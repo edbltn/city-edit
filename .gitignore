@@ -1,0 +1,21 @@
+# Python
+server/env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Editor
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Logs
+*.log

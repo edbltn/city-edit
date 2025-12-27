@@ -1,0 +1,60 @@
+:root {
+  --font-ui: "Source Sans 3", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-editorial: "Source Serif 4", Georgia, "Times New Roman", serif;
+
+  --paper: #fbfbf8;
+  --ink: #111;
+  --hairline: rgba(0, 0, 0, 0.12);
+
+  --topbar-height: 44px;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  font-family: var(--font-ui);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.topbar {
+  height: var(--topbar-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  box-sizing: border-box;
+  background: rgba(251, 251, 248, 0.85);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.topbar .title {
+  font-family: var(--font-editorial);
+  font-weight: 400;
+  letter-spacing: 0.1px;
+}
+
+.topbar .status {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+#map {
+  height: calc(100% - var(--topbar-height));
+  background: #eee;
+}
+
+.leaflet-control-zoom a {
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  box-shadow: 0 1px 10px rgba(0, 0, 0, 0.06);
+}
+
+.leaflet-control-attribution {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  opacity: 0.85;
+}
