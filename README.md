@@ -11,8 +11,10 @@ redis-server
 # Terminal 2: Start Flask backend
 cd server
 cp .env.example .env  # Add your ORS_API_KEY
-uv venv && source .venv/bin/activate
-uv pip install -r requirements.txt
+python3 -m venv env
+source env/bin/activate
+pip install uv
+uv pip compile requirements.in > requirements.txt && pip install -r requirements.txt
 python app.py
 
 # Terminal 3: Start frontend
