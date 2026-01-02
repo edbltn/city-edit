@@ -6,6 +6,11 @@ __pycache__/
 *.pyd
 .Python
 
+# Environment
+.env
+*.env
+!.env.example
+
 # Editor
 *.swp
 *.swo

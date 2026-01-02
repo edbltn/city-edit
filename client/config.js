@@ -1,26 +1,29 @@
+// Re-export all colors for convenient access
+export * from "./colors.js";
+
 export const CONFIG = {
   // Initial camera
-  initialView: { lat: 40.7831, lon: -73.9712, zoom: 12 },
+  initialView: { lat: 40.7128, lon: -74.0060, zoom: 11 },
 
-  // Prevent panning too far away (rough Manhattan-ish bbox)
-  manhattanBounds: {
-    sw: { lat: 40.6980, lon: -74.0470 },
-    ne: { lat: 40.8820, lon: -73.9070 }
+  // Pan limits (strict geographic bounds)
+  nycBounds: {
+    sw: { lat: 40.4774, lon: -74.2591 },
+    ne: { lat: 40.9176, lon: -73.7004 }
   },
 
   // Zoom limits
-  minZoom: 11,
-  maxZoom: 19,
+  minZoom: 10,
+  maxZoom: 20,
 
-  // Tiles (simple raster). For production, use a proper provider / your own tiles.
-  tileUrlTemplate: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
-  tileAttribution: "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, TomTom, Intermap, iPC, USGS, FAO, NPS, NRCAN, GeoBase, Kadaster NL, Ordnance Survey, Esri Japan, METI, Esri China (Hong Kong), and the GIS User Community",
-  tileSubdomains: "",
+  // Tiles - CartoDB Positron No Labels
+  tileUrlTemplate: "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+  tileAttribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  tileSubdomains: "abcd",
 
   // Leaflet behaviors
   preferCanvas: true,
-  maxBoundsViscosity: 1.0,
 
-  // Socket URL
+  // API & Socket URLs
+  apiUrl: "http://localhost:5001/api",
   wsUrl: "ws://localhost:5001/ws"
 };

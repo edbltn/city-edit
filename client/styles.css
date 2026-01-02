@@ -1,13 +1,65 @@
+/* ==========================================================================
+   Design Tokens
+
+   NOTE: Colors are also defined in colors.js for JavaScript usage.
+   Keep these in sync: COLOR_START = --color-start, COLOR_END = --color-end
+
+   2025 Color Palette inspired by Pantone & W3Schools 2025 trends:
+   https://www.w3schools.com/Colors/colors_2025.asp
+   ========================================================================== */
+
 :root {
-  --font-ui: "Source Sans 3", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-editorial: "Source Serif 4", Georgia, "Times New Roman", serif;
+  /* Typography */
+  --font-ui: system-ui, -apple-system, sans-serif;
+  --font-editorial: "Playfair Display", Georgia, serif;
 
-  --paper: #fbfbf8;
-  --ink: #111;
-  --hairline: rgba(0, 0, 0, 0.12);
+  /* Colors - synced with colors.js (2025 palette) */
+  --paper: #F4F5F0;              /* Bright White */
+  --ink: #343148;                /* Eclipse */
+  --hairline: rgba(52, 49, 72, 0.15);
+  --color-start: #2E5283;        /* Déja Vu Blue - COLOR_START in colors.js */
+  --color-end: #DC343B;          /* Poppy Red - COLOR_END in colors.js */
+  --color-start-light: rgba(46, 82, 131, 0.1);
+  --hover-bg: rgba(52, 49, 72, 0.06);
+  --hover-bg-strong: rgba(52, 49, 72, 0.1);
 
-  --topbar-height: 44px;
+  /* Shadows */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 10px 40px rgba(0, 0, 0, 0.2);
+
+  /* Spacing (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* Border radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* Z-index scale */
+  --z-map: 1;
+  --z-topbar: 100;
+  --z-dropdown: 200;
+  --z-autocomplete: 300;
+  --z-modal: 400;
+  --z-pac-container: 500;
+
+  /* Layout */
+  --topbar-height: auto;
+  --topbar-min-height: 72px;
 }
+
+
+/* ==========================================================================
+   Reset & Base
+   ========================================================================== */
 
 html,
 body {
@@ -16,45 +68,865 @@ body {
   font-family: var(--font-ui);
   background: var(--paper);
   color: var(--ink);
+  overflow: hidden;
 }
 
-.topbar {
-  height: var(--topbar-height);
+#app {
+  height: 100%;
   display: flex;
+  flex-direction: column;
+}
+
+
+/* ==========================================================================
+   Topbar
+   ========================================================================== */
+
+.topbar {
+  min-height: var(--topbar-min-height);
+  height: auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: var(--space-4) var(--space-5);
+  gap: var(--space-4);
   box-sizing: border-box;
   background: rgba(251, 251, 248, 0.85);
   backdrop-filter: blur(6px);
   border-bottom: 1px solid var(--hairline);
+  position: relative;
+  z-index: var(--z-topbar);
+  flex-shrink: 0;
 }
 
-.topbar .title {
+.topbar h1 {
+  margin: 0;
   font-family: var(--font-editorial);
+  font-size: 18px;
   font-weight: 400;
   letter-spacing: 0.1px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: pointer;
+  position: relative;
 }
 
-.topbar .status {
-  font-family: var(--font-ui);
-  font-size: 12px;
-  opacity: 0.7;
+.topbar h1::after {
+  content: "Desire Path Mapper";
+  position: absolute;
+  left: 40px;
+  top: 0;
+  color: rgba(0, 0, 0, 0.2);
+  transform-origin: 50% 100%;
+  transform: rotateX(-72deg) translateX(calc(18% + 1px)) translateY(16px);
+  filter: blur(1px);
+  z-index: -1;
+  transition: all 0.2s ease;
+  pointer-events: none;
 }
+
+.topbar h1:hover::after {
+  color: rgba(0, 0, 0, 0.32);
+  filter: blur(1.5px);
+  transform: rotateX(-67deg) translateX(calc(18% + 1px)) translateY(12px);
+}
+
+.logo-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.logo-icon {
+  height: 36px;
+  width: auto;
+  display: block;
+  filter: drop-shadow(2px 2px 3px rgba(0, 0, 0, 0.15));
+  transition: filter 0.2s ease;
+}
+
+.topbar h1:hover .logo-icon {
+  filter: drop-shadow(3px 3px 4px rgba(0, 0, 0, 0.22));
+}
+
+.logo-icon-shadow {
+  display: none;
+}
+
+.header-divider {
+  width: 1px;
+  height: 40px;
+  background: var(--hairline);
+}
+
+
+/* ==========================================================================
+   Route Bar
+   ========================================================================== */
+
+.route-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.route-fields {
+  display: flex;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.route-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  position: relative;
+  flex-shrink: 0;
+}
+
+.route-field-label {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  opacity: 0.6;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.route-field-label::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.route-field:first-child .route-field-label::before {
+  background: var(--color-start);
+}
+
+.route-field:last-child .route-field-label::before {
+  background: var(--color-end);
+}
+
+.route-field-value {
+  font-size: 13px;
+  font-family: var(--font-ui);
+  color: var(--ink);
+  min-width: 135px;
+  max-width: 155px;
+}
+
+.route-field-value.empty {
+  opacity: 0.4;
+  font-style: italic;
+}
+
+.action-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+
+/* ==========================================================================
+   Mode Selector
+   ========================================================================== */
+
+.mode-selector {
+  position: relative;
+  z-index: var(--z-dropdown);
+}
+
+.mode-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 10px var(--space-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.2s ease;
+  height: 40px;
+  box-sizing: border-box;
+}
+
+.mode-btn:hover {
+  background: var(--hover-bg);
+}
+
+.mode-btn:active {
+  background: var(--hover-bg-strong);
+}
+
+.mode-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.mode-label {
+  font-weight: 500;
+}
+
+.mode-dropdown {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  min-width: 100px;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+  overflow: hidden;
+  z-index: var(--z-dropdown);
+}
+
+.mode-selector.active .mode-dropdown {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.mode-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.mode-option:first-child {
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.mode-option:last-child {
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+.mode-option:hover {
+  background: var(--hover-bg);
+}
+
+.mode-option .check-icon {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0;
+}
+
+.mode-option.selected .check-icon {
+  opacity: 1;
+}
+
+
+/* ==========================================================================
+   Buttons
+   ========================================================================== */
+
+.btn-header {
+  padding: 10px var(--space-5);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.2s ease;
+  white-space: nowrap;
+  height: 40px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-header:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+
+.btn-header:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+
+/* ==========================================================================
+   Map
+   ========================================================================== */
 
 #map {
-  height: calc(100% - var(--topbar-height));
-  background: #eee;
+  flex: 1;
+  position: relative;
+  z-index: var(--z-map);
+  min-height: 0;
+}
+
+.leaflet-container {
+  z-index: var(--z-map) !important;
+}
+
+.leaflet-pane {
+  z-index: auto !important;
+}
+
+
+/* ==========================================================================
+   Leaflet Controls
+   ========================================================================== */
+
+.leaflet-bar,
+.leaflet-control-zoom,
+.leaflet-control-zoom a {
+  border: 1px solid var(--hairline) !important;
+  border-radius: var(--radius-sm) !important;
+  box-shadow: var(--shadow-sm) !important;
+  background: var(--paper) !important;
+  color: var(--ink) !important;
+}
+
+.leaflet-control-zoom {
+  margin-bottom: var(--space-5) !important;
+  margin-right: var(--space-5) !important;
 }
 
 .leaflet-control-zoom a {
-  border: 1px solid var(--hairline);
-  border-radius: 10px;
-  box-shadow: 0 1px 10px rgba(0, 0, 0, 0.06);
+  width: 28px !important;
+  height: 28px !important;
+  line-height: 28px !important;
+  text-align: center !important;
+  text-decoration: none !important;
+  display: block !important;
+}
+
+.leaflet-control-zoom a:hover {
+  background: var(--hover-bg) !important;
+}
+
+.leaflet-control-zoom a:focus,
+.leaflet-control-zoom a:active,
+.leaflet-bar a:focus,
+.leaflet-bar a:active {
+  outline: none !important;
+  box-shadow: var(--shadow-sm) !important;
+  background: var(--paper) !important;
+  border: 1px solid var(--hairline) !important;
+}
+
+.leaflet-bar a {
+  border-bottom: 1px solid var(--hairline) !important;
+}
+
+.leaflet-bar a:last-child {
+  border-bottom: none !important;
 }
 
 .leaflet-control-attribution {
   font-family: var(--font-ui);
   font-size: 11px;
   opacity: 0.85;
+}
+
+
+/* ==========================================================================
+   Map Markers
+   ========================================================================== */
+
+.custom-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+.pin-container {
+  position: relative;
+  width: 30px;
+  height: 44px;
+}
+
+.pin-head {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-52%);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow:
+    0 3px 6px rgba(0, 0, 0, 0.3),
+    inset -3px -3px 6px rgba(0, 0, 0, 0.2),
+    inset 3px 3px 6px rgba(255, 255, 255, 0.4);
+  z-index: 2;
+}
+
+.pin-head::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 6px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 50%;
+  filter: blur(1px);
+}
+
+.pin-needle {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-45%);
+  width: 2px;
+  height: 34px;
+  background: linear-gradient(to right,
+    rgba(100, 100, 100, 0.9) 0%,
+    rgba(180, 180, 180, 1) 50%,
+    rgba(100, 100, 100, 0.9) 100%);
+  box-shadow:
+    1px 0 1px rgba(255, 255, 255, 0.3),
+    -1px 0 2px rgba(0, 0, 0, 0.4);
+  border-radius: 1px;
+  z-index: 1;
+}
+
+.pin-shadow {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 4px;
+  background: radial-gradient(ellipse at center,
+    rgba(0, 0, 0, 0.3) 0%,
+    rgba(0, 0, 0, 0) 70%);
+  border-radius: 50%;
+}
+
+
+/* ==========================================================================
+   Autocomplete (shared base styles)
+   ========================================================================== */
+
+.autocomplete-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: var(--space-1);
+  max-height: 200px;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  overflow-y: auto;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: var(--z-autocomplete);
+}
+
+.autocomplete-results.active {
+  opacity: 1;
+  pointer-events: all;
+  transform: translateY(0);
+}
+
+.autocomplete-item {
+  padding: var(--space-3) 14px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  border-bottom: 1px solid var(--hairline);
+  transition: background 0.1s ease;
+  position: relative;
+}
+
+.autocomplete-item:last-child {
+  border-bottom: none;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item.selected {
+  background: var(--color-start-light);
+}
+
+.autocomplete-item.selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--color-start);
+}
+
+.autocomplete-item.autocomplete-loading,
+.autocomplete-item.autocomplete-error,
+.autocomplete-item.autocomplete-empty {
+  cursor: default;
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.autocomplete-item.autocomplete-loading:hover,
+.autocomplete-item.autocomplete-error:hover,
+.autocomplete-item.autocomplete-empty:hover {
+  background: transparent;
+}
+
+/* Topbar autocomplete variant - extends left position */
+.route-field .autocomplete-results {
+  left: 50px;
+  max-height: 240px;
+}
+
+
+/* ==========================================================================
+   Google Places Autocomplete Override
+   ========================================================================== */
+
+.pac-container {
+  background: var(--paper) !important;
+  border: 1px solid var(--hairline) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-lg) !important;
+  margin-top: var(--space-1) !important;
+  font-family: var(--font-ui) !important;
+  padding: 0 !important;
+  z-index: var(--z-pac-container) !important;
+}
+
+.pac-container::after {
+  display: none !important;
+}
+
+.pac-item {
+  padding: var(--space-2) var(--space-3) !important;
+  font-size: 12px !important;
+  color: var(--ink) !important;
+  background: var(--paper) !important;
+  cursor: pointer !important;
+  border-top: 1px solid var(--hairline) !important;
+  font-family: var(--font-ui) !important;
+  line-height: 1.4 !important;
+}
+
+.pac-item * {
+  color: var(--ink) !important;
+  background: transparent !important;
+}
+
+.pac-item:first-child {
+  border-top: none !important;
+  border-radius: var(--radius-md) var(--radius-md) 0 0 !important;
+}
+
+.pac-item:last-child {
+  border-radius: 0 0 var(--radius-md) var(--radius-md) !important;
+}
+
+.pac-item:hover,
+.pac-item-selected {
+  background: var(--color-start-light) !important;
+  color: var(--ink) !important;
+}
+
+.pac-item:hover *,
+.pac-item-selected * {
+  color: var(--ink) !important;
+}
+
+.pac-item-selected {
+  position: relative;
+}
+
+.pac-item-selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--color-start);
+}
+
+.pac-icon {
+  display: none !important;
+}
+
+.pac-item-query {
+  font-size: 12px !important;
+  color: var(--ink) !important;
+  font-family: var(--font-ui) !important;
+}
+
+.pac-matched {
+  font-weight: 600 !important;
+  color: var(--ink) !important;
+}
+
+.hdpi.pac-logo::after {
+  background-image: none !important;
+}
+
+
+/* ==========================================================================
+   Modal
+   ========================================================================== */
+
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  z-index: var(--z-modal);
+}
+
+.modal.active {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.modal-content {
+  width: 90%;
+  max-width: 480px;
+  background: var(--paper);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  transform: scale(0.9);
+  transition: transform 0.3s ease;
+}
+
+.modal.active .modal-content {
+  transform: scale(1);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-family: var(--font-editorial);
+  font-size: 20px;
+  font-weight: 400;
+  letter-spacing: 0.1px;
+}
+
+.modal-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.modal-close:hover {
+  background: var(--hover-bg);
+}
+
+.modal-body {
+  padding: var(--space-6);
+}
+
+.input-group {
+  position: relative;
+  margin-bottom: var(--space-5);
+}
+
+.input-group:last-child {
+  margin-bottom: 0;
+}
+
+.input-group label {
+  display: block;
+  margin-bottom: var(--space-2);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  opacity: 0.8;
+}
+
+.input-group input {
+  width: 100%;
+  padding: var(--space-3) 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--ink);
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.input-group input:focus {
+  outline: none;
+  border-color: rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.05);
+}
+
+.input-group input::placeholder {
+  color: var(--ink);
+  opacity: 0.4;
+}
+
+
+/* ==========================================================================
+   Calculating Indicator
+   ========================================================================== */
+
+.calculating-indicator {
+  display: none;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  font-size: 13px;
+  color: var(--ink);
+  opacity: 0.7;
+}
+
+.calculating-indicator.active {
+  display: flex;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--hairline);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+/* First breakpoint: Clear button wraps below */
+@media (max-width: 1100px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .action-controls #clear-btn {
+    order: 10;
+  }
+
+  .action-controls {
+    flex-wrap: wrap;
+  }
+}
+
+/* Second breakpoint: Calculate Route also wraps */
+@media (max-width: 980px) {
+  .action-controls {
+    order: 10;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .header-divider {
+    display: none;
+  }
+}
+
+/* Third breakpoint: Bike button wraps */
+@media (max-width: 850px) {
+  .route-bar {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .mode-selector {
+    order: 10;
+  }
+}
+
+/* Fourth breakpoint: End field on new line */
+@media (max-width: 720px) {
+  .route-fields {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .route-field {
+    width: 100%;
+  }
+
+  .route-field-value {
+    min-width: unset;
+    max-width: unset;
+    flex: 1;
+  }
+
+  .route-bar {
+    width: 100%;
+  }
+}
+
+/* Fifth breakpoint: Stack everything single column */
+@media (max-width: 540px) {
+  .topbar {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .route-bar {
+    gap: var(--space-2);
+  }
+
+  .action-controls {
+    justify-content: stretch;
+  }
+
+  .action-controls .btn-header {
+    flex: 1;
+  }
 }

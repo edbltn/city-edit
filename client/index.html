@@ -1,31 +1,127 @@
 <!doctype html>
-<link
-  rel="stylesheet"
-  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-  crossorigin=""
-/>
 <html lang="en">
-    <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Desire Path Map</title>
-        <link rel="stylesheet" href="./styles.css" />
-    </head>
-    <body>
-        <header class="topbar">
-            <div class="title">Desire Path Map</div>
-            <div class="status" id="status">loading…</div>
-        </header>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Map and visualize desire paths - the informal trails people create">
+    <meta name="theme-color" content="#F4F5F0">
+    <title>Desire Path Map</title>
 
-        <main id="map"></main>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400..900&display=swap"
+      rel="stylesheet"
+    >
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    >
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <h1>
+          <span class="logo-wrapper">
+            <img src="path-icon.png" alt="" class="logo-icon">
+            <img src="path-icon.png" alt="" class="logo-icon-shadow" aria-hidden="true">
+          </span>
+          Desire Path Mapper
+        </h1>
 
-        <script type="module" src="./app.js"></script>
-    </body>
+        <div class="header-divider"></div>
+
+        <div class="route-bar">
+          <div class="route-fields">
+            <div class="route-field">
+              <span class="route-field-label">Start</span>
+              <div class="route-field-value empty" id="start-coords">Click map to set start</div>
+            </div>
+            <div class="route-field">
+              <span class="route-field-label">End</span>
+              <div class="route-field-value empty" id="end-coords">Click map to set end</div>
+            </div>
+          </div>
+
+          <div class="mode-selector" id="mode-selector">
+            <button class="mode-btn" id="mode-btn">
+              <span class="mode-icon">🚲</span>
+              <span class="mode-label">Bike</span>
+            </button>
+            <div class="mode-dropdown">
+              <div class="mode-option selected" data-mode="bike">
+                <span class="mode-icon">🚲</span>
+                <span class="mode-label">Bike</span>
+                <span class="check-icon">✓</span>
+              </div>
+              <div class="mode-option" data-mode="walk">
+                <span class="mode-icon">🚶</span>
+                <span class="mode-label">Walk</span>
+                <span class="check-icon">✓</span>
+              </div>
+              <div class="mode-option" data-mode="drive">
+                <span class="mode-icon">🚗</span>
+                <span class="mode-label">Drive</span>
+                <span class="check-icon">✓</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="action-controls">
+          <div id="calculating-indicator" class="calculating-indicator">
+            <div class="spinner"></div>
+            <span>Calculating route...</span>
+          </div>
+
+          <button class="btn-header" id="clear-btn">
+            Clear
+          </button>
+        </div>
+      </header>
+
+      <main id="map"></main>
+    </div>
+
+    <div id="commute-modal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Plan Your Commute</h2>
+          <button id="commute-modal-close" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="input-group">
+            <label for="origin-input">Origin</label>
+            <input
+              type="text"
+              id="origin-input"
+              placeholder="Enter starting location..."
+              autocomplete="off"
+            >
+            <div id="origin-results" class="autocomplete-results"></div>
+          </div>
+          <div class="input-group">
+            <label for="destination-input">Destination</label>
+            <input
+              type="text"
+              id="destination-input"
+              placeholder="Enter destination..."
+              autocomplete="off"
+            >
+            <div id="destination-results" class="autocomplete-results"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script type="module" src="./app.js?v=2"></script>
+  </body>
 </html>
-<script
-  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-  crossorigin=""
-></script>
-<script type="module" src="./app.js"></script>

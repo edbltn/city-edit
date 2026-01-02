@@ -1,2 +1,11 @@
 flask
 flask-sock
+flask-cors
+requests
+redis
+gevent
+gevent-websocket
+gunicorn
+python-dotenv
+osmnx
+networkx

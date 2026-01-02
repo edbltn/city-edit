@@ -1,3 +1,58 @@
+# Project Architecture
+
+## Overview
+
+Desire Path Mapper is a crowdsourced map showing how people actually travel through a city. Users submit their commute routes, which are aggregated and visualized as a heatmap overlay.
+
+## Components
+
+- **Nginx**: Reverse proxy serving static files and load-balancing Flask instances
+- **Flask**: Python backend handling route calculations and vote processing (runs as multiple replicas)
+- **Redis**: In-memory store for vote data and real-time state; used for pub/sub to sync state across Flask instances
+- **Client**: Leaflet-based map UI served as static files
+
+## Environment Variables
+
+All secrets and configuration are stored in `server/.env`. Copy from `.env.example` if needed.
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `ORS_API_KEY` | OpenRouteService API key ([get free key](https://openrouteservice.org/)) | Yes |
+| `REDIS_HOST` | Redis host (default: `localhost`) | No |
+
+**Never commit `.env` to git.** It's in `.gitignore`.
+
+## Data Flow
+
+1. Client connects via WebSocket to receive real-time map state
+2. User submits a commute route (start/end points + mode)
+3. Flask calls OpenRouteService API to calculate route geometry
+4. Route segments are converted to vote points stored in Redis
+5. WebSocket broadcasts updated heatmap to all clients
+
+## Docker
+
+```bash
+docker compose up --build
+```
+
+Services: `nginx` (port 8080), `flask` (internal, 2 replicas), `redis` (port 6379).
+
+## Local Development
+
+```bash
+# Terminal 1: Redis
+redis-server
+
+# Terminal 2: Flask
+cd server && source env/bin/activate && python app.py
+
+# Terminal 3: Client
+cd client && npx serve
+```
+
+---
+
 # CSS Best Practices
 
 ## Organization
@@ -352,4 +407,332 @@ function createLayer({ id, style, opacity = 1.0 }) {
 function createLayer(id, style, opacity, visible, zIndex) {
   // too many params
 }
+```
+
+---
+
+# Python Best Practices
+
+## Package Management with uv
+
+### Dependency Files
+Use a two-file approach with `uv`:
+- `requirements.in` - High-level dependencies (hand-written)
+- `requirements.txt` - Locked, pinned dependencies (auto-generated)
+
+**requirements.in** (minimal, human-maintained):
+```
+flask
+flask-sock
+flask-cors
+requests
+```
+
+**Workflow**:
+```bash
+# Compile dependencies with uv (generates requirements.txt)
+uv pip compile requirements.in -o requirements.txt
+
+# Install dependencies
+source env/bin/activate
+uv pip install -r requirements.txt
+```
+
+### Virtual Environments
+
+**Setup** (one-time):
+```bash
+python3 -m venv env
+source env/bin/activate
+uv pip install -r requirements.txt
+```
+
+**Daily usage**:
+```bash
+# Activate
+source env/bin/activate
+
+# Deactivate
+deactivate
+```
+
+**Best practices**:
+- Always use virtual environments (never install globally)
+- Add `env/` to `.gitignore`
+- Commit both `requirements.in` and `requirements.txt`
+- Use `uv pip compile` when adding/updating dependencies
+
+## Code Style
+
+### Formatting
+Follow PEP 8 with these highlights:
+- 4 spaces for indentation (not tabs)
+- Max line length: 88 characters (Black default)
+- Two blank lines between top-level functions/classes
+- One blank line between methods
+
+### Naming Conventions
+```python
+# snake_case for variables and functions
+user_name = "Alice"
+def get_user_data():
+    pass
+
+# PascalCase for classes
+class UserManager:
+    pass
+
+# UPPER_SNAKE_CASE for constants
+MAX_RETRY_COUNT = 3
+API_BASE_URL = "https://api.example.com"
+
+# _leading_underscore for internal/private
+def _internal_helper():
+    pass
+```
+
+### Imports
+Organize imports in three groups with blank lines between:
+```python
+# 1. Standard library
+import json
+import time
+from typing import Dict, List
+
+# 2. Third-party packages
+import requests
+from flask import Flask, jsonify, request
+
+# 3. Local modules
+from .utils import parse_data
+from .config import CONFIG
+```
+
+### Type Hints
+Use type hints for function signatures (especially in public APIs):
+```python
+def make_state(rev: int) -> dict:
+    return {"revision": rev}
+
+def geocode(query: str, limit: int = 5) -> list[dict]:
+    results = fetch_results(query, limit)
+    return results
+```
+
+## Functions & Classes
+
+### Function Design
+```python
+# Good: single responsibility, clear name
+def format_address(address: dict) -> str:
+    parts = [
+        address.get("house_number"),
+        address.get("road"),
+        address.get("city")
+    ]
+    return ", ".join(filter(None, parts))
+
+# Avoid: too many parameters
+def create_user(name, email, age, city, country, phone, address):
+    pass
+
+# Better: use a dataclass or dict
+from dataclasses import dataclass
+
+@dataclass
+class UserData:
+    name: str
+    email: str
+    age: int
+    city: str
+
+def create_user(data: UserData):
+    pass
+```
+
+### Early Returns
+Use guard clauses for validation:
+```python
+def geocode(query: str):
+    if not query:
+        return {"error": "Missing query"}, 400
+
+    if len(query) < 3:
+        return {"error": "Query too short"}, 400
+
+    # Main logic at lowest indentation
+    results = perform_search(query)
+    return results
+```
+
+## Flask Best Practices
+
+### Route Organization
+```python
+# Group related routes
+@app.route("/api/geocode")
+def geocode():
+    """Geocode search query using Nominatim"""
+    query = request.args.get("q", "")
+    # ...
+
+@app.route("/api/reverse-geocode")
+def reverse_geocode():
+    """Reverse geocode lat/lon to address"""
+    lat = request.args.get("lat")
+    lon = request.args.get("lon")
+    # ...
+```
+
+### Error Handling
+```python
+from flask import jsonify
+
+@app.route("/api/geocode")
+def geocode():
+    query = request.args.get("q", "")
+    if not query:
+        return jsonify({"error": "Missing query parameter 'q'"}), 400
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": str(e)}), 500
+```
+
+### Configuration
+```python
+# config.py
+class Config:
+    DEBUG = False
+    TESTING = False
+    NYC_BBOX = "-74.26,40.49,-73.70,40.92"
+
+class DevelopmentConfig(Config):
+    DEBUG = True
+
+# app.py
+app.config.from_object('config.DevelopmentConfig')
+```
+
+## Error Handling
+
+### Be Specific
+```python
+# Good: catch specific exceptions
+try:
+    data = json.loads(text)
+except json.JSONDecodeError as e:
+    logger.error(f"Invalid JSON: {e}")
+    return None
+
+# Avoid: bare except
+try:
+    data = json.loads(text)
+except:  # Too broad!
+    pass
+```
+
+### Context Managers
+```python
+# Use context managers for resources
+with open("data.json") as f:
+    data = json.load(f)
+
+# Custom context manager
+from contextlib import contextmanager
+
+@contextmanager
+def db_transaction(conn):
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+```
+
+## Comments & Docstrings
+
+### Docstrings
+Use docstrings for all public functions/classes:
+```python
+def geocode(query: str, limit: int = 5) -> list[dict]:
+    """
+    Geocode a search query using Nominatim API.
+
+    Args:
+        query: Address or place name to search for
+        limit: Maximum number of results to return
+
+    Returns:
+        List of geocoding results with lat, lon, and display_name
+
+    Raises:
+        requests.RequestException: If API request fails
+    """
+    # ...
+```
+
+### When to Comment
+- Complex algorithms or business logic
+- Non-obvious optimizations
+- Workarounds for external API quirks
+- TODOs with context
+
+### When NOT to Comment
+```python
+# Bad: obvious
+# Increment counter
+counter += 1
+
+# Bad: outdated
+# TODO: Add caching (already implemented)
+
+# Good: explains why
+# Use bounded=1 to restrict results to viewbox, not just bias them
+params["bounded"] = 1
+```
+
+## Modern Python Features
+
+### Use
+- f-strings for formatting: `f"Hello {name}"`
+- Pathlib for file paths: `Path("data") / "file.json"`
+- Dataclasses for data structures
+- List/dict comprehensions (when readable)
+- `enumerate()` instead of manual indexing
+- `get()` with defaults for dict access
+
+### Avoid
+- String concatenation with `+`
+- Manual file closing (use context managers)
+- Mutable default arguments: `def foo(items=[]):`
+- `from module import *`
+
+## Performance
+
+- Use generators for large datasets
+- Cache expensive operations with `functools.lru_cache`
+- Use `requests.Session()` for multiple HTTP requests
+- Profile before optimizing (`cProfile`, `timeit`)
+
+## Testing
+
+```python
+# test_geocode.py
+import pytest
+
+def test_geocode_valid_query():
+    result = geocode("Times Square, NYC")
+    assert len(result) > 0
+    assert "lat" in result[0]
+    assert "lon" in result[0]
+
+def test_geocode_empty_query():
+    result, status = geocode("")
+    assert status == 400
+    assert "error" in result
 ```

@@ -1,21 +1,26 @@
-import { CONFIG } from "./config.js";
-import { createOverlayManager } from "./overlays.js";
-import { connectMapStateWebSocket } from "./ws.js";
-
-const statusEl = document.getElementById("status");
+import { CONFIG, COLOR_START, COLOR_END } from "./config.js?v=3";
+import { createOverlayManager } from "./overlays.js?v=3";
+import { connectMapStateWebSocket } from "./ws.js?v=3";
+import { createCommuteInputModal } from "./commute-input.js?v=3";
+import { createRouteLayer } from "./route-styles.js?v=3";
 
 const bounds = L.latLngBounds(
-  [CONFIG.manhattanBounds.sw.lat, CONFIG.manhattanBounds.sw.lon],
-  [CONFIG.manhattanBounds.ne.lat, CONFIG.manhattanBounds.ne.lon]
+  [CONFIG.nycBounds.sw.lat, CONFIG.nycBounds.sw.lon],
+  [CONFIG.nycBounds.ne.lat, CONFIG.nycBounds.ne.lon]
 );
 
 const map = L.map("map", {
   preferCanvas: CONFIG.preferCanvas,
   maxBounds: bounds,
-  maxBoundsViscosity: CONFIG.maxBoundsViscosity
+  maxBoundsViscosity: 1.0,
+  zoomControl: false
 }).setView([CONFIG.initialView.lat, CONFIG.initialView.lon], CONFIG.initialView.zoom);
 
 map.setMinZoom(CONFIG.minZoom);
+
+L.control.zoom({
+  position: 'bottomright'
+}).addTo(map);
 
 L.tileLayer(CONFIG.tileUrlTemplate, {
   subdomains: CONFIG.tileSubdomains,
@@ -23,44 +28,289 @@ L.tileLayer(CONFIG.tileUrlTemplate, {
   attribution: CONFIG.tileAttribution
 }).addTo(map);
 
+// Create a pane for the user's route so it appears above vote overlays
+map.createPane("routePane");
+map.getPane("routePane").style.zIndex = 450;
+
 const overlays = createOverlayManager(map);
 
-// Fallback demo state (so you always see *something*)
+// Track latest revision for overlay updates
 let latestRevision = 0;
-const demoState = {
-  revision: 1,
-  overlays: {
-    demo_line: {
-      type: "geojson",
-      data: {
-        type: "FeatureCollection",
-        features: [{
-          type: "Feature",
-          properties: {},
-          geometry: {
-            type: "LineString",
-            coordinates: [
-              [-73.9772, 40.7712],
-              [-73.9715, 40.7818],
-              [-73.9650, 40.7910]
-            ]
-          }
-        }]
-      }
-    }
-  }
-};
 
-overlays.applyMapState(demoState);
-
-connectMapStateWebSocket({
+// WebSocket connection with send capability
+const wsConnection = connectMapStateWebSocket({
   url: CONFIG.wsUrl,
-  onStatus: (txt) => (statusEl.textContent = `Step 4: ${txt}`),
   onState: (state) => {
     if (!state || typeof state.revision !== "number") return;
-    if (state.revision <= latestRevision) return; // ignore stale
+    if (state.revision <= latestRevision) return;
     latestRevision = state.revision;
     overlays.applyMapState(state);
   }
 });
 
+// Initialize commute input modal
+const commuteInput = createCommuteInputModal(map);
+commuteInput.init();
+
+// Mode selector dropdown elements
+const modeSelector = document.getElementById("mode-selector");
+const modeBtn = document.getElementById("mode-btn");
+const modeOptions = document.querySelectorAll(".mode-option");
+
+// Map click state
+let state = {
+  start: { coords: null, marker: null, timestamp: null },
+  end: { coords: null, marker: null, timestamp: null },
+  routeLayer: null,
+  routeRequestId: 0
+};
+
+// Custom marker icons - Classic photographic pin style
+const createCustomIcon = (color) => {
+  return L.divIcon({
+    className: 'custom-marker',
+    html: `<div class="pin-container">
+      <div class="pin-head" style="background: ${color};"></div>
+      <div class="pin-needle"></div>
+      <div class="pin-shadow"></div>
+    </div>`,
+    iconSize: [30, 40],
+    iconAnchor: [15, 40]
+  });
+};
+
+const startIcon = createCustomIcon(COLOR_START);
+const endIcon = createCustomIcon(COLOR_END);
+
+const clearBtn = document.getElementById("clear-btn");
+const startInput = document.getElementById("start-coords");
+const endInput = document.getElementById("end-coords");
+const calculatingIndicator = document.getElementById("calculating-indicator");
+
+// Helper to clear route layer
+const clearRoute = () => {
+  if (state.routeLayer) {
+    map.removeLayer(state.routeLayer);
+    state.routeLayer = null;
+  }
+};
+
+// Helper to bring markers to front
+const bringMarkersToFront = () => {
+  if (state.start.marker) {
+    state.start.marker.setZIndexOffset(1000);
+  }
+  if (state.end.marker) {
+    state.end.marker.setZIndexOffset(1000);
+  }
+};
+
+// Helper to calculate and display route
+const calculateRoute = async () => {
+  if (!state.start.coords || !state.end.coords) return;
+
+  // Increment request ID and capture it for this request
+  state.routeRequestId++;
+  const requestId = state.routeRequestId;
+
+  // Capture the start/end coords and mode at time of request
+  const requestStart = { lat: state.start.coords.lat, lng: state.start.coords.lng };
+  const requestEnd = { lat: state.end.coords.lat, lng: state.end.coords.lng };
+  const requestMode = commuteInput.state.selectedMode;
+
+  // Show calculating indicator
+  calculatingIndicator.classList.add("active");
+
+  try {
+    const response = await fetch("http://localhost:5001/api/routes", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        start: [requestStart.lat, requestStart.lng],
+        end: [requestEnd.lat, requestEnd.lng],
+        mode: requestMode
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Route calculation failed: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+
+    // Ignore response if a newer request was made
+    if (requestId !== state.routeRequestId) {
+      return;
+    }
+
+    // Verify start/end still match what we requested
+    const startMatches = state.start.coords &&
+      state.start.coords.lat === requestStart.lat &&
+      state.start.coords.lng === requestStart.lng;
+    const endMatches = state.end.coords &&
+      state.end.coords.lat === requestEnd.lat &&
+      state.end.coords.lng === requestEnd.lng;
+
+    if (!startMatches || !endMatches) {
+      return;
+    }
+
+    // Remove existing route layer
+    clearRoute();
+
+    // Create multi-layer route with mode-based styling (use mode from request)
+    state.routeLayer = createRouteLayer(data.geometry, requestMode, "routePane");
+    state.routeLayer.addTo(map);
+
+    // Ensure markers stay on top of route
+    bringMarkersToFront();
+
+    // Final check: only cast votes if route layer is on the map
+    if (state.routeLayer && map.hasLayer(state.routeLayer)) {
+      wsConnection.send({
+        type: "cast_votes",
+        geometry: data.geometry
+      });
+    }
+
+  } catch (error) {
+    console.error("Route calculation failed:", error.message);
+  } finally {
+    // Hide calculating indicator only if this is still the current request
+    if (requestId === state.routeRequestId) {
+      calculatingIndicator.classList.remove("active");
+    }
+  }
+};
+
+// Mode selector dropdown event handlers
+if (modeBtn && modeSelector) {
+  modeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    modeSelector.classList.toggle("active");
+  });
+
+  document.addEventListener("click", () => {
+    modeSelector.classList.remove("active");
+  });
+
+  modeOptions.forEach((option) => {
+    option.addEventListener("click", () => {
+      const mode = option.dataset.mode;
+      const icon = option.querySelector(".mode-icon").textContent;
+      const label = option.querySelector(".mode-label").textContent;
+
+      // Update button
+      modeBtn.querySelector(".mode-icon").textContent = icon;
+      modeBtn.querySelector(".mode-label").textContent = label;
+
+      // Update selected state
+      modeOptions.forEach((opt) => opt.classList.remove("selected"));
+      option.classList.add("selected");
+
+      // Update state in commuteInput
+      commuteInput.state.selectedMode = mode;
+
+      // Close dropdown
+      modeSelector.classList.remove("active");
+
+      // Re-calculate route if both points are set
+      if (state.start.coords && state.end.coords) {
+        calculateRoute();
+      }
+    });
+  });
+}
+
+// Helper to update a point (start or end)
+const updatePoint = (which, lat, lng) => {
+  const point = state[which];
+  const display = which === 'start' ? startInput : endInput;
+  const icon = which === 'start' ? startIcon : endIcon;
+
+  // Update coords and timestamp
+  point.coords = { lat, lng };
+  point.timestamp = Date.now();
+
+  // Update display
+  display.textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  display.classList.remove('empty');
+
+  // Update marker
+  if (point.marker) {
+    map.removeLayer(point.marker);
+  }
+  point.marker = L.marker([lat, lng], {
+    icon,
+    title: which,
+    zIndexOffset: 1000
+  }).addTo(map);
+
+  // Clear existing route when points change
+  clearRoute();
+
+  // Auto-calculate route when both points are set
+  if (state.start.coords && state.end.coords) {
+    calculateRoute();
+  }
+};
+
+// Helper to clear a point
+const clearPoint = (which) => {
+  const point = state[which];
+  const display = which === 'start' ? startInput : endInput;
+  const placeholder = which === 'start' ? 'Click map to set start' : 'Click map to set end';
+
+  point.coords = null;
+  point.timestamp = null;
+
+  if (point.marker) {
+    map.removeLayer(point.marker);
+    point.marker = null;
+  }
+
+  display.textContent = placeholder;
+  display.classList.add('empty');
+};
+
+// Map click handler
+map.on("click", (e) => {
+  // If no start, set start
+  if (!state.start.coords) {
+    updatePoint('start', e.latlng.lat, e.latlng.lng);
+    return;
+  }
+
+  // If start exists but no end, set end
+  if (!state.end.coords) {
+    updatePoint('end', e.latlng.lat, e.latlng.lng);
+    return;
+  }
+
+  // Both exist: previous end becomes start, new click becomes end
+  // Move end marker to start position
+  const prevEnd = state.end.coords;
+
+  // Update start with previous end coords
+  updatePoint('start', prevEnd.lat, prevEnd.lng);
+
+  // Update end with new click
+  updatePoint('end', e.latlng.lat, e.latlng.lng);
+});
+
+// Clear button handler
+clearBtn.addEventListener("click", () => {
+  clearPoint('start');
+  clearPoint('end');
+  clearRoute();
+});
+
+// Logo click handler - refresh page
+const logoTitle = document.querySelector(".topbar h1");
+if (logoTitle) {
+  logoTitle.addEventListener("click", () => {
+    window.location.reload();
+  });
+}
