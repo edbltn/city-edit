@@ -43,6 +43,6 @@ dump.rdb
 # Cache
 server/cache/
 
-# Screenshots and images (local only)
-*.png
+# Screenshots and images (local only, not client assets)
+Screenshot*.png
 *.jpg

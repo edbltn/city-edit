@@ -24,8 +24,10 @@ terraform/*.tfstate*
 .vscode/
 
 # Misc
-*.png
-*.jpg
 docs/
 dump.rdb
 server/cache/
+
+# Screenshots (not client assets)
+Screenshot*.png
+*.jpg
