@@ -1,7 +1,7 @@
-import { CONFIG, COLOR_START, COLOR_END } from "./config.js?v=3";
+import { CONFIG, COLOR_START, COLOR_END } from "./config.js?v=4";
 import { createOverlayManager } from "./overlays.js?v=3";
 import { connectMapStateWebSocket } from "./ws.js?v=3";
-import { createCommuteInputModal } from "./commute-input.js?v=3";
+import { createCommuteInputModal } from "./commute-input.js?v=4";
 import { createRouteLayer, createDesirePathLayer } from "./route-styles.js?v=3";
 
 const bounds = L.latLngBounds(
@@ -143,7 +143,7 @@ const calculateRoute = async () => {
 
   try {
     // Use ORS-based routing with desire path computation
-    const response = await fetch("http://localhost:5001/api/routes", {
+    const response = await fetch(`${CONFIG.apiUrl}/routes`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"

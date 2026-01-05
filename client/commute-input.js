@@ -1,4 +1,6 @@
-const GEOCODE_API_URL = "http://localhost:5001/api/geocode";
+import { CONFIG } from "./config.js";
+
+const GEOCODE_API_URL = `${CONFIG.apiUrl}/geocode`;
 const DEBOUNCE_MS = 300;
 
 export function createCommuteInputModal(map) {
