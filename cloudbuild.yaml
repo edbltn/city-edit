@@ -4,7 +4,7 @@ steps:
     args:
       - 'build'
       - '-t'
-      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:${SHORT_SHA}'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:${BUILD_ID}'
       - '-t'
       - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
       - '.'
@@ -23,7 +23,7 @@ steps:
       - 'run'
       - 'deploy'
       - 'desire-path-mapper-${_ENVIRONMENT}'
-      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:${SHORT_SHA}'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:${BUILD_ID}'
       - '--region=${_REGION}'
       - '--platform=managed'
 

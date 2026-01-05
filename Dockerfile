@@ -10,7 +10,7 @@ COPY server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY server/*.py .
+COPY server/*.py ./
 COPY client/ /usr/share/nginx/html/
 
 # Configure nginx for Cloud Run (single container)
