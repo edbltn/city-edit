@@ -32,6 +32,11 @@ export const ROUTE_COLORS = {
     glow: "#B8B0A8",      // Warmer, more emphatic glow
     asphalt: "#343148",   // Eclipse - deep purple-gray
     centerLine: "#E3BD33" // Misted Marigold - bold yellow
+  },
+  desire: {
+    glow: "#F5D76E",      // Soft gold glow
+    middle: "#E3BD33",    // Misted Marigold - gold
+    core: "#D4A017"       // Deeper gold core
   }
 };
 

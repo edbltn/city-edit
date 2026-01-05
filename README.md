@@ -4,6 +4,11 @@ Crowdsourced map of how people actually travel through a city.
 
 ## Quickstart
 
+### Prerequisites
+- Redis
+- Python 3.12+
+- [Bun](https://bun.sh/) (`curl -fsSL https://bun.sh/install | bash`)
+
 ```bash
 # Terminal 1: Start Redis
 redis-server
@@ -17,9 +22,9 @@ pip install uv
 uv pip compile requirements.in > requirements.txt && pip install -r requirements.txt
 python app.py
 
-# Terminal 3: Start frontend
+# Terminal 3: Start frontend (auto-reloads on file changes)
 cd client
-npx serve
+bun run dev
 ```
 
 Open http://localhost:3000
@@ -67,11 +72,17 @@ Copy `server/.env.example` to `server/.env` and configure:
 
 ## Docker
 
+### Production
 ```bash
 docker compose up --build
 ```
-
 Open http://localhost:8080
+
+### Development (with hot reload)
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+Open http://localhost:3000
 
 ## Experimental: Hybrid Routing
 
@@ -107,6 +118,61 @@ Supported modes: `walk`, `bike`, `drive`, `hybrid`
 ### Memory requirements
 
 The NYC street network graphs require approximately 2-5 GB of memory when loaded.
+
+---
+
+## Roam: Multi-Modal Routing Engine
+
+**Roam** ("Freedom to Roam") is our custom routing algorithm that treats the city as unified public space. Unlike the hybrid router above, Roam:
+
+- **Ignores one-way restrictions**: All edges become bidirectional
+- **Zero mode-switch penalty**: Seamlessly transitions between walk/bike/drive
+- **Tile-based caching**: Pre-computes paths between geographic tiles for sub-second routing
+- **Daily OSM refresh**: Automatically detects and invalidates changed tiles
+
+### Design Philosophy
+
+Roam operates under the hypothesis that all walkable, bikeable, and driveable surfaces are public land. This "freedom to roam" approach helps identify where infrastructure improvements (footbridges, bike lanes, pedestrian crossings) would have the greatest impact on desire paths.
+
+### Key Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| **Tile system** | Lat-lon degree grid | Human-readable keys; easy to debug (you can tell where `40.71_-74.00` is by looking at it) |
+| **Tile size** | 0.005° (~500m at NYC latitude) | Balance between cache granularity and overhead |
+| **Portal distance** | 0.001° (~111m) | Matches current hybrid router's 100m threshold |
+| **Scope** | NYC only | Richest OSM data quality; proves concept before expanding |
+
+### How Tiles Work
+
+Each tile is identified by its **southwest corner** coordinates, truncated to 3 decimal places:
+
+```
+Tile "40.710_-74.010" covers:
+  SW corner: (40.710, -74.010)
+  NE corner: (40.715, -74.005)
+  Size: 0.005° × 0.005° ≈ 555m × 400m at NYC latitude
+```
+
+This convention means:
+- Tile IDs are human-readable (you know `40.75_-73.99` is Midtown)
+- Simple math: `tile_lat = floor(lat / 0.005) * 0.005`
+- Easy neighbor lookup: north tile is `tile_lat + 0.005`
+
+### API
+
+```bash
+# Roam routing (finds optimal multi-modal path)
+curl -X POST http://localhost:5001/api/routes/roam \
+  -H "Content-Type: application/json" \
+  -d '{"start": [40.7128, -74.0060], "end": [40.7580, -73.9855]}'
+```
+
+Response includes mode annotations per segment, allowing the client to render each segment in a different color.
+
+For detailed implementation documentation, see [docs/roam.md](docs/roam.md).
+
+---
 
 ## Deploy to GCP
 

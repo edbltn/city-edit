@@ -1,0 +1,31 @@
+# Git
+.git/
+.gitignore
+
+# Python
+env/
+__pycache__/
+*.pyc
+.env
+
+# Node
+node_modules/
+
+# Google Cloud SDK (don't upload to itself!)
+google-cloud-sdk/
+*.tar.gz
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate*
+
+# IDE
+.idea/
+.vscode/
+
+# Misc
+*.png
+*.jpg
+docs/
+dump.rdb
+server/cache/

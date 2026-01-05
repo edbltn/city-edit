@@ -1,0 +1,26 @@
+# Development override - uses Bun with hot reload instead of Nginx
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  flask:
+    deploy:
+      replicas: 1
+    ports:
+      - "5001:5001"
+
+  client:
+    image: oven/bun:alpine
+    working_dir: /app
+    command: bun --watch server.ts
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./client:/app
+    environment:
+      - API_HOST=http://flask:5001
+    depends_on:
+      - flask
+
+  # Disable nginx in dev mode
+  nginx:
+    profiles:
+      - production

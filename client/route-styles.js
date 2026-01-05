@@ -125,3 +125,97 @@ export function createRouteLayer(geometry, mode, pane) {
 
   return L.layerGroup(layers);
 }
+
+/**
+ * Create multi-segment route layer for Roam mode.
+ * Each segment is rendered with its own mode styling.
+ *
+ * @param {Object} routeData - Full route response with geometry and segments
+ * @param {string} pane - Leaflet pane name
+ * @returns {L.LayerGroup} Layer group containing all segment layers
+ */
+export function createRoamRouteLayer(routeData, pane) {
+  const layers = [];
+  const segments = routeData.segments || [];
+
+  // If no segments, fall back to bike styling for the whole geometry
+  if (segments.length === 0 && routeData.geometry) {
+    return createRouteLayer(routeData.geometry, "bike", pane);
+  }
+
+  // Render each segment with its mode's style
+  for (const segment of segments) {
+    const segmentMode = segment.mode || "bike";
+    const coords = segment.coordinates || [];
+
+    if (coords.length < 2) continue;
+
+    // Create GeoJSON geometry from segment coordinates
+    const segmentGeometry = {
+      type: "LineString",
+      coordinates: coords
+    };
+
+    // Skip portal segments (they're just transitions)
+    if (segmentMode === "portal") continue;
+
+    // Use the mode-specific styling
+    const segmentLayer = createRouteLayer(segmentGeometry, segmentMode, pane);
+    segmentLayer.eachLayer((layer) => layers.push(layer));
+  }
+
+  return L.layerGroup(layers);
+}
+
+/**
+ * Create desire path layer - a glowing gold line showing where people would
+ * prefer to go (walk route) vs where infrastructure forces them (mode route).
+ *
+ * @param {Object} geometry - GeoJSON LineString geometry
+ * @param {string} pane - Leaflet pane name
+ * @returns {L.LayerGroup} Layer group with desire path styling
+ */
+export function createDesirePathLayer(geometry, pane) {
+  if (!geometry) return L.layerGroup([]);
+
+  const colors = ROUTE_COLORS.desire;
+  const layers = [];
+
+  // Outer glow layer
+  layers.push(L.geoJSON(geometry, {
+    pane,
+    style: {
+      color: colors.glow,
+      weight: 8,
+      opacity: 0.3,
+      lineCap: "round",
+      lineJoin: "round"
+    }
+  }));
+
+  // Middle glow
+  layers.push(L.geoJSON(geometry, {
+    pane,
+    style: {
+      color: colors.middle,
+      weight: 6,
+      opacity: 0.5,
+      lineCap: "round",
+      lineJoin: "round"
+    }
+  }));
+
+  // Core line
+  layers.push(L.geoJSON(geometry, {
+    pane,
+    style: {
+      color: colors.core,
+      weight: 4,
+      opacity: 1,
+      lineCap: "round",
+      lineJoin: "round"
+    }
+  }));
+
+  return L.layerGroup(layers);
+}

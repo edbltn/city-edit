@@ -43,6 +43,32 @@ resource "google_project_service" "redis" {
   service = "redis.googleapis.com"
 }
 
+resource "google_project_service" "cloudbuild" {
+  service = "cloudbuild.googleapis.com"
+}
+
+# Grant Cloud Build permission to deploy to Cloud Run
+resource "google_project_iam_member" "cloudbuild_run_admin" {
+  project = var.project_id
+  role    = "roles/run.admin"
+  member  = "serviceAccount:${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+
+  depends_on = [google_project_service.cloudbuild]
+}
+
+resource "google_project_iam_member" "cloudbuild_service_account_user" {
+  project = var.project_id
+  role    = "roles/iam.serviceAccountUser"
+  member  = "serviceAccount:${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+
+  depends_on = [google_project_service.cloudbuild]
+}
+
+# Get project number for Cloud Build service account
+data "google_project" "project" {
+  project_id = var.project_id
+}
+
 # Artifact Registry for Docker images
 resource "google_artifact_registry_repository" "app" {
   location      = var.region
@@ -122,6 +148,28 @@ resource "google_cloud_run_service_iam_member" "public" {
   member   = "allUsers"
 }
 
+variable "custom_domain" {
+  description = "Custom domain for the app"
+  type        = string
+  default     = "demo.sphericalharmonics.org"
+}
+
+# Custom domain mapping
+resource "google_cloud_run_domain_mapping" "custom" {
+  location = var.region
+  name     = var.custom_domain
+
+  metadata {
+    namespace = var.project_id
+  }
+
+  spec {
+    route_name = google_cloud_run_service.app.name
+  }
+
+  depends_on = [google_cloud_run_service.app]
+}
+
 # Outputs
 output "service_url" {
   value = google_cloud_run_service.app.status[0].url
@@ -133,4 +181,13 @@ output "redis_host" {
 
 output "registry_url" {
   value = "${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper"
+}
+
+output "custom_domain" {
+  value = var.custom_domain
+}
+
+output "domain_mapping_dns" {
+  description = "DNS records to configure at your registrar"
+  value       = google_cloud_run_domain_mapping.custom.status[0].resource_records
 }

@@ -1,12 +1,36 @@
-import { DESIRE_PATH, COLOR_END } from "./colors.js";
+import { DESIRE_PATH, COLOR_END, ROUTE_COLORS } from "./colors.js";
+
+// Mode-specific colors for desire path overlay
+const MODE_COLORS = {
+  walk: ROUTE_COLORS.walk.core,   // Blue
+  bike: ROUTE_COLORS.bike.core,   // Green
+  drive: ROUTE_COLORS.drive.asphalt  // Dark gray
+};
 
 const defaultLineStyle = {
-  color: COLOR_END,     // red default for desire paths
-  weight: 3,            // stroke width in pixels
-  opacity: 0.85,        // overall stroke opacity
-  lineCap: "round",
-  lineJoin: "round"
+  color: DESIRE_PATH.fill,  // fallback color
+  weight: 1.5,              // base thin stroke
+  opacity: 0.08,            // very subtle by default
+  lineCap: "butt",          // no rounded ends (prevents overlap at nodes)
+  lineJoin: "bevel"         // no rounded joins
 };
+
+// Calculate opacity based on vote count (linear scale)
+// Starts very subtle, becomes more visible with more votes
+function getOpacityForVotes(votes) {
+  const minOpacity = 0.08;
+  const maxOpacity = 0.7;
+  const votesForMax = 20;  // votes needed to reach max opacity
+  return Math.min(minOpacity + (votes / votesForMax) * (maxOpacity - minOpacity), maxOpacity);
+}
+
+// Calculate weight based on vote count (linear scale)
+function getWeightForVotes(votes) {
+  const minWeight = 1.5;
+  const maxWeight = 5;
+  const votesForMax = 20;  // votes needed to reach max weight
+  return Math.min(minWeight + (votes / votesForMax) * (maxWeight - minWeight), maxWeight);
+}
 
 const defaultPointStyle = {
   fillColor: DESIRE_PATH.fill,
@@ -74,15 +98,20 @@ export function createOverlayManager(map) {
           return {};
         }
 
+        // Get mode-specific color
+        const mode = feature.properties?.mode;
+        const modeColor = MODE_COLORS[mode] || DESIRE_PATH.fill;
+
+        // Get vote count for dynamic styling
+        const votes = feature.properties?.votes || 1;
+
         const baseStyle = {
           ...defaultLineStyle,
+          color: modeColor,
+          opacity: getOpacityForVotes(votes),
+          weight: getWeightForVotes(votes),
           ...overlay.options?.style
         };
-
-        // Use per-feature opacity if available
-        if (feature.properties?.opacity !== undefined) {
-          baseStyle.opacity = feature.properties.opacity;
-        }
 
         return baseStyle;
       }

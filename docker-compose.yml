@@ -8,6 +8,8 @@ services:
     build: ./server
     environment:
       - REDIS_HOST=redis
+    env_file:
+      - ./server/.env
     depends_on:
       - redis
     deploy:

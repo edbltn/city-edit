@@ -33,7 +33,11 @@ All secrets and configuration are stored in `server/.env`. Copy from `.env.examp
 ## Docker
 
 ```bash
+# Production
 docker compose up --build
+
+# Development (with hot reload)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
 Services: `nginx` (port 8080), `flask` (internal, 2 replicas), `redis` (port 6379).
@@ -47,8 +51,8 @@ redis-server
 # Terminal 2: Flask
 cd server && source env/bin/activate && python app.py
 
-# Terminal 3: Client
-cd client && npx serve
+# Terminal 3: Client (auto-reloads on file changes)
+cd client && bun run dev
 ```
 
 ---
@@ -735,4 +739,31 @@ def test_geocode_empty_query():
     result, status = geocode("")
     assert status == 400
     assert "error" in result
+```
+
+---
+
+# Response Format
+
+## Always Provide a Summary
+
+After completing any task that modifies code or files, always provide a summary that includes:
+
+1. **What was done**: Brief description of the changes made
+2. **Key line changes**: Specific files and line numbers that were modified (e.g., `app.js:42-45`)
+3. **Key concepts**: Important architectural decisions, patterns used, or concepts the user should understand
+
+Example format:
+```
+## Summary
+
+**What was done**: Added auto-reload support to the development server
+
+**Key changes**:
+- `README.md:20-22`: Changed `npx serve` to `npx live-server --port=3000`
+- `CLAUDE.md:50-51`: Updated local development instructions
+
+**Key concepts**:
+- live-server watches for file changes and automatically refreshes the browser
+- Port 3000 is used to match the existing documentation
 ```

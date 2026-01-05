@@ -22,5 +22,27 @@ node_modules/
 npm-debug.log
 yarn-error.log
 
+# Bun
+bun.lockb
+
 # Logs
 *.log
+
+# Terraform
+terraform/.terraform/
+terraform/terraform.tfstate*
+terraform/terraform.tfvars
+
+# Google Cloud SDK
+google-cloud-sdk/
+*.tar.gz
+
+# Redis
+dump.rdb
+
+# Cache
+server/cache/
+
+# Screenshots and images (local only)
+*.png
+*.jpg

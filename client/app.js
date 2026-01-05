@@ -2,7 +2,7 @@ import { CONFIG, COLOR_START, COLOR_END } from "./config.js?v=3";
 import { createOverlayManager } from "./overlays.js?v=3";
 import { connectMapStateWebSocket } from "./ws.js?v=3";
 import { createCommuteInputModal } from "./commute-input.js?v=3";
-import { createRouteLayer } from "./route-styles.js?v=3";
+import { createRouteLayer, createDesirePathLayer } from "./route-styles.js?v=3";
 
 const bounds = L.latLngBounds(
   [CONFIG.nycBounds.sw.lat, CONFIG.nycBounds.sw.lon],
@@ -32,6 +32,10 @@ L.tileLayer(CONFIG.tileUrlTemplate, {
 map.createPane("routePane");
 map.getPane("routePane").style.zIndex = 450;
 
+// Create a separate pane for desire path (below main route)
+map.createPane("desirePathPane");
+map.getPane("desirePathPane").style.zIndex = 440;
+
 const overlays = createOverlayManager(map);
 
 // Track latest revision for overlay updates
@@ -45,6 +49,10 @@ const wsConnection = connectMapStateWebSocket({
     if (state.revision <= latestRevision) return;
     latestRevision = state.revision;
     overlays.applyMapState(state);
+  },
+  onConnect: () => {
+    // Send initial mode filter on connection
+    wsConnection.send({ type: "set_mode", mode: commuteInput.state.selectedMode });
   }
 });
 
@@ -62,8 +70,12 @@ let state = {
   start: { coords: null, marker: null, timestamp: null },
   end: { coords: null, marker: null, timestamp: null },
   routeLayer: null,
+  desirePathLayer: null,
   routeRequestId: 0
 };
+
+// Legend element
+const routeLegend = document.getElementById("route-legend");
 
 // Custom marker icons - Classic photographic pin style
 const createCustomIcon = (color) => {
@@ -87,11 +99,19 @@ const startInput = document.getElementById("start-coords");
 const endInput = document.getElementById("end-coords");
 const calculatingIndicator = document.getElementById("calculating-indicator");
 
-// Helper to clear route layer
+// Helper to clear route layers and legend
 const clearRoute = () => {
   if (state.routeLayer) {
     map.removeLayer(state.routeLayer);
     state.routeLayer = null;
+  }
+  if (state.desirePathLayer) {
+    map.removeLayer(state.desirePathLayer);
+    state.desirePathLayer = null;
+  }
+  // Hide legend
+  if (routeLegend) {
+    routeLegend.classList.remove("active");
   }
 };
 
@@ -122,6 +142,7 @@ const calculateRoute = async () => {
   calculatingIndicator.classList.add("active");
 
   try {
+    // Use ORS-based routing with desire path computation
     const response = await fetch("http://localhost:5001/api/routes", {
       method: "POST",
       headers: {
@@ -157,23 +178,44 @@ const calculateRoute = async () => {
       return;
     }
 
-    // Remove existing route layer
+    // Remove existing route layers
     clearRoute();
 
-    // Create multi-layer route with mode-based styling (use mode from request)
-    state.routeLayer = createRouteLayer(data.geometry, requestMode, "routePane");
-    state.routeLayer.addTo(map);
+    // Extract route data from new API format
+    const routeData = data.route;
+    const desirePathData = data.desire_path;
+
+    // Create desire path layer first (so it appears below main route)
+    if (desirePathData && desirePathData.geometry && requestMode !== "walk") {
+      state.desirePathLayer = createDesirePathLayer(desirePathData.geometry, "desirePathPane");
+      state.desirePathLayer.addTo(map);
+    }
+
+    // Create main route layer
+    if (routeData && routeData.geometry) {
+      state.routeLayer = createRouteLayer(routeData.geometry, requestMode, "routePane");
+      state.routeLayer.addTo(map);
+    }
+
+    // Show legend for bike/drive modes (not walk)
+    if (routeLegend && requestMode !== "walk" && desirePathData) {
+      routeLegend.classList.add("active");
+      // Update legend labels based on mode
+      const modeLabel = routeLegend.querySelector(".legend-mode-label");
+      const modeLine = routeLegend.querySelector(".legend-line-mode");
+      if (modeLabel) {
+        const modeNames = { bike: "Bike", drive: "Drive" };
+        modeLabel.textContent = `${modeNames[requestMode] || requestMode} path`;
+      }
+      if (modeLine) {
+        modeLine.style.background = requestMode === "bike" ? "#00A651" : "#343148";
+      }
+    }
 
     // Ensure markers stay on top of route
     bringMarkersToFront();
 
-    // Final check: only cast votes if route layer is on the map
-    if (state.routeLayer && map.hasLayer(state.routeLayer)) {
-      wsConnection.send({
-        type: "cast_votes",
-        geometry: data.geometry
-      });
-    }
+    // Voting now happens server-side when route is calculated
 
   } catch (error) {
     console.error("Route calculation failed:", error.message);
@@ -212,6 +254,9 @@ if (modeBtn && modeSelector) {
 
       // Update state in commuteInput
       commuteInput.state.selectedMode = mode;
+
+      // Send mode filter to server
+      wsConnection.send({ type: "set_mode", mode: mode });
 
       // Close dropdown
       modeSelector.classList.remove("active");

@@ -1,4 +1,4 @@
-export function connectMapStateWebSocket({ url, onState, onStatus }) {
+export function connectMapStateWebSocket({ url, onState, onStatus, onConnect }) {
   let ws;
 
   function setStatus(text) {
@@ -9,7 +9,10 @@ export function connectMapStateWebSocket({ url, onState, onStatus }) {
     setStatus(`connecting to ${url}…`);
     ws = new WebSocket(url);
 
-    ws.onopen = () => setStatus("ws connected");
+    ws.onopen = () => {
+      setStatus("ws connected");
+      if (onConnect) onConnect();
+    };
 
     ws.onmessage = (evt) => {
       try {
