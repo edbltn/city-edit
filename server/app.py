@@ -185,19 +185,26 @@ def calculate_route():
     - Computes walk route only
     - Votes for entire walk path
     """
+    print(f"[ROUTE] Received request, ORS_API_KEY set: {bool(ORS_API_KEY)}, REDIS_HOST: {redis_host}")
+
     data = request.get_json()
     if not data:
+        print("[ROUTE] Error: Missing request body")
         return jsonify({"error": "Missing request body"}), 400
 
     start = data.get("start")  # [lat, lon]
     end = data.get("end")      # [lat, lon]
     mode = data.get("mode", "bike")
 
+    print(f"[ROUTE] Request: start={start}, end={end}, mode={mode}")
+
     if not start or not end:
+        print("[ROUTE] Error: Missing coordinates")
         return jsonify({"error": "Missing start or end coordinates"}), 400
 
     # Validate ORS API key
     if not ORS_API_KEY or ORS_API_KEY == "your-api-key-here":
+        print("[ROUTE] Error: ORS API key not configured")
         return jsonify({"error": "ORS API key not configured"}), 500
 
     # Get tile IDs for cache lookup
@@ -349,7 +356,9 @@ def calculate_route():
         })
 
     except Exception as e:
+        import traceback
         print(f"[ROUTE] Unexpected error: {e}")
+        print(f"[ROUTE] Traceback:\n{traceback.format_exc()}")
         return jsonify({"error": f"Routing failed: {str(e)}"}), 500
 
 
