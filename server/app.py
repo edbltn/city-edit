@@ -204,17 +204,24 @@ def calculate_route():
         profile = ORS_PROFILES.get(route_mode, "cycling-regular")
         url = f"https://api.openrouteservice.org/v2/directions/{profile}/geojson"
 
+        # Build request body
+        request_body = {
+            "coordinates": [
+                [start[1], start[0]],  # ORS expects [lon, lat]
+                [end[1], end[0]]
+            ]
+        }
+
+        # Avoid ferries for walking routes
+        if route_mode == "walk":
+            request_body["options"] = {"avoid_features": ["ferries"]}
+
         last_error = None
         for attempt in range(max_retries):
             try:
                 response = requests.post(
                     url,
-                    json={
-                        "coordinates": [
-                            [start[1], start[0]],  # ORS expects [lon, lat]
-                            [end[1], end[0]]
-                        ]
-                    },
+                    json=request_body,
                     headers={
                         "Authorization": ORS_API_KEY,
                         "Content-Type": "application/json"
