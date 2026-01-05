@@ -176,6 +176,43 @@ For detailed implementation documentation, see [docs/roam.md](docs/roam.md).
 
 ## Deploy to GCP
 
+See [docs/gcp-deployment.md](docs/gcp-deployment.md) for detailed deployment documentation.
+
+### Quick Deploy
+
+```bash
+# Build and deploy (from project root)
+gcloud builds submit --config=cloudbuild.yaml --project=google-mpf-ywspom2sxeey
+```
+
+### Environment Variables
+
+After deployment, set environment variables:
+
+```bash
+gcloud run services update desire-path-mapper-prod \
+  --region=us-central1 \
+  --project=google-mpf-ywspom2sxeey \
+  --set-env-vars="REDIS_HOST=10.63.107.3,REDIS_PORT=6379,ORS_API_KEY=your-key-here"
+```
+
+**Important**: Make sure the ORS_API_KEY has no trailing newline or whitespace.
+
+### View Logs
+
+```bash
+gcloud logging read \
+  "resource.type=cloud_run_revision AND resource.labels.service_name=desire-path-mapper-prod" \
+  --project=google-mpf-ywspom2sxeey \
+  --limit=30 \
+  --format="table(timestamp,textPayload)"
+```
+
+### Live URLs
+
+- **Cloud Run**: https://desire-path-mapper-prod-katze52zaq-uc.a.run.app
+- **Custom Domain**: https://demo.sphericalharmonics.org
+
 ### Prerequisites
 
 1. Apply for [Google for Nonprofits](https://www.google.com/nonprofits/) ($10k/year credits)
