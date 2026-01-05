@@ -965,6 +965,11 @@ body {
   .route-bar {
     width: 100%;
   }
+
+  .route-legend {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
 }
 
 /* Fifth breakpoint: Stack everything single column */
@@ -983,5 +988,16 @@ body {
 
   .action-controls .btn-header {
     flex: 1;
+  }
+
+  .route-legend {
+    width: 100%;
+    justify-content: center;
+    order: 5;
+  }
+
+  .route-legend .legend-item {
+    flex: 1;
+    justify-content: center;
   }
 }
