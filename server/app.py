@@ -28,7 +28,11 @@ logger = logging.getLogger(__name__)
 # Force unbuffered output for Cloud Run
 sys.stdout.reconfigure(line_buffering=True)
 
-# Load environment variables from .env file
+# Debug: log all environment variables related to Redis
+logger.info(f"[DEBUG] REDIS_HOST from env: {os.environ.get('REDIS_HOST', 'NOT_SET')}")
+logger.info(f"[DEBUG] REDIS_PORT from env: {os.environ.get('REDIS_PORT', 'NOT_SET')}")
+
+# Load environment variables from .env file (won't override existing env vars)
 load_dotenv()
 
 app = Flask(__name__)
