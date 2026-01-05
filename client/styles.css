@@ -182,6 +182,7 @@ body {
 
 .route-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
   flex: 1;
@@ -237,6 +238,9 @@ body {
   color: var(--ink);
   min-width: 135px;
   max-width: 155px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .route-field-value.empty {
@@ -905,47 +909,14 @@ body {
    Responsive
    ========================================================================== */
 
-/* First breakpoint: Clear button wraps below */
+/* All topbar items wrap naturally - no custom ordering */
 @media (max-width: 1100px) {
-  .topbar {
-    flex-wrap: wrap;
-  }
-
-  .action-controls #clear-btn {
-    order: 10;
-  }
-
-  .action-controls {
-    flex-wrap: wrap;
-  }
-}
-
-/* Second breakpoint: Calculate Route also wraps */
-@media (max-width: 980px) {
-  .action-controls {
-    order: 10;
-    width: 100%;
-    justify-content: flex-end;
-  }
-
   .header-divider {
     display: none;
   }
 }
 
-/* Third breakpoint: Bike button wraps */
-@media (max-width: 850px) {
-  .route-bar {
-    flex-wrap: wrap;
-    justify-content: flex-start;
-  }
-
-  .mode-selector {
-    order: 10;
-  }
-}
-
-/* Fourth breakpoint: End field on new line */
+/* Smaller screens: stack route fields vertically */
 @media (max-width: 720px) {
   .route-fields {
     flex-direction: column;
@@ -965,39 +936,20 @@ body {
   .route-bar {
     width: 100%;
   }
-
-  .route-legend {
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
 }
 
-/* Fifth breakpoint: Stack everything single column */
+/* Mobile: full-width action buttons */
 @media (max-width: 540px) {
   .topbar {
     padding: var(--space-3) var(--space-4);
   }
 
-  .route-bar {
-    gap: var(--space-2);
-  }
-
   .action-controls {
+    width: 100%;
     justify-content: stretch;
   }
 
   .action-controls .btn-header {
     flex: 1;
-  }
-
-  .route-legend {
-    width: 100%;
-    justify-content: center;
-    order: 5;
-  }
-
-  .route-legend .legend-item {
-    flex: 1;
-    justify-content: center;
   }
 }
