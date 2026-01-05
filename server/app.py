@@ -1,6 +1,9 @@
 import json
+import logging
 import os
+import sys
 import time
+import traceback
 import requests
 import redis
 from dotenv import load_dotenv
@@ -13,6 +16,17 @@ from roam_cache import (
 )
 from tiles import coords_to_tile
 from desire_path_voting import compute_desire_path_votes, cast_desire_path_votes
+
+# Configure logging for Cloud Run (unbuffered, structured)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(message)s',
+    stream=sys.stdout
+)
+logger = logging.getLogger(__name__)
+
+# Force unbuffered output for Cloud Run
+sys.stdout.reconfigure(line_buffering=True)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -27,19 +41,20 @@ redis_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=Tr
 SEGMENT_VOTES_KEY = "segment_votes"
 
 # Log Redis connection info at startup
-print(f"[REDIS] Connecting to Redis at: {redis_host}:6379")
+logger.info(f"[REDIS] Connecting to Redis at: {redis_host}:6379")
 try:
     redis_info = redis_client.info("server")
-    print(f"[REDIS] Connected successfully - Redis version: {redis_info.get('redis_version', 'unknown')}")
+    logger.info(f"[REDIS] Connected successfully - Redis version: {redis_info.get('redis_version', 'unknown')}")
     if redis_host != 'localhost':
-        print(f"[REDIS] Using CLOUD Redis (Memorystore) at {redis_host}")
+        logger.info(f"[REDIS] Using CLOUD Redis (Memorystore) at {redis_host}")
     else:
-        print(f"[REDIS] Using LOCAL Redis at {redis_host}")
+        logger.info(f"[REDIS] Using LOCAL Redis at {redis_host}")
 except redis.ConnectionError as e:
-    print(f"[REDIS] WARNING: Could not connect to Redis at {redis_host}: {e}")
+    logger.error(f"[REDIS] WARNING: Could not connect to Redis at {redis_host}: {e}")
 
 # OpenRouteService API key (get free key at https://openrouteservice.org/)
 ORS_API_KEY = os.environ.get('ORS_API_KEY', '')
+logger.info(f"[STARTUP] ORS_API_KEY configured: {bool(ORS_API_KEY)}")
 
 # OpenRouteService profile mapping
 ORS_PROFILES = {
@@ -158,7 +173,7 @@ def ws(ws):
                     new_mode = data.get("mode")
                     if new_mode in ("bike", "walk", "drive"):
                         current_mode = new_mode
-                        print(f"Mode filter set to: {current_mode}")
+                        logger.info(f"Mode filter set to: {current_mode}")
         except Exception as e:
             # Timeout or no data is expected, only log actual errors
             if "timed out" not in str(e).lower():
@@ -185,26 +200,26 @@ def calculate_route():
     - Computes walk route only
     - Votes for entire walk path
     """
-    print(f"[ROUTE] Received request, ORS_API_KEY set: {bool(ORS_API_KEY)}, REDIS_HOST: {redis_host}")
+    logger.info(f"[ROUTE] Received request, ORS_API_KEY set: {bool(ORS_API_KEY)}, REDIS_HOST: {redis_host}")
 
     data = request.get_json()
     if not data:
-        print("[ROUTE] Error: Missing request body")
+        logger.error("[ROUTE] Error: Missing request body")
         return jsonify({"error": "Missing request body"}), 400
 
     start = data.get("start")  # [lat, lon]
     end = data.get("end")      # [lat, lon]
     mode = data.get("mode", "bike")
 
-    print(f"[ROUTE] Request: start={start}, end={end}, mode={mode}")
+    logger.info(f"[ROUTE] Request: start={start}, end={end}, mode={mode}")
 
     if not start or not end:
-        print("[ROUTE] Error: Missing coordinates")
+        logger.error("[ROUTE] Error: Missing coordinates")
         return jsonify({"error": "Missing start or end coordinates"}), 400
 
     # Validate ORS API key
     if not ORS_API_KEY or ORS_API_KEY == "your-api-key-here":
-        print("[ROUTE] Error: ORS API key not configured")
+        logger.error("[ROUTE] Error: ORS API key not configured")
         return jsonify({"error": "ORS API key not configured"}), 500
 
     # Get tile IDs for cache lookup
@@ -250,18 +265,18 @@ def calculate_route():
                 # Handle rate limiting (429) with exponential backoff
                 if response.status_code == 429:
                     wait_time = (2 ** attempt) + (time.time() % 1)  # 1, 2, 4, 8, 16 + jitter
-                    print(f"[ORS] Rate limited (429), retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
+                    logger.warning(f"[ORS] Rate limited (429), retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
                     time.sleep(wait_time)
                     continue
 
                 # Handle other errors
                 if response.status_code >= 400:
                     error_msg = f"ORS API error {response.status_code}: {response.text[:200]}"
-                    print(f"[ORS] {error_msg}")
+                    logger.error(f"[ORS] {error_msg}")
                     if response.status_code >= 500:
                         # Server error - retry
                         wait_time = (2 ** attempt) + (time.time() % 1)
-                        print(f"[ORS] Server error, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
+                        logger.warning(f"[ORS] Server error, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
                         time.sleep(wait_time)
                         continue
                     else:
@@ -305,23 +320,23 @@ def calculate_route():
             except requests.Timeout as e:
                 last_error = f"Timeout: {e}"
                 wait_time = (2 ** attempt) + (time.time() % 1)
-                print(f"[ORS] Timeout, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
+                logger.warning(f"[ORS] Timeout, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
                 time.sleep(wait_time)
             except requests.RequestException as e:
                 last_error = f"Request error: {e}"
                 wait_time = (2 ** attempt) + (time.time() % 1)
-                print(f"[ORS] {last_error}, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
+                logger.warning(f"[ORS] {last_error}, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
                 time.sleep(wait_time)
 
         # All retries exhausted
-        print(f"[ORS] All {max_retries} retries failed for {route_mode} route. Last error: {last_error}")
+        logger.error(f"[ORS] All {max_retries} retries failed for {route_mode} route. Last error: {last_error}")
         return {"error": f"ORS API failed after {max_retries} retries: {last_error}"}
 
     try:
         # Compute desired mode route
         route_desired = fetch_ors_route(mode)
         if "error" in route_desired:
-            print(f"[ROUTE] Failed to get {mode} route: {route_desired['error']}")
+            logger.error(f"[ROUTE] Failed to get {mode} route: {route_desired['error']}")
             return jsonify(route_desired), 404
 
         # For walk mode, walk route is the same as desired route
@@ -331,7 +346,7 @@ def calculate_route():
             # For bike/drive, also compute walk route
             route_walk = fetch_ors_route("walk")
             if "error" in route_walk:
-                print(f"[ROUTE] Failed to get walk route: {route_walk['error']}, returning desired route only")
+                logger.warning(f"[ROUTE] Failed to get walk route: {route_walk['error']}, returning desired route only")
                 # If walk route fails, just return desired route without voting
                 return jsonify({
                     "route": route_desired,
@@ -346,7 +361,7 @@ def calculate_route():
 
         if vote_segments:
             vote_count = cast_desire_path_votes(redis_client, vote_segments, vote_mode)
-            print(f"[VOTE] Cast {vote_count} votes as '{vote_mode}'")
+            logger.info(f"[VOTE] Cast {vote_count} votes as '{vote_mode}'")
 
         # Return both routes to frontend
         return jsonify({
@@ -356,9 +371,8 @@ def calculate_route():
         })
 
     except Exception as e:
-        import traceback
-        print(f"[ROUTE] Unexpected error: {e}")
-        print(f"[ROUTE] Traceback:\n{traceback.format_exc()}")
+        logger.error(f"[ROUTE] Unexpected error: {e}")
+        logger.error(f"[ROUTE] Traceback:\n{traceback.format_exc()}")
         return jsonify({"error": f"Routing failed: {str(e)}"}), 500
 
 

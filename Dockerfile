@@ -2,6 +2,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Force unbuffered Python output for Cloud Logging
+ENV PYTHONUNBUFFERED=1
+
 # Install nginx
 RUN apt-get update && apt-get install -y nginx && rm -rf /var/lib/apt/lists/*
 
