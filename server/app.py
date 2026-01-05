@@ -26,6 +26,18 @@ redis_host = os.environ.get('REDIS_HOST', 'localhost')
 redis_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
 SEGMENT_VOTES_KEY = "segment_votes"
 
+# Log Redis connection info at startup
+print(f"[REDIS] Connecting to Redis at: {redis_host}:6379")
+try:
+    redis_info = redis_client.info("server")
+    print(f"[REDIS] Connected successfully - Redis version: {redis_info.get('redis_version', 'unknown')}")
+    if redis_host != 'localhost':
+        print(f"[REDIS] Using CLOUD Redis (Memorystore) at {redis_host}")
+    else:
+        print(f"[REDIS] Using LOCAL Redis at {redis_host}")
+except redis.ConnectionError as e:
+    print(f"[REDIS] WARNING: Could not connect to Redis at {redis_host}: {e}")
+
 # OpenRouteService API key (get free key at https://openrouteservice.org/)
 ORS_API_KEY = os.environ.get('ORS_API_KEY', '')
 
@@ -212,9 +224,8 @@ def calculate_route():
             ]
         }
 
-        # Avoid ferries for walking routes
-        if route_mode == "walk":
-            request_body["options"] = {"avoid_features": ["ferries"]}
+        # Avoid ferries for all modes
+        request_body["options"] = {"avoid_features": ["ferries"]}
 
         last_error = None
         for attempt in range(max_retries):

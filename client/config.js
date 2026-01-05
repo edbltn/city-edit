@@ -1,6 +1,10 @@
 // Re-export all colors for convenient access
 export * from "./colors.js";
 
+// Detect environment: use relative paths in production, localhost in dev
+const isLocalDev = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+
 export const CONFIG = {
   // Initial camera
   initialView: { lat: 40.7128, lon: -74.0060, zoom: 11 },
@@ -23,7 +27,7 @@ export const CONFIG = {
   // Leaflet behaviors
   preferCanvas: true,
 
-  // API & Socket URLs
-  apiUrl: "http://localhost:5001/api",
-  wsUrl: "ws://localhost:5001/ws"
+  // API & Socket URLs - auto-detect based on environment
+  apiUrl: isLocalDev ? "http://localhost:5001/api" : "/api",
+  wsUrl: isLocalDev ? "ws://localhost:5001/ws" : `${wsProtocol}//${window.location.host}/ws`
 };
