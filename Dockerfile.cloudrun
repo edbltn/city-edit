@@ -10,7 +10,7 @@ COPY server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
 # Copy all Python files
-COPY server/*.py .
+COPY server/*.py ./
 COPY client/ /var/www/html/
 
 # Nginx config
