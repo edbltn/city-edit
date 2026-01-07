@@ -157,6 +157,16 @@ def make_state(rev: int, mode_filter=None):
     }
 
 
+@app.route("/health")
+def health():
+    """Health check endpoint for load balancers and monitoring."""
+    try:
+        redis_client.ping()
+        return jsonify({"status": "healthy", "redis": "connected"}), 200
+    except redis.ConnectionError:
+        return jsonify({"status": "unhealthy", "redis": "disconnected"}), 503
+
+
 @sock.route("/ws")
 def ws(ws):
     import select

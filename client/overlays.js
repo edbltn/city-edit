@@ -1,10 +1,10 @@
 import { DESIRE_PATH, COLOR_END, ROUTE_COLORS } from "./colors.js";
 
-// Mode-specific colors for desire path overlay
+// All modes use gold to represent desire paths
 const MODE_COLORS = {
-  walk: ROUTE_COLORS.walk.core,   // Blue
-  bike: ROUTE_COLORS.bike.core,   // Green
-  drive: ROUTE_COLORS.drive.asphalt  // Dark gray
+  walk: ROUTE_COLORS.desire.core,   // Gold
+  bike: ROUTE_COLORS.desire.core,   // Gold
+  drive: ROUTE_COLORS.desire.core   // Gold
 };
 
 const defaultLineStyle = {

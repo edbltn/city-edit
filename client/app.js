@@ -125,6 +125,35 @@ const bringMarkersToFront = () => {
   }
 };
 
+// Fetch with retry and exponential backoff
+const fetchWithRetry = async (url, options, maxRetries = 5) => {
+  let lastError;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+
+      // Retry on server errors (5xx)
+      if (response.status >= 500) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+
+      return response;
+    } catch (error) {
+      lastError = error;
+
+      // Don't retry on the last attempt
+      if (attempt < maxRetries - 1) {
+        // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+        const delay = Math.pow(2, attempt) * 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError;
+};
+
 // Helper to calculate and display route
 const calculateRoute = async () => {
   if (!state.start.coords || !state.end.coords) return;
@@ -142,8 +171,8 @@ const calculateRoute = async () => {
   calculatingIndicator.classList.add("active");
 
   try {
-    // Use ORS-based routing with desire path computation
-    const response = await fetch(`${CONFIG.apiUrl}/routes`, {
+    // Use ORS-based routing with desire path computation (with retry)
+    const response = await fetchWithRetry(`${CONFIG.apiUrl}/routes`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
