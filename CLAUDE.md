@@ -1,5 +1,9 @@
 # Project Architecture
 
+## Claude Instructions
+
+- **gcloud commands**: Don't run gcloud commands directly. Ask me to run them and I'll provide the output.
+
 ## Overview
 
 Desire Path Mapper is a crowdsourced map showing how people actually travel through a city. Users submit their commute routes, which are aggregated and visualized as a heatmap overlay.
