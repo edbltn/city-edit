@@ -17,8 +17,11 @@ Redis key schema:
 """
 
 import json
+import logging
 from typing import Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Redis key prefixes
 PATH_PREFIX = "roam:path:"
@@ -117,6 +120,7 @@ def cache_mst_segments(redis_client, waypoint_tiles: list[str], mode: str,
         Number of segments cached
     """
     if redis_client is None or len(waypoint_tiles) < 2:
+        logger.warning(f"[MST] Skipping: redis_client={redis_client is not None}, tiles={len(waypoint_tiles)}")
         return 0
 
     # Remove duplicates while preserving order
@@ -128,9 +132,12 @@ def cache_mst_segments(redis_client, waypoint_tiles: list[str], mode: str,
             seen.add(tile)
 
     if len(unique_tiles) < 2:
+        logger.warning(f"[MST] Skipping: only {len(unique_tiles)} unique tiles after dedup")
         return 0
 
+    logger.info(f"[MST] Caching segments for {len(unique_tiles)} unique tiles")
     cached_count = 0
+    skipped_count = 0
     geometry_coords = full_path_data.get("geometry", {}).get("coordinates", [])
 
     try:
@@ -175,12 +182,15 @@ def cache_mst_segments(redis_client, waypoint_tiles: list[str], mode: str,
                     key = f"{PATH_PREFIX}{mode}:{from_tile}:{to_tile}"
                     pipe.set(key, json.dumps(segment_data))
                     cached_count += 1
+                else:
+                    skipped_count += 1
 
         pipe.execute()
+        logger.info(f"[MST] Cached {cached_count} segments, skipped {skipped_count} (no coords)")
         return cached_count
 
     except Exception as e:
-        print(f"MST cache error: {e}")
+        logger.error(f"[MST] Cache error: {e}")
         return 0
 
 

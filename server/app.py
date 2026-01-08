@@ -323,8 +323,10 @@ def calculate_route():
                 # Cache MST segments for intermediate tile pairs
                 waypoint_tiles = extract_waypoint_tiles(route_data)
                 tile_to_coords = build_tile_to_coords_map(route_data)
+                logger.info(f"[CACHE] Route has {len(waypoint_tiles)} waypoint tiles: {waypoint_tiles[:5]}{'...' if len(waypoint_tiles) > 5 else ''}")
                 if len(waypoint_tiles) >= 2:
-                    cache_mst_segments(redis_client, waypoint_tiles, route_mode, route_data, tile_to_coords)
+                    cached_count = cache_mst_segments(redis_client, waypoint_tiles, route_mode, route_data, tile_to_coords)
+                    logger.info(f"[CACHE] Cached {cached_count} MST segments for {route_mode} route")
 
                 # Register for cache invalidation
                 register_path_tiles(redis_client, start_tile, end_tile, route_mode, waypoint_tiles)
