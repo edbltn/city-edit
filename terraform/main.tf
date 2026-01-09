@@ -131,6 +131,11 @@ resource "google_cloud_run_service" "app" {
           value = google_redis_instance.cache.port
         }
 
+        env {
+          name  = "ORS_API_KEY"
+          value = var.ors_api_key
+        }
+
         resources {
           limits = {
             cpu    = "1"
@@ -174,6 +179,12 @@ variable "custom_domain" {
   description = "Custom domain for the app"
   type        = string
   default     = "demo.sphericalharmonics.org"
+}
+
+variable "ors_api_key" {
+  description = "OpenRouteService API key"
+  type        = string
+  sensitive   = true
 }
 
 # Custom domain mapping
