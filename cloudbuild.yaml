@@ -18,16 +18,16 @@ steps:
       - '--all-tags'
       - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app'
 
-  # Deploy to Cloud Run
+  # Deploy to Cloud Run (update image only, preserve env vars from terraform)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
     args:
       - 'run'
-      - 'deploy'
+      - 'services'
+      - 'update'
       - 'desire-path-mapper-${_ENVIRONMENT}'
       - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:${BUILD_ID}'
       - '--region=${_REGION}'
-      - '--platform=managed'
 
 substitutions:
   _REGION: us-central1
