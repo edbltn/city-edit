@@ -101,6 +101,11 @@ resource "google_redis_instance" "cache" {
   redis_version = "REDIS_7_0"
   display_name  = "Desire Path Mapper Redis"
 
+  # Use LRU eviction to auto-remove old cache entries when memory is full
+  redis_configs = {
+    maxmemory-policy = "allkeys-lru"
+  }
+
   lifecycle {
     prevent_destroy = true
   }
