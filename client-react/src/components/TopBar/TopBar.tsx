@@ -27,10 +27,12 @@ export const TopBar = memo(function TopBar() {
     return `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
   };
 
-  const showLegend = mode !== "walk" && desirePathData && routeData;
+  // Show walk path legend when in walk mode with route data
+  const showWalkLegend = mode === "walk" && routeData;
+  // Show current/desired path legend when in bike/drive mode with both routes
+  const showSplitLegend = mode !== "walk" && desirePathData && routeData;
   const modeLegendColor =
     mode === "bike" ? ROUTE_COLORS.bike.core : ROUTE_COLORS.drive.asphalt;
-  const modeLabel = mode === "bike" ? "Bike path" : "Drive path";
 
   // For walk mode, the route itself is voteable; for other modes, need desirePathData
   const canVote = mode === "walk" ? !!routeData : !!desirePathData;
@@ -53,53 +55,59 @@ export const TopBar = memo(function TopBar() {
 
         <div className="header-divider"></div>
 
-        {/* Route section: coordinates + legend on top, actions below */}
+        {/* Route section: legend with coordinates on top, actions below */}
         <div className="route-section">
-          <div className="route-fields-row">
-            <div className="route-fields">
-              <div className="route-field">
-                <span className="route-field-label">Start</span>
-                <div
-                  className={`route-field-value ${!start.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}
-                >
-                  {formatCoords(start.coords) || "Click map to set start"}
-                </div>
-              </div>
-              <div className="route-field">
-                <span className="route-field-label">End</span>
-                <div
-                  className={`route-field-value ${!end.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}
-                >
-                  {formatCoords(end.coords) || "Click map to set end"}
-                </div>
-              </div>
+          <div className="route-legend">
+            <div className="legend-item legend-item-coords">
+              <span className="legend-icon-slot">
+                {start.coords && <span className="legend-marker legend-marker-start"></span>}
+              </span>
+              <span className="legend-label">Start</span>
+              <span className={`legend-coords ${!start.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}>
+                {formatCoords(start.coords) || "Click map to set start"}
+              </span>
             </div>
-
-            <div className={`route-legend ${showLegend ? "active" : ""}`}>
-              <div className="legend-item">
+            <div className="legend-item legend-item-coords">
+              <span className="legend-icon-slot">
+                {end.coords && <span className="legend-marker legend-marker-end"></span>}
+              </span>
+              <span className="legend-label">End</span>
+              <span className={`legend-coords ${!end.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}>
+                {formatCoords(end.coords) || "Click map to set end"}
+              </span>
+            </div>
+            <div className="legend-item">
+              <span className="legend-icon-slot">
                 <HexagonIcon />
-                <span>Most Requested</span>
-              </div>
-              <div className="legend-path-items">
-                <div className="legend-item">
-                  <span
-                    className="legend-line legend-line-mode"
-                    style={{ background: modeLegendColor }}
-                  ></span>
-                  <span className="legend-mode-label">{modeLabel}</span>
-                </div>
-                <div className="legend-item">
-                  <span className="legend-line legend-line-desire"></span>
-                  <span className="legend-desire-label">Desire Path</span>
-                </div>
-              </div>
+              </span>
+              <span>Most Requested</span>
             </div>
-
-            {isLoading && (
-              <div className="calculating-indicator active">
-                <div className="spinner"></div>
-                <span>Calculating...</span>
+            {showWalkLegend && (
+              <div className="legend-item">
+                <span className="legend-icon-slot">
+                  <span className="legend-dots legend-dots-walk"></span>
+                </span>
+                <span>Walk Path</span>
               </div>
+            )}
+            {showSplitLegend && (
+              <>
+                <div className="legend-item">
+                  <span className="legend-icon-slot">
+                    <span
+                      className="legend-line legend-line-mode"
+                      style={{ background: modeLegendColor }}
+                    ></span>
+                  </span>
+                  <span>Current Path</span>
+                </div>
+                <div className="legend-item">
+                  <span className="legend-icon-slot">
+                    <span className="legend-line legend-line-desire"></span>
+                  </span>
+                  <span>Desired Path</span>
+                </div>
+              </>
             )}
           </div>
 
@@ -122,6 +130,13 @@ export const TopBar = memo(function TopBar() {
               >
                 {isVoting ? "Voting..." : hasVoted ? "Vote Cast!" : "Cast Vote"}
               </button>
+            )}
+
+            {isLoading && (
+              <div className="calculating-indicator active">
+                <div className="spinner"></div>
+                <span>Calculating...</span>
+              </div>
             )}
           </div>
         </div>

@@ -292,6 +292,7 @@ body {
   align-items: center;
   gap: var(--space-2);
   padding: 10px var(--space-4);
+  padding-right: calc(var(--space-4) + 1.2em);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
   background: var(--paper);
@@ -396,20 +397,19 @@ body {
   color: var(--ink);
 }
 
-.legend-path-items {
-  display: none;
-  align-items: center;
-  gap: var(--space-4);
-}
-
-.route-legend.active .legend-path-items {
-  display: flex;
-}
-
 .legend-item {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+.legend-icon-slot {
+  width: 20px;
+  min-width: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .legend-line {
@@ -422,9 +422,72 @@ body {
   background: #00A651;  /* Bike green by default, updated via JS for drive */
 }
 
+.legend-dots {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.legend-dots::before,
+.legend-dots::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.legend-dots-walk::before,
+.legend-dots-walk::after {
+  background: #5DADE2;  /* Light blue */
+}
+
 .legend-line-desire {
   background: linear-gradient(90deg, #F5D76E, #D4A017);  /* Gold gradient */
   box-shadow: 0 0 4px rgba(227, 189, 51, 0.5);  /* Subtle glow */
+}
+
+.legend-marker {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.legend-marker-start {
+  background: var(--color-start);
+}
+
+.legend-marker-end {
+  background: var(--color-end);
+}
+
+.legend-hexagons {
+  flex-shrink: 0;
+  width: 16px;
+  height: 11px;
+}
+
+.legend-label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.legend-coords {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.legend-coords.empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.legend-coords.loading {
+  animation: pulse 1.5s ease-in-out infinite;
 }
 
 
@@ -1132,11 +1195,6 @@ body {
   .route-legend {
     flex-direction: column;
     gap: var(--space-2);
-    align-items: flex-start;
-  }
-
-  .route-legend.active .legend-path-items {
-    flex-direction: column;
     align-items: flex-start;
   }
 }

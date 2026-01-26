@@ -149,19 +149,24 @@ def segment_key_from_coords(coord1: list, coord2: list, mode: str) -> str:
         return f"{p2[0]},{p2[1]}|{p1[0]},{p1[1]}|{mode}"
 
 
-def update_hex_cache_incremental(redis_client, segments: list, mode: str):
+def update_hex_cache_incremental(redis_client, segments: list, mode: str, ip_hash: str = None):
     """
     Add votes for new segments to hex cache using deterministic jitter.
 
     This incrementally updates the cached hex votes when new segments are voted on.
+    Uses IP-weighted voting: stores per-IP hex votes for weighted aggregation.
 
     Args:
         redis_client: Redis client
         segments: List of [[coord1, coord2], ...] segments
         mode: Transport mode (bike, walk, drive)
+        ip_hash: Hashed IP for weighted voting (optional, defaults to "system")
     """
     if not redis_client or not segments:
         return
+
+    # Use "system" for legacy/migration votes
+    ip_hash = ip_hash or "system"
 
     pipe = redis_client.pipeline()
 
@@ -175,42 +180,148 @@ def update_hex_cache_incremental(redis_client, segments: list, mode: str):
         # Find exact hexes that intersect this segment
         exact_hexes = list(line_to_hexes_exact(coord1, coord2))
 
-        # For each hex, apply deterministic jitter and increment vote
+        # For each hex, apply deterministic jitter and increment per-IP vote
         for vote_idx, center_hex in enumerate(exact_hexes):
             jittered = get_jittered_hex_deterministic(center_hex, seg_key, vote_idx)
-            pipe.hincrby(f"hex_votes:{mode}", jittered, 1)
-            pipe.hincrby("hex_votes:all", jittered, 1)
+            # Store per-IP hex votes: key is "hex_id|ip_hash"
+            per_ip_key = f"{jittered}|{ip_hash}"
+            pipe.hincrby(f"hex_votes_by_ip:{mode}", per_ip_key, 1)
 
     pipe.execute()
+
+    # Rebuild weighted cache after adding new votes
+    rebuild_weighted_hex_cache(redis_client, mode)
+
+
+def rebuild_weighted_hex_cache(redis_client, mode: str = None):
+    """
+    Rebuild weighted hex cache from per-IP hex votes.
+
+    Computes weighted sums where each IP contributes 1.0 total weight:
+    weight = count / total_votes_by_ip
+
+    Args:
+        redis_client: Redis client
+        mode: Transport mode to rebuild (if None, rebuilds all modes)
+    """
+    if not redis_client:
+        return
+
+    modes = [mode] if mode else ["bike", "walk", "drive"]
+
+    for m in modes:
+        try:
+            # Get all per-IP hex votes for this mode
+            hex_votes_by_ip = redis_client.hgetall(f"hex_votes_by_ip:{m}")
+            if not hex_votes_by_ip:
+                continue
+
+            # Get all IP vote counts
+            ip_vote_counts = redis_client.hgetall("ip_vote_counts")
+
+            # Compute weighted sums
+            weighted_hexes = {}
+            for hex_ip_key, count in hex_votes_by_ip.items():
+                # Parse "hex_id|ip_hash"
+                parts = hex_ip_key.rsplit("|", 1)
+                if len(parts) != 2:
+                    continue
+
+                hex_id, ip_hash = parts
+                count = int(count)
+
+                # Get total votes for this IP (default to count if not found)
+                total_votes = int(ip_vote_counts.get(ip_hash, count))
+                if total_votes == 0:
+                    total_votes = 1
+
+                # Weight = count / total_votes (IP contributes 1.0 total)
+                weight = count / total_votes
+                weighted_hexes[hex_id] = weighted_hexes.get(hex_id, 0.0) + weight
+
+            # Store weighted cache (as floats with 6 decimal places)
+            if weighted_hexes:
+                pipe = redis_client.pipeline()
+                pipe.delete(f"hex_votes_weighted:{m}")
+                for hex_id, weight in weighted_hexes.items():
+                    pipe.hset(f"hex_votes_weighted:{m}", hex_id, f"{weight:.6f}")
+                pipe.execute()
+
+        except Exception as e:
+            print(f"Error rebuilding weighted hex cache for {m}: {e}")
+
+    # Also rebuild the "all" mode aggregated cache
+    if mode:
+        rebuild_all_modes_weighted_cache(redis_client)
+
+
+def rebuild_all_modes_weighted_cache(redis_client):
+    """
+    Rebuild the aggregated weighted hex cache across all modes.
+    """
+    if not redis_client:
+        return
+
+    try:
+        all_weighted = {}
+
+        for m in ["bike", "walk", "drive"]:
+            hex_votes = redis_client.hgetall(f"hex_votes_weighted:{m}")
+            for hex_id, weight in hex_votes.items():
+                all_weighted[hex_id] = all_weighted.get(hex_id, 0.0) + float(weight)
+
+        if all_weighted:
+            pipe = redis_client.pipeline()
+            pipe.delete("hex_votes_weighted:all")
+            for hex_id, weight in all_weighted.items():
+                pipe.hset("hex_votes_weighted:all", hex_id, f"{weight:.6f}")
+            pipe.execute()
+
+    except Exception as e:
+        print(f"Error rebuilding all-modes weighted cache: {e}")
 
 
 def get_cached_hex_overlay(redis_client, mode_filter: str = None) -> dict:
     """
-    Read hex votes from cache.
+    Read weighted hex votes from cache.
 
     Args:
         redis_client: Redis client
         mode_filter: Optional mode to filter by (bike, walk, drive)
 
     Returns:
-        Dict with "hexes" (hex_id -> vote_count) and "max_votes"
+        Dict with "hexes" (hex_id -> weighted_vote_float) and "max_votes"
     """
     try:
-        key = f"hex_votes:{mode_filter}" if mode_filter else "hex_votes:all"
+        # Try weighted cache first (new IP-weighted system)
+        key = f"hex_votes_weighted:{mode_filter}" if mode_filter else "hex_votes_weighted:all"
         hex_votes = redis_client.hgetall(key)
-        hex_votes = {k: int(v) for k, v in hex_votes.items()}
-        max_votes = max(hex_votes.values()) if hex_votes else 1
-        return {"hexes": hex_votes, "max_votes": max_votes}
+
+        if hex_votes:
+            # Weighted cache exists - return floats
+            hex_votes = {k: float(v) for k, v in hex_votes.items()}
+            max_votes = max(hex_votes.values()) if hex_votes else 1.0
+            return {"hexes": hex_votes, "max_votes": max_votes}
+
+        # Fall back to legacy unweighted cache for backwards compatibility
+        legacy_key = f"hex_votes:{mode_filter}" if mode_filter else "hex_votes:all"
+        hex_votes = redis_client.hgetall(legacy_key)
+        if hex_votes:
+            hex_votes = {k: float(v) for k, v in hex_votes.items()}
+            max_votes = max(hex_votes.values()) if hex_votes else 1.0
+            return {"hexes": hex_votes, "max_votes": max_votes}
+
+        return {"hexes": {}, "max_votes": 1.0}
     except Exception:
-        return {"hexes": {}, "max_votes": 1}
+        return {"hexes": {}, "max_votes": 1.0}
 
 
 def regenerate_hex_cache(redis_client):
     """
     Full rebuild of hex cache from segment votes.
 
-    Clears existing hex caches and rebuilds deterministically from all
-    segment votes. Useful for recovery or when changing hex resolution.
+    Migrates legacy votes to "system" user and rebuilds weighted cache.
+    Useful for recovery or when changing hex resolution.
 
     Args:
         redis_client: Redis client
@@ -227,13 +338,19 @@ def regenerate_hex_cache(redis_client):
     if not segment_votes:
         return
 
-    # Clear existing hex caches
+    # Clear existing caches (both legacy and new weighted)
     pipe = redis_client.pipeline()
     for mode in ["bike", "walk", "drive", "all"]:
         pipe.delete(f"hex_votes:{mode}")
+        pipe.delete(f"hex_votes_weighted:{mode}")
+        pipe.delete(f"hex_votes_by_ip:{mode}")
     pipe.execute()
 
-    # Rebuild from segment votes
+    # Count total hex votes that will be assigned to "system" user
+    total_system_hex_votes = 0
+
+    # Rebuild per-IP hex votes from segment votes
+    # All legacy votes are attributed to "system" user
     for key, count in segment_votes.items():
         parts = key.split("|")
         if len(parts) < 3:
@@ -248,16 +365,26 @@ def regenerate_hex_cache(redis_client):
         except (ValueError, IndexError):
             continue
 
-        # Simulate the original votes using deterministic jitter
+        # Find exact hexes that intersect this segment
         exact_hexes = list(line_to_hexes_exact(coord1, coord2))
 
         pipe = redis_client.pipeline()
         for _ in range(vote_count):
             for vote_idx, center_hex in enumerate(exact_hexes):
                 jittered = get_jittered_hex_deterministic(center_hex, key, vote_idx)
-                pipe.hincrby(f"hex_votes:{mode}", jittered, 1)
-                pipe.hincrby("hex_votes:all", jittered, 1)
+                # Store as "system" user votes
+                per_ip_key = f"{jittered}|system"
+                pipe.hincrby(f"hex_votes_by_ip:{mode}", per_ip_key, 1)
+                total_system_hex_votes += 1
         pipe.execute()
+
+    # Set total vote count for "system" user
+    if total_system_hex_votes > 0:
+        redis_client.hset("ip_vote_counts", "system", total_system_hex_votes)
+
+    # Rebuild weighted caches from per-IP data
+    rebuild_weighted_hex_cache(redis_client, None)
+    rebuild_all_modes_weighted_cache(redis_client)
 
 
 def build_hex_overlay_from_segments(segment_votes: dict, mode_filter: str = None) -> dict:

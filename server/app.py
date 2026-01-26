@@ -2,8 +2,10 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import traceback
+import hashlib
 import requests
 import redis
 from dotenv import load_dotenv
@@ -62,9 +64,29 @@ try:
 except redis.ConnectionError as e:
     logger.error(f"[REDIS] WARNING: Could not connect to Redis at {redis_host}: {e}")
 
-# OpenRouteService API key (get free key at https://openrouteservice.org/)
-ORS_API_KEY = os.environ.get('ORS_API_KEY', '')
-logger.info(f"[STARTUP] ORS_API_KEY configured: {bool(ORS_API_KEY)}")
+# ORS API keys - comma-separated list for rotation on quota exhaustion
+ORS_API_KEYS = [k.strip() for k in os.environ.get('ORS_API_KEYS', '').split(',') if k.strip()]
+_ors_key_index = 0
+_ors_key_lock = threading.Lock()
+logger.info(f"[STARTUP] ORS API keys configured: {len(ORS_API_KEYS)}")
+
+
+def get_ors_key():
+    """Get the current active ORS API key."""
+    if not ORS_API_KEYS:
+        return None
+    with _ors_key_lock:
+        return ORS_API_KEYS[_ors_key_index % len(ORS_API_KEYS)]
+
+
+def rotate_ors_key():
+    """Rotate to the next ORS API key. Returns True if rotation happened."""
+    global _ors_key_index
+    with _ors_key_lock:
+        old_index = _ors_key_index
+        _ors_key_index = (_ors_key_index + 1) % len(ORS_API_KEYS)
+        logger.info(f"[ORS] Rotated to key {_ors_key_index + 1}/{len(ORS_API_KEYS)}")
+        return _ors_key_index != old_index
 
 # OpenRouteService profile mapping
 ORS_PROFILES = {
@@ -72,6 +94,25 @@ ORS_PROFILES = {
     "walk": "foot-walking",
     "drive": "driving-car"
 }
+
+
+def get_client_ip() -> str:
+    """
+    Get hashed client IP for privacy-preserving vote tracking.
+
+    Uses X-Forwarded-For header (set by nginx) or falls back to remote_addr.
+    Returns first 16 chars of SHA-256 hash.
+    """
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        # X-Forwarded-For can be "client, proxy1, proxy2" - take first
+        ip = forwarded.split(",")[0].strip()
+    else:
+        ip = request.remote_addr or "unknown"
+
+    # Hash for privacy (first 16 chars of SHA-256)
+    ip_hash = hashlib.sha256(ip.encode()).hexdigest()[:16]
+    return ip_hash
 
 
 # Percentage to shrink each edge on both ends to prevent overlap at nodes
@@ -245,7 +286,7 @@ def calculate_route():
     - Computes walk route only
     - Votes for entire walk path
     """
-    logger.info(f"[ROUTE] Received request, ORS_API_KEY set: {bool(ORS_API_KEY)}, REDIS_HOST: {redis_host}")
+    logger.info(f"[ROUTE] Received request, ORS keys: {len(ORS_API_KEYS)}, REDIS_HOST: {redis_host}")
 
     data = request.get_json()
     if not data:
@@ -263,10 +304,10 @@ def calculate_route():
         logger.error("[ROUTE] Error: Missing coordinates")
         return jsonify({"error": "Missing start or end coordinates"}), 400
 
-    # Validate ORS API key
-    if not ORS_API_KEY or ORS_API_KEY == "your-api-key-here":
-        logger.error("[ROUTE] Error: ORS API key not configured")
-        return jsonify({"error": "ORS API key not configured"}), 500
+    # Validate ORS API keys
+    if not ORS_API_KEYS:
+        logger.error("[ROUTE] Error: ORS API keys not configured")
+        return jsonify({"error": "ORS API keys not configured"}), 500
 
     # Get tile IDs for cache lookup
     start_tile = coords_to_tile(start[0], start[1])
@@ -303,13 +344,15 @@ def calculate_route():
         request_body["options"] = {"avoid_features": ["ferries"]}
 
         last_error = None
+        keys_tried = 0  # Track how many keys we've tried for quota rotation
         for attempt in range(max_retries):
             try:
+                current_key = get_ors_key()
                 response = requests.post(
                     url,
                     json=request_body,
                     headers={
-                        "Authorization": ORS_API_KEY,
+                        "Authorization": current_key,
                         "Content-Type": "application/json"
                     },
                     timeout=10
@@ -334,9 +377,14 @@ def calculate_route():
                         continue
                     else:
                         # Client error (4xx except 429) - don't retry
-                        # Provide user-friendly message for quota exceeded
+                        # Handle quota exceeded by rotating to next key
                         if response.status_code == 403 and "quota" in response.text.lower():
-                            return {"error": "Route service quota exceeded. Please try again later."}
+                            keys_tried += 1
+                            if keys_tried < len(ORS_API_KEYS):
+                                logger.warning(f"[ORS] Quota exceeded, rotating key ({keys_tried}/{len(ORS_API_KEYS)} tried)")
+                                rotate_ors_key()
+                                continue  # Retry with new key
+                            return {"error": "All API keys exhausted. Please try again later."}
                         return {"error": error_msg}
 
                 response.raise_for_status()
@@ -445,6 +493,9 @@ def cast_vote():
     Expects JSON body with:
     - segments: List of [[coord1, coord2], ...] segments
     - mode: Transport mode (bike, walk, drive)
+
+    Uses IP-weighted voting: each IP contributes exactly 1.0 total weight
+    across all their votes.
     """
     data = request.get_json()
     if not data:
@@ -456,13 +507,16 @@ def cast_vote():
     if not segments:
         return jsonify({"error": "No segments to vote on"}), 400
 
-    try:
-        # Cast segment votes
-        vote_count = cast_desire_path_votes(redis_client, segments, mode)
-        logger.info(f"[VOTE] Cast {vote_count} segment votes as '{mode}'")
+    # Get hashed IP for weighted voting
+    ip_hash = get_client_ip()
 
-        # Update hex cache incrementally
-        update_hex_cache_incremental(redis_client, segments, mode)
+    try:
+        # Cast segment votes (updates ip_vote_counts)
+        vote_count = cast_desire_path_votes(redis_client, segments, mode, ip_hash)
+        logger.info(f"[VOTE] Cast {vote_count} segment votes as '{mode}' from IP {ip_hash[:8]}...")
+
+        # Update hex cache incrementally with IP-weighted votes
+        update_hex_cache_incremental(redis_client, segments, mode, ip_hash)
         logger.info(f"[VOTE] Updated hex cache with {len(segments)} segments")
 
         # Increment revision to trigger WebSocket broadcast

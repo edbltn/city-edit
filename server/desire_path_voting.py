@@ -71,7 +71,7 @@ def segment_key(coord1: list, coord2: list, mode: str) -> str:
         return f"{p2[0]},{p2[1]}|{p1[0]},{p1[1]}|{mode}"
 
 
-def cast_desire_path_votes(redis_client, segments: list, mode: str) -> int:
+def cast_desire_path_votes(redis_client, segments: list, mode: str, ip_hash: str = None) -> int:
     """
     Cast votes for desire path segments in Redis.
 
@@ -79,12 +79,16 @@ def cast_desire_path_votes(redis_client, segments: list, mode: str) -> int:
         redis_client: Redis client
         segments: List of [[coord1, coord2], ...] from compute_desire_path_votes
         mode: Mode to tag votes with (the desired mode)
+        ip_hash: Hashed IP address for weighted voting (optional, defaults to "system")
 
     Returns:
         Number of votes cast
     """
     if not redis_client or not segments:
         return 0
+
+    # Use "system" for legacy/migration votes
+    ip_hash = ip_hash or "system"
 
     try:
         pipe = redis_client.pipeline()
@@ -95,6 +99,9 @@ def cast_desire_path_votes(redis_client, segments: list, mode: str) -> int:
             coord1, coord2 = segment[0], segment[1]
             key = segment_key(coord1, coord2, mode)
             pipe.hincrby(SEGMENT_VOTES_KEY, key, 1)
+
+        # Track total votes cast by this IP for weighted calculation
+        pipe.hincrby("ip_vote_counts", ip_hash, len(segments))
 
         pipe.execute()
         return len(segments)
