@@ -1,4 +1,4 @@
-# Development override - uses Bun with hot reload instead of Nginx
+# Development override - uses Vite with hot reload instead of Nginx
 # Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 services:
   flask:
@@ -8,15 +8,14 @@ services:
       - "5001:5001"
 
   client:
-    image: oven/bun:alpine
+    image: node:20-alpine
     working_dir: /app
-    command: bun --watch server.ts
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
     ports:
       - "3000:3000"
     volumes:
-      - ./client:/app
-    environment:
-      - API_HOST=http://flask:5001
+      - ./client-react:/app
+      - /app/node_modules
     depends_on:
       - flask
 

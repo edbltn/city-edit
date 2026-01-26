@@ -1,3 +1,12 @@
+# Stage 1: Build React
+FROM node:20-alpine AS client-builder
+WORKDIR /app
+COPY client-react/package.json client-react/package-lock.json ./
+RUN npm ci
+COPY client-react/ ./
+RUN npm run build
+
+# Stage 2: Python + Nginx
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -11,7 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
 # Copy all Python files
 COPY server/*.py ./
-COPY client/ /var/www/html/
+COPY --from=client-builder /app/dist /var/www/html/
 
 # Nginx config
 COPY deploy/nginx-cloudrun.conf /etc/nginx/nginx.conf

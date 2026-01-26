@@ -9,3 +9,4 @@ gunicorn
 python-dotenv
 osmnx
 networkx
+h3

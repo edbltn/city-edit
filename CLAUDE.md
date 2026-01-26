@@ -3,6 +3,7 @@
 ## Claude Instructions
 
 - **gcloud commands**: Don't run gcloud commands directly. Ask me to run them and I'll provide the output.
+- **Browser testing**: I have a browser AI helper that can report on status. When you need me to test something, ask questions that this AI can answer (descriptions of screenshots, UI changes that need verification, functionality checks, error messages visible on screen).
 
 ## Overview
 
@@ -13,7 +14,15 @@ Desire Path Mapper is a crowdsourced map showing how people actually travel thro
 - **Nginx**: Reverse proxy serving static files and load-balancing Flask instances
 - **Flask**: Python backend handling route calculations and vote processing (runs as multiple replicas)
 - **Redis**: In-memory store for vote data and real-time state; used for pub/sub to sync state across Flask instances
-- **Client**: Leaflet-based map UI served as static files
+- **Client**: React + Leaflet map UI (TypeScript, Vite)
+
+## Frontend
+
+The React frontend is in `client-react/`. The vanilla JS `client/` directory is deprecated.
+
+- **Local dev**: `cd client-react && npm run dev` (port 3000)
+- **Docker dev**: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up`
+- **Docker prod**: `docker compose up --build` (port 8080)
 
 ## Environment Variables
 
@@ -56,7 +65,7 @@ redis-server
 cd server && source env/bin/activate && python app.py
 
 # Terminal 3: Client (auto-reloads on file changes)
-cd client && bun run dev
+cd client-react && npm run dev
 ```
 
 ---
