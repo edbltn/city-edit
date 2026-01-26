@@ -164,7 +164,7 @@ def get_hex_overlay(mode_filter=None):
                 regenerate_hex_cache(redis_client)
                 result = get_cached_hex_overlay(redis_client, mode_filter)
 
-        logger.info(f"[HEX_CACHE] Hex overlay from cache: {len(result.get('hexes', {}))} hexes, max_votes={result.get('max_votes')}, mode={mode_filter}")
+        logger.debug(f"[HEX_CACHE] Hex overlay from cache: {len(result.get('hexes', {}))} hexes, max_votes={result.get('max_votes')}, mode={mode_filter}")
         return result
     except redis.ConnectionError:
         return {"hexes": {}, "max_votes": 1}
@@ -334,6 +334,9 @@ def calculate_route():
                         continue
                     else:
                         # Client error (4xx except 429) - don't retry
+                        # Provide user-friendly message for quota exceeded
+                        if response.status_code == 403 and "quota" in response.text.lower():
+                            return {"error": "Route service quota exceeded. Please try again later."}
                         return {"error": error_msg}
 
                 response.raise_for_status()

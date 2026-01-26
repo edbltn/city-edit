@@ -496,6 +496,11 @@ body {
   z-index: auto !important;
 }
 
+/* Pale map tiles so desire paths pop more */
+.leaflet-tile-pane {
+  filter: saturate(0.4) brightness(1.08);
+}
+
 
 /* ==========================================================================
    Leaflet Controls
@@ -559,9 +564,12 @@ body {
    Desire Path Interactive Layer
    ========================================================================== */
 
-.desire-path-interactive {
+.desire-path-interactive,
+.split-path-interactive {
   cursor: grab !important;
   pointer-events: all !important;
+  touch-action: none !important;
+  -webkit-tap-highlight-color: transparent;
 }
 
 
@@ -1018,18 +1026,55 @@ body {
    Responsive
    ========================================================================== */
 
-/* All topbar items wrap naturally - no custom ordering */
+/* Hide divider on smaller screens */
 @media (max-width: 1100px) {
   .header-divider {
     display: none;
   }
 }
 
-/* Smaller screens: stack route fields vertically */
+/* Medium screens: route-fields-row wraps (legend goes to new line) */
+@media (max-width: 900px) {
+  .route-fields-row {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .route-legend {
+    width: 100%;
+    margin-top: var(--space-1);
+  }
+
+  .calculating-indicator {
+    width: 100%;
+  }
+}
+
+/* Tablet: everything moves below logo */
 @media (max-width: 720px) {
+  .topbar-row-main {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-3);
+  }
+
+  .topbar h1 {
+    align-self: flex-start;
+  }
+
+  .route-section {
+    width: 100%;
+  }
+
+  .route-fields-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .route-fields {
     flex-direction: column;
     width: 100%;
+    gap: var(--space-2);
   }
 
   .route-field {
@@ -1042,24 +1087,46 @@ body {
     flex: 1;
   }
 
-  .route-bar {
+  .route-legend {
     width: 100%;
+  }
+
+  .route-actions {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .route-actions > * {
+    flex: 1 1 auto;
+    min-width: 80px;
+  }
+
+  .mode-btn {
+    justify-content: center;
   }
 }
 
-/* Mobile: full-width action buttons */
+/* Mobile: tighter spacing, smaller logo */
 @media (max-width: 540px) {
   .topbar {
     padding: var(--space-3) var(--space-4);
   }
 
-  .action-controls {
-    width: 100%;
-    justify-content: stretch;
+  .topbar h1 {
+    font-size: 16px;
   }
 
-  .action-controls .btn-header {
-    flex: 1;
+  .logo-icon,
+  .logo-icon-shadow {
+    height: 28px;
+  }
+
+  .mode-btn {
+    padding: 10px var(--space-3);
+  }
+
+  .btn-header {
+    padding: 10px var(--space-3);
   }
 
   .route-legend {
@@ -1071,5 +1138,29 @@ body {
   .route-legend.active .legend-path-items {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+/* Very small mobile: stack actions vertically */
+@media (max-width: 400px) {
+  .route-actions {
+    flex-direction: column;
+  }
+
+  .route-actions > * {
+    width: 100%;
+    flex: none;
+  }
+
+  .mode-selector {
+    width: 100%;
+  }
+
+  .mode-btn {
+    width: 100%;
+  }
+
+  .mode-dropdown {
+    width: 100%;
   }
 }
