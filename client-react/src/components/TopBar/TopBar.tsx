@@ -83,7 +83,7 @@ export const TopBar = memo(function TopBar() {
               <span className="legend-icon-slot">
                 <HexagonIcon />
               </span>
-              <span>Most Requested</span>
+              <span>Most Desired</span>
             </div>
             {showWalkLegend && (
               <div className="legend-item">
@@ -102,7 +102,7 @@ export const TopBar = memo(function TopBar() {
                       style={{ background: modeLegendColor }}
                     ></span>
                   </span>
-                  <span>Current Best Path</span>
+                  <span>Current Route</span>
                 </div>
                 <div className="legend-item">
                   <span className="legend-icon-slot">

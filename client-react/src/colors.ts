@@ -24,9 +24,9 @@ export const ROUTE_COLORS = {
     core: "#5B8FBF", // Lighter blue fill
   },
   bike: {
-    glow: "#7FE0A3", // Soft green glow
-    middle: "#00A651", // Bike lane green
-    core: "#00A651", // Bike lane green core
+    glow: "#98DDDF", // Soft teal glow (matches walk)
+    middle: "#3B6EA5", // Blue
+    core: "#3B6EA5", // Blue core
   },
   drive: {
     glow: "#B8B0A8", // Warmer, more emphatic glow
