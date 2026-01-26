@@ -34,14 +34,14 @@ export const ROUTE_COLORS = {
     centerLine: "#E3BD33", // Misted Marigold - bold yellow
   },
   desire: {
-    glow: "#F5D76E", // Soft gold glow
-    middle: "#E3BD33", // Misted Marigold - gold
-    core: "#D4A017", // Deeper gold core
+    glow: "#F5E6A3", // Soft gold glow
+    middle: "#E3BD33", // Misted Marigold gold
+    core: "#D4A017", // Deep gold core
   },
   splitDesire: {
-    glow: "#F5D76E",    // Soft gold glow
-    middle: "#E3BD33",  // Misted Marigold - gold
-    core: "#D4A017",    // Deeper gold core
+    glow: "#F5E6A3",    // Soft gold glow
+    middle: "#E3BD33",  // Misted Marigold gold
+    core: "#D4A017",    // Deep gold core
   },
 };
 
@@ -52,7 +52,8 @@ export const UI = {
 };
 
 // Hex heatmap gradient (for H3 hex visualization)
+// Gold gradient to match desire paths
 export const HEX_HEATMAP = {
-  light: { r: 232, g: 168, b: 56 },  // #E8A838 warm amber
-  dark: { r: 204, g: 68, b: 0 },     // #CC4400 burnt orange
+  light: { r: 245, g: 215, b: 110 },  // #F5D76E light gold
+  dark: { r: 212, g: 160, b: 23 },    // #D4A017 deep gold
 };

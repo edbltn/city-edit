@@ -559,9 +559,9 @@ body {
   z-index: auto !important;
 }
 
-/* Pale map tiles so desire paths pop more */
+/* Architect-style map: pale, desaturated tiles so desire paths pop */
 .leaflet-tile-pane {
-  filter: saturate(0.4) brightness(1.08);
+  filter: saturate(0.35) brightness(1.06);
 }
 
 
@@ -942,7 +942,6 @@ body {
   width: 100%;
   height: 100%;
   background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;

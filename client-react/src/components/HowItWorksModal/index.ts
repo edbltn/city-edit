@@ -1,0 +1,1 @@
+export { HowItWorksModal } from "./HowItWorksModal";

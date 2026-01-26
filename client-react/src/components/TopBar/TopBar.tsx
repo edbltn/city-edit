@@ -1,11 +1,14 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import { useRoute } from "../../context";
 import { ModeSelector } from "../ModeSelector";
+import { HowItWorksModal } from "../HowItWorksModal";
 import { HexagonIcon } from "./HexagonIcon";
 import { ROUTE_COLORS } from "../../colors";
 import "./TopBar.css";
 
 export const TopBar = memo(function TopBar() {
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
+
   const {
     start,
     end,
@@ -99,7 +102,7 @@ export const TopBar = memo(function TopBar() {
                       style={{ background: modeLegendColor }}
                     ></span>
                   </span>
-                  <span>Current Path</span>
+                  <span>Current Best Path</span>
                 </div>
                 <div className="legend-item">
                   <span className="legend-icon-slot">
@@ -112,6 +115,13 @@ export const TopBar = memo(function TopBar() {
           </div>
 
           <div className="route-actions">
+            <button
+              className="btn-header"
+              onClick={() => setShowHowItWorks(true)}
+            >
+              How it Works
+            </button>
+
             <ModeSelector />
 
             <button
@@ -141,6 +151,11 @@ export const TopBar = memo(function TopBar() {
           </div>
         </div>
       </div>
+
+      <HowItWorksModal
+        isOpen={showHowItWorks}
+        onClose={() => setShowHowItWorks(false)}
+      />
     </header>
   );
 });

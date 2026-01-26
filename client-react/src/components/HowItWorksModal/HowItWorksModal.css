@@ -1,0 +1,87 @@
+/* HowItWorksModal styles */
+
+.how-it-works-modal {
+  max-width: 520px;
+}
+
+.how-it-works-section {
+  margin-bottom: var(--space-5);
+}
+
+.how-it-works-section:last-child {
+  margin-bottom: 0;
+}
+
+.how-it-works-section h3 {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--ink);
+  opacity: 0.6;
+  margin: 0 0 var(--space-2) 0;
+}
+
+.how-it-works-section p {
+  margin: 0 0 var(--space-3) 0;
+  line-height: 1.6;
+}
+
+.how-it-works-section p:last-child {
+  margin-bottom: 0;
+}
+
+.how-it-works-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.how-it-works-steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.step-icon-slot {
+  width: 80px;
+  min-width: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.inline-btn-example {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px 8px;
+  background: var(--hover-bg);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.inline-btn-example .mode-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.vote-example {
+  background: #E3BD33;
+  color: #343148;
+}
+
+.wiki-link {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.wiki-link:hover {
+  opacity: 0.7;
+}
