@@ -122,7 +122,7 @@ export const HowItWorksModal = memo(function HowItWorksModal({ isOpen, onClose }
             <h3>Fair Voting</h3>
             <p>
               The more routes you vote on, the more your total contribution
-              gets diluted. That way, everyone gets equal representation!
+              gets diluted. (That way, everyone gets equal representation in the heatmap.)
             </p>
           </section>
         </div>

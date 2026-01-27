@@ -3,6 +3,7 @@
 ## Claude Instructions
 
 - **gcloud commands**: Don't run gcloud commands directly. Ask me to run them and I'll provide the output.
+- **Commands for user to run**: When providing commands for me to run manually, pipe them into `pbcopy` so I can paste them easily. Example: `echo "gcloud run services logs read desire-path-mapper --limit=50" | pbcopy`
 - **Browser testing**: I have a browser AI helper that can report on status. When you need me to test something, ask questions that this AI can answer (descriptions of screenshots, UI changes that need verification, functionality checks, error messages visible on screen).
 
 ## Overview
@@ -30,7 +31,7 @@ All secrets and configuration are stored in `server/.env`. Copy from `.env.examp
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `ORS_API_KEY` | OpenRouteService API key ([get free key](https://openrouteservice.org/)) | Yes |
+| `ORS_API_KEYS` | OpenRouteService API keys, comma-separated ([get free key](https://openrouteservice.org/)). Rotates automatically when quota is exceeded. | Yes |
 | `REDIS_HOST` | Redis host (default: `localhost`) | No |
 
 **Never commit `.env` to git.** It's in `.gitignore`.
