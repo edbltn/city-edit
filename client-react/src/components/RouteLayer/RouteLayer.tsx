@@ -129,6 +129,7 @@ export function RouteLayer({ geometry, mode }: RouteLayerProps) {
           key={`route-${mode}-${index}-${geometryKey}`}
           data={geojsonData}
           style={() => ({ ...style, pane: "routePane" })}
+          interactive={false}
         />
       ))}
     </>
@@ -562,7 +563,7 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
 // Dragging between handles inserts a new vertex.
 
 import type { EditVertex } from "../../types";
-import { Polyline, useMap as useMapForVertex } from "react-leaflet";
+import { useMap as useMapForVertex } from "react-leaflet";
 
 // Draggable vertex handle that doesn't fight with React during drag
 function DraggableVertexHandle({
@@ -670,25 +671,48 @@ export function EditableRouteLayer({
   onDragStart,
 }: EditableRouteLayerProps) {
   const map = useMap();
+  const { startDrag, updateDrag, endDrag } = useGhostPin();
   const isDraggingRef = useRef(false);
   const dragSegmentRef = useRef(-1);
 
   const modeColor = useMemo(() => getModeColor(mode), [mode]);
   const desireColor = ROUTE_COLORS.desire.core;
 
+  // Build set of segment indices that have edited geometry
+  const editedSegmentIndices = useMemo(() => {
+    return new Set(editedSegments.map(s => s.segmentIndex));
+  }, [editedSegments]);
+
   // Build segments between vertices from original geometry
+  // Also includes "pending" segments that are modified but don't have geometry yet
   const segments = useMemo(() => {
     if (editVertices.length < 2) return [];
 
-    const segs: { positions: [number, number][]; index: number }[] = [];
+    const segs: { positions: [number, number][]; index: number; isPending?: boolean }[] = [];
     for (let i = 0; i < editVertices.length - 1; i++) {
       const v1 = editVertices[i];
       const v2 = editVertices[i + 1];
 
-      // If this segment is modified, we render the edited geometry instead
-      if (modifiedSegmentIndices.has(i)) continue;
+      const isModified = modifiedSegmentIndices.has(i);
+      const hasEditedGeometry = editedSegmentIndices.has(i);
 
-      // Extract coordinates between these two vertex coord indices from original geometry
+      // If modified AND has edited geometry, skip (rendered separately)
+      if (isModified && hasEditedGeometry) continue;
+
+      // If modified but NO edited geometry yet, render a straight line placeholder
+      if (isModified && !hasEditedGeometry) {
+        segs.push({
+          positions: [
+            [v1.position.lng, v1.position.lat],
+            [v2.position.lng, v2.position.lat],
+          ],
+          index: i,
+          isPending: true,
+        });
+        continue;
+      }
+
+      // Not modified - extract from original geometry
       if (v1.coordIndex >= 0 && v2.coordIndex >= 0) {
         const slice = geometry.coordinates.slice(v1.coordIndex, v2.coordIndex + 1);
         segs.push({ positions: slice, index: i });
@@ -703,8 +727,9 @@ export function EditableRouteLayer({
         });
       }
     }
+    
     return segs;
-  }, [editVertices, geometry, modifiedSegmentIndices]);
+  }, [editVertices, geometry, modifiedSegmentIndices, editedSegmentIndices]);
 
   // Handle mid-line drag (between vertices)
   const handleSegmentMouseDown = useCallback(
@@ -718,8 +743,16 @@ export function EditableRouteLayer({
       document.body.style.cursor = "grabbing";
       onDragStart?.();
 
-      const handleMove = (_ev: MouseEvent) => {
-        // Ghost pin visual could be added here; for now just cursor
+      // Start ghost pin at cursor position
+      startDrag({
+        x: e.originalEvent.clientX,
+        y: e.originalEvent.clientY,
+      });
+
+      const handleMove = (ev: MouseEvent) => {
+        if (isDraggingRef.current) {
+          updateDrag({ x: ev.clientX, y: ev.clientY });
+        }
       };
 
       const handleUp = (ev: MouseEvent) => {
@@ -731,6 +764,7 @@ export function EditableRouteLayer({
           onLineDrag(dragSegmentRef.current, { lat: latLng.lat, lng: latLng.lng });
         }
         isDraggingRef.current = false;
+        endDrag();
         map.dragging.enable();
         document.body.style.cursor = "";
         document.removeEventListener("mousemove", handleMove);
@@ -740,7 +774,7 @@ export function EditableRouteLayer({
       document.addEventListener("mousemove", handleMove);
       document.addEventListener("mouseup", handleUp);
     },
-    [map, onLineDrag, onDragStart]
+    [map, onLineDrag, onDragStart, startDrag, updateDrag, endDrag]
   );
 
   // Vertex handle drag end
@@ -757,96 +791,125 @@ export function EditableRouteLayer({
   const isWalk = mode === "walk";
   const dashArray = isWalk ? "0, 12" : undefined;
 
+  // Create native Leaflet polylines for interactive segments
+  useEffect(() => {
+    const polylines: L.Polyline[] = [];
+    const svgRenderer = L.svg(); // Shared SVG renderer for interactive lines
+    
+    segments.forEach(({ positions, index, isPending }) => {
+      // Convert [lng, lat] to [lat, lng] for Leaflet
+      const latLngs = positions.map(([lng, lat]) => [lat, lng] as [number, number]);
+      
+      // For pending segments (being calculated), show gold dashed placeholder
+      const lineColor = isPending ? ROUTE_COLORS.desire.core : modeColor;
+      const lineOpacity = isPending ? 0.5 : 1;
+      const lineDash = isPending ? "8, 8" : (dashArray || undefined);
+      
+      // Create visual polyline
+      const visualLine = L.polyline(latLngs, {
+        color: lineColor,
+        weight: 4,
+        opacity: lineOpacity,
+        dashArray: lineDash,
+        lineCap: "round",
+        lineJoin: "round",
+        interactive: false,
+        pane: "routePane",
+      }).addTo(map);
+      polylines.push(visualLine);
+      
+      // Create interactive polyline (thick, nearly invisible)
+      // Force SVG rendering for mouse events (canvas doesn't support individual path events)
+      const interactiveLine = L.polyline(latLngs, {
+        color: "#000000",
+        weight: 24,
+        opacity: 0.001,
+        lineCap: "round",
+        lineJoin: "round",
+        interactive: true,
+        renderer: svgRenderer,
+      }).addTo(map);
+      polylines.push(interactiveLine);
+      
+      // Bind events
+      interactiveLine.on("mousedown", (e) => {
+        handleSegmentMouseDown(index, e);
+      });
+      interactiveLine.on("mouseover", () => {
+        document.body.style.cursor = "grab";
+      });
+      interactiveLine.on("mouseout", () => {
+        document.body.style.cursor = "";
+      });
+    });
+    
+    return () => {
+      polylines.forEach(p => p.remove());
+    };
+  }, [map, segments, modeColor, dashArray, handleSegmentMouseDown]);
+
   return (
     <>
-      {/* Unmodified segments - rendered in mode color */}
-      {segments.map(({ positions, index }) => {
-        // Convert [lng, lat] to [lat, lng] for Leaflet
-        const latLngs = positions.map(([lng, lat]) => [lat, lng] as [number, number]);
-        const key = `seg-${index}-${latLngs.length}-${latLngs[0]?.[0]}`;
-
-        return (
-          <React.Fragment key={key}>
-            {/* Visual line */}
-            <Polyline
-              positions={latLngs}
-              pathOptions={{
-                color: modeColor,
-                weight: 4,
-                opacity: 1,
-                dashArray,
-                lineCap: "round",
-                lineJoin: "round",
-              }}
-              pane="routePane"
-              interactive={false}
-            />
-            {/* Interactive transparent overlay for mid-line dragging */}
-            <Polyline
-              positions={latLngs}
-              pathOptions={{
-                color: "#000000",
-                weight: 20,
-                opacity: 0.001,
-                lineCap: "round",
-                lineJoin: "round",
-              }}
-              pane="routePane"
-              eventHandlers={{
-                mousedown: (e) => handleSegmentMouseDown(index, e),
-              }}
-            />
-          </React.Fragment>
-        );
-      })}
 
       {/* Modified segments - rendered in gold */}
       {editedSegments.map((seg) => {
-        const coords = seg.geometry.coordinates;
-        const latLngs = coords.map(([lng, lat]) => [lat, lng] as [number, number]);
-        const key = `edited-${seg.id}-${latLngs.length}`;
+        const key = `edited-${seg.id}-${seg.geometry.coordinates.length}`;
+        
+        // Create GeoJSON feature for this segment
+        const geojsonData = {
+          type: "Feature" as const,
+          properties: {},
+          geometry: seg.geometry,
+        };
 
         return (
           <React.Fragment key={key}>
             {/* Gold glow */}
-            <Polyline
-              positions={latLngs}
-              pathOptions={{
+            <GeoJSON
+              key={`glow-${key}`}
+              data={geojsonData}
+              style={() => ({
                 color: ROUTE_COLORS.desire.glow,
                 weight: 8,
                 opacity: 0.3,
                 lineCap: "round",
                 lineJoin: "round",
-              }}
-              pane="routePane"
+                pane: "routePane",
+              })}
               interactive={false}
             />
             {/* Gold core */}
-            <Polyline
-              positions={latLngs}
-              pathOptions={{
+            <GeoJSON
+              key={`core-${key}`}
+              data={geojsonData}
+              style={() => ({
                 color: desireColor,
                 weight: 4,
                 opacity: 1,
                 lineCap: "round",
                 lineJoin: "round",
-              }}
-              pane="routePane"
+                pane: "routePane",
+              })}
               interactive={false}
             />
             {/* Interactive overlay for further dragging */}
-            <Polyline
-              positions={latLngs}
-              pathOptions={{
+            <GeoJSON
+              key={`interactive-${key}`}
+              data={geojsonData}
+              style={() => ({
                 color: "#000000",
                 weight: 20,
                 opacity: 0.001,
                 lineCap: "round",
                 lineJoin: "round",
-              }}
-              pane="routePane"
-              eventHandlers={{
-                mousedown: (e) => handleSegmentMouseDown(seg.segmentIndex, e),
+                pane: "routePane",
+              })}
+              onEachFeature={(_feature, layer) => {
+                layer.on({
+                  mousedown: (e) => handleSegmentMouseDown(seg.segmentIndex, e as L.LeafletMouseEvent),
+                  mouseover: () => { document.body.style.cursor = "grab"; },
+                  mouseout: () => { document.body.style.cursor = ""; },
+                });
               }}
             />
           </React.Fragment>

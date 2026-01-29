@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -14,8 +14,12 @@ import { RouteMarker } from "../RouteMarker";
 import { RouteLayer, EditableRouteLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
 import { GhostPin } from "../GhostPin";
-import { HexHeatmapLayer } from "../HexHeatmapLayer";
-import type { LatLng } from "../../types";
+import { VotedPathsLayer } from "../VotedPathsLayer";
+import { BasemapSwitcher } from "../BasemapSwitcher";
+import { LayerControl } from "../LayerControl";
+import { GISLayers } from "../GISLayers";
+import { ZoomIndicator } from "../ZoomIndicator";
+import type { LatLng, BasemapId } from "../../types";
 import "leaflet/dist/leaflet.css";
 import "./MapView.css";
 
@@ -107,6 +111,7 @@ export function MapView() {
     setSuppressClick,
   } = useRoute();
   const { mapState } = useWebSocketContext();
+  const [currentBasemap, setCurrentBasemap] = useState<BasemapId>(CONFIG.defaultBasemap);
 
   const { handleMapClick } = useMapClick({
     state: { start, end },
@@ -150,17 +155,24 @@ export function MapView() {
       <MapClickHandler onMapClick={handleMapClick} />
 
       <TileLayer
-        url={CONFIG.tileUrlTemplate}
-        subdomains={["a", "b", "c", "d"]}
+        key={currentBasemap}
+        url={CONFIG.basemaps[currentBasemap].url}
+        subdomains={CONFIG.tileSubdomains.split("")}
         maxZoom={CONFIG.maxZoom}
-        attribution={CONFIG.tileAttribution}
+        attribution={CONFIG.basemaps[currentBasemap].attribution}
       />
 
       {/* Zoom control in bottom right */}
       <ZoomControl />
 
-      {/* Hex heatmap layer for H3 hexagonal visualization */}
-      <HexHeatmapLayer hexOverlay={mapState?.hex_overlay} />
+      {/* Zoom indicator in bottom left */}
+      <ZoomIndicator />
+
+      {/* Voted paths layer for polyline visualization */}
+      <VotedPathsLayer overlay={mapState?.overlays?.desire_paths} />
+
+      {/* GIS layers (crosswalks, stop signs, traffic signals, trees) */}
+      <GISLayers />
 
       {/* Faded original route underneath when edits exist */}
       {originalRouteGeometry && (
@@ -219,6 +231,15 @@ export function MapView() {
 
     {/* Ghost pin rendered outside MapContainer for smooth 60fps positioning */}
     <GhostPin />
+
+    {/* Basemap switcher control */}
+    <BasemapSwitcher
+      currentBasemap={currentBasemap}
+      onBasemapChange={setCurrentBasemap}
+    />
+
+    {/* Layer control for GIS overlays */}
+    <LayerControl />
     </>
   );
 }

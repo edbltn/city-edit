@@ -1,0 +1,66 @@
+.basemap-switcher {
+  position: absolute;
+  bottom: 100px;
+  right: 10px;
+  z-index: 1000;
+}
+
+.basemap-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: white;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #333;
+  cursor: pointer;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
+  transition: background 0.15s;
+}
+
+.basemap-toggle:hover {
+  background: #f5f5f5;
+}
+
+.basemap-toggle svg {
+  opacity: 0.7;
+}
+
+.basemap-dropdown {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 4px;
+  background: white;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  min-width: 140px;
+}
+
+.basemap-option {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: white;
+  text-align: left;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.basemap-option:hover {
+  background: #f0f0f0;
+}
+
+.basemap-option.active {
+  background: #e8f4fc;
+  color: #1a73e8;
+  font-weight: 500;
+}

@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { CONFIG } from "../config";
+import { reverseGeocode } from "../utils/reverseGeocode";
 import type {
   TransportMode,
   LatLng,
@@ -22,91 +23,90 @@ import type {
 } from "../types";
 
 // ── Vertex extraction ────────────────────────────────────────────────
-// Extract sparse vertices from a route geometry for draggable handles.
-// Uses angle-based detection to pick major turns, with a minimum spacing.
+// Smart vertex placement at significant turns, plus line-dragging for new vertices.
 
-function angleBetween(a: [number, number], b: [number, number], c: [number, number]): number {
-  const dx1 = b[0] - a[0];
-  const dy1 = b[1] - a[1];
-  const dx2 = c[0] - b[0];
-  const dy2 = c[1] - b[1];
-  const dot = dx1 * dx2 + dy1 * dy2;
-  const cross = dx1 * dy2 - dy1 * dx2;
-  return Math.abs(Math.atan2(cross, dot));
+// Haversine distance in meters
+function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000; // Earth radius in meters
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function extractVertices(geometry: RouteGeometry, targetCount = 5): EditVertex[] {
+// Calculate angle (in degrees) between two segments at point B
+// Returns 0-180, where 0 = straight line, 180 = U-turn
+function angleBetween(
+  a: [number, number],
+  b: [number, number],
+  c: [number, number]
+): number {
+  const v1 = [b[0] - a[0], b[1] - a[1]];
+  const v2 = [c[0] - b[0], c[1] - b[1]];
+  const dot = v1[0] * v2[0] + v1[1] * v2[1];
+  const mag1 = Math.sqrt(v1[0] ** 2 + v1[1] ** 2);
+  const mag2 = Math.sqrt(v2[0] ** 2 + v2[1] ** 2);
+  if (mag1 === 0 || mag2 === 0) return 0;
+  const cos = Math.max(-1, Math.min(1, dot / (mag1 * mag2)));
+  return Math.acos(cos) * (180 / Math.PI);
+}
+
+function extractVertices(geometry: RouteGeometry): EditVertex[] {
   const coords = geometry.coordinates;
-  if (coords.length <= 2) {
-    return coords.map((c, i) => ({
-      position: { lat: c[1], lng: c[0] },
-      coordIndex: i,
-    }));
+  if (coords.length === 0) return [];
+  if (coords.length === 1) {
+    return [{ position: { lat: coords[0][1], lng: coords[0][0] }, coordIndex: 0 }];
   }
 
-  // Always include first and last
-  const vertices: EditVertex[] = [
-    { position: { lat: coords[0][1], lng: coords[0][0] }, coordIndex: 0 },
-  ];
-
-  // Calculate angles at each interior point
-  const angles: { index: number; angle: number }[] = [];
+  const MIN_SPACING = 100;   // Minimum meters between vertices
+  const TURN_THRESHOLD = 40; // Degrees - consider this a significant turn
+  
+  const vertices: EditVertex[] = [];
+  
+  // Always include start
+  vertices.push({ 
+    position: { lat: coords[0][1], lng: coords[0][0] }, 
+    coordIndex: 0 
+  });
+  
+  let distanceSinceLastVertex = 0;
+  
   for (let i = 1; i < coords.length - 1; i++) {
-    angles.push({ index: i, angle: angleBetween(coords[i - 1], coords[i], coords[i + 1]) });
-  }
-
-  // Sort by sharpest turns first
-  angles.sort((a, b) => b.angle - a.angle);
-
-  // Minimum spacing: don't place handles closer than this many coords apart
-  const minSpacing = Math.max(3, Math.floor(coords.length / (targetCount * 2)));
-
-  const selected = new Set<number>();
-  selected.add(0);
-  selected.add(coords.length - 1);
-
-  for (const { index } of angles) {
-    if (selected.size >= targetCount - 1) break; // -1 because we add last at end
-
-    // Check minimum spacing from all already-selected
-    let tooClose = false;
-    for (const s of selected) {
-      if (Math.abs(index - s) < minSpacing) {
-        tooClose = true;
-        break;
-      }
-    }
-    if (!tooClose) {
-      selected.add(index);
+    const prevCoord = coords[i - 1];
+    const currCoord = coords[i];
+    const nextCoord = coords[i + 1];
+    
+    // Calculate distance from last vertex
+    const segmentDist = haversineDistance(
+      coords[i - 1][1], coords[i - 1][0],
+      currCoord[1], currCoord[0]
+    );
+    distanceSinceLastVertex += segmentDist;
+    
+    // Calculate turn angle at this point (0 = straight, 180 = U-turn)
+    const turnAngle = angleBetween(prevCoord, currCoord, nextCoord);
+    
+    const isSignificantTurn = turnAngle >= TURN_THRESHOLD;
+    const meetsMinSpacing = distanceSinceLastVertex >= MIN_SPACING;
+    
+    // Add vertex only at significant turns (with min spacing)
+    if (isSignificantTurn && meetsMinSpacing) {
+      vertices.push({
+        position: { lat: currCoord[1], lng: currCoord[0] },
+        coordIndex: i,
+      });
+      distanceSinceLastVertex = 0;
     }
   }
-
-  // If we still have room, fill in evenly spaced vertices
-  if (selected.size < targetCount - 1) {
-    const step = Math.floor(coords.length / (targetCount - selected.size + 1));
-    for (let i = step; i < coords.length - 1; i += step) {
-      if (selected.size >= targetCount - 1) break;
-      let tooClose = false;
-      for (const s of selected) {
-        if (Math.abs(i - s) < minSpacing) {
-          tooClose = true;
-          break;
-        }
-      }
-      if (!tooClose) selected.add(i);
-    }
-  }
-
-  // Build sorted vertex list (excluding first which is already added)
-  const sortedIndices = Array.from(selected).sort((a, b) => a - b);
-  for (const idx of sortedIndices) {
-    if (idx === 0) continue;
-    vertices.push({
-      position: { lat: coords[idx][1], lng: coords[idx][0] },
-      coordIndex: idx,
-    });
-  }
-
+  
+  // Always include end
+  vertices.push({ 
+    position: { lat: coords[coords.length - 1][1], lng: coords[coords.length - 1][0] }, 
+    coordIndex: coords.length - 1 
+  });
+  
   return vertices;
 }
 
@@ -155,8 +155,9 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const [start, setStart] = useState<RoutePoint>({
     coords: null,
     timestamp: null,
+    address: null,
   });
-  const [end, setEnd] = useState<RoutePoint>({ coords: null, timestamp: null });
+  const [end, setEnd] = useState<RoutePoint>({ coords: null, timestamp: null, address: null });
   const [mode, setModeState] = useState<TransportMode>("bike");
   const [waypoints, setWaypoints] = useState<LatLng[]>([]);
   const [hasVoted, setHasVoted] = useState(false);
@@ -181,10 +182,16 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const prevEndCoordsRef = useRef<LatLng | null>(null);
   const fromDragRef = useRef(false);
   const editVerticesRef = useRef<EditVertex[]>([]);
+  const hasEditsRef = useRef(false);
 
   useEffect(() => {
     editVerticesRef.current = editVertices;
   }, [editVertices]);
+
+  // Track whether edits are in progress (for preventing vertex reset)
+  useEffect(() => {
+    hasEditsRef.current = editedSegments.length > 0 || modifiedSegmentIndices.size > 0;
+  }, [editedSegments, modifiedSegmentIndices]);
 
   const {
     isCalculating,
@@ -198,26 +205,41 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     clearError,
   } = useRouteCalculation();
 
-  // Extract vertices when route data changes
+  // Extract vertices when route data changes - but only if no edits are in progress
   useEffect(() => {
-    if (routeData?.geometry) {
+    // Don't reset vertices if there are edits in progress (would cause discontinuities)
+    if (routeData?.geometry && !hasEditsRef.current) {
       // Use the desire path geometry for bike/drive, route geometry for walk
       const geom = mode === "walk" ? routeData.geometry : (desirePathData?.geometry || routeData.geometry);
       const vertices = extractVertices(geom);
       setEditVertices(vertices);
-    } else {
+    } else if (!routeData?.geometry) {
       setEditVertices([]);
     }
   }, [routeData, desirePathData, mode]);
 
   const setStartPoint = useCallback((coords: LatLng, fromDrag = false) => {
     fromDragRef.current = fromDrag;
-    setStart({ coords, timestamp: Date.now() });
+    setStart({ coords, timestamp: Date.now(), address: null });
+    // Fetch address in background
+    reverseGeocode(coords).then(address => {
+      setStart(prev => prev.coords?.lat === coords.lat && prev.coords?.lng === coords.lng
+        ? { ...prev, address }
+        : prev
+      );
+    });
   }, []);
 
   const setEndPoint = useCallback((coords: LatLng, fromDrag = false) => {
     fromDragRef.current = fromDrag;
-    setEnd({ coords, timestamp: Date.now() });
+    setEnd({ coords, timestamp: Date.now(), address: null });
+    // Fetch address in background
+    reverseGeocode(coords).then(address => {
+      setEnd(prev => prev.coords?.lat === coords.lat && prev.coords?.lng === coords.lng
+        ? { ...prev, address }
+        : prev
+      );
+    });
   }, []);
 
   const setMode = useCallback((newMode: TransportMode) => {
@@ -255,10 +277,12 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Calculate a single segment between two points via ORS
+  // preferLegal: if true, use the legal route geometry instead of desire path (for return segments)
   const calculateSegment = useCallback(async (
     from: LatLng,
     to: LatLng,
     segmentIndex: number,
+    preferLegal = false,
   ): Promise<SplitDesirePath | null> => {
     const response = await fetch(`${CONFIG.apiUrl}/routes`, {
       method: "POST",
@@ -274,14 +298,31 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     if (!response.ok) throw new Error("Failed to calculate segment");
 
     const data = await response.json();
-    const geometry = mode === "walk" ? data.route?.geometry : data.desire_path?.geometry;
+    
+    // For walk mode, always use route geometry (it IS the desire path for walking)
+    // For bike/drive: use legal route if preferLegal, otherwise desire path
+    let geometry;
+    let segments: [number, number][][] = [];
+    
+    if (mode === "walk") {
+      geometry = data.route?.geometry;
+      segments = data.desire_path_segments || [];
+    } else if (preferLegal) {
+      // Use legal route for return segments
+      geometry = data.route?.geometry;
+      segments = []; // No desire path segments since we're following legal route
+    } else {
+      geometry = data.desire_path?.geometry;
+      segments = data.desire_path_segments || [];
+    }
+    
     if (!geometry) return null;
 
     return {
       id: `edited-${segmentIndex}`,
       segmentIndex,
       geometry,
-      segments: data.desire_path_segments || [],
+      segments,
       isModified: true,
     };
   }, [mode]);
@@ -322,15 +363,17 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       // Recalculate the affected segments in background
       const segmentPromises: Promise<SplitDesirePath | null>[] = [];
 
+      // Segment before: from previous vertex to dragged position - allow desire path
       if (vertexIndex > 0) {
         segmentPromises.push(
-          calculateSegment(newVertices[vertexIndex - 1].position, position, vertexIndex - 1)
+          calculateSegment(newVertices[vertexIndex - 1].position, position, vertexIndex - 1, false)
         );
       }
 
+      // Segment after: from dragged position to next vertex - prefer legal route
       if (vertexIndex < newVertices.length - 1) {
         segmentPromises.push(
-          calculateSegment(position, newVertices[vertexIndex + 1].position, vertexIndex)
+          calculateSegment(position, newVertices[vertexIndex + 1].position, vertexIndex, true)
         );
       }
 
@@ -387,15 +430,19 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       newVertices.splice(afterVertexIndex + 1, 0, newVertex);
 
       // Calculate both new segments
+      // segBefore: from previous vertex to dragged point - allow desire path
       const segBefore = await calculateSegment(
         currentVertices[afterVertexIndex].position,
         position,
         afterVertexIndex,
+        false, // allow desire path
       );
+      // segAfter: from dragged point back to next vertex - prefer legal route
       const segAfter = await calculateSegment(
         position,
         currentVertices[afterVertexIndex + 1].position,
         afterVertexIndex + 1,
+        true, // prefer legal route for smooth rejoin
       );
 
       // Rebuild edited segments with updated indices
@@ -440,8 +487,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   }, [start.coords, end.coords, mode, routeData, desirePathData, originalRouteGeometry, calculateSegment]);
 
   const clearPoints = useCallback(() => {
-    setStart({ coords: null, timestamp: null });
-    setEnd({ coords: null, timestamp: null });
+    setStart({ coords: null, timestamp: null, address: null });
+    setEnd({ coords: null, timestamp: null, address: null });
     setWaypoints([]);
     setHasVoted(false);
     setEditVertices([]);
