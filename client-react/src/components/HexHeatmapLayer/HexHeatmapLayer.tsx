@@ -35,8 +35,15 @@ export function HexHeatmapLayer({ hexOverlay }: HexHeatmapLayerProps) {
     canvasRef.current = canvas;
     ctxRef.current = ctx;
 
-    // Add to desirePathPane (below routes)
-    const pane = map.getPane("desirePathPane");
+    // Ensure pane exists (create if MapPanes hasn't run yet)
+    if (!map.getPane("votedPathsPane")) {
+      map.createPane("votedPathsPane");
+      const newPane = map.getPane("votedPathsPane");
+      if (newPane) newPane.style.zIndex = "400";
+    }
+
+    // Add to votedPathsPane (lowest - below user routes)
+    const pane = map.getPane("votedPathsPane");
     if (pane) {
       pane.appendChild(canvas);
     }

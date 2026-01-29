@@ -57,3 +57,7 @@ export const HEX_HEATMAP = {
   light: { r: 245, g: 215, b: 110 },  // #F5D76E light gold
   dark: { r: 212, g: 160, b: 23 },    // #D4A017 deep gold
 };
+
+// Voted paths color (aggregated community votes)
+// Using teal to differentiate from gold desire paths
+export const VOTED_PATHS_COLOR = "#3FB8AF"; // Teal/cyan

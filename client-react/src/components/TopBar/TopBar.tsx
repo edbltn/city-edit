@@ -2,8 +2,7 @@ import { memo, useState } from "react";
 import { useRoute } from "../../context";
 import { ModeSelector } from "../ModeSelector";
 import { HowItWorksModal } from "../HowItWorksModal";
-import { HexagonIcon } from "./HexagonIcon";
-import { ROUTE_COLORS } from "../../colors";
+import { ROUTE_COLORS, VOTED_PATHS_COLOR } from "../../colors";
 import "./TopBar.css";
 
 export const TopBar = memo(function TopBar() {
@@ -28,6 +27,13 @@ export const TopBar = memo(function TopBar() {
   const formatCoords = (coords: { lat: number; lng: number } | null) => {
     if (!coords) return null;
     return `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
+  };
+
+  // Display address if available, otherwise fall back to coordinates
+  const formatLocation = (point: typeof start) => {
+    if (!point.coords) return null;
+    if (point.address) return point.address;
+    return formatCoords(point.coords);
   };
 
   // Show walk path legend when in walk mode with route data
@@ -66,8 +72,8 @@ export const TopBar = memo(function TopBar() {
                 {start.coords && <span className="legend-marker legend-marker-start"></span>}
               </span>
               <span className="legend-label">Start</span>
-              <span className={`legend-coords ${!start.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}>
-                {formatCoords(start.coords) || "Click map to set start"}
+              <span className={`legend-coords ${!start.coords ? "empty" : ""} ${isLoading ? "loading" : ""} ${start.address ? "has-address" : ""}`}>
+                {formatLocation(start) || "Click map to set start"}
               </span>
             </div>
             <div className="legend-item legend-item-coords">
@@ -75,13 +81,16 @@ export const TopBar = memo(function TopBar() {
                 {end.coords && <span className="legend-marker legend-marker-end"></span>}
               </span>
               <span className="legend-label">End</span>
-              <span className={`legend-coords ${!end.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}>
-                {formatCoords(end.coords) || "Click map to set end"}
+              <span className={`legend-coords ${!end.coords ? "empty" : ""} ${isLoading ? "loading" : ""} ${end.address ? "has-address" : ""}`}>
+                {formatLocation(end) || "Click map to set end"}
               </span>
             </div>
             <div className="legend-item">
               <span className="legend-icon-slot">
-                <HexagonIcon />
+                <span
+                  className="legend-line legend-line-voted"
+                  style={{ background: VOTED_PATHS_COLOR }}
+                ></span>
               </span>
               <span>Most Desired</span>
             </div>

@@ -13,3 +13,13 @@
     opacity: 0.5;
   }
 }
+
+/* Address display transition */
+.legend-coords {
+  transition: opacity 0.2s ease;
+}
+
+/* Subtle fade-in when address loads */
+.legend-coords.has-address {
+  font-weight: 500;
+}

@@ -1221,3 +1221,16 @@ body {
     width: 100%;
   }
 }
+
+/* ==========================================================================
+   GIS Layer Icons
+   ========================================================================== */
+
+.gis-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+.gis-icon svg {
+  display: block;
+}

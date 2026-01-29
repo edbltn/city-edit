@@ -32,15 +32,39 @@ export const CONFIG = {
   minZoom: 10,
   maxZoom: 20,
 
-  // Tiles - CartoDB Positron No Labels
-  tileUrlTemplate:
-    "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
-  tileAttribution:
-    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  // Basemap options
+  basemaps: {
+    light: {
+      name: "Light",
+      url: "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+    lightLabels: {
+      name: "Light + Labels",
+      url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+    dark: {
+      name: "Dark",
+      url: "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png",
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+    satellite: {
+      name: "Satellite",
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      attribution: '&copy; Esri',
+    },
+    osm: {
+      name: "OpenStreetMap",
+      url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    },
+  },
+  defaultBasemap: "light" as const,
   tileSubdomains: "abcd",
 
-  // Leaflet behaviors
-  preferCanvas: true,
+  // Leaflet behaviors - use SVG for better event handling on individual paths
+  preferCanvas: false,
 
   // API & Socket URLs - auto-detect based on environment
   apiUrl: isLocalDev ? "http://localhost:5001/api" : "/api",

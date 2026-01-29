@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -11,11 +11,15 @@ import { useRoute } from "../../context";
 import { useWebSocketContext } from "../../context";
 import { useMapClick } from "../../hooks";
 import { RouteMarker } from "../RouteMarker";
-import { RouteLayer, DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
+import { RouteLayer, EditableRouteLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
 import { GhostPin } from "../GhostPin";
-import { HexHeatmapLayer } from "../HexHeatmapLayer";
-import type { LatLng } from "../../types";
+import { VotedPathsLayer } from "../VotedPathsLayer";
+import { BasemapSwitcher } from "../BasemapSwitcher";
+import { LayerControl } from "../LayerControl";
+import { GISLayers } from "../GISLayers";
+import { ZoomIndicator } from "../ZoomIndicator";
+import type { LatLng, BasemapId } from "../../types";
 import "leaflet/dist/leaflet.css";
 import "./MapView.css";
 
@@ -24,20 +28,33 @@ function MapPanes() {
   const map = useMap();
 
   useEffect(() => {
-    // Create pane for user's route (above vote overlays)
-    if (!map.getPane("routePane")) {
-      map.createPane("routePane");
-      const routePane = map.getPane("routePane");
-      if (routePane) routePane.style.zIndex = "450";
+    // Create pane for voted paths / community data (lowest - background)
+    // Create this FIRST so it exists when VotedPathsLayer renders
+    if (!map.getPane("votedPathsPane")) {
+      map.createPane("votedPathsPane");
+      const votedPathsPane = map.getPane("votedPathsPane");
+      if (votedPathsPane) votedPathsPane.style.zIndex = "400";
     }
 
-    // Create pane for desire path (below main route)
+    // Create pane for desire path / edited segments (middle)
     if (!map.getPane("desirePathPane")) {
       map.createPane("desirePathPane");
       const desirePathPane = map.getPane("desirePathPane");
-      if (desirePathPane) {
-        desirePathPane.style.zIndex = "440";
-      }
+      if (desirePathPane) desirePathPane.style.zIndex = "450";
+    }
+
+    // Create pane for user's route (high - above voted paths)
+    if (!map.getPane("routePane")) {
+      map.createPane("routePane");
+      const routePane = map.getPane("routePane");
+      if (routePane) routePane.style.zIndex = "500";
+    }
+
+    // Create pane for vertex handles (highest - always on top of everything)
+    if (!map.getPane("vertexPane")) {
+      map.createPane("vertexPane");
+      const vertexPane = map.getPane("vertexPane");
+      if (vertexPane) vertexPane.style.zIndex = "650";
     }
 
     // Set default map cursor to pointer (for placing start/end points)
@@ -93,18 +110,21 @@ export function MapView() {
     routeData,
     desirePathData,
     waypoints,
-    ghostWaypoints,
-    splitDesirePaths,
+    editVertices,
+    originalRouteGeometry,
+    editedSegments,
+    modifiedSegmentIndices,
     suppressNextClick,
     setStartPoint,
     setEndPoint,
-    insertWaypointAtSegment,
-    updateGhostWaypoint,
+    dragVertex,
+    insertVertexOnLine,
     updateWaypoint,
     clearSuppressClick,
     setSuppressClick,
   } = useRoute();
   const { mapState } = useWebSocketContext();
+  const [currentBasemap, setCurrentBasemap] = useState<BasemapId>(CONFIG.defaultBasemap);
 
   const { handleMapClick } = useMapClick({
     state: { start, end },
@@ -122,6 +142,13 @@ export function MapView() {
       ),
     []
   );
+
+  // Determine which geometry to use for the editable layer
+  const editableGeometry = useMemo(() => {
+    if (!routeData?.geometry) return null;
+    if (mode === "walk") return routeData.geometry;
+    return desirePathData?.geometry || routeData.geometry;
+  }, [routeData, desirePathData, mode]);
 
   return (
     <>
@@ -141,62 +168,48 @@ export function MapView() {
       <MapClickHandler onMapClick={handleMapClick} />
 
       <TileLayer
-        url={CONFIG.tileUrlTemplate}
-        subdomains={["a", "b", "c", "d"]}
+        key={currentBasemap}
+        url={CONFIG.basemaps[currentBasemap].url}
+        subdomains={CONFIG.tileSubdomains.split("")}
         maxZoom={CONFIG.maxZoom}
-        attribution={CONFIG.tileAttribution}
+        attribution={CONFIG.basemaps[currentBasemap].attribution}
       />
 
       {/* Zoom control in bottom right */}
       <ZoomControl />
 
-      {/* Hex heatmap layer for H3 hexagonal visualization */}
-      <HexHeatmapLayer hexOverlay={mapState?.hex_overlay} />
+      {/* Zoom indicator in bottom left */}
+      <ZoomIndicator />
 
-      {/* Desire path layer for bike/drive - hidden when split paths exist */}
-      {desirePathData?.geometry && mode !== "walk" && splitDesirePaths.length === 0 && (
-        <DesirePathLayer
-          geometry={desirePathData.geometry}
-          segmentIndex={0}
-          onSegmentDrag={insertWaypointAtSegment}
-        />
+      {/* Voted paths layer for polyline visualization */}
+      <VotedPathsLayer overlay={mapState?.overlays?.desire_paths} />
+
+      {/* GIS layers (crosswalks, stop signs, traffic signals, trees) */}
+      <GISLayers />
+
+      {/* Faded original route underneath when edits exist */}
+      {originalRouteGeometry && (
+        <RouteLayer geometry={originalRouteGeometry} mode={mode} />
       )}
 
-      {/* Walk mode: route itself is draggable for waypoints */}
-      {mode === "walk" && routeData?.geometry && splitDesirePaths.length === 0 && (
-        <DesirePathLayer
-          geometry={routeData.geometry}
-          segmentIndex={0}
-          onSegmentDrag={insertWaypointAtSegment}
-          mode="walk"
-        />
-      )}
-
-      {/* Split desire path layers - shown after ghost pin drop */}
-      {splitDesirePaths.map((splitPath) => (
-        <SplitDesirePathLayer
-          key={splitPath.id}
-          splitPath={splitPath}
+      {/* Editable route with vertex handles */}
+      {editableGeometry && editVertices.length >= 2 && (
+        <EditableRouteLayer
+          geometry={editableGeometry}
           mode={mode}
-          onSegmentDrag={insertWaypointAtSegment}
+          editVertices={editVertices}
+          editedSegments={editedSegments}
+          modifiedSegmentIndices={modifiedSegmentIndices}
+          onVertexDrag={dragVertex}
+          onLineDrag={insertVertexOnLine}
+          onDragStart={setSuppressClick}
         />
-      ))}
+      )}
 
-      {/* Main route layer - not shown for walk mode (rendered as desire path instead) */}
-      {routeData?.geometry && mode !== "walk" && (
+      {/* Main route layer when no editable layer (fallback) */}
+      {routeData?.geometry && mode !== "walk" && !editableGeometry && (
         <RouteLayer geometry={routeData.geometry} mode={mode} />
       )}
-
-      {/* Ghost waypoint markers - persistent after drop, draggable to recalculate split */}
-      {ghostWaypoints.map((wp, index) => (
-        <RouteMarker
-          key={`ghost-waypoint-${index}`}
-          position={wp}
-          which="waypoint"
-          onDragStart={setSuppressClick}
-          onDragEnd={(pos) => updateGhostWaypoint(index, pos)}
-        />
-      ))}
 
       {/* Waypoint markers */}
       {waypoints.map((wp, index) => (
@@ -231,6 +244,15 @@ export function MapView() {
 
     {/* Ghost pin rendered outside MapContainer for smooth 60fps positioning */}
     <GhostPin />
+
+    {/* Basemap switcher control */}
+    <BasemapSwitcher
+      currentBasemap={currentBasemap}
+      onBasemapChange={setCurrentBasemap}
+    />
+
+    {/* Layer control for GIS overlays */}
+    <LayerControl />
     </>
   );
 }

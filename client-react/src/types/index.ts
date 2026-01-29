@@ -4,6 +4,8 @@
 
 export type TransportMode = "bike" | "walk" | "drive";
 
+export type BasemapId = "light" | "lightLabels" | "dark" | "satellite" | "osm";
+
 export interface LatLng {
   lat: number;
   lng: number;
@@ -12,6 +14,7 @@ export interface LatLng {
 export interface RoutePoint {
   coords: LatLng | null;
   timestamp: number | null;
+  address: string | null;
 }
 
 export interface RouteGeometry {
@@ -35,6 +38,12 @@ export interface SplitDesirePath {
   segmentIndex: number;
   geometry: RouteGeometry;
   segments: [number, number][][];
+  isModified?: boolean;
+}
+
+export interface EditVertex {
+  position: LatLng;
+  coordIndex: number; // index into the original route coordinates array
 }
 
 export interface RouteResponse {
