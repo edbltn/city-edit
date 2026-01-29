@@ -277,12 +277,10 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Calculate a single segment between two points via ORS
-  // preferLegal: if true, use the legal route geometry instead of desire path (for return segments)
   const calculateSegment = useCallback(async (
     from: LatLng,
     to: LatLng,
     segmentIndex: number,
-    preferLegal = false,
   ): Promise<SplitDesirePath | null> => {
     const response = await fetch(`${CONFIG.apiUrl}/routes`, {
       method: "POST",
@@ -298,31 +296,14 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     if (!response.ok) throw new Error("Failed to calculate segment");
 
     const data = await response.json();
-    
-    // For walk mode, always use route geometry (it IS the desire path for walking)
-    // For bike/drive: use legal route if preferLegal, otherwise desire path
-    let geometry;
-    let segments: [number, number][][] = [];
-    
-    if (mode === "walk") {
-      geometry = data.route?.geometry;
-      segments = data.desire_path_segments || [];
-    } else if (preferLegal) {
-      // Use legal route for return segments
-      geometry = data.route?.geometry;
-      segments = []; // No desire path segments since we're following legal route
-    } else {
-      geometry = data.desire_path?.geometry;
-      segments = data.desire_path_segments || [];
-    }
-    
+    const geometry = mode === "walk" ? data.route?.geometry : data.desire_path?.geometry;
     if (!geometry) return null;
 
     return {
       id: `edited-${segmentIndex}`,
       segmentIndex,
       geometry,
-      segments,
+      segments: data.desire_path_segments || [],
       isModified: true,
     };
   }, [mode]);
@@ -363,17 +344,15 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       // Recalculate the affected segments in background
       const segmentPromises: Promise<SplitDesirePath | null>[] = [];
 
-      // Segment before: from previous vertex to dragged position - allow desire path
       if (vertexIndex > 0) {
         segmentPromises.push(
-          calculateSegment(newVertices[vertexIndex - 1].position, position, vertexIndex - 1, false)
+          calculateSegment(newVertices[vertexIndex - 1].position, position, vertexIndex - 1)
         );
       }
 
-      // Segment after: from dragged position to next vertex - prefer legal route
       if (vertexIndex < newVertices.length - 1) {
         segmentPromises.push(
-          calculateSegment(position, newVertices[vertexIndex + 1].position, vertexIndex, true)
+          calculateSegment(position, newVertices[vertexIndex + 1].position, vertexIndex)
         );
       }
 
@@ -384,7 +363,10 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         const updated = [...prev];
         for (let i = 0; i < results.length; i++) {
           const result = results[i];
-          if (!result) continue;
+          if (!result) {
+            console.warn(`[dragVertex] Segment ${affectedIndices[i]} returned null!`);
+            continue;
+          }
           const existingIdx = updated.findIndex(s => s.segmentIndex === affectedIndices[i]);
           if (existingIdx >= 0) {
             updated[existingIdx] = result;
@@ -430,19 +412,15 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       newVertices.splice(afterVertexIndex + 1, 0, newVertex);
 
       // Calculate both new segments
-      // segBefore: from previous vertex to dragged point - allow desire path
       const segBefore = await calculateSegment(
         currentVertices[afterVertexIndex].position,
         position,
         afterVertexIndex,
-        false, // allow desire path
       );
-      // segAfter: from dragged point back to next vertex - prefer legal route
       const segAfter = await calculateSegment(
         position,
         currentVertices[afterVertexIndex + 1].position,
         afterVertexIndex + 1,
-        true, // prefer legal route for smooth rejoin
       );
 
       // Rebuild edited segments with updated indices

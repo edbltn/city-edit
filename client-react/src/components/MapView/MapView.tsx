@@ -28,20 +28,33 @@ function MapPanes() {
   const map = useMap();
 
   useEffect(() => {
-    // Create pane for user's route (above vote overlays)
-    if (!map.getPane("routePane")) {
-      map.createPane("routePane");
-      const routePane = map.getPane("routePane");
-      if (routePane) routePane.style.zIndex = "450";
+    // Create pane for voted paths / community data (lowest - background)
+    // Create this FIRST so it exists when VotedPathsLayer renders
+    if (!map.getPane("votedPathsPane")) {
+      map.createPane("votedPathsPane");
+      const votedPathsPane = map.getPane("votedPathsPane");
+      if (votedPathsPane) votedPathsPane.style.zIndex = "400";
     }
 
-    // Create pane for desire path / original route (below main route)
+    // Create pane for desire path / edited segments (middle)
     if (!map.getPane("desirePathPane")) {
       map.createPane("desirePathPane");
       const desirePathPane = map.getPane("desirePathPane");
-      if (desirePathPane) {
-        desirePathPane.style.zIndex = "440";
-      }
+      if (desirePathPane) desirePathPane.style.zIndex = "450";
+    }
+
+    // Create pane for user's route (high - above voted paths)
+    if (!map.getPane("routePane")) {
+      map.createPane("routePane");
+      const routePane = map.getPane("routePane");
+      if (routePane) routePane.style.zIndex = "500";
+    }
+
+    // Create pane for vertex handles (highest - always on top of everything)
+    if (!map.getPane("vertexPane")) {
+      map.createPane("vertexPane");
+      const vertexPane = map.getPane("vertexPane");
+      if (vertexPane) vertexPane.style.zIndex = "650";
     }
 
     // Set default map cursor to pointer (for placing start/end points)

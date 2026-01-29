@@ -79,6 +79,13 @@ export function VotedPathsLayer({ overlay }: VotedPathsLayerProps) {
       return;
     }
 
+    // Ensure pane exists (create if MapPanes hasn't run yet)
+    if (!map.getPane("votedPathsPane")) {
+      map.createPane("votedPathsPane");
+      const pane = map.getPane("votedPathsPane");
+      if (pane) pane.style.zIndex = "400";
+    }
+
     // Create or update layer
     if (layerRef.current) {
       map.removeLayer(layerRef.current);
@@ -86,7 +93,7 @@ export function VotedPathsLayer({ overlay }: VotedPathsLayerProps) {
 
     const layer = L.geoJSON(overlay.data, {
       style: getStyle,
-      pane: "desirePathPane",
+      pane: "votedPathsPane",
     });
 
     layer.addTo(map);

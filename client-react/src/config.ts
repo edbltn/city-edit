@@ -63,8 +63,8 @@ export const CONFIG = {
   defaultBasemap: "light" as const,
   tileSubdomains: "abcd",
 
-  // Leaflet behaviors
-  preferCanvas: true,
+  // Leaflet behaviors - use SVG for better event handling on individual paths
+  preferCanvas: false,
 
   // API & Socket URLs - auto-detect based on environment
   apiUrl: isLocalDev ? "http://localhost:5001/api" : "/api",
