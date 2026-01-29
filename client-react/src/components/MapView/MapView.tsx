@@ -11,7 +11,7 @@ import { useRoute } from "../../context";
 import { useWebSocketContext } from "../../context";
 import { useMapClick } from "../../hooks";
 import { RouteMarker } from "../RouteMarker";
-import { RouteLayer, DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
+import { RouteLayer, EditableRouteLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
 import { GhostPin } from "../GhostPin";
 import { HexHeatmapLayer } from "../HexHeatmapLayer";
@@ -31,7 +31,7 @@ function MapPanes() {
       if (routePane) routePane.style.zIndex = "450";
     }
 
-    // Create pane for desire path (below main route)
+    // Create pane for desire path / original route (below main route)
     if (!map.getPane("desirePathPane")) {
       map.createPane("desirePathPane");
       const desirePathPane = map.getPane("desirePathPane");
@@ -93,13 +93,15 @@ export function MapView() {
     routeData,
     desirePathData,
     waypoints,
-    ghostWaypoints,
-    splitDesirePaths,
+    editVertices,
+    originalRouteGeometry,
+    editedSegments,
+    modifiedSegmentIndices,
     suppressNextClick,
     setStartPoint,
     setEndPoint,
-    insertWaypointAtSegment,
-    updateGhostWaypoint,
+    dragVertex,
+    insertVertexOnLine,
     updateWaypoint,
     clearSuppressClick,
     setSuppressClick,
@@ -122,6 +124,13 @@ export function MapView() {
       ),
     []
   );
+
+  // Determine which geometry to use for the editable layer
+  const editableGeometry = useMemo(() => {
+    if (!routeData?.geometry) return null;
+    if (mode === "walk") return routeData.geometry;
+    return desirePathData?.geometry || routeData.geometry;
+  }, [routeData, desirePathData, mode]);
 
   return (
     <>
@@ -153,50 +162,29 @@ export function MapView() {
       {/* Hex heatmap layer for H3 hexagonal visualization */}
       <HexHeatmapLayer hexOverlay={mapState?.hex_overlay} />
 
-      {/* Desire path layer for bike/drive - hidden when split paths exist */}
-      {desirePathData?.geometry && mode !== "walk" && splitDesirePaths.length === 0 && (
-        <DesirePathLayer
-          geometry={desirePathData.geometry}
-          segmentIndex={0}
-          onSegmentDrag={insertWaypointAtSegment}
-        />
+      {/* Faded original route underneath when edits exist */}
+      {originalRouteGeometry && (
+        <RouteLayer geometry={originalRouteGeometry} mode={mode} />
       )}
 
-      {/* Walk mode: route itself is draggable for waypoints */}
-      {mode === "walk" && routeData?.geometry && splitDesirePaths.length === 0 && (
-        <DesirePathLayer
-          geometry={routeData.geometry}
-          segmentIndex={0}
-          onSegmentDrag={insertWaypointAtSegment}
-          mode="walk"
-        />
-      )}
-
-      {/* Split desire path layers - shown after ghost pin drop */}
-      {splitDesirePaths.map((splitPath) => (
-        <SplitDesirePathLayer
-          key={splitPath.id}
-          splitPath={splitPath}
+      {/* Editable route with vertex handles */}
+      {editableGeometry && editVertices.length >= 2 && (
+        <EditableRouteLayer
+          geometry={editableGeometry}
           mode={mode}
-          onSegmentDrag={insertWaypointAtSegment}
+          editVertices={editVertices}
+          editedSegments={editedSegments}
+          modifiedSegmentIndices={modifiedSegmentIndices}
+          onVertexDrag={dragVertex}
+          onLineDrag={insertVertexOnLine}
+          onDragStart={setSuppressClick}
         />
-      ))}
+      )}
 
-      {/* Main route layer - not shown for walk mode (rendered as desire path instead) */}
-      {routeData?.geometry && mode !== "walk" && (
+      {/* Main route layer when no editable layer (fallback) */}
+      {routeData?.geometry && mode !== "walk" && !editableGeometry && (
         <RouteLayer geometry={routeData.geometry} mode={mode} />
       )}
-
-      {/* Ghost waypoint markers - persistent after drop, draggable to recalculate split */}
-      {ghostWaypoints.map((wp, index) => (
-        <RouteMarker
-          key={`ghost-waypoint-${index}`}
-          position={wp}
-          which="waypoint"
-          onDragStart={setSuppressClick}
-          onDragEnd={(pos) => updateGhostWaypoint(index, pos)}
-        />
-      ))}
 
       {/* Waypoint markers */}
       {waypoints.map((wp, index) => (

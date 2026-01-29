@@ -35,6 +35,12 @@ export interface SplitDesirePath {
   segmentIndex: number;
   geometry: RouteGeometry;
   segments: [number, number][][];
+  isModified?: boolean;
+}
+
+export interface EditVertex {
+  position: LatLng;
+  coordIndex: number; // index into the original route coordinates array
 }
 
 export interface RouteResponse {

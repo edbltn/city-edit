@@ -1,1 +1,1 @@
-export { RouteLayer, DesirePathLayer, SplitDesirePathLayer } from "./RouteLayer";
+export { RouteLayer, DesirePathLayer, SplitDesirePathLayer, EditableRouteLayer } from "./RouteLayer";

@@ -41,10 +41,9 @@ export function useMapClick({
         return;
       }
 
-      // Both exist: previous end becomes start, new click becomes end
-      const prevEnd = state.end.coords;
-      onUpdateStart(prevEnd);
-      onUpdateEnd(latlng);
+      // Both exist: ignore clicks so panning works freely.
+      // User must clear points to start a new route.
+      return;
     },
     [state.start.coords, state.end.coords, onUpdateStart, onUpdateEnd, suppressNextClick, onClearSuppress]
   );

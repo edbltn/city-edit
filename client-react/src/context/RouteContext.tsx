@@ -16,8 +16,101 @@ import type {
   RoutePoint,
   RouteData,
   DesirePathData,
+  RouteGeometry,
+  EditVertex,
   SplitDesirePath,
 } from "../types";
+
+// ── Vertex extraction ────────────────────────────────────────────────
+// Extract sparse vertices from a route geometry for draggable handles.
+// Uses angle-based detection to pick major turns, with a minimum spacing.
+
+function angleBetween(a: [number, number], b: [number, number], c: [number, number]): number {
+  const dx1 = b[0] - a[0];
+  const dy1 = b[1] - a[1];
+  const dx2 = c[0] - b[0];
+  const dy2 = c[1] - b[1];
+  const dot = dx1 * dx2 + dy1 * dy2;
+  const cross = dx1 * dy2 - dy1 * dx2;
+  return Math.abs(Math.atan2(cross, dot));
+}
+
+function extractVertices(geometry: RouteGeometry, targetCount = 5): EditVertex[] {
+  const coords = geometry.coordinates;
+  if (coords.length <= 2) {
+    return coords.map((c, i) => ({
+      position: { lat: c[1], lng: c[0] },
+      coordIndex: i,
+    }));
+  }
+
+  // Always include first and last
+  const vertices: EditVertex[] = [
+    { position: { lat: coords[0][1], lng: coords[0][0] }, coordIndex: 0 },
+  ];
+
+  // Calculate angles at each interior point
+  const angles: { index: number; angle: number }[] = [];
+  for (let i = 1; i < coords.length - 1; i++) {
+    angles.push({ index: i, angle: angleBetween(coords[i - 1], coords[i], coords[i + 1]) });
+  }
+
+  // Sort by sharpest turns first
+  angles.sort((a, b) => b.angle - a.angle);
+
+  // Minimum spacing: don't place handles closer than this many coords apart
+  const minSpacing = Math.max(3, Math.floor(coords.length / (targetCount * 2)));
+
+  const selected = new Set<number>();
+  selected.add(0);
+  selected.add(coords.length - 1);
+
+  for (const { index } of angles) {
+    if (selected.size >= targetCount - 1) break; // -1 because we add last at end
+
+    // Check minimum spacing from all already-selected
+    let tooClose = false;
+    for (const s of selected) {
+      if (Math.abs(index - s) < minSpacing) {
+        tooClose = true;
+        break;
+      }
+    }
+    if (!tooClose) {
+      selected.add(index);
+    }
+  }
+
+  // If we still have room, fill in evenly spaced vertices
+  if (selected.size < targetCount - 1) {
+    const step = Math.floor(coords.length / (targetCount - selected.size + 1));
+    for (let i = step; i < coords.length - 1; i += step) {
+      if (selected.size >= targetCount - 1) break;
+      let tooClose = false;
+      for (const s of selected) {
+        if (Math.abs(i - s) < minSpacing) {
+          tooClose = true;
+          break;
+        }
+      }
+      if (!tooClose) selected.add(i);
+    }
+  }
+
+  // Build sorted vertex list (excluding first which is already added)
+  const sortedIndices = Array.from(selected).sort((a, b) => a - b);
+  for (const idx of sortedIndices) {
+    if (idx === 0) continue;
+    vertices.push({
+      position: { lat: coords[idx][1], lng: coords[idx][0] },
+      coordIndex: idx,
+    });
+  }
+
+  return vertices;
+}
+
+// ── Context interface ────────────────────────────────────────────────
 
 interface RouteContextValue {
   start: RoutePoint;
@@ -30,9 +123,15 @@ interface RouteContextValue {
   error: string | null;
   hasVoted: boolean;
   isVoting: boolean;
+  // Vertex editing
+  editVertices: EditVertex[];
+  originalRouteGeometry: RouteGeometry | null;
+  editedSegments: SplitDesirePath[];
+  modifiedSegmentIndices: Set<number>;
+  isCalculatingSplit: boolean;
+  // Legacy (kept for compatibility)
   ghostWaypoints: LatLng[];
   splitDesirePaths: SplitDesirePath[];
-  isCalculatingSplit: boolean;
   suppressNextClick: () => boolean;
   setStartPoint: (coords: LatLng, fromDrag?: boolean) => void;
   setEndPoint: (coords: LatLng, fromDrag?: boolean) => void;
@@ -43,8 +142,8 @@ interface RouteContextValue {
   updateWaypoint: (index: number, coords: LatLng) => void;
   clearWaypoints: () => void;
   castVote: () => Promise<void>;
-  insertWaypointAtSegment: (segmentIndex: number, position: LatLng) => Promise<void>;
-  updateGhostWaypoint: (index: number, position: LatLng) => Promise<void>;
+  dragVertex: (vertexIndex: number, position: LatLng) => Promise<void>;
+  insertVertexOnLine: (afterVertexIndex: number, position: LatLng) => Promise<void>;
   clearSplitPaths: () => void;
   clearSuppressClick: () => void;
   setSuppressClick: () => void;
@@ -62,23 +161,30 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const [waypoints, setWaypoints] = useState<LatLng[]>([]);
   const [hasVoted, setHasVoted] = useState(false);
   const [isVoting, setIsVoting] = useState(false);
-  const [ghostWaypoints, setGhostWaypoints] = useState<LatLng[]>([]);
-  const [splitDesirePaths, setSplitDesirePaths] = useState<SplitDesirePath[]>([]);
   const [isCalculatingSplit, setIsCalculatingSplit] = useState(false);
 
-  // Use a ref for click suppression so it takes effect immediately (not async like state)
+  // Vertex editing state
+  const [editVertices, setEditVertices] = useState<EditVertex[]>([]);
+  const [originalRouteGeometry, setOriginalRouteGeometry] = useState<RouteGeometry | null>(null);
+  const [editedSegments, setEditedSegments] = useState<SplitDesirePath[]>([]);
+  const [modifiedSegmentIndices, setModifiedSegmentIndices] = useState<Set<number>>(new Set());
+
+  // Legacy state kept for compatibility
+  const [ghostWaypoints] = useState<LatLng[]>([]);
+  const [splitDesirePaths] = useState<SplitDesirePath[]>([]);
+
+  // Click suppression ref
   const suppressNextClickRef = useRef(false);
 
-  // Refs to track previous values for detecting new points vs drags
+  // Refs for tracking
   const prevStartCoordsRef = useRef<LatLng | null>(null);
   const prevEndCoordsRef = useRef<LatLng | null>(null);
-  const ghostWaypointsRef = useRef<LatLng[]>([]);
   const fromDragRef = useRef(false);
+  const editVerticesRef = useRef<EditVertex[]>([]);
 
-  // Keep ghostWaypointsRef in sync with state
   useEffect(() => {
-    ghostWaypointsRef.current = ghostWaypoints;
-  }, [ghostWaypoints]);
+    editVerticesRef.current = editVertices;
+  }, [editVertices]);
 
   const {
     isCalculating,
@@ -91,6 +197,18 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     clearRoute,
     clearError,
   } = useRouteCalculation();
+
+  // Extract vertices when route data changes
+  useEffect(() => {
+    if (routeData?.geometry) {
+      // Use the desire path geometry for bike/drive, route geometry for walk
+      const geom = mode === "walk" ? routeData.geometry : (desirePathData?.geometry || routeData.geometry);
+      const vertices = extractVertices(geom);
+      setEditVertices(vertices);
+    } else {
+      setEditVertices([]);
+    }
+  }, [routeData, desirePathData, mode]);
 
   const setStartPoint = useCallback((coords: LatLng, fromDrag = false) => {
     fromDragRef.current = fromDrag;
@@ -119,8 +237,9 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearSplitPaths = useCallback(() => {
-    setGhostWaypoints([]);
-    setSplitDesirePaths([]);
+    setEditedSegments([]);
+    setModifiedSegmentIndices(new Set());
+    setOriginalRouteGeometry(null);
   }, []);
 
   const clearSuppressClick = useCallback(() => {
@@ -131,138 +250,211 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     suppressNextClickRef.current = true;
   }, []);
 
-  // Getter for suppressNextClick - reads from ref for immediate effect
   const suppressNextClick = useCallback(() => {
     return suppressNextClickRef.current;
   }, []);
 
-  // Helper to calculate all route segments given a list of points
-  const calculateAllSegments = useCallback(async (points: LatLng[]): Promise<SplitDesirePath[]> => {
-    if (points.length < 2) return [];
+  // Calculate a single segment between two points via ORS
+  const calculateSegment = useCallback(async (
+    from: LatLng,
+    to: LatLng,
+    segmentIndex: number,
+  ): Promise<SplitDesirePath | null> => {
+    const response = await fetch(`${CONFIG.apiUrl}/routes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        start: [from.lat, from.lng],
+        end: [to.lat, to.lng],
+        mode,
+        waypoints: [],
+      }),
+    });
 
-    // Calculate N-1 routes in parallel for N points
-    const fetchPromises = [];
-    for (let i = 0; i < points.length - 1; i++) {
-      fetchPromises.push(
-        fetch(`${CONFIG.apiUrl}/routes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            start: [points[i].lat, points[i].lng],
-            end: [points[i + 1].lat, points[i + 1].lng],
-            mode,
-            waypoints: []
-          })
-        })
-      );
-    }
+    if (!response.ok) throw new Error("Failed to calculate segment");
 
-    const responses = await Promise.all(fetchPromises);
+    const data = await response.json();
+    const geometry = mode === "walk" ? data.route?.geometry : data.desire_path?.geometry;
+    if (!geometry) return null;
 
-    // Check all responses succeeded
-    for (const response of responses) {
-      if (!response.ok) {
-        throw new Error("Failed to calculate split paths");
-      }
-    }
-
-    const dataPromises = responses.map(r => r.json());
-    const allData = await Promise.all(dataPromises);
-
-    // Build split paths from response data
-    const splitPaths: SplitDesirePath[] = [];
-    for (let i = 0; i < allData.length; i++) {
-      const data = allData[i];
-      // For walk mode, use route geometry; for other modes, use desire_path geometry
-      const geometry = mode === "walk" ? data.route?.geometry : data.desire_path?.geometry;
-      if (geometry) {
-        splitPaths.push({
-          id: `split-${i}`,
-          segmentIndex: i,
-          geometry,
-          segments: data.desire_path_segments || []
-        });
-      }
-    }
-
-    return splitPaths;
+    return {
+      id: `edited-${segmentIndex}`,
+      segmentIndex,
+      geometry,
+      segments: data.desire_path_segments || [],
+      isModified: true,
+    };
   }, [mode]);
 
-  // Insert a new waypoint at the given segment index
-  const insertWaypointAtSegment = useCallback(async (segmentIndex: number, position: LatLng) => {
+  // Drag an existing vertex to a new position
+  const dragVertex = useCallback(async (vertexIndex: number, position: LatLng) => {
     if (!start.coords || !end.coords) return;
 
-    // Suppress the click event that follows mouseup on ghost pin drop
     suppressNextClickRef.current = true;
-
     setIsCalculatingSplit(true);
+
     try {
-      // Insert the new waypoint at the appropriate position
-      const newWaypoints = [...ghostWaypoints];
-      newWaypoints.splice(segmentIndex, 0, position);
+      const currentVertices = editVerticesRef.current;
+      if (vertexIndex < 0 || vertexIndex >= currentVertices.length) return;
 
-      // Build the full list of points: start → waypoints → end
-      const allPoints = [start.coords, ...newWaypoints, end.coords];
-
-      const splitPaths = await calculateAllSegments(allPoints);
-
-      if (splitPaths.length === newWaypoints.length + 1) {
-        setGhostWaypoints(newWaypoints);
-        setSplitDesirePaths(splitPaths);
-        setHasVoted(false);
+      // Save original route on first edit
+      const geom = mode === "walk" ? routeData?.geometry : (desirePathData?.geometry || routeData?.geometry);
+      if (!originalRouteGeometry && geom) {
+        setOriginalRouteGeometry(geom);
       }
-    } catch (error) {
-      console.error("Failed to calculate split paths:", error);
+
+      // Update the vertex position immediately (optimistic update)
+      const newVertices = [...currentVertices];
+      newVertices[vertexIndex] = { ...newVertices[vertexIndex], position };
+      setEditVertices(newVertices);
+
+      // Mark affected segments as modified immediately
+      const affectedIndices: number[] = [];
+      if (vertexIndex > 0) affectedIndices.push(vertexIndex - 1);
+      if (vertexIndex < newVertices.length - 1) affectedIndices.push(vertexIndex);
+
+      setModifiedSegmentIndices(prev => {
+        const next = new Set(prev);
+        for (const idx of affectedIndices) next.add(idx);
+        return next;
+      });
+
+      // Recalculate the affected segments in background
+      const segmentPromises: Promise<SplitDesirePath | null>[] = [];
+
+      if (vertexIndex > 0) {
+        segmentPromises.push(
+          calculateSegment(newVertices[vertexIndex - 1].position, position, vertexIndex - 1)
+        );
+      }
+
+      if (vertexIndex < newVertices.length - 1) {
+        segmentPromises.push(
+          calculateSegment(position, newVertices[vertexIndex + 1].position, vertexIndex)
+        );
+      }
+
+      const results = await Promise.all(segmentPromises);
+
+      // Update edited segments with API results
+      setEditedSegments(prev => {
+        const updated = [...prev];
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i];
+          if (!result) continue;
+          const existingIdx = updated.findIndex(s => s.segmentIndex === affectedIndices[i]);
+          if (existingIdx >= 0) {
+            updated[existingIdx] = result;
+          } else {
+            updated.push(result);
+          }
+        }
+        return updated;
+      });
+
+      setHasVoted(false);
+    } catch (err) {
+      console.error("Failed to drag vertex:", err);
     } finally {
       setIsCalculatingSplit(false);
     }
-  }, [start.coords, end.coords, ghostWaypoints, calculateAllSegments]);
+  }, [start.coords, end.coords, mode, routeData, desirePathData, originalRouteGeometry, calculateSegment]);
 
-  // Update an existing ghost waypoint position
-  const updateGhostWaypoint = useCallback(async (index: number, position: LatLng) => {
+  // Insert a new vertex by dragging from the middle of a segment
+  const insertVertexOnLine = useCallback(async (afterVertexIndex: number, position: LatLng) => {
     if (!start.coords || !end.coords) return;
-    if (index < 0 || index >= ghostWaypoints.length) return;
 
-    // Suppress the click event that follows mouseup
     suppressNextClickRef.current = true;
-
     setIsCalculatingSplit(true);
+
     try {
-      // Update the waypoint at the given index
-      const newWaypoints = [...ghostWaypoints];
-      newWaypoints[index] = position;
+      const currentVertices = editVerticesRef.current;
+      if (afterVertexIndex < 0 || afterVertexIndex >= currentVertices.length - 1) return;
 
-      // Build the full list of points: start → waypoints → end
-      const allPoints = [start.coords, ...newWaypoints, end.coords];
-
-      const splitPaths = await calculateAllSegments(allPoints);
-
-      if (splitPaths.length === newWaypoints.length + 1) {
-        setGhostWaypoints(newWaypoints);
-        setSplitDesirePaths(splitPaths);
-        setHasVoted(false);
+      // Save original route on first edit
+      const geom = mode === "walk" ? routeData?.geometry : (desirePathData?.geometry || routeData?.geometry);
+      if (!originalRouteGeometry && geom) {
+        setOriginalRouteGeometry(geom);
       }
-    } catch (error) {
-      console.error("Failed to recalculate split paths:", error);
+
+      // Insert new vertex between afterVertexIndex and afterVertexIndex+1
+      const newVertex: EditVertex = {
+        position,
+        coordIndex: -1, // Not from original geometry
+      };
+
+      const newVertices = [...currentVertices];
+      newVertices.splice(afterVertexIndex + 1, 0, newVertex);
+
+      // Calculate both new segments
+      const segBefore = await calculateSegment(
+        currentVertices[afterVertexIndex].position,
+        position,
+        afterVertexIndex,
+      );
+      const segAfter = await calculateSegment(
+        position,
+        currentVertices[afterVertexIndex + 1].position,
+        afterVertexIndex + 1,
+      );
+
+      // Rebuild edited segments with updated indices
+      setEditedSegments(prev => {
+        // Shift existing segment indices that are >= afterVertexIndex + 1
+        const updated = prev.map(s => {
+          if (s.segmentIndex > afterVertexIndex) {
+            return { ...s, segmentIndex: s.segmentIndex + 1, id: `edited-${s.segmentIndex + 1}` };
+          }
+          return s;
+        });
+
+        // Replace/add the two affected segments
+        const beforeIdx = updated.findIndex(s => s.segmentIndex === afterVertexIndex);
+        if (segBefore) {
+          if (beforeIdx >= 0) updated[beforeIdx] = segBefore;
+          else updated.push(segBefore);
+        }
+        if (segAfter) updated.push(segAfter);
+
+        return updated;
+      });
+
+      // Track modified segments
+      setModifiedSegmentIndices(prev => {
+        const next = new Set<number>();
+        for (const idx of prev) {
+          next.add(idx > afterVertexIndex ? idx + 1 : idx);
+        }
+        next.add(afterVertexIndex);
+        next.add(afterVertexIndex + 1);
+        return next;
+      });
+
+      setEditVertices(newVertices);
+      setHasVoted(false);
+    } catch (err) {
+      console.error("Failed to insert vertex:", err);
     } finally {
       setIsCalculatingSplit(false);
     }
-  }, [start.coords, end.coords, ghostWaypoints, calculateAllSegments]);
+  }, [start.coords, end.coords, mode, routeData, desirePathData, originalRouteGeometry, calculateSegment]);
 
   const clearPoints = useCallback(() => {
     setStart({ coords: null, timestamp: null });
     setEnd({ coords: null, timestamp: null });
     setWaypoints([]);
     setHasVoted(false);
-    setGhostWaypoints([]);
-    setSplitDesirePaths([]);
+    setEditVertices([]);
+    setEditedSegments([]);
+    setModifiedSegmentIndices(new Set());
+    setOriginalRouteGeometry(null);
     clearRoute();
   }, [clearRoute]);
 
   const castVote = useCallback(async () => {
-    // Use split path segments if available, otherwise use desire path segments
-    const segmentsToVote = splitDesirePaths.length > 0
-      ? splitDesirePaths.flatMap(sp => sp.segments)
+    // Use edited segments if available, otherwise use desire path segments
+    const segmentsToVote = editedSegments.length > 0
+      ? editedSegments.flatMap(sp => sp.segments)
       : desirePathSegments;
 
     if (!segmentsToVote || segmentsToVote.length === 0 || !voteMode) {
@@ -273,9 +465,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     try {
       const response = await fetch(`${CONFIG.apiUrl}/vote`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           segments: segmentsToVote,
           mode: voteMode,
@@ -287,21 +477,18 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       }
 
       setHasVoted(true);
-    } catch (error) {
-      console.error("Failed to cast vote:", error);
+    } catch (err) {
+      console.error("Failed to cast vote:", err);
     } finally {
       setIsVoting(false);
     }
-  }, [splitDesirePaths, desirePathSegments, voteMode]);
+  }, [editedSegments, desirePathSegments, voteMode]);
 
   // Auto-calculate route when both points are set or mode changes
-  // Preserve ghost waypoints on mode change or drag, clear only on click
   useEffect(() => {
-    // Check if this update came from a drag (vs a click or mode change)
     const isDrag = fromDragRef.current;
-    fromDragRef.current = false; // Reset for next update
+    fromDragRef.current = false;
 
-    // Detect if start or end coords changed
     const prevStart = prevStartCoordsRef.current;
     const prevEnd = prevEndCoordsRef.current;
     const startChanged = start.coords !== prevStart &&
@@ -311,77 +498,27 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       (end.coords === null || prevEnd === null ||
        end.coords.lat !== prevEnd.lat || end.coords.lng !== prevEnd.lng);
 
-    // Update refs for next run
     prevStartCoordsRef.current = start.coords;
     prevEndCoordsRef.current = end.coords;
 
-    // Preserve ghost waypoints only on: mode change or drag
-    // Clear ghost waypoints on: click (new point)
-    const shouldPreserveGhostWaypoints = isDrag || (!startChanged && !endChanged);
+    const shouldPreserveEdits = isDrag || (!startChanged && !endChanged);
 
-    // Always clear the main route first
     clearRoute();
-    // Always clear regular waypoints
     setWaypoints([]);
-    // Always reset vote status
     setHasVoted(false);
 
-    // Clear ghost waypoints on click (not drag, not mode change)
-    if (!shouldPreserveGhostWaypoints) {
-      setGhostWaypoints([]);
-      setSplitDesirePaths([]);
+    if (!shouldPreserveEdits) {
+      setEditedSegments([]);
+      setModifiedSegmentIndices(new Set());
+      setOriginalRouteGeometry(null);
     }
 
     if (start.coords && end.coords) {
-      // Read from ref to avoid adding ghostWaypoints as a dependency
-      const currentGhostWaypoints = ghostWaypointsRef.current;
-
-      // Always calculate the main route
       calculateRoute({ start: start.coords, end: end.coords, mode, waypoints: [] });
-
-      if (currentGhostWaypoints.length > 0 && shouldPreserveGhostWaypoints) {
-        // Clear old split paths before recalculating to avoid stale styling
-        setSplitDesirePaths([]);
-        setIsCalculatingSplit(true);
-        // Recalculate all segments with preserved ghost waypoints
-        const allPoints = [start.coords, ...currentGhostWaypoints, end.coords];
-        calculateAllSegments(allPoints)
-          .then(splitPaths => {
-            if (splitPaths.length === currentGhostWaypoints.length + 1) {
-              setSplitDesirePaths(splitPaths);
-            }
-          })
-          .catch(console.error)
-          .finally(() => setIsCalculatingSplit(false));
-      }
     }
-  }, [start.coords, end.coords, mode, calculateRoute, clearRoute, calculateAllSegments]);
+  }, [start.coords, end.coords, mode, calculateRoute, clearRoute]);
 
-  // Global mouse event tracking
-  useEffect(() => {
-    const logEvent = (e: MouseEvent) => {
-      console.log(`[MOUSE-${e.type}]`, {
-        target: e.target instanceof Element ? e.target.className : 'unknown',
-        button: e.button,
-        clientX: e.clientX,
-        clientY: e.clientY,
-        timestamp: Date.now()
-      });
-    };
-
-    document.addEventListener('click', logEvent, true);
-    document.addEventListener('mousedown', logEvent, true);
-    document.addEventListener('mouseup', logEvent, true);
-
-    return () => {
-      document.removeEventListener('click', logEvent, true);
-      document.removeEventListener('mousedown', logEvent, true);
-      document.removeEventListener('mouseup', logEvent, true);
-    };
-  }, []);
-
-  // Recalculate route when waypoints change (don't clear waypoints)
-  // Also reset vote status when route changes due to waypoints
+  // Recalculate route when waypoints change
   useEffect(() => {
     if (start.coords && end.coords && waypoints.length > 0) {
       setHasVoted(false);
@@ -402,9 +539,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       error,
       hasVoted,
       isVoting,
+      editVertices,
+      originalRouteGeometry,
+      editedSegments,
+      modifiedSegmentIndices,
+      isCalculatingSplit,
       ghostWaypoints,
       splitDesirePaths,
-      isCalculatingSplit,
       suppressNextClick,
       setStartPoint,
       setEndPoint,
@@ -415,8 +556,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       updateWaypoint,
       clearWaypoints,
       castVote,
-      insertWaypointAtSegment,
-      updateGhostWaypoint,
+      dragVertex,
+      insertVertexOnLine,
       clearSplitPaths,
       clearSuppressClick,
       setSuppressClick,
@@ -432,9 +573,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       error,
       hasVoted,
       isVoting,
+      editVertices,
+      originalRouteGeometry,
+      editedSegments,
+      modifiedSegmentIndices,
+      isCalculatingSplit,
       ghostWaypoints,
       splitDesirePaths,
-      isCalculatingSplit,
       suppressNextClick,
       setStartPoint,
       setEndPoint,
@@ -445,8 +590,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       updateWaypoint,
       clearWaypoints,
       castVote,
-      insertWaypointAtSegment,
-      updateGhostWaypoint,
+      dragVertex,
+      insertVertexOnLine,
       clearSplitPaths,
       clearSuppressClick,
       setSuppressClick,
