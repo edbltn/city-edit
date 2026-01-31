@@ -2,7 +2,7 @@
  * Hex Heatmap Layer - H3 Hexagonal Canvas Renderer
  *
  * Custom canvas layer for rendering filled hexagons with log-scaled
- * orange coloring based on vote counts.
+ * orange coloring based on vote counts. Hotswaps resolution on zoom.
  */
 
 import { useEffect, useRef, useCallback } from "react";
@@ -10,17 +10,15 @@ import { useMap } from "react-leaflet";
 import L from "leaflet";
 import { cellToBoundary } from "h3-js";
 import { HEX_HEATMAP } from "../../colors";
-import type { HexOverlay } from "../../types";
+import { useWebSocketContext } from "../../context/WebSocketContext";
 
-interface HexHeatmapLayerProps {
-  hexOverlay: HexOverlay | null | undefined;
-}
-
-export function HexHeatmapLayer({ hexOverlay }: HexHeatmapLayerProps) {
+export function HexHeatmapLayer() {
   const map = useMap();
+  const { currentResolution, setZoom, getHexOverlayForResolution } = useWebSocketContext();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const redrawTimeoutRef = useRef<number | null>(null);
+  const isZoomingRef = useRef(false);
 
   // Initialize canvas once
   useEffect(() => {
@@ -48,6 +46,12 @@ export function HexHeatmapLayer({ hexOverlay }: HexHeatmapLayerProps) {
     };
   }, [map]);
 
+  // Send initial zoom on mount
+  useEffect(() => {
+    setZoom(Math.round(map.getZoom()));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map]);
+
   // Color and opacity calculation with log scale
   const getColorAndOpacity = useCallback(
     (votes: number, maxVotes: number) => {
@@ -70,7 +74,7 @@ export function HexHeatmapLayer({ hexOverlay }: HexHeatmapLayerProps) {
     []
   );
 
-  // Redraw function
+  // Redraw function - uses currentResolution to get the right hex overlay
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
     const ctx = ctxRef.current;
@@ -86,7 +90,11 @@ export function HexHeatmapLayer({ hexOverlay }: HexHeatmapLayerProps) {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (!hexOverlay?.hexes || Object.keys(hexOverlay.hexes).length === 0) {
+    // Get hex overlay for current resolution
+    const hexOverlay = getHexOverlayForResolution(currentResolution);
+    const hexCount = hexOverlay?.hexes ? Object.keys(hexOverlay.hexes).length : 0;
+    console.log(`[HEXLAYER] Redrawing res=${currentResolution}, hexCount=${hexCount}`);
+    if (!hexOverlay?.hexes || hexCount === 0) {
       return;
     }
 
@@ -134,7 +142,7 @@ export function HexHeatmapLayer({ hexOverlay }: HexHeatmapLayerProps) {
 
     // Reset globalAlpha after drawing all hexes
     ctx.globalAlpha = 1.0;
-  }, [map, hexOverlay, getColorAndOpacity]);
+  }, [map, currentResolution, getHexOverlayForResolution, getColorAndOpacity]);
 
   // Schedule redraw with requestAnimationFrame
   const scheduleRedraw = useCallback(() => {
@@ -146,21 +154,61 @@ export function HexHeatmapLayer({ hexOverlay }: HexHeatmapLayerProps) {
 
   // Redraw on map movement
   useEffect(() => {
-    map.on("moveend", scheduleRedraw);
-    map.on("zoomend", scheduleRedraw);
+    const canvas = canvasRef.current;
+    const ctx = ctxRef.current;
+
+    const handleZoomStart = () => {
+      // Mark that we're zooming - skip moveend redraws until zoom completes
+      isZoomingRef.current = true;
+      console.log(`[HEXLAYER] ZOOM START - clearing canvas`);
+      // Clear canvas immediately on zoom start
+      if (canvas && ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    };
+
+    const handleZoomEnd = () => {
+      const newZoom = Math.round(map.getZoom());
+      console.log(`[HEXLAYER] ZOOM END - zoom=${newZoom}, scheduling redraw`);
+      // Update zoom in context - useEffect will redraw when currentResolution changes
+      setZoom(newZoom);
+      // Always schedule a redraw after zoom ends
+      scheduleRedraw();
+      // Clear zooming flag after a microtask to let state update first
+      queueMicrotask(() => {
+        isZoomingRef.current = false;
+      });
+    };
+
+    const handleMoveEnd = () => {
+      // Skip moveend during zoom - the resolution useEffect will handle redraw
+      if (isZoomingRef.current) return;
+      scheduleRedraw();
+    };
+
+    map.on("moveend", handleMoveEnd);
+    map.on("zoomstart", handleZoomStart);
+    map.on("zoomend", handleZoomEnd);
     map.on("resize", scheduleRedraw);
 
     return () => {
-      map.off("moveend", scheduleRedraw);
-      map.off("zoomend", scheduleRedraw);
+      map.off("moveend", handleMoveEnd);
+      map.off("zoomstart", handleZoomStart);
+      map.off("zoomend", handleZoomEnd);
       map.off("resize", scheduleRedraw);
     };
-  }, [map, scheduleRedraw]);
+  }, [map, scheduleRedraw, setZoom]);
 
-  // Redraw when data changes
+  // Redraw when resolution changes (hotswap)
+  useEffect(() => {
+    console.log(`[HEXLAYER] Resolution changed to ${currentResolution}, redrawing`);
+    scheduleRedraw();
+  }, [currentResolution, scheduleRedraw]);
+
+  // Redraw when hex data changes
   useEffect(() => {
     scheduleRedraw();
-  }, [hexOverlay, scheduleRedraw]);
+  }, [getHexOverlayForResolution, scheduleRedraw]);
 
   return null;
 }

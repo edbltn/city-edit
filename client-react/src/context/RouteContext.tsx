@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { CONFIG } from "../config";
+import { getDefaultVoteType } from "../constants/voteTypes";
 import type {
   TransportMode,
   LatLng,
@@ -33,11 +34,15 @@ interface RouteContextValue {
   ghostWaypoints: LatLng[];
   splitDesirePaths: SplitDesirePath[];
   isCalculatingSplit: boolean;
+  voteType: string;
+  pointType: "route" | "point";
   suppressNextClick: () => boolean;
-  setStartPoint: (coords: LatLng, fromDrag?: boolean) => void;
-  setEndPoint: (coords: LatLng, fromDrag?: boolean) => void;
+  setStartPoint: (coords: LatLng) => void;
+  setEndPoint: (coords: LatLng) => void;
   setMode: (mode: TransportMode) => void;
   clearPoints: () => void;
+  clearStart: () => void;
+  clearEnd: () => void;
   clearError: () => void;
   addWaypoint: (coords: LatLng) => void;
   updateWaypoint: (index: number, coords: LatLng) => void;
@@ -45,37 +50,41 @@ interface RouteContextValue {
   castVote: () => Promise<void>;
   insertWaypointAtSegment: (segmentIndex: number, position: LatLng) => Promise<void>;
   updateGhostWaypoint: (index: number, position: LatLng) => Promise<void>;
+  removeGhostWaypoint: (index: number) => void;
   clearSplitPaths: () => void;
   clearSuppressClick: () => void;
   setSuppressClick: () => void;
+  setVoteType: (voteType: string) => void;
 }
 
 const RouteContext = createContext<RouteContextValue | null>(null);
 
 export function RouteProvider({ children }: { children: ReactNode }) {
-  const [start, setStart] = useState<RoutePoint>({
-    coords: null,
-    timestamp: null,
-  });
+  // Core state
+  const [start, setStart] = useState<RoutePoint>({ coords: null, timestamp: null });
   const [end, setEnd] = useState<RoutePoint>({ coords: null, timestamp: null });
   const [mode, setModeState] = useState<TransportMode>("bike");
   const [waypoints, setWaypoints] = useState<LatLng[]>([]);
-  const [hasVoted, setHasVoted] = useState(false);
-  const [isVoting, setIsVoting] = useState(false);
   const [ghostWaypoints, setGhostWaypoints] = useState<LatLng[]>([]);
   const [splitDesirePaths, setSplitDesirePaths] = useState<SplitDesirePath[]>([]);
   const [isCalculatingSplit, setIsCalculatingSplit] = useState(false);
+  const [hasVoted, setHasVoted] = useState(false);
+  const [isVoting, setIsVoting] = useState(false);
+  const [voteType, setVoteTypeState] = useState<string>(() => getDefaultVoteType("bike", "route"));
 
-  // Use a ref for click suppression so it takes effect immediately (not async like state)
+  // Ref for click suppression (needs immediate effect, not async like state)
   const suppressNextClickRef = useRef(false);
 
-  // Refs to track previous values for detecting new points vs drags
-  const prevStartCoordsRef = useRef<LatLng | null>(null);
-  const prevEndCoordsRef = useRef<LatLng | null>(null);
+  // Ref to track ghost waypoints for reading in effects without triggering re-runs
   const ghostWaypointsRef = useRef<LatLng[]>([]);
-  const fromDragRef = useRef(false);
 
-  // Keep ghostWaypointsRef in sync with state
+  // Ref to track if we're handling point removal (skip main effect)
+  const handlingRemovalRef = useRef(false);
+
+  // Route version counter - increments when path changes, used to detect stale votes
+  const routeVersionRef = useRef(0);
+
+  // Keep ghostWaypointsRef in sync
   useEffect(() => {
     ghostWaypointsRef.current = ghostWaypoints;
   }, [ghostWaypoints]);
@@ -92,13 +101,63 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     clearError,
   } = useRouteCalculation();
 
-  const setStartPoint = useCallback((coords: LatLng, fromDrag = false) => {
-    fromDragRef.current = fromDrag;
+  // Compute point type based on whether both points are set
+  const pointType: "route" | "point" = start.coords && end.coords ? "route" : "point";
+
+  // ============================================
+  // Helper: Calculate all route segments for split paths
+  // ============================================
+  const calculateAllSegments = useCallback(async (points: LatLng[]): Promise<SplitDesirePath[]> => {
+    if (points.length < 2) return [];
+
+    const fetchPromises = [];
+    for (let i = 0; i < points.length - 1; i++) {
+      fetchPromises.push(
+        fetch(`${CONFIG.apiUrl}/routes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            start: [points[i].lat, points[i].lng],
+            end: [points[i + 1].lat, points[i + 1].lng],
+            mode,
+            waypoints: []
+          })
+        })
+      );
+    }
+
+    const responses = await Promise.all(fetchPromises);
+    for (const response of responses) {
+      if (!response.ok) throw new Error("Failed to calculate split paths");
+    }
+
+    const allData = await Promise.all(responses.map(r => r.json()));
+    const splitPaths: SplitDesirePath[] = [];
+
+    for (let i = 0; i < allData.length; i++) {
+      const data = allData[i];
+      const geometry = mode === "walk" ? data.route?.geometry : data.desire_path?.geometry;
+      if (geometry) {
+        splitPaths.push({
+          id: `split-${i}`,
+          segmentIndex: i,
+          geometry,
+          segments: data.desire_path_segments || []
+        });
+      }
+    }
+
+    return splitPaths;
+  }, [mode]);
+
+  // ============================================
+  // Simple setters
+  // ============================================
+  const setStartPoint = useCallback((coords: LatLng) => {
     setStart({ coords, timestamp: Date.now() });
   }, []);
 
-  const setEndPoint = useCallback((coords: LatLng, fromDrag = false) => {
-    fromDragRef.current = fromDrag;
+  const setEndPoint = useCallback((coords: LatLng) => {
     setEnd({ coords, timestamp: Date.now() });
   }, []);
 
@@ -131,265 +190,311 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     suppressNextClickRef.current = true;
   }, []);
 
-  // Getter for suppressNextClick - reads from ref for immediate effect
   const suppressNextClick = useCallback(() => {
     return suppressNextClickRef.current;
   }, []);
 
-  // Helper to calculate all route segments given a list of points
-  const calculateAllSegments = useCallback(async (points: LatLng[]): Promise<SplitDesirePath[]> => {
-    if (points.length < 2) return [];
+  const setVoteType = useCallback((newVoteType: string) => {
+    setVoteTypeState(newVoteType);
+    // Allow re-voting with a different suggestion
+    setHasVoted(false);
+  }, []);
 
-    // Calculate N-1 routes in parallel for N points
-    const fetchPromises = [];
-    for (let i = 0; i < points.length - 1; i++) {
-      fetchPromises.push(
-        fetch(`${CONFIG.apiUrl}/routes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            start: [points[i].lat, points[i].lng],
-            end: [points[i + 1].lat, points[i + 1].lng],
-            mode,
-            waypoints: []
-          })
-        })
-      );
-    }
-
-    const responses = await Promise.all(fetchPromises);
-
-    // Check all responses succeeded
-    for (const response of responses) {
-      if (!response.ok) {
-        throw new Error("Failed to calculate split paths");
-      }
-    }
-
-    const dataPromises = responses.map(r => r.json());
-    const allData = await Promise.all(dataPromises);
-
-    // Build split paths from response data
-    const splitPaths: SplitDesirePath[] = [];
-    for (let i = 0; i < allData.length; i++) {
-      const data = allData[i];
-      // For walk mode, use route geometry; for other modes, use desire_path geometry
-      const geometry = mode === "walk" ? data.route?.geometry : data.desire_path?.geometry;
-      if (geometry) {
-        splitPaths.push({
-          id: `split-${i}`,
-          segmentIndex: i,
-          geometry,
-          segments: data.desire_path_segments || []
-        });
-      }
-    }
-
-    return splitPaths;
-  }, [mode]);
-
-  // Insert a new waypoint at the given segment index
-  const insertWaypointAtSegment = useCallback(async (segmentIndex: number, position: LatLng) => {
-    if (!start.coords || !end.coords) return;
-
-    // Suppress the click event that follows mouseup on ghost pin drop
-    suppressNextClickRef.current = true;
-
-    setIsCalculatingSplit(true);
-    try {
-      // Insert the new waypoint at the appropriate position
-      const newWaypoints = [...ghostWaypoints];
-      newWaypoints.splice(segmentIndex, 0, position);
-
-      // Build the full list of points: start → waypoints → end
-      const allPoints = [start.coords, ...newWaypoints, end.coords];
-
-      const splitPaths = await calculateAllSegments(allPoints);
-
-      if (splitPaths.length === newWaypoints.length + 1) {
-        setGhostWaypoints(newWaypoints);
-        setSplitDesirePaths(splitPaths);
-        setHasVoted(false);
-      }
-    } catch (error) {
-      console.error("Failed to calculate split paths:", error);
-    } finally {
-      setIsCalculatingSplit(false);
-    }
-  }, [start.coords, end.coords, ghostWaypoints, calculateAllSegments]);
-
-  // Update an existing ghost waypoint position
-  const updateGhostWaypoint = useCallback(async (index: number, position: LatLng) => {
-    if (!start.coords || !end.coords) return;
-    if (index < 0 || index >= ghostWaypoints.length) return;
-
-    // Suppress the click event that follows mouseup
-    suppressNextClickRef.current = true;
-
-    setIsCalculatingSplit(true);
-    try {
-      // Update the waypoint at the given index
-      const newWaypoints = [...ghostWaypoints];
-      newWaypoints[index] = position;
-
-      // Build the full list of points: start → waypoints → end
-      const allPoints = [start.coords, ...newWaypoints, end.coords];
-
-      const splitPaths = await calculateAllSegments(allPoints);
-
-      if (splitPaths.length === newWaypoints.length + 1) {
-        setGhostWaypoints(newWaypoints);
-        setSplitDesirePaths(splitPaths);
-        setHasVoted(false);
-      }
-    } catch (error) {
-      console.error("Failed to recalculate split paths:", error);
-    } finally {
-      setIsCalculatingSplit(false);
-    }
-  }, [start.coords, end.coords, ghostWaypoints, calculateAllSegments]);
-
+  // ============================================
+  // Clear all points
+  // ============================================
   const clearPoints = useCallback(() => {
     setStart({ coords: null, timestamp: null });
     setEnd({ coords: null, timestamp: null });
     setWaypoints([]);
-    setHasVoted(false);
     setGhostWaypoints([]);
     setSplitDesirePaths([]);
+    routeVersionRef.current++;
+    setHasVoted(false);
+    setIsVoting(false);
     clearRoute();
   }, [clearRoute]);
 
+  // ============================================
+  // Insert ghost waypoint at segment (drag on path)
+  // ============================================
+  const insertWaypointAtSegment = useCallback(async (segmentIndex: number, position: LatLng) => {
+    if (!start.coords || !end.coords) return;
+
+    suppressNextClickRef.current = true;
+
+    // Insert waypoint immediately so it appears right away
+    const newWaypoints = [...ghostWaypoints];
+    newWaypoints.splice(segmentIndex, 0, position);
+    setGhostWaypoints(newWaypoints);
+
+    // Path changed - reset vote state immediately
+    routeVersionRef.current++;
+    setHasVoted(false);
+    setIsVoting(false);
+
+    // Clear paths immediately - they'll reappear when calculation completes
+    setSplitDesirePaths([]);
+    setIsCalculatingSplit(true);
+
+    try {
+      const allPoints = [start.coords, ...newWaypoints, end.coords];
+      const splitPaths = await calculateAllSegments(allPoints);
+
+      if (splitPaths.length === newWaypoints.length + 1) {
+        setSplitDesirePaths(splitPaths);
+      }
+    } catch (err) {
+      console.error("Failed to calculate split paths:", err);
+    } finally {
+      setIsCalculatingSplit(false);
+    }
+  }, [start.coords, end.coords, ghostWaypoints, calculateAllSegments]);
+
+  // ============================================
+  // Update ghost waypoint position (drag existing waypoint)
+  // ============================================
+  const updateGhostWaypoint = useCallback(async (index: number, position: LatLng) => {
+    if (!start.coords || !end.coords) return;
+    if (index < 0 || index >= ghostWaypoints.length) return;
+
+    suppressNextClickRef.current = true;
+
+    // Update ghost waypoint position immediately so marker doesn't snap back
+    const newWaypoints = [...ghostWaypoints];
+    newWaypoints[index] = position;
+    setGhostWaypoints(newWaypoints);
+
+    // Path changed - reset vote state immediately
+    routeVersionRef.current++;
+    setHasVoted(false);
+    setIsVoting(false);
+
+    // Clear paths immediately - they'll reappear when calculation completes
+    setSplitDesirePaths([]);
+    setIsCalculatingSplit(true);
+
+    try {
+      const allPoints = [start.coords, ...newWaypoints, end.coords];
+      const splitPaths = await calculateAllSegments(allPoints);
+
+      if (splitPaths.length === newWaypoints.length + 1) {
+        setSplitDesirePaths(splitPaths);
+      }
+    } catch (err) {
+      console.error("Failed to recalculate split paths:", err);
+    } finally {
+      setIsCalculatingSplit(false);
+    }
+  }, [start.coords, end.coords, ghostWaypoints, calculateAllSegments]);
+
+  // ============================================
+  // Remove any point (unified logic)
+  // All points conceptually: [start, ...ghostWaypoints, end]
+  // After removal: reassign based on count
+  // ============================================
+  const removePoint = useCallback((which: "start" | "end" | number) => {
+    // Build ordered point list
+    const allPoints: LatLng[] = [];
+    if (start.coords) allPoints.push(start.coords);
+    allPoints.push(...ghostWaypoints);
+    if (end.coords) allPoints.push(end.coords);
+
+    // Determine index to remove
+    let removeIndex: number;
+    if (which === "start") {
+      removeIndex = 0;
+    } else if (which === "end") {
+      removeIndex = allPoints.length - 1;
+    } else {
+      // Ghost waypoint index: offset by 1 if start exists
+      removeIndex = start.coords ? which + 1 : which;
+    }
+
+    const remaining = allPoints.filter((_, i) => i !== removeIndex);
+
+    // Mark that we're handling removal (skip main effect)
+    handlingRemovalRef.current = true;
+    routeVersionRef.current++;
+    setHasVoted(false);
+    setIsVoting(false);
+
+    // Clear paths immediately - they'll reappear when calculation completes
+    clearRoute();
+    setSplitDesirePaths([]);
+
+    if (remaining.length === 0) {
+      // No points left
+      setStart({ coords: null, timestamp: null });
+      setEnd({ coords: null, timestamp: null });
+      setGhostWaypoints([]);
+    } else if (remaining.length === 1) {
+      // One point left → just start, no route
+      setStart({ coords: remaining[0], timestamp: Date.now() });
+      setEnd({ coords: null, timestamp: null });
+      setGhostWaypoints([]);
+    } else {
+      // Two or more: first=start, last=end, middle=ghostWaypoints
+      const newStart = remaining[0];
+      const newEnd = remaining[remaining.length - 1];
+      const newGhostWaypoints = remaining.slice(1, -1);
+
+      setStart({ coords: newStart, timestamp: Date.now() });
+      setEnd({ coords: newEnd, timestamp: Date.now() });
+      setGhostWaypoints(newGhostWaypoints);
+
+      // Recalculate based on new structure
+      if (newGhostWaypoints.length > 0) {
+        // Has ghost waypoints: calculate split paths
+        setIsCalculatingSplit(true);
+        calculateAllSegments(remaining)
+          .then(splitPaths => {
+            if (splitPaths.length === newGhostWaypoints.length + 1) {
+              setSplitDesirePaths(splitPaths);
+            }
+          })
+          .catch(console.error)
+          .finally(() => setIsCalculatingSplit(false));
+      } else {
+        // Just start and end: calculate main route
+        calculateRoute({ start: newStart, end: newEnd, mode, waypoints: [] });
+      }
+    }
+  }, [start.coords, end.coords, ghostWaypoints, mode, calculateAllSegments, calculateRoute, clearRoute]);
+
+  // Convenience wrappers
+  const clearStart = useCallback(() => removePoint("start"), [removePoint]);
+  const clearEnd = useCallback(() => removePoint("end"), [removePoint]);
+  const removeGhostWaypoint = useCallback((index: number) => removePoint(index), [removePoint]);
+
+  // ============================================
+  // Cast vote
+  // ============================================
   const castVote = useCallback(async () => {
-    // Use split path segments if available, otherwise use desire path segments
     const segmentsToVote = splitDesirePaths.length > 0
       ? splitDesirePaths.flatMap(sp => sp.segments)
       : desirePathSegments;
 
-    if (!segmentsToVote || segmentsToVote.length === 0 || !voteMode) {
+    const isPointVote = start.coords && !end.coords;
+
+    if (!isPointVote && (!segmentsToVote || segmentsToVote.length === 0 || !voteMode)) {
+      return;
+    }
+    if (isPointVote && !start.coords) {
       return;
     }
 
+    // Capture route version at vote start
+    const voteRouteVersion = routeVersionRef.current;
+
     setIsVoting(true);
     try {
+      const body: Record<string, unknown> = {
+        mode: voteMode || mode,
+        vote_type: voteType,
+      };
+
+      if (isPointVote && start.coords) {
+        body.point = [start.coords.lat, start.coords.lng];
+      } else {
+        body.segments = segmentsToVote;
+      }
+
       const response = await fetch(`${CONFIG.apiUrl}/vote`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          segments: segmentsToVote,
-          mode: voteMode,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
 
       if (!response.ok) {
         throw new Error(`Vote failed: ${response.statusText}`);
       }
 
-      setHasVoted(true);
-    } catch (error) {
-      console.error("Failed to cast vote:", error);
+      // Only mark as voted if route hasn't changed during the vote
+      if (routeVersionRef.current === voteRouteVersion) {
+        setHasVoted(true);
+      }
+    } catch (err) {
+      console.error("Failed to cast vote:", err);
     } finally {
       setIsVoting(false);
     }
-  }, [splitDesirePaths, desirePathSegments, voteMode]);
+  }, [splitDesirePaths, desirePathSegments, voteMode, voteType, start.coords, end.coords, mode]);
 
-  // Auto-calculate route when both points are set or mode changes
-  // Preserve ghost waypoints on mode change or drag, clear only on click
+  // ============================================
+  // Main calculation effect
+  // Runs when start, end, or mode changes
+  // Uses current ghost waypoints to determine what to calculate
+  // ============================================
   useEffect(() => {
-    // Check if this update came from a drag (vs a click or mode change)
-    const isDrag = fromDragRef.current;
-    fromDragRef.current = false; // Reset for next update
+    // Skip if removal is being handled (it does its own calculation)
+    if (handlingRemovalRef.current) {
+      handlingRemovalRef.current = false;
+      return;
+    }
 
-    // Detect if start or end coords changed
-    const prevStart = prevStartCoordsRef.current;
-    const prevEnd = prevEndCoordsRef.current;
-    const startChanged = start.coords !== prevStart &&
-      (start.coords === null || prevStart === null ||
-       start.coords.lat !== prevStart.lat || start.coords.lng !== prevStart.lng);
-    const endChanged = end.coords !== prevEnd &&
-      (end.coords === null || prevEnd === null ||
-       end.coords.lat !== prevEnd.lat || end.coords.lng !== prevEnd.lng);
-
-    // Update refs for next run
-    prevStartCoordsRef.current = start.coords;
-    prevEndCoordsRef.current = end.coords;
-
-    // Preserve ghost waypoints only on: mode change or drag
-    // Clear ghost waypoints on: click (new point)
-    const shouldPreserveGhostWaypoints = isDrag || (!startChanged && !endChanged);
-
-    // Always clear the main route first
-    clearRoute();
-    // Always clear regular waypoints
-    setWaypoints([]);
-    // Always reset vote status
+    // Reset vote status on any change
+    routeVersionRef.current++;
     setHasVoted(false);
+    setIsVoting(false);
+    setWaypoints([]);
 
-    // Clear ghost waypoints on click (not drag, not mode change)
-    if (!shouldPreserveGhostWaypoints) {
+    // Need both start and end to calculate
+    if (!start.coords || !end.coords) {
+      // Clear everything - can't have a route or ghost waypoints without both endpoints
+      clearRoute();
       setGhostWaypoints([]);
       setSplitDesirePaths([]);
+      return;
     }
 
-    if (start.coords && end.coords) {
-      // Read from ref to avoid adding ghostWaypoints as a dependency
-      const currentGhostWaypoints = ghostWaypointsRef.current;
+    // Clear existing paths immediately - they'll reappear when calculation completes
+    clearRoute();
+    setSplitDesirePaths([]);
 
-      // Always calculate the main route
-      calculateRoute({ start: start.coords, end: end.coords, mode, waypoints: [] });
+    const currentGhostWaypoints = ghostWaypointsRef.current;
 
-      if (currentGhostWaypoints.length > 0 && shouldPreserveGhostWaypoints) {
-        // Clear old split paths before recalculating to avoid stale styling
-        setSplitDesirePaths([]);
-        setIsCalculatingSplit(true);
-        // Recalculate all segments with preserved ghost waypoints
-        const allPoints = [start.coords, ...currentGhostWaypoints, end.coords];
-        calculateAllSegments(allPoints)
-          .then(splitPaths => {
-            if (splitPaths.length === currentGhostWaypoints.length + 1) {
-              setSplitDesirePaths(splitPaths);
-            }
-          })
-          .catch(console.error)
-          .finally(() => setIsCalculatingSplit(false));
-      }
+    // Always calculate the main route
+    calculateRoute({ start: start.coords, end: end.coords, mode, waypoints: [] });
+
+    // If there are ghost waypoints, also calculate split paths
+    if (currentGhostWaypoints.length > 0) {
+      setIsCalculatingSplit(true);
+      const allPoints = [start.coords, ...currentGhostWaypoints, end.coords];
+      calculateAllSegments(allPoints)
+        .then(splitPaths => {
+          if (splitPaths.length === currentGhostWaypoints.length + 1) {
+            setSplitDesirePaths(splitPaths);
+          }
+        })
+        .catch(console.error)
+        .finally(() => setIsCalculatingSplit(false));
     }
-  }, [start.coords, end.coords, mode, calculateRoute, clearRoute, calculateAllSegments]);
+  }, [start, end, mode, calculateRoute, clearRoute, calculateAllSegments]);
 
-  // Global mouse event tracking
-  useEffect(() => {
-    const logEvent = (e: MouseEvent) => {
-      console.log(`[MOUSE-${e.type}]`, {
-        target: e.target instanceof Element ? e.target.className : 'unknown',
-        button: e.button,
-        clientX: e.clientX,
-        clientY: e.clientY,
-        timestamp: Date.now()
-      });
-    };
-
-    document.addEventListener('click', logEvent, true);
-    document.addEventListener('mousedown', logEvent, true);
-    document.addEventListener('mouseup', logEvent, true);
-
-    return () => {
-      document.removeEventListener('click', logEvent, true);
-      document.removeEventListener('mousedown', logEvent, true);
-      document.removeEventListener('mouseup', logEvent, true);
-    };
-  }, []);
-
-  // Recalculate route when waypoints change (don't clear waypoints)
-  // Also reset vote status when route changes due to waypoints
+  // ============================================
+  // Recalculate when waypoints change
+  // ============================================
   useEffect(() => {
     if (start.coords && end.coords && waypoints.length > 0) {
-      setHasVoted(false);
+      routeVersionRef.current++;
+    setHasVoted(false);
+    setIsVoting(false);
       calculateRoute({ start: start.coords, end: end.coords, mode, waypoints });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [waypoints]);
 
+  // ============================================
+  // Auto-update vote type when mode or pointType changes
+  // ============================================
+  useEffect(() => {
+    setVoteTypeState(getDefaultVoteType(mode, pointType));
+  }, [mode, pointType]);
+
+  // ============================================
+  // Context value
+  // ============================================
   const value = useMemo(
     () => ({
       start,
@@ -405,11 +510,15 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       ghostWaypoints,
       splitDesirePaths,
       isCalculatingSplit,
+      voteType,
+      pointType,
       suppressNextClick,
       setStartPoint,
       setEndPoint,
       setMode,
       clearPoints,
+      clearStart,
+      clearEnd,
       clearError,
       addWaypoint,
       updateWaypoint,
@@ -417,9 +526,11 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       castVote,
       insertWaypointAtSegment,
       updateGhostWaypoint,
+      removeGhostWaypoint,
       clearSplitPaths,
       clearSuppressClick,
       setSuppressClick,
+      setVoteType,
     }),
     [
       start,
@@ -435,11 +546,15 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       ghostWaypoints,
       splitDesirePaths,
       isCalculatingSplit,
+      voteType,
+      pointType,
       suppressNextClick,
       setStartPoint,
       setEndPoint,
       setMode,
       clearPoints,
+      clearStart,
+      clearEnd,
       clearError,
       addWaypoint,
       updateWaypoint,
@@ -447,9 +562,11 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       castVote,
       insertWaypointAtSegment,
       updateGhostWaypoint,
+      removeGhostWaypoint,
       clearSplitPaths,
       clearSuppressClick,
       setSuppressClick,
+      setVoteType,
     ]
   );
 

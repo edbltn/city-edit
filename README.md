@@ -7,7 +7,7 @@ Crowdsourced map of how people actually travel through a city.
 ### Prerequisites
 - Redis
 - Python 3.12+
-- [Bun](https://bun.sh/) (`curl -fsSL https://bun.sh/install | bash`)
+- Node.js 20+
 
 ```bash
 # Terminal 1: Start Redis
@@ -19,12 +19,12 @@ cp .env.example .env  # Add your ORS_API_KEY
 python3 -m venv env
 source env/bin/activate
 pip install uv
-uv pip compile requirements.in > requirements.txt && pip install -r requirements.txt
+uv pip compile requirements.in -o requirements.txt && uv pip install -r requirements.txt
 python app.py
 
 # Terminal 3: Start frontend (auto-reloads on file changes)
-cd client
-bun run dev
+cd client-react
+npm run dev
 ```
 
 Open http://localhost:3000

@@ -6,8 +6,6 @@ Simple approach: vote for every segment along the desire path (walk route).
 This shows where people actually want to go.
 """
 
-from tiles import coords_to_tile
-
 # Redis key for segment votes (must match app.py)
 SEGMENT_VOTES_KEY = "segment_votes"
 

@@ -14,8 +14,10 @@
   --font-editorial: "Playfair Display", Georgia, serif;
 
   /* Typography Scale */
+  --font-size-2xs: 10px;    /* mobile compact */
   --font-size-xs: 11px;     /* attribution */
   --font-size-sm: 14px;     /* secondary text */
+  --font-size-sm-mobile: 13px; /* mobile buttons */
   --font-size-md: 15px;     /* labels, legend */
   --font-size-base: 16px;   /* primary controls */
 
@@ -86,8 +88,7 @@ body {
 
 #app {
   height: 100%;
-  display: flex;
-  flex-direction: column;
+  position: relative;
 }
 
 
@@ -106,7 +107,6 @@ body {
   border-bottom: 1px solid var(--hairline);
   position: relative;
   z-index: var(--z-topbar);
-  flex-shrink: 0;
 }
 
 .topbar-row {
@@ -216,6 +216,8 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  position: relative;
+  min-height: var(--control-height);
 }
 
 .route-field {
@@ -227,7 +229,7 @@ body {
 }
 
 .route-field-label {
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   letter-spacing: 0.3px;
   color: var(--ink);
@@ -297,7 +299,7 @@ body {
   border-radius: var(--radius-md);
   background: var(--paper);
   font-family: var(--font-ui);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   letter-spacing: 0.3px;
   color: var(--ink);
@@ -315,7 +317,7 @@ body {
 }
 
 .mode-icon {
-  font-size: 16px;
+  font-size: var(--font-size-base);
   line-height: 1;
 }
 
@@ -344,6 +346,11 @@ body {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
+  z-index: 9999 !important;
+}
+
+.mode-selector.active {
+  z-index: 9999 !important;
 }
 
 .mode-option {
@@ -352,10 +359,22 @@ body {
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-size-sm);
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: 0.3px;
   color: var(--ink);
   cursor: pointer;
   transition: background 0.15s ease;
+  text-align: left;
+}
+
+.mode-option .mode-icon {
+  width: 20px;
+  text-align: left;
+}
+
+.mode-option .mode-label {
+  flex: 1;
+  text-align: left;
 }
 
 .mode-option:first-child {
@@ -441,6 +460,38 @@ body {
   background: #5DADE2;  /* Light blue */
 }
 
+.legend-line-bike {
+  background: #3CB371;  /* Green - bike lane green */
+  width: 20px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.legend-line-drive {
+  background: linear-gradient(90deg, #343148, #343148);  /* Dark asphalt */
+  position: relative;
+  width: 20px;
+  height: 7px;
+  border-radius: 2px;
+}
+
+.legend-line-drive::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  right: 2px;
+  height: 1.5px;
+  background: repeating-linear-gradient(
+    90deg,
+    #E3BD33,
+    #E3BD33 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  transform: translateY(-50%);
+}
+
 .legend-line-desire {
   background: linear-gradient(90deg, #F5D76E, #D4A017);  /* Gold gradient */
   box-shadow: 0 0 4px rgba(227, 189, 51, 0.5);  /* Subtle glow */
@@ -477,7 +528,7 @@ body {
 
 .legend-coords {
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--ink);
 }
 
@@ -501,7 +552,7 @@ body {
   border-radius: var(--radius-md);
   background: var(--paper);
   font-family: var(--font-ui);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   letter-spacing: 0.3px;
   color: var(--ink);
@@ -545,14 +596,17 @@ body {
    ========================================================================== */
 
 #map {
-  flex: 1;
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: var(--z-map);
-  min-height: 0;
 }
 
 .leaflet-container {
   z-index: var(--z-map) !important;
+  cursor: crosshair !important;
 }
 
 .leaflet-pane {
@@ -635,6 +689,12 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Grabbing cursor during drag */
+.leaflet-dragging .desire-path-interactive,
+.leaflet-dragging .split-path-interactive {
+  cursor: grabbing !important;
+}
+
 
 /* ==========================================================================
    Map Markers
@@ -643,6 +703,12 @@ body {
 .custom-marker {
   background: transparent !important;
   border: none !important;
+  cursor: grab !important;
+}
+
+.custom-marker:active,
+.leaflet-dragging .custom-marker {
+  cursor: grabbing !important;
 }
 
 .pin-container {
@@ -1058,10 +1124,14 @@ body {
   display: none;
   align-items: center;
   gap: var(--space-2);
-  padding: 0 var(--space-3);
+  padding: 10px var(--space-5);
   font-size: var(--font-size-sm);
   color: var(--ink);
-  opacity: 0.7;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  height: var(--control-height);
+  box-sizing: border-box;
 }
 
 .calculating-indicator.active {
@@ -1105,10 +1175,6 @@ body {
   .route-legend {
     width: 100%;
     margin-top: var(--space-1);
-  }
-
-  .calculating-indicator {
-    width: 100%;
   }
 }
 
@@ -1168,27 +1234,45 @@ body {
   }
 }
 
-/* Mobile: tighter spacing, smaller logo */
+/* Mobile: tighter spacing, smaller controls */
 @media (max-width: 540px) {
+  :root {
+    --control-height: 36px;
+  }
+
   .topbar {
-    padding: var(--space-3) var(--space-4);
+    padding: var(--space-2) var(--space-3);
   }
 
   .topbar h1 {
-    font-size: 16px;
+    font-size: 15px;
   }
 
   .logo-icon,
   .logo-icon-shadow {
-    height: 28px;
-  }
-
-  .mode-btn {
-    padding: 10px var(--space-3);
+    height: 24px;
   }
 
   .btn-header {
-    padding: 10px var(--space-3);
+    font-size: var(--font-size-sm-mobile);
+    padding: 6px 10px;
+  }
+
+  .mode-btn {
+    font-size: var(--font-size-sm-mobile);
+    padding: 6px 10px;
+  }
+
+  .mode-icon {
+    font-size: 14px;
+  }
+
+  .legend-label {
+    font-size: 12px;
+  }
+
+  .legend-coords {
+    font-size: var(--font-size-xs);
   }
 
   .route-legend {
@@ -1198,8 +1282,26 @@ body {
   }
 }
 
-/* Very small mobile: stack actions vertically */
+/* Very small mobile: stack actions vertically, even more compact */
 @media (max-width: 400px) {
+  :root {
+    --control-height: 34px;
+  }
+
+  .topbar {
+    padding: var(--space-2) var(--space-2);
+  }
+
+  .topbar h1 {
+    font-size: 14px;
+  }
+
+  .btn-header,
+  .mode-btn {
+    font-size: 12px;
+    padding: 5px 8px;
+  }
+
   .route-actions {
     flex-direction: column;
   }

@@ -51,14 +51,29 @@ export interface GeocodeResult {
 }
 
 export interface HexOverlay {
-  hexes: Record<string, number>;
+  res?: number;                      // Resolution level
+  hexes: Record<string, number>;     // Expanded format (used internally)
   max_votes: number;
+}
+
+// Compact format from server (h = array of [hex_id, weight] tuples, m = max_votes)
+export interface HexOverlayCompact {
+  res: number;
+  h: [string, number][];
+  m: number;
 }
 
 export interface MapState {
   revision: number;
   overlays: Record<string, GeoJSONOverlay>;
-  hex_overlay?: HexOverlay;
+  hex_overlays?: Record<number, HexOverlay>;  // All resolutions: {10: {...}, 11: {...}, ...}
+}
+
+// Raw state from server (before parsing)
+export interface RawMapState {
+  revision: number;
+  overlays: Record<string, GeoJSONOverlay>;
+  hex_overlays?: Record<number, HexOverlayCompact>;  // All resolutions in compact format
 }
 
 export interface GeoJSONOverlay {
@@ -85,3 +100,10 @@ export const MODES: ModeOption[] = [
   { mode: "walk", icon: "\u{1F6B6}", label: "Walk" },
   { mode: "drive", icon: "\u{1F697}", label: "Drive" },
 ];
+
+// Vote type suggestion for the selector
+export interface VoteTypeSuggestion {
+  label: string;          // Natural language suggestion, e.g. "Add bike lane"
+  pointType: "route" | "point";  // route = 2 points, point = 1 point
+  modes: TransportMode[]; // Which modes this suggestion appears for
+}

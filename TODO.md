@@ -27,17 +27,11 @@ gcloud run services update desire-path-mapper-prod \
 
 **Important**: ORS_API_KEY must have NO trailing newline or it causes HTTP header errors.
 
-### Cache Busting
-Client JS files use `?v=N` query params for cache busting. After changing JS files, increment the version in:
-- `client/index.html` (app.js import)
-- `client/app.js` (config.js, commute-input.js imports)
-
 ## Future Improvements
 
 ### High Priority
 - [ ] Store env vars in Terraform/Secret Manager so they persist across deploys
 - [ ] Add proper cache headers to nginx config
-- [ ] Add hash-based cache busting (e.g., `app.abc123.js`) instead of manual version bumps
 
 ### Features
 - [ ] Show route distance/duration in UI
@@ -56,7 +50,7 @@ Client JS files use `?v=N` query params for cache busting. After changing JS fil
 ```bash
 redis-server --daemonize yes
 cd server && source env/bin/activate && python app.py
-cd client && npx live-server --port=3000
+cd client-react && npm run dev
 # Open http://localhost:3000
 ```
 

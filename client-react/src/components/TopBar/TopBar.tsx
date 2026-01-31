@@ -2,8 +2,8 @@ import { memo, useState } from "react";
 import { useRoute } from "../../context";
 import { ModeSelector } from "../ModeSelector";
 import { HowItWorksModal } from "../HowItWorksModal";
+import { VoteTypeSelector } from "../VoteTypeSelector";
 import { HexagonIcon } from "./HexagonIcon";
-import { ROUTE_COLORS } from "../../colors";
 import "./TopBar.css";
 
 export const TopBar = memo(function TopBar() {
@@ -16,9 +16,10 @@ export const TopBar = memo(function TopBar() {
     isCalculating,
     isCalculatingSplit,
     routeData,
-    desirePathData,
+    splitDesirePaths,
     hasVoted,
     isVoting,
+    pointType,
     clearPoints,
     castVote,
   } = useRoute();
@@ -30,15 +31,20 @@ export const TopBar = memo(function TopBar() {
     return `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
   };
 
-  // Show walk path legend when in walk mode with route data
-  const showWalkLegend = mode === "walk" && routeData;
-  // Show current/desired path legend when in bike/drive mode with both routes
-  const showSplitLegend = mode !== "walk" && desirePathData && routeData;
-  const modeLegendColor =
-    mode === "bike" ? ROUTE_COLORS.bike.core : ROUTE_COLORS.drive.asphalt;
+  // Can vote once we have a route (2 points), split paths (waypoints), OR a single point (for point votes)
+  const canVote = !!routeData || splitDesirePaths.length > 0 || (pointType === "point" && !!start.coords);
 
-  // For walk mode, the route itself is voteable; for other modes, need desirePathData
-  const canVote = mode === "walk" ? !!routeData : !!desirePathData;
+  // Get legend icon class based on mode
+  const getLegendIcon = () => {
+    if (mode === "walk") {
+      return <span className="legend-dots legend-dots-walk"></span>;
+    }
+    if (mode === "bike") {
+      return <span className="legend-line legend-line-bike"></span>;
+    }
+    // Drive mode
+    return <span className="legend-line legend-line-drive"></span>;
+  };
 
   return (
     <header className="topbar">
@@ -83,34 +89,15 @@ export const TopBar = memo(function TopBar() {
               <span className="legend-icon-slot">
                 <HexagonIcon />
               </span>
-              <span>Most Desired</span>
+              <span>Most Requested</span>
             </div>
-            {showWalkLegend && (
+            {(routeData || splitDesirePaths.length > 0) && (
               <div className="legend-item">
                 <span className="legend-icon-slot">
-                  <span className="legend-dots legend-dots-walk"></span>
+                  {getLegendIcon()}
                 </span>
-                <span>Walk Path</span>
+                <span>Proposed Path</span>
               </div>
-            )}
-            {showSplitLegend && (
-              <>
-                <div className="legend-item">
-                  <span className="legend-icon-slot">
-                    <span
-                      className="legend-line legend-line-mode"
-                      style={{ background: modeLegendColor }}
-                    ></span>
-                  </span>
-                  <span>Current Route</span>
-                </div>
-                <div className="legend-item">
-                  <span className="legend-icon-slot">
-                    <span className="legend-line legend-line-desire"></span>
-                  </span>
-                  <span>Desired Path</span>
-                </div>
-              </>
             )}
           </div>
 
@@ -133,16 +120,27 @@ export const TopBar = memo(function TopBar() {
             </button>
 
             {canVote && (
-              <button
-                className="btn-header btn-vote"
-                onClick={castVote}
-                disabled={hasVoted || isLoading || isVoting}
-              >
-                {isVoting ? "Voting..." : hasVoted ? "Vote Cast!" : "Cast Vote"}
-              </button>
+              <>
+                <VoteTypeSelector />
+                {isLoading ? (
+                  <div className="calculating-indicator active">
+                    <div className="spinner"></div>
+                    <span>Calculating...</span>
+                  </div>
+                ) : (
+                  <button
+                    className="btn-header btn-vote"
+                    onClick={castVote}
+                    disabled={hasVoted || isVoting}
+                  >
+                    {isVoting ? "Voting..." : hasVoted ? "Vote Cast!" : "Cast Vote"}
+                  </button>
+                )}
+              </>
             )}
 
-            {isLoading && (
+            {/* Show calculating indicator when loading a new route (before canVote becomes true) */}
+            {!canVote && isLoading && start.coords && end.coords && (
               <div className="calculating-indicator active">
                 <div className="spinner"></div>
                 <span>Calculating...</span>

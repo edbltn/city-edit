@@ -32,6 +32,10 @@ const DesireLine = () => (
   </span>
 );
 
+const VoteForExample = () => (
+  <span className="inline-btn-example">▾</span>
+);
+
 const VoteButtonExample = () => (
   <span className="inline-btn-example vote-example">Cast Vote</span>
 );
@@ -103,11 +107,17 @@ export const HowItWorksModal = memo(function HowItWorksModal({ isOpen, onClose }
               </li>
               <li>
                 <EndDot />
-                <span>Click again to set your destination</span>
+                <span>Click again to set your destination (or skip for point votes)</span>
               </li>
               <li>
                 <DesireLine />
                 <span>Drag your desired path to match your ideal route</span>
+              </li>
+              <li>
+                <span className="step-icon-slot">
+                  <VoteForExample />
+                </span>
+                <span>Choose what you're voting for (or type your own idea)</span>
               </li>
               <li>
                 <span className="step-icon-slot">
@@ -119,10 +129,25 @@ export const HowItWorksModal = memo(function HowItWorksModal({ isOpen, onClose }
           </section>
 
           <section className="how-it-works-section">
+            <h3>Vote Types</h3>
+            <p>
+              <strong>Route votes</strong>: Vote for infrastructure along a path —
+              bike lanes, crosswalks, or car lanes.
+            </p>
+            <p>
+              <strong>Point votes</strong>: Vote for amenities at a specific location —
+              Citi Bike stations, benches, parking, trees, or EV chargers.
+            </p>
+            <p>
+              You can also type any custom suggestion you like!
+            </p>
+          </section>
+
+          <section className="how-it-works-section">
             <h3>Fair Voting</h3>
             <p>
               The more routes you vote on, the more your total contribution
-              gets diluted. (That way, everyone gets equal representation in the heatmap.)
+              gets diluted (that way, everyone gets equal representation in the heatmap)
             </p>
           </section>
         </div>

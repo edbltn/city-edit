@@ -9,4 +9,7 @@ gunicorn
 python-dotenv
 osmnx
 networkx
+rustworkx
+scikit-learn
 h3
+psycopg2-binary

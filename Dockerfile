@@ -1,46 +1,33 @@
+# Stage 1: Build React
+FROM node:20-alpine AS client-builder
+WORKDIR /app
+COPY client-react/package.json client-react/package-lock.json ./
+RUN npm ci
+COPY client-react/ ./
+RUN npm run build
+
+# Stage 2: Python + Nginx
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Force unbuffered Python output for Cloud Logging
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
 ENV PYTHONUNBUFFERED=1
 
-# Install nginx
-RUN apt-get update && apt-get install -y nginx && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y nginx supervisor curl && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
 COPY server/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN uv pip install --system --no-cache -r requirements.txt gunicorn
 
-# Copy application code
 COPY server/*.py ./
-COPY client/ /usr/share/nginx/html/
+COPY --from=client-builder /app/dist /var/www/html/
 
-# Configure nginx for Cloud Run (single container)
-RUN echo 'events { worker_connections 1024; }\n\
-http {\n\
-    include /etc/nginx/mime.types;\n\
-    server {\n\
-        listen 8080;\n\
-        location / {\n\
-            root /usr/share/nginx/html;\n\
-            index index.html;\n\
-        }\n\
-        location /api/ {\n\
-            proxy_pass http://127.0.0.1:5001;\n\
-        }\n\
-        location = /ws {\n\
-            proxy_pass http://127.0.0.1:5001;\n\
-            proxy_http_version 1.1;\n\
-            proxy_set_header Upgrade $http_upgrade;\n\
-            proxy_set_header Connection "upgrade";\n\
-        }\n\
-    }\n\
-}' > /etc/nginx/nginx.conf
-
-# Start script to run both nginx and Flask
-RUN echo '#!/bin/bash\nnginx && python app.py' > /start.sh && chmod +x /start.sh
+COPY deploy/nginx-cloudrun.conf /etc/nginx/nginx.conf
+COPY deploy/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY deploy/healthcheck.sh /app/deploy/healthcheck.sh
+RUN chmod +x /app/deploy/healthcheck.sh
 
 EXPOSE 8080
 
-CMD ["/start.sh"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

@@ -2,28 +2,26 @@ import json
 import logging
 import os
 import sys
-import threading
 import time
 import traceback
 import hashlib
-import requests
+import threading
 import redis
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sock import Sock
-from roam_cache import (
-    cache_path, get_cached_path, register_path_tiles, extract_waypoint_tiles,
-    cache_mst_segments, build_tile_to_coords_map
-)
-from tiles import coords_to_tile
 from desire_path_voting import compute_desire_path_votes, cast_desire_path_votes, extract_all_segments
 from hex_voting import (
     build_hex_overlay_from_segments,
     get_cached_hex_overlay,
     update_hex_cache_incremental,
     regenerate_hex_cache,
+    rebuild_weighted_hex_cache,
+    ZOOM_TO_RESOLUTION,
+    H3_RESOLUTIONS,
 )
+from database import init_db, record_segment_votes
 
 # Configure logging for Cloud Run (unbuffered, structured)
 logging.basicConfig(
@@ -35,6 +33,10 @@ logger = logging.getLogger(__name__)
 
 # Force unbuffered output for Cloud Run
 sys.stdout.reconfigure(line_buffering=True)
+
+# Import Python router
+from python_router import PythonRouter
+logger.info("[STARTUP] Using Python router (osmnx + rustworkx)")
 
 # Debug: log all environment variables related to Redis
 logger.info(f"[DEBUG] REDIS_HOST from env: {os.environ.get('REDIS_HOST', 'NOT_SET')}")
@@ -51,6 +53,106 @@ sock = Sock(app)
 redis_host = os.environ.get('REDIS_HOST', 'localhost')
 redis_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
 SEGMENT_VOTES_KEY = "segment_votes"
+REDIS_CHANNEL = "state_updates"
+
+# In-memory cache for hex overlays (keyed by "mode:resolution")
+# This avoids Redis round-trips for every WebSocket push
+hex_cache = {}
+hex_cache_revision = 0  # Incremented when cache is invalidated
+
+
+def invalidate_hex_cache_local():
+    """Clear in-memory hex cache (local instance only)."""
+    global hex_cache, hex_cache_revision
+    hex_cache = {}
+    hex_cache_revision += 1
+
+
+def invalidate_hex_cache():
+    """Clear in-memory hex cache and notify other instances via pub/sub."""
+    invalidate_hex_cache_local()
+    # Publish invalidation message so other Flask instances clear their cache
+    try:
+        redis_client.publish(REDIS_CHANNEL, json.dumps({"type": "cache_invalidate"}))
+    except redis.ConnectionError:
+        pass  # If Redis is down, just clear local cache
+
+
+def publish_votes_changed():
+    """Publish votes_changed message to trigger WebSocket broadcasts."""
+    try:
+        rev = redis_client.get("revision") or 1
+        redis_client.publish(REDIS_CHANNEL, json.dumps({
+            "type": "votes_changed",
+            "revision": int(rev)
+        }))
+    except redis.ConnectionError:
+        pass
+
+
+def start_pubsub_listener():
+    """Background thread that listens for pub/sub messages."""
+    def listener():
+        # Create separate connection for pub/sub (required by redis-py)
+        pubsub_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
+        pubsub = pubsub_client.pubsub()
+        pubsub.subscribe(REDIS_CHANNEL)
+        logger.info(f"[PUBSUB] Subscribed to channel: {REDIS_CHANNEL}")
+
+        for message in pubsub.listen():
+            if message["type"] != "message":
+                continue
+            try:
+                data = json.loads(message["data"])
+                msg_type = data.get("type")
+
+                if msg_type == "cache_invalidate":
+                    # Another instance invalidated cache, clear ours too
+                    invalidate_hex_cache_local()
+                    logger.info("[PUBSUB] Received cache_invalidate, cleared local cache")
+                elif msg_type == "votes_changed":
+                    # This triggers WebSocket push - handled by WS handler
+                    pass
+
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"[PUBSUB] Invalid message: {e}")
+
+    thread = threading.Thread(target=listener, daemon=True, name="pubsub-listener")
+    thread.start()
+    return thread
+
+def get_hex_overlay_cached(mode_filter: str, resolution: int) -> dict:
+    """Get hex overlay from in-memory cache, falling back to Redis."""
+    global hex_cache
+    cache_key = f"{mode_filter or 'all'}:{resolution}"
+
+    if cache_key in hex_cache:
+        return hex_cache[cache_key]
+
+    # Load from Redis
+    result = get_cached_hex_overlay(redis_client, mode_filter, resolution)
+    hex_cache[cache_key] = result
+    return result
+
+def clear_hex_cache():
+    """Clear in-memory hex cache to force reload from Redis."""
+    global hex_cache
+    hex_cache = {}
+    logger.info("[HEX_CACHE] Cleared in-memory cache")
+
+def preload_hex_cache():
+    """Preload all resolutions into memory on startup."""
+    global hex_cache
+    hex_cache = {}  # Clear first
+    logger.info("[HEX_CACHE] Preloading hex cache for all resolutions...")
+    for mode in ["bike", "walk", "drive", None]:
+        for res in H3_RESOLUTIONS:
+            cache_key = f"{mode or 'all'}:{res}"
+            result = get_cached_hex_overlay(redis_client, mode, res)
+            hex_count = len(result.get("hexes", {}))
+            hex_cache[cache_key] = result
+            logger.info(f"[HEX_CACHE] {cache_key}: {hex_count} hexes")
+    logger.info(f"[HEX_CACHE] Preloaded {len(hex_cache)} cache entries")
 
 # Log Redis connection info at startup
 logger.info(f"[REDIS] Connecting to Redis at: {redis_host}:6379")
@@ -64,36 +166,18 @@ try:
 except redis.ConnectionError as e:
     logger.error(f"[REDIS] WARNING: Could not connect to Redis at {redis_host}: {e}")
 
-# ORS API keys - comma-separated list for rotation on quota exhaustion
-ORS_API_KEYS = [k.strip() for k in os.environ.get('ORS_API_KEYS', '').split(',') if k.strip()]
-_ors_key_index = 0
-_ors_key_lock = threading.Lock()
-logger.info(f"[STARTUP] ORS API keys configured: {len(ORS_API_KEYS)}")
+# Initialize Python router
+router = PythonRouter(data_dir="osm_data", redis_client=redis_client)
+logger.info("[STARTUP] Python router initialized")
 
+# Preload hex cache into memory
+preload_hex_cache()
 
-def get_ors_key():
-    """Get the current active ORS API key."""
-    if not ORS_API_KEYS:
-        return None
-    with _ors_key_lock:
-        return ORS_API_KEYS[_ors_key_index % len(ORS_API_KEYS)]
+# Initialize database (creates tables if needed)
+init_db()
 
-
-def rotate_ors_key():
-    """Rotate to the next ORS API key. Returns True if rotation happened."""
-    global _ors_key_index
-    with _ors_key_lock:
-        old_index = _ors_key_index
-        _ors_key_index = (_ors_key_index + 1) % len(ORS_API_KEYS)
-        logger.info(f"[ORS] Rotated to key {_ors_key_index + 1}/{len(ORS_API_KEYS)}")
-        return _ors_key_index != old_index
-
-# OpenRouteService profile mapping
-ORS_PROFILES = {
-    "bike": "cycling-regular",
-    "walk": "foot-walking",
-    "drive": "driving-car"
-}
+# Start pub/sub listener for cross-instance cache synchronization
+start_pubsub_listener()
 
 
 def get_client_ip() -> str:
@@ -192,10 +276,11 @@ def get_segment_overlay(mode_filter=None):
     }
 
 
-def get_hex_overlay(mode_filter=None):
-    """Get hex overlay from cache, falling back to regeneration if empty."""
+def get_hex_overlay(mode_filter=None, resolution=None):
+    """Get hex overlay from in-memory cache, falling back to Redis if needed."""
     try:
-        result = get_cached_hex_overlay(redis_client, mode_filter)
+        # Use in-memory cache for fast access
+        result = get_hex_overlay_cached(mode_filter, resolution)
 
         # If cache is empty but we have segment votes, regenerate
         if not result.get("hexes"):
@@ -203,25 +288,42 @@ def get_hex_overlay(mode_filter=None):
             if segment_votes:
                 logger.info("[HEX_CACHE] Cache empty but segment votes exist, regenerating...")
                 regenerate_hex_cache(redis_client)
-                result = get_cached_hex_overlay(redis_client, mode_filter)
+                invalidate_hex_cache()  # Clear in-memory cache
+                result = get_hex_overlay_cached(mode_filter, resolution)
 
-        logger.debug(f"[HEX_CACHE] Hex overlay from cache: {len(result.get('hexes', {}))} hexes, max_votes={result.get('max_votes')}, mode={mode_filter}")
         return result
     except redis.ConnectionError:
-        return {"hexes": {}, "max_votes": 1}
+        return {"hexes": {}, "max_votes": 1, "res": resolution or 13}
 
 
-def make_state(rev: int, mode_filter=None):
-    """Build map state with segment overlay and hex overlay, filtered by mode."""
+def make_state(rev: int, mode_filter=None, resolution=None):
+    """Build map state with segment overlay and ALL hex overlays (res 10-15).
+
+    Sends all resolutions at once so frontend can hotswap on zoom without waiting.
+    Uses compact format for hex overlay to reduce bandwidth:
+    - 'res': resolution level
+    - 'h': array of [hex_id, weight] tuples (more compact than object)
+    - 'm': max votes
+    """
     segment_overlay = get_segment_overlay(mode_filter)
-    hex_overlay = get_hex_overlay(mode_filter)
+
+    # Build hex overlays for all resolutions
+    hex_overlays = {}
+    for res in H3_RESOLUTIONS:
+        hex_data = get_hex_overlay(mode_filter, res)
+        hex_list = [[hex_id, round(weight, 4)] for hex_id, weight in hex_data.get("hexes", {}).items()]
+        hex_overlays[res] = {
+            "res": res,
+            "h": hex_list,
+            "m": hex_data.get("max_votes", 1.0)
+        }
 
     return {
         "revision": rev,
         "overlays": {
             "desire_paths": segment_overlay
         },
-        "hex_overlay": hex_overlay
+        "hex_overlays": hex_overlays  # All resolutions: {10: {...}, 11: {...}, ...}
     }
 
 
@@ -237,45 +339,92 @@ def health():
 
 @sock.route("/ws")
 def ws(ws):
-    import select
+    """WebSocket handler using Redis pub/sub for efficient push updates."""
     rev = 1
     current_mode = "bike"  # Default mode filter
-    while True:
-        # Check for incoming messages (non-blocking)
-        try:
-            # Use select to check if there's data available
-            msg = ws.receive(timeout=0)
-            if msg:
-                data = json.loads(msg)
-                if data.get("type") == "cast_votes":
-                    # Votes are now cast server-side in /api/routes endpoint
-                    # This message type is kept for backwards compatibility
-                    pass
-                elif data.get("type") == "set_mode":
-                    new_mode = data.get("mode")
-                    if new_mode in ("bike", "walk", "drive"):
-                        current_mode = new_mode
-                        logger.info(f"Mode filter set to: {current_mode}")
-                        # Immediately send updated state with new mode filter
-                        state_msg = {"type": "map_state", "state": make_state(rev, current_mode)}
-                        ws.send(json.dumps(state_msg))
-                        rev += 1
-        except Exception as e:
-            # Timeout or no data is expected, only log actual errors
-            if "timed out" not in str(e).lower():
-                pass
+    current_zoom = 14  # Default zoom level
+    current_resolution = ZOOM_TO_RESOLUTION.get(current_zoom, 13)
+    last_push_time = 0
+    KEEPALIVE_INTERVAL = 30  # Send keepalive every 30 seconds
 
-        # Push current state filtered by mode
-        state_msg = {"type": "map_state", "state": make_state(rev, current_mode)}
-        ws.send(json.dumps(state_msg))
-        rev += 1
-        time.sleep(1)
+    # Create pub/sub subscription for this connection
+    ws_pubsub_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
+    pubsub = ws_pubsub_client.pubsub()
+    pubsub.subscribe(REDIS_CHANNEL)
+
+    # Send initial state immediately on connect
+    state_msg = {"type": "map_state", "state": make_state(rev, current_mode, current_resolution)}
+    ws.send(json.dumps(state_msg))
+    rev += 1
+    last_push_time = time.time()
+
+    try:
+        while True:
+            # Check for incoming WebSocket messages (non-blocking)
+            try:
+                msg = ws.receive(timeout=0)
+                if msg:
+                    data = json.loads(msg)
+                    if data.get("type") == "cast_votes":
+                        # Votes are now cast server-side in /api/routes endpoint
+                        # This message type is kept for backwards compatibility
+                        pass
+                    elif data.get("type") == "set_mode":
+                        new_mode = data.get("mode")
+                        if new_mode in ("bike", "walk", "drive"):
+                            current_mode = new_mode
+                            logger.info(f"Mode filter set to: {current_mode}")
+                            # Immediately send updated state with new mode filter
+                            state_msg = {"type": "map_state", "state": make_state(rev, current_mode, current_resolution)}
+                            ws.send(json.dumps(state_msg))
+                            rev += 1
+                            last_push_time = time.time()
+                    elif data.get("type") == "set_zoom":
+                        new_zoom = data.get("zoom", 14)
+                        if isinstance(new_zoom, (int, float)) and 0 <= new_zoom <= 22:
+                            current_zoom = int(new_zoom)
+                            current_resolution = ZOOM_TO_RESOLUTION.get(current_zoom, 13)
+                            logger.info(f"[ZOOM] zoom={current_zoom} → res={current_resolution}")
+                            # State already includes all resolutions, no need to send again
+            except Exception as e:
+                # Timeout, no data, and connection closed are expected - don't log
+                err_str = str(e).lower()
+                if "timed out" not in err_str and "no data" not in err_str and "connection closed" not in err_str:
+                    logger.warning(f"[WS] Exception in receive: {e}")
+
+            # Check for pub/sub messages (with short timeout)
+            redis_msg = pubsub.get_message(timeout=0.5)
+            should_push = False
+
+            if redis_msg and redis_msg["type"] == "message":
+                try:
+                    data = json.loads(redis_msg["data"])
+                    if data.get("type") == "votes_changed":
+                        should_push = True
+                except (json.JSONDecodeError, KeyError):
+                    pass
+
+            # Send keepalive if no push in KEEPALIVE_INTERVAL seconds
+            if not should_push and (time.time() - last_push_time) > KEEPALIVE_INTERVAL:
+                should_push = True
+
+            if should_push:
+                state_msg = {"type": "map_state", "state": make_state(rev, current_mode, current_resolution)}
+                ws.send(json.dumps(state_msg))
+                rev += 1
+                last_push_time = time.time()
+
+    finally:
+        # Clean up pub/sub on disconnect
+        pubsub.unsubscribe(REDIS_CHANNEL)
+        pubsub.close()
+        ws_pubsub_client.close()
 
 
 @app.route("/api/routes", methods=["POST"])
 def calculate_route():
     """
-    Calculate route using OpenRouteService API with desire path voting.
+    Calculate route using router interface with desire path voting.
 
     For bike/drive modes:
     - Computes BOTH the desired mode route AND a walk route
@@ -286,7 +435,7 @@ def calculate_route():
     - Computes walk route only
     - Votes for entire walk path
     """
-    logger.info(f"[ROUTE] Received request, ORS keys: {len(ORS_API_KEYS)}, REDIS_HOST: {redis_host}")
+    logger.info(f"[ROUTE] Received request, REDIS_HOST: {redis_host}")
 
     data = request.get_json()
     if not data:
@@ -304,146 +453,15 @@ def calculate_route():
         logger.error("[ROUTE] Error: Missing coordinates")
         return jsonify({"error": "Missing start or end coordinates"}), 400
 
-    # Validate ORS API keys
-    if not ORS_API_KEYS:
-        logger.error("[ROUTE] Error: ORS API keys not configured")
-        return jsonify({"error": "ORS API keys not configured"}), 500
-
-    # Get tile IDs for cache lookup
-    start_tile = coords_to_tile(start[0], start[1])
-    end_tile = coords_to_tile(end[0], end[1])
-
-    # Helper to fetch route from ORS API (with caching and exponential backoff)
-    def fetch_ors_route(route_mode: str, route_waypoints: list = None, max_retries: int = 5) -> dict:
-        """Fetch a route from ORS API, using cache if available. Retries with exponential backoff."""
-        route_waypoints = route_waypoints or []
-
-        # Only use cache if no waypoints (waypoints make routes unique)
-        if not route_waypoints:
-            # Check cache first
-            cached = get_cached_path(redis_client, start_tile, end_tile, route_mode)
-            if cached:
-                cached["_cache_hit"] = True
-                return cached
-
-        profile = ORS_PROFILES.get(route_mode, "cycling-regular")
-        url = f"https://api.openrouteservice.org/v2/directions/{profile}/geojson"
-
-        # Build coordinates: start + waypoints + end
-        coords = [[start[1], start[0]]]  # ORS expects [lon, lat]
-        for wp in route_waypoints:
-            coords.append([wp[1], wp[0]])
-        coords.append([end[1], end[0]])
-
-        # Build request body
-        request_body = {
-            "coordinates": coords
-        }
-
-        # Avoid ferries for all modes
-        request_body["options"] = {"avoid_features": ["ferries"]}
-
-        last_error = None
-        keys_tried = 0  # Track how many keys we've tried for quota rotation
-        for attempt in range(max_retries):
-            try:
-                current_key = get_ors_key()
-                response = requests.post(
-                    url,
-                    json=request_body,
-                    headers={
-                        "Authorization": current_key,
-                        "Content-Type": "application/json"
-                    },
-                    timeout=10
-                )
-
-                # Handle rate limiting (429) with exponential backoff
-                if response.status_code == 429:
-                    wait_time = (2 ** attempt) + (time.time() % 1)  # 1, 2, 4, 8, 16 + jitter
-                    logger.warning(f"[ORS] Rate limited (429), retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
-                    time.sleep(wait_time)
-                    continue
-
-                # Handle other errors
-                if response.status_code >= 400:
-                    error_msg = f"ORS API error {response.status_code}: {response.text[:200]}"
-                    logger.error(f"[ORS] {error_msg}")
-                    if response.status_code >= 500:
-                        # Server error - retry
-                        wait_time = (2 ** attempt) + (time.time() % 1)
-                        logger.warning(f"[ORS] Server error, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        # Client error (4xx except 429) - don't retry
-                        # Handle quota exceeded by rotating to next key
-                        if response.status_code == 403 and "quota" in response.text.lower():
-                            keys_tried += 1
-                            if keys_tried < len(ORS_API_KEYS):
-                                logger.warning(f"[ORS] Quota exceeded, rotating key ({keys_tried}/{len(ORS_API_KEYS)} tried)")
-                                rotate_ors_key()
-                                continue  # Retry with new key
-                            return {"error": "All API keys exhausted. Please try again later."}
-                        return {"error": error_msg}
-
-                response.raise_for_status()
-                result = response.json()
-
-                features = result.get("features", [])
-                if not features:
-                    return {"error": "No route found"}
-
-                route = features[0]
-                geometry = route.get("geometry")
-                properties = route.get("properties", {})
-                summary = properties.get("summary", {})
-
-                route_data = {
-                    "geometry": geometry,
-                    "duration": summary.get("duration", 0),
-                    "distance": summary.get("distance", 0),
-                    "mode": route_mode,
-                    "_cache_hit": False
-                }
-
-                # Cache the route only if no waypoints (waypoints make start/end cache invalid)
-                if not route_waypoints:
-                    cache_path(redis_client, start_tile, end_tile, route_mode, route_data)
-
-                # Always cache MST segments for intermediate tile pairs (useful for future routes)
-                waypoint_tiles = extract_waypoint_tiles(route_data)
-                tile_to_coords = build_tile_to_coords_map(route_data)
-                logger.info(f"[CACHE] Route has {len(waypoint_tiles)} waypoint tiles: {waypoint_tiles[:5]}{'...' if len(waypoint_tiles) > 5 else ''}")
-                if len(waypoint_tiles) >= 2:
-                    cached_count = cache_mst_segments(redis_client, waypoint_tiles, route_mode, route_data, tile_to_coords)
-                    logger.info(f"[CACHE] Cached {cached_count} MST segments for {route_mode} route")
-
-                # Register for cache invalidation only if no waypoints
-                if not route_waypoints:
-                    register_path_tiles(redis_client, start_tile, end_tile, route_mode, waypoint_tiles)
-
-                return route_data
-
-            except requests.Timeout as e:
-                last_error = f"Timeout: {e}"
-                wait_time = (2 ** attempt) + (time.time() % 1)
-                logger.warning(f"[ORS] Timeout, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(wait_time)
-            except requests.RequestException as e:
-                last_error = f"Request error: {e}"
-                wait_time = (2 ** attempt) + (time.time() % 1)
-                logger.warning(f"[ORS] {last_error}, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(wait_time)
-
-        # All retries exhausted
-        logger.error(f"[ORS] All {max_retries} retries failed for {route_mode} route. Last error: {last_error}")
-        return {"error": f"ORS API failed after {max_retries} retries: {last_error}"}
-
     try:
         # Compute main route WITHOUT waypoints (start → end only)
         # Waypoints only affect the desire path, not the main route
-        route_desired = fetch_ors_route(mode, [])
+        route_desired = router.calculate_route(
+            start=(start[0], start[1]),
+            end=(end[0], end[1]),
+            mode="walk",  # Force walk mode for all routes
+            waypoints=[]
+        )
         if "error" in route_desired:
             logger.error(f"[ROUTE] Failed to get {mode} route: {route_desired['error']}")
             return jsonify(route_desired), 404
@@ -451,10 +469,25 @@ def calculate_route():
         # Compute desire path WITH waypoints (walking route through user's waypoints)
         if mode == "walk":
             # For walk mode, the desire path includes waypoints
-            route_walk = fetch_ors_route("walk", waypoints) if waypoints else route_desired
+            if waypoints:
+                waypoints_tuples = [(wp[0], wp[1]) for wp in waypoints]
+                route_walk = router.calculate_route(
+                    start=(start[0], start[1]),
+                    end=(end[0], end[1]),
+                    mode="walk",
+                    waypoints=waypoints_tuples
+                )
+            else:
+                route_walk = route_desired
         else:
             # For bike/drive, compute walk route with waypoints
-            route_walk = fetch_ors_route("walk", waypoints)
+            waypoints_tuples = [(wp[0], wp[1]) for wp in waypoints]
+            route_walk = router.calculate_route(
+                start=(start[0], start[1]),
+                end=(end[0], end[1]),
+                mode="walk",
+                waypoints=waypoints_tuples
+            )
             if "error" in route_walk:
                 logger.warning(f"[ROUTE] Failed to get walk route: {route_walk['error']}, returning desired route only")
                 # If walk route fails, just return desired route without voting
@@ -466,7 +499,7 @@ def calculate_route():
 
         # Compute desire path segments (but do NOT cast votes - user must click "Cast Vote")
         vote_segments, vote_mode, desire_tiles = compute_desire_path_votes(
-            route_desired, route_walk, mode
+            route_desired, route_walk, mode  # Use user's selected mode
         )
 
         # Return both routes and the segments for voting
@@ -488,11 +521,13 @@ def calculate_route():
 @app.route("/api/vote", methods=["POST"])
 def cast_vote():
     """
-    Cast votes for desire path segments.
+    Cast votes for desire path segments or single points.
 
     Expects JSON body with:
-    - segments: List of [[coord1, coord2], ...] segments
+    - segments: List of [[coord1, coord2], ...] segments (for route votes)
+    - point: [lat, lon] single point (for point votes)
     - mode: Transport mode (bike, walk, drive)
+    - vote_type: Natural language description of what user is voting for
 
     Uses IP-weighted voting: each IP contributes exactly 1.0 total weight
     across all their votes.
@@ -502,34 +537,171 @@ def cast_vote():
         return jsonify({"error": "Missing request body"}), 400
 
     segments = data.get("segments", [])
+    point = data.get("point")
     mode = data.get("mode", "bike")
+    vote_type = data.get("vote_type", "")
 
-    if not segments:
-        return jsonify({"error": "No segments to vote on"}), 400
+    # Validate: need either segments or point
+    if not segments and not point:
+        return jsonify({"error": "No segments or point to vote on"}), 400
 
     # Get hashed IP for weighted voting
     ip_hash = get_client_ip()
 
     try:
-        # Cast segment votes (updates ip_vote_counts)
-        vote_count = cast_desire_path_votes(redis_client, segments, mode, ip_hash)
-        logger.info(f"[VOTE] Cast {vote_count} segment votes as '{mode}' from IP {ip_hash[:8]}...")
+        if point:
+            # Single-point vote (no route, just a location)
+            from hex_voting import cast_point_vote
+            cast_point_vote(redis_client, point, mode, ip_hash, defer_rebuild=True)
+            logger.info(f"[VOTE] Cast point vote for '{vote_type}' at {point} as '{mode}' from IP {ip_hash[:8]}...")
 
-        # Update hex cache incrementally with IP-weighted votes
-        update_hex_cache_incremental(redis_client, segments, mode, ip_hash)
-        logger.info(f"[VOTE] Updated hex cache with {len(segments)} segments")
+            # Record to database for persistence (vote_type only stored here)
+            from database import record_point_vote
+            record_point_vote(point, mode, ip_hash, vote_type)
 
-        # Increment revision to trigger WebSocket broadcast
-        redis_client.incr("revision")
+            # Invalidate in-memory cache so next request gets fresh data
+            invalidate_hex_cache()
 
-        return jsonify({
-            "success": True,
-            "segments_voted": vote_count
-        })
+            # Increment revision and notify all instances
+            redis_client.incr("revision")
+            publish_votes_changed()
+
+            # Run expensive hex cache rebuild in background thread
+            def background_rebuild():
+                try:
+                    rebuild_weighted_hex_cache(redis_client, mode)
+                    invalidate_hex_cache()
+                    publish_votes_changed()
+                    logger.info(f"[VOTE] Background hex rebuild complete for point vote mode={mode}")
+                except Exception as e:
+                    logger.error(f"[VOTE] Background rebuild failed: {e}")
+
+            threading.Thread(target=background_rebuild, daemon=True).start()
+
+            return jsonify({
+                "success": True,
+                "point_vote": True,
+                "vote_type": vote_type
+            })
+        else:
+            # Route vote (existing logic)
+            # Cast segment votes (updates ip_vote_counts)
+            vote_count = cast_desire_path_votes(redis_client, segments, mode, ip_hash)
+            logger.info(f"[VOTE] Cast {vote_count} segment votes for '{vote_type}' as '{mode}' from IP {ip_hash[:8]}...")
+
+            # Update hex cache incrementally with IP-weighted votes (defer expensive rebuild)
+            update_hex_cache_incremental(redis_client, segments, mode, ip_hash, defer_rebuild=True)
+            logger.info(f"[VOTE] Updated hex cache with {len(segments)} segments")
+
+            # Record to database for persistence (async, doesn't block response)
+            # Weight per segment = 1.0 / (previous votes from this IP + 1)
+            weight_per_segment = 1.0 / len(segments) if segments else 1.0
+            record_segment_votes(segments, mode, ip_hash, weight_per_segment, vote_type)
+
+            # Invalidate in-memory cache so next request gets fresh data
+            invalidate_hex_cache()
+
+            # Increment revision and notify all instances to push WebSocket updates
+            redis_client.incr("revision")
+            publish_votes_changed()
+
+            # Run expensive hex cache rebuild in background thread
+            def background_rebuild():
+                try:
+                    rebuild_weighted_hex_cache(redis_client, mode)
+                    invalidate_hex_cache()
+                    publish_votes_changed()
+                    logger.info(f"[VOTE] Background hex rebuild complete for mode={mode}")
+                except Exception as e:
+                    logger.error(f"[VOTE] Background rebuild failed: {e}")
+
+            threading.Thread(target=background_rebuild, daemon=True).start()
+
+            return jsonify({
+                "success": True,
+                "segments_voted": vote_count,
+                "vote_type": vote_type
+            })
 
     except Exception as e:
         logger.error(f"[VOTE] Error casting votes: {e}")
         return jsonify({"error": f"Vote failed: {str(e)}"}), 500
+
+
+# =============================================================================
+# Admin Endpoints
+# =============================================================================
+
+@app.route("/api/admin/refresh-osm", methods=["POST"])
+def admin_refresh_osm():
+    """
+    Trigger OSM data refresh and graph rebuild.
+
+    Called by Cloud Scheduler weekly, or manually for testing.
+    Requires OIDC authentication in production.
+    """
+    # Log the request
+    logger.info("[ADMIN] OSM refresh triggered")
+
+    # In production, verify the caller is Cloud Scheduler
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header:
+        logger.info("[ADMIN] Request has Authorization header (Cloud Scheduler)")
+
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["python", "refresh_osm.py"],
+            capture_output=True,
+            text=True,
+            timeout=1800  # 30 minute timeout for graph building
+        )
+
+        logger.info(f"[ADMIN] Refresh completed with exit code {result.returncode}")
+
+        if result.returncode == 0:
+            # Reload router if it supports hot-reload
+            if hasattr(router, 'reload'):
+                router.reload()
+                logger.info("[ADMIN] Router reloaded")
+
+            return jsonify({
+                "status": "success",
+                "stdout": result.stdout[-2000:] if result.stdout else "",  # Last 2000 chars
+            })
+        else:
+            return jsonify({
+                "status": "failed",
+                "stdout": result.stdout[-2000:] if result.stdout else "",
+                "stderr": result.stderr[-2000:] if result.stderr else "",
+            }), 500
+
+    except subprocess.TimeoutExpired:
+        logger.error("[ADMIN] Refresh timed out after 30 minutes")
+        return jsonify({"error": "Refresh timed out"}), 500
+    except Exception as e:
+        logger.error(f"[ADMIN] Refresh failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/admin/router-stats", methods=["GET"])
+def admin_router_stats():
+    """Get statistics about the current router."""
+    try:
+        if hasattr(router, 'stats'):
+            stats = router.stats()
+            return jsonify({
+                "router": "python",
+                "version": router.get_version() if hasattr(router, 'get_version') else "unknown",
+                "stats": stats
+            })
+        else:
+            return jsonify({
+                "router": "python",
+                "stats": "not available"
+            })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

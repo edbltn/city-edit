@@ -10,12 +10,61 @@ import {
 } from "react";
 import { useRoute } from "./RouteContext";
 import { CONFIG } from "../config";
-import type { MapState, TransportMode } from "../types";
+import type { MapState, TransportMode, HexOverlay, HexOverlayCompact, RawMapState } from "../types";
+
+// Resolution bounds
+const MIN_RESOLUTION = 10;
+const MAX_RESOLUTION = 15;
 
 interface WebSocketContextValue {
   mapState: MapState | null;
   connectionStatus: string;
+  currentZoom: number;
+  currentResolution: number;
   setMode: (mode: TransportMode) => void;
+  setZoom: (zoom: number) => void;
+  getHexOverlayForResolution: (res: number) => HexOverlay | undefined;
+}
+
+/**
+ * Convert zoom level to H3 resolution (zoom - 3 with clamping).
+ */
+function zoomToResolution(zoom: number): number {
+  const res = zoom - 3;
+  if (res <= MIN_RESOLUTION) return MIN_RESOLUTION;
+  if (res >= MAX_RESOLUTION) return MAX_RESOLUTION;
+  return res;
+}
+
+/**
+ * Parse a single hex overlay from compact format to internal format.
+ */
+function parseHexOverlayCompact(data: HexOverlayCompact): HexOverlay {
+  const hexes: Record<string, number> = {};
+  for (const [hexId, weight] of data.h) {
+    hexes[hexId] = weight;
+  }
+  return {
+    res: data.res,
+    hexes,
+    max_votes: data.m,
+  };
+}
+
+/**
+ * Parse all hex overlays from server format.
+ */
+function parseAllHexOverlays(
+  data: Record<number, HexOverlayCompact> | undefined
+): Record<number, HexOverlay> | undefined {
+  if (!data) return undefined;
+
+  const result: Record<number, HexOverlay> = {};
+  for (const [resStr, compactOverlay] of Object.entries(data)) {
+    const res = parseInt(resStr, 10);
+    result[res] = parseHexOverlayCompact(compactOverlay);
+  }
+  return result;
 }
 
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
@@ -23,6 +72,7 @@ const WebSocketContext = createContext<WebSocketContextValue | null>(null);
 export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [mapState, setMapState] = useState<MapState | null>(null);
   const [connectionStatus, setConnectionStatus] = useState("disconnected");
+  const [currentZoom, setCurrentZoom] = useState(14);
   const { mode } = useRoute();
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -31,11 +81,17 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     null
   );
   const modeRef = useRef(mode);
+  const currentZoomRef = useRef(currentZoom);
 
   // Keep mode ref updated
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
+
+  // Keep zoom ref updated
+  useEffect(() => {
+    currentZoomRef.current = currentZoom;
+  }, [currentZoom]);
 
   const connect = useCallback(() => {
     setConnectionStatus("connecting...");
@@ -43,21 +99,32 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
     ws.onopen = () => {
       setConnectionStatus("connected");
-      // Send initial mode on connect
+      // Send initial mode and zoom on connect
       ws.send(JSON.stringify({ type: "set_mode", mode: modeRef.current }));
+      ws.send(JSON.stringify({ type: "set_zoom", zoom: currentZoomRef.current }));
     };
 
     ws.onmessage = (evt) => {
       try {
         const msg = JSON.parse(evt.data);
         if (msg.type === "map_state" && msg.state) {
-          const state = msg.state as MapState;
+          const rawState = msg.state as RawMapState;
           if (
-            typeof state.revision === "number" &&
-            state.revision > latestRevisionRef.current
+            typeof rawState.revision === "number" &&
+            rawState.revision > latestRevisionRef.current
           ) {
-            latestRevisionRef.current = state.revision;
-            setMapState(state);
+            latestRevisionRef.current = rawState.revision;
+            // Parse all hex overlays
+            const parsedState: MapState = {
+              ...rawState,
+              hex_overlays: parseAllHexOverlays(rawState.hex_overlays),
+            };
+            // Log hex counts for all resolutions
+            const hexCounts = Object.entries(parsedState.hex_overlays || {})
+              .map(([res, overlay]) => `${res}:${Object.keys(overlay.hexes).length}`)
+              .join(", ");
+            console.log(`[HEX] Received all resolutions: ${hexCounts}`);
+            setMapState(parsedState);
           }
         }
       } catch (e) {
@@ -75,7 +142,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     };
 
     wsRef.current = ws;
-  }, []);
+  }, []);  // No dependencies - uses refs for current values
 
   useEffect(() => {
     connect();
@@ -95,18 +162,40 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const setZoom = useCallback((zoom: number) => {
+    const res = zoomToResolution(zoom);
+    console.log(`[ZOOM] zoom=${zoom} → res=${res}`);
+    setCurrentZoom(zoom);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "set_zoom", zoom }));
+    }
+  }, []);
+
   // Send mode when it changes
   useEffect(() => {
     setMode(mode);
   }, [mode, setMode]);
 
+  const currentResolution = useMemo(() => zoomToResolution(currentZoom), [currentZoom]);
+
+  const getHexOverlayForResolution = useCallback(
+    (res: number): HexOverlay | undefined => {
+      return mapState?.hex_overlays?.[res];
+    },
+    [mapState]
+  );
+
   const value = useMemo(
     () => ({
       mapState,
       connectionStatus,
+      currentZoom,
+      currentResolution,
       setMode,
+      setZoom,
+      getHexOverlayForResolution,
     }),
-    [mapState, connectionStatus, setMode]
+    [mapState, connectionStatus, currentZoom, currentResolution, setMode, setZoom, getHexOverlayForResolution]
   );
 
   return (

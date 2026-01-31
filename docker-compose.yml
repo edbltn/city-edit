@@ -7,14 +7,32 @@ services:
       - redis-data:/data
     command: redis-server --appendonly yes
 
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: votes
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: devpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d votes"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   flask:
     build: ./server
     environment:
       - REDIS_HOST=redis
+      - DATABASE_URL=postgresql://app:devpassword@postgres:5432/votes
     env_file:
       - ./server/.env
     depends_on:
       - redis
+      - postgres
     deploy:
       replicas: 2
     healthcheck:
@@ -23,6 +41,49 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    volumes:
+      - osm-data:/app/osm_data
+
+  # OSM data builder and weekly refresh sidecar
+  osm-refresh:
+    build: ./server
+    command: |
+      sh -c "
+        echo 'OSM refresh service started'
+
+        # Build graphs on first startup if they don't exist
+        if [ ! -f /app/osm_data/walk_graph.pkl ]; then
+          echo 'Graph files not found, building now...'
+          python refresh_osm.py --region manhattan --force 2>&1
+          echo 'Initial graph build complete'
+        else
+          echo 'Graph files exist, skipping initial build'
+        fi
+
+        # Weekly refresh loop
+        while true; do
+          # Run Sunday at 3am (UTC)
+          current_day=$$(date +%u)
+          current_hour=$$(date +%H)
+          if [ \"$$current_day\" = \"7\" ] && [ \"$$current_hour\" = \"03\" ]; then
+            echo 'Starting weekly OSM refresh...'
+            python refresh_osm.py 2>&1
+            # Sleep for 1 hour to avoid running again
+            sleep 3600
+          fi
+          # Check every hour
+          sleep 3600
+        done
+      "
+    environment:
+      - REDIS_HOST=redis
+    env_file:
+      - ./server/.env
+    volumes:
+      - osm-data:/app/osm_data
+    depends_on:
+      - redis
+    restart: unless-stopped
 
   nginx:
     build: ./client-react
@@ -35,3 +96,5 @@ services:
 
 volumes:
   redis-data:
+  postgres-data:
+  osm-data:

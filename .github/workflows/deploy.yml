@@ -30,7 +30,7 @@ jobs:
 
       - name: Build and Push
         run: |
-          docker build -f Dockerfile.cloudrun -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/desire-path-mapper/app:${{ github.sha }} .
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/desire-path-mapper/app:${{ github.sha }} .
           docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/desire-path-mapper/app:${{ github.sha }}
           docker tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/desire-path-mapper/app:${{ github.sha }} ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/desire-path-mapper/app:latest
           docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/desire-path-mapper/app:latest

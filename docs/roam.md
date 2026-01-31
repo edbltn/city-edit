@@ -486,16 +486,16 @@ Use this checklist to coordinate parallel implementation. Each item can be worke
 
 ### Phase 5: Client Integration
 
-- [ ] **5.1** Modify `client/index.html`
+- [ ] **5.1** Modify `client-react/src/components/CommuteInput/`
   - [ ] Add "Roam" option to mode dropdown
 
-- [ ] **5.2** Modify `client/app.js`
+- [ ] **5.2** Modify `client-react/src/context/RouteContext.tsx`
   - [ ] Handle "roam" mode selection
-  - [ ] Update `calculateRoute()` to call `/api/routes/roam`
+  - [ ] Update route calculation to call `/api/routes/roam`
 
-- [ ] **5.3** Modify `client/route-styles.js`
+- [ ] **5.3** Modify `client-react/src/components/RouteLayer/`
   - [ ] Add multi-segment rendering (different color per mode)
-  - [ ] Create `createRoamRouteLayer()` function
+  - [ ] Create roam route layer function
 
 ### Phase 6: Testing
 

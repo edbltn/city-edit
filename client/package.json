@@ -1,8 +1,0 @@
-{
-  "name": "desire-path-mapper-client",
-  "version": "1.0.0",
-  "scripts": {
-    "dev": "bun server.ts",
-    "start": "bun server.ts"
-  }
-}

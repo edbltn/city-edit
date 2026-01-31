@@ -10,6 +10,7 @@ interface UseMapClickOptions {
   state: MapClickState;
   onUpdateStart: (coords: LatLng) => void;
   onUpdateEnd: (coords: LatLng) => void;
+  onClearGhostWaypoints: () => void;
   suppressNextClick?: () => boolean;
   onClearSuppress?: () => void;
 }
@@ -18,6 +19,7 @@ export function useMapClick({
   state,
   onUpdateStart,
   onUpdateEnd,
+  onClearGhostWaypoints,
   suppressNextClick,
   onClearSuppress,
 }: UseMapClickOptions) {
@@ -28,6 +30,9 @@ export function useMapClick({
         onClearSuppress?.();
         return;
       }
+
+      // New map click always clears ghost waypoints (starting fresh route segment)
+      onClearGhostWaypoints();
 
       // If no start, set start
       if (!state.start.coords) {
@@ -46,7 +51,7 @@ export function useMapClick({
       onUpdateStart(prevEnd);
       onUpdateEnd(latlng);
     },
-    [state.start.coords, state.end.coords, onUpdateStart, onUpdateEnd, suppressNextClick, onClearSuppress]
+    [state.start.coords, state.end.coords, onUpdateStart, onUpdateEnd, onClearGhostWaypoints, suppressNextClick, onClearSuppress]
   );
 
   return { handleMapClick };

@@ -22,15 +22,15 @@ export const CONFIG = {
   // Initial camera
   initialView: { lat: 40.7128, lon: -74.006, zoom: 11 },
 
-  // Pan limits (strict geographic bounds)
+  // Pan limits (expanded geographic bounds for more scroll room)
   nycBounds: {
-    sw: { lat: 40.4774, lon: -74.2591 },
-    ne: { lat: 40.9176, lon: -73.7004 },
+    sw: { lat: 40.3, lon: -74.4 },
+    ne: { lat: 41.1, lon: -73.5 },
   },
 
   // Zoom limits
   minZoom: 10,
-  maxZoom: 20,
+  maxZoom: 18,
 
   // Tiles - CartoDB Positron No Labels
   tileUrlTemplate:

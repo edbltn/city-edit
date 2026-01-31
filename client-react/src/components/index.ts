@@ -6,3 +6,4 @@ export { RouteLayer, DesirePathLayer } from "./RouteLayer";
 export { ErrorToast } from "./ErrorToast";
 export { GhostPin } from "./GhostPin";
 export { HexHeatmapLayer } from "./HexHeatmapLayer";
+export { VoteTypeSelector } from "./VoteTypeSelector";

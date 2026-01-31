@@ -8,11 +8,11 @@ import {
 import L from "leaflet";
 import { CONFIG } from "../../config";
 import { useRoute } from "../../context";
-import { useWebSocketContext } from "../../context";
 import { useMapClick } from "../../hooks";
 import { RouteMarker } from "../RouteMarker";
-import { RouteLayer, DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
+import { DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
+import { WaypointConnectors } from "../WaypointConnectors";
 import { GhostPin } from "../GhostPin";
 import { HexHeatmapLayer } from "../HexHeatmapLayer";
 import type { LatLng } from "../../types";
@@ -40,8 +40,8 @@ function MapPanes() {
       }
     }
 
-    // Set default map cursor to pointer (for placing start/end points)
-    map.getContainer().style.cursor = "pointer";
+    // Set default map cursor to crosshair (for placing start/end points)
+    map.getContainer().style.cursor = "crosshair";
   }, [map]);
 
   return null;
@@ -91,25 +91,28 @@ export function MapView() {
     end,
     mode,
     routeData,
-    desirePathData,
     waypoints,
     ghostWaypoints,
     splitDesirePaths,
     suppressNextClick,
     setStartPoint,
     setEndPoint,
+    clearStart,
+    clearEnd,
     insertWaypointAtSegment,
     updateGhostWaypoint,
+    removeGhostWaypoint,
     updateWaypoint,
     clearSuppressClick,
     setSuppressClick,
+    clearSplitPaths,
   } = useRoute();
-  const { mapState } = useWebSocketContext();
 
   const { handleMapClick } = useMapClick({
     state: { start, end },
     onUpdateStart: setStartPoint,
     onUpdateEnd: setEndPoint,
+    onClearGhostWaypoints: clearSplitPaths,
     suppressNextClick,
     onClearSuppress: clearSuppressClick,
   });
@@ -151,24 +154,16 @@ export function MapView() {
       <ZoomControl />
 
       {/* Hex heatmap layer for H3 hexagonal visualization */}
-      <HexHeatmapLayer hexOverlay={mapState?.hex_overlay} />
+      <HexHeatmapLayer />
 
-      {/* Desire path layer for bike/drive - hidden when split paths exist */}
-      {desirePathData?.geometry && mode !== "walk" && splitDesirePaths.length === 0 && (
-        <DesirePathLayer
-          geometry={desirePathData.geometry}
-          segmentIndex={0}
-          onSegmentDrag={insertWaypointAtSegment}
-        />
-      )}
-
-      {/* Walk mode: route itself is draggable for waypoints */}
-      {mode === "walk" && routeData?.geometry && splitDesirePaths.length === 0 && (
+      {/* Desire path layer for all modes - shows the walk route */}
+      {/* Only show when no ghost waypoints (otherwise we're mid-calculation or showing splits) */}
+      {routeData?.geometry && splitDesirePaths.length === 0 && ghostWaypoints.length === 0 && (
         <DesirePathLayer
           geometry={routeData.geometry}
           segmentIndex={0}
           onSegmentDrag={insertWaypointAtSegment}
-          mode="walk"
+          mode={mode}
         />
       )}
 
@@ -182,10 +177,14 @@ export function MapView() {
         />
       ))}
 
-      {/* Main route layer - not shown for walk mode (rendered as desire path instead) */}
-      {routeData?.geometry && mode !== "walk" && (
-        <RouteLayer geometry={routeData.geometry} mode={mode} />
-      )}
+      {/* Grey arc connectors from waypoints to path endpoints */}
+      <WaypointConnectors
+        start={start.coords}
+        end={end.coords}
+        ghostWaypoints={ghostWaypoints}
+        routeGeometry={routeData?.geometry?.coordinates ?? null}
+        splitDesirePaths={splitDesirePaths}
+      />
 
       {/* Ghost waypoint markers - persistent after drop, draggable to recalculate split */}
       {ghostWaypoints.map((wp, index) => (
@@ -195,6 +194,7 @@ export function MapView() {
           which="waypoint"
           onDragStart={setSuppressClick}
           onDragEnd={(pos) => updateGhostWaypoint(index, pos)}
+          onDelete={() => removeGhostWaypoint(index)}
         />
       ))}
 
@@ -214,7 +214,8 @@ export function MapView() {
           position={start.coords}
           which="start"
           onDragStart={setSuppressClick}
-          onDragEnd={(pos) => setStartPoint(pos, true)}
+          onDragEnd={setStartPoint}
+          onDelete={clearStart}
         />
       )}
 
@@ -224,7 +225,8 @@ export function MapView() {
           position={end.coords}
           which="end"
           onDragStart={setSuppressClick}
-          onDragEnd={(pos) => setEndPoint(pos, true)}
+          onDragEnd={setEndPoint}
+          onDelete={clearEnd}
         />
       )}
     </MapContainer>

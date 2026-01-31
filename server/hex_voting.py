@@ -16,11 +16,28 @@ import math
 import random
 import h3
 
-# H3 resolution 13: ~6.8m edge length, ~14m diameter
-H3_RESOLUTION = 13
+# H3 resolutions: 6 levels (10-15), directly mapped from zoom
+H3_RESOLUTIONS = [10, 11, 12, 13, 14, 15]
+H3_FINEST_RESOLUTION = 15  # Store at highest res, aggregate down
+H3_COARSEST_RESOLUTION = 10
+H3_RESOLUTION = H3_FINEST_RESOLUTION  # Default for backwards compatibility
 
-# Sample interval in degrees (~5m at NYC latitude, smaller than hex edge)
-SAMPLE_INTERVAL_DEG = 0.000045
+# Zoom level to H3 resolution mapping: resolution = zoom - 3 (with clamping)
+# zoom 13 → res 10, zoom 14 → res 11, ..., zoom 18 → res 15
+def zoom_to_resolution(zoom: int) -> int:
+    """Convert zoom level to H3 resolution (zoom - 3 with clamping)."""
+    res = zoom - 3
+    if res <= H3_COARSEST_RESOLUTION:
+        return H3_COARSEST_RESOLUTION
+    if res >= H3_FINEST_RESOLUTION:
+        return H3_FINEST_RESOLUTION
+    return res
+
+# Legacy dict for backwards compatibility
+ZOOM_TO_RESOLUTION = {z: zoom_to_resolution(z) for z in range(0, 23)}
+
+# Sample interval in degrees (~1.5m at NYC latitude, smaller than finest hex edge)
+SAMPLE_INTERVAL_DEG = 0.000015
 
 # Jitter radius standard deviation in hex ring units
 # stddev=0.4 means moderate spread with most votes near center
@@ -149,7 +166,83 @@ def segment_key_from_coords(coord1: list, coord2: list, mode: str) -> str:
         return f"{p2[0]},{p2[1]}|{p1[0]},{p1[1]}|{mode}"
 
 
-def update_hex_cache_incremental(redis_client, segments: list, mode: str, ip_hash: str = None):
+def aggregate_to_resolution(hex_votes: dict, target_res: int) -> dict:
+    """
+    Aggregate fine-resolution hex votes to coarser resolution.
+
+    Uses h3.cell_to_parent() to find parent hex at target resolution.
+    Sums weights from all child hexes into parent.
+
+    Args:
+        hex_votes: Dict of hex_id -> weight at finest resolution
+        target_res: Target H3 resolution to aggregate to
+
+    Returns:
+        Dict of hex_id -> aggregated_weight at target resolution
+    """
+    if not hex_votes:
+        return {}
+
+    aggregated = {}
+    for hex_id, weight in hex_votes.items():
+        try:
+            current_res = h3.get_resolution(hex_id)
+            if current_res == target_res:
+                parent = hex_id
+            elif current_res > target_res:
+                parent = h3.cell_to_parent(hex_id, target_res)
+            else:
+                # Already coarser than target, skip
+                continue
+            aggregated[parent] = aggregated.get(parent, 0.0) + weight
+        except Exception:
+            # Skip invalid hex IDs
+            continue
+    return aggregated
+
+
+def rebuild_all_resolutions(redis_client, mode: str):
+    """
+    Build hex caches at all resolutions from finest resolution data.
+
+    Reads from hex_votes_weighted:{mode}:res14, aggregates to coarser
+    resolutions, and stores each in hex_votes_weighted:{mode}:res{N}.
+
+    Args:
+        redis_client: Redis client
+        mode: Transport mode (bike, walk, drive)
+    """
+    if not redis_client:
+        return
+
+    try:
+        # Get finest resolution data
+        finest_key = f"hex_votes_weighted:{mode}:res{H3_FINEST_RESOLUTION}"
+        finest_data = redis_client.hgetall(finest_key)
+
+        if not finest_data:
+            return
+
+        finest_hexes = {k: float(v) for k, v in finest_data.items()}
+
+        # Aggregate to each coarser resolution
+        pipe = redis_client.pipeline()
+        for res in H3_RESOLUTIONS:
+            if res == H3_FINEST_RESOLUTION:
+                continue  # Already stored
+
+            aggregated = aggregate_to_resolution(finest_hexes, res)
+            key = f"hex_votes_weighted:{mode}:res{res}"
+            pipe.delete(key)
+            for hex_id, weight in aggregated.items():
+                pipe.hset(key, hex_id, f"{weight:.6f}")
+        pipe.execute()
+
+    except Exception as e:
+        print(f"Error rebuilding resolutions for {mode}: {e}")
+
+
+def update_hex_cache_incremental(redis_client, segments: list, mode: str, ip_hash: str = None, defer_rebuild: bool = False):
     """
     Add votes for new segments to hex cache using deterministic jitter.
 
@@ -161,6 +254,7 @@ def update_hex_cache_incremental(redis_client, segments: list, mode: str, ip_has
         segments: List of [[coord1, coord2], ...] segments
         mode: Transport mode (bike, walk, drive)
         ip_hash: Hashed IP for weighted voting (optional, defaults to "system")
+        defer_rebuild: If True, skip the blocking rebuild (caller handles it)
     """
     if not redis_client or not segments:
         return
@@ -189,8 +283,9 @@ def update_hex_cache_incremental(redis_client, segments: list, mode: str, ip_has
 
     pipe.execute()
 
-    # Rebuild weighted cache after adding new votes
-    rebuild_weighted_hex_cache(redis_client, mode)
+    # Rebuild weighted cache after adding new votes (unless deferred)
+    if not defer_rebuild:
+        rebuild_weighted_hex_cache(redis_client, mode)
 
 
 def rebuild_weighted_hex_cache(redis_client, mode: str = None):
@@ -199,6 +294,8 @@ def rebuild_weighted_hex_cache(redis_client, mode: str = None):
 
     Computes weighted sums where each IP contributes 1.0 total weight:
     weight = count / total_votes_by_ip
+
+    Stores at finest resolution, then aggregates to all coarser resolutions.
 
     Args:
         redis_client: Redis client
@@ -239,13 +336,21 @@ def rebuild_weighted_hex_cache(redis_client, mode: str = None):
                 weight = count / total_votes
                 weighted_hexes[hex_id] = weighted_hexes.get(hex_id, 0.0) + weight
 
-            # Store weighted cache (as floats with 6 decimal places)
+            # Store at finest resolution
             if weighted_hexes:
                 pipe = redis_client.pipeline()
+                finest_key = f"hex_votes_weighted:{m}:res{H3_FINEST_RESOLUTION}"
+                pipe.delete(finest_key)
+                for hex_id, weight in weighted_hexes.items():
+                    pipe.hset(finest_key, hex_id, f"{weight:.6f}")
+                # Also maintain legacy key for backwards compatibility
                 pipe.delete(f"hex_votes_weighted:{m}")
                 for hex_id, weight in weighted_hexes.items():
                     pipe.hset(f"hex_votes_weighted:{m}", hex_id, f"{weight:.6f}")
                 pipe.execute()
+
+                # Aggregate to all coarser resolutions
+                rebuild_all_resolutions(redis_client, m)
 
         except Exception as e:
             print(f"Error rebuilding weighted hex cache for {m}: {e}")
@@ -258,62 +363,90 @@ def rebuild_weighted_hex_cache(redis_client, mode: str = None):
 def rebuild_all_modes_weighted_cache(redis_client):
     """
     Rebuild the aggregated weighted hex cache across all modes.
+    Builds at all resolutions.
     """
     if not redis_client:
         return
 
     try:
-        all_weighted = {}
+        # Build "all" mode at each resolution
+        for res in H3_RESOLUTIONS:
+            all_weighted = {}
 
-        for m in ["bike", "walk", "drive"]:
-            hex_votes = redis_client.hgetall(f"hex_votes_weighted:{m}")
-            for hex_id, weight in hex_votes.items():
-                all_weighted[hex_id] = all_weighted.get(hex_id, 0.0) + float(weight)
+            for m in ["bike", "walk", "drive"]:
+                key = f"hex_votes_weighted:{m}:res{res}"
+                hex_votes = redis_client.hgetall(key)
+                for hex_id, weight in hex_votes.items():
+                    all_weighted[hex_id] = all_weighted.get(hex_id, 0.0) + float(weight)
 
-        if all_weighted:
+            if all_weighted:
+                pipe = redis_client.pipeline()
+                res_key = f"hex_votes_weighted:all:res{res}"
+                pipe.delete(res_key)
+                for hex_id, weight in all_weighted.items():
+                    pipe.hset(res_key, hex_id, f"{weight:.6f}")
+                pipe.execute()
+
+        # Also maintain legacy key for backwards compatibility (finest resolution)
+        finest_key = f"hex_votes_weighted:all:res{H3_FINEST_RESOLUTION}"
+        hex_votes = redis_client.hgetall(finest_key)
+        if hex_votes:
             pipe = redis_client.pipeline()
             pipe.delete("hex_votes_weighted:all")
-            for hex_id, weight in all_weighted.items():
-                pipe.hset("hex_votes_weighted:all", hex_id, f"{weight:.6f}")
+            for hex_id, weight in hex_votes.items():
+                pipe.hset("hex_votes_weighted:all", hex_id, weight)
             pipe.execute()
 
     except Exception as e:
         print(f"Error rebuilding all-modes weighted cache: {e}")
 
 
-def get_cached_hex_overlay(redis_client, mode_filter: str = None) -> dict:
+def get_cached_hex_overlay(redis_client, mode_filter: str = None, resolution: int = None) -> dict:
     """
-    Read weighted hex votes from cache.
+    Read weighted hex votes from cache at specified resolution.
 
     Args:
         redis_client: Redis client
         mode_filter: Optional mode to filter by (bike, walk, drive)
+        resolution: H3 resolution level (10-14), defaults to 13
 
     Returns:
-        Dict with "hexes" (hex_id -> weighted_vote_float) and "max_votes"
+        Dict with "hexes" (hex_id -> weighted_vote_float), "max_votes", and "res"
     """
+    if resolution is None:
+        resolution = 13  # Default to res 13 for backwards compatibility
+
     try:
-        # Try weighted cache first (new IP-weighted system)
-        key = f"hex_votes_weighted:{mode_filter}" if mode_filter else "hex_votes_weighted:all"
-        hex_votes = redis_client.hgetall(key)
+        # Try resolution-specific key first
+        mode_part = mode_filter if mode_filter else "all"
+        res_key = f"hex_votes_weighted:{mode_part}:res{resolution}"
+        hex_votes = redis_client.hgetall(res_key)
 
         if hex_votes:
-            # Weighted cache exists - return floats
             hex_votes = {k: float(v) for k, v in hex_votes.items()}
             max_votes = max(hex_votes.values()) if hex_votes else 1.0
-            return {"hexes": hex_votes, "max_votes": max_votes}
+            return {"hexes": hex_votes, "max_votes": max_votes, "res": resolution}
 
-        # Fall back to legacy unweighted cache for backwards compatibility
-        legacy_key = f"hex_votes:{mode_filter}" if mode_filter else "hex_votes:all"
+        # Fall back to legacy key (non-resolution-specific)
+        legacy_key = f"hex_votes_weighted:{mode_part}"
         hex_votes = redis_client.hgetall(legacy_key)
+
         if hex_votes:
             hex_votes = {k: float(v) for k, v in hex_votes.items()}
             max_votes = max(hex_votes.values()) if hex_votes else 1.0
-            return {"hexes": hex_votes, "max_votes": max_votes}
+            return {"hexes": hex_votes, "max_votes": max_votes, "res": resolution}
 
-        return {"hexes": {}, "max_votes": 1.0}
+        # Fall back to very old unweighted cache
+        old_legacy_key = f"hex_votes:{mode_part}"
+        hex_votes = redis_client.hgetall(old_legacy_key)
+        if hex_votes:
+            hex_votes = {k: float(v) for k, v in hex_votes.items()}
+            max_votes = max(hex_votes.values()) if hex_votes else 1.0
+            return {"hexes": hex_votes, "max_votes": max_votes, "res": resolution}
+
+        return {"hexes": {}, "max_votes": 1.0, "res": resolution}
     except Exception:
-        return {"hexes": {}, "max_votes": 1.0}
+        return {"hexes": {}, "max_votes": 1.0, "res": resolution}
 
 
 def regenerate_hex_cache(redis_client):
@@ -338,12 +471,15 @@ def regenerate_hex_cache(redis_client):
     if not segment_votes:
         return
 
-    # Clear existing caches (both legacy and new weighted)
+    # Clear existing caches (both legacy and new weighted, all resolutions)
     pipe = redis_client.pipeline()
     for mode in ["bike", "walk", "drive", "all"]:
         pipe.delete(f"hex_votes:{mode}")
         pipe.delete(f"hex_votes_weighted:{mode}")
         pipe.delete(f"hex_votes_by_ip:{mode}")
+        # Clear resolution-specific keys
+        for res in H3_RESOLUTIONS:
+            pipe.delete(f"hex_votes_weighted:{mode}:res{res}")
     pipe.execute()
 
     # Count total hex votes that will be assigned to "system" user
@@ -442,3 +578,40 @@ def build_hex_overlay_from_segments(segment_votes: dict, mode_filter: str = None
     max_votes = max(hex_votes.values()) if hex_votes else 1
 
     return {"hexes": hex_votes, "max_votes": max_votes}
+
+
+def cast_point_vote(redis_client, point: list, mode: str, ip_hash: str, defer_rebuild: bool = False):
+    """
+    Cast a single-point vote at a specific location.
+
+    Converts the point to an H3 hex and stores it with IP-weighted voting.
+    Point votes contribute to the same heatmap as route votes.
+
+    Args:
+        redis_client: Redis client
+        point: [lat, lon] coordinates
+        mode: Transport mode (bike, walk, drive)
+        ip_hash: Hashed client IP for weighted voting
+        defer_rebuild: If True, skip the blocking rebuild (caller handles it)
+    """
+    if not redis_client or not point or len(point) < 2:
+        return
+
+    lat, lon = point[0], point[1]
+
+    # Convert point to H3 hex at finest resolution
+    hex_id = h3.latlng_to_cell(lat, lon, H3_FINEST_RESOLUTION)
+
+    # Apply deterministic jitter for consistency
+    jittered = get_jittered_hex_deterministic(hex_id, f"point:{lat},{lon}:{mode}", 0)
+
+    # Store per-IP hex vote
+    per_ip_key = f"{jittered}|{ip_hash}"
+    redis_client.hincrby(f"hex_votes_by_ip:{mode}", per_ip_key, 1)
+
+    # Update IP vote count
+    redis_client.hincrby("ip_vote_counts", ip_hash, 1)
+
+    # Rebuild weighted cache (unless deferred)
+    if not defer_rebuild:
+        rebuild_weighted_hex_cache(redis_client, mode)

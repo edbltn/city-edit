@@ -19,7 +19,7 @@ Desire Path Mapper is a crowdsourced map showing how people actually travel thro
 
 ## Frontend
 
-The React frontend is in `client-react/`. The vanilla JS `client/` directory is deprecated.
+The React frontend is in `client-react/`.
 
 - **Local dev**: `cd client-react && npm run dev` (port 3000)
 - **Docker dev**: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up`
@@ -31,8 +31,8 @@ All secrets and configuration are stored in `server/.env`. Copy from `.env.examp
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `ORS_API_KEYS` | OpenRouteService API keys, comma-separated ([get free key](https://openrouteservice.org/)). Rotates automatically when quota is exceeded. | Yes |
 | `REDIS_HOST` | Redis host (default: `localhost`) | No |
+| `DATABASE_URL` | PostgreSQL connection URL for persistent vote storage | No |
 
 **Never commit `.env` to git.** It's in `.gitignore`.
 
@@ -40,9 +40,32 @@ All secrets and configuration are stored in `server/.env`. Copy from `.env.examp
 
 1. Client connects via WebSocket to receive real-time map state
 2. User submits a commute route (start/end points + mode)
-3. Flask calls OpenRouteService API to calculate route geometry
+3. Flask uses osmnx + rustworkx to calculate route geometry locally
 4. Route segments are converted to vote points stored in Redis
 5. WebSocket broadcasts updated heatmap to all clients
+
+## Routing
+
+### Architecture
+The app uses a **Python router** based on osmnx and rustworkx for fast local routing. Routes are calculated entirely server-side without external API dependencies.
+
+- **Router**: `server/python_router.py` - Graph-based routing with rustworkx
+- **Graph files**: `server/osm_data/walk_graph.pickle` - Pre-built graph from OSM data
+- **Refresh script**: `server/refresh_osm.py` - Downloads OSM data and rebuilds graphs
+
+### Regions
+Available regions for graph building:
+- `downtown` (default): Battery Park to 34th Street (~6km x 4km)
+- `fidi`: Financial District only (~1.6km x 1.5km)
+- `manhattan`: Full Manhattan
+- `nyc-metro`: Full NYC metro area (high memory)
+
+### Rebuilding Graphs
+If graphs are missing or outdated:
+```bash
+cd server && source env/bin/activate
+python refresh_osm.py --region downtown --force
+```
 
 ## Docker
 

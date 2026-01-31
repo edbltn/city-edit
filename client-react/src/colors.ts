@@ -28,6 +28,12 @@ export const ROUTE_COLORS = {
     middle: "#3B6EA5", // Blue
     core: "#3B6EA5", // Blue core
   },
+  // Bike desire path - green
+  bikeDesire: {
+    glow: "#98E0B0", // Soft green glow
+    edge: "#2E8B57", // Sea green outline
+    core: "#3CB371", // Medium sea green fill
+  },
   drive: {
     glow: "#B8B0A8", // Warmer, more emphatic glow
     asphalt: "#343148", // Eclipse - deep purple-gray

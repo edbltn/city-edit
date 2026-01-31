@@ -151,9 +151,10 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
   // Interactive weight - larger than visual for easier clicking
   const INTERACTIVE_WEIGHT = 20;
 
-  // Visual styles - use walk styling for walk mode, desire styling otherwise
+  // Visual styles - mode-specific colors
   const visualStyles: LayerStyle[] = useMemo(() => {
     if (mode === "walk") {
+      // Walk: blue dots
       const colors = ROUTE_COLORS.walk;
       return [
         {
@@ -183,28 +184,57 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
       ];
     }
 
-    // Default: gold desire path styling
-    const colors = ROUTE_COLORS.desire;
+    if (mode === "bike") {
+      // Bike: solid green line (bike lane green)
+      const colors = ROUTE_COLORS.bikeDesire;
+      return [
+        {
+          color: colors.glow,
+          weight: 8,
+          opacity: 0.3,
+          lineCap: "round",
+          lineJoin: "round",
+        },
+        {
+          color: colors.edge,
+          weight: 6,
+          opacity: 0.5,
+          lineCap: "round",
+          lineJoin: "round",
+        },
+        {
+          color: colors.core,
+          weight: 4,
+          opacity: 1,
+          lineCap: "round",
+          lineJoin: "round",
+        },
+      ];
+    }
+
+    // Drive: black with yellow center line (road style)
+    const colors = ROUTE_COLORS.drive;
     return [
       {
         color: colors.glow,
-        weight: 8,
-        opacity: 0.3,
+        weight: 12,
+        opacity: 0.4,
         lineCap: "round",
         lineJoin: "round",
       },
       {
-        color: colors.middle,
-        weight: 6,
-        opacity: 0.5,
+        color: colors.asphalt,
+        weight: 7,
+        opacity: 0.95,
         lineCap: "round",
         lineJoin: "round",
       },
       {
-        color: colors.core,
-        weight: 4,
-        opacity: 1,
-        lineCap: "round",
+        color: colors.centerLine,
+        weight: 1.5,
+        opacity: 0.9,
+        dashArray: "6, 12",
+        lineCap: "butt",
         lineJoin: "round",
       },
     ];
@@ -215,7 +245,7 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
     () => ({
       color: "#000000",
       weight: INTERACTIVE_WEIGHT,
-      opacity: 0.001, // Nearly invisible but still interactive
+      opacity: 0.01, // Low but visible enough for touch hit detection
       lineCap: "round",
       lineJoin: "round",
     }),
@@ -240,27 +270,36 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
     [geometry]
   );
 
-  // Global mousemove handler for drag
-  const handleGlobalMouseMove = useCallback(
-    (e: MouseEvent) => {
+  // Get position from mouse or touch event
+  const getEventPosition = useCallback((e: MouseEvent | TouchEvent) => {
+    if ("touches" in e && e.touches.length > 0) {
+      return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+    if ("changedTouches" in e && e.changedTouches.length > 0) {
+      return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    }
+    return { x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY };
+  }, []);
+
+  // Global move handler for drag (mouse + touch)
+  const handleGlobalMove = useCallback(
+    (e: MouseEvent | TouchEvent) => {
       if (isDraggingRef.current) {
-        updateDrag({ x: e.clientX, y: e.clientY });
+        const pos = getEventPosition(e);
+        updateDrag(pos);
       }
     },
-    [updateDrag]
+    [updateDrag, getEventPosition]
   );
 
-  // Global mouseup handler - convert screen position to lat/lng and call callback
-  const handleGlobalMouseUp = useCallback(
-    (e: MouseEvent) => {
+  // Global end handler - convert screen position to lat/lng and call callback
+  const handleGlobalEnd = useCallback(
+    (e: MouseEvent | TouchEvent) => {
       if (isDraggingRef.current && onSegmentDrag) {
-        // Get map container rect to calculate relative position
+        const pos = getEventPosition(e);
         const container = map.getContainer();
         const rect = container.getBoundingClientRect();
-        const containerPoint = L.point(
-          e.clientX - rect.left,
-          e.clientY - rect.top
-        );
+        const containerPoint = L.point(pos.x - rect.left, pos.y - rect.top);
         const latLng = map.containerPointToLatLng(containerPoint);
         onSegmentDrag(segmentIndex, { lat: latLng.lat, lng: latLng.lng });
       }
@@ -269,18 +308,19 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
       isDraggingRef.current = false;
       endDrag();
       map.dragging.enable();
-
-      // Restore default cursor
       document.body.style.cursor = "";
 
-      document.removeEventListener("mousemove", handleGlobalMouseMove);
-      document.removeEventListener("mouseup", handleGlobalMouseUp);
+      document.removeEventListener("mousemove", handleGlobalMove);
+      document.removeEventListener("mouseup", handleGlobalEnd);
+      document.removeEventListener("touchmove", handleGlobalMove);
+      document.removeEventListener("touchend", handleGlobalEnd);
+      document.removeEventListener("touchcancel", handleGlobalEnd);
     },
-    [map, segmentIndex, onSegmentDrag, endDrag, handleGlobalMouseMove]
+    [map, segmentIndex, onSegmentDrag, endDrag, handleGlobalMove, getEventPosition]
   );
 
-  // Mousedown on path starts the drag
-  const handleMouseDown = useCallback(
+  // Start drag on mousedown/touchstart
+  const handleStart = useCallback(
     (e: L.LeafletMouseEvent) => {
       if (!onSegmentDrag) return;
 
@@ -289,35 +329,101 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
 
       isDraggingRef.current = true;
       map.dragging.disable();
-
-      // Set grabbing cursor globally
       document.body.style.cursor = "grabbing";
 
-      // Start ghost pin at cursor position
-      startDrag({
-        x: e.originalEvent.clientX,
-        y: e.originalEvent.clientY,
-      });
+      // Get initial position
+      const pos = getEventPosition(e.originalEvent);
+      startDrag(pos);
 
-      // Attach global listeners
-      document.addEventListener("mousemove", handleGlobalMouseMove);
-      document.addEventListener("mouseup", handleGlobalMouseUp);
+      // Attach global listeners for both mouse and touch
+      document.addEventListener("mousemove", handleGlobalMove);
+      document.addEventListener("mouseup", handleGlobalEnd);
+      document.addEventListener("touchmove", handleGlobalMove, { passive: false });
+      document.addEventListener("touchend", handleGlobalEnd);
+      document.addEventListener("touchcancel", handleGlobalEnd);
     },
-    [map, onSegmentDrag, startDrag, handleGlobalMouseMove, handleGlobalMouseUp]
+    [map, onSegmentDrag, startDrag, handleGlobalMove, handleGlobalEnd, getEventPosition]
   );
+
+  // Check if a point is near the path geometry (within threshold pixels)
+  const isPointNearPath = useCallback(
+    (latlng: L.LatLng, thresholdPx: number = 25): boolean => {
+      const coords = geometry.coordinates;
+      if (coords.length < 2) return false;
+
+      const point = map.latLngToContainerPoint(latlng);
+
+      for (let i = 0; i < coords.length - 1; i++) {
+        const a = map.latLngToContainerPoint(L.latLng(coords[i][1], coords[i][0]));
+        const b = map.latLngToContainerPoint(L.latLng(coords[i + 1][1], coords[i + 1][0]));
+        const dist = L.LineUtil.pointToSegmentDistance(point, a, b);
+        if (dist <= thresholdPx) return true;
+      }
+      return false;
+    },
+    [map, geometry]
+  );
+
+  // Listen for touchstart on map container and check if near path
+  useEffect(() => {
+    if (!onSegmentDrag) return;
+
+    const container = map.getContainer();
+
+    const handleContainerTouchStart = (e: TouchEvent) => {
+      if (isDraggingRef.current) return;
+      if (e.touches.length !== 1) return;
+
+      // Don't capture touches on markers - let them handle tap-to-delete
+      const target = e.target as HTMLElement;
+      if (target.closest(".custom-marker, .leaflet-marker-icon, .pin-container")) {
+        return;
+      }
+
+      const touch = e.touches[0];
+      const rect = container.getBoundingClientRect();
+      const containerPoint = L.point(touch.clientX - rect.left, touch.clientY - rect.top);
+      const latlng = map.containerPointToLatLng(containerPoint);
+
+      if (isPointNearPath(latlng)) {
+        e.stopPropagation();
+        e.preventDefault();
+
+        isDraggingRef.current = true;
+        map.dragging.disable();
+
+        startDrag({ x: touch.clientX, y: touch.clientY });
+
+        document.addEventListener("mousemove", handleGlobalMove);
+        document.addEventListener("mouseup", handleGlobalEnd);
+        document.addEventListener("touchmove", handleGlobalMove, { passive: false });
+        document.addEventListener("touchend", handleGlobalEnd);
+        document.addEventListener("touchcancel", handleGlobalEnd);
+      }
+    };
+
+    container.addEventListener("touchstart", handleContainerTouchStart, { passive: false });
+
+    return () => {
+      container.removeEventListener("touchstart", handleContainerTouchStart);
+    };
+  }, [map, onSegmentDrag, isPointNearPath, startDrag, handleGlobalMove, handleGlobalEnd]);
 
   // Cleanup listeners on unmount
   useEffect(() => {
     return () => {
-      document.removeEventListener("mousemove", handleGlobalMouseMove);
-      document.removeEventListener("mouseup", handleGlobalMouseUp);
+      document.removeEventListener("mousemove", handleGlobalMove);
+      document.removeEventListener("mouseup", handleGlobalEnd);
+      document.removeEventListener("touchmove", handleGlobalMove);
+      document.removeEventListener("touchend", handleGlobalEnd);
+      document.removeEventListener("touchcancel", handleGlobalEnd);
       if (isDraggingRef.current) {
         map.dragging.enable();
         document.body.style.cursor = "";
         endDrag();
       }
     };
-  }, [map, endDrag, handleGlobalMouseMove, handleGlobalMouseUp]);
+  }, [map, endDrag, handleGlobalMove, handleGlobalEnd]);
 
   return (
     <>
@@ -340,7 +446,7 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
             pane: "desirePathPane",
             className: "desire-path-interactive",
           })}
-          eventHandlers={{ mousedown: handleMouseDown }}
+          eventHandlers={{ mousedown: handleStart }}
         />
       )}
     </>
@@ -362,8 +468,10 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
   // Interactive weight - larger than visual for easier clicking
   const INTERACTIVE_WEIGHT = 20;
 
+  // Visual styles - mode-specific colors
   const visualStyles: LayerStyle[] = useMemo(() => {
     if (mode === "walk") {
+      // Walk: blue dots
       const colors = ROUTE_COLORS.walk;
       return [
         {
@@ -393,28 +501,57 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
       ];
     }
 
-    // Default: gold split desire path styling
-    const colors = ROUTE_COLORS.splitDesire;
+    if (mode === "bike") {
+      // Bike: solid green line (bike lane green)
+      const colors = ROUTE_COLORS.bikeDesire;
+      return [
+        {
+          color: colors.glow,
+          weight: 8,
+          opacity: 0.3,
+          lineCap: "round",
+          lineJoin: "round",
+        },
+        {
+          color: colors.edge,
+          weight: 6,
+          opacity: 0.5,
+          lineCap: "round",
+          lineJoin: "round",
+        },
+        {
+          color: colors.core,
+          weight: 4,
+          opacity: 1,
+          lineCap: "round",
+          lineJoin: "round",
+        },
+      ];
+    }
+
+    // Drive: black with yellow center line (road style)
+    const colors = ROUTE_COLORS.drive;
     return [
       {
         color: colors.glow,
-        weight: 8,
-        opacity: 0.3,
+        weight: 12,
+        opacity: 0.4,
         lineCap: "round",
         lineJoin: "round",
       },
       {
-        color: colors.middle,
-        weight: 6,
-        opacity: 0.5,
+        color: colors.asphalt,
+        weight: 7,
+        opacity: 0.95,
         lineCap: "round",
         lineJoin: "round",
       },
       {
-        color: colors.core,
-        weight: 4,
-        opacity: 1,
-        lineCap: "round",
+        color: colors.centerLine,
+        weight: 1.5,
+        opacity: 0.9,
+        dashArray: "6, 12",
+        lineCap: "butt",
         lineJoin: "round",
       },
     ];
@@ -425,7 +562,7 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
     () => ({
       color: "#000000",
       weight: INTERACTIVE_WEIGHT,
-      opacity: 0.001, // Nearly invisible but still interactive
+      opacity: 0.01, // Low but visible enough for touch hit detection
       lineCap: "round",
       lineJoin: "round",
     }),
@@ -449,27 +586,36 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
     [splitPath.geometry]
   );
 
-  // Global mousemove handler for drag
-  const handleGlobalMouseMove = useCallback(
-    (e: MouseEvent) => {
+  // Get position from mouse or touch event
+  const getEventPosition = useCallback((e: MouseEvent | TouchEvent) => {
+    if ("touches" in e && e.touches.length > 0) {
+      return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+    if ("changedTouches" in e && e.changedTouches.length > 0) {
+      return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    }
+    return { x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY };
+  }, []);
+
+  // Global move handler for drag (mouse + touch)
+  const handleGlobalMove = useCallback(
+    (e: MouseEvent | TouchEvent) => {
       if (isDraggingRef.current) {
-        updateDrag({ x: e.clientX, y: e.clientY });
+        const pos = getEventPosition(e);
+        updateDrag(pos);
       }
     },
-    [updateDrag]
+    [updateDrag, getEventPosition]
   );
 
-  // Global mouseup handler - convert screen position to lat/lng and call callback
-  const handleGlobalMouseUp = useCallback(
-    (e: MouseEvent) => {
+  // Global end handler - convert screen position to lat/lng and call callback
+  const handleGlobalEnd = useCallback(
+    (e: MouseEvent | TouchEvent) => {
       if (isDraggingRef.current && onSegmentDrag) {
-        // Get map container rect to calculate relative position
+        const pos = getEventPosition(e);
         const container = map.getContainer();
         const rect = container.getBoundingClientRect();
-        const containerPoint = L.point(
-          e.clientX - rect.left,
-          e.clientY - rect.top
-        );
+        const containerPoint = L.point(pos.x - rect.left, pos.y - rect.top);
         const latLng = map.containerPointToLatLng(containerPoint);
         onSegmentDrag(splitPath.segmentIndex, { lat: latLng.lat, lng: latLng.lng });
       }
@@ -478,18 +624,19 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
       isDraggingRef.current = false;
       endDrag();
       map.dragging.enable();
-
-      // Restore default cursor
       document.body.style.cursor = "";
 
-      document.removeEventListener("mousemove", handleGlobalMouseMove);
-      document.removeEventListener("mouseup", handleGlobalMouseUp);
+      document.removeEventListener("mousemove", handleGlobalMove);
+      document.removeEventListener("mouseup", handleGlobalEnd);
+      document.removeEventListener("touchmove", handleGlobalMove);
+      document.removeEventListener("touchend", handleGlobalEnd);
+      document.removeEventListener("touchcancel", handleGlobalEnd);
     },
-    [map, onSegmentDrag, splitPath.segmentIndex, endDrag, handleGlobalMouseMove]
+    [map, splitPath.segmentIndex, onSegmentDrag, endDrag, handleGlobalMove, getEventPosition]
   );
 
-  // Mousedown on path starts the drag
-  const handleMouseDown = useCallback(
+  // Start drag on mousedown/touchstart
+  const handleStart = useCallback(
     (e: L.LeafletMouseEvent) => {
       if (!onSegmentDrag) return;
 
@@ -498,35 +645,101 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
 
       isDraggingRef.current = true;
       map.dragging.disable();
-
-      // Set grabbing cursor globally
       document.body.style.cursor = "grabbing";
 
-      // Start ghost pin at cursor position
-      startDrag({
-        x: e.originalEvent.clientX,
-        y: e.originalEvent.clientY,
-      });
+      // Get initial position
+      const pos = getEventPosition(e.originalEvent);
+      startDrag(pos);
 
-      // Attach global listeners
-      document.addEventListener("mousemove", handleGlobalMouseMove);
-      document.addEventListener("mouseup", handleGlobalMouseUp);
+      // Attach global listeners for both mouse and touch
+      document.addEventListener("mousemove", handleGlobalMove);
+      document.addEventListener("mouseup", handleGlobalEnd);
+      document.addEventListener("touchmove", handleGlobalMove, { passive: false });
+      document.addEventListener("touchend", handleGlobalEnd);
+      document.addEventListener("touchcancel", handleGlobalEnd);
     },
-    [map, onSegmentDrag, startDrag, handleGlobalMouseMove, handleGlobalMouseUp]
+    [map, onSegmentDrag, startDrag, handleGlobalMove, handleGlobalEnd, getEventPosition]
   );
+
+  // Check if a point is near the path geometry (within threshold pixels)
+  const isPointNearPath = useCallback(
+    (latlng: L.LatLng, thresholdPx: number = 25): boolean => {
+      const coords = splitPath.geometry.coordinates;
+      if (coords.length < 2) return false;
+
+      const point = map.latLngToContainerPoint(latlng);
+
+      for (let i = 0; i < coords.length - 1; i++) {
+        const a = map.latLngToContainerPoint(L.latLng(coords[i][1], coords[i][0]));
+        const b = map.latLngToContainerPoint(L.latLng(coords[i + 1][1], coords[i + 1][0]));
+        const dist = L.LineUtil.pointToSegmentDistance(point, a, b);
+        if (dist <= thresholdPx) return true;
+      }
+      return false;
+    },
+    [map, splitPath.geometry]
+  );
+
+  // Listen for touchstart on map container and check if near path
+  useEffect(() => {
+    if (!onSegmentDrag) return;
+
+    const container = map.getContainer();
+
+    const handleContainerTouchStart = (e: TouchEvent) => {
+      if (isDraggingRef.current) return;
+      if (e.touches.length !== 1) return;
+
+      // Don't capture touches on markers - let them handle tap-to-delete
+      const target = e.target as HTMLElement;
+      if (target.closest(".custom-marker, .leaflet-marker-icon, .pin-container")) {
+        return;
+      }
+
+      const touch = e.touches[0];
+      const rect = container.getBoundingClientRect();
+      const containerPoint = L.point(touch.clientX - rect.left, touch.clientY - rect.top);
+      const latlng = map.containerPointToLatLng(containerPoint);
+
+      if (isPointNearPath(latlng)) {
+        e.stopPropagation();
+        e.preventDefault();
+
+        isDraggingRef.current = true;
+        map.dragging.disable();
+
+        startDrag({ x: touch.clientX, y: touch.clientY });
+
+        document.addEventListener("mousemove", handleGlobalMove);
+        document.addEventListener("mouseup", handleGlobalEnd);
+        document.addEventListener("touchmove", handleGlobalMove, { passive: false });
+        document.addEventListener("touchend", handleGlobalEnd);
+        document.addEventListener("touchcancel", handleGlobalEnd);
+      }
+    };
+
+    container.addEventListener("touchstart", handleContainerTouchStart, { passive: false });
+
+    return () => {
+      container.removeEventListener("touchstart", handleContainerTouchStart);
+    };
+  }, [map, onSegmentDrag, splitPath.segmentIndex, isPointNearPath, startDrag, handleGlobalMove, handleGlobalEnd]);
 
   // Cleanup listeners on unmount
   useEffect(() => {
     return () => {
-      document.removeEventListener("mousemove", handleGlobalMouseMove);
-      document.removeEventListener("mouseup", handleGlobalMouseUp);
+      document.removeEventListener("mousemove", handleGlobalMove);
+      document.removeEventListener("mouseup", handleGlobalEnd);
+      document.removeEventListener("touchmove", handleGlobalMove);
+      document.removeEventListener("touchend", handleGlobalEnd);
+      document.removeEventListener("touchcancel", handleGlobalEnd);
       if (isDraggingRef.current) {
         map.dragging.enable();
         document.body.style.cursor = "";
         endDrag();
       }
     };
-  }, [map, endDrag, handleGlobalMouseMove, handleGlobalMouseUp]);
+  }, [map, endDrag, handleGlobalMove, handleGlobalEnd]);
 
   return (
     <>
@@ -549,7 +762,7 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
             pane: "desirePathPane",
             className: "split-path-interactive",
           })}
-          eventHandlers={{ mousedown: handleMouseDown }}
+          eventHandlers={{ mousedown: handleStart }}
         />
       )}
     </>
