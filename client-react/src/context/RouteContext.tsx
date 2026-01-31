@@ -44,6 +44,7 @@ interface RouteContextValue {
   clearStart: () => void;
   clearEnd: () => void;
   clearError: () => void;
+  setError: (message: string) => void;
   addWaypoint: (coords: LatLng) => void;
   updateWaypoint: (index: number, coords: LatLng) => void;
   clearWaypoints: () => void;
@@ -99,6 +100,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     calculateRoute,
     clearRoute,
     clearError,
+    setError,
   } = useRouteCalculation();
 
   // Compute point type based on whether both points are set
@@ -339,8 +341,21 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       const newEnd = remaining[remaining.length - 1];
       const newGhostWaypoints = remaining.slice(1, -1);
 
-      setStart({ coords: newStart, timestamp: Date.now() });
-      setEnd({ coords: newEnd, timestamp: Date.now() });
+      // Only update start/end if coordinates actually changed
+      // This prevents triggering the main effect unnecessarily when removing a ghost waypoint
+      const startChanged = !start.coords ||
+        start.coords.lat !== newStart.lat ||
+        start.coords.lng !== newStart.lng;
+      const endChanged = !end.coords ||
+        end.coords.lat !== newEnd.lat ||
+        end.coords.lng !== newEnd.lng;
+
+      if (startChanged) {
+        setStart({ coords: newStart, timestamp: Date.now() });
+      }
+      if (endChanged) {
+        setEnd({ coords: newEnd, timestamp: Date.now() });
+      }
       setGhostWaypoints(newGhostWaypoints);
 
       // Recalculate based on new structure
@@ -349,9 +364,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         setIsCalculatingSplit(true);
         calculateAllSegments(remaining)
           .then(splitPaths => {
-            if (splitPaths.length === newGhostWaypoints.length + 1) {
-              setSplitDesirePaths(splitPaths);
-            }
+            setSplitDesirePaths(splitPaths);
           })
           .catch(console.error)
           .finally(() => setIsCalculatingSplit(false));
@@ -377,7 +390,14 @@ export function RouteProvider({ children }: { children: ReactNode }) {
 
     const isPointVote = start.coords && !end.coords;
 
-    if (!isPointVote && (!segmentsToVote || segmentsToVote.length === 0 || !voteMode)) {
+    // For point votes, use mode directly (no route calculation needed)
+    // For split paths, use mode directly; otherwise need voteMode from route calculation
+    const effectiveVoteMode = isPointVote
+      ? mode
+      : (splitDesirePaths.length > 0 ? mode : voteMode);
+
+    if (!isPointVote && (!segmentsToVote || segmentsToVote.length === 0 || !effectiveVoteMode)) {
+      console.warn("castVote: No segments to vote on", { segmentsToVote, effectiveVoteMode });
       return;
     }
     if (isPointVote && !start.coords) {
@@ -390,7 +410,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     setIsVoting(true);
     try {
       const body: Record<string, unknown> = {
-        mode: voteMode || mode,
+        mode: effectiveVoteMode,
         vote_type: voteType,
       };
 
@@ -520,6 +540,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       clearStart,
       clearEnd,
       clearError,
+      setError,
       addWaypoint,
       updateWaypoint,
       clearWaypoints,
@@ -556,6 +577,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       clearStart,
       clearEnd,
       clearError,
+      setError,
       addWaypoint,
       updateWaypoint,
       clearWaypoints,
