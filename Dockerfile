@@ -21,6 +21,10 @@ COPY server/requirements.txt .
 RUN uv pip install --system --no-cache -r requirements.txt gunicorn
 
 COPY server/*.py ./
+
+# Build routing graph during image build (bakes graph into image)
+RUN mkdir -p osm_data && python refresh_osm.py --region manhattan --force
+
 COPY --from=client-builder /app/dist /var/www/html/
 
 COPY deploy/nginx-cloudrun.conf /etc/nginx/nginx.conf

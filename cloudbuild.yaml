@@ -26,13 +26,12 @@ steps:
       - 'run'
       - 'services'
       - 'update'
-      - 'desire-path-mapper-${_ENVIRONMENT}'
+      - 'desire-path-mapper'
       - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:${BUILD_ID}'
       - '--region=${_REGION}'
 
 substitutions:
   _REGION: us-central1
-  _ENVIRONMENT: prod
 
 images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
