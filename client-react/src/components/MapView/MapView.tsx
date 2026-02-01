@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -99,6 +99,7 @@ export function MapView() {
     setEndPoint,
     clearStart,
     clearEnd,
+    setError,
     insertWaypointAtSegment,
     updateGhostWaypoint,
     removeGhostWaypoint,
@@ -113,9 +114,14 @@ export function MapView() {
     onUpdateStart: setStartPoint,
     onUpdateEnd: setEndPoint,
     onClearGhostWaypoints: clearSplitPaths,
+    onSetError: setError,
     suppressNextClick,
     onClearSuppress: clearSuppressClick,
   });
+
+  const handleOutOfBounds = useCallback(() => {
+    setError("Not mapped yet — please limit to Manhattan");
+  }, [setError]);
 
   const bounds = useMemo(
     () =>
@@ -195,6 +201,7 @@ export function MapView() {
           onDragStart={setSuppressClick}
           onDragEnd={(pos) => updateGhostWaypoint(index, pos)}
           onDelete={() => removeGhostWaypoint(index)}
+          onOutOfBounds={handleOutOfBounds}
         />
       ))}
 
@@ -205,6 +212,7 @@ export function MapView() {
           position={wp}
           index={index}
           onDragEnd={updateWaypoint}
+          onOutOfBounds={handleOutOfBounds}
         />
       ))}
 
@@ -216,6 +224,7 @@ export function MapView() {
           onDragStart={setSuppressClick}
           onDragEnd={setStartPoint}
           onDelete={clearStart}
+          onOutOfBounds={handleOutOfBounds}
         />
       )}
 
@@ -227,6 +236,7 @@ export function MapView() {
           onDragStart={setSuppressClick}
           onDragEnd={setEndPoint}
           onDelete={clearEnd}
+          onOutOfBounds={handleOutOfBounds}
         />
       )}
     </MapContainer>

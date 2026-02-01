@@ -393,7 +393,7 @@ def ws(ws):
                     logger.warning(f"[WS] Exception in receive: {e}")
 
             # Check for pub/sub messages (with short timeout)
-            redis_msg = pubsub.get_message(timeout=0.5)
+            redis_msg = pubsub.get_message(timeout=0.1)
             should_push = False
 
             if redis_msg and redis_msg["type"] == "message":

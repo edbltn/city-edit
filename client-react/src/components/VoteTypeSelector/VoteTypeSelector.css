@@ -17,14 +17,15 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  min-width: 200px;
-  width: 200px;
+  min-width: 180px;
+  width: 180px;
   height: var(--control-height);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
   background: var(--paper);
   cursor: pointer;
   text-align: left;
+  font-size: var(--font-size-sm);
 }
 
 .vote-type-control:hover {
@@ -49,13 +50,14 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  padding: 0 var(--space-4);
-  padding-right: calc(var(--space-4) + 1.2em);
+  padding: 0 var(--space-3);
+  padding-right: calc(var(--space-3) + 1.2em);
   border: none;
   background: transparent;
   font-family: var(--font-ui);
   font-size: var(--font-size-sm);
-  font-weight: 500;
+  font-weight: 400;
+  letter-spacing: 0.3px;
   color: var(--ink);
   cursor: pointer;
   box-sizing: border-box;
@@ -79,11 +81,12 @@
   align-items: center;
   justify-content: flex-start;
   gap: var(--space-2);
-  padding: 0 var(--space-4);
-  padding-right: calc(var(--space-4) + 1.2em);
+  padding: 0 var(--space-3);
+  padding-right: calc(var(--space-3) + 1.2em);
   font-family: var(--font-ui);
   font-size: var(--font-size-sm);
-  font-weight: 500;
+  font-weight: 400;
+  letter-spacing: 0.3px;
   color: var(--ink);
   pointer-events: none;
   text-align: left;
@@ -96,7 +99,7 @@
 /* Icon in the selector display - don't constrain width */
 .vote-type-display .vote-type-icon {
   flex-shrink: 0;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1;
 }
 
@@ -143,7 +146,8 @@
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-size-sm);
-  font-weight: 500;
+  font-weight: 400;
+  letter-spacing: 0.3px;
   color: var(--ink);
   cursor: pointer;
   transition: background 0.1s ease;
@@ -159,10 +163,10 @@
   display: inline-flex !important;
   align-items: center !important;
   justify-content: flex-start !important;
-  width: 20px !important;
-  min-width: 20px !important;
+  width: 18px !important;
+  min-width: 18px !important;
   flex-shrink: 0 !important;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1;
 }
 
@@ -203,5 +207,14 @@
 
   .vote-type-control {
     width: 100%;
+  }
+}
+
+@media (max-width: 540px) {
+  .vote-type-input,
+  .vote-type-display,
+  .vote-type-placeholder,
+  .vote-type-option {
+    font-size: 12px;
   }
 }

@@ -186,7 +186,7 @@ resource "google_secret_manager_secret_iam_member" "cloud_run_db_access" {
 
 # Cloud Run service
 resource "google_cloud_run_service" "app" {
-  name     = "desire-path-mapper-${var.environment}"
+  name     = "desire-path-mapper"
   location = var.region
 
   template {

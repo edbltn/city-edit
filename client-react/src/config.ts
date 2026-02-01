@@ -28,6 +28,12 @@ export const CONFIG = {
     ne: { lat: 41.1, lon: -73.5 },
   },
 
+  // Routing limits (mapped region bounds)
+  mappedBounds: {
+    sw: { lat: 40.70121, lon: -74.03069 },
+    ne: { lat: 40.87043, lon: -73.90752 },
+  },
+
   // Zoom limits
   minZoom: 10,
   maxZoom: 18,

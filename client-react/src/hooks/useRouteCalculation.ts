@@ -151,10 +151,15 @@ export function useRouteCalculation() {
     setState((prev) => ({ ...prev, error: null }));
   }, []);
 
+  const setError = useCallback((message: string) => {
+    setState((prev) => ({ ...prev, error: message }));
+  }, []);
+
   return {
     ...state,
     calculateRoute,
     clearRoute,
     clearError,
+    setError,
   };
 }

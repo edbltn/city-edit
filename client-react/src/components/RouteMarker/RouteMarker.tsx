@@ -2,6 +2,7 @@ import { useMemo, useRef } from "react";
 import { Marker } from "react-leaflet";
 import L from "leaflet";
 import { COLOR_START, COLOR_END, ROUTE_COLORS } from "../../colors";
+import { isWithinMappedBounds } from "../../utils/bounds";
 import type { LatLng } from "../../types";
 
 // Minimum distance (in degrees) to consider a drag as intentional movement
@@ -17,6 +18,7 @@ interface RouteMarkerProps {
   onDragEnd?: (newPosition: LatLng) => void;
   onDragStart?: () => void;
   onDelete?: () => void;
+  onOutOfBounds?: () => void;
 }
 
 // Create custom icon for markers
@@ -39,7 +41,7 @@ function getMarkerColor(which: "start" | "end" | "waypoint"): string {
   return ROUTE_COLORS.desire.middle; // Gold for waypoint
 }
 
-export function RouteMarker({ position, which, onDragEnd, onDragStart, onDelete }: RouteMarkerProps) {
+export function RouteMarker({ position, which, onDragEnd, onDragStart, onDelete, onOutOfBounds }: RouteMarkerProps) {
   const markerRef = useRef<L.Marker>(null);
   const dragStartPosition = useRef<LatLng | null>(null);
   const touchStartTime = useRef<number>(0);
@@ -85,7 +87,18 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDelete 
         const latlng = marker.getLatLng();
         const newPos = { lat: latlng.lat, lng: latlng.lng };
 
-        // If we have a start position, check if barely moved → noop
+        // Check if new position is within mapped bounds
+        if (!isWithinMappedBounds(newPos)) {
+          // Reset marker to original position
+          if (dragStartPosition.current) {
+            marker.setLatLng([dragStartPosition.current.lat, dragStartPosition.current.lng]);
+          }
+          dragStartPosition.current = null;
+          onOutOfBounds?.();
+          return;
+        }
+
+        // If we have a start position, check if barely moved -> noop
         // If no start position recorded (shouldn't happen), proceed with update
         if (dragStartPosition.current) {
           const deltaLat = Math.abs(newPos.lat - dragStartPosition.current.lat);
@@ -104,7 +117,7 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDelete 
         onDragEnd(newPos);
       },
     }),
-    [onDragEnd, onDragStart, onDelete]
+    [onDragEnd, onDragStart, onDelete, onOutOfBounds]
   );
 
   return (

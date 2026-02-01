@@ -1,20 +1,24 @@
 import { useMemo, useRef } from "react";
 import { Marker } from "react-leaflet";
 import L from "leaflet";
+import { isWithinMappedBounds } from "../../utils/bounds";
 import type { LatLng } from "../../types";
 
 interface WaypointMarkerProps {
   position: LatLng;
   index: number;
   onDragEnd: (index: number, newPosition: LatLng) => void;
+  onOutOfBounds?: () => void;
 }
 
 export function WaypointMarker({
   position,
   index,
   onDragEnd,
+  onOutOfBounds,
 }: WaypointMarkerProps) {
   const markerRef = useRef<L.Marker>(null);
+  const dragStartPosition = useRef<LatLng | null>(null);
 
   const icon = useMemo(
     () =>
@@ -33,15 +37,36 @@ export function WaypointMarker({
 
   const eventHandlers = useMemo(
     () => ({
+      dragstart: () => {
+        const marker = markerRef.current;
+        if (marker) {
+          const latlng = marker.getLatLng();
+          dragStartPosition.current = { lat: latlng.lat, lng: latlng.lng };
+        }
+      },
       dragend: () => {
         const marker = markerRef.current;
         if (marker) {
           const latlng = marker.getLatLng();
-          onDragEnd(index, { lat: latlng.lat, lng: latlng.lng });
+          const newPos = { lat: latlng.lat, lng: latlng.lng };
+
+          // Check if new position is within mapped bounds
+          if (!isWithinMappedBounds(newPos)) {
+            // Reset marker to original position
+            if (dragStartPosition.current) {
+              marker.setLatLng([dragStartPosition.current.lat, dragStartPosition.current.lng]);
+            }
+            dragStartPosition.current = null;
+            onOutOfBounds?.();
+            return;
+          }
+
+          dragStartPosition.current = null;
+          onDragEnd(index, newPos);
         }
       },
     }),
-    [index, onDragEnd]
+    [index, onDragEnd, onOutOfBounds]
   );
 
   return (

@@ -91,7 +91,7 @@ export const TopBar = memo(function TopBar() {
               </span>
               <span>Most Requested</span>
             </div>
-            {(routeData || splitDesirePaths.length > 0) && (
+            {(routeData || splitDesirePaths.length > 0) && !isLoading && (
               <div className="legend-item">
                 <span className="legend-icon-slot">
                   {getLegendIcon()}
@@ -109,43 +109,39 @@ export const TopBar = memo(function TopBar() {
               How it Works
             </button>
 
-            <ModeSelector />
+            <div className="btn-group">
+              <ModeSelector />
+              {(canVote || (start.coords && end.coords)) && <VoteTypeSelector />}
+            </div>
 
-            <button
-              className="btn-header btn-clear"
-              onClick={clearPoints}
-              disabled={isLoading || isVoting}
-            >
-              Clear
-            </button>
+            <div className="btn-group">
+              <button
+                className="btn-header btn-clear"
+                onClick={clearPoints}
+                disabled={isLoading || isVoting}
+              >
+                Clear
+              </button>
 
-            {canVote && (
-              <>
-                <VoteTypeSelector />
-                {isLoading ? (
-                  <div className="calculating-indicator active">
-                    <div className="spinner"></div>
-                    <span>Calculating...</span>
-                  </div>
-                ) : (
-                  <button
-                    className="btn-header btn-vote"
-                    onClick={castVote}
-                    disabled={hasVoted || isVoting}
-                  >
-                    {isVoting ? "Voting..." : hasVoted ? "Vote Cast!" : "Cast Vote"}
-                  </button>
-                )}
-              </>
-            )}
+              {/* Show calculating when loading with both points set */}
+              {isLoading && start.coords && end.coords && (
+                <div className="calculating-indicator active">
+                  <div className="spinner"></div>
+                  <span>Calculating...</span>
+                </div>
+              )}
 
-            {/* Show calculating indicator when loading a new route (before canVote becomes true) */}
-            {!canVote && isLoading && start.coords && end.coords && (
-              <div className="calculating-indicator active">
-                <div className="spinner"></div>
-                <span>Calculating...</span>
-              </div>
-            )}
+              {/* Show Cast Vote when route ready and not loading */}
+              {canVote && !isLoading && (
+                <button
+                  className="btn-header btn-vote"
+                  onClick={castVote}
+                  disabled={hasVoted || isVoting}
+                >
+                  {isVoting ? "Voting..." : hasVoted ? "Vote Cast!" : "Cast Vote"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

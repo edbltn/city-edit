@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { isWithinMappedBounds } from "../utils/bounds";
 import type { LatLng, RoutePoint } from "../types";
 
 interface MapClickState {
@@ -11,6 +12,7 @@ interface UseMapClickOptions {
   onUpdateStart: (coords: LatLng) => void;
   onUpdateEnd: (coords: LatLng) => void;
   onClearGhostWaypoints: () => void;
+  onSetError: (message: string) => void;
   suppressNextClick?: () => boolean;
   onClearSuppress?: () => void;
 }
@@ -20,6 +22,7 @@ export function useMapClick({
   onUpdateStart,
   onUpdateEnd,
   onClearGhostWaypoints,
+  onSetError,
   suppressNextClick,
   onClearSuppress,
 }: UseMapClickOptions) {
@@ -28,6 +31,12 @@ export function useMapClick({
       // Skip this click if suppressed (after ghost pin drop)
       if (suppressNextClick?.()) {
         onClearSuppress?.();
+        return;
+      }
+
+      // Validate click is within mapped bounds
+      if (!isWithinMappedBounds(latlng)) {
+        onSetError("Not mapped yet — please limit to Manhattan");
         return;
       }
 
@@ -51,7 +60,7 @@ export function useMapClick({
       onUpdateStart(prevEnd);
       onUpdateEnd(latlng);
     },
-    [state.start.coords, state.end.coords, onUpdateStart, onUpdateEnd, onClearGhostWaypoints, suppressNextClick, onClearSuppress]
+    [state.start.coords, state.end.coords, onUpdateStart, onUpdateEnd, onClearGhostWaypoints, onSetError, suppressNextClick, onClearSuppress]
   );
 
   return { handleMapClick };

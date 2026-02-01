@@ -14,12 +14,12 @@
   --font-editorial: "Playfair Display", Georgia, serif;
 
   /* Typography Scale (desktop) */
-  --font-size-2xs: 12px;    /* mobile compact */
-  --font-size-xs: 13px;     /* attribution */
-  --font-size-sm: 16px;     /* secondary text */
+  --font-size-2xs: 13px;    /* mobile compact */
+  --font-size-xs: 14px;     /* attribution */
+  --font-size-sm: 17px;     /* secondary text */
   --font-size-sm-mobile: 14px; /* mobile buttons */
-  --font-size-md: 17px;     /* labels, legend */
-  --font-size-base: 18px;   /* primary controls */
+  --font-size-md: 18px;     /* labels, legend */
+  --font-size-base: 19px;   /* primary controls */
 
   /* Control Heights (Apple standard touch target) */
   --control-height: 44px;
