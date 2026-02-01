@@ -4,8 +4,16 @@
   max-width: 520px;
 }
 
+.how-it-works-modal .modal-body {
+  font-size: 15px;
+}
+
+.how-it-works-modal .modal-header h2 {
+  font-size: 20px;
+}
+
 .how-it-works-section {
-  margin-bottom: var(--space-5);
+  margin-bottom: var(--space-4);
 }
 
 .how-it-works-section:last-child {
@@ -14,7 +22,7 @@
 
 .how-it-works-section h3 {
   font-family: var(--font-ui);
-  font-size: var(--font-size-sm);
+  font-size: 13px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -24,8 +32,8 @@
 }
 
 .how-it-works-section p {
-  margin: 0 0 var(--space-3) 0;
-  line-height: 1.6;
+  margin: 0 0 var(--space-2) 0;
+  line-height: 1.5;
 }
 
 .how-it-works-section p:last-child {
@@ -41,13 +49,13 @@
 .how-it-works-steps li {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) 0;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
 }
 
 .step-icon-slot {
-  width: 80px;
-  min-width: 80px;
+  width: 70px;
+  min-width: 70px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -58,16 +66,16 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 4px 8px;
+  padding: 3px 6px;
   background: var(--hover-bg);
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
+  font-size: 13px;
   font-weight: 600;
   flex-shrink: 0;
 }
 
 .inline-btn-example .mode-icon {
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1;
 }
 

@@ -7,7 +7,7 @@
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
-  background: #DC343B;
+  background: #C4841D;
   color: white;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
@@ -35,6 +35,8 @@
 .error-toast-icon {
   width: 20px;
   height: 20px;
+  min-width: 20px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -45,7 +47,7 @@
 }
 
 .error-toast-message {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
 }
 
@@ -58,7 +60,7 @@
   padding: 6px 12px;
   border: none;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.2s ease;
@@ -66,7 +68,7 @@
 
 .error-toast-btn-retry {
   background: rgba(255, 255, 255, 0.9);
-  color: #DC343B;
+  color: #C4841D;
 }
 
 .error-toast-btn-retry:hover {

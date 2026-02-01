@@ -13,13 +13,13 @@
   --font-ui: system-ui, -apple-system, sans-serif;
   --font-editorial: "Playfair Display", Georgia, serif;
 
-  /* Typography Scale */
-  --font-size-2xs: 10px;    /* mobile compact */
-  --font-size-xs: 11px;     /* attribution */
-  --font-size-sm: 14px;     /* secondary text */
-  --font-size-sm-mobile: 13px; /* mobile buttons */
-  --font-size-md: 15px;     /* labels, legend */
-  --font-size-base: 16px;   /* primary controls */
+  /* Typography Scale (desktop) */
+  --font-size-2xs: 12px;    /* mobile compact */
+  --font-size-xs: 13px;     /* attribution */
+  --font-size-sm: 16px;     /* secondary text */
+  --font-size-sm-mobile: 14px; /* mobile buttons */
+  --font-size-md: 17px;     /* labels, legend */
+  --font-size-base: 18px;   /* primary controls */
 
   /* Control Heights (Apple standard touch target) */
   --control-height: 44px;
@@ -123,7 +123,7 @@ body {
 .topbar h1 {
   margin: 0;
   font-family: var(--font-editorial);
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 400;
   letter-spacing: 0.1px;
   white-space: nowrap;
@@ -220,6 +220,12 @@ body {
   min-height: var(--control-height);
 }
 
+.btn-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .route-field {
   display: flex;
   align-items: center;
@@ -293,8 +299,8 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 10px var(--space-4);
-  padding-right: calc(var(--space-4) + 1.2em);
+  padding: 8px var(--space-3);
+  padding-right: calc(var(--space-3) + 1.2em);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
   background: var(--paper);
@@ -420,6 +426,7 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  font-size: var(--font-size-sm);
 }
 
 .legend-icon-slot {
@@ -547,7 +554,7 @@ body {
    ========================================================================== */
 
 .btn-header {
-  padding: 10px var(--space-5);
+  padding: 8px var(--space-3);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
   background: var(--paper);
@@ -929,7 +936,7 @@ body {
 
 .pac-item {
   padding: var(--space-2) var(--space-3) !important;
-  font-size: 12px !important;
+  font-size: 14px !important;
   color: var(--ink) !important;
   background: var(--paper) !important;
   cursor: pointer !important;
@@ -982,7 +989,7 @@ body {
 }
 
 .pac-item-query {
-  font-size: 12px !important;
+  font-size: 14px !important;
   color: var(--ink) !important;
   font-family: var(--font-ui) !important;
 }
@@ -1047,7 +1054,7 @@ body {
 .modal-header h2 {
   margin: 0;
   font-family: var(--font-editorial);
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 400;
   letter-spacing: 0.1px;
 }
@@ -1085,7 +1092,7 @@ body {
 .input-group label {
   display: block;
   margin-bottom: var(--space-2);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--ink);
   opacity: 0.8;
@@ -1098,7 +1105,7 @@ body {
   border-radius: var(--radius-lg);
   background: var(--paper);
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: 16px;
   color: var(--ink);
   box-sizing: border-box;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -1123,15 +1130,18 @@ body {
 .calculating-indicator {
   display: none;
   align-items: center;
+  justify-content: center;
   gap: var(--space-2);
-  padding: 10px var(--space-5);
+  padding: 8px var(--space-3);
   font-size: var(--font-size-sm);
+  font-weight: 400;
   color: var(--ink);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
   background: var(--paper);
   height: var(--control-height);
   box-sizing: border-box;
+  white-space: nowrap;
 }
 
 .calculating-indicator.active {
@@ -1224,9 +1234,8 @@ body {
     gap: var(--space-2);
   }
 
-  .route-actions > * {
-    flex: 1 1 auto;
-    min-width: 80px;
+  .btn-group {
+    flex: 0 0 auto;
   }
 
   .mode-btn {
@@ -1253,20 +1262,21 @@ body {
     height: 24px;
   }
 
-  .btn-header {
-    font-size: var(--font-size-sm-mobile);
-    padding: 6px 10px;
+  .btn-header,
+  .mode-btn {
+    font-size: 12px;
+    padding: 4px 8px;
   }
 
   .mode-btn {
-    font-size: var(--font-size-sm-mobile);
-    padding: 6px 10px;
+    padding-right: calc(8px + 1.2em);
   }
 
   .mode-icon {
     font-size: 14px;
   }
 
+  .legend-item,
   .legend-label {
     font-size: 12px;
   }
@@ -1280,9 +1290,26 @@ body {
     gap: var(--space-2);
     align-items: flex-start;
   }
+
+  .route-actions {
+    gap: var(--space-2);
+  }
+
+  .calculating-indicator {
+    font-size: 12px;
+    padding: 4px 8px;
+  }
+
+  /* VoteTypeSelector mobile */
+  .vote-type-input,
+  .vote-type-display,
+  .vote-type-placeholder,
+  .vote-type-option {
+    font-size: 12px;
+  }
 }
 
-/* Very small mobile: stack actions vertically, even more compact */
+/* Very small mobile: stack button groups vertically */
 @media (max-width: 400px) {
   :root {
     --control-height: 34px;
@@ -1299,27 +1326,42 @@ body {
   .btn-header,
   .mode-btn {
     font-size: 12px;
-    padding: 5px 8px;
+    padding: 4px 6px;
+  }
+
+  .mode-btn {
+    padding-right: calc(6px + 1.2em);
   }
 
   .route-actions {
     flex-direction: column;
+    align-items: stretch;
   }
 
-  .route-actions > * {
+  .btn-group {
     width: 100%;
-    flex: none;
+    justify-content: stretch;
+  }
+
+  .btn-group > * {
+    flex: 1;
   }
 
   .mode-selector {
-    width: 100%;
+    flex: 1;
   }
 
   .mode-btn {
     width: 100%;
+    justify-content: center;
   }
 
   .mode-dropdown {
     width: 100%;
+  }
+
+  .calculating-indicator {
+    width: 100%;
+    justify-content: center;
   }
 }
