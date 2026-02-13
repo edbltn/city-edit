@@ -117,17 +117,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             rawState.revision > latestRevisionRef.current
           ) {
             latestRevisionRef.current = rawState.revision;
-            // Parse all hex overlays
-            const parsedState: MapState = {
+            // Merge new hex overlays with cached ones (server sends one resolution at a time)
+            const newHexOverlays = parseAllHexOverlays(rawState.hex_overlays);
+            setMapState((prev) => ({
               ...rawState,
-              hex_overlays: parseAllHexOverlays(rawState.hex_overlays),
-            };
-            // Log hex counts for all resolutions
-            const hexCounts = Object.entries(parsedState.hex_overlays || {})
-              .map(([res, overlay]) => `${res}:${Object.keys(overlay.hexes).length}`)
-              .join(", ");
-            console.log(`[HEX] Received all resolutions: ${hexCounts}`);
-            setMapState(parsedState);
+              hex_overlays: { ...prev?.hex_overlays, ...newHexOverlays },
+            }));
           }
         }
       } catch (e) {
@@ -166,8 +161,6 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setZoom = useCallback((zoom: number) => {
-    const res = zoomToResolution(zoom);
-    console.log(`[ZOOM] zoom=${zoom} → res=${res}`);
     setCurrentZoom(zoom);
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "set_zoom", zoom }));

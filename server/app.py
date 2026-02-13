@@ -297,9 +297,11 @@ def get_hex_overlay(mode_filter=None, resolution=None):
 
 
 def make_state(rev: int, mode_filter=None, resolution=None):
-    """Build map state with segment overlay and ALL hex overlays (res 10-15).
+    """Build map state with segment overlay and a single hex overlay.
 
-    Sends all resolutions at once so frontend can hotswap on zoom without waiting.
+    Sends only the requested resolution to keep payload small (~80-120 KB
+    instead of ~500 KB for all 6). Client merges and caches resolutions
+    as they arrive.
     Uses compact format for hex overlay to reduce bandwidth:
     - 'res': resolution level
     - 'h': array of [hex_id, weight] tuples (more compact than object)
@@ -307,44 +309,44 @@ def make_state(rev: int, mode_filter=None, resolution=None):
     """
     segment_overlay = get_segment_overlay(mode_filter)
 
-    # Build hex overlays for all resolutions
+    # Build hex overlay for requested resolution only
+    target_res = resolution or 13
     hex_overlays = {}
-    for res in H3_RESOLUTIONS:
-        hex_data = get_hex_overlay(mode_filter, res)
-        hex_list = [[hex_id, round(weight, 4)] for hex_id, weight in hex_data.get("hexes", {}).items()]
+    hex_data = get_hex_overlay(mode_filter, target_res)
+    hex_list = [[hex_id, round(weight, 4)] for hex_id, weight in hex_data.get("hexes", {}).items()]
 
-        # Build suggestion legend and per-hex indices (top 3 per hex)
-        suggestions = hex_data.get("suggestions", {})
-        legend = []
-        legend_index = {}
-        hex_sug = {}
-        for hex_id, type_counts in suggestions.items():
-            sorted_types = sorted(type_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-            indices = []
-            for vtype, _count in sorted_types:
-                if vtype not in legend_index:
-                    legend_index[vtype] = len(legend)
-                    legend.append(vtype)
-                indices.append(legend_index[vtype])
-            if indices:
-                hex_sug[hex_id] = indices
+    # Build suggestion legend and per-hex indices (top 3 per hex)
+    suggestions = hex_data.get("suggestions", {})
+    legend = []
+    legend_index = {}
+    hex_sug = {}
+    for hex_id, type_counts in suggestions.items():
+        sorted_types = sorted(type_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+        indices = []
+        for vtype, _count in sorted_types:
+            if vtype not in legend_index:
+                legend_index[vtype] = len(legend)
+                legend.append(vtype)
+            indices.append(legend_index[vtype])
+        if indices:
+            hex_sug[hex_id] = indices
 
-        overlay = {
-            "res": res,
-            "h": hex_list,
-            "m": hex_data.get("max_votes", 1.0)
-        }
-        if legend:
-            overlay["sl"] = legend
-            overlay["s"] = hex_sug
-        hex_overlays[res] = overlay
+    overlay = {
+        "res": target_res,
+        "h": hex_list,
+        "m": hex_data.get("max_votes", 1.0)
+    }
+    if legend:
+        overlay["sl"] = legend
+        overlay["s"] = hex_sug
+    hex_overlays[target_res] = overlay
 
     return {
         "revision": rev,
         "overlays": {
             "desire_paths": segment_overlay
         },
-        "hex_overlays": hex_overlays  # All resolutions: {10: {...}, 11: {...}, ...}
+        "hex_overlays": hex_overlays
     }
 
 
@@ -404,9 +406,13 @@ def ws(ws):
                         new_zoom = data.get("zoom", 14)
                         if isinstance(new_zoom, (int, float)) and 0 <= new_zoom <= 22:
                             current_zoom = int(new_zoom)
-                            current_resolution = ZOOM_TO_RESOLUTION.get(current_zoom, 13)
-                            logger.info(f"[ZOOM] zoom={current_zoom} → res={current_resolution}")
-                            # State already includes all resolutions, no need to send again
+                            new_resolution = ZOOM_TO_RESOLUTION.get(current_zoom, 13)
+                            if new_resolution != current_resolution:
+                                current_resolution = new_resolution
+                                state_msg = {"type": "map_state", "state": make_state(rev, current_mode, current_resolution)}
+                                ws.send(json.dumps(state_msg))
+                                rev += 1
+                                last_push_time = time.time()
             except Exception as e:
                 # Timeout, no data, and connection closed are expected - don't log
                 err_str = str(e).lower()

@@ -134,10 +134,24 @@ export function HexHeatmapLayer() {
     if (!hexId) return;
 
     drawHexPath(hoverCtx, hexId);
-    hoverCtx.globalAlpha = 0.4;
-    hoverCtx.strokeStyle = "#343148";
-    hoverCtx.lineWidth = 1.5;
+
+    // Clip to hex so stroke stays inside the boundary
+    hoverCtx.save();
+    hoverCtx.clip();
+
+    // White outer outline for contrast against dark fills
+    hoverCtx.globalAlpha = 0.5;
+    hoverCtx.strokeStyle = "#ffffff";
+    hoverCtx.lineWidth = 4;
     hoverCtx.stroke();
+
+    // Black inner stroke
+    hoverCtx.globalAlpha = 0.6;
+    hoverCtx.strokeStyle = "#000000";
+    hoverCtx.lineWidth = 2;
+    hoverCtx.stroke();
+
+    hoverCtx.restore();
   }, [map, drawHexPath]);
 
   // Redraw function - uses currentResolution to get the right hex overlay
@@ -159,7 +173,6 @@ export function HexHeatmapLayer() {
     // Get hex overlay for current resolution
     const hexOverlay = getHexOverlayForResolution(currentResolution);
     const hexCount = hexOverlay?.hexes ? Object.keys(hexOverlay.hexes).length : 0;
-    console.log(`[HEXLAYER] Redrawing res=${currentResolution}, hexCount=${hexCount}`);
     if (!hexOverlay?.hexes || hexCount === 0) {
       return;
     }
@@ -228,7 +241,6 @@ export function HexHeatmapLayer() {
 
     const handleZoomStart = () => {
       isZoomingRef.current = true;
-      console.log(`[HEXLAYER] ZOOM START - clearing canvas`);
       if (canvas && ctx) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
@@ -244,7 +256,6 @@ export function HexHeatmapLayer() {
 
     const handleZoomEnd = () => {
       const newZoom = Math.round(map.getZoom());
-      console.log(`[HEXLAYER] ZOOM END - zoom=${newZoom}, scheduling redraw`);
       setZoom(newZoom);
       scheduleRedraw();
       queueMicrotask(() => {
@@ -324,7 +335,6 @@ export function HexHeatmapLayer() {
 
   // Redraw when resolution changes (hotswap)
   useEffect(() => {
-    console.log(`[HEXLAYER] Resolution changed to ${currentResolution}, redrawing`);
     scheduleRedraw();
   }, [currentResolution, scheduleRedraw]);
 
