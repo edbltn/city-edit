@@ -6,6 +6,8 @@
 
 .how-it-works-modal .modal-body {
   font-size: 15px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
 }
 
 .how-it-works-modal .modal-header h2 {

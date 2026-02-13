@@ -281,8 +281,11 @@ export function HexHeatmapLayer() {
     };
   }, [map, scheduleRedraw, setZoom]);
 
-  // Hex hover detection via map mousemove
+  // Hex hover detection via map mousemove (disabled on touch devices)
   useEffect(() => {
+    const canHover = window.matchMedia("(hover: hover)").matches;
+    if (!canHover) return;
+
     const handleMouseMove = (e: L.LeafletMouseEvent) => {
       const hexOverlay = getHexOverlayForResolution(currentResolution);
       if (!hexOverlay?.hexes) {
