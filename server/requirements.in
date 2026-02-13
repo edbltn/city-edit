@@ -4,7 +4,6 @@ flask-cors
 requests
 redis
 gevent
-gevent-websocket
 gunicorn
 python-dotenv
 osmnx
