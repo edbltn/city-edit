@@ -22,11 +22,11 @@ H3_FINEST_RESOLUTION = 15  # Store at highest res, aggregate down
 H3_COARSEST_RESOLUTION = 10
 H3_RESOLUTION = H3_FINEST_RESOLUTION  # Default for backwards compatibility
 
-# Zoom level to H3 resolution mapping: resolution = zoom - 3 (with clamping)
-# zoom 13 → res 10, zoom 14 → res 11, ..., zoom 18 → res 15
+# Zoom level to H3 resolution mapping: changes every 2 zoom levels
+# zoom 13-14 → res 10, zoom 15-16 → res 11, ..., zoom 23+ → res 15
 def zoom_to_resolution(zoom: int) -> int:
-    """Convert zoom level to H3 resolution (zoom - 3 with clamping)."""
-    res = zoom - 3
+    """Convert zoom level to H3 resolution (every 2 zoom levels)."""
+    res = H3_COARSEST_RESOLUTION + (max(zoom, 13) - 13) // 2
     if res <= H3_COARSEST_RESOLUTION:
         return H3_COARSEST_RESOLUTION
     if res >= H3_FINEST_RESOLUTION:
@@ -201,6 +201,66 @@ def aggregate_to_resolution(hex_votes: dict, target_res: int) -> dict:
     return aggregated
 
 
+def aggregate_suggestions_to_resolution(hex_suggestions: dict, target_res: int) -> dict:
+    """
+    Aggregate per-hex suggestion counts to a coarser resolution.
+
+    Args:
+        hex_suggestions: Dict of hex_id -> {vote_type: count} at finest resolution
+        target_res: Target H3 resolution to aggregate to
+
+    Returns:
+        Dict of parent_hex_id -> {vote_type: aggregated_count}
+    """
+    if not hex_suggestions:
+        return {}
+
+    aggregated = {}
+    for hex_id, type_counts in hex_suggestions.items():
+        try:
+            current_res = h3.get_resolution(hex_id)
+            if current_res == target_res:
+                parent = hex_id
+            elif current_res > target_res:
+                parent = h3.cell_to_parent(hex_id, target_res)
+            else:
+                continue
+            if parent not in aggregated:
+                aggregated[parent] = {}
+            for vtype, count in type_counts.items():
+                aggregated[parent][vtype] = aggregated[parent].get(vtype, 0) + count
+        except Exception:
+            continue
+    return aggregated
+
+
+def _parse_suggestion_hash(raw_data: dict) -> dict:
+    """
+    Parse Redis hash of "hex_id|vote_type" -> count into
+    {hex_id: {vote_type: count}}.
+    """
+    result = {}
+    for field, count in raw_data.items():
+        parts = field.split("|", 1)
+        if len(parts) != 2:
+            continue
+        hex_id, vote_type = parts
+        if hex_id not in result:
+            result[hex_id] = {}
+        result[hex_id][vote_type] = int(count)
+    return result
+
+
+def _store_suggestion_hash(pipe, key: str, hex_suggestions: dict):
+    """
+    Store {hex_id: {vote_type: count}} into Redis hash as "hex_id|vote_type" -> count.
+    """
+    pipe.delete(key)
+    for hex_id, type_counts in hex_suggestions.items():
+        for vote_type, count in type_counts.items():
+            pipe.hset(key, f"{hex_id}|{vote_type}", str(count))
+
+
 def rebuild_all_resolutions(redis_client, mode: str):
     """
     Build hex caches at all resolutions from finest resolution data.
@@ -238,11 +298,24 @@ def rebuild_all_resolutions(redis_client, mode: str):
                 pipe.hset(key, hex_id, f"{weight:.6f}")
         pipe.execute()
 
+        # Also rebuild suggestion caches at coarser resolutions
+        finest_sug_key = f"hex_suggestions:{mode}:res{H3_FINEST_RESOLUTION}"
+        finest_sug_data = redis_client.hgetall(finest_sug_key)
+        if finest_sug_data:
+            finest_suggestions = _parse_suggestion_hash(finest_sug_data)
+            pipe2 = redis_client.pipeline()
+            for res in H3_RESOLUTIONS:
+                if res == H3_FINEST_RESOLUTION:
+                    continue
+                aggregated = aggregate_suggestions_to_resolution(finest_suggestions, res)
+                _store_suggestion_hash(pipe2, f"hex_suggestions:{mode}:res{res}", aggregated)
+            pipe2.execute()
+
     except Exception as e:
         print(f"Error rebuilding resolutions for {mode}: {e}")
 
 
-def update_hex_cache_incremental(redis_client, segments: list, mode: str, ip_hash: str = None, defer_rebuild: bool = False):
+def update_hex_cache_incremental(redis_client, segments: list, mode: str, ip_hash: str = None, defer_rebuild: bool = False, vote_type: str = ""):
     """
     Add votes for new segments to hex cache using deterministic jitter.
 
@@ -255,6 +328,7 @@ def update_hex_cache_incremental(redis_client, segments: list, mode: str, ip_has
         mode: Transport mode (bike, walk, drive)
         ip_hash: Hashed IP for weighted voting (optional, defaults to "system")
         defer_rebuild: If True, skip the blocking rebuild (caller handles it)
+        vote_type: Natural language description of what user is voting for
     """
     if not redis_client or not segments:
         return
@@ -280,6 +354,9 @@ def update_hex_cache_incremental(redis_client, segments: list, mode: str, ip_has
             # Store per-IP hex votes: key is "hex_id|ip_hash"
             per_ip_key = f"{jittered}|{ip_hash}"
             pipe.hincrby(f"hex_votes_by_ip:{mode}", per_ip_key, 1)
+            # Store suggestion count for this hex
+            if vote_type:
+                pipe.hincrby(f"hex_suggestions:{mode}:res{H3_FINEST_RESOLUTION}", f"{jittered}|{vote_type}", 1)
 
     pipe.execute()
 
@@ -372,6 +449,7 @@ def rebuild_all_modes_weighted_cache(redis_client):
         # Build "all" mode at each resolution
         for res in H3_RESOLUTIONS:
             all_weighted = {}
+            all_suggestions = {}
 
             for m in ["bike", "walk", "drive"]:
                 key = f"hex_votes_weighted:{m}:res{res}"
@@ -379,12 +457,26 @@ def rebuild_all_modes_weighted_cache(redis_client):
                 for hex_id, weight in hex_votes.items():
                     all_weighted[hex_id] = all_weighted.get(hex_id, 0.0) + float(weight)
 
+                # Merge suggestions across modes
+                sug_key = f"hex_suggestions:{m}:res{res}"
+                sug_data = redis_client.hgetall(sug_key)
+                if sug_data:
+                    mode_suggestions = _parse_suggestion_hash(sug_data)
+                    for hex_id, type_counts in mode_suggestions.items():
+                        if hex_id not in all_suggestions:
+                            all_suggestions[hex_id] = {}
+                        for vtype, count in type_counts.items():
+                            all_suggestions[hex_id][vtype] = all_suggestions[hex_id].get(vtype, 0) + count
+
             if all_weighted:
                 pipe = redis_client.pipeline()
                 res_key = f"hex_votes_weighted:all:res{res}"
                 pipe.delete(res_key)
                 for hex_id, weight in all_weighted.items():
                     pipe.hset(res_key, hex_id, f"{weight:.6f}")
+                # Store merged suggestions
+                if all_suggestions:
+                    _store_suggestion_hash(pipe, f"hex_suggestions:all:res{res}", all_suggestions)
                 pipe.execute()
 
         # Also maintain legacy key for backwards compatibility (finest resolution)
@@ -403,15 +495,16 @@ def rebuild_all_modes_weighted_cache(redis_client):
 
 def get_cached_hex_overlay(redis_client, mode_filter: str = None, resolution: int = None) -> dict:
     """
-    Read weighted hex votes from cache at specified resolution.
+    Read weighted hex votes and suggestion counts from cache at specified resolution.
 
     Args:
         redis_client: Redis client
         mode_filter: Optional mode to filter by (bike, walk, drive)
-        resolution: H3 resolution level (10-14), defaults to 13
+        resolution: H3 resolution level (10-15), defaults to 13
 
     Returns:
-        Dict with "hexes" (hex_id -> weighted_vote_float), "max_votes", and "res"
+        Dict with "hexes" (hex_id -> weighted_vote_float), "max_votes", "res",
+        and "suggestions" (hex_id -> {vote_type: count})
     """
     if resolution is None:
         resolution = 13  # Default to res 13 for backwards compatibility
@@ -425,7 +518,8 @@ def get_cached_hex_overlay(redis_client, mode_filter: str = None, resolution: in
         if hex_votes:
             hex_votes = {k: float(v) for k, v in hex_votes.items()}
             max_votes = max(hex_votes.values()) if hex_votes else 1.0
-            return {"hexes": hex_votes, "max_votes": max_votes, "res": resolution}
+            suggestions = _read_suggestions(redis_client, mode_part, resolution)
+            return {"hexes": hex_votes, "max_votes": max_votes, "res": resolution, "suggestions": suggestions}
 
         # Fall back to legacy key (non-resolution-specific)
         legacy_key = f"hex_votes_weighted:{mode_part}"
@@ -434,7 +528,7 @@ def get_cached_hex_overlay(redis_client, mode_filter: str = None, resolution: in
         if hex_votes:
             hex_votes = {k: float(v) for k, v in hex_votes.items()}
             max_votes = max(hex_votes.values()) if hex_votes else 1.0
-            return {"hexes": hex_votes, "max_votes": max_votes, "res": resolution}
+            return {"hexes": hex_votes, "max_votes": max_votes, "res": resolution, "suggestions": {}}
 
         # Fall back to very old unweighted cache
         old_legacy_key = f"hex_votes:{mode_part}"
@@ -442,11 +536,26 @@ def get_cached_hex_overlay(redis_client, mode_filter: str = None, resolution: in
         if hex_votes:
             hex_votes = {k: float(v) for k, v in hex_votes.items()}
             max_votes = max(hex_votes.values()) if hex_votes else 1.0
-            return {"hexes": hex_votes, "max_votes": max_votes, "res": resolution}
+            return {"hexes": hex_votes, "max_votes": max_votes, "res": resolution, "suggestions": {}}
 
-        return {"hexes": {}, "max_votes": 1.0, "res": resolution}
+        return {"hexes": {}, "max_votes": 1.0, "res": resolution, "suggestions": {}}
     except Exception:
-        return {"hexes": {}, "max_votes": 1.0, "res": resolution}
+        return {"hexes": {}, "max_votes": 1.0, "res": resolution, "suggestions": {}}
+
+
+def _read_suggestions(redis_client, mode_part: str, resolution: int) -> dict:
+    """
+    Read suggestion counts for a mode and resolution.
+
+    Returns:
+        Dict of hex_id -> {vote_type: count}
+    """
+    sug_key = f"hex_suggestions:{mode_part}:res{resolution}"
+    sug_data = redis_client.hgetall(sug_key)
+    if not sug_data:
+        return {}
+
+    return _parse_suggestion_hash(sug_data)
 
 
 def regenerate_hex_cache(redis_client):
@@ -480,6 +589,7 @@ def regenerate_hex_cache(redis_client):
         # Clear resolution-specific keys
         for res in H3_RESOLUTIONS:
             pipe.delete(f"hex_votes_weighted:{mode}:res{res}")
+            pipe.delete(f"hex_suggestions:{mode}:res{res}")
     pipe.execute()
 
     # Count total hex votes that will be assigned to "system" user
@@ -580,7 +690,7 @@ def build_hex_overlay_from_segments(segment_votes: dict, mode_filter: str = None
     return {"hexes": hex_votes, "max_votes": max_votes}
 
 
-def cast_point_vote(redis_client, point: list, mode: str, ip_hash: str, defer_rebuild: bool = False):
+def cast_point_vote(redis_client, point: list, mode: str, ip_hash: str, defer_rebuild: bool = False, vote_type: str = ""):
     """
     Cast a single-point vote at a specific location.
 
@@ -593,6 +703,7 @@ def cast_point_vote(redis_client, point: list, mode: str, ip_hash: str, defer_re
         mode: Transport mode (bike, walk, drive)
         ip_hash: Hashed client IP for weighted voting
         defer_rebuild: If True, skip the blocking rebuild (caller handles it)
+        vote_type: Natural language description of what user is voting for
     """
     if not redis_client or not point or len(point) < 2:
         return
@@ -608,6 +719,10 @@ def cast_point_vote(redis_client, point: list, mode: str, ip_hash: str, defer_re
     # Store per-IP hex vote
     per_ip_key = f"{jittered}|{ip_hash}"
     redis_client.hincrby(f"hex_votes_by_ip:{mode}", per_ip_key, 1)
+
+    # Store suggestion count for this hex
+    if vote_type:
+        redis_client.hincrby(f"hex_suggestions:{mode}:res{H3_FINEST_RESOLUTION}", f"{jittered}|{vote_type}", 1)
 
     # Update IP vote count
     redis_client.hincrby("ip_vote_counts", ip_hash, 1)

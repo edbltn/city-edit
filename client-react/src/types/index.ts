@@ -54,6 +54,8 @@ export interface HexOverlay {
   res?: number;                      // Resolution level
   hexes: Record<string, number>;     // Expanded format (used internally)
   max_votes: number;
+  suggestionLegend?: string[];                  // Unique vote_type labels
+  suggestions?: Record<string, number[]>;       // hex_id → indices into legend (top 3)
 }
 
 // Compact format from server (h = array of [hex_id, weight] tuples, m = max_votes)
@@ -61,6 +63,8 @@ export interface HexOverlayCompact {
   res: number;
   h: [string, number][];
   m: number;
+  sl?: string[];                          // Suggestion legend
+  s?: Record<string, number[]>;           // hex_id → legend indices (top 3)
 }
 
 export interface MapState {

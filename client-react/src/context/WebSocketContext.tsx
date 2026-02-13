@@ -27,10 +27,11 @@ interface WebSocketContextValue {
 }
 
 /**
- * Convert zoom level to H3 resolution (zoom - 3 with clamping).
+ * Convert zoom level to H3 resolution (every 2 zoom levels).
+ * zoom 13-14 → res 10, zoom 15-16 → res 11, ..., zoom 23+ → res 15
  */
 function zoomToResolution(zoom: number): number {
-  const res = zoom - 3;
+  const res = MIN_RESOLUTION + Math.floor((Math.max(zoom, 13) - 13) / 2);
   if (res <= MIN_RESOLUTION) return MIN_RESOLUTION;
   if (res >= MAX_RESOLUTION) return MAX_RESOLUTION;
   return res;
@@ -48,6 +49,8 @@ function parseHexOverlayCompact(data: HexOverlayCompact): HexOverlay {
     res: data.res,
     hexes,
     max_votes: data.m,
+    suggestionLegend: data.sl,
+    suggestions: data.s,
   };
 }
 

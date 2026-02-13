@@ -90,6 +90,9 @@
   color: var(--ink);
   pointer-events: none;
   text-align: left;
+  overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .vote-type-placeholder {
@@ -108,6 +111,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
+  min-width: 0;
 }
 
 .vote-type-chevron {

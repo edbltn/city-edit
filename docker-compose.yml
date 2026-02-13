@@ -67,7 +67,7 @@ services:
           current_hour=$$(date +%H)
           if [ \"$$current_day\" = \"7\" ] && [ \"$$current_hour\" = \"03\" ]; then
             echo 'Starting weekly OSM refresh...'
-            python refresh_osm.py 2>&1
+            python refresh_osm.py --region manhattan 2>&1
             # Sleep for 1 hour to avoid running again
             sleep 3600
           fi

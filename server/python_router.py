@@ -52,8 +52,8 @@ class PythonRouter(RouterInterface):
         self._version = None
         self._cache_ttl = 86400  # 24 hours
 
-    # Grid precision for coordinate snapping (4 decimals = ~11 meters)
-    COORD_SNAP_PRECISION = 4
+    # Grid precision for coordinate snapping (3 decimals = ~100 meters, roughly half an avenue block)
+    COORD_SNAP_PRECISION = 3
 
     def _snap_to_grid(self, lat: float, lon: float) -> tuple[float, float]:
         """Snap coordinates to grid for cache key consistency."""

@@ -293,7 +293,7 @@ def get_hex_overlay(mode_filter=None, resolution=None):
 
         return result
     except redis.ConnectionError:
-        return {"hexes": {}, "max_votes": 1, "res": resolution or 13}
+        return {"hexes": {}, "max_votes": 1, "res": resolution or 13, "suggestions": {}}
 
 
 def make_state(rev: int, mode_filter=None, resolution=None):
@@ -312,11 +312,32 @@ def make_state(rev: int, mode_filter=None, resolution=None):
     for res in H3_RESOLUTIONS:
         hex_data = get_hex_overlay(mode_filter, res)
         hex_list = [[hex_id, round(weight, 4)] for hex_id, weight in hex_data.get("hexes", {}).items()]
-        hex_overlays[res] = {
+
+        # Build suggestion legend and per-hex indices (top 3 per hex)
+        suggestions = hex_data.get("suggestions", {})
+        legend = []
+        legend_index = {}
+        hex_sug = {}
+        for hex_id, type_counts in suggestions.items():
+            sorted_types = sorted(type_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+            indices = []
+            for vtype, _count in sorted_types:
+                if vtype not in legend_index:
+                    legend_index[vtype] = len(legend)
+                    legend.append(vtype)
+                indices.append(legend_index[vtype])
+            if indices:
+                hex_sug[hex_id] = indices
+
+        overlay = {
             "res": res,
             "h": hex_list,
             "m": hex_data.get("max_votes", 1.0)
         }
+        if legend:
+            overlay["sl"] = legend
+            overlay["s"] = hex_sug
+        hex_overlays[res] = overlay
 
     return {
         "revision": rev,
@@ -552,7 +573,7 @@ def cast_vote():
         if point:
             # Single-point vote (no route, just a location)
             from hex_voting import cast_point_vote
-            cast_point_vote(redis_client, point, mode, ip_hash, defer_rebuild=True)
+            cast_point_vote(redis_client, point, mode, ip_hash, defer_rebuild=True, vote_type=vote_type)
             logger.info(f"[VOTE] Cast point vote for '{vote_type}' at {point} as '{mode}' from IP {ip_hash[:8]}...")
 
             # Record to database for persistence (vote_type only stored here)
@@ -590,7 +611,7 @@ def cast_vote():
             logger.info(f"[VOTE] Cast {vote_count} segment votes for '{vote_type}' as '{mode}' from IP {ip_hash[:8]}...")
 
             # Update hex cache incrementally with IP-weighted votes (defer expensive rebuild)
-            update_hex_cache_incremental(redis_client, segments, mode, ip_hash, defer_rebuild=True)
+            update_hex_cache_incremental(redis_client, segments, mode, ip_hash, defer_rebuild=True, vote_type=vote_type)
             logger.info(f"[VOTE] Updated hex cache with {len(segments)} segments")
 
             # Record to database for persistence (async, doesn't block response)
@@ -651,7 +672,7 @@ def admin_refresh_osm():
     try:
         import subprocess
         result = subprocess.run(
-            ["python", "refresh_osm.py"],
+            ["python", "refresh_osm.py", "--region", "manhattan"],
             capture_output=True,
             text=True,
             timeout=1800  # 30 minute timeout for graph building

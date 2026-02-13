@@ -835,6 +835,25 @@ body {
   filter: drop-shadow(0 4px 12px rgba(212, 160, 23, 0.4));
 }
 
+/* ==========================================================================
+   Hover Ghost Pin (snapped-to-path preview)
+   ========================================================================== */
+
+.hover-ghost-marker {
+  background: transparent !important;
+  border: none !important;
+  pointer-events: none !important;
+}
+
+.hover-ghost-pin {
+  opacity: 0.7;
+  transform: scale(0.7);
+  transform-origin: bottom center;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 6px rgba(212, 160, 23, 0.3));
+  transition: opacity 0.15s ease;
+}
+
 
 /* ==========================================================================
    Autocomplete (shared base styles)
@@ -1364,4 +1383,60 @@ body {
     width: 100%;
     justify-content: center;
   }
+}
+
+
+/* ==========================================================================
+   Hex Tooltip
+   ========================================================================== */
+
+.hex-tooltip {
+  position: absolute;
+  z-index: var(--z-dropdown);
+  pointer-events: none;
+  padding: 4px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  color: var(--ink);
+  white-space: nowrap;
+  transform: translate(-50%, -100%);
+  margin-top: -12px;
+}
+
+.hex-tooltip::after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  background: var(--paper);
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.hex-tooltip-line {
+  line-height: 1.4;
+}
+
+.hex-tooltip-ellipsis {
+  line-height: 1.4;
+  color: var(--ink);
+  opacity: 0.5;
+}
+
+.hex-tooltip-votes {
+  line-height: 1.4;
+  margin-top: 2px;
+  padding-top: 2px;
+  border-top: 1px solid var(--hairline);
+  color: var(--ink);
+  opacity: 0.6;
+  font-size: 11px;
 }

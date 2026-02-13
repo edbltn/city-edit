@@ -3,24 +3,34 @@
  *
  * Custom canvas layer for rendering filled hexagons with log-scaled
  * orange coloring based on vote counts. Hotswaps resolution on zoom.
+ * Shows tooltip with top suggestions on hex hover.
+ * Uses a separate canvas for hover outline (cheap per-frame redraw).
  */
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { useMap } from "react-leaflet";
 import L from "leaflet";
-import { cellToBoundary } from "h3-js";
+import { cellToBoundary, latLngToCell } from "h3-js";
 import { HEX_HEATMAP } from "../../colors";
 import { useWebSocketContext } from "../../context/WebSocketContext";
+import { HexTooltip } from "./HexTooltip";
 
 export function HexHeatmapLayer() {
   const map = useMap();
   const { currentResolution, setZoom, getHexOverlayForResolution } = useWebSocketContext();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const hoverCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const hoverCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const redrawTimeoutRef = useRef<number | null>(null);
   const isZoomingRef = useRef(false);
 
-  // Initialize canvas once
+  // Hover state
+  const [hoveredHexId, setHoveredHexId] = useState<string | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const hoveredHexIdRef = useRef<string | null>(null);
+
+  // Initialize canvases once
   useEffect(() => {
     const canvas = document.createElement("canvas");
     canvas.className = "hex-heatmap";
@@ -29,20 +39,36 @@ export function HexHeatmapLayer() {
     canvas.style.left = "0";
     canvas.style.pointerEvents = "none";
 
+    const hoverCanvas = document.createElement("canvas");
+    hoverCanvas.className = "hex-heatmap-hover";
+    hoverCanvas.style.position = "absolute";
+    hoverCanvas.style.top = "0";
+    hoverCanvas.style.left = "0";
+    hoverCanvas.style.pointerEvents = "none";
+
     const ctx = canvas.getContext("2d");
+    const hoverCtx = hoverCanvas.getContext("2d");
     canvasRef.current = canvas;
     ctxRef.current = ctx;
+    hoverCanvasRef.current = hoverCanvas;
+    hoverCtxRef.current = hoverCtx;
 
-    // Add to desirePathPane (below routes)
+    // Add to desirePathPane (before other children so routes render on top)
     const pane = map.getPane("desirePathPane");
     if (pane) {
-      pane.appendChild(canvas);
+      const firstChild = pane.firstChild;
+      if (firstChild) {
+        pane.insertBefore(canvas, firstChild);
+        pane.insertBefore(hoverCanvas, canvas.nextSibling);
+      } else {
+        pane.appendChild(canvas);
+        pane.appendChild(hoverCanvas);
+      }
     }
 
     return () => {
-      if (canvas.parentNode) {
-        canvas.parentNode.removeChild(canvas);
-      }
+      if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+      if (hoverCanvas.parentNode) hoverCanvas.parentNode.removeChild(hoverCanvas);
     };
   }, [map]);
 
@@ -73,6 +99,46 @@ export function HexHeatmapLayer() {
     },
     []
   );
+
+  // Draw a hex polygon path on a context
+  const drawHexPath = useCallback((ctx: CanvasRenderingContext2D, hexId: string) => {
+    const boundary = cellToBoundary(hexId);
+    const screenCoords = boundary.map(([lat, lon]) => {
+      const point = map.latLngToContainerPoint([lat, lon]);
+      return [point.x, point.y];
+    });
+    ctx.beginPath();
+    ctx.moveTo(screenCoords[0][0], screenCoords[0][1]);
+    for (let i = 1; i < screenCoords.length; i++) {
+      ctx.lineTo(screenCoords[i][0], screenCoords[i][1]);
+    }
+    ctx.closePath();
+  }, [map]);
+
+  // Draw hover outline on separate canvas (cheap - single polygon)
+  const redrawHoverOutline = useCallback(() => {
+    const hoverCanvas = hoverCanvasRef.current;
+    const hoverCtx = hoverCtxRef.current;
+    if (!hoverCanvas || !hoverCtx) return;
+
+    const size = map.getSize();
+    hoverCanvas.width = size.x;
+    hoverCanvas.height = size.y;
+
+    const topLeft = map.containerPointToLayerPoint([0, 0]);
+    L.DomUtil.setPosition(hoverCanvas, topLeft);
+
+    hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
+
+    const hexId = hoveredHexIdRef.current;
+    if (!hexId) return;
+
+    drawHexPath(hoverCtx, hexId);
+    hoverCtx.globalAlpha = 0.4;
+    hoverCtx.strokeStyle = "#343148";
+    hoverCtx.lineWidth = 1.5;
+    hoverCtx.stroke();
+  }, [map, drawHexPath]);
 
   // Redraw function - uses currentResolution to get the right hex overlay
   const redraw = useCallback(() => {
@@ -142,7 +208,10 @@ export function HexHeatmapLayer() {
 
     // Reset globalAlpha after drawing all hexes
     ctx.globalAlpha = 1.0;
-  }, [map, currentResolution, getHexOverlayForResolution, getColorAndOpacity]);
+
+    // Also update hover outline position
+    redrawHoverOutline();
+  }, [map, currentResolution, getHexOverlayForResolution, getColorAndOpacity, redrawHoverOutline]);
 
   // Schedule redraw with requestAnimationFrame
   const scheduleRedraw = useCallback(() => {
@@ -158,30 +227,32 @@ export function HexHeatmapLayer() {
     const ctx = ctxRef.current;
 
     const handleZoomStart = () => {
-      // Mark that we're zooming - skip moveend redraws until zoom completes
       isZoomingRef.current = true;
       console.log(`[HEXLAYER] ZOOM START - clearing canvas`);
-      // Clear canvas immediately on zoom start
       if (canvas && ctx) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
+      // Clear hover outline and tooltip during zoom
+      const hoverCtx = hoverCtxRef.current;
+      const hoverCanvas = hoverCanvasRef.current;
+      if (hoverCanvas && hoverCtx) {
+        hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
+      }
+      setHoveredHexId(null);
+      hoveredHexIdRef.current = null;
     };
 
     const handleZoomEnd = () => {
       const newZoom = Math.round(map.getZoom());
       console.log(`[HEXLAYER] ZOOM END - zoom=${newZoom}, scheduling redraw`);
-      // Update zoom in context - useEffect will redraw when currentResolution changes
       setZoom(newZoom);
-      // Always schedule a redraw after zoom ends
       scheduleRedraw();
-      // Clear zooming flag after a microtask to let state update first
       queueMicrotask(() => {
         isZoomingRef.current = false;
       });
     };
 
     const handleMoveEnd = () => {
-      // Skip moveend during zoom - the resolution useEffect will handle redraw
       if (isZoomingRef.current) return;
       scheduleRedraw();
     };
@@ -199,6 +270,58 @@ export function HexHeatmapLayer() {
     };
   }, [map, scheduleRedraw, setZoom]);
 
+  // Hex hover detection via map mousemove
+  useEffect(() => {
+    const handleMouseMove = (e: L.LeafletMouseEvent) => {
+      const hexOverlay = getHexOverlayForResolution(currentResolution);
+      if (!hexOverlay?.hexes) {
+        if (hoveredHexIdRef.current) {
+          hoveredHexIdRef.current = null;
+          setHoveredHexId(null);
+          redrawHoverOutline();
+        }
+        return;
+      }
+
+      // Convert mouse position to H3 hex at current resolution
+      const { lat, lng } = e.latlng;
+      const hexId = latLngToCell(lat, lng, currentResolution);
+
+      // Check if this hex exists in our overlay
+      if (hexId in hexOverlay.hexes) {
+        if (hoveredHexIdRef.current !== hexId) {
+          hoveredHexIdRef.current = hexId;
+          setHoveredHexId(hexId);
+          redrawHoverOutline();
+        }
+        const containerPoint = e.containerPoint;
+        setTooltipPos({ x: containerPoint.x, y: containerPoint.y });
+      } else {
+        if (hoveredHexIdRef.current) {
+          hoveredHexIdRef.current = null;
+          setHoveredHexId(null);
+          redrawHoverOutline();
+        }
+      }
+    };
+
+    const handleMouseOut = () => {
+      if (hoveredHexIdRef.current) {
+        hoveredHexIdRef.current = null;
+        setHoveredHexId(null);
+        redrawHoverOutline();
+      }
+    };
+
+    map.on("mousemove", handleMouseMove);
+    map.on("mouseout", handleMouseOut);
+
+    return () => {
+      map.off("mousemove", handleMouseMove);
+      map.off("mouseout", handleMouseOut);
+    };
+  }, [map, currentResolution, getHexOverlayForResolution, redrawHoverOutline]);
+
   // Redraw when resolution changes (hotswap)
   useEffect(() => {
     console.log(`[HEXLAYER] Resolution changed to ${currentResolution}, redrawing`);
@@ -210,5 +333,33 @@ export function HexHeatmapLayer() {
     scheduleRedraw();
   }, [getHexOverlayForResolution, scheduleRedraw]);
 
-  return null;
+  // Resolve tooltip content from legend + indices, with vote count fallback
+  const tooltipSuggestions: string[] = [];
+  let hoveredVotes = 0;
+  if (hoveredHexId) {
+    const hexOverlay = getHexOverlayForResolution(currentResolution);
+    if (hexOverlay) {
+      hoveredVotes = (hexOverlay.hexes[hoveredHexId] as number) || 0;
+      if (hexOverlay.suggestionLegend && hexOverlay.suggestions?.[hoveredHexId]) {
+        const indices = hexOverlay.suggestions[hoveredHexId];
+        for (const idx of indices) {
+          if (idx < hexOverlay.suggestionLegend.length) {
+            tooltipSuggestions.push(hexOverlay.suggestionLegend[idx]);
+          }
+        }
+      }
+    }
+  }
+
+  const mapContainer = map.getContainer();
+
+  return hoveredHexId && hoveredVotes > 0 ? (
+    <HexTooltip
+      suggestions={tooltipSuggestions}
+      votes={hoveredVotes}
+      x={tooltipPos.x}
+      y={tooltipPos.y}
+      container={mapContainer}
+    />
+  ) : null;
 }

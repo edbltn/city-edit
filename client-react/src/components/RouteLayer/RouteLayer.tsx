@@ -1,10 +1,52 @@
-import { useMemo, useCallback, useRef, useEffect } from "react";
-import { GeoJSON, useMap } from "react-leaflet";
+import { useMemo, useCallback, useRef, useEffect, useState } from "react";
+import { GeoJSON, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 import { ROUTE_COLORS } from "../../colors";
 import { useGhostPin } from "../../context";
 import type { TransportMode, RouteGeometry, LatLng, SplitDesirePath } from "../../types";
 import type { PathOptions } from "leaflet";
+
+/**
+ * Find the closest point on a path geometry to a given lat/lng,
+ * working in screen space for accuracy at the current zoom level.
+ */
+function closestPointOnPath(
+  map: L.Map,
+  coordinates: [number, number][],
+  latlng: L.LatLng,
+  thresholdPx: number = 20
+): L.LatLng | null {
+  if (coordinates.length < 2) return null;
+
+  const point = map.latLngToContainerPoint(latlng);
+  let bestDist = Infinity;
+  let bestPoint: L.Point | null = null;
+
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const a = map.latLngToContainerPoint(L.latLng(coordinates[i][1], coordinates[i][0]));
+    const b = map.latLngToContainerPoint(L.latLng(coordinates[i + 1][1], coordinates[i + 1][0]));
+    const closest = L.LineUtil.closestPointOnSegment(point, a, b);
+    const dist = point.distanceTo(closest);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestPoint = closest;
+    }
+  }
+
+  if (bestDist > thresholdPx || !bestPoint) return null;
+  return map.containerPointToLatLng(bestPoint);
+}
+
+const hoverGhostIcon = L.divIcon({
+  className: "hover-ghost-marker",
+  html: `<div class="pin-container hover-ghost-pin">
+    <div class="pin-head" style="background: #D4A017;"></div>
+    <div class="pin-needle"></div>
+    <div class="pin-shadow"></div>
+  </div>`,
+  iconSize: [20, 28],
+  iconAnchor: [17, 44],
+});
 
 interface RouteLayerProps {
   geometry: RouteGeometry;
@@ -147,6 +189,7 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
   const map = useMap();
   const { startDrag, updateDrag, endDrag } = useGhostPin();
   const isDraggingRef = useRef(false);
+  const [hoverLatLng, setHoverLatLng] = useState<L.LatLng | null>(null);
 
   // Interactive weight - larger than visual for easier clicking
   const INTERACTIVE_WEIGHT = 20;
@@ -330,6 +373,7 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
       isDraggingRef.current = true;
       map.dragging.disable();
       document.body.style.cursor = "grabbing";
+      setHoverLatLng(null);
 
       // Get initial position
       const pos = getEventPosition(e.originalEvent);
@@ -363,6 +407,20 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
     },
     [map, geometry]
   );
+
+  // Hover ghost pin handlers
+  const handleHoverMove = useCallback(
+    (e: L.LeafletMouseEvent) => {
+      if (isDraggingRef.current) return;
+      const snapped = closestPointOnPath(map, geometry.coordinates, e.latlng);
+      setHoverLatLng(snapped);
+    },
+    [map, geometry.coordinates]
+  );
+
+  const handleHoverOut = useCallback(() => {
+    setHoverLatLng(null);
+  }, []);
 
   // Listen for touchstart on map container and check if near path
   useEffect(() => {
@@ -446,7 +504,21 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
             pane: "desirePathPane",
             className: "desire-path-interactive",
           })}
-          eventHandlers={{ mousedown: handleStart }}
+          eventHandlers={{
+            mousedown: handleStart,
+            mouseover: handleHoverMove,
+            mousemove: handleHoverMove,
+            mouseout: handleHoverOut,
+          }}
+        />
+      )}
+      {/* Hover ghost pin - snapped to path */}
+      {hoverLatLng && !isDraggingRef.current && (
+        <Marker
+          position={hoverLatLng}
+          icon={hoverGhostIcon}
+          interactive={false}
+          pane="desirePathPane"
         />
       )}
     </>
@@ -464,6 +536,7 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
   const map = useMap();
   const { startDrag, updateDrag, endDrag } = useGhostPin();
   const isDraggingRef = useRef(false);
+  const [hoverLatLng, setHoverLatLng] = useState<L.LatLng | null>(null);
 
   // Interactive weight - larger than visual for easier clicking
   const INTERACTIVE_WEIGHT = 20;
@@ -646,6 +719,7 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
       isDraggingRef.current = true;
       map.dragging.disable();
       document.body.style.cursor = "grabbing";
+      setHoverLatLng(null);
 
       // Get initial position
       const pos = getEventPosition(e.originalEvent);
@@ -679,6 +753,20 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
     },
     [map, splitPath.geometry]
   );
+
+  // Hover ghost pin handlers
+  const handleHoverMove = useCallback(
+    (e: L.LeafletMouseEvent) => {
+      if (isDraggingRef.current) return;
+      const snapped = closestPointOnPath(map, splitPath.geometry.coordinates, e.latlng);
+      setHoverLatLng(snapped);
+    },
+    [map, splitPath.geometry.coordinates]
+  );
+
+  const handleHoverOut = useCallback(() => {
+    setHoverLatLng(null);
+  }, []);
 
   // Listen for touchstart on map container and check if near path
   useEffect(() => {
@@ -762,7 +850,21 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
             pane: "desirePathPane",
             className: "split-path-interactive",
           })}
-          eventHandlers={{ mousedown: handleStart }}
+          eventHandlers={{
+            mousedown: handleStart,
+            mouseover: handleHoverMove,
+            mousemove: handleHoverMove,
+            mouseout: handleHoverOut,
+          }}
+        />
+      )}
+      {/* Hover ghost pin - snapped to path */}
+      {hoverLatLng && !isDraggingRef.current && (
+        <Marker
+          position={hoverLatLng}
+          icon={hoverGhostIcon}
+          interactive={false}
+          pane="desirePathPane"
         />
       )}
     </>
