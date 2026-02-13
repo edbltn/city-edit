@@ -176,6 +176,133 @@ preload_hex_cache()
 # Initialize database (creates tables if needed)
 init_db()
 
+# Migrate suggestion data from DB → Redis on startup (ensures hex_suggestions
+# stay in sync after regenerate_hex_cache or Redis restarts)
+def _migrate_suggestions_on_startup():
+    from database import DATABASE_URL, get_cursor
+    from hex_voting import (
+        line_to_hexes_exact,
+        get_jittered_hex_deterministic,
+        segment_key_from_coords,
+        rebuild_all_resolutions,
+        rebuild_all_modes_weighted_cache,
+        H3_FINEST_RESOLUTION,
+        H3_RESOLUTIONS,
+    )
+    import h3 as h3_lib
+
+    if not DATABASE_URL:
+        return
+
+    try:
+        # Check if suggestions already exist
+        for mode in ["bike", "walk", "drive"]:
+            key = f"hex_suggestions:{mode}:res{H3_FINEST_RESOLUTION}"
+            if redis_client.hlen(key) > 0:
+                logger.info(f"[MIGRATE] Suggestions already exist in Redis, skipping migration")
+                return
+
+        logger.info("[MIGRATE] No suggestion data in Redis, migrating from DB...")
+
+        # Read vote_types from DB
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT segment_key, mode, vote_type
+                FROM votes WHERE vote_type IS NOT NULL
+            """)
+            rows = cursor.fetchall()
+
+        if not rows:
+            logger.info("[MIGRATE] No votes with vote_type in DB")
+            return
+
+        # Build normalized key → vote_types mapping
+        vote_type_map = {}
+        point_votes = []
+        for db_seg_key, mode, vote_type in rows:
+            parts = db_seg_key.split("|")
+            if len(parts) < 2:
+                continue
+            if not parts[1]:
+                point_votes.append((db_seg_key, mode, vote_type))
+                continue
+            try:
+                c1 = [float(x) for x in parts[0].split(",")]
+                c2 = [float(x) for x in parts[1].split(",")]
+            except (ValueError, IndexError):
+                continue
+            norm_key = segment_key_from_coords(c1, c2, mode)
+            if norm_key not in vote_type_map:
+                vote_type_map[norm_key] = set()
+            vote_type_map[norm_key].add(vote_type)
+
+        # Iterate segment_votes Redis (same coords/jitter as regenerate_hex_cache)
+        segment_votes = redis_client.hgetall("segment_votes")
+        suggestions_by_mode = {}
+        matched = 0
+
+        for key, count in segment_votes.items():
+            parts = key.split("|")
+            if len(parts) < 3:
+                continue
+            mode = parts[2]
+            vote_types = vote_type_map.get(key, set())
+            if not vote_types:
+                continue
+            matched += 1
+            try:
+                c1 = [float(x) for x in parts[0].split(",")]
+                c2 = [float(x) for x in parts[1].split(",")]
+            except (ValueError, IndexError):
+                continue
+            exact_hexes = list(line_to_hexes_exact(c1, c2))
+            if mode not in suggestions_by_mode:
+                suggestions_by_mode[mode] = {}
+            for _ in range(int(count)):
+                for vi, ch in enumerate(exact_hexes):
+                    jittered = get_jittered_hex_deterministic(ch, key, vi)
+                    for vt in vote_types:
+                        sk = f"{jittered}|{vt}"
+                        suggestions_by_mode[mode][sk] = suggestions_by_mode[mode].get(sk, 0) + 1
+
+        # Handle point votes
+        for db_seg_key, mode, vote_type in point_votes:
+            parts = db_seg_key.split("|")
+            try:
+                lon, lat = [float(x) for x in parts[0].split(",")]
+            except (ValueError, IndexError):
+                continue
+            hex_id = h3_lib.latlng_to_cell(lat, lon, H3_FINEST_RESOLUTION)
+            jittered = get_jittered_hex_deterministic(hex_id, f"point:{lat},{lon}:{mode}", 0)
+            if mode not in suggestions_by_mode:
+                suggestions_by_mode[mode] = {}
+            suggestions_by_mode[mode][f"{jittered}|{vote_type}"] = suggestions_by_mode[mode].get(f"{jittered}|{vote_type}", 0) + 1
+
+        # Write to Redis
+        pipe = redis_client.pipeline()
+        total = 0
+        for mode, sug_data in suggestions_by_mode.items():
+            rk = f"hex_suggestions:{mode}:res{H3_FINEST_RESOLUTION}"
+            for field, cnt in sug_data.items():
+                pipe.hset(rk, field, str(cnt))
+                total += 1
+        pipe.execute()
+
+        # Aggregate to coarser resolutions
+        for mode in suggestions_by_mode:
+            rebuild_all_resolutions(redis_client, mode)
+        rebuild_all_modes_weighted_cache(redis_client)
+
+        logger.info(f"[MIGRATE] Migrated {total} suggestion entries for {list(suggestions_by_mode.keys())}, matched {matched} segments")
+
+        # Reload hex cache with new suggestions
+        preload_hex_cache()
+
+    except Exception as e:
+        logger.error(f"[MIGRATE] Startup migration failed: {e}")
+
+_migrate_suggestions_on_startup()
+
 # Start pub/sub listener for cross-instance cache synchronization
 start_pubsub_listener()
 
@@ -419,6 +546,157 @@ def db_diagnostic():
         result["redis_error"] = str(e)
 
     return jsonify(result)
+
+
+@app.route("/api/admin/migrate-suggestions", methods=["POST"])
+def migrate_suggestions():
+    """Replay vote_type data from Postgres into Redis hex_suggestions.
+
+    Uses segment_votes Redis hash as source of truth for coordinates and
+    jitter (matching regenerate_hex_cache exactly), cross-referenced with
+    DB votes table for vote_type information.
+    """
+    from database import get_cursor
+    from hex_voting import (
+        line_to_hexes_exact,
+        get_jittered_hex_deterministic,
+        segment_key_from_coords,
+        rebuild_all_resolutions,
+        rebuild_all_modes_weighted_cache,
+        H3_FINEST_RESOLUTION,
+        H3_RESOLUTIONS,
+    )
+    import h3 as h3_lib
+
+    try:
+        # Step 1: Clear all existing hex_suggestions keys
+        pipe = redis_client.pipeline()
+        for mode in ["bike", "walk", "drive", "all"]:
+            for res in H3_RESOLUTIONS:
+                pipe.delete(f"hex_suggestions:{mode}:res{res}")
+        pipe.execute()
+
+        # Step 2: Read all votes with vote_type from DB, build normalized lookup
+        # DB segment_key format: "lon.6dp,lat.6dp|lon.6dp,lat.6dp|mode"
+        # Normalize to match segment_votes Redis format (5dp)
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT segment_key, mode, vote_type
+                FROM votes
+                WHERE vote_type IS NOT NULL
+            """)
+            rows = cursor.fetchall()
+
+        # Map: normalized_segment_key -> set of vote_types
+        vote_type_map = {}
+        point_votes = []
+        for db_seg_key, mode, vote_type in rows:
+            parts = db_seg_key.split("|")
+            if len(parts) < 2:
+                continue
+
+            if not parts[1]:
+                # Point vote — handle separately
+                point_votes.append((db_seg_key, mode, vote_type))
+                continue
+
+            try:
+                coord1 = [float(x) for x in parts[0].split(",")]
+                coord2 = [float(x) for x in parts[1].split(",")]
+            except (ValueError, IndexError):
+                continue
+
+            # Normalize to 5dp key (matches segment_votes Redis format)
+            norm_key = segment_key_from_coords(coord1, coord2, mode)
+            if norm_key not in vote_type_map:
+                vote_type_map[norm_key] = set()
+            vote_type_map[norm_key].add(vote_type)
+
+        # Step 3: Iterate segment_votes Redis (same as regenerate_hex_cache)
+        segment_votes = redis_client.hgetall("segment_votes")
+        stats = {"segment_votes": len(segment_votes), "matched": 0, "unmatched": 0,
+                 "points": 0, "hex_entries": 0}
+        suggestions_by_mode = {}
+
+        for key, count in segment_votes.items():
+            parts = key.split("|")
+            if len(parts) < 3:
+                continue
+
+            mode = parts[2]
+            vote_count = int(count)
+
+            # Look up vote_types for this segment
+            vote_types = vote_type_map.get(key, set())
+            if not vote_types:
+                stats["unmatched"] += 1
+                continue
+            stats["matched"] += 1
+
+            try:
+                coord1 = [float(x) for x in parts[0].split(",")]
+                coord2 = [float(x) for x in parts[1].split(",")]
+            except (ValueError, IndexError):
+                continue
+
+            # Use same logic as regenerate_hex_cache: exact hexes + jitter
+            exact_hexes = list(line_to_hexes_exact(coord1, coord2))
+
+            if mode not in suggestions_by_mode:
+                suggestions_by_mode[mode] = {}
+
+            for _ in range(vote_count):
+                for vote_idx, center_hex in enumerate(exact_hexes):
+                    # Use raw Redis key as jitter seed (matches regenerate_hex_cache)
+                    jittered = get_jittered_hex_deterministic(center_hex, key, vote_idx)
+                    for vtype in vote_types:
+                        sug_key = f"{jittered}|{vtype}"
+                        suggestions_by_mode[mode][sug_key] = suggestions_by_mode[mode].get(sug_key, 0) + 1
+                        stats["hex_entries"] += 1
+
+        # Step 4: Handle point votes from DB
+        for db_seg_key, mode, vote_type in point_votes:
+            parts = db_seg_key.split("|")
+            try:
+                lon, lat = [float(x) for x in parts[0].split(",")]
+            except (ValueError, IndexError):
+                continue
+
+            hex_id = h3_lib.latlng_to_cell(lat, lon, H3_FINEST_RESOLUTION)
+            jittered = get_jittered_hex_deterministic(hex_id, f"point:{lat},{lon}:{mode}", 0)
+
+            if mode not in suggestions_by_mode:
+                suggestions_by_mode[mode] = {}
+            sug_key = f"{jittered}|{vote_type}"
+            suggestions_by_mode[mode][sug_key] = suggestions_by_mode[mode].get(sug_key, 0) + 1
+            stats["points"] += 1
+            stats["hex_entries"] += 1
+
+        # Step 5: Write suggestions to Redis at finest resolution
+        pipe = redis_client.pipeline()
+        for mode, sug_data in suggestions_by_mode.items():
+            key = f"hex_suggestions:{mode}:res{H3_FINEST_RESOLUTION}"
+            for field, cnt in sug_data.items():
+                pipe.hset(key, field, str(cnt))
+        pipe.execute()
+
+        # Step 6: Aggregate to coarser resolutions for each mode
+        for mode in suggestions_by_mode:
+            rebuild_all_resolutions(redis_client, mode)
+
+        # Step 7: Rebuild "all" mode aggregation
+        rebuild_all_modes_weighted_cache(redis_client)
+
+        # Step 8: Invalidate in-memory cache on all Flask instances
+        invalidate_hex_cache()
+
+        stats["modes_migrated"] = list(suggestions_by_mode.keys())
+        return jsonify({"status": "ok", "stats": stats})
+
+    except Exception as e:
+        logger.error(f"[MIGRATE] Error: {e}")
+        import traceback
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
 
 
 @sock.route("/ws")
