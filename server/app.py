@@ -421,6 +421,112 @@ def db_diagnostic():
     return jsonify(result)
 
 
+@app.route("/api/admin/migrate-suggestions", methods=["POST"])
+def migrate_suggestions():
+    """Replay vote_type data from Postgres into Redis hex_suggestions.
+
+    Clears existing suggestion keys, reads all DB votes with vote_type,
+    replays them through the same hex logic (line_to_hexes_exact + jitter),
+    then aggregates to all resolutions.
+    """
+    from database import get_cursor
+    from hex_voting import (
+        line_to_hexes_exact,
+        get_jittered_hex_deterministic,
+        segment_key_from_coords,
+        rebuild_all_resolutions,
+        rebuild_all_modes_weighted_cache,
+        H3_FINEST_RESOLUTION,
+        H3_RESOLUTIONS,
+    )
+    import h3 as h3_lib
+
+    try:
+        # Step 1: Clear all existing hex_suggestions keys
+        pipe = redis_client.pipeline()
+        for mode in ["bike", "walk", "drive", "all"]:
+            for res in H3_RESOLUTIONS:
+                pipe.delete(f"hex_suggestions:{mode}:res{res}")
+        pipe.execute()
+
+        # Step 2: Read all votes with vote_type from DB
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT segment_key, mode, vote_type, COUNT(*) as cnt
+                FROM votes
+                WHERE vote_type IS NOT NULL
+                GROUP BY segment_key, mode, vote_type
+            """)
+            rows = cursor.fetchall()
+
+        # Step 3: Replay each vote into Redis suggestions
+        stats = {"total_rows": len(rows), "segments": 0, "points": 0, "hex_entries": 0}
+        suggestions_by_mode = {}  # {mode: {hex_id|vote_type: count}}
+
+        for segment_key, mode, vote_type, count in rows:
+            parts = segment_key.split("|")
+            if len(parts) < 2:
+                continue
+
+            coord1_str = parts[0]
+            coord2_str = parts[1]
+
+            if not coord2_str:
+                # Point vote: "lon,lat||mode"
+                lon, lat = [float(x) for x in coord1_str.split(",")]
+                hex_id = h3_lib.latlng_to_cell(lat, lon, H3_FINEST_RESOLUTION)
+                jittered = get_jittered_hex_deterministic(hex_id, f"point:{lat},{lon}:{mode}", 0)
+
+                sug_key = f"{jittered}|{vote_type}"
+                if mode not in suggestions_by_mode:
+                    suggestions_by_mode[mode] = {}
+                suggestions_by_mode[mode][sug_key] = suggestions_by_mode[mode].get(sug_key, 0) + count
+                stats["points"] += 1
+                stats["hex_entries"] += 1
+            else:
+                # Segment vote: "lon,lat|lon,lat|mode"
+                coord1 = [float(x) for x in coord1_str.split(",")]
+                coord2 = [float(x) for x in coord2_str.split(",")]
+                seg_key = segment_key_from_coords(coord1, coord2, mode)
+
+                try:
+                    exact_hexes = list(line_to_hexes_exact(coord1, coord2))
+                except Exception:
+                    continue
+
+                for vote_idx, center_hex in enumerate(exact_hexes):
+                    jittered = get_jittered_hex_deterministic(center_hex, seg_key, vote_idx)
+                    sug_key = f"{jittered}|{vote_type}"
+                    if mode not in suggestions_by_mode:
+                        suggestions_by_mode[mode] = {}
+                    suggestions_by_mode[mode][sug_key] = suggestions_by_mode[mode].get(sug_key, 0) + count
+                    stats["hex_entries"] += 1
+                stats["segments"] += 1
+
+        # Step 4: Write suggestions to Redis at finest resolution
+        pipe = redis_client.pipeline()
+        for mode, sug_data in suggestions_by_mode.items():
+            key = f"hex_suggestions:{mode}:res{H3_FINEST_RESOLUTION}"
+            for field, cnt in sug_data.items():
+                pipe.hset(key, field, str(cnt))
+        pipe.execute()
+
+        # Step 5: Aggregate to coarser resolutions for each mode
+        for mode in suggestions_by_mode:
+            rebuild_all_resolutions(redis_client, mode)
+
+        # Step 6: Rebuild "all" mode aggregation
+        rebuild_all_modes_weighted_cache(redis_client)
+
+        stats["modes_migrated"] = list(suggestions_by_mode.keys())
+        return jsonify({"status": "ok", "stats": stats})
+
+    except Exception as e:
+        logger.error(f"[MIGRATE] Error: {e}")
+        import traceback
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+
+
 @sock.route("/ws")
 def ws(ws):
     """WebSocket handler using Redis pub/sub for efficient push updates."""
