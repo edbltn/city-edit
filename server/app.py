@@ -466,6 +466,10 @@ def make_state(rev: int, mode_filter=None, resolution=None):
     if legend:
         overlay["sl"] = legend
         overlay["s"] = hex_sug
+    # Include raw vote counts per hex (for tooltip display)
+    raw_counts = hex_data.get("raw_counts", {})
+    if raw_counts:
+        overlay["rc"] = raw_counts
     hex_overlays[target_res] = overlay
 
     return {

@@ -56,6 +56,7 @@ export interface HexOverlay {
   max_votes: number;
   suggestionLegend?: string[];                  // Unique vote_type labels
   suggestions?: Record<string, number[]>;       // hex_id → indices into legend (top 3)
+  rawCounts?: Record<string, number>;           // hex_id → raw (unweighted) vote count
 }
 
 // Compact format from server (h = array of [hex_id, weight] tuples, m = max_votes)
@@ -65,6 +66,7 @@ export interface HexOverlayCompact {
   m: number;
   sl?: string[];                          // Suggestion legend
   s?: Record<string, number[]>;           // hex_id → legend indices (top 3)
+  rc?: Record<string, number>;            // hex_id → raw vote count
 }
 
 export interface MapState {

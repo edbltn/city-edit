@@ -16,7 +16,7 @@ interface HexTooltipProps {
 }
 
 export function HexTooltip({ suggestions, votes, x, y, container }: HexTooltipProps) {
-  const voteCount = Math.max(1, Math.round(votes));
+  const voteCount = Math.round(votes);
   const voteLabel = `${voteCount} vote${voteCount !== 1 ? "s" : ""}`;
 
   return createPortal(

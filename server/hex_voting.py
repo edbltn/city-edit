@@ -285,6 +285,11 @@ def rebuild_all_resolutions(redis_client, mode: str):
 
         finest_hexes = {k: float(v) for k, v in finest_data.items()}
 
+        # Get finest resolution raw counts
+        raw_key = f"hex_votes_raw:{mode}:res{H3_FINEST_RESOLUTION}"
+        raw_data = redis_client.hgetall(raw_key)
+        finest_raw = {k: int(v) for k, v in raw_data.items()} if raw_data else {}
+
         # Aggregate to each coarser resolution
         pipe = redis_client.pipeline()
         for res in H3_RESOLUTIONS:
@@ -296,6 +301,16 @@ def rebuild_all_resolutions(redis_client, mode: str):
             pipe.delete(key)
             for hex_id, weight in aggregated.items():
                 pipe.hset(key, hex_id, f"{weight:.6f}")
+
+            # Aggregate raw counts to coarser resolution
+            if finest_raw:
+                agg_raw = aggregate_to_resolution(
+                    {k: float(v) for k, v in finest_raw.items()}, res
+                )
+                rk = f"hex_votes_raw:{mode}:res{res}"
+                pipe.delete(rk)
+                for hex_id, cnt in agg_raw.items():
+                    pipe.hset(rk, hex_id, str(int(cnt)))
         pipe.execute()
 
         # Also rebuild suggestion caches at coarser resolutions
@@ -395,6 +410,7 @@ def rebuild_weighted_hex_cache(redis_client, mode: str = None):
 
             # Compute weighted sums
             weighted_hexes = {}
+            raw_counts = {}
             for hex_ip_key, count in hex_votes_by_ip.items():
                 # Parse "hex_id|ip_hash"
                 parts = hex_ip_key.rsplit("|", 1)
@@ -403,6 +419,9 @@ def rebuild_weighted_hex_cache(redis_client, mode: str = None):
 
                 hex_id, ip_hash = parts
                 count = int(count)
+
+                # Track raw vote count (sum across all IPs)
+                raw_counts[hex_id] = raw_counts.get(hex_id, 0) + count
 
                 # Get total votes for this IP (default to count if not found)
                 total_votes = int(ip_vote_counts.get(ip_hash, count))
@@ -420,6 +439,11 @@ def rebuild_weighted_hex_cache(redis_client, mode: str = None):
                 pipe.delete(finest_key)
                 for hex_id, weight in weighted_hexes.items():
                     pipe.hset(finest_key, hex_id, f"{weight:.6f}")
+                # Store raw counts at finest resolution
+                raw_key = f"hex_votes_raw:{m}:res{H3_FINEST_RESOLUTION}"
+                pipe.delete(raw_key)
+                for hex_id, cnt in raw_counts.items():
+                    pipe.hset(raw_key, hex_id, str(cnt))
                 # Also maintain legacy key for backwards compatibility
                 pipe.delete(f"hex_votes_weighted:{m}")
                 for hex_id, weight in weighted_hexes.items():
@@ -450,12 +474,19 @@ def rebuild_all_modes_weighted_cache(redis_client):
         for res in H3_RESOLUTIONS:
             all_weighted = {}
             all_suggestions = {}
+            all_raw = {}
 
             for m in ["bike", "walk", "drive"]:
                 key = f"hex_votes_weighted:{m}:res{res}"
                 hex_votes = redis_client.hgetall(key)
                 for hex_id, weight in hex_votes.items():
                     all_weighted[hex_id] = all_weighted.get(hex_id, 0.0) + float(weight)
+
+                # Merge raw counts across modes
+                raw_key = f"hex_votes_raw:{m}:res{res}"
+                raw_data = redis_client.hgetall(raw_key)
+                for hex_id, cnt in raw_data.items():
+                    all_raw[hex_id] = all_raw.get(hex_id, 0) + int(cnt)
 
                 # Merge suggestions across modes
                 sug_key = f"hex_suggestions:{m}:res{res}"
@@ -474,6 +505,11 @@ def rebuild_all_modes_weighted_cache(redis_client):
                 pipe.delete(res_key)
                 for hex_id, weight in all_weighted.items():
                     pipe.hset(res_key, hex_id, f"{weight:.6f}")
+                # Store merged raw counts
+                raw_res_key = f"hex_votes_raw:all:res{res}"
+                pipe.delete(raw_res_key)
+                for hex_id, cnt in all_raw.items():
+                    pipe.hset(raw_res_key, hex_id, str(cnt))
                 # Store merged suggestions
                 if all_suggestions:
                     _store_suggestion_hash(pipe, f"hex_suggestions:all:res{res}", all_suggestions)
@@ -519,7 +555,11 @@ def get_cached_hex_overlay(redis_client, mode_filter: str = None, resolution: in
             hex_votes = {k: float(v) for k, v in hex_votes.items()}
             max_votes = max(hex_votes.values()) if hex_votes else 1.0
             suggestions = _read_suggestions(redis_client, mode_part, resolution)
-            return {"hexes": hex_votes, "max_votes": max_votes, "res": resolution, "suggestions": suggestions}
+            # Read raw vote counts
+            raw_key = f"hex_votes_raw:{mode_part}:res{resolution}"
+            raw_data = redis_client.hgetall(raw_key)
+            raw_counts = {k: int(v) for k, v in raw_data.items()} if raw_data else {}
+            return {"hexes": hex_votes, "max_votes": max_votes, "res": resolution, "suggestions": suggestions, "raw_counts": raw_counts}
 
         # Fall back to legacy key (non-resolution-specific)
         legacy_key = f"hex_votes_weighted:{mode_part}"
@@ -590,6 +630,7 @@ def regenerate_hex_cache(redis_client):
         for res in H3_RESOLUTIONS:
             pipe.delete(f"hex_votes_weighted:{mode}:res{res}")
             pipe.delete(f"hex_suggestions:{mode}:res{res}")
+            pipe.delete(f"hex_votes_raw:{mode}:res{res}")
     pipe.execute()
 
     # Count total hex votes that will be assigned to "system" user

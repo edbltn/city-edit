@@ -51,6 +51,7 @@ function parseHexOverlayCompact(data: HexOverlayCompact): HexOverlay {
     max_votes: data.m,
     suggestionLegend: data.sl,
     suggestions: data.s,
+    rawCounts: data.rc,
   };
 }
 
