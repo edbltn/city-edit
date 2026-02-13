@@ -352,7 +352,7 @@ export function HexHeatmapLayer() {
   if (hoveredHexId) {
     const hexOverlay = getHexOverlayForResolution(currentResolution);
     if (hexOverlay) {
-      hoveredVotes = hexOverlay.rawCounts?.[hoveredHexId] ?? (hexOverlay.hexes[hoveredHexId] as number) ?? 0;
+      hoveredVotes = hexOverlay.rawCounts?.[hoveredHexId] ?? Math.max(1, Math.round((hexOverlay.hexes[hoveredHexId] as number) || 0));
       if (hexOverlay.suggestionLegend && hexOverlay.suggestions?.[hoveredHexId]) {
         const indices = hexOverlay.suggestions[hoveredHexId];
         for (const idx of indices) {

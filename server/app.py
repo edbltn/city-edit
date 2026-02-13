@@ -303,6 +303,44 @@ def _migrate_suggestions_on_startup():
 
 _migrate_suggestions_on_startup()
 
+
+def _migrate_raw_counts_on_startup():
+    """One-time rebuild to populate hex_votes_raw keys for existing data."""
+    from hex_voting import (
+        rebuild_weighted_hex_cache,
+        rebuild_all_resolutions,
+        rebuild_all_modes_weighted_cache,
+        H3_FINEST_RESOLUTION,
+    )
+
+    try:
+        # Check if raw counts already exist for any mode
+        for mode in ["bike", "walk", "drive"]:
+            raw_key = f"hex_votes_raw:{mode}:res{H3_FINEST_RESOLUTION}"
+            if redis_client.hlen(raw_key) > 0:
+                return
+
+        # Check if weighted data exists (otherwise nothing to rebuild)
+        has_data = False
+        for mode in ["bike", "walk", "drive"]:
+            if redis_client.hlen(f"hex_votes_by_ip:{mode}") > 0:
+                has_data = True
+                break
+        if not has_data:
+            return
+
+        logger.info("[MIGRATE] Rebuilding weighted caches to populate raw vote counts...")
+        rebuild_weighted_hex_cache(redis_client, None)
+        for mode in ["bike", "walk", "drive"]:
+            rebuild_all_resolutions(redis_client, mode)
+        rebuild_all_modes_weighted_cache(redis_client)
+        preload_hex_cache()
+        logger.info("[MIGRATE] Raw vote counts populated")
+    except Exception as e:
+        logger.error(f"[MIGRATE] Raw counts migration failed: {e}")
+
+_migrate_raw_counts_on_startup()
+
 # Start pub/sub listener for cross-instance cache synchronization
 start_pubsub_listener()
 
