@@ -362,7 +362,10 @@ def health():
 
 @app.route("/api/admin/db-diagnostic")
 def db_diagnostic():
-    """Temporary endpoint to diagnose vote_type data in database."""
+    """Temporary endpoint to diagnose vote_type data."""
+    result = {}
+
+    # Database stats
     try:
         from database import get_cursor
         with get_cursor() as cursor:
@@ -377,7 +380,7 @@ def db_diagnostic():
                 FROM votes
             """)
             row = cursor.fetchone()
-            summary = {
+            result["db_summary"] = {
                 "total_votes": row[0],
                 "with_vote_type": row[1],
                 "without_vote_type": row[2],
@@ -385,29 +388,37 @@ def db_diagnostic():
                 "earliest_with_type": row[4],
                 "latest_vote": row[5],
             }
-
-            cursor.execute("""
-                SELECT vote_type, COUNT(*) as cnt
-                FROM votes
-                WHERE vote_type IS NOT NULL
-                GROUP BY vote_type
-                ORDER BY cnt DESC
-                LIMIT 20
-            """)
-            vote_types = [{"vote_type": r[0], "count": r[1]} for r in cursor.fetchall()]
-
-            cursor.execute("""
-                SELECT mode, COUNT(*) as total, COUNT(vote_type) as with_type
-                FROM votes
-                GROUP BY mode
-                ORDER BY total DESC
-            """)
-            by_mode = [{"mode": r[0], "total": r[1], "with_type": r[2]} for r in cursor.fetchall()]
-
-            return jsonify({"summary": summary, "vote_types": vote_types, "by_mode": by_mode})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-        return jsonify({"status": "unhealthy", "redis": "disconnected"}), 503
+        result["db_error"] = str(e)
+
+    # Redis suggestion stats
+    try:
+        redis_sug = {}
+        for mode in ["bike", "walk", "drive", "all"]:
+            for res in [10, 11, 12, 13, 14, 15]:
+                key = f"hex_suggestions:{mode}:res{res}"
+                count = redis_client.hlen(key)
+                if count > 0:
+                    # Sample a few entries
+                    sample = dict(list(redis_client.hscan_iter(key, count=5))[:5])
+                    redis_sug[key] = {"entries": count, "sample": sample}
+                else:
+                    redis_sug[key] = {"entries": 0}
+        result["redis_suggestions"] = redis_sug
+
+        # Also check hex_votes_weighted counts
+        hex_weighted = {}
+        for mode in ["bike", "walk", "drive", "all"]:
+            for res in [10, 11, 12, 13, 14, 15]:
+                key = f"hex_votes_weighted:{mode}:res{res}"
+                count = redis_client.hlen(key)
+                if count > 0:
+                    hex_weighted[key] = count
+        result["redis_hex_weighted"] = hex_weighted
+    except Exception as e:
+        result["redis_error"] = str(e)
+
+    return jsonify(result)
 
 
 @sock.route("/ws")
