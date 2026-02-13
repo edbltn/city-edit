@@ -690,6 +690,7 @@ def migrate_suggestions():
         # Step 8: Invalidate in-memory cache on all Flask instances
         invalidate_hex_cache()
 
+
         stats["modes_migrated"] = list(suggestions_by_mode.keys())
         return jsonify({"status": "ok", "stats": stats})
 
