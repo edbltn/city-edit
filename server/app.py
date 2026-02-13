@@ -357,6 +357,7 @@ def health():
         redis_client.ping()
         return jsonify({"status": "healthy", "redis": "connected"}), 200
     except redis.ConnectionError:
+        return jsonify({"status": "unhealthy", "redis": "disconnected"}), 503
 
 
 @app.route("/api/admin/db-diagnostic")
