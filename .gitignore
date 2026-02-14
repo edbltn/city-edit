@@ -43,6 +43,9 @@ dump.rdb
 # Cache
 server/cache/
 
+# Citibike data downloads
+server/citibike_data/
+
 # Screenshots and images (local only, not client assets)
 Screenshot*.png
 *.jpg

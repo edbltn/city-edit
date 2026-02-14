@@ -954,8 +954,12 @@ def cast_vote():
     if not segments and not point:
         return jsonify({"error": "No segments or point to vote on"}), 400
 
-    # Get hashed IP for weighted voting
-    ip_hash = get_client_ip()
+    # Get hashed voter identity: use voter_id override if provided, else IP
+    voter_id = data.get("voter_id")
+    if voter_id:
+        ip_hash = hashlib.sha256(str(voter_id).encode()).hexdigest()[:16]
+    else:
+        ip_hash = get_client_ip()
 
     try:
         if point:

@@ -216,8 +216,8 @@ resource "google_cloud_run_service" "app" {
 
         resources {
           limits = {
-            cpu    = "2"
-            memory = "2Gi"
+            cpu    = "4"
+            memory = "4Gi"
           }
         }
       }
@@ -225,7 +225,7 @@ resource "google_cloud_run_service" "app" {
 
     metadata {
       annotations = {
-        "autoscaling.knative.dev/minScale"        = "1"
+        "autoscaling.knative.dev/minScale"        = "2"
         "autoscaling.knative.dev/maxScale"        = "10"
         "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.connector.id
         "run.googleapis.com/vpc-access-egress"    = "private-ranges-only"
