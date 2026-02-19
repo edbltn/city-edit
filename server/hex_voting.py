@@ -22,11 +22,13 @@ H3_FINEST_RESOLUTION = 15  # Store at highest res, aggregate down
 H3_COARSEST_RESOLUTION = 10
 H3_RESOLUTION = H3_FINEST_RESOLUTION  # Default for backwards compatibility
 
-# Zoom level to H3 resolution mapping: changes every 2 zoom levels
-# zoom 13-14 → res 10, zoom 15-16 → res 11, ..., zoom 23+ → res 15
+# Zoom level to H3 resolution mapping with rounding for stable hex sizes.
+# Uses math.floor(x + 0.5) to match JavaScript's Math.floor(x + 0.5) behavior
+# (avoids Python's banker's rounding with round()).
+# zoom 13 → res 10, zoom 14-15 → res 11, zoom 16-17 → res 12, zoom 18 → res 13
 def zoom_to_resolution(zoom: int) -> int:
-    """Convert zoom level to H3 resolution (every 2 zoom levels)."""
-    res = H3_COARSEST_RESOLUTION + (max(zoom, 13) - 13) // 2
+    """Convert zoom level to H3 resolution with rounding."""
+    res = H3_COARSEST_RESOLUTION + math.floor((max(zoom, 13) - 13 + 1) / 2)
     if res <= H3_COARSEST_RESOLUTION:
         return H3_COARSEST_RESOLUTION
     if res >= H3_FINEST_RESOLUTION:
@@ -290,17 +292,6 @@ def rebuild_all_resolutions(redis_client, mode: str):
         raw_data = redis_client.hgetall(raw_key)
         finest_raw = {k: int(v) for k, v in raw_data.items()} if raw_data else {}
 
-        # Build per-IP sets for unique voter counting at coarser resolutions
-        hex_ip_data = redis_client.hgetall(f"hex_votes_by_ip:{mode}")
-        finest_hex_ips = {}  # hex_id -> set of ip_hashes
-        for hex_ip_key in hex_ip_data:
-            parts = hex_ip_key.rsplit("|", 1)
-            if len(parts) == 2:
-                hex_id, ip_hash = parts
-                if hex_id not in finest_hex_ips:
-                    finest_hex_ips[hex_id] = set()
-                finest_hex_ips[hex_id].add(ip_hash)
-
         # Aggregate to each coarser resolution
         pipe = redis_client.pipeline()
         for res in H3_RESOLUTIONS:
@@ -313,21 +304,15 @@ def rebuild_all_resolutions(redis_client, mode: str):
             for hex_id, weight in aggregated.items():
                 pipe.hset(key, hex_id, f"{weight:.6f}")
 
-            # Compute unique voters at coarser resolution from per-IP data
-            if finest_hex_ips:
-                parent_ips = {}  # parent_hex -> set of ip_hashes
-                for hex_id, ips in finest_hex_ips.items():
-                    try:
-                        parent = h3.cell_to_parent(hex_id, res)
-                    except Exception:
-                        continue
-                    if parent not in parent_ips:
-                        parent_ips[parent] = set()
-                    parent_ips[parent].update(ips)
+            # Aggregate raw counts by summing child hex counts into parents
+            if finest_raw:
+                agg_raw = aggregate_to_resolution(
+                    {k: float(v) for k, v in finest_raw.items()}, res
+                )
                 rk = f"hex_votes_raw:{mode}:res{res}"
                 pipe.delete(rk)
-                for hex_id, ips in parent_ips.items():
-                    pipe.hset(rk, hex_id, str(len(ips)))
+                for hex_id, cnt in agg_raw.items():
+                    pipe.hset(rk, hex_id, str(int(cnt)))
         pipe.execute()
 
         # Also rebuild suggestion caches at coarser resolutions
@@ -492,48 +477,23 @@ def rebuild_all_modes_weighted_cache(redis_client):
         return
 
     try:
-        # Build per-IP sets across all modes for unique voter counting
-        all_mode_hex_ips = {}  # (hex_id, res) -> set of ip_hashes
-        for m in ["bike", "walk", "drive"]:
-            hex_ip_data = redis_client.hgetall(f"hex_votes_by_ip:{m}")
-            finest_hex_ips = {}
-            for hex_ip_key in hex_ip_data:
-                parts = hex_ip_key.rsplit("|", 1)
-                if len(parts) == 2:
-                    hex_id, ip_hash = parts
-                    if hex_id not in finest_hex_ips:
-                        finest_hex_ips[hex_id] = set()
-                    finest_hex_ips[hex_id].add(ip_hash)
-
-            # Map to all resolutions
-            for res in H3_RESOLUTIONS:
-                if res == H3_FINEST_RESOLUTION:
-                    for hex_id, ips in finest_hex_ips.items():
-                        key = (hex_id, res)
-                        if key not in all_mode_hex_ips:
-                            all_mode_hex_ips[key] = set()
-                        all_mode_hex_ips[key].update(ips)
-                else:
-                    for hex_id, ips in finest_hex_ips.items():
-                        try:
-                            parent = h3.cell_to_parent(hex_id, res)
-                        except Exception:
-                            continue
-                        key = (parent, res)
-                        if key not in all_mode_hex_ips:
-                            all_mode_hex_ips[key] = set()
-                        all_mode_hex_ips[key].update(ips)
-
         # Build "all" mode at each resolution
         for res in H3_RESOLUTIONS:
             all_weighted = {}
             all_suggestions = {}
+            all_raw = {}
 
             for m in ["bike", "walk", "drive"]:
                 key = f"hex_votes_weighted:{m}:res{res}"
                 hex_votes = redis_client.hgetall(key)
                 for hex_id, weight in hex_votes.items():
                     all_weighted[hex_id] = all_weighted.get(hex_id, 0.0) + float(weight)
+
+                # Merge raw counts across modes by summing
+                raw_key = f"hex_votes_raw:{m}:res{res}"
+                raw_data = redis_client.hgetall(raw_key)
+                for hex_id, cnt in raw_data.items():
+                    all_raw[hex_id] = all_raw.get(hex_id, 0) + int(cnt)
 
                 # Merge suggestions across modes
                 sug_key = f"hex_suggestions:{m}:res{res}"
@@ -545,12 +505,6 @@ def rebuild_all_modes_weighted_cache(redis_client):
                             all_suggestions[hex_id] = {}
                         for vtype, count in type_counts.items():
                             all_suggestions[hex_id][vtype] = all_suggestions[hex_id].get(vtype, 0) + count
-
-            # Compute unique voters per hex at this resolution
-            all_raw = {}
-            for (hex_id, r), ips in all_mode_hex_ips.items():
-                if r == res:
-                    all_raw[hex_id] = len(ips)
 
             if all_weighted:
                 pipe = redis_client.pipeline()
