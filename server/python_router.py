@@ -115,6 +115,69 @@ class PythonRouter(RouterInterface):
         except Exception as e:
             logger.warning(f"[PYTHON_ROUTER] Cache write error: {e}")
 
+    def _precache_subpaths(
+        self,
+        start_snapped: tuple[float, float],
+        end_snapped: tuple[float, float],
+        coords: list,
+        cumulative_distances: list[float],
+        total_distance: float
+    ):
+        """Pre-cache sub-paths so split-path requests hit cache.
+
+        After computing A→B, caches start→C and C→end for each intermediate
+        vertex C that falls on a distinct snap-grid cell. Any sub-path of a
+        shortest path is itself a shortest path, so slicing the geometry is
+        correct.
+        """
+        if not self.redis or len(coords) < 3:
+            return
+
+        seen = {start_snapped, end_snapped}
+        entries = []  # (snapped_coord, geometry_index)
+
+        for i, coord in enumerate(coords):
+            snapped = self._snap_to_grid(coord[1], coord[0])  # GeoJSON [lon, lat]
+            if snapped not in seen:
+                seen.add(snapped)
+                entries.append((snapped, i))
+
+        if not entries:
+            return
+
+        try:
+            pipe = self.redis.pipeline(transaction=False)
+            for snapped, idx in entries:
+                # start → this vertex
+                key_from_start = self._coord_cache_key(start_snapped, snapped)
+                dist = cumulative_distances[idx]
+                sub_start = {
+                    "geometry": {"type": "LineString", "coordinates": coords[:idx + 1]},
+                    "distance": dist,
+                    "duration": dist / 1.4,
+                    "mode": "walk",
+                }
+                pipe.setex(key_from_start, self._cache_ttl, json.dumps(sub_start))
+
+                # this vertex → end
+                key_to_end = self._coord_cache_key(snapped, end_snapped)
+                remaining = total_distance - dist
+                sub_end = {
+                    "geometry": {"type": "LineString", "coordinates": coords[idx:]},
+                    "distance": remaining,
+                    "duration": remaining / 1.4,
+                    "mode": "walk",
+                }
+                pipe.setex(key_to_end, self._cache_ttl, json.dumps(sub_end))
+
+            pipe.execute()
+            logger.info(
+                f"[PYTHON_ROUTER] Pre-cached {len(entries)} sub-path pairs "
+                f"({len(entries) * 2} keys)"
+            )
+        except Exception as e:
+            logger.warning(f"[PYTHON_ROUTER] Sub-path pre-cache error: {e}")
+
     def _get_cached_route(self, start_idx: int, end_idx: int) -> Optional[dict]:
         """Check Redis cache for a previously computed route."""
         if not self.redis:
@@ -310,6 +373,7 @@ class PythonRouter(RouterInterface):
 
         # Convert to coordinates
         coords = []
+        cumulative_distances = [0.0]
         total_distance = 0.0
 
         for i, idx in enumerate(path_indices):
@@ -326,6 +390,7 @@ class PythonRouter(RouterInterface):
                 edge_data = self._nx_graph.get_edge_data(prev_node_id, node_id)
                 if edge_data:
                     total_distance += edge_data.get("length", 0)
+                cumulative_distances.append(total_distance)
 
         # Estimate duration (walking speed ~5 km/h = 1.4 m/s)
         duration = total_distance / 1.4
@@ -343,6 +408,12 @@ class PythonRouter(RouterInterface):
 
         # Cache the result by coordinates
         self._cache_route_by_coords(start_snapped, end_snapped, result)
+
+        # Pre-cache sub-paths for split-path cache hits
+        self._precache_subpaths(
+            start_snapped, end_snapped,
+            coords, cumulative_distances, total_distance
+        )
 
         return result
 
