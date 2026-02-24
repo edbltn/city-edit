@@ -107,9 +107,38 @@ function segmentsFromGeometry(geometry: RouteGeometry): [number, number][][] {
 // Beyond this, fall back to server requests (the waypoint was dragged off-route).
 const LOCAL_SPLIT_THRESHOLD_METERS = 100;
 
+/**
+ * Reverse geocode a lat/lng to a short address via Nominatim.
+ * Returns street + house number, or just the street, or coords as fallback.
+ */
+async function reverseGeocode(coords: LatLng): Promise<string> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${coords.lat}&lon=${coords.lng}&format=json&zoom=18&addressdetails=1`,
+      { headers: { "Accept-Language": "en" } }
+    );
+    if (!res.ok) return `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
+    const data = await res.json();
+    const addr = data.address;
+    if (!addr) return `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
+
+    // Build a short label: "123 Broadway" or "Broadway & Wall St" or just the road
+    const parts: string[] = [];
+    if (addr.house_number) parts.push(addr.house_number);
+    if (addr.road) parts.push(addr.road);
+    else if (addr.pedestrian) parts.push(addr.pedestrian);
+    if (parts.length === 0 && addr.neighbourhood) parts.push(addr.neighbourhood);
+    return parts.join(" ") || `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
+  } catch {
+    return `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
+  }
+}
+
 interface RouteContextValue {
   start: RoutePoint;
   end: RoutePoint;
+  startLabel: string | null;
+  endLabel: string | null;
   mode: TransportMode;
   waypoints: LatLng[];
   isCalculating: boolean;
@@ -162,6 +191,10 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const [hasVoted, setHasVoted] = useState(false);
   const [isVoting, setIsVoting] = useState(false);
   const [voteType, setVoteTypeState] = useState<string>(() => getDefaultVoteType("bike", "route"));
+
+  // Reverse geocoded labels
+  const [startLabel, setStartLabel] = useState<string | null>(null);
+  const [endLabel, setEndLabel] = useState<string | null>(null);
 
   // Ref for click suppression (needs immediate effect, not async like state)
   const suppressNextClickRef = useRef(false);
@@ -250,10 +283,14 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // ============================================
   const setStartPoint = useCallback((coords: LatLng) => {
     setStart({ coords, timestamp: Date.now() });
+    setStartLabel(null);
+    reverseGeocode(coords).then(setStartLabel);
   }, []);
 
   const setEndPoint = useCallback((coords: LatLng) => {
     setEnd({ coords, timestamp: Date.now() });
+    setEndLabel(null);
+    reverseGeocode(coords).then(setEndLabel);
   }, []);
 
   const setMode = useCallback((newMode: TransportMode) => {
@@ -723,6 +760,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     () => ({
       start,
       end,
+      startLabel,
+      endLabel,
       mode,
       waypoints,
       isCalculating,
@@ -761,6 +800,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     [
       start,
       end,
+      startLabel,
+      endLabel,
       mode,
       waypoints,
       isCalculating,

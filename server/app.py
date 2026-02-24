@@ -365,7 +365,8 @@ def get_client_ip() -> str:
 
 
 # Percentage to shrink each edge on both ends to prevent overlap at nodes
-EDGE_SHRINK = 0.08
+# Set to 0 for weighted segments layer (shrink caused visible gaps/overlaps)
+EDGE_SHRINK = 0
 
 
 def shrink_edge(coord1, coord2):

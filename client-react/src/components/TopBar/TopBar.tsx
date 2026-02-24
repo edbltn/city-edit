@@ -3,7 +3,7 @@ import { useRoute } from "../../context";
 import { ModeSelector } from "../ModeSelector";
 import { HowItWorksModal } from "../HowItWorksModal";
 import { VoteTypeSelector } from "../VoteTypeSelector";
-import { HexagonIcon } from "./HexagonIcon";
+import { HeatLineIcon } from "./HeatLineIcon";
 import "./TopBar.css";
 
 export const TopBar = memo(function TopBar() {
@@ -12,6 +12,8 @@ export const TopBar = memo(function TopBar() {
   const {
     start,
     end,
+    startLabel,
+    endLabel,
     mode,
     isCalculating,
     isCalculatingSplit,
@@ -26,8 +28,12 @@ export const TopBar = memo(function TopBar() {
 
   const isLoading = isCalculating || isCalculatingSplit;
 
-  const formatCoords = (coords: { lat: number; lng: number } | null) => {
+  const formatLocation = (
+    coords: { lat: number; lng: number } | null,
+    label: string | null
+  ) => {
     if (!coords) return null;
+    if (label) return label;
     return `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
   };
 
@@ -73,7 +79,7 @@ export const TopBar = memo(function TopBar() {
               </span>
               <span className="legend-label">Start</span>
               <span className={`legend-coords ${!start.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}>
-                {formatCoords(start.coords) || "Click map to set start"}
+                {formatLocation(start.coords, startLabel) || "Click map to set start"}
               </span>
             </div>
             <div className="legend-item legend-item-coords">
@@ -82,12 +88,12 @@ export const TopBar = memo(function TopBar() {
               </span>
               <span className="legend-label">End</span>
               <span className={`legend-coords ${!end.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}>
-                {formatCoords(end.coords) || "Click map to set end"}
+                {formatLocation(end.coords, endLabel) || "Click map to set end"}
               </span>
             </div>
             <div className="legend-item">
               <span className="legend-icon-slot">
-                <HexagonIcon />
+                <HeatLineIcon />
               </span>
               <span>Most Requested</span>
             </div>
