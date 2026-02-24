@@ -14,7 +14,7 @@ import { DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
 import { WaypointConnectors } from "../WaypointConnectors";
 import { GhostPin } from "../GhostPin";
-import { HexHeatmapLayer } from "../HexHeatmapLayer";
+import { WeightedSegmentsLayer } from "../WeightedSegmentsLayer";
 import type { LatLng } from "../../types";
 import "leaflet/dist/leaflet.css";
 import "./MapView.css";
@@ -159,8 +159,8 @@ export function MapView() {
       {/* Zoom control in bottom right */}
       <ZoomControl />
 
-      {/* Hex heatmap layer for H3 hexagonal visualization */}
-      <HexHeatmapLayer />
+      {/* Weighted segments layer - vote-weighted line rendering */}
+      <WeightedSegmentsLayer />
 
       {/* Desire path layer for all modes - shows the walk route */}
       {/* Only show when no ghost waypoints (otherwise we're mid-calculation or showing splits) */}

@@ -38,9 +38,9 @@ export const CONFIG = {
   minZoom: 10,
   maxZoom: 18,
 
-  // Tiles - CartoDB Positron No Labels
+  // Tiles - CartoDB Dark Matter No Labels
   tileUrlTemplate:
-    "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+    "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png",
   tileAttribution:
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
   tileSubdomains: "abcd",

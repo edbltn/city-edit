@@ -50,10 +50,12 @@ class PythonRouter(RouterInterface):
         self._node_index = {}
         self._index_to_node = {}
         self._version = None
+        self._bbox = None  # (south, west, north, east) from graph metadata
         self._cache_ttl = 86400  # 24 hours
 
-    # Grid precision for coordinate snapping (3 decimals = ~100 meters, roughly half an avenue block)
-    COORD_SNAP_PRECISION = 3
+    # Grid precision for coordinate snapping (5 decimals = ~1 meter)
+    # Previously 3 (~100m) which caused routes to "teleport" to cached results
+    COORD_SNAP_PRECISION = 5
 
     def _snap_to_grid(self, lat: float, lon: float) -> tuple[float, float]:
         """Snap coordinates to grid for cache key consistency."""
@@ -243,6 +245,7 @@ class PythonRouter(RouterInterface):
         self._node_index = data["node_index"]
         self._index_to_node = data["index_to_node"]
         self._version = data.get("version", "unknown")
+        self._bbox = data.get("bbox")  # (south, west, north, east)
 
         # Build rustworkx graph from networkx graph
         self._graph = rx.PyDiGraph()
@@ -289,6 +292,15 @@ class PythonRouter(RouterInterface):
             f"[PYTHON_ROUTER] Route request: start={start}, end={end}, "
             f"mode={mode}, waypoints={len(waypoints) if waypoints else 0}"
         )
+
+        # Validate coordinates are within graph bounds (with padding)
+        if self._bbox:
+            pad = 0.01  # ~1km padding — allow points slightly outside
+            south, west, north, east = self._bbox
+            for label, point in [("Start", start), ("End", end)]:
+                if (point[0] < south - pad or point[0] > north + pad or
+                    point[1] < west - pad or point[1] > east + pad):
+                    return {"error": f"{label} point is outside the mapped area. The current graph covers Battery Park to 34th St — rebuilding for full Manhattan."}
 
         try:
             if not waypoints:
