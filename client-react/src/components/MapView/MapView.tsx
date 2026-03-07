@@ -93,6 +93,7 @@ export function MapView() {
     routeData,
     waypoints,
     ghostWaypoints,
+    ghostWaypointIds,
     splitDesirePaths,
     suppressNextClick,
     setStartPoint,
@@ -195,7 +196,7 @@ export function MapView() {
       {/* Ghost waypoint markers - persistent after drop, draggable to recalculate split */}
       {ghostWaypoints.map((wp, index) => (
         <RouteMarker
-          key={`ghost-waypoint-${index}`}
+          key={ghostWaypointIds[index] ?? `ghost-waypoint-${index}`}
           position={wp}
           which="waypoint"
           onDragStart={setSuppressClick}

@@ -137,6 +137,8 @@ export function useRouteCalculation() {
   );
 
   const clearRoute = useCallback(() => {
+    // Invalidate any in-flight requests so they don't overwrite the cleared state
+    requestIdRef.current++;
     setState({
       isCalculating: false,
       error: null,

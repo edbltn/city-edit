@@ -16,20 +16,20 @@
 export function HexagonIcon() {
   return (
     <svg width="16" height="11" viewBox="0 0 16 11" className="legend-hexagons">
-      {/* Top hexagon - light gold */}
+      {/* Top hexagon - soft teal */}
       <polygon
         points="8,0 10.6,1.5 10.6,4.5 8,6 5.4,4.5 5.4,1.5"
-        fill="#F5D76E"
+        fill="#80CBC4"
       />
-      {/* Bottom-left hexagon - medium amber */}
+      {/* Bottom-left hexagon - medium teal */}
       <polygon
         points="5.4,4.5 8,6 8,9 5.4,10.5 2.8,9 2.8,6"
-        fill="#E8A838"
+        fill="#26A69A"
       />
-      {/* Bottom-right hexagon - dark burnt orange */}
+      {/* Bottom-right hexagon - deep teal */}
       <polygon
         points="10.6,4.5 13.2,6 13.2,9 10.6,10.5 8,9 8,6"
-        fill="#CC4400"
+        fill="#004D40"
       />
     </svg>
   );

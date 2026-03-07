@@ -21,17 +21,19 @@ interface WebSocketContextValue {
   connectionStatus: string;
   currentZoom: number;
   currentResolution: number;
+  hexDataVersion: number;
   setMode: (mode: TransportMode) => void;
   setZoom: (zoom: number) => void;
   getHexOverlayForResolution: (res: number) => HexOverlay | undefined;
 }
 
 /**
- * Convert zoom level to H3 resolution (every 2 zoom levels).
- * zoom 13-14 → res 10, zoom 15-16 → res 11, ..., zoom 23+ → res 15
+ * Convert zoom level to H3 resolution with rounding for stable hex sizes.
+ * Uses floor(x + 0.5) instead of Math.round to match Python's math.floor behavior.
+ * zoom 13 → res 10, zoom 14-15 → res 11, zoom 16-17 → res 12, zoom 18 → res 13
  */
 function zoomToResolution(zoom: number): number {
-  const res = MIN_RESOLUTION + Math.floor((Math.max(zoom, 13) - 13) / 2);
+  const res = MIN_RESOLUTION + Math.floor((Math.max(zoom, 13) - 13 + 1) / 2);
   if (res <= MIN_RESOLUTION) return MIN_RESOLUTION;
   if (res >= MAX_RESOLUTION) return MAX_RESOLUTION;
   return res;
@@ -77,6 +79,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [mapState, setMapState] = useState<MapState | null>(null);
   const [connectionStatus, setConnectionStatus] = useState("disconnected");
   const [currentZoom, setCurrentZoom] = useState(14);
+  const [hexDataVersion, setHexDataVersion] = useState(0);
   const { mode } = useRoute();
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -86,16 +89,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   );
   const modeRef = useRef(mode);
   const currentZoomRef = useRef(currentZoom);
+  const mapStateRef = useRef(mapState);
+  const hexDataVersionRef = useRef(0);
 
-  // Keep mode ref updated
-  useEffect(() => {
-    modeRef.current = mode;
-  }, [mode]);
-
-  // Keep zoom ref updated
-  useEffect(() => {
-    currentZoomRef.current = currentZoom;
-  }, [currentZoom]);
+  // Keep refs updated
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+  useEffect(() => { currentZoomRef.current = currentZoom; }, [currentZoom]);
+  useEffect(() => { mapStateRef.current = mapState; }, [mapState]);
 
   const connect = useCallback(() => {
     setConnectionStatus("connecting...");
@@ -118,12 +118,16 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             rawState.revision > latestRevisionRef.current
           ) {
             latestRevisionRef.current = rawState.revision;
-            // Merge new hex overlays with cached ones (server sends one resolution at a time)
             const newHexOverlays = parseAllHexOverlays(rawState.hex_overlays);
             setMapState((prev) => ({
               ...rawState,
               hex_overlays: { ...prev?.hex_overlays, ...newHexOverlays },
             }));
+            // Signal hex data change for redraw triggers
+            if (newHexOverlays) {
+              hexDataVersionRef.current += 1;
+              setHexDataVersion(hexDataVersionRef.current);
+            }
           }
         }
       } catch (e) {
@@ -175,11 +179,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
   const currentResolution = useMemo(() => zoomToResolution(currentZoom), [currentZoom]);
 
+  // Stable reference — reads from ref so identity never changes
   const getHexOverlayForResolution = useCallback(
     (res: number): HexOverlay | undefined => {
-      return mapState?.hex_overlays?.[res];
+      return mapStateRef.current?.hex_overlays?.[res];
     },
-    [mapState]
+    []
   );
 
   const value = useMemo(
@@ -188,11 +193,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       connectionStatus,
       currentZoom,
       currentResolution,
+      hexDataVersion,
       setMode,
       setZoom,
       getHexOverlayForResolution,
     }),
-    [mapState, connectionStatus, currentZoom, currentResolution, setMode, setZoom, getHexOverlayForResolution]
+    [mapState, connectionStatus, currentZoom, currentResolution, hexDataVersion, setMode, setZoom, getHexOverlayForResolution]
   );
 
   return (

@@ -58,8 +58,8 @@ export const UI = {
 };
 
 // Hex heatmap gradient (for H3 hex visualization)
-// Gold gradient to match desire paths
+// Teal gradient - cool and distinct from blue walking routes
 export const HEX_HEATMAP = {
-  light: { r: 245, g: 215, b: 110 },  // #F5D76E light gold
-  dark: { r: 212, g: 160, b: 23 },    // #D4A017 deep gold
+  light: { r: 128, g: 203, b: 196 },  // #80CBC4 soft teal
+  dark: { r: 0, g: 77, b: 64 },       // #004D40 deep forest teal
 };

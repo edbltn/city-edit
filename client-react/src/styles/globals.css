@@ -500,8 +500,8 @@ body {
 }
 
 .legend-line-desire {
-  background: linear-gradient(90deg, #F5D76E, #D4A017);  /* Gold gradient */
-  box-shadow: 0 0 4px rgba(227, 189, 51, 0.5);  /* Subtle glow */
+  background: linear-gradient(90deg, #80CBC4, #004D40);  /* Teal gradient */
+  box-shadow: 0 0 4px rgba(38, 166, 154, 0.5);  /* Teal glow */
 }
 
 .legend-marker {
@@ -1382,6 +1382,76 @@ body {
   .calculating-indicator {
     width: 100%;
     justify-content: center;
+  }
+}
+
+/* Mobile landscape: compact single-row topbar */
+@media (max-height: 500px) and (orientation: landscape) {
+  :root {
+    --control-height: 32px;
+  }
+
+  .topbar {
+    padding: var(--space-1) var(--space-3);
+    gap: var(--space-1);
+  }
+
+  .topbar-row-main {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .topbar h1 {
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .logo-icon,
+  .logo-icon-shadow {
+    height: 20px;
+  }
+
+  .route-section {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Hide legend in landscape — not enough vertical space */
+  .route-legend {
+    display: none;
+  }
+
+  .route-actions {
+    flex-wrap: nowrap;
+    gap: var(--space-2);
+    align-items: center;
+  }
+
+  .btn-header,
+  .mode-btn {
+    font-size: 12px;
+    padding: 4px 8px;
+    white-space: nowrap;
+  }
+
+  .mode-btn {
+    padding-right: calc(8px + 1.2em);
+  }
+
+  .btn-group {
+    flex: 0 0 auto;
+  }
+
+  .calculating-indicator {
+    font-size: 12px;
+    padding: 4px 8px;
+  }
+
+  /* Tighter zoom controls */
+  .leaflet-control-zoom {
+    margin-bottom: var(--space-2) !important;
+    margin-right: var(--space-2) !important;
   }
 }
 

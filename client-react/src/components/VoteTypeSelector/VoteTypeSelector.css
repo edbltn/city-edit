@@ -222,3 +222,28 @@
     font-size: 12px;
   }
 }
+
+/* Landscape: don't force full width, match compact sizing */
+@media (max-height: 500px) and (orientation: landscape) {
+  .vote-type-selector,
+  .vote-type-control {
+    width: auto;
+    min-width: 140px;
+  }
+
+  .vote-type-control,
+  .vote-type-input,
+  .vote-type-display,
+  .vote-type-placeholder,
+  .vote-type-option {
+    font-size: 12px;
+  }
+
+  .vote-type-dropdown {
+    min-width: 200px;
+  }
+
+  .vote-type-option .vote-type-icon {
+    font-size: 12px;
+  }
+}

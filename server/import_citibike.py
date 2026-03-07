@@ -23,6 +23,8 @@ import time
 import zipfile
 from pathlib import Path
 
+import ssl as _ssl
+
 import aiohttp
 import pandas as pd
 import requests
@@ -93,10 +95,10 @@ def in_manhattan(row: pd.Series) -> bool:
     )
 
 
-def health_check(api_base: str, timeout: int = 5) -> bool:
+def health_check(api_base: str, timeout: int = 15) -> bool:
     """Check if the backend is healthy."""
     try:
-        resp = requests.get(f"{api_base}/health", timeout=timeout)
+        resp = requests.get(f"{api_base}/health", timeout=timeout, verify=False)
         return resp.status_code == 200
     except Exception:
         return False
@@ -173,7 +175,7 @@ async def route_and_vote(
             async with session.post(
                 f"{api_base}/api/routes",
                 json={"start": start, "end": end, "mode": "bike", "waypoints": []},
-                timeout=aiohttp.ClientTimeout(total=30),
+                timeout=aiohttp.ClientTimeout(total=120),
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()
@@ -212,7 +214,7 @@ async def route_and_vote(
             async with session.post(
                 f"{api_base}/api/vote",
                 json={"segments": segments, "mode": vote_mode, "vote_type": VOTE_TYPE, "voter_id": voter_id},
-                timeout=aiohttp.ClientTimeout(total=30),
+                timeout=aiohttp.ClientTimeout(total=120),
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()
@@ -250,6 +252,8 @@ async def run_async(rides: pd.DataFrame, api_base: str, concurrency: int):
         for _, r in rides.iterrows()
     ]
 
+    is_local = "localhost" in api_base or "127.0.0.1" in api_base
+
     i = 0
     restarts = 0
     max_restarts = 5
@@ -258,23 +262,29 @@ async def run_async(rides: pd.DataFrame, api_base: str, concurrency: int):
         # Health check before each batch
         if not health_check(api_base):
             log(f"Backend unhealthy before batch starting at ride {i}.")
-            if restarts >= max_restarts:
-                log(f"Exceeded max restarts ({max_restarts}). Aborting.")
-                break
-            restart_docker()
-            if not wait_for_healthy(api_base):
-                log("Backend failed to recover. Aborting.")
-                break
-            restarts += 1
-            # Drop concurrency after a restart
-            concurrency = max(1, concurrency - 1)
-            log(f"Reduced concurrency to {concurrency} after restart.")
+            if is_local:
+                if restarts >= max_restarts:
+                    log(f"Exceeded max restarts ({max_restarts}). Aborting.")
+                    break
+                restart_docker()
+                if not wait_for_healthy(api_base):
+                    log("Backend failed to recover. Aborting.")
+                    break
+                restarts += 1
+                concurrency = max(1, concurrency - 1)
+                log(f"Reduced concurrency to {concurrency} after restart.")
+            else:
+                # Remote server — just wait for it to come back
+                log("Waiting for remote backend to recover...")
+                if not wait_for_healthy(api_base, max_wait=300):
+                    log("Remote backend did not recover. Aborting.")
+                    break
             continue
 
         batch = ride_list[i:i + batch_size]
         sem = asyncio.Semaphore(concurrency)
 
-        connector = aiohttp.TCPConnector(limit=concurrency)
+        connector = aiohttp.TCPConnector(limit=concurrency, ssl=False)
         async with aiohttp.ClientSession(connector=connector) as session:
             async def throttled(start, end, rid):
                 async with sem:
@@ -286,16 +296,22 @@ async def run_async(rides: pd.DataFrame, api_base: str, concurrency: int):
         # Check if too many consecutive failures (backend probably crashed)
         if stats.consecutive_failures >= batch_size:
             log(f"Entire batch of {batch_size} failed consecutively. Backend likely crashed.")
-            if restarts >= max_restarts:
-                log(f"Exceeded max restarts ({max_restarts}). Aborting.")
-                break
-            restart_docker()
-            if not wait_for_healthy(api_base):
-                log("Backend failed to recover. Aborting.")
-                break
-            restarts += 1
-            concurrency = max(1, concurrency - 1)
-            log(f"Reduced concurrency to {concurrency} after restart.")
+            if is_local:
+                if restarts >= max_restarts:
+                    log(f"Exceeded max restarts ({max_restarts}). Aborting.")
+                    break
+                restart_docker()
+                if not wait_for_healthy(api_base):
+                    log("Backend failed to recover. Aborting.")
+                    break
+                restarts += 1
+                concurrency = max(1, concurrency - 1)
+                log(f"Reduced concurrency to {concurrency} after restart.")
+            else:
+                log("Waiting for remote backend to recover...")
+                if not wait_for_healthy(api_base, max_wait=300):
+                    log("Remote backend did not recover. Aborting.")
+                    break
             # Retry this batch
             continue
 
