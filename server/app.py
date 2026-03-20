@@ -1136,6 +1136,61 @@ def admin_refresh_osm():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/admin/vote-match-diagnostic", methods=["GET"])
+def vote_match_diagnostic():
+    """Diagnose why Redis segment keys may not match graph edges."""
+    try:
+        segment_votes = redis_client.hgetall(SEGMENT_VOTES_KEY)
+        total_redis_keys = len(segment_votes)
+        total_redis_votes = sum(int(v) for v in segment_votes.values())
+
+        # Build set of all graph edge coord pairs
+        nodes = _graph_cache["nodes"]
+        edges = _graph_cache["edges"]
+        graph_pairs = set()
+        for from_idx, to_idx, *rest in edges:
+            from_lat, from_lon = nodes[from_idx]
+            to_lat, to_lon = nodes[to_idx]
+            c1 = f"{round(from_lon, 5)},{round(from_lat, 5)}"
+            c2 = f"{round(to_lon, 5)},{round(to_lat, 5)}"
+            graph_pairs.add((c1, c2))
+            graph_pairs.add((c2, c1))
+
+        # Check how many Redis keys match
+        matched_keys = 0
+        matched_votes = 0
+        unmatched_samples = []
+        for seg_key, vote_count in segment_votes.items():
+            parts = seg_key.split("|")
+            if len(parts) >= 3:
+                c1, c2 = parts[0], parts[1]
+                if (c1, c2) in graph_pairs:
+                    matched_keys += 1
+                    matched_votes += int(vote_count)
+                elif len(unmatched_samples) < 5:
+                    unmatched_samples.append({"key": seg_key, "votes": int(vote_count)})
+
+        # Sample graph edge coords for comparison
+        graph_samples = []
+        for from_idx, to_idx, *rest in edges[:5]:
+            from_lat, from_lon = nodes[from_idx]
+            to_lat, to_lon = nodes[to_idx]
+            graph_samples.append(f"{round(from_lon, 5)},{round(from_lat, 5)}|{round(to_lon, 5)},{round(to_lat, 5)}")
+
+        return jsonify({
+            "redis_segment_keys": total_redis_keys,
+            "redis_total_votes": total_redis_votes,
+            "graph_edges": len(edges),
+            "graph_unique_coord_pairs": len(graph_pairs) // 2,
+            "matched_keys": matched_keys,
+            "matched_votes": matched_votes,
+            "unmatched_sample_keys": unmatched_samples,
+            "graph_sample_edges": graph_samples,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/admin/router-stats", methods=["GET"])
 def admin_router_stats():
     """Get statistics about the current router."""
