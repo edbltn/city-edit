@@ -231,12 +231,6 @@ export function MapView() {
 
       {/* Split desire path layers - shown after ghost pin drop */}
       {splitDesirePaths.map((splitPath) => {
-        const before = splitPath.segmentIndex === 0
-          ? start.coords
-          : ghostWaypoints[splitPath.segmentIndex - 1];
-        const after = splitPath.segmentIndex >= ghostWaypoints.length
-          ? end.coords
-          : ghostWaypoints[splitPath.segmentIndex];
         return (
           <SplitDesirePathLayer
             key={splitPath.id}
