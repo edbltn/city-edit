@@ -1,9 +1,7 @@
 import { memo, useState } from "react";
 import { useRoute } from "../../context";
-import { ModeSelector } from "../ModeSelector";
 import { HowItWorksModal } from "../HowItWorksModal";
 import { VoteTypeSelector } from "../VoteTypeSelector";
-import { HexagonIcon } from "./HexagonIcon";
 import "./TopBar.css";
 
 export const TopBar = memo(function TopBar() {
@@ -12,7 +10,6 @@ export const TopBar = memo(function TopBar() {
   const {
     start,
     end,
-    mode,
     isCalculating,
     isCalculatingSplit,
     routeData,
@@ -26,77 +23,64 @@ export const TopBar = memo(function TopBar() {
 
   const isLoading = isCalculating || isCalculatingSplit;
 
-  const formatCoords = (coords: { lat: number; lng: number } | null) => {
-    if (!coords) return null;
-    return `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
+  const formatLocation = (point: { coords: { lat: number; lng: number } | null; address?: string | null } | null) => {
+    if (!point?.coords) return null;
+    // If address is a string, show it
+    if (typeof point.address === 'string') return point.address;
+    // Show coordinates as placeholder while loading or if no address
+    return `${point.coords.lat.toFixed(5)}, ${point.coords.lng.toFixed(5)}`;
   };
 
   // Can vote once we have a route (2 points), split paths (waypoints), OR a single point (for point votes)
   const canVote = !!routeData || splitDesirePaths.length > 0 || (pointType === "point" && !!start.coords);
 
-  // Get legend icon class based on mode
-  const getLegendIcon = () => {
-    if (mode === "walk") {
-      return <span className="legend-dots legend-dots-walk"></span>;
-    }
-    if (mode === "bike") {
-      return <span className="legend-line legend-line-bike"></span>;
-    }
-    // Drive mode
-    return <span className="legend-line legend-line-drive"></span>;
-  };
-
   return (
     <header className="topbar">
-      <div className="topbar-row topbar-row-main">
-        <h1 onClick={() => window.location.reload()}>
-          <span className="logo-wrapper">
-            <img src="/path-icon.png" alt="" className="logo-icon" />
-            <img
-              src="/path-icon.png"
-              alt=""
-              className="logo-icon-shadow"
-              aria-hidden="true"
-            />
-          </span>
-          Desire Path Mapper
-        </h1>
+      <h1 onClick={() => window.location.reload()} className="logo-container">
+        <img src="/logo.svg" alt="City Edit" className="logo-img" />
+      </h1>
+      <div className="logo-mobile-banner" onClick={() => window.location.reload()}>
+        <svg viewBox="-1 -1 233 25" xmlns="http://www.w3.org/2000/svg" className="logo-mobile-svg">
+          {["C","I","T","Y","","E","D","I","T"].map((ch, i) => {
+            const x = i * 26;
+            if (!ch) return <rect key={i} x={x} y="0" width="22" height="22" fill="none" stroke="#d4d4d4" strokeWidth="1.5" opacity="0.15"/>;
+            return <g key={i}>
+              <rect x={x} y="0" width="22" height="22" fill="none" stroke="#d4d4d4" strokeWidth="1.5"/>
+              <text x={x + 11} y="11" fontFamily="monospace" fontSize="14" fontWeight="600" fill="#d4d4d4" textAnchor="middle" dominantBaseline="central">{ch}</text>
+            </g>;
+          })}
+        </svg>
+      </div>
 
-        <div className="header-divider"></div>
-
-        {/* Route section: legend with coordinates on top, actions below */}
-        <div className="route-section">
+      <div className="topbar-content">
+        <div className="topbar-row topbar-row-main">
+          {/* Route section: legend with coordinates on top, actions below */}
+          <div className="route-section">
           <div className="route-legend">
             <div className="legend-item legend-item-coords">
               <span className="legend-icon-slot">
-                {start.coords && <span className="legend-marker legend-marker-start"></span>}
+                <span className="legend-char-start">●</span>
               </span>
               <span className="legend-label">Start</span>
               <span className={`legend-coords ${!start.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}>
-                {formatCoords(start.coords) || "Click map to set start"}
+                {formatLocation(start) || "click map to set start"}
               </span>
             </div>
             <div className="legend-item legend-item-coords">
               <span className="legend-icon-slot">
-                {end.coords && <span className="legend-marker legend-marker-end"></span>}
+                <span className="legend-char-end">●</span>
               </span>
               <span className="legend-label">End</span>
               <span className={`legend-coords ${!end.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}>
-                {formatCoords(end.coords) || "Click map to set end"}
+                {formatLocation(end) || "click map to set end"}
               </span>
-            </div>
-            <div className="legend-item">
-              <span className="legend-icon-slot">
-                <HexagonIcon />
-              </span>
-              <span>Most Requested</span>
             </div>
             {(routeData || splitDesirePaths.length > 0) && !isLoading && (
               <div className="legend-item">
                 <span className="legend-icon-slot">
-                  {getLegendIcon()}
+                  <span className="legend-char-selection">◻</span>
                 </span>
-                <span>Proposed Path</span>
+                <span>Selection</span>
               </div>
             )}
           </div>
@@ -110,7 +94,6 @@ export const TopBar = memo(function TopBar() {
             </button>
 
             <div className="btn-group">
-              <ModeSelector />
               {(canVote || (start.coords && end.coords)) && <VoteTypeSelector />}
             </div>
 
@@ -144,6 +127,7 @@ export const TopBar = memo(function TopBar() {
             </div>
           </div>
         </div>
+      </div>
       </div>
 
       <HowItWorksModal

@@ -12,6 +12,7 @@ export interface LatLng {
 export interface RoutePoint {
   coords: LatLng | null;
   timestamp: number | null;
+  address?: string | null;
 }
 
 export interface RouteGeometry {
@@ -50,36 +51,15 @@ export interface GeocodeResult {
   display_name: string;
 }
 
-export interface HexOverlay {
-  res?: number;                      // Resolution level
-  hexes: Record<string, number>;     // Expanded format (used internally)
-  max_votes: number;
-  suggestionLegend?: string[];                  // Unique vote_type labels
-  suggestions?: Record<string, number[]>;       // hex_id → indices into legend (top 3)
-  rawCounts?: Record<string, number>;           // hex_id → raw (unweighted) vote count
-}
-
-// Compact format from server (h = array of [hex_id, weight] tuples, m = max_votes)
-export interface HexOverlayCompact {
-  res: number;
-  h: [string, number][];
-  m: number;
-  sl?: string[];                          // Suggestion legend
-  s?: Record<string, number[]>;           // hex_id → legend indices (top 3)
-  rc?: Record<string, number>;            // hex_id → raw vote count
-}
-
 export interface MapState {
   revision: number;
   overlays: Record<string, GeoJSONOverlay>;
-  hex_overlays?: Record<number, HexOverlay>;  // All resolutions: {10: {...}, 11: {...}, ...}
 }
 
 // Raw state from server (before parsing)
 export interface RawMapState {
   revision: number;
   overlays: Record<string, GeoJSONOverlay>;
-  hex_overlays?: Record<number, HexOverlayCompact>;  // All resolutions in compact format
 }
 
 export interface GeoJSONOverlay {
@@ -95,21 +75,17 @@ export interface WebSocketMessage {
   state?: MapState;
 }
 
-export interface ModeOption {
-  mode: TransportMode;
-  icon: string;
-  label: string;
+export interface GraphData {
+  nodes: [number, number][];                              // [lat, lon]
+  edges: [number, number, string, string, number][];      // [from_idx, to_idx, name, highway, length_m]
+  node_votes?: number[];                                  // Vote count for each node
+  edge_votes?: number[];                                  // Vote count for each edge
+  vote_type_legend?: string[];                            // Unique vote type labels
+  edge_vote_types?: [number, number][][];                  // Per-edge [legend_idx, count] pairs, sorted by frequency
 }
-
-export const MODES: ModeOption[] = [
-  { mode: "bike", icon: "\u{1F6B2}", label: "Bike" },
-  { mode: "walk", icon: "\u{1F6B6}", label: "Walk" },
-  { mode: "drive", icon: "\u{1F697}", label: "Drive" },
-];
 
 // Vote type suggestion for the selector
 export interface VoteTypeSuggestion {
   label: string;          // Natural language suggestion, e.g. "Add bike lane"
   pointType: "route" | "point";  // route = 2 points, point = 1 point
-  modes: TransportMode[]; // Which modes this suggestion appears for
 }

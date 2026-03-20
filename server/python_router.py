@@ -51,6 +51,7 @@ class PythonRouter(RouterInterface):
         self._index_to_node = {}
         self._version = None
         self._cache_ttl = 86400  # 24 hours
+        self._bbox_cache: dict[tuple, dict] = {}
 
     # Grid precision for coordinate snapping (3 decimals = ~100 meters, roughly half an avenue block)
     COORD_SNAP_PRECISION = 3
@@ -463,6 +464,105 @@ class PythonRouter(RouterInterface):
             "_cache_hit": all_cached
         }
 
+    def get_graph_for_bbox(self, south: float, west: float, north: float, east: float) -> dict:
+        """Return nodes and edges of the walk graph within a lat/lon bounding box.
+
+        Results are cached by bbox rounded to 3 decimal places (~111m).
+        """
+        self._ensure_loaded()
+
+        # Check cache (rounded to 3dp for ~111m granularity)
+        cache_key = (round(south, 3), round(west, 3), round(north, 3), round(east, 3))
+        if cache_key in self._bbox_cache:
+            return self._bbox_cache[cache_key]
+
+        # Collect nodes within bbox (osmnx stores y=lat, x=lon)
+        node_list = []       # [[lat, lon], ...]
+        node_id_to_idx = {}  # osmid → position in node_list
+
+        for node_id, data in self._nx_graph.nodes(data=True):
+            lat = data.get("y")
+            lon = data.get("x")
+            if lat is None or lon is None:
+                continue
+            if south <= lat <= north and west <= lon <= east:
+                node_id_to_idx[node_id] = len(node_list)
+                node_list.append([lat, lon])
+
+        # Collect edges between filtered nodes
+        edge_list = []  # [[from_idx, to_idx, name, highway, length_m], ...]
+        for u, v, data in self._nx_graph.edges(data=True):
+            if u not in node_id_to_idx or v not in node_id_to_idx:
+                continue
+            name = data.get("name", "") or ""
+            if isinstance(name, list):
+                name = name[0] if name else ""
+            highway = data.get("highway", "") or ""
+            if isinstance(highway, list):
+                highway = highway[0] if highway else ""
+            length = round(data.get("length", 0.0), 1)
+            edge_list.append([node_id_to_idx[u], node_id_to_idx[v], name, highway, length])
+
+        result = {"nodes": node_list, "edges": edge_list}
+
+        # Cache (limit to 64 entries to bound memory)
+        if len(self._bbox_cache) >= 64:
+            # Evict oldest entry
+            oldest = next(iter(self._bbox_cache))
+            del self._bbox_cache[oldest]
+        self._bbox_cache[cache_key] = result
+
+        return result
+
+    def nearest_node_coords(self, lat: float, lon: float) -> tuple[float, float]:
+        """Return (lat, lon) of the nearest graph node to the given point."""
+        self._ensure_loaded()
+        node_id = ox.distance.nearest_nodes(self._nx_graph, lon, lat)
+        node_data = self._nx_graph.nodes[node_id]
+        return node_data["y"], node_data["x"]
+
+    def reverse_geocode(self, lat: float, lon: float) -> str:
+        """Return a street-level address for a point using the local OSM graph.
+
+        Finds the nearest node, then BFS outward (up to 3 hops) to collect
+        street names from nearby edges.  Walk graphs have many unnamed
+        footways/crosswalks, so the immediate node often has none.
+
+        Two distinct street names → "Broadway & 7th Ave" (intersection).
+        One street name → that name.  No names → empty string.
+        """
+        self._ensure_loaded()
+        start_node = ox.distance.nearest_nodes(self._nx_graph, lon, lat)
+
+        names: list[str] = []
+        seen_names: set[str] = set()
+
+        # BFS up to 5 hops from nearest node (pedestrian plazas can be wide)
+        visited: set = {start_node}
+        frontier = [start_node]
+        for _ in range(5):
+            if len(names) >= 2:
+                break
+            next_frontier = []
+            for node_id in frontier:
+                for _, neighbor, data in self._nx_graph.edges(node_id, data=True):
+                    name = data.get("name", "") or ""
+                    if isinstance(name, list):
+                        name = name[0] if name else ""
+                    if name and name not in seen_names:
+                        seen_names.add(name)
+                        names.append(name)
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        next_frontier.append(neighbor)
+            frontier = next_frontier
+
+        if len(names) >= 2:
+            return f"{names[0]} & {names[1]}"
+        if len(names) == 1:
+            return names[0]
+        return ""
+
     def get_version(self) -> str:
         """Get current graph version for cache invalidation."""
         self._ensure_loaded()
@@ -476,6 +576,7 @@ class PythonRouter(RouterInterface):
         self._node_index = {}
         self._index_to_node = {}
         self._version = None
+        self._bbox_cache = {}
         self._ensure_loaded()
 
     def stats(self) -> dict:

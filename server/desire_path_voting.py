@@ -6,8 +6,12 @@ Simple approach: vote for every segment along the desire path (walk route).
 This shows where people actually want to go.
 """
 
+import json
+
 # Redis key for segment votes (must match app.py)
 SEGMENT_VOTES_KEY = "segment_votes"
+# Redis key for per-segment vote type counts: field = segment_key, value = JSON {vote_type: count}
+SEGMENT_VOTE_TYPES_KEY = "segment_vote_types"
 
 
 def extract_all_segments(geometry: dict) -> list[list]:
@@ -69,7 +73,7 @@ def segment_key(coord1: list, coord2: list, mode: str) -> str:
         return f"{p2[0]},{p2[1]}|{p1[0]},{p1[1]}|{mode}"
 
 
-def cast_desire_path_votes(redis_client, segments: list, mode: str, ip_hash: str = None) -> int:
+def cast_desire_path_votes(redis_client, segments: list, mode: str, ip_hash: str = None, vote_type: str = "") -> int:
     """
     Cast votes for desire path segments in Redis.
 
@@ -78,6 +82,7 @@ def cast_desire_path_votes(redis_client, segments: list, mode: str, ip_hash: str
         segments: List of [[coord1, coord2], ...] from compute_desire_path_votes
         mode: Mode to tag votes with (the desired mode)
         ip_hash: Hashed IP address for weighted voting (optional, defaults to "system")
+        vote_type: Vote type label (e.g. "Add bike lane")
 
     Returns:
         Number of votes cast
@@ -91,19 +96,44 @@ def cast_desire_path_votes(redis_client, segments: list, mode: str, ip_hash: str
     try:
         pipe = redis_client.pipeline()
 
+        keys_to_update = []
         for segment in segments:
             if len(segment) < 2:
                 continue
             coord1, coord2 = segment[0], segment[1]
             key = segment_key(coord1, coord2, mode)
             pipe.hincrby(SEGMENT_VOTES_KEY, key, 1)
+            if vote_type:
+                keys_to_update.append(key)
 
         # Track total votes cast by this IP for weighted calculation
         pipe.hincrby("ip_vote_counts", ip_hash, len(segments))
 
         pipe.execute()
+
+        # Update vote type counts per segment (separate pipeline for atomicity)
+        if vote_type and keys_to_update:
+            _update_segment_vote_types(redis_client, keys_to_update, vote_type)
+
         return len(segments)
 
     except Exception as e:
         print(f"Vote casting error: {e}")
         return 0
+
+
+def _update_segment_vote_types(redis_client, keys: list[str], vote_type: str):
+    """Increment vote_type count for each segment key in Redis."""
+    # Read current values
+    pipe = redis_client.pipeline()
+    for key in keys:
+        pipe.hget(SEGMENT_VOTE_TYPES_KEY, key)
+    current_values = pipe.execute()
+
+    # Increment and write back
+    pipe = redis_client.pipeline()
+    for key, raw in zip(keys, current_values):
+        vt_map = json.loads(raw) if raw else {}
+        vt_map[vote_type] = vt_map.get(vote_type, 0) + 1
+        pipe.hset(SEGMENT_VOTE_TYPES_KEY, key, json.dumps(vt_map))
+    pipe.execute()

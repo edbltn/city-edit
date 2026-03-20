@@ -1,58 +1,49 @@
-import type { TransportMode, VoteTypeSuggestion } from "../types";
+import type { VoteTypeSuggestion } from "../types";
 
-// Default vote type suggestions by mode and point count
+// Default vote type suggestions by point type
 export const VOTE_TYPE_SUGGESTIONS: VoteTypeSuggestion[] = [
-  // Route votes (2 points) - mode-specific
-  { label: "🚴 Add bike lane", pointType: "route", modes: ["bike"] },
-  { label: "🛡️ Add protected bike lane", pointType: "route", modes: ["bike"] },
-  { label: "↔️ Widen bike lane", pointType: "route", modes: ["bike"] },
-  { label: "🚶 Add crosswalks", pointType: "route", modes: ["walk"] },
-  { label: "↔️ Widen sidewalk", pointType: "route", modes: ["walk"] },
-  { label: "🌉 Add pedestrian bridge", pointType: "route", modes: ["walk"] },
-  { label: "🚗 Add lane", pointType: "route", modes: ["drive"] },
-  { label: "↩️ Add turn lane", pointType: "route", modes: ["drive"] },
-  { label: "🛣️ Repave road", pointType: "route", modes: ["drive"] },
+  // Route votes (2 points)
+  { label: "🚴 Add bike lane", pointType: "route" },
+  { label: "🛡️ Add protected bike lane", pointType: "route" },
+  { label: "↔️ Widen bike lane", pointType: "route" },
+  { label: "🚶 Add crosswalks", pointType: "route" },
+  { label: "↔️ Widen sidewalk", pointType: "route" },
+  { label: "🌉 Add pedestrian bridge", pointType: "route" },
+  { label: "🚗 Add lane", pointType: "route" },
+  { label: "↩️ Add turn lane", pointType: "route" },
+  { label: "🛣️ Repave road", pointType: "route" },
+  { label: "💡 Add street lighting", pointType: "route" },
+  { label: "🚧 Add traffic calming", pointType: "route" },
 
-  // Route votes - universal
-  { label: "💡 Add street lighting", pointType: "route", modes: ["bike", "walk", "drive"] },
-  { label: "🚧 Add traffic calming", pointType: "route", modes: ["bike", "walk", "drive"] },
-
-  // Point votes (1 point) - mode-specific
-  { label: "🚲 Add Citi Bike station", pointType: "point", modes: ["bike"] },
-  { label: "🅿️ Add bike parking", pointType: "point", modes: ["bike"] },
-  { label: "🔧 Add bike repair station", pointType: "point", modes: ["bike"] },
-  { label: "🪑 Add bench", pointType: "point", modes: ["walk"] },
-  { label: "🚻 Add public restroom", pointType: "point", modes: ["walk"] },
-  { label: "🚰 Add water fountain", pointType: "point", modes: ["walk"] },
-  { label: "🅿️ Add parking", pointType: "point", modes: ["drive"] },
-  { label: "🏢 Add parking garage", pointType: "point", modes: ["drive"] },
-
-  // Point votes - universal
-  { label: "🌳 Plant trees", pointType: "point", modes: ["bike", "walk", "drive"] },
-  { label: "⚡ Add EV charger", pointType: "point", modes: ["bike", "walk", "drive"] },
-  { label: "🗑️ Add trash can", pointType: "point", modes: ["bike", "walk", "drive"] },
-  { label: "🚌 Add bus stop", pointType: "point", modes: ["bike", "walk", "drive"] },
+  // Point votes (1 point)
+  { label: "🚲 Add Citi Bike station", pointType: "point" },
+  { label: "🅿️ Add bike parking", pointType: "point" },
+  { label: "🔧 Add bike repair station", pointType: "point" },
+  { label: "🪑 Add bench", pointType: "point" },
+  { label: "🚻 Add public restroom", pointType: "point" },
+  { label: "🚰 Add water fountain", pointType: "point" },
+  { label: "🅿️ Add parking", pointType: "point" },
+  { label: "🌳 Plant trees", pointType: "point" },
+  { label: "⚡ Add EV charger", pointType: "point" },
+  { label: "🗑️ Add trash can", pointType: "point" },
+  { label: "🚌 Add bus stop", pointType: "point" },
 ];
 
 /**
- * Get suggestions filtered by mode and point type.
+ * Get suggestions filtered by point type.
  */
 export function getSuggestions(
-  mode: TransportMode,
   pointType: "route" | "point"
 ): VoteTypeSuggestion[] {
-  return VOTE_TYPE_SUGGESTIONS.filter(
-    (s) => s.pointType === pointType && s.modes.includes(mode)
-  );
+  return VOTE_TYPE_SUGGESTIONS.filter((s) => s.pointType === pointType);
 }
 
 /**
- * Get the default vote type label for a given mode and point type.
+ * Get the default vote type label for a given point type.
  */
 export function getDefaultVoteType(
-  mode: TransportMode,
   pointType: "route" | "point"
 ): string {
-  const suggestions = getSuggestions(mode, pointType);
+  const suggestions = getSuggestions(pointType);
   return suggestions.length > 0 ? suggestions[0].label : "";
 }

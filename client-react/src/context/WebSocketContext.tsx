@@ -8,92 +8,78 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import { useRoute } from "./RouteContext";
 import { CONFIG } from "../config";
-import type { MapState, TransportMode, HexOverlay, HexOverlayCompact, RawMapState } from "../types";
+import type { MapState, RawMapState } from "../types";
 
-// Resolution bounds
-const MIN_RESOLUTION = 10;
-const MAX_RESOLUTION = 15;
+// Parsed hex overlay for a single resolution
+export interface HexOverlayData {
+  hexes: Record<string, number>;
+  max_votes: number;
+  rawCounts?: Record<string, number>;
+  suggestionLegend?: string[];
+  suggestions?: Record<string, number[]>;
+}
 
 interface WebSocketContextValue {
   mapState: MapState | null;
   connectionStatus: string;
   currentZoom: number;
+  setZoom: (zoom: number) => void;
   currentResolution: number;
   hexDataVersion: number;
-  setMode: (mode: TransportMode) => void;
-  setZoom: (zoom: number) => void;
-  getHexOverlayForResolution: (res: number) => HexOverlay | undefined;
-}
-
-/**
- * Convert zoom level to H3 resolution with rounding for stable hex sizes.
- * Uses floor(x + 0.5) instead of Math.round to match Python's math.floor behavior.
- * zoom 13 → res 10, zoom 14-15 → res 11, zoom 16-17 → res 12, zoom 18 → res 13
- */
-function zoomToResolution(zoom: number): number {
-  const res = MIN_RESOLUTION + Math.floor((Math.max(zoom, 13) - 13 + 1) / 2);
-  if (res <= MIN_RESOLUTION) return MIN_RESOLUTION;
-  if (res >= MAX_RESOLUTION) return MAX_RESOLUTION;
-  return res;
-}
-
-/**
- * Parse a single hex overlay from compact format to internal format.
- */
-function parseHexOverlayCompact(data: HexOverlayCompact): HexOverlay {
-  const hexes: Record<string, number> = {};
-  for (const [hexId, weight] of data.h) {
-    hexes[hexId] = weight;
-  }
-  return {
-    res: data.res,
-    hexes,
-    max_votes: data.m,
-    suggestionLegend: data.sl,
-    suggestions: data.s,
-    rawCounts: data.rc,
-  };
-}
-
-/**
- * Parse all hex overlays from server format.
- */
-function parseAllHexOverlays(
-  data: Record<number, HexOverlayCompact> | undefined
-): Record<number, HexOverlay> | undefined {
-  if (!data) return undefined;
-
-  const result: Record<number, HexOverlay> = {};
-  for (const [resStr, compactOverlay] of Object.entries(data)) {
-    const res = parseInt(resStr, 10);
-    result[res] = parseHexOverlayCompact(compactOverlay);
-  }
-  return result;
+  getHexOverlayForResolution: (res: number) => HexOverlayData | null;
 }
 
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
+
+// Map zoom level to H3 resolution
+function zoomToResolution(zoom: number): number {
+  if (zoom >= 16) return 13;
+  if (zoom >= 15) return 12;
+  if (zoom >= 14) return 11;
+  if (zoom >= 13) return 10;
+  if (zoom >= 12) return 9;
+  return 8;
+}
+
+// Parse compact hex overlay format from server into expanded format
+function parseHexOverlay(compact: {
+  res: number;
+  h: [string, number][];
+  m: number;
+  sl?: string[];
+  s?: Record<string, number[]>;
+  rc?: Record<string, number>;
+}): HexOverlayData {
+  const hexes: Record<string, number> = {};
+  for (const [hexId, weight] of compact.h) {
+    hexes[hexId] = weight;
+  }
+  return {
+    hexes,
+    max_votes: compact.m,
+    rawCounts: compact.rc,
+    suggestionLegend: compact.sl,
+    suggestions: compact.s,
+  };
+}
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [mapState, setMapState] = useState<MapState | null>(null);
   const [connectionStatus, setConnectionStatus] = useState("disconnected");
   const [currentZoom, setCurrentZoom] = useState(14);
   const [hexDataVersion, setHexDataVersion] = useState(0);
-  const { mode } = useRoute();
 
   const wsRef = useRef<WebSocket | null>(null);
   const latestRevisionRef = useRef(0);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
-  const modeRef = useRef(mode);
   const currentZoomRef = useRef(currentZoom);
   const mapStateRef = useRef(mapState);
-  const hexDataVersionRef = useRef(0);
+  const hexCacheRef = useRef<Map<number, HexOverlayData>>(new Map());
 
   // Keep refs updated
-  useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { currentZoomRef.current = currentZoom; }, [currentZoom]);
   useEffect(() => { mapStateRef.current = mapState; }, [mapState]);
 
@@ -103,8 +89,6 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
     ws.onopen = () => {
       setConnectionStatus("connected");
-      // Send initial mode and zoom on connect
-      ws.send(JSON.stringify({ type: "set_mode", mode: modeRef.current }));
       ws.send(JSON.stringify({ type: "set_zoom", zoom: currentZoomRef.current }));
     };
 
@@ -118,15 +102,16 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             rawState.revision > latestRevisionRef.current
           ) {
             latestRevisionRef.current = rawState.revision;
-            const newHexOverlays = parseAllHexOverlays(rawState.hex_overlays);
-            setMapState((prev) => ({
-              ...rawState,
-              hex_overlays: { ...prev?.hex_overlays, ...newHexOverlays },
-            }));
-            // Signal hex data change for redraw triggers
-            if (newHexOverlays) {
-              hexDataVersionRef.current += 1;
-              setHexDataVersion(hexDataVersionRef.current);
+            setMapState(rawState);
+
+            // Parse and cache hex overlays
+            const hexOverlays = (rawState as unknown as Record<string, unknown>).hex_overlays as
+              Record<string, { res: number; h: [string, number][]; m: number; sl?: string[]; s?: Record<string, number[]>; rc?: Record<string, number> }> | undefined;
+            if (hexOverlays) {
+              for (const [resStr, compact] of Object.entries(hexOverlays)) {
+                hexCacheRef.current.set(Number(resStr), parseHexOverlay(compact));
+              }
+              setHexDataVersion((v) => v + 1);
             }
           }
         }
@@ -159,12 +144,6 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     };
   }, [connect]);
 
-  const setMode = useCallback((newMode: TransportMode) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "set_mode", mode: newMode }));
-    }
-  }, []);
-
   const setZoom = useCallback((zoom: number) => {
     setCurrentZoom(zoom);
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -172,33 +151,23 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Send mode when it changes
-  useEffect(() => {
-    setMode(mode);
-  }, [mode, setMode]);
+  const currentResolution = zoomToResolution(currentZoom);
 
-  const currentResolution = useMemo(() => zoomToResolution(currentZoom), [currentZoom]);
-
-  // Stable reference — reads from ref so identity never changes
-  const getHexOverlayForResolution = useCallback(
-    (res: number): HexOverlay | undefined => {
-      return mapStateRef.current?.hex_overlays?.[res];
-    },
-    []
-  );
+  const getHexOverlayForResolution = useCallback((res: number): HexOverlayData | null => {
+    return hexCacheRef.current.get(res) ?? null;
+  }, []);
 
   const value = useMemo(
     () => ({
       mapState,
       connectionStatus,
       currentZoom,
+      setZoom,
       currentResolution,
       hexDataVersion,
-      setMode,
-      setZoom,
       getHexOverlayForResolution,
     }),
-    [mapState, connectionStatus, currentZoom, currentResolution, hexDataVersion, setMode, setZoom, getHexOverlayForResolution]
+    [mapState, connectionStatus, currentZoom, setZoom, currentResolution, hexDataVersion, getHexOverlayForResolution]
   );
 
   return (

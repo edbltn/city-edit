@@ -12,7 +12,6 @@ import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { CONFIG } from "../config";
 import { getDefaultVoteType } from "../constants/voteTypes";
 import type {
-  TransportMode,
   LatLng,
   RoutePoint,
   RouteData,
@@ -110,7 +109,6 @@ const LOCAL_SPLIT_THRESHOLD_METERS = 100;
 interface RouteContextValue {
   start: RoutePoint;
   end: RoutePoint;
-  mode: TransportMode;
   waypoints: LatLng[];
   isCalculating: boolean;
   routeData: RouteData | null;
@@ -127,7 +125,6 @@ interface RouteContextValue {
   suppressNextClick: () => boolean;
   setStartPoint: (coords: LatLng) => void;
   setEndPoint: (coords: LatLng) => void;
-  setMode: (mode: TransportMode) => void;
   clearPoints: () => void;
   clearStart: () => void;
   clearEnd: () => void;
@@ -152,7 +149,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // Core state
   const [start, setStart] = useState<RoutePoint>({ coords: null, timestamp: null });
   const [end, setEnd] = useState<RoutePoint>({ coords: null, timestamp: null });
-  const [mode, setModeState] = useState<TransportMode>("bike");
   const [waypoints, setWaypoints] = useState<LatLng[]>([]);
   const [ghostWaypoints, setGhostWaypoints] = useState<LatLng[]>([]);
   const [ghostWaypointIds, setGhostWaypointIds] = useState<string[]>([]);
@@ -161,7 +157,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const [isCalculatingSplit, setIsCalculatingSplit] = useState(false);
   const [hasVoted, setHasVoted] = useState(false);
   const [isVoting, setIsVoting] = useState(false);
-  const [voteType, setVoteTypeState] = useState<string>(() => getDefaultVoteType("bike", "route"));
+  const [voteType, setVoteTypeState] = useState<string>(() => getDefaultVoteType("route"));
 
   // Ref for click suppression (needs immediate effect, not async like state)
   const suppressNextClickRef = useRef(false);
@@ -189,7 +185,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     routeData,
     desirePathData,
     desirePathSegments,
-    voteMode,
     calculateRoute,
     clearRoute,
     clearError,
@@ -214,7 +209,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({
             start: [points[i].lat, points[i].lng],
             end: [points[i + 1].lat, points[i + 1].lng],
-            mode,
             waypoints: []
           })
         })
@@ -231,7 +225,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
 
     for (let i = 0; i < allData.length; i++) {
       const data = allData[i];
-      const geometry = mode === "walk" ? data.route?.geometry : data.desire_path?.geometry;
+      const geometry = data.route?.geometry;
       if (geometry) {
         splitPaths.push({
           id: `split-${i}`,
@@ -243,21 +237,43 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     }
 
     return splitPaths;
-  }, [mode]);
+  }, []);
 
   // ============================================
   // Simple setters
   // ============================================
   const setStartPoint = useCallback((coords: LatLng) => {
-    setStart({ coords, timestamp: Date.now() });
+    setStart({ coords, timestamp: Date.now(), address: null });
+    fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${coords.lat}&lng=${coords.lng}`)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(data => {
+        setStart(prev =>
+          prev.coords?.lat === coords.lat && prev.coords?.lng === coords.lng
+            ? { ...prev, address: data.address }
+            : prev
+        );
+      })
+      .catch(() => {});
   }, []);
 
   const setEndPoint = useCallback((coords: LatLng) => {
-    setEnd({ coords, timestamp: Date.now() });
-  }, []);
-
-  const setMode = useCallback((newMode: TransportMode) => {
-    setModeState(newMode);
+    setEnd({ coords, timestamp: Date.now(), address: null });
+    fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${coords.lat}&lng=${coords.lng}`)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(data => {
+        setEnd(prev =>
+          prev.coords?.lat === coords.lat && prev.coords?.lng === coords.lng
+            ? { ...prev, address: data.address }
+            : prev
+        );
+      })
+      .catch(() => {});
   }, []);
 
   const addWaypoint = useCallback((coords: LatLng) => {
@@ -469,14 +485,16 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     // IDs use null for start/end since they don't have ghost IDs
     const allPoints: LatLng[] = [];
     const allIds: (string | null)[] = [];
+    const allAddresses: (string | null | undefined)[] = [];
     const currentIds = ghostWaypointIds;
-    if (start.coords) { allPoints.push(start.coords); allIds.push(null); }
+    if (start.coords) { allPoints.push(start.coords); allIds.push(null); allAddresses.push(start.address); }
     const currentGhostWaypoints = ghostWaypointsRef.current;
     for (let i = 0; i < currentGhostWaypoints.length; i++) {
       allPoints.push(currentGhostWaypoints[i]);
       allIds.push(currentIds[i] ?? null);
+      allAddresses.push(undefined);
     }
-    if (end.coords) { allPoints.push(end.coords); allIds.push(null); }
+    if (end.coords) { allPoints.push(end.coords); allIds.push(null); allAddresses.push(end.address); }
 
     // Determine index to remove
     let removeIndex: number;
@@ -491,6 +509,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
 
     const remaining = allPoints.filter((_, i) => i !== removeIndex);
     const remainingIds = allIds.filter((_, i) => i !== removeIndex);
+    const remainingAddresses = allAddresses.filter((_, i) => i !== removeIndex);
 
     routeVersionRef.current++;
     setHasVoted(false);
@@ -508,10 +527,24 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       setGhostWaypointIds([]);
     } else if (remaining.length === 1) {
       // One point left -> just start, no route
-      setStart({ coords: remaining[0], timestamp: Date.now() });
+      const addr = remainingAddresses[0] ?? null;
+      setStart({ coords: remaining[0], timestamp: Date.now(), address: addr });
       setEnd({ coords: null, timestamp: null });
       setGhostWaypoints([]);
       setGhostWaypointIds([]);
+      if (!addr) {
+        const pt = remaining[0];
+        fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${pt.lat}&lng=${pt.lng}`)
+          .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+          .then(data => {
+            setStart(prev =>
+              prev.coords?.lat === pt.lat && prev.coords?.lng === pt.lng
+                ? { ...prev, address: data.address }
+                : prev
+            );
+          })
+          .catch(() => {});
+      }
     } else {
       // Two or more: first=start, last=end, middle=ghostWaypoints
       const newStart = remaining[0];
@@ -539,10 +572,37 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       }
 
       if (startChanged) {
-        setStart({ coords: newStart, timestamp: Date.now() });
+        const startAddr = remainingAddresses[0] ?? null;
+        setStart({ coords: newStart, timestamp: Date.now(), address: startAddr });
+        // Fetch reverse geocode if promoted point lacks an address
+        if (!startAddr) {
+          fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${newStart.lat}&lng=${newStart.lng}`)
+            .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+            .then(data => {
+              setStart(prev =>
+                prev.coords?.lat === newStart.lat && prev.coords?.lng === newStart.lng
+                  ? { ...prev, address: data.address }
+                  : prev
+              );
+            })
+            .catch(() => {});
+        }
       }
       if (endChanged) {
-        setEnd({ coords: newEnd, timestamp: Date.now() });
+        const endAddr = remainingAddresses[remainingAddresses.length - 1] ?? null;
+        setEnd({ coords: newEnd, timestamp: Date.now(), address: endAddr });
+        if (!endAddr) {
+          fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${newEnd.lat}&lng=${newEnd.lng}`)
+            .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+            .then(data => {
+              setEnd(prev =>
+                prev.coords?.lat === newEnd.lat && prev.coords?.lng === newEnd.lng
+                  ? { ...prev, address: data.address }
+                  : prev
+              );
+            })
+            .catch(() => {});
+        }
       }
       setGhostWaypoints(newGhostWaypoints);
       setGhostWaypointIds(newGhostIds);
@@ -566,10 +626,10 @@ export function RouteProvider({ children }: { children: ReactNode }) {
           });
       } else {
         // Just start and end: calculate main route
-        calculateRoute({ start: newStart, end: newEnd, mode, waypoints: [] });
+        calculateRoute({ start: newStart, end: newEnd, waypoints: [] });
       }
     }
-  }, [start.coords, end.coords, ghostWaypointIds, mode, calculateAllSegments, calculateRoute, clearRoute]);
+  }, [start.coords, end.coords, ghostWaypointIds, calculateAllSegments, calculateRoute, clearRoute]);
 
   // Convenience wrappers
   const clearStart = useCallback(() => removePoint("start"), [removePoint]);
@@ -586,14 +646,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
 
     const isPointVote = start.coords && !end.coords;
 
-    // For point votes, use mode directly (no route calculation needed)
-    // For split paths, use mode directly; otherwise need voteMode from route calculation
-    const effectiveVoteMode = isPointVote
-      ? mode
-      : (splitDesirePaths.length > 0 ? mode : voteMode);
-
-    if (!isPointVote && (!segmentsToVote || segmentsToVote.length === 0 || !effectiveVoteMode)) {
-      console.warn("castVote: No segments to vote on", { segmentsToVote, effectiveVoteMode });
+    if (!isPointVote && (!segmentsToVote || segmentsToVote.length === 0)) {
+      console.warn("castVote: No segments to vote on", { segmentsToVote });
       return;
     }
     if (isPointVote && !start.coords) {
@@ -606,7 +660,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     setIsVoting(true);
     try {
       const body: Record<string, unknown> = {
-        mode: effectiveVoteMode,
+        mode: "walk",
         vote_type: voteType,
       };
 
@@ -635,13 +689,20 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsVoting(false);
     }
-  }, [splitDesirePaths, desirePathSegments, voteMode, voteType, start.coords, end.coords, mode]);
+  }, [splitDesirePaths, desirePathSegments, voteType, start.coords, end.coords]);
 
   // ============================================
   // Main calculation effect
   // Runs when start, end, or mode changes
   // Uses current ghost waypoints to determine what to calculate
   // ============================================
+  // Extract coordinate values for effect deps — avoids re-triggering
+  // the main calculation when only the address or timestamp changes
+  const startLat = start.coords?.lat ?? null;
+  const startLng = start.coords?.lng ?? null;
+  const endLat = end.coords?.lat ?? null;
+  const endLng = end.coords?.lng ?? null;
+
   useEffect(() => {
     // Skip if removal is being handled (it does its own calculation)
     if (handlingRemovalRef.current) {
@@ -656,7 +717,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     setWaypoints([]);
 
     // Need both start and end to calculate
-    if (!start.coords || !end.coords) {
+    if (startLat === null || startLng === null || endLat === null || endLng === null) {
       // Clear everything - can't have a route or ghost waypoints without both endpoints
       clearRoute();
       setGhostWaypoints([]);
@@ -669,17 +730,19 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     clearRoute();
     setSplitDesirePaths([]);
 
+    const startCoords = { lat: startLat, lng: startLng };
+    const endCoords = { lat: endLat, lng: endLng };
     const currentGhostWaypoints = ghostWaypointsRef.current;
 
     // Always calculate the main route
-    calculateRoute({ start: start.coords, end: end.coords, mode, waypoints: [] });
+    calculateRoute({ start: startCoords, end: endCoords, waypoints: [] });
 
     // If there are ghost waypoints, also calculate split paths
     if (currentGhostWaypoints.length > 0) {
       setIsCalculatingSplit(true);
       splitCalcVersionRef.current++;
       const calcVersion = splitCalcVersionRef.current;
-      const allPoints = [start.coords, ...currentGhostWaypoints, end.coords];
+      const allPoints = [startCoords, ...currentGhostWaypoints, endCoords];
       calculateAllSegments(allPoints)
         .then(splitPaths => {
           if (calcVersion !== splitCalcVersionRef.current) return;
@@ -694,7 +757,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
           }
         });
     }
-  }, [start, end, mode, calculateRoute, clearRoute, calculateAllSegments]);
+  }, [startLat, startLng, endLat, endLng, calculateRoute, clearRoute, calculateAllSegments]);
 
   // ============================================
   // Recalculate when waypoints change
@@ -704,17 +767,17 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       routeVersionRef.current++;
       setHasVoted(false);
       setIsVoting(false);
-      calculateRoute({ start: start.coords, end: end.coords, mode, waypoints });
+      calculateRoute({ start: start.coords, end: end.coords, waypoints });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [waypoints]);
 
   // ============================================
-  // Auto-update vote type when mode or pointType changes
+  // Auto-update vote type when pointType changes
   // ============================================
   useEffect(() => {
-    setVoteTypeState(getDefaultVoteType(mode, pointType));
-  }, [mode, pointType]);
+    setVoteTypeState(getDefaultVoteType(pointType));
+  }, [pointType]);
 
   // ============================================
   // Context value
@@ -723,7 +786,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     () => ({
       start,
       end,
-      mode,
       waypoints,
       isCalculating,
       routeData,
@@ -740,7 +802,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       suppressNextClick,
       setStartPoint,
       setEndPoint,
-      setMode,
       clearPoints,
       clearStart,
       clearEnd,
@@ -761,7 +822,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     [
       start,
       end,
-      mode,
       waypoints,
       isCalculating,
       routeData,
@@ -778,7 +838,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       suppressNextClick,
       setStartPoint,
       setEndPoint,
-      setMode,
       clearPoints,
       clearStart,
       clearEnd,

@@ -51,15 +51,15 @@ export const ROUTE_COLORS = {
   },
 };
 
+// Hex heatmap gradient (light = few votes, dark = many votes)
+export const HEX_HEATMAP = {
+  light: { r: 91, g: 143, b: 191 },   // #5B8FBF - soft blue
+  dark: { r: 220, g: 52, b: 59 },     // #DC343B - Poppy Red
+};
+
 // UI colors (for reference - primary definitions in CSS)
 export const UI = {
   paper: "#F4F5F0", // Bright White - 2025
   ink: "#343148", // Eclipse - deep text
 };
 
-// Hex heatmap gradient (for H3 hex visualization)
-// Teal gradient - cool and distinct from blue walking routes
-export const HEX_HEATMAP = {
-  light: { r: 128, g: 203, b: 196 },  // #80CBC4 soft teal
-  dark: { r: 0, g: 77, b: 64 },       // #004D40 deep forest teal
-};

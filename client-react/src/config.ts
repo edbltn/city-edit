@@ -20,12 +20,12 @@ const wsProtocol =
 
 export const CONFIG = {
   // Initial camera
-  initialView: { lat: 40.7128, lon: -74.006, zoom: 11 },
+  initialView: { lat: 40.7580, lon: -73.9855, zoom: 14 },
 
-  // Pan limits (expanded geographic bounds for more scroll room)
+  // Pan limits (generous padding around mapped region)
   nycBounds: {
-    sw: { lat: 40.3, lon: -74.4 },
-    ne: { lat: 41.1, lon: -73.5 },
+    sw: { lat: 40.550, lon: -74.200 },
+    ne: { lat: 41.000, lon: -73.750 },
   },
 
   // Routing limits (mapped region bounds)
@@ -35,12 +35,12 @@ export const CONFIG = {
   },
 
   // Zoom limits
-  minZoom: 10,
+  minZoom: 12,
   maxZoom: 18,
 
-  // Tiles - CartoDB Positron No Labels
+  // Tiles - CartoDB DarkMatter No Labels
   tileUrlTemplate:
-    "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+    "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png",
   tileAttribution:
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
   tileSubdomains: "abcd",

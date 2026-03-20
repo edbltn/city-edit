@@ -24,14 +24,14 @@ function parseLabel(label: string): { emoji: string; text: string } {
 }
 
 export const VoteTypeSelector = memo(function VoteTypeSelector() {
-  const { mode, voteType, setVoteType, pointType } = useRoute();
+  const { voteType, setVoteType, pointType } = useRoute();
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const suggestions = getSuggestions(mode, pointType);
+  const suggestions = getSuggestions(pointType);
 
   // Filter suggestions based on input
   const inputLower = inputValue.trim().toLowerCase();

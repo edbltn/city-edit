@@ -1,22 +1,26 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   MapContainer,
+  Marker,
   TileLayer,
   useMap,
   useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
 import { CONFIG } from "../../config";
-import { useRoute } from "../../context";
+import { COLOR_START, COLOR_END } from "../../colors";
+import { useRoute, useGhostPin } from "../../context";
 import { useMapClick } from "../../hooks";
+import { kiteGhostIcon } from "../../utils/kiteIcon";
 import { RouteMarker } from "../RouteMarker";
 import { DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
 import { WaypointConnectors } from "../WaypointConnectors";
 import { GhostPin } from "../GhostPin";
-import { HexHeatmapLayer } from "../HexHeatmapLayer";
+import { GraphLayer } from "../GraphLayer/GraphLayer";
 import type { LatLng } from "../../types";
 import "leaflet/dist/leaflet.css";
+import "maplibre-gl/dist/maplibre-gl.css";
 import "./MapView.css";
 
 // Custom pane setup component
@@ -29,6 +33,13 @@ function MapPanes() {
       map.createPane("routePane");
       const routePane = map.getPane("routePane");
       if (routePane) routePane.style.zIndex = "450";
+    }
+
+    // Create pane for OSM graph (below heatmap)
+    if (!map.getPane("graphPane")) {
+      map.createPane("graphPane");
+      const graphPane = map.getPane("graphPane");
+      if (graphPane) graphPane.style.zIndex = "430";
     }
 
     // Create pane for desire path (below main route)
@@ -71,25 +82,46 @@ function MapDragCursor() {
   return null;
 }
 
-// Map click handler component
+// Map click handler — uses snappedNode when available so clicks land exactly
+// on the displayed ghost pin position
 function MapClickHandler({
   onMapClick,
+  snappedNode,
 }: {
   onMapClick: (latlng: LatLng) => void;
+  snappedNode: LatLng | null;
 }) {
   useMapEvents({
     click: (e) => {
-      onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng });
+      onMapClick(snappedNode ?? { lat: e.latlng.lat, lng: e.latlng.lng });
     },
   });
   return null;
+}
+
+// Ghost pin marker for the snapped node position (from GraphLayer onSnap)
+function SnapMarker({
+  snappedNode,
+  hasStart,
+  suppress,
+}: {
+  snappedNode: LatLng | null;
+  hasStart: boolean;
+  suppress: boolean;
+}) {
+  const icon = useMemo(
+    () => kiteGhostIcon(hasStart ? COLOR_END : COLOR_START),
+    [hasStart]
+  );
+
+  if (suppress || !snappedNode) return null;
+  return <Marker position={[snappedNode.lat, snappedNode.lng]} icon={icon} interactive={false} />;
 }
 
 export function MapView() {
   const {
     start,
     end,
-    mode,
     routeData,
     waypoints,
     ghostWaypoints,
@@ -109,6 +141,23 @@ export function MapView() {
     setSuppressClick,
     clearSplitPaths,
   } = useRoute();
+
+  const { ghostState } = useGhostPin();
+
+  const [snappedNode, setSnappedNode] = useState<LatLng | null>(null);
+  const [isHoveringPath, setIsHoveringPath] = useState(false);
+  const [isDraggingMarker, setIsDraggingMarker] = useState(false);
+
+  // Wrapper for marker drag start — suppresses ghost pin and next click
+  const handleMarkerDragStart = useCallback(() => {
+    setIsDraggingMarker(true);
+    setSuppressClick();
+  }, [setSuppressClick]);
+
+  // Wrapper for marker drag finish — re-enables ghost pin
+  const handleMarkerDragFinish = useCallback(() => {
+    setIsDraggingMarker(false);
+  }, []);
 
   const { handleMapClick } = useMapClick({
     state: { start, end },
@@ -147,8 +196,17 @@ export function MapView() {
       className="map-container"
     >
       <MapPanes />
+      <GraphLayer
+        onSnap={setSnappedNode}
+        pinnedPoint={start.coords && !end.coords ? start.coords : null}
+      />
       <MapDragCursor />
-      <MapClickHandler onMapClick={handleMapClick} />
+      <MapClickHandler onMapClick={handleMapClick} snappedNode={snappedNode} />
+      <SnapMarker
+        snappedNode={snappedNode}
+        hasStart={!!start.coords}
+        suppress={isHoveringPath || ghostState.isDragging || isDraggingMarker}
+      />
 
       <TileLayer
         url={CONFIG.tileUrlTemplate}
@@ -160,9 +218,6 @@ export function MapView() {
       {/* Zoom control in bottom right */}
       <ZoomControl />
 
-      {/* Hex heatmap layer for H3 hexagonal visualization */}
-      <HexHeatmapLayer />
-
       {/* Desire path layer for all modes - shows the walk route */}
       {/* Only show when no ghost waypoints (otherwise we're mid-calculation or showing splits) */}
       {routeData?.geometry && splitDesirePaths.length === 0 && ghostWaypoints.length === 0 && (
@@ -170,19 +225,28 @@ export function MapView() {
           geometry={routeData.geometry}
           segmentIndex={0}
           onSegmentDrag={insertWaypointAtSegment}
-          mode={mode}
+          onPathHoverChange={setIsHoveringPath}
         />
       )}
 
       {/* Split desire path layers - shown after ghost pin drop */}
-      {splitDesirePaths.map((splitPath) => (
-        <SplitDesirePathLayer
-          key={splitPath.id}
-          splitPath={splitPath}
-          mode={mode}
-          onSegmentDrag={insertWaypointAtSegment}
-        />
-      ))}
+      {splitDesirePaths.map((splitPath) => {
+        const before = splitPath.segmentIndex === 0
+          ? start.coords
+          : ghostWaypoints[splitPath.segmentIndex - 1];
+        const after = splitPath.segmentIndex >= ghostWaypoints.length
+          ? end.coords
+          : ghostWaypoints[splitPath.segmentIndex];
+        return (
+          <SplitDesirePathLayer
+            key={splitPath.id}
+            splitPath={splitPath}
+            onSegmentDrag={insertWaypointAtSegment}
+            onPathHoverChange={setIsHoveringPath}
+
+          />
+        );
+      })}
 
       {/* Grey arc connectors from waypoints to path endpoints */}
       <WaypointConnectors
@@ -199,8 +263,9 @@ export function MapView() {
           key={ghostWaypointIds[index] ?? `ghost-waypoint-${index}`}
           position={wp}
           which="waypoint"
-          onDragStart={setSuppressClick}
+          onDragStart={handleMarkerDragStart}
           onDragEnd={(pos) => updateGhostWaypoint(index, pos)}
+          onDragFinish={handleMarkerDragFinish}
           onDelete={() => removeGhostWaypoint(index)}
           onOutOfBounds={handleOutOfBounds}
         />
@@ -222,8 +287,9 @@ export function MapView() {
         <RouteMarker
           position={start.coords}
           which="start"
-          onDragStart={setSuppressClick}
+          onDragStart={handleMarkerDragStart}
           onDragEnd={setStartPoint}
+          onDragFinish={handleMarkerDragFinish}
           onDelete={clearStart}
           onOutOfBounds={handleOutOfBounds}
         />
@@ -234,8 +300,9 @@ export function MapView() {
         <RouteMarker
           position={end.coords}
           which="end"
-          onDragStart={setSuppressClick}
+          onDragStart={handleMarkerDragStart}
           onDragEnd={setEndPoint}
+          onDragFinish={handleMarkerDragFinish}
           onDelete={clearEnd}
           onOutOfBounds={handleOutOfBounds}
         />

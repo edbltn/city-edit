@@ -1,4 +1,4 @@
-import { RouteProvider, WebSocketProvider, GhostPinProvider } from "./context";
+import { RouteProvider, WebSocketProvider, GhostPinProvider, GraphSnapProvider } from "./context";
 import { TopBar, MapView, ErrorToast } from "./components";
 import { useRoute } from "./context";
 
@@ -21,7 +21,9 @@ function App() {
     <RouteProvider>
       <WebSocketProvider>
         <GhostPinProvider>
-          <AppContent />
+          <GraphSnapProvider>
+            <AppContent />
+          </GraphSnapProvider>
         </GhostPinProvider>
       </WebSocketProvider>
     </RouteProvider>

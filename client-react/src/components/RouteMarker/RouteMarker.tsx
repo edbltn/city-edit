@@ -1,8 +1,10 @@
-import { useMemo, useRef } from "react";
-import { Marker } from "react-leaflet";
+import { useEffect, useMemo, useRef } from "react";
+import { Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 import { COLOR_START, COLOR_END, ROUTE_COLORS } from "../../colors";
 import { isWithinMappedBounds } from "../../utils/bounds";
+import { kiteIcon } from "../../utils/kiteIcon";
+import { useGraphSnap } from "../../context";
 import type { LatLng } from "../../types";
 
 // Minimum distance (in degrees) to consider a drag as intentional movement
@@ -17,46 +19,66 @@ interface RouteMarkerProps {
   which: "start" | "end" | "waypoint";
   onDragEnd?: (newPosition: LatLng) => void;
   onDragStart?: () => void;
+  onDragFinish?: () => void;
   onDelete?: () => void;
   onOutOfBounds?: () => void;
-}
-
-// Create custom icon for markers
-function createCustomIcon(color: string): L.DivIcon {
-  return L.divIcon({
-    className: "custom-marker",
-    html: `<div class="pin-container">
-      <div class="pin-head" style="background: ${color};"></div>
-      <div class="pin-needle"></div>
-      <div class="pin-shadow"></div>
-    </div>`,
-    iconSize: [30, 40],
-    iconAnchor: [15, 40],
-  });
+  hidden?: boolean;
 }
 
 function getMarkerColor(which: "start" | "end" | "waypoint"): string {
   if (which === "start") return COLOR_START;
   if (which === "end") return COLOR_END;
-  return ROUTE_COLORS.desire.middle; // Gold for waypoint
+  return ROUTE_COLORS.desire.middle;
 }
 
-export function RouteMarker({ position, which, onDragEnd, onDragStart, onDelete, onOutOfBounds }: RouteMarkerProps) {
+const DRAG_TRAIL_STYLE: L.PolylineOptions = {
+  color: "#999999",
+  weight: 2,
+  opacity: 0.6,
+  dashArray: "1, 4",
+  lineCap: "round",
+};
+
+export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, hidden }: RouteMarkerProps) {
+  const map = useMap();
+  const { snapToGraph, currentSnapRef, setDragging } = useGraphSnap();
   const markerRef = useRef<L.Marker>(null);
   const dragStartPosition = useRef<LatLng | null>(null);
+  const dragTrailRef = useRef<L.Polyline | null>(null);
   const touchStartTime = useRef<number>(0);
   const wasDragged = useRef<boolean>(false);
+  const originalSetLatLngRef = useRef<Function | null>(null);
 
-  const icon = useMemo(() => {
-    const color = getMarkerColor(which);
-    return createCustomIcon(color);
-  }, [which]);
+  const icon = useMemo(() => kiteIcon(getMarkerColor(which)), [which]);
+
+  // Hide/show via Leaflet DOM directly — no unmount/remount flicker
+  useEffect(() => {
+    const el = markerRef.current?.getElement();
+    if (el) {
+      el.style.opacity = hidden ? "0" : "";
+      el.style.pointerEvents = hidden ? "none" : "";
+    }
+  }, [hidden]);
+
+  // Restore setLatLng if component unmounts during an active drag
+  useEffect(() => {
+    return () => {
+      const marker = markerRef.current;
+      if (marker && originalSetLatLngRef.current) {
+        (marker as any).setLatLng = originalSetLatLngRef.current;
+        originalSetLatLngRef.current = null;
+      }
+    };
+  }, []);
 
   const eventHandlers = useMemo(
     () => ({
       // Desktop: click fires if there was no drag
       click: () => {
-        onDelete?.();
+        if (!wasDragged.current) {
+          onDelete?.();
+        }
+        wasDragged.current = false;
       },
       // Mobile: track touch timing for tap detection
       touchstart: () => {
@@ -72,20 +94,57 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDelete,
       },
       dragstart: () => {
         wasDragged.current = true;
-        // Store the position when drag starts for distance comparison
         const marker = markerRef.current;
         if (marker) {
           const latlng = marker.getLatLng();
           dragStartPosition.current = { lat: latlng.lat, lng: latlng.lng };
+          originalSetLatLngRef.current = marker.setLatLng.bind(marker);
+          (marker as any).setLatLng = function() { return this; };
+
+          // Create dotted trail from original position
+          dragTrailRef.current = L.polyline(
+            [latlng, latlng],
+            DRAG_TRAIL_STYLE
+          ).addTo(map);
         }
+        setDragging(true);
         onDragStart?.();
+      },
+      drag: () => {
+        const marker = markerRef.current;
+        if (marker && dragStartPosition.current && dragTrailRef.current) {
+          const snapped = currentSnapRef.current;
+          const latlng = marker.getLatLng();
+          const trailEnd = snapped ?? latlng;
+          dragTrailRef.current.setLatLngs([
+            [dragStartPosition.current.lat, dragStartPosition.current.lng],
+            trailEnd,
+          ]);
+        }
       },
       dragend: () => {
         const marker = markerRef.current;
-        if (!marker || !onDragEnd) return;
 
+        // Remove drag trail and clear drag state
+        dragTrailRef.current?.remove();
+        dragTrailRef.current = null;
+        setDragging(false);
+
+        // Restore original setLatLng before state updates trigger re-renders
+        if (marker && originalSetLatLngRef.current) {
+          (marker as any).setLatLng = originalSetLatLngRef.current;
+          originalSetLatLngRef.current = null;
+        }
+
+        if (!marker || !onDragEnd) {
+          onDragFinish?.();
+          return;
+        }
+
+        // Snap final position to graph node/edge
         const latlng = marker.getLatLng();
-        const newPos = { lat: latlng.lat, lng: latlng.lng };
+        const snapped = snapToGraph(map, latlng.lat, latlng.lng);
+        const newPos = snapped ?? { lat: latlng.lat, lng: latlng.lng };
 
         // Check if new position is within mapped bounds
         if (!isWithinMappedBounds(newPos)) {
@@ -95,6 +154,7 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDelete,
           }
           dragStartPosition.current = null;
           onOutOfBounds?.();
+          onDragFinish?.();
           return;
         }
 
@@ -109,15 +169,17 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDelete,
             // Reset marker to original position and do nothing
             marker.setLatLng([dragStartPosition.current.lat, dragStartPosition.current.lng]);
             dragStartPosition.current = null;
+            onDragFinish?.();
             return;
           }
         }
 
         dragStartPosition.current = null;
         onDragEnd(newPos);
+        onDragFinish?.();
       },
     }),
-    [onDragEnd, onDragStart, onDelete, onOutOfBounds]
+    [map, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, snapToGraph, currentSnapRef, setDragging]
   );
 
   return (

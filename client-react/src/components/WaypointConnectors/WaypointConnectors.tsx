@@ -19,52 +19,15 @@ interface WaypointConnectorsProps {
   splitDesirePaths: SplitDesirePath[];
 }
 
-// Generate a curved arc between a waypoint and a path endpoint
-// from: {lat, lng} waypoint
-// to: [lng, lat] GeoJSON coordinate
-function generateArc(
+// Generate a straight line between a waypoint and a path endpoint
+function generateLine(
   from: LatLng,
-  to: [number, number],
-  segments: number = 10
+  to: [number, number]
 ): [number, number][] {
-  const points: [number, number][] = [];
-  const toLat = to[1];
-  const toLng = to[0];
-
-  const dx = toLng - from.lng;
-  const dy = toLat - from.lat;
-  const len = Math.sqrt(dx * dx + dy * dy);
-
-  if (len === 0) return [];
-
-  // Calculate midpoint with perpendicular offset for the arc
-  const midLat = (from.lat + toLat) / 2;
-  const midLng = (from.lng + toLng) / 2;
-
-  // Arc height is proportional to distance (but capped)
-  const arcHeight = Math.min(len * 0.3, 0.0003);
-
-  // Perpendicular direction
-  const perpX = -dy / len;
-  const perpY = dx / len;
-
-  // Control point for quadratic bezier
-  const controlLat = midLat + perpX * arcHeight;
-  const controlLng = midLng + perpY * arcHeight;
-
-  // Generate points along the quadratic bezier curve
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const t1 = 1 - t;
-
-    // Quadratic bezier: P = (1-t)²P0 + 2(1-t)tP1 + t²P2
-    const lat = t1 * t1 * from.lat + 2 * t1 * t * controlLat + t * t * toLat;
-    const lng = t1 * t1 * from.lng + 2 * t1 * t * controlLng + t * t * toLng;
-
-    points.push([lat, lng]);
-  }
-
-  return points;
+  return [
+    [from.lat, from.lng],
+    [to[1], to[0]],
+  ];
 }
 
 function createConnector(
@@ -82,10 +45,8 @@ function createConnector(
   // Too far - route data is probably stale (waypoint moved but route not recalculated)
   if (distance > MAX_CONNECTOR_DISTANCE) return null;
 
-  const arcPoints = generateArc(waypoint, target);
-  if (arcPoints.length === 0) return null;
-
-  return { key, positions: arcPoints };
+  const linePoints = generateLine(waypoint, target);
+  return { key, positions: linePoints };
 }
 
 export function WaypointConnectors({
@@ -167,10 +128,11 @@ export function WaypointConnectors({
           key={key}
           positions={positions}
           pathOptions={{
-            color: "#444444",
+            color: "#999999",
             weight: 2,
-            opacity: 0.8,
-            dashArray: "4, 4",
+            opacity: 0.6,
+            dashArray: "1, 4",
+            lineCap: "round",
           }}
         />
       ))}

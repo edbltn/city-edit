@@ -12,3 +12,5 @@ rustworkx
 scikit-learn
 h3
 psycopg2-binary
+pmtiles
+mercantile

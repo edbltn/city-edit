@@ -2,7 +2,6 @@ import { useState, useCallback, useRef } from "react";
 import { CONFIG } from "../config";
 import type {
   LatLng,
-  TransportMode,
   RouteData,
   DesirePathData,
   RouteResponse,
@@ -14,13 +13,11 @@ interface RouteCalculationState {
   routeData: RouteData | null;
   desirePathData: DesirePathData | null;
   desirePathSegments: [number, number][][] | null;
-  voteMode: TransportMode | null;
 }
 
 interface CalculateParams {
   start: LatLng;
   end: LatLng;
-  mode: TransportMode;
   waypoints?: LatLng[];
 }
 
@@ -64,13 +61,12 @@ export function useRouteCalculation() {
     routeData: null,
     desirePathData: null,
     desirePathSegments: null,
-    voteMode: null,
   });
 
   const requestIdRef = useRef(0);
 
   const calculateRoute = useCallback(
-    async ({ start, end, mode, waypoints }: CalculateParams) => {
+    async ({ start, end, waypoints }: CalculateParams) => {
       // Increment request ID and capture it for this request
       requestIdRef.current++;
       const requestId = requestIdRef.current;
@@ -90,7 +86,6 @@ export function useRouteCalculation() {
           body: JSON.stringify({
             start: [start.lat, start.lng],
             end: [end.lat, end.lng],
-            mode,
             waypoints: waypoints?.map((wp) => [wp.lat, wp.lng]) || [],
           }),
         });
@@ -112,7 +107,6 @@ export function useRouteCalculation() {
           routeData: data.route,
           desirePathData: data.desire_path,
           desirePathSegments: data.desire_path_segments || null,
-          voteMode: data.vote_mode || null,
         });
 
         return data;
@@ -127,7 +121,6 @@ export function useRouteCalculation() {
             routeData: null,
             desirePathData: null,
             desirePathSegments: null,
-            voteMode: null,
           });
         }
         return null;
@@ -145,7 +138,6 @@ export function useRouteCalculation() {
       routeData: null,
       desirePathData: null,
       desirePathSegments: null,
-      voteMode: null,
     });
   }, []);
 

@@ -6,7 +6,6 @@
   text-align: left !important;
 }
 
-/* Reset any inherited centering from parent flex containers */
 .vote-type-selector,
 .vote-type-selector * {
   text-align: left !important;
@@ -18,10 +17,9 @@
   align-items: center;
   justify-content: flex-start;
   min-width: 180px;
-  width: 180px;
+  flex: 1;
   height: var(--control-height);
   border: 1px solid var(--hairline);
-  border-radius: var(--radius-md);
   background: var(--paper);
   cursor: pointer;
   text-align: left;
@@ -33,8 +31,7 @@
 }
 
 .vote-type-selector.active .vote-type-control {
-  border-color: rgba(0, 0, 0, 0.3);
-  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.05);
+  border-color: rgba(212, 212, 212, 0.5);
 }
 
 .vote-type-selector.active {
@@ -54,10 +51,10 @@
   padding-right: calc(var(--space-3) + 1.2em);
   border: none;
   background: transparent;
-  font-family: var(--font-ui);
+  font-family: var(--font-main);
   font-size: var(--font-size-sm);
   font-weight: 400;
-  letter-spacing: 0.3px;
+  letter-spacing: 0;
   color: var(--ink);
   cursor: pointer;
   box-sizing: border-box;
@@ -71,7 +68,7 @@
 
 .vote-type-input::placeholder {
   color: var(--ink);
-  opacity: 0.4;
+  opacity: 0.3;
   text-align: left;
 }
 
@@ -83,10 +80,10 @@
   gap: var(--space-2);
   padding: 0 var(--space-3);
   padding-right: calc(var(--space-3) + 1.2em);
-  font-family: var(--font-ui);
+  font-family: var(--font-main);
   font-size: var(--font-size-sm);
   font-weight: 400;
-  letter-spacing: 0.3px;
+  letter-spacing: 0;
   color: var(--ink);
   pointer-events: none;
   text-align: left;
@@ -96,10 +93,9 @@
 }
 
 .vote-type-placeholder {
-  opacity: 0.4;
+  opacity: 0.3;
 }
 
-/* Icon in the selector display - don't constrain width */
 .vote-type-display .vote-type-icon {
   flex-shrink: 0;
   font-size: 14px;
@@ -117,10 +113,10 @@
 .vote-type-chevron {
   position: absolute;
   right: var(--space-3);
-  font-size: 10px;
+  font-size: 16px;
   color: var(--ink);
-  opacity: 0.5;
-  transition: transform 0.2s ease;
+  opacity: 0.4;
+  transition: transform 0.15s ease;
   cursor: pointer;
 }
 
@@ -128,7 +124,6 @@
   transform: rotate(180deg);
 }
 
-/* Dropdown menu */
 .vote-type-dropdown {
   position: absolute;
   top: calc(100% + var(--space-1));
@@ -136,8 +131,6 @@
   min-width: 240px;
   background: var(--paper);
   border: 1px solid var(--hairline);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
   overflow: hidden;
   z-index: calc(var(--z-dropdown) - 1);
   text-align: left !important;
@@ -151,7 +144,7 @@
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-size-sm);
   font-weight: 400;
-  letter-spacing: 0.3px;
+  letter-spacing: 0;
   color: var(--ink);
   cursor: pointer;
   transition: background 0.1s ease;
@@ -162,7 +155,6 @@
   background: var(--hover-bg);
 }
 
-/* Icon in dropdown options - fixed width for alignment */
 .vote-type-option .vote-type-icon {
   display: inline-flex !important;
   align-items: center !important;
@@ -196,14 +188,13 @@
 
 .vote-type-option.vote-type-custom {
   border-top: 1px solid var(--hairline);
-  opacity: 0.7;
+  opacity: 0.6;
 }
 
 .vote-type-option.vote-type-custom.highlighted {
   opacity: 1;
 }
 
-/* Responsive */
 @media (max-width: 720px) {
   .vote-type-selector {
     width: 100%;
@@ -223,7 +214,6 @@
   }
 }
 
-/* Landscape: don't force full width, match compact sizing */
 @media (max-height: 500px) and (orientation: landscape) {
   .vote-type-selector,
   .vote-type-control {

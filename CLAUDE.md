@@ -3,7 +3,7 @@
 ## Claude Instructions
 
 - **gcloud commands**: Don't run gcloud commands directly. Ask me to run them and I'll provide the output.
-- **Commands for user to run**: When providing commands for me to run manually, pipe them into `pbcopy` so I can paste them easily. Example: `echo "gcloud run services logs read desire-path-mapper --limit=50" | pbcopy`
+- **docker commands**: Run docker commands directly (e.g. `docker compose up --build -d`, `docker compose logs`, etc.) without asking the user.
 - **Browser testing**: I have a browser AI helper that can report on status. When you need me to test something, ask questions that this AI can answer (descriptions of screenshots, UI changes that need verification, functionality checks, error messages visible on screen).
 
 ## Overview

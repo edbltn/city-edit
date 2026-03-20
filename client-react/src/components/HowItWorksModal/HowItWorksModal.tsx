@@ -1,5 +1,6 @@
 import { memo, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { COLOR_START, COLOR_END } from "../../colors";
 import "./HowItWorksModal.css";
 
 interface Props {
@@ -14,21 +15,21 @@ const ModeExample = () => (
   </span>
 );
 
-const StartDot = () => (
+const KitePin = ({ color }: { color: string }) => (
   <span className="step-icon-slot">
-    <span className="legend-marker legend-marker-start"></span>
+    <span className="hiw-kite" style={{ color }}>
+      <span className="hiw-kite-diamond">◆</span>
+      <span className="hiw-kite-stem" style={{ background: color }}></span>
+    </span>
   </span>
 );
 
-const EndDot = () => (
-  <span className="step-icon-slot">
-    <span className="legend-marker legend-marker-end"></span>
-  </span>
-);
+const StartDot = () => <KitePin color={COLOR_START} />;
+const EndDot = () => <KitePin color={COLOR_END} />;
 
 const DesireLine = () => (
   <span className="step-icon-slot">
-    <span className="legend-line legend-line-desire"></span>
+    <span className="hiw-desire-line"></span>
   </span>
 );
 

@@ -170,6 +170,22 @@ except redis.ConnectionError as e:
 router = PythonRouter(data_dir="osm_data", redis_client=redis_client)
 logger.info("[STARTUP] Python router initialized")
 
+# Cache graph data for serving as GeoJSON
+_graph_cache = None
+
+def _load_graph_cache():
+    global _graph_cache
+    logger.info("[STARTUP] Pre-loading graph geometry...")
+    try:
+        # get_graph_for_bbox(south, west, north, east) — full Manhattan
+        data = router.get_graph_for_bbox(40.700, -74.020, 40.880, -73.907)
+        _graph_cache = data
+        logger.info(f"[STARTUP] Cached graph: {len(data.get('nodes', []))} nodes, {len(data.get('edges', []))} edges")
+    except Exception as e:
+        logger.error(f"[STARTUP] Failed to load graph cache: {e}")
+
+_load_graph_cache()
+
 # Preload hex cache into memory
 preload_hex_cache()
 
@@ -340,6 +356,72 @@ def _migrate_raw_counts_on_startup():
         logger.error(f"[MIGRATE] Raw counts migration failed: {e}")
 
 _migrate_raw_counts_on_startup()
+
+
+def _migrate_segment_vote_types_on_startup():
+    """Populate segment_vote_types Redis hash from Postgres for existing votes.
+
+    Uses segment_votes Redis keys as canonical (5dp), matching them to Postgres
+    vote_type data (stored at 6dp) by rounding Postgres keys to 5dp.
+    """
+    from database import DATABASE_URL, get_cursor
+    from desire_path_voting import SEGMENT_VOTE_TYPES_KEY, segment_key
+
+    if not DATABASE_URL:
+        return
+
+    try:
+        # Skip if already populated
+        if redis_client.hlen(SEGMENT_VOTE_TYPES_KEY) > 0:
+            return
+
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT segment_key, vote_type, COUNT(*) as cnt
+                FROM votes
+                WHERE vote_type IS NOT NULL AND vote_type != ''
+                GROUP BY segment_key, vote_type
+            """)
+            rows = cursor.fetchall()
+
+        if not rows:
+            return
+
+        # Get all segment_votes keys from Redis (these are the canonical 5dp keys)
+        redis_seg_keys = set(redis_client.hkeys(SEGMENT_VOTES_KEY))
+
+        # Build per-segment vote type maps, normalizing Postgres 6dp keys to
+        # match Redis 5dp keys via segment_key()
+        seg_vt_maps: dict[str, dict[str, int]] = {}
+        for seg_key_raw, vote_type, cnt in rows:
+            parts = seg_key_raw.split("|")
+            if len(parts) < 3 or not parts[1]:
+                continue
+            try:
+                c1 = [float(x) for x in parts[0].split(",")]
+                c2 = [float(x) for x in parts[1].split(",")]
+            except (ValueError, IndexError):
+                continue
+            mode = parts[2]
+            norm_key = segment_key(c1, c2, mode)
+            # Only keep if this key exists in segment_votes (ensures matching)
+            if norm_key not in redis_seg_keys:
+                continue
+            if norm_key not in seg_vt_maps:
+                seg_vt_maps[norm_key] = {}
+            seg_vt_maps[norm_key][vote_type] = seg_vt_maps[norm_key].get(vote_type, 0) + cnt
+
+        # Write to Redis
+        pipe = redis_client.pipeline()
+        for key, vt_map in seg_vt_maps.items():
+            pipe.hset(SEGMENT_VOTE_TYPES_KEY, key, json.dumps(vt_map))
+        pipe.execute()
+
+        logger.info(f"[MIGRATE] Populated segment_vote_types for {len(seg_vt_maps)} segments (from {len(rows)} DB rows, {len(redis_seg_keys)} Redis keys)")
+    except Exception as e:
+        logger.error(f"[MIGRATE] segment_vote_types migration failed: {e}")
+
+_migrate_segment_vote_types_on_startup()
 
 # Start pub/sub listener for cross-instance cache synchronization
 start_pubsub_listener()
@@ -746,7 +828,6 @@ def migrate_suggestions():
 def ws(ws):
     """WebSocket handler using Redis pub/sub for efficient push updates."""
     rev = 1
-    current_mode = "bike"  # Default mode filter
     current_zoom = 14  # Default zoom level
     current_resolution = ZOOM_TO_RESOLUTION.get(current_zoom, 13)
     last_push_time = 0
@@ -758,7 +839,7 @@ def ws(ws):
     pubsub.subscribe(REDIS_CHANNEL)
 
     # Send initial state immediately on connect
-    state_msg = {"type": "map_state", "state": make_state(rev, current_mode, current_resolution)}
+    state_msg = {"type": "map_state", "state": make_state(rev, None, current_resolution)}
     ws.send(json.dumps(state_msg))
     rev += 1
     last_push_time = time.time()
@@ -770,28 +851,14 @@ def ws(ws):
                 msg = ws.receive(timeout=0)
                 if msg:
                     data = json.loads(msg)
-                    if data.get("type") == "cast_votes":
-                        # Votes are now cast server-side in /api/routes endpoint
-                        # This message type is kept for backwards compatibility
-                        pass
-                    elif data.get("type") == "set_mode":
-                        new_mode = data.get("mode")
-                        if new_mode in ("bike", "walk", "drive"):
-                            current_mode = new_mode
-                            logger.info(f"Mode filter set to: {current_mode}")
-                            # Immediately send updated state with new mode filter
-                            state_msg = {"type": "map_state", "state": make_state(rev, current_mode, current_resolution)}
-                            ws.send(json.dumps(state_msg))
-                            rev += 1
-                            last_push_time = time.time()
-                    elif data.get("type") == "set_zoom":
+                    if data.get("type") == "set_zoom":
                         new_zoom = data.get("zoom", 14)
                         if isinstance(new_zoom, (int, float)) and 0 <= new_zoom <= 22:
                             current_zoom = int(new_zoom)
                             new_resolution = ZOOM_TO_RESOLUTION.get(current_zoom, 13)
                             if new_resolution != current_resolution:
                                 current_resolution = new_resolution
-                                state_msg = {"type": "map_state", "state": make_state(rev, current_mode, current_resolution)}
+                                state_msg = {"type": "map_state", "state": make_state(rev, None, current_resolution)}
                                 ws.send(json.dumps(state_msg))
                                 rev += 1
                                 last_push_time = time.time()
@@ -818,7 +885,7 @@ def ws(ws):
                 should_push = True
 
             if should_push:
-                state_msg = {"type": "map_state", "state": make_state(rev, current_mode, current_resolution)}
+                state_msg = {"type": "map_state", "state": make_state(rev, None, current_resolution)}
                 ws.send(json.dumps(state_msg))
                 rev += 1
                 last_push_time = time.time()
@@ -853,72 +920,44 @@ def calculate_route():
 
     start = data.get("start")  # [lat, lon]
     end = data.get("end")      # [lat, lon]
-    mode = data.get("mode", "bike")
     waypoints = data.get("waypoints", [])  # List of [lat, lon] pairs
 
-    logger.info(f"[ROUTE] Request: start={start}, end={end}, mode={mode}, waypoints={len(waypoints)}")
+    logger.info(f"[ROUTE] Request: start={start}, end={end}, waypoints={len(waypoints)}")
 
     if not start or not end:
         logger.error("[ROUTE] Error: Missing coordinates")
         return jsonify({"error": "Missing start or end coordinates"}), 400
 
     try:
-        # Compute main route WITHOUT waypoints (start → end only)
-        # Waypoints only affect the desire path, not the main route
-        route_desired = router.calculate_route(
-            start=(start[0], start[1]),
-            end=(end[0], end[1]),
-            mode="walk",  # Force walk mode for all routes
-            waypoints=[]
-        )
-        if "error" in route_desired:
-            logger.error(f"[ROUTE] Failed to get {mode} route: {route_desired['error']}")
-            return jsonify(route_desired), 404
-
-        # Compute desire path WITH waypoints (walking route through user's waypoints)
-        if mode == "walk":
-            # For walk mode, the desire path includes waypoints
-            if waypoints:
-                waypoints_tuples = [(wp[0], wp[1]) for wp in waypoints]
-                route_walk = router.calculate_route(
-                    start=(start[0], start[1]),
-                    end=(end[0], end[1]),
-                    mode="walk",
-                    waypoints=waypoints_tuples
-                )
-            else:
-                route_walk = route_desired
-        else:
-            # For bike/drive, compute walk route with waypoints
+        # Compute route with optional waypoints
+        if waypoints:
             waypoints_tuples = [(wp[0], wp[1]) for wp in waypoints]
-            route_walk = router.calculate_route(
+            route = router.calculate_route(
                 start=(start[0], start[1]),
                 end=(end[0], end[1]),
                 mode="walk",
                 waypoints=waypoints_tuples
             )
-            if "error" in route_walk:
-                logger.warning(f"[ROUTE] Failed to get walk route: {route_walk['error']}, returning desired route only")
-                # If walk route fails, just return desired route without voting
-                return jsonify({
-                    "route": route_desired,
-                    "desire_path": None,
-                    "desire_tiles": []
-                })
+        else:
+            route = router.calculate_route(
+                start=(start[0], start[1]),
+                end=(end[0], end[1]),
+                mode="walk",
+                waypoints=[]
+            )
 
-        # Compute desire path segments (but do NOT cast votes - user must click "Cast Vote")
-        vote_segments, vote_mode, desire_tiles = compute_desire_path_votes(
-            route_desired, route_walk, mode  # Use user's selected mode
-        )
+        if "error" in route:
+            logger.error(f"[ROUTE] Routing failed: {route['error']}")
+            return jsonify(route), 404
 
-        # Return both routes and the segments for voting
-        # Client will POST to /api/vote when user clicks "Cast Vote"
+        # Extract segments for voting (client casts votes on user action)
+        vote_segments = extract_all_segments(route.get("geometry"))
+
         return jsonify({
-            "route": route_desired,
-            "desire_path": route_walk if mode != "walk" else None,
-            "desire_tiles": desire_tiles,
+            "route": route,
+            "desire_path": None,
             "desire_path_segments": vote_segments,
-            "vote_mode": vote_mode
+            "vote_mode": "walk"
         })
 
     except Exception as e:
@@ -947,7 +986,7 @@ def cast_vote():
 
     segments = data.get("segments", [])
     point = data.get("point")
-    mode = data.get("mode", "bike")
+    mode = data.get("mode", "walk")
     vote_type = data.get("vote_type", "")
 
     # Validate: need either segments or point
@@ -999,7 +1038,7 @@ def cast_vote():
         else:
             # Route vote (existing logic)
             # Cast segment votes (updates ip_vote_counts)
-            vote_count = cast_desire_path_votes(redis_client, segments, mode, ip_hash)
+            vote_count = cast_desire_path_votes(redis_client, segments, mode, ip_hash, vote_type=vote_type)
             logger.info(f"[VOTE] Cast {vote_count} segment votes for '{vote_type}' as '{mode}' from IP {ip_hash[:8]}...")
 
             # Update hex cache incrementally with IP-weighted votes (defer expensive rebuild)
@@ -1113,6 +1152,394 @@ def admin_router_stats():
                 "router": "python",
                 "stats": "not available"
             })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/nearest-node", methods=["GET"])
+def nearest_node():
+    """Return the lat/lng of the nearest walk graph node to the given point."""
+    try:
+        lat = float(request.args["lat"])
+        lon = float(request.args["lng"])
+    except (KeyError, ValueError):
+        return jsonify({"error": "lat and lng are required"}), 400
+
+    try:
+        node_lat, node_lon = router.nearest_node_coords(lat, lon)
+        return jsonify({"lat": node_lat, "lng": node_lon})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/reverse-geocode", methods=["GET"])
+def reverse_geocode():
+    """Reverse geocode lat/lon to address using the local OSM graph."""
+    try:
+        lat = float(request.args["lat"])
+        lon = float(request.args["lng"])
+    except (KeyError, ValueError):
+        return jsonify({"error": "lat and lng are required"}), 400
+
+    try:
+        address = router.reverse_geocode(lat, lon)
+        return jsonify({
+            "address": address or None,
+            "lat": lat,
+            "lng": lon
+        })
+    except Exception as e:
+        logger.error(f"Reverse geocoding error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/graph", methods=["GET"])
+def graph_tiles():
+    """Return OSM walk graph nodes and edges within a bounding box, with vote counts."""
+    try:
+        bbox = request.args["bbox"]  # minLon,minLat,maxLon,maxLat
+        west, south, east, north = [float(v) for v in bbox.split(",")]
+    except (KeyError, ValueError):
+        return jsonify({"error": "bbox=minLon,minLat,maxLon,maxLat required"}), 400
+
+    try:
+        data = router.get_graph_for_bbox(south, west, north, east)
+
+        # Fetch vote counts from Redis and aggregate to nodes/edges
+        segment_votes = redis_client.hgetall(SEGMENT_VOTES_KEY)
+
+        # Build lookup dict: coord_pair -> vote_count (much faster than iterating all for each)
+        # coord_pair is rounded to 5dp for matching
+        vote_lookup = {}
+        for seg_key, vote_count in segment_votes.items():
+            parts = seg_key.split("|")
+            if len(parts) >= 3:
+                c1 = parts[0]  # "lon,lat"
+                c2 = parts[1]  # "lon,lat"
+                vote_count = int(vote_count)
+                # Store both directions for efficient lookup
+                vote_lookup[(c1, c2)] = vote_lookup.get((c1, c2), 0) + vote_count
+                vote_lookup[(c2, c1)] = vote_lookup.get((c2, c1), 0) + vote_count
+
+        # Compute vote counts for each node (max of adjacent edge votes)
+        node_votes = [0] * len(data["nodes"])
+        for from_idx, to_idx, *rest in data["edges"]:
+            from_lat, from_lon = data["nodes"][from_idx]
+            to_lat, to_lon = data["nodes"][to_idx]
+            c1_str = f"{round(from_lon, 5)},{round(from_lat, 5)}"
+            c2_str = f"{round(to_lon, 5)},{round(to_lat, 5)}"
+            votes = vote_lookup.get((c1_str, c2_str), 0)
+            if votes > node_votes[from_idx]:
+                node_votes[from_idx] = votes
+            if votes > node_votes[to_idx]:
+                node_votes[to_idx] = votes
+
+        # Compute vote counts for each edge (O(1) lookup)
+        edge_votes = []
+        for from_idx, to_idx, *rest in data["edges"]:
+            from_lat, from_lon = data["nodes"][from_idx]
+            to_lat, to_lon = data["nodes"][to_idx]
+            c1_str = f"{round(from_lon, 5)},{round(from_lat, 5)}"
+            c2_str = f"{round(to_lon, 5)},{round(to_lat, 5)}"
+            edge_votes.append(vote_lookup.get((c1_str, c2_str), 0))
+
+        data["node_votes"] = node_votes
+        data["edge_votes"] = edge_votes
+
+        # Fetch vote types from Redis (segment_vote_types hash)
+        edge_vote_types = [[] for _ in data["edges"]]
+        try:
+            from desire_path_voting import SEGMENT_VOTE_TYPES_KEY
+            raw_vt = redis_client.hgetall(SEGMENT_VOTE_TYPES_KEY)
+
+            # Build lookup: (c1_str, c2_str) -> {vote_type: count}
+            # Use raw strings from Redis keys (already rounded to 5dp by segment_key())
+            vt_lookup: dict[tuple[str, str], dict[str, int]] = {}
+            for seg_key, vt_json in raw_vt.items():
+                parts = seg_key.split("|")
+                if len(parts) < 3 or not parts[1]:
+                    continue
+                c1 = parts[0]  # "lon,lat" already at 5dp
+                c2 = parts[1]
+                vt_map = json.loads(vt_json)
+                # Both directions
+                for pair in [(c1, c2), (c2, c1)]:
+                    if pair not in vt_lookup:
+                        vt_lookup[pair] = {}
+                    for vt, cnt in vt_map.items():
+                        vt_lookup[pair][vt] = vt_lookup[pair].get(vt, 0) + cnt
+
+            # Build legend + per-edge indices
+            legend = []
+            legend_idx: dict[str, int] = {}
+            for i, (from_idx, to_idx, *rest) in enumerate(data["edges"]):
+                from_lat, from_lon = data["nodes"][from_idx]
+                to_lat, to_lon = data["nodes"][to_idx]
+                c1_str = f"{round(from_lon, 5)},{round(from_lat, 5)}"
+                c2_str = f"{round(to_lon, 5)},{round(to_lat, 5)}"
+                vt_map = vt_lookup.get((c1_str, c2_str))
+                if vt_map:
+                    # Sort by count descending
+                    sorted_vts = sorted(vt_map.items(), key=lambda x: -x[1])
+                    indices = []
+                    for vt, cnt in sorted_vts:
+                        if vt not in legend_idx:
+                            legend_idx[vt] = len(legend)
+                            legend.append(vt)
+                        indices.append([legend_idx[vt], cnt])
+                    edge_vote_types[i] = indices
+
+            data["vote_type_legend"] = legend
+            matched_edges = sum(1 for vt in edge_vote_types if vt)
+            logger.info(f"[GRAPH] Vote types: {len(raw_vt)} segments in Redis, {len(vt_lookup)//2} in lookup, {matched_edges} edges matched, {len(legend)} unique types")
+        except Exception as e:
+            logger.warning(f"[GRAPH] Failed to fetch vote types: {e}")
+
+        data["edge_vote_types"] = edge_vote_types
+
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/graph-topology", methods=["GET"])
+def graph_topology():
+    """Serve full graph topology (nodes + edges, no votes). Highly cacheable."""
+    global _graph_cache
+    if _graph_cache is None:
+        return jsonify({"error": "Graph not loaded"}), 500
+
+    resp = jsonify({
+        "nodes": _graph_cache["nodes"],
+        "edges": _graph_cache["edges"],
+    })
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
+
+@app.route("/api/graph-votes", methods=["GET"])
+def graph_votes():
+    """Return vote data for the full cached graph topology.
+
+    No bbox needed — indices match /api/graph-topology.
+    Returns edge_votes, node_votes, vote_type_legend, edge_vote_types.
+    """
+    global _graph_cache
+    if _graph_cache is None:
+        return jsonify({"error": "Graph not loaded"}), 500
+
+    nodes = _graph_cache["nodes"]
+    edges = _graph_cache["edges"]
+
+    try:
+        segment_votes = redis_client.hgetall(SEGMENT_VOTES_KEY)
+
+        # Build lookup dict: coord_pair -> vote_count
+        vote_lookup = {}
+        for seg_key, vote_count in segment_votes.items():
+            parts = seg_key.split("|")
+            if len(parts) >= 3:
+                c1, c2 = parts[0], parts[1]
+                vote_count = int(vote_count)
+                vote_lookup[(c1, c2)] = vote_lookup.get((c1, c2), 0) + vote_count
+                vote_lookup[(c2, c1)] = vote_lookup.get((c2, c1), 0) + vote_count
+
+        # Compute edge votes
+        edge_votes = []
+        for from_idx, to_idx, *rest in edges:
+            from_lat, from_lon = nodes[from_idx]
+            to_lat, to_lon = nodes[to_idx]
+            c1_str = f"{round(from_lon, 5)},{round(from_lat, 5)}"
+            c2_str = f"{round(to_lon, 5)},{round(to_lat, 5)}"
+            edge_votes.append(vote_lookup.get((c1_str, c2_str), 0))
+
+        # Compute node votes (max of adjacent edge votes)
+        node_votes = [0] * len(nodes)
+        for i, (from_idx, to_idx, *rest) in enumerate(edges):
+            votes = edge_votes[i]
+            if votes > node_votes[from_idx]:
+                node_votes[from_idx] = votes
+            if votes > node_votes[to_idx]:
+                node_votes[to_idx] = votes
+
+        # Vote types — look up via segment_votes keys (same keys in both hashes)
+        edge_vote_types = [[] for _ in edges]
+        legend: list[str] = []
+        try:
+            from desire_path_voting import SEGMENT_VOTE_TYPES_KEY
+            raw_vt = redis_client.hgetall(SEGMENT_VOTE_TYPES_KEY)
+
+            # Build coord-pair lookup from segment_vote_types using raw keys
+            vt_lookup: dict[tuple[str, str], dict[str, int]] = {}
+            for seg_key, vt_json in raw_vt.items():
+                parts = seg_key.split("|")
+                if len(parts) < 3 or not parts[1]:
+                    continue
+                c1, c2 = parts[0], parts[1]
+                vt_map = json.loads(vt_json)
+                for pair in [(c1, c2), (c2, c1)]:
+                    if pair not in vt_lookup:
+                        vt_lookup[pair] = {}
+                    for vt, cnt in vt_map.items():
+                        vt_lookup[pair][vt] = vt_lookup[pair].get(vt, 0) + cnt
+
+            legend_idx: dict[str, int] = {}
+            for i, (from_idx, to_idx, *rest) in enumerate(edges):
+                from_lat, from_lon = nodes[from_idx]
+                to_lat, to_lon = nodes[to_idx]
+                c1_str = f"{round(from_lon, 5)},{round(from_lat, 5)}"
+                c2_str = f"{round(to_lon, 5)},{round(to_lat, 5)}"
+                vt_map = vt_lookup.get((c1_str, c2_str))
+                if vt_map:
+                    sorted_vts = sorted(vt_map.items(), key=lambda x: -x[1])
+                    indices = []
+                    for vt, cnt in sorted_vts:
+                        if vt not in legend_idx:
+                            legend_idx[vt] = len(legend)
+                            legend.append(vt)
+                        indices.append([legend_idx[vt], cnt])
+                    edge_vote_types[i] = indices
+        except Exception as e:
+            logger.warning(f"[GRAPH-VOTES] Failed to fetch vote types: {e}")
+
+        resp = jsonify({
+            "edge_votes": edge_votes,
+            "node_votes": node_votes,
+            "vote_type_legend": legend,
+            "edge_vote_types": edge_vote_types,
+        })
+        resp.headers["Cache-Control"] = "public, max-age=5"
+        return resp
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/graph.geojson", methods=["GET"])
+def graph_geojson():
+    """Serve graph geometry as GeoJSON (cached from startup)."""
+    try:
+        global _graph_cache
+        if _graph_cache is None:
+            return jsonify({"error": "Graph cache not loaded"}), 500
+
+        nodes = _graph_cache.get("nodes", [])
+        edges = _graph_cache.get("edges", [])
+
+        features = []
+
+        # Add edge features
+        for edge_idx, edge in enumerate(edges):
+            from_idx, to_idx = edge[0], edge[1]
+            name = edge[2] if len(edge) > 2 else ""
+            highway = edge[3] if len(edge) > 3 else ""
+            length = edge[4] if len(edge) > 4 else 0
+
+            from_lat, from_lon = nodes[from_idx]
+            to_lat, to_lon = nodes[to_idx]
+
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[from_lon, from_lat], [to_lon, to_lat]]
+                },
+                "properties": {
+                    "type": "edge",
+                    "from_idx": from_idx,
+                    "to_idx": to_idx,
+                    "name": name,
+                    "highway": highway,
+                    "length": length,
+                }
+            })
+
+        # Add node features
+        for node_idx, (lat, lon) in enumerate(nodes):
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [lon, lat]
+                },
+                "properties": {
+                    "type": "node",
+                    "node_id": node_idx,
+                    "lat": round(lat, 6),
+                    "lon": round(lon, 6),
+                }
+            })
+
+        geojson = {
+            "type": "FeatureCollection",
+            "features": features
+        }
+
+        return jsonify(geojson)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/votes", methods=["GET"])
+def get_votes():
+    """Get vote counts for nodes and edges in a bounding box.
+
+    Query params:
+      bbox: minLon,minLat,maxLon,maxLat (comma-separated floats)
+
+    Returns:
+      {
+        "node_votes": { "node_id": vote_count, ... },
+        "edge_votes": { "edge_id": vote_count, ... }
+      }
+    """
+    try:
+        bbox = request.args.get("bbox", "")
+        if not bbox:
+            return jsonify({"error": "bbox parameter required"}), 400
+
+        west, south, east, north = [float(v) for v in bbox.split(",")]
+
+        # Get graph data for bbox
+        data = router.get_graph_for_bbox(south, west, north, east)
+
+        # Fetch vote counts from Redis
+        segment_votes = redis_client.hgetall(SEGMENT_VOTES_KEY)
+
+        # Build lookup dict for O(1) lookups
+        vote_lookup = {}
+        for seg_key, vote_count in segment_votes.items():
+            parts = seg_key.split("|")
+            if len(parts) >= 3:
+                c1 = parts[0]
+                c2 = parts[1]
+                vote_count = int(vote_count)
+                vote_lookup[(c1, c2)] = vote_lookup.get((c1, c2), 0) + vote_count
+                vote_lookup[(c2, c1)] = vote_lookup.get((c2, c1), 0) + vote_count
+
+        # Build node votes dict (using node indices as keys)
+        node_votes = {}
+        for from_idx, to_idx, *rest in data["edges"]:
+            from_lat, from_lon = data["nodes"][from_idx]
+            to_lat, to_lon = data["nodes"][to_idx]
+            c1_str = f"{round(from_lon, 5)},{round(from_lat, 5)}"
+            c2_str = f"{round(to_lon, 5)},{round(to_lat, 5)}"
+            votes = vote_lookup.get((c1_str, c2_str), 0)
+            node_votes[from_idx] = node_votes.get(from_idx, 0) + votes
+            node_votes[to_idx] = node_votes.get(to_idx, 0) + votes
+
+        # Build edge votes dict (using edge indices as keys)
+        edge_votes = {}
+        for edge_idx, (from_idx, to_idx, *rest) in enumerate(data["edges"]):
+            from_lat, from_lon = data["nodes"][from_idx]
+            to_lat, to_lon = data["nodes"][to_idx]
+            c1_str = f"{round(from_lon, 5)},{round(from_lat, 5)}"
+            c2_str = f"{round(to_lon, 5)},{round(to_lat, 5)}"
+            edge_votes[edge_idx] = vote_lookup.get((c1_str, c2_str), 0)
+
+        return jsonify({
+            "node_votes": node_votes,
+            "edge_votes": edge_votes
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

@@ -1,4 +1,7 @@
 import { useGhostPin } from "../../context";
+import { ROUTE_COLORS } from "../../colors";
+
+const GOLD = ROUTE_COLORS.desire.middle;
 
 export function GhostPin() {
   const { ghostState } = useGhostPin();
@@ -14,10 +17,9 @@ export function GhostPin() {
       className="ghost-pin-overlay"
       style={{ transform: `translate(${x}px, ${y}px)` }}
     >
-      <div className="pin-container ghost-pin">
-        <div className="pin-head" style={{ background: "#D4A017" }}></div>
-        <div className="pin-needle"></div>
-        <div className="pin-shadow"></div>
+      <div className="ascii-marker ghost-pin" style={{ color: GOLD }}>
+        <span className="ascii-kite">◆</span>
+        <span className="ascii-stem"></span>
       </div>
     </div>
   );

@@ -1,21 +1,13 @@
-import { useMemo } from "react";
-import { GeoJSON, Marker, useMap } from "react-leaflet";
+import { useCallback, useEffect, useMemo } from "react";
 import L from "leaflet";
+import { GeoJSON, Marker, useMap } from "react-leaflet";
 import { ROUTE_COLORS } from "../../colors";
+import { kiteGhostIcon } from "../../utils/kiteIcon";
 import { usePathDrag } from "../../hooks";
-import type { TransportMode, RouteGeometry, LatLng, SplitDesirePath } from "../../types";
+import type { RouteGeometry, LatLng, SplitDesirePath } from "../../types";
 import type { PathOptions } from "leaflet";
 
-const hoverGhostIcon = L.divIcon({
-  className: "hover-ghost-marker",
-  html: `<div class="pin-container hover-ghost-pin">
-    <div class="pin-head" style="background: #D4A017;"></div>
-    <div class="pin-needle"></div>
-    <div class="pin-shadow"></div>
-  </div>`,
-  iconSize: [20, 28],
-  iconAnchor: [17, 44],
-});
+const hoverGhostIcon = kiteGhostIcon(ROUTE_COLORS.desire.middle);
 
 interface LayerStyle extends PathOptions {
   pane?: string;
@@ -33,177 +25,111 @@ const interactiveStyle: LayerStyle = {
   lineJoin: "round",
 };
 
-function getRouteStyles(mode: TransportMode): LayerStyle[] {
-  if (mode === "walk") {
-    const colors = ROUTE_COLORS.walk;
-    return [
-      {
-        color: colors.glow,
-        weight: 12,
-        opacity: 0.4,
-        dashArray: "0, 12",
-        lineCap: "round",
-        lineJoin: "round",
-      },
-      {
-        color: colors.edge,
-        weight: 8,
-        opacity: 0.9,
-        dashArray: "0, 12",
-        lineCap: "round",
-        lineJoin: "round",
-      },
-      {
-        color: colors.core,
-        weight: 5,
-        opacity: 1,
-        dashArray: "0, 12",
-        lineCap: "round",
-        lineJoin: "round",
-      },
-    ];
-  }
-
-  if (mode === "bike") {
-    const colors = ROUTE_COLORS.bike;
-    return [
-      {
-        color: colors.glow,
-        weight: 8,
-        opacity: 0.3,
-        lineCap: "round",
-        lineJoin: "round",
-      },
-      {
-        color: colors.middle,
-        weight: 6,
-        opacity: 0.5,
-        lineCap: "round",
-        lineJoin: "round",
-      },
-      {
-        color: colors.core,
-        weight: 4,
-        opacity: 1,
-        lineCap: "round",
-        lineJoin: "round",
-      },
-    ];
-  }
-
-  // Drive mode
-  const colors = ROUTE_COLORS.drive;
+function getRouteStyles(): LayerStyle[] {
+  const colors = ROUTE_COLORS.walk;
   return [
     {
       color: colors.glow,
       weight: 12,
       opacity: 0.4,
-      lineCap: "round",
+      dashArray: "5, 7",
+      lineCap: "butt",
       lineJoin: "round",
     },
     {
-      color: colors.asphalt,
-      weight: 7,
-      opacity: 0.95,
-      lineCap: "round",
-      lineJoin: "round",
-    },
-    {
-      color: colors.centerLine,
-      weight: 1.5,
+      color: colors.edge,
+      weight: 8,
       opacity: 0.9,
-      dashArray: "6, 12",
+      dashArray: "5, 7",
+      lineCap: "butt",
+      lineJoin: "round",
+    },
+    {
+      color: colors.core,
+      weight: 5,
+      opacity: 1,
+      dashArray: "5, 7",
       lineCap: "butt",
       lineJoin: "round",
     },
   ];
 }
 
-function getDesirePathStyles(mode?: TransportMode): LayerStyle[] {
-  if (mode === "walk") {
-    const colors = ROUTE_COLORS.walk;
-    return [
-      {
-        color: colors.glow,
-        weight: 12,
-        opacity: 0.4,
-        dashArray: "0, 12",
-        lineCap: "round",
-        lineJoin: "round",
-      },
-      {
-        color: colors.edge,
-        weight: 8,
-        opacity: 0.9,
-        dashArray: "0, 12",
-        lineCap: "round",
-        lineJoin: "round",
-      },
-      {
-        color: colors.core,
-        weight: 5,
-        opacity: 1,
-        dashArray: "0, 12",
-        lineCap: "round",
-        lineJoin: "round",
-      },
-    ];
-  }
-
-  if (mode === "bike") {
-    const colors = ROUTE_COLORS.bikeDesire;
-    return [
-      {
-        color: colors.glow,
-        weight: 8,
-        opacity: 0.3,
-        lineCap: "round",
-        lineJoin: "round",
-      },
-      {
-        color: colors.edge,
-        weight: 6,
-        opacity: 0.5,
-        lineCap: "round",
-        lineJoin: "round",
-      },
-      {
-        color: colors.core,
-        weight: 4,
-        opacity: 1,
-        lineCap: "round",
-        lineJoin: "round",
-      },
-    ];
-  }
-
-  // Drive mode
-  const colors = ROUTE_COLORS.drive;
+function getDesirePathStyles(): LayerStyle[] {
   return [
     {
-      color: colors.glow,
-      weight: 12,
-      opacity: 0.4,
-      lineCap: "round",
-      lineJoin: "round",
-    },
-    {
-      color: colors.asphalt,
+      color: "#ffffff",
       weight: 7,
-      opacity: 0.95,
+      opacity: 1,
       lineCap: "round",
-      lineJoin: "round",
-    },
-    {
-      color: colors.centerLine,
-      weight: 1.5,
-      opacity: 0.9,
-      dashArray: "6, 12",
-      lineCap: "butt",
       lineJoin: "round",
     },
   ];
 }
+
+// Inject SVG contour filter into the path's own SVG and apply it directly.
+// Uses onEachFeature + layer 'add' event to get the actual DOM element.
+const CONTOUR_FILTER_ID = "desire-contour";
+
+function ensureFilterInSvg(svg: SVGSVGElement) {
+  if (svg.querySelector(`#${CONTOUR_FILTER_ID}`)) return;
+
+  const ns = "http://www.w3.org/2000/svg";
+  let defs = svg.querySelector("defs");
+  if (!defs) {
+    defs = document.createElementNS(ns, "defs");
+    svg.insertBefore(defs, svg.firstChild);
+  }
+
+  const filter = document.createElementNS(ns, "filter");
+  filter.id = CONTOUR_FILTER_ID;
+  filter.setAttribute("x", "-20%");
+  filter.setAttribute("y", "-20%");
+  filter.setAttribute("width", "140%");
+  filter.setAttribute("height", "140%");
+
+  const morph = document.createElementNS(ns, "feMorphology");
+  morph.setAttribute("operator", "erode");
+  morph.setAttribute("radius", "0.75");
+  morph.setAttribute("in", "SourceGraphic");
+  morph.setAttribute("result", "interior");
+
+  const comp = document.createElementNS(ns, "feComposite");
+  comp.setAttribute("in", "SourceGraphic");
+  comp.setAttribute("in2", "interior");
+  comp.setAttribute("operator", "out");
+  comp.setAttribute("result", "border");
+
+  const matrix = document.createElementNS(ns, "feColorMatrix");
+  matrix.setAttribute("in", "interior");
+  matrix.setAttribute("type", "matrix");
+  matrix.setAttribute("values", "1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.12 0");
+  matrix.setAttribute("result", "faintInterior");
+
+  const merge = document.createElementNS(ns, "feMerge");
+  const mn1 = document.createElementNS(ns, "feMergeNode");
+  mn1.setAttribute("in", "faintInterior");
+  const mn2 = document.createElementNS(ns, "feMergeNode");
+  mn2.setAttribute("in", "border");
+  merge.appendChild(mn1);
+  merge.appendChild(mn2);
+
+  filter.append(morph, comp, matrix, merge);
+  defs.appendChild(filter);
+}
+
+function applyContourToLayer(_feature: unknown, layer: L.Layer) {
+  const path = layer as L.Path;
+  path.on("add", () => {
+    const el = path.getElement();
+    if (!el) return;
+    const svg = el.closest("svg");
+    if (!svg) return;
+    ensureFilterInSvg(svg as SVGSVGElement);
+    el.setAttribute("filter", `url(#${CONTOUR_FILTER_ID})`);
+  });
+}
+
 
 function makeGeometryKey(coordinates: [number, number][], prefix: string = ""): string {
   if (coordinates.length === 0) return `${prefix}empty`;
@@ -218,11 +144,10 @@ function makeGeometryKey(coordinates: [number, number][], prefix: string = ""): 
 
 interface RouteLayerProps {
   geometry: RouteGeometry;
-  mode: TransportMode;
 }
 
-export function RouteLayer({ geometry, mode }: RouteLayerProps) {
-  const styles = useMemo(() => getRouteStyles(mode), [mode]);
+export function RouteLayer({ geometry }: RouteLayerProps) {
+  const styles = useMemo(() => getRouteStyles(), []);
   const geometryKey = useMemo(() => makeGeometryKey(geometry.coordinates), [geometry]);
 
   const geojsonData = useMemo(
@@ -238,7 +163,7 @@ export function RouteLayer({ geometry, mode }: RouteLayerProps) {
     <>
       {styles.map((style, index) => (
         <GeoJSON
-          key={`route-${mode}-${index}-${geometryKey}`}
+          key={`route-${index}-${geometryKey}`}
           data={geojsonData}
           style={() => ({ ...style, pane: "routePane" })}
         />
@@ -255,15 +180,32 @@ interface DesirePathLayerProps {
   geometry: RouteGeometry;
   segmentIndex?: number;
   onSegmentDrag?: (segmentIndex: number, position: LatLng) => void;
-  mode?: TransportMode;
+  onPathHoverChange?: (isHovering: boolean) => void;
 }
 
-export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mode }: DesirePathLayerProps) {
+export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, onPathHoverChange }: DesirePathLayerProps) {
   const map = useMap();
   const { isDraggingRef, hoverLatLng, handleStart, handleHoverMove, handleHoverOut } =
     usePathDrag({ map, geometry, segmentIndex, onSegmentDrag });
 
-  const visualStyles = useMemo(() => getDesirePathStyles(mode), [mode]);
+  // Force SVG renderer for visual layer so SVG filters work (map uses Canvas globally)
+  const svgRenderer = useMemo(() => L.svg({ pane: "desirePathPane" }), []);
+  useEffect(() => () => { svgRenderer.remove(); }, [svgRenderer]);
+
+  // Reset hover state on unmount — prevents isHoveringPath getting stuck true
+  // when the component unmounts while the cursor is over the interactive layer
+  useEffect(() => () => { onPathHoverChange?.(false); }, [onPathHoverChange]);
+
+  // Wrap handleStart to reset hover state when drag begins
+  const handleStartWithHoverReset = useCallback(
+    (e: L.LeafletMouseEvent) => {
+      onPathHoverChange?.(false);
+      handleStart(e);
+    },
+    [handleStart, onPathHoverChange]
+  );
+
+  const visualStyles = useMemo(() => getDesirePathStyles(), []);
   const geometryKey = useMemo(() => makeGeometryKey(geometry.coordinates), [geometry]);
 
   const geojsonData = useMemo(
@@ -277,12 +219,13 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
 
   return (
     <>
-      {/* Visual layers (no interaction) */}
+      {/* Visual layer with contour filter (SVG renderer for filter support) */}
       {visualStyles.map((style, index) => (
         <GeoJSON
           key={`desire-visual-${index}-${geometryKey}`}
           data={geojsonData}
-          style={() => ({ ...style, pane: "desirePathPane" })}
+          style={() => ({ ...style, pane: "desirePathPane", renderer: svgRenderer })}
+          onEachFeature={applyContourToLayer}
           interactive={false}
         />
       ))}
@@ -297,10 +240,10 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
             className: "desire-path-interactive",
           })}
           eventHandlers={{
-            mousedown: handleStart,
-            mouseover: handleHoverMove,
-            mousemove: handleHoverMove,
-            mouseout: handleHoverOut,
+            mousedown: handleStartWithHoverReset,
+            mouseover: (e) => { onPathHoverChange?.(true); handleHoverMove(e); },
+            mousemove: (e) => { onPathHoverChange?.(true); handleHoverMove(e); },
+            mouseout: () => { onPathHoverChange?.(false); handleHoverOut(); },
           }}
         />
       )}
@@ -323,16 +266,32 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, mod
 
 interface SplitDesirePathLayerProps {
   splitPath: SplitDesirePath;
-  mode?: TransportMode;
   onSegmentDrag?: (segmentIndex: number, position: LatLng) => void;
+  onPathHoverChange?: (isHovering: boolean) => void;
 }
 
-export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDesirePathLayerProps) {
+export function SplitDesirePathLayer({ splitPath, onSegmentDrag, onPathHoverChange }: SplitDesirePathLayerProps) {
   const map = useMap();
   const { isDraggingRef, hoverLatLng, handleStart, handleHoverMove, handleHoverOut } =
     usePathDrag({ map, geometry: splitPath.geometry, segmentIndex: splitPath.segmentIndex, onSegmentDrag });
 
-  const visualStyles = useMemo(() => getDesirePathStyles(mode), [mode]);
+  // Force SVG renderer for visual layer so SVG filters work (map uses Canvas globally)
+  const svgRenderer = useMemo(() => L.svg({ pane: "desirePathPane" }), []);
+  useEffect(() => () => { svgRenderer.remove(); }, [svgRenderer]);
+
+  // Reset hover state on unmount — prevents isHoveringPath getting stuck true
+  useEffect(() => () => { onPathHoverChange?.(false); }, [onPathHoverChange]);
+
+  // Wrap handleStart to reset hover state when drag begins
+  const handleStartWithHoverReset = useCallback(
+    (e: L.LeafletMouseEvent) => {
+      onPathHoverChange?.(false);
+      handleStart(e);
+    },
+    [handleStart, onPathHoverChange]
+  );
+
+  const visualStyles = useMemo(() => getDesirePathStyles(), []);
   const geometryKey = useMemo(
     () => makeGeometryKey(splitPath.geometry.coordinates, `${splitPath.id}-`),
     [splitPath]
@@ -349,12 +308,13 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
 
   return (
     <>
-      {/* Visual layers (no interaction) */}
+      {/* Visual layer with contour filter (SVG renderer for filter support) */}
       {visualStyles.map((style, index) => (
         <GeoJSON
           key={`split-${splitPath.id}-${index}-${geometryKey}`}
           data={geojsonData}
-          style={() => ({ ...style, pane: "desirePathPane" })}
+          style={() => ({ ...style, pane: "desirePathPane", renderer: svgRenderer })}
+          onEachFeature={applyContourToLayer}
           interactive={false}
         />
       ))}
@@ -369,10 +329,10 @@ export function SplitDesirePathLayer({ splitPath, mode, onSegmentDrag }: SplitDe
             className: "split-path-interactive",
           })}
           eventHandlers={{
-            mousedown: handleStart,
-            mouseover: handleHoverMove,
-            mousemove: handleHoverMove,
-            mouseout: handleHoverOut,
+            mousedown: handleStartWithHoverReset,
+            mouseover: (e) => { onPathHoverChange?.(true); handleHoverMove(e); },
+            mousemove: (e) => { onPathHoverChange?.(true); handleHoverMove(e); },
+            mouseout: () => { onPathHoverChange?.(false); handleHoverOut(); },
           }}
         />
       )}
