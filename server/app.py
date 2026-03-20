@@ -358,6 +358,69 @@ def _migrate_raw_counts_on_startup():
 _migrate_raw_counts_on_startup()
 
 
+def _migrate_segment_votes_on_startup():
+    """Replay segment votes from Postgres into Redis if Redis is underpopulated.
+
+    Postgres stores segment_key at 6dp; Redis uses 5dp. We normalize via
+    segment_key() to match the canonical format.
+    """
+    from database import DATABASE_URL, get_cursor
+    from desire_path_voting import segment_key as make_segment_key
+
+    if not DATABASE_URL:
+        return
+
+    try:
+        redis_count = redis_client.hlen(SEGMENT_VOTES_KEY)
+        # Only run if Redis has fewer than 1000 segment keys (likely wiped)
+        if redis_count >= 1000:
+            logger.info(f"[MIGRATE] segment_votes has {redis_count} keys, skipping replay")
+            return
+
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT segment_key, COUNT(*) as cnt
+                FROM votes
+                GROUP BY segment_key
+            """)
+            rows = cursor.fetchall()
+
+        if not rows:
+            return
+
+        logger.info(f"[MIGRATE] Replaying {len(rows)} segment groups from Postgres into Redis (had {redis_count} keys)...")
+
+        # Normalize 6dp Postgres keys to 5dp Redis keys and aggregate
+        vote_counts: dict[str, int] = {}
+        for seg_key_raw, cnt in rows:
+            parts = seg_key_raw.split("|")
+            if len(parts) < 3 or not parts[1]:
+                continue
+            try:
+                c1 = [float(x) for x in parts[0].split(",")]
+                c2 = [float(x) for x in parts[1].split(",")]
+            except (ValueError, IndexError):
+                continue
+            mode = parts[2]
+            norm_key = make_segment_key(c1, c2, mode)
+            vote_counts[norm_key] = vote_counts.get(norm_key, 0) + cnt
+
+        # Write to Redis in batches
+        pipe = redis_client.pipeline()
+        for i, (key, count) in enumerate(vote_counts.items()):
+            pipe.hset(SEGMENT_VOTES_KEY, key, count)
+            if (i + 1) % 5000 == 0:
+                pipe.execute()
+                pipe = redis_client.pipeline()
+        pipe.execute()
+
+        logger.info(f"[MIGRATE] Replayed {len(vote_counts)} segment keys into Redis")
+    except Exception as e:
+        logger.error(f"[MIGRATE] segment_votes replay failed: {e}")
+
+_migrate_segment_votes_on_startup()
+
+
 def _migrate_segment_vote_types_on_startup():
     """Populate segment_vote_types Redis hash from Postgres for existing votes.
 

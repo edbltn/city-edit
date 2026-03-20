@@ -98,13 +98,15 @@ export const TopBar = memo(function TopBar() {
             </div>
 
             <div className="btn-group">
-              <button
-                className="btn-header btn-clear"
-                onClick={clearPoints}
-                disabled={isLoading || isVoting}
-              >
-                Clear
-              </button>
+              {start.coords && (
+                <button
+                  className="btn-header btn-clear"
+                  onClick={clearPoints}
+                  disabled={isLoading || isVoting}
+                >
+                  Clear
+                </button>
+              )}
 
               {/* Show calculating when loading with both points set */}
               {isLoading && start.coords && end.coords && (
