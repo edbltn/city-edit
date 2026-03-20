@@ -9,8 +9,8 @@
 
   <!-- X box (col 1) -->
   <rect x="1" y="1" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.3"/>
-  <line x1="5" y1="5" x2="21" y2="21" stroke="#d4d4d4" stroke-width="3"/>
-  <line x1="21" y1="5" x2="5" y2="21" stroke="#d4d4d4" stroke-width="3"/>
+  <line x1="5" y1="5" x2="21" y2="21" stroke="#bbb" stroke-width="2.5"/>
+  <line x1="21" y1="5" x2="5" y2="21" stroke="#bbb" stroke-width="2.5"/>
 
   <!-- Empty cell (col 2) -->
   <rect x="31" y="1" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.15"/>
@@ -22,8 +22,8 @@
 
   <!-- X box (col 6) -->
   <rect x="151" y="1" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.3"/>
-  <line x1="155" y1="5" x2="171" y2="21" stroke="#d4d4d4" stroke-width="3"/>
-  <line x1="171" y1="5" x2="155" y2="21" stroke="#d4d4d4" stroke-width="3"/>
+  <line x1="155" y1="5" x2="171" y2="21" stroke="#bbb" stroke-width="2.5"/>
+  <line x1="171" y1="5" x2="155" y2="21" stroke="#bbb" stroke-width="2.5"/>
 
   <!-- Row 2: C I T Y [ ] [ ] -->
 
@@ -76,8 +76,8 @@
 
   <!-- X box (col 2) -->
   <rect x="31" y="91" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.3"/>
-  <line x1="35" y1="95" x2="51" y2="111" stroke="#d4d4d4" stroke-width="3"/>
-  <line x1="51" y1="95" x2="35" y2="111" stroke="#d4d4d4" stroke-width="3"/>
+  <line x1="35" y1="95" x2="51" y2="111" stroke="#bbb" stroke-width="2.5"/>
+  <line x1="51" y1="95" x2="35" y2="111" stroke="#bbb" stroke-width="2.5"/>
 
   <!-- Empty cells, cols 3-6 -->
   <rect x="61" y="91" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.15"/>
