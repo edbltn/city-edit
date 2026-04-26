@@ -1,3 +1,4 @@
-project_id = "your-gcp-project-id"
-region     = "us-central1"
-environment = "prod"
+project_id      = "your-gcp-project-id"
+region          = "us-central1"
+environment     = "prod"
+developer_email = "user:you@gmail.com"

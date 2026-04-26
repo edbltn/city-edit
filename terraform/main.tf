@@ -255,10 +255,14 @@ resource "google_cloud_run_service_iam_member" "public" {
   member   = "allUsers"
 }
 
-variable "custom_domain" {
-  description = "Custom domain for the app"
-  type        = string
-  default     = "demo.sphericalharmonics.org"
+variable "custom_domains" {
+  description = "Custom domains to map to the Cloud Run service"
+  type        = list(string)
+  default = [
+    "bikepaths.cityedit.org",
+    "trees.cityedit.org",
+    "walkways.cityedit.org",
+  ]
 }
 
 variable "db_password" {
@@ -267,10 +271,25 @@ variable "db_password" {
   sensitive   = true
 }
 
-# Custom domain mapping
+variable "developer_email" {
+  description = "IAM email of the developer who needs local DB access (e.g. user:you@gmail.com)"
+  type        = string
+  default     = "user:eric.didier.bolton@gmail.com"
+}
+
+# Grant developer Cloud SQL client access (for Cloud SQL Auth Proxy)
+resource "google_project_iam_member" "developer_cloudsql_client" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = var.developer_email
+}
+
+# Custom domain mappings (one per subdomain)
 resource "google_cloud_run_domain_mapping" "custom" {
+  for_each = toset(var.custom_domains)
+
   location = var.region
-  name     = var.custom_domain
+  name     = each.value
 
   metadata {
     namespace = var.project_id
@@ -304,13 +323,16 @@ output "registry_url" {
   value = "${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper"
 }
 
-output "custom_domain" {
-  value = var.custom_domain
+output "custom_domains" {
+  value = var.custom_domains
 }
 
 output "domain_mapping_dns" {
-  description = "DNS records to configure at your registrar"
-  value       = google_cloud_run_domain_mapping.custom.status[0].resource_records
+  description = "DNS records to configure at your registrar, keyed by domain"
+  value = {
+    for domain, mapping in google_cloud_run_domain_mapping.custom :
+    domain => mapping.status[0].resource_records
+  }
 }
 
 # =============================================================================
@@ -362,4 +384,82 @@ resource "google_cloud_scheduler_job" "osm_refresh" {
 
 output "osm_refresh_scheduler_job" {
   value = google_cloud_scheduler_job.osm_refresh.name
+}
+
+# =============================================================================
+# Bastion VM (IAP tunnel for local DB access)
+# =============================================================================
+
+resource "google_project_service" "iap" {
+  service = "iap.googleapis.com"
+}
+
+resource "google_project_service" "compute" {
+  service = "compute.googleapis.com"
+}
+
+resource "google_compute_instance" "bastion" {
+  name         = "bastion-${var.environment}"
+  machine_type = "e2-micro"
+  zone         = "${var.region}-a"
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-12"
+      size  = 10
+    }
+  }
+
+  network_interface {
+    network = "default"
+    # No access_config block = no public IP; IAP handles tunneling
+  }
+
+  metadata = {
+    enable-oslogin = "TRUE"
+  }
+
+  tags = ["bastion"]
+
+  depends_on = [google_project_service.compute]
+}
+
+# Allow IAP to SSH into the bastion
+resource "google_compute_firewall" "allow_iap_ssh" {
+  name    = "allow-iap-ssh"
+  network = "default"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  # IAP's IP range for TCP forwarding
+  source_ranges = ["35.235.240.0/20"]
+  target_tags   = ["bastion"]
+}
+
+# Grant developer IAP tunnel access to the bastion
+resource "google_iap_tunnel_instance_iam_member" "developer_bastion" {
+  instance = google_compute_instance.bastion.name
+  zone     = google_compute_instance.bastion.zone
+  role     = "roles/iap.tunnelResourceAccessor"
+  member   = var.developer_email
+
+  depends_on = [google_project_service.iap]
+}
+
+# Grant developer OS Login so gcloud can log in to the bastion
+resource "google_project_iam_member" "developer_oslogin" {
+  project = var.project_id
+  role    = "roles/compute.osAdminLogin"
+  member  = var.developer_email
+}
+
+output "bastion_name" {
+  value = google_compute_instance.bastion.name
+}
+
+output "bastion_zone" {
+  value = google_compute_instance.bastion.zone
 }
