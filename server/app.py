@@ -8,7 +8,7 @@ import hashlib
 import threading
 import redis
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_sock import Sock
 from desire_path_voting import compute_desire_path_votes, cast_desire_path_votes, extract_all_segments
@@ -145,7 +145,7 @@ def preload_hex_cache():
     global hex_cache
     hex_cache = {}  # Clear first
     logger.info("[HEX_CACHE] Preloading hex cache for all resolutions...")
-    for mode in ["bike", "walk", "drive", None]:
+    for mode in ["bike", "walk", "drive", "trees", "pedestrian", None]:
         for res in H3_RESOLUTIONS:
             cache_key = f"{mode or 'all'}:{res}"
             result = get_cached_hex_overlay(redis_client, mode, res)
@@ -424,8 +424,9 @@ _migrate_segment_votes_on_startup()
 def _migrate_segment_vote_types_on_startup():
     """Populate segment_vote_types Redis hash from Postgres for existing votes.
 
-    Uses segment_votes Redis keys as canonical (5dp), matching them to Postgres
-    vote_type data (stored at 6dp) by rounding Postgres keys to 5dp.
+    Normalizes Postgres 6dp keys to 5dp via segment_key() and writes all
+    vote_type data. Skips only when well-populated (>= 1000 entries), matching
+    the same threshold used by _migrate_segment_votes_on_startup().
     """
     from database import DATABASE_URL, get_cursor
     from desire_path_voting import SEGMENT_VOTE_TYPES_KEY, segment_key
@@ -434,8 +435,10 @@ def _migrate_segment_vote_types_on_startup():
         return
 
     try:
-        # Skip if already populated
-        if redis_client.hlen(SEGMENT_VOTE_TYPES_KEY) > 0:
+        # Skip only if already well-populated (same threshold as segment_votes migration)
+        existing_count = redis_client.hlen(SEGMENT_VOTE_TYPES_KEY)
+        if existing_count >= 1000:
+            logger.info(f"[MIGRATE] segment_vote_types has {existing_count} keys, skipping replay")
             return
 
         with get_cursor() as cursor:
@@ -448,13 +451,13 @@ def _migrate_segment_vote_types_on_startup():
             rows = cursor.fetchall()
 
         if not rows:
+            logger.info("[MIGRATE] No votes with vote_type in DB, skipping segment_vote_types migration")
             return
 
-        # Get all segment_votes keys from Redis (these are the canonical 5dp keys)
-        redis_seg_keys = set(redis_client.hkeys(SEGMENT_VOTES_KEY))
-
-        # Build per-segment vote type maps, normalizing Postgres 6dp keys to
-        # match Redis 5dp keys via segment_key()
+        # Build per-segment vote type maps. We normalize Postgres 6dp keys to
+        # 5dp via segment_key() without cross-checking against live Redis keys —
+        # the cross-check was unreliable due to double-rounding (float → 6dp
+        # string → 5dp can differ from float → 5dp directly).
         seg_vt_maps: dict[str, dict[str, int]] = {}
         for seg_key_raw, vote_type, cnt in rows:
             parts = seg_key_raw.split("|")
@@ -467,20 +470,20 @@ def _migrate_segment_vote_types_on_startup():
                 continue
             mode = parts[2]
             norm_key = segment_key(c1, c2, mode)
-            # Only keep if this key exists in segment_votes (ensures matching)
-            if norm_key not in redis_seg_keys:
-                continue
             if norm_key not in seg_vt_maps:
                 seg_vt_maps[norm_key] = {}
             seg_vt_maps[norm_key][vote_type] = seg_vt_maps[norm_key].get(vote_type, 0) + cnt
 
-        # Write to Redis
+        # Write to Redis in batches
         pipe = redis_client.pipeline()
-        for key, vt_map in seg_vt_maps.items():
+        for i, (key, vt_map) in enumerate(seg_vt_maps.items()):
             pipe.hset(SEGMENT_VOTE_TYPES_KEY, key, json.dumps(vt_map))
+            if (i + 1) % 5000 == 0:
+                pipe.execute()
+                pipe = redis_client.pipeline()
         pipe.execute()
 
-        logger.info(f"[MIGRATE] Populated segment_vote_types for {len(seg_vt_maps)} segments (from {len(rows)} DB rows, {len(redis_seg_keys)} Redis keys)")
+        logger.info(f"[MIGRATE] Populated segment_vote_types for {len(seg_vt_maps)} segments from {len(rows)} DB rows (had {existing_count} existing)")
     except Exception as e:
         logger.error(f"[MIGRATE] segment_vote_types migration failed: {e}")
 
@@ -1199,6 +1202,68 @@ def admin_refresh_osm():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/admin/migrate-vote-types", methods=["POST"])
+def admin_migrate_vote_types():
+    """Force re-populate segment_vote_types from Postgres.
+
+    Useful when the Redis key was evicted or partially lost without a server
+    restart (which would normally trigger _migrate_segment_vote_types_on_startup).
+    """
+    from database import DATABASE_URL, get_cursor
+    from desire_path_voting import SEGMENT_VOTE_TYPES_KEY, segment_key as sk
+
+    if not DATABASE_URL:
+        return jsonify({"error": "DATABASE_URL not configured"}), 500
+
+    try:
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT segment_key, vote_type, COUNT(*) as cnt
+                FROM votes
+                WHERE vote_type IS NOT NULL AND vote_type != ''
+                GROUP BY segment_key, vote_type
+            """)
+            rows = cursor.fetchall()
+
+        seg_vt_maps: dict[str, dict[str, int]] = {}
+        skipped = 0
+        for seg_key_raw, vote_type, cnt in rows:
+            parts = seg_key_raw.split("|")
+            if len(parts) < 3 or not parts[1]:
+                skipped += 1
+                continue
+            try:
+                c1 = [float(x) for x in parts[0].split(",")]
+                c2 = [float(x) for x in parts[1].split(",")]
+            except (ValueError, IndexError):
+                skipped += 1
+                continue
+            mode = parts[2]
+            norm_key = sk(c1, c2, mode)
+            if norm_key not in seg_vt_maps:
+                seg_vt_maps[norm_key] = {}
+            seg_vt_maps[norm_key][vote_type] = seg_vt_maps[norm_key].get(vote_type, 0) + cnt
+
+        pipe = redis_client.pipeline()
+        for i, (key, vt_map) in enumerate(seg_vt_maps.items()):
+            pipe.hset(SEGMENT_VOTE_TYPES_KEY, key, json.dumps(vt_map))
+            if (i + 1) % 5000 == 0:
+                pipe.execute()
+                pipe = redis_client.pipeline()
+        pipe.execute()
+
+        logger.info(f"[ADMIN] Migrated vote types: {len(seg_vt_maps)} segments from {len(rows)} DB rows ({skipped} skipped)")
+        return jsonify({
+            "status": "ok",
+            "segments_written": len(seg_vt_maps),
+            "db_rows_processed": len(rows),
+            "skipped": skipped,
+        })
+    except Exception as e:
+        logger.error(f"[ADMIN] migrate-vote-types failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/admin/vote-match-diagnostic", methods=["GET"])
 def vote_match_diagnostic():
     """Diagnose why Redis segment keys may not match graph edges."""
@@ -1418,6 +1483,17 @@ def graph_tiles():
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/tiles/<path:filename>")
+def serve_tiles(filename):
+    """Serve PMTiles files for local development. In production, nginx serves these."""
+    tiles_dir = os.path.join(os.path.dirname(__file__), "osm_data")
+    response = send_from_directory(tiles_dir, filename)
+    response.headers["Accept-Ranges"] = "bytes"
+    response.headers["Cache-Control"] = "public, max-age=604800"
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
 
 
 @app.route("/api/graph-topology", methods=["GET"])
