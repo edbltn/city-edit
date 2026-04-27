@@ -45,6 +45,11 @@ export const CONFIG = {
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
   tileSubdomains: "abcd",
 
+  // PMTiles — graph overlay tiles (built from OSM walk graph)
+  graphTilesUrl: isLocalDev
+    ? "http://localhost:5001/api/tiles/graph.pmtiles"
+    : "/tiles/graph.pmtiles",
+
   // Leaflet behaviors
   preferCanvas: true,
 

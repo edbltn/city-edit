@@ -9,7 +9,7 @@ import {
 import L from "leaflet";
 import { CONFIG } from "../../config";
 import { COLOR_START, COLOR_END } from "../../colors";
-import { useRoute, useGhostPin } from "../../context";
+import { useRoute, useGhostPin, useTheme } from "../../context";
 import { useMapClick } from "../../hooks";
 import { kiteGhostIcon } from "../../utils/kiteIcon";
 import { RouteMarker } from "../RouteMarker";
@@ -18,6 +18,7 @@ import { WaypointMarker } from "../WaypointMarker";
 import { WaypointConnectors } from "../WaypointConnectors";
 import { GhostPin } from "../GhostPin";
 import { GraphLayer } from "../GraphLayer/GraphLayer";
+import { MapLibreBackground } from "../MapLibreBackground";
 import type { LatLng } from "../../types";
 import "leaflet/dist/leaflet.css";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -132,6 +133,7 @@ export function MapView() {
     setEndPoint,
     clearStart,
     clearEnd,
+    clearPoints,
     setError,
     insertWaypointAtSegment,
     updateGhostWaypoint,
@@ -142,8 +144,11 @@ export function MapView() {
     clearSplitPaths,
   } = useRoute();
 
+  const theme = useTheme();
+
   const { ghostState } = useGhostPin();
 
+  const [leafletMap, setLeafletMap] = useState<L.Map | null>(null);
   const [snappedNode, setSnappedNode] = useState<LatLng | null>(null);
   const [isHoveringPath, setIsHoveringPath] = useState(false);
   const [isDraggingMarker, setIsDraggingMarker] = useState(false);
@@ -161,8 +166,10 @@ export function MapView() {
 
   const { handleMapClick } = useMapClick({
     state: { start, end },
+    inputMode: theme.inputMode,
     onUpdateStart: setStartPoint,
     onUpdateEnd: setEndPoint,
+    onClearPoints: clearPoints,
     onClearGhostWaypoints: clearSplitPaths,
     onSetError: setError,
     suppressNextClick,
@@ -184,6 +191,9 @@ export function MapView() {
 
   return (
     <>
+    {/* MapLibre GL JS background — renders base map + graph from PMTiles */}
+    <MapLibreBackground leafletMap={leafletMap} />
+
     <MapContainer
       center={[CONFIG.initialView.lat, CONFIG.initialView.lon]}
       zoom={CONFIG.initialView.zoom}
@@ -195,6 +205,7 @@ export function MapView() {
       preferCanvas={CONFIG.preferCanvas}
       className="map-container"
     >
+      <MapBridge onMap={setLeafletMap} />
       <MapPanes />
       <GraphLayer
         onSnap={setSnappedNode}
@@ -208,6 +219,7 @@ export function MapView() {
         suppress={isHoveringPath || ghostState.isDragging || isDraggingMarker}
       />
 
+      {/* Raster tile fallback — visible until MapLibre loads, or when WebGL unavailable */}
       <TileLayer
         url={CONFIG.tileUrlTemplate}
         subdomains={["a", "b", "c", "d"]}
@@ -307,6 +319,13 @@ export function MapView() {
     <GhostPin />
     </>
   );
+}
+
+// Bridge to expose Leaflet map instance to parent
+function MapBridge({ onMap }: { onMap: (map: L.Map) => void }) {
+  const map = useMap();
+  useEffect(() => { onMap(map); }, [map, onMap]);
+  return null;
 }
 
 // Zoom control component

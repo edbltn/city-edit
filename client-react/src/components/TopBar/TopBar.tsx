@@ -1,11 +1,13 @@
 import { memo, useState } from "react";
-import { useRoute } from "../../context";
+import { useRoute, useTheme } from "../../context";
+import { landingHref } from "../../themes";
 import { HowItWorksModal } from "../HowItWorksModal";
 import { VoteTypeSelector } from "../VoteTypeSelector";
 import "./TopBar.css";
 
 export const TopBar = memo(function TopBar() {
   const [showHowItWorks, setShowHowItWorks] = useState(false);
+  const theme = useTheme();
 
   const {
     start,
@@ -21,6 +23,8 @@ export const TopBar = memo(function TopBar() {
     castVote,
   } = useRoute();
 
+  const isPointOnly = theme.inputMode === "point";
+
   const isLoading = isCalculating || isCalculatingSplit;
 
   const formatLocation = (point: { coords: { lat: number; lng: number } | null; address?: string | null } | null) => {
@@ -34,12 +38,16 @@ export const TopBar = memo(function TopBar() {
   // Can vote once we have a route (2 points), split paths (waypoints), OR a single point (for point votes)
   const canVote = !!routeData || splitDesirePaths.length > 0 || (pointType === "point" && !!start.coords);
 
+  const goToLanding = () => {
+    window.location.href = landingHref();
+  };
+
   return (
     <header className="topbar">
-      <h1 onClick={() => window.location.reload()} className="logo-container">
+      <h1 onClick={goToLanding} className="logo-container">
         <img src="/logo.svg" alt="City Edit" className="logo-img" />
       </h1>
-      <div className="logo-mobile-banner" onClick={() => window.location.reload()}>
+      <div className="logo-mobile-banner" onClick={goToLanding}>
         <svg viewBox="-1 -1 233 25" xmlns="http://www.w3.org/2000/svg" className="logo-mobile-svg">
           {["C","I","T","Y","","E","D","I","T"].map((ch, i) => {
             const x = i * 26;
@@ -61,20 +69,22 @@ export const TopBar = memo(function TopBar() {
               <span className="legend-icon-slot">
                 <span className="legend-char-start">●</span>
               </span>
-              <span className="legend-label">Start</span>
+              <span className="legend-label">{theme.locationLabel}</span>
               <span className={`legend-coords ${!start.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}>
-                {formatLocation(start) || "click map to set start"}
+                {formatLocation(start) || (isPointOnly ? "click map to set location" : "click map to set start")}
               </span>
             </div>
-            <div className="legend-item legend-item-coords">
-              <span className="legend-icon-slot">
-                <span className="legend-char-end">●</span>
-              </span>
-              <span className="legend-label">End</span>
-              <span className={`legend-coords ${!end.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}>
-                {formatLocation(end) || "click map to set end"}
-              </span>
-            </div>
+            {!isPointOnly && (
+              <div className="legend-item legend-item-coords">
+                <span className="legend-icon-slot">
+                  <span className="legend-char-end">●</span>
+                </span>
+                <span className="legend-label">End</span>
+                <span className={`legend-coords ${!end.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}>
+                  {formatLocation(end) || "click map to set end"}
+                </span>
+              </div>
+            )}
             {(routeData || splitDesirePaths.length > 0) && !isLoading && (
               <div className="legend-item">
                 <span className="legend-icon-slot">

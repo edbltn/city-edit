@@ -7,7 +7,7 @@
 // ==========================================================================
 
 // Marker colors (start/end pins, header dots)
-export const COLOR_START = "#2E5283"; // Deja Vu Blue - bold 2025 blue
+export const COLOR_START = "#00C4D4"; // Bright cyan-teal — pops against orange heatmap
 export const COLOR_END = "#DC343B"; // Poppy Red - vibrant 2025 red
 
 // Desire path overlay - blue like walking dots
@@ -40,21 +40,15 @@ export const ROUTE_COLORS = {
     centerLine: "#E3BD33", // Misted Marigold - bold yellow
   },
   desire: {
-    glow: "#F5E6A3", // Soft gold glow
-    middle: "#E3BD33", // Misted Marigold gold
-    core: "#D4A017", // Deep gold core
+    glow: "rgba(255, 255, 255, 0.15)", // Soft white glow
+    middle: "#FFFFFF", // White selection boundary
+    core: "#FFFFFF",
   },
   splitDesire: {
-    glow: "#F5E6A3",    // Soft gold glow
-    middle: "#E3BD33",  // Misted Marigold gold
-    core: "#D4A017",    // Deep gold core
+    glow: "rgba(255, 255, 255, 0.15)",
+    middle: "#FFFFFF",
+    core: "#FFFFFF",
   },
-};
-
-// Hex heatmap gradient (light = few votes, dark = many votes)
-export const HEX_HEATMAP = {
-  light: { r: 91, g: 143, b: 191 },   // #5B8FBF - soft blue
-  dark: { r: 220, g: 52, b: 59 },     // #DC343B - Poppy Red
 };
 
 // UI colors (for reference - primary definitions in CSS)

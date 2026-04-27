@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, memo } from "react";
-import { useRoute } from "../../context";
-import { getSuggestions } from "../../constants/voteTypes";
+import { useRoute, useTheme } from "../../context";
+import { getSuggestionsForTheme } from "../../constants/voteTypes";
 import "./VoteTypeSelector.css";
 
 // Parse emoji and text from a vote type label
@@ -25,13 +25,14 @@ function parseLabel(label: string): { emoji: string; text: string } {
 
 export const VoteTypeSelector = memo(function VoteTypeSelector() {
   const { voteType, setVoteType, pointType } = useRoute();
+  const theme = useTheme();
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const suggestions = getSuggestions(pointType);
+  const suggestions = getSuggestionsForTheme(theme, pointType);
 
   // Filter suggestions based on input
   const inputLower = inputValue.trim().toLowerCase();

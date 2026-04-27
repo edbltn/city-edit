@@ -1,6 +1,7 @@
-import { RouteProvider, WebSocketProvider, GhostPinProvider, GraphSnapProvider } from "./context";
-import { TopBar, MapView, ErrorToast } from "./components";
+import { RouteProvider, WebSocketProvider, GhostPinProvider, GraphSnapProvider, ThemeProvider } from "./context";
+import { TopBar, MapView, ErrorToast, Landing } from "./components";
 import { useRoute } from "./context";
+import { isLandingHost } from "./themes";
 
 function AppContent() {
   const { error, clearError } = useRoute();
@@ -17,16 +18,22 @@ function AppContent() {
 }
 
 function App() {
+  if (isLandingHost()) {
+    return <Landing />;
+  }
+
   return (
-    <RouteProvider>
-      <WebSocketProvider>
-        <GhostPinProvider>
-          <GraphSnapProvider>
-            <AppContent />
-          </GraphSnapProvider>
-        </GhostPinProvider>
-      </WebSocketProvider>
-    </RouteProvider>
+    <ThemeProvider>
+      <RouteProvider>
+        <WebSocketProvider>
+          <GhostPinProvider>
+            <GraphSnapProvider>
+              <AppContent />
+            </GraphSnapProvider>
+          </GhostPinProvider>
+        </WebSocketProvider>
+      </RouteProvider>
+    </ThemeProvider>
   );
 }
 

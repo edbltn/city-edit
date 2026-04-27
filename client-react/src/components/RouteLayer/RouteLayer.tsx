@@ -58,7 +58,7 @@ function getRouteStyles(): LayerStyle[] {
 function getDesirePathStyles(): LayerStyle[] {
   return [
     {
-      color: "#ffffff",
+      color: ROUTE_COLORS.desire.middle,
       weight: 7,
       opacity: 1,
       lineCap: "round",
@@ -90,7 +90,7 @@ function ensureFilterInSvg(svg: SVGSVGElement) {
 
   const morph = document.createElementNS(ns, "feMorphology");
   morph.setAttribute("operator", "erode");
-  morph.setAttribute("radius", "0.75");
+  morph.setAttribute("radius", "1.5");
   morph.setAttribute("in", "SourceGraphic");
   morph.setAttribute("result", "interior");
 

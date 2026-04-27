@@ -15,9 +15,8 @@ import { useMap } from "react-leaflet";
 import { createPortal } from "react-dom";
 import L from "leaflet";
 import { CONFIG } from "../../config";
-import { DESIRE_PATH } from "../../colors";
 import { useWebSocketContext } from "../../context/WebSocketContext";
-import { useGraphSnap } from "../../context";
+import { useGraphSnap, useTheme } from "../../context";
 import type { GraphData } from "../../types";
 
 // ---------------------------------------------------------------------------
@@ -53,6 +52,20 @@ function arrayMax(arr: number[]): number {
   }
   return max;
 }
+
+// ---------------------------------------------------------------------------
+// Heatmap color stops — flame cross-section
+// ---------------------------------------------------------------------------
+// Each pass uses a different color and width so the gradient runs ACROSS the
+// stroke (deep-red halo on the outside, white-hot core on the inside) rather
+// than ALONG it. Combined with `globalCompositeOperation = "lighter"` this
+// gives Strava-style natural intersection brightening: when edges cross, RGB
+// channels add and the apparent hue shifts toward yellow→white as expected.
+
+const HEAT_HALO = "rgb(180, 50, 30)";   // deep red — outer glow
+const HEAT_WARM = "rgb(255, 110, 30)";  // warm orange — main "heat"
+const HEAT_HOT = "rgb(255, 210, 90)";   // bright yellow — hot core
+const HEAT_PEAK = "rgb(255, 240, 210)"; // pale warm white — peak intensity
 
 // ---------------------------------------------------------------------------
 // Reverse-geocode cache (module-level, survives re-renders)
@@ -113,8 +126,17 @@ function resolveAddress(
 // Unified radii — used for hover, snap, pinned highlight, and tooltip lookup
 const SNAP_EDGE_PX = 4;   // hit-test radius for edges
 const SNAP_NODE_PX = 3;   // node priority radius (wins over edges when very close)
-const NODE_GLOW_R = 5;    // highlight: white glow ring
-const NODE_CORE_R = 2;    // highlight: blue core dot
+
+// Highlight ring dimensions — matched to the desire path SVG filter so hover
+// and pinned highlights look identical to the selected path:
+//   - Edge ring: 7px wide stroke with a 4px hole = 1.5px white border each side
+//   - Node ring: 5px outer radius with 3.5px hole = 1.5px white border
+//   - Interior alpha: 0.12 (matches feColorMatrix in RouteLayer)
+const HIGHLIGHT_RING_WIDTH = 7;
+const HIGHLIGHT_INNER_WIDTH = 4;
+const HIGHLIGHT_NODE_OUTER_R = 5;
+const HIGHLIGHT_NODE_INNER_R = 3.5;
+const HIGHLIGHT_INTERIOR_ALPHA = 0.12;
 
 // Hover target type
 interface HoverEdge { kind: "edge"; index: number }
@@ -241,6 +263,8 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
   const map = useMap();
   const { mapState } = useWebSocketContext();
   const { setSnapFn, setCurrentSnap, isDraggingRef: graphDraggingRef } = useGraphSnap();
+  const theme = useTheme();
+  const themeMode = theme.mode;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const hoverCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -291,6 +315,10 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
     canvas.style.top = "0";
     canvas.style.left = "0";
     canvas.style.pointerEvents = "none";
+    // CSS-level softness: a hint of blur smooths the geometric snap, and
+    // `screen` lightens the dark base map where heat accumulates.
+    canvas.style.filter = "blur(0.6px)";
+    canvas.style.mixBlendMode = "screen";
 
     const hoverCanvas = document.createElement("canvas");
     hoverCanvas.className = "graph-layer-hover";
@@ -318,12 +346,14 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
     };
   }, [map]);
 
-  // Fetch votes and merge with cached topology
+  // Fetch votes and merge with cached topology. Always scoped to the active
+  // theme — each subdomain shows only its own votes.
   const fetchVotes = useCallback(async () => {
     const topology = topologyRef.current;
     if (!topology) return;
     try {
-      const response = await fetch(`${CONFIG.apiUrl}/graph-votes`);
+      const url = `${CONFIG.apiUrl}/graph-votes?mode=${encodeURIComponent(themeMode)}`;
+      const response = await fetch(url);
       if (!response.ok) throw new Error(`Vote fetch failed: ${response.status}`);
       const voteData = await response.json();
       graphDataRef.current = { ...topology, ...voteData };
@@ -331,7 +361,7 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
     } catch (error) {
       console.error("Failed to fetch graph votes:", error);
     }
-  }, []);
+  }, [themeMode]);
 
   const fetchVotesRef = useRef(fetchVotes);
   useEffect(() => { fetchVotesRef.current = fetchVotes; }, [fetchVotes]);
@@ -347,7 +377,7 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
     let cancelled = false;
     (async () => {
       try {
-        const response = await fetch(`${CONFIG.apiUrl}/graph-topology`, { cache: "no-cache" });
+        const response = await fetch(`${CONFIG.apiUrl}/graph-topology`);
         if (!response.ok) throw new Error(`Topology fetch failed: ${response.status}`);
         const data = await response.json();
         if (cancelled) return;
@@ -384,56 +414,82 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
     hoverCtx.lineCap = "round";
     hoverCtx.lineJoin = "round";
 
-    const drawNode = (nodeIndex: number) => {
+    // Renders a hollow white ring with faint interior — same look as the
+    // desire path. `alpha` scales overall opacity (e.g. hover dimmer than pinned).
+    // Three passes:
+    //   1. Stroke wide white (covers full path footprint)
+    //   2. destination-out narrower stroke (carves the hole)
+    //   3. Stroke narrower at low alpha (faint white interior)
+    const drawNode = (nodeIndex: number, alpha: number) => {
       const node = data.nodes[nodeIndex];
       if (!node) return;
       const pt = map.latLngToContainerPoint([node[0], node[1]]);
-      hoverCtx.globalAlpha = 0.5;
+
+      hoverCtx.globalCompositeOperation = "source-over";
+      hoverCtx.globalAlpha = alpha;
       hoverCtx.fillStyle = "#ffffff";
       hoverCtx.beginPath();
-      hoverCtx.arc(pt.x, pt.y, NODE_GLOW_R, 0, Math.PI * 2);
+      hoverCtx.arc(pt.x, pt.y, HIGHLIGHT_NODE_OUTER_R, 0, Math.PI * 2);
       hoverCtx.fill();
+
+      hoverCtx.globalCompositeOperation = "destination-out";
       hoverCtx.globalAlpha = 1.0;
-      hoverCtx.fillStyle = DESIRE_PATH.stroke;
       hoverCtx.beginPath();
-      hoverCtx.arc(pt.x, pt.y, NODE_CORE_R, 0, Math.PI * 2);
+      hoverCtx.arc(pt.x, pt.y, HIGHLIGHT_NODE_INNER_R, 0, Math.PI * 2);
+      hoverCtx.fill();
+
+      hoverCtx.globalCompositeOperation = "source-over";
+      hoverCtx.globalAlpha = HIGHLIGHT_INTERIOR_ALPHA * alpha;
+      hoverCtx.beginPath();
+      hoverCtx.arc(pt.x, pt.y, HIGHLIGHT_NODE_INNER_R, 0, Math.PI * 2);
       hoverCtx.fill();
     };
 
-    const drawEdge = (edgeIndex: number) => {
+    const drawEdge = (edgeIndex: number, alpha: number) => {
       const edge = data.edges[edgeIndex];
       if (!edge) return;
       const [fromIdx, toIdx] = edge;
       const fromScreen = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);
       const toScreen = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);
 
-      hoverCtx.globalAlpha = 0.6;
+      const strokeLine = () => {
+        hoverCtx.beginPath();
+        hoverCtx.moveTo(fromScreen.x, fromScreen.y);
+        hoverCtx.lineTo(toScreen.x, toScreen.y);
+        hoverCtx.stroke();
+      };
+
+      hoverCtx.globalCompositeOperation = "source-over";
+      hoverCtx.globalAlpha = alpha;
       hoverCtx.strokeStyle = "#ffffff";
-      hoverCtx.lineWidth = 6;
-      hoverCtx.beginPath();
-      hoverCtx.moveTo(fromScreen.x, fromScreen.y);
-      hoverCtx.lineTo(toScreen.x, toScreen.y);
-      hoverCtx.stroke();
+      hoverCtx.lineWidth = HIGHLIGHT_RING_WIDTH;
+      strokeLine();
 
+      hoverCtx.globalCompositeOperation = "destination-out";
       hoverCtx.globalAlpha = 1.0;
-      hoverCtx.strokeStyle = DESIRE_PATH.stroke;
-      hoverCtx.lineWidth = 3;
-      hoverCtx.beginPath();
-      hoverCtx.moveTo(fromScreen.x, fromScreen.y);
-      hoverCtx.lineTo(toScreen.x, toScreen.y);
-      hoverCtx.stroke();
+      hoverCtx.lineWidth = HIGHLIGHT_INNER_WIDTH;
+      strokeLine();
+
+      hoverCtx.globalCompositeOperation = "source-over";
+      hoverCtx.globalAlpha = HIGHLIGHT_INTERIOR_ALPHA * alpha;
+      hoverCtx.lineWidth = HIGHLIGHT_INNER_WIDTH;
+      strokeLine();
     };
 
-    const drawTarget = (t: HoverTarget) => {
-      if (t.kind === "edge") drawEdge(t.index);
-      else drawNode(t.index);
+    const drawTarget = (t: HoverTarget, alpha: number) => {
+      if (t.kind === "edge") drawEdge(t.index, alpha);
+      else drawNode(t.index, alpha);
     };
 
-    // Pinned highlight (start point)
-    if (pinnedTargetRef.current) drawTarget(pinnedTargetRef.current);
+    // Pinned highlight (selected start point) — full opacity, exact path match
+    if (pinnedTargetRef.current) drawTarget(pinnedTargetRef.current, 1.0);
 
-    // Hover highlight
-    if (hoverTargetRef.current) drawTarget(hoverTargetRef.current);
+    // Hover highlight — slightly dimmer to read as "preview"
+    if (hoverTargetRef.current) drawTarget(hoverTargetRef.current, 0.6);
+
+    // Reset state for any subsequent canvas operations
+    hoverCtx.globalCompositeOperation = "source-over";
+    hoverCtx.globalAlpha = 1.0;
   }, [map]);
 
   const redrawHoverHighlightRef = useRef(redrawHoverHighlight);
@@ -461,63 +517,110 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
     const maxVotes = Math.max(1, arrayMax(edgeVotes));
     const bounds = map.getBounds();
 
+    const zoom = map.getZoom();
+    const zoomScale = Math.pow(2, (zoom - 14) / 2);
+
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    for (let i = 0; i < data.edges.length; i++) {
+    const south = bounds.getSouth();
+    const north = bounds.getNorth();
+    const west = bounds.getWest();
+    const east = bounds.getEast();
+
+    // Returns [from, to] container points, or null if the edge is fully off-screen.
+    const screenFor = (i: number): [L.Point, L.Point] | null => {
       const [fromIdx, toIdx] = data.edges[i];
-      const votes = edgeVotes[i] ?? 0;
-      const fromNode = data.nodes[fromIdx];
-      const toNode = data.nodes[toIdx];
-
-      // Viewport culling
+      const a = data.nodes[fromIdx];
+      const b = data.nodes[toIdx];
       if (
-        (fromNode[0] < bounds.getSouth() && toNode[0] < bounds.getSouth()) ||
-        (fromNode[0] > bounds.getNorth() && toNode[0] > bounds.getNorth()) ||
-        (fromNode[1] < bounds.getWest() && toNode[1] < bounds.getWest()) ||
-        (fromNode[1] > bounds.getEast() && toNode[1] > bounds.getEast())
-      ) {
-        continue;
-      }
+        (a[0] < south && b[0] < south) ||
+        (a[0] > north && b[0] > north) ||
+        (a[1] < west && b[1] < west) ||
+        (a[1] > east && b[1] > east)
+      ) return null;
+      return [
+        map.latLngToContainerPoint([a[0], a[1]]),
+        map.latLngToContainerPoint([b[0], b[1]]),
+      ];
+    };
 
-      const fromScreen = map.latLngToContainerPoint([fromNode[0], fromNode[1]]);
-      const toScreen = map.latLngToContainerPoint([toNode[0], toNode[1]]);
-
-      if (votes === 0) {
-        ctx.lineWidth = 0.5;
-        ctx.globalAlpha = 0.12;
-        ctx.strokeStyle = DESIRE_PATH.stroke;
-      } else {
-        const norm = Math.log(votes + 1) / Math.log(maxVotes + 1);
-        ctx.lineWidth = 1 + norm * 4;
-        ctx.globalAlpha = 0.2 + norm * 0.7;
-        ctx.strokeStyle = DESIRE_PATH.stroke;
-      }
-
+    const drawLine = (pts: [L.Point, L.Point]) => {
       ctx.beginPath();
-      ctx.moveTo(fromScreen.x, fromScreen.y);
-      ctx.lineTo(toScreen.x, toScreen.y);
+      ctx.moveTo(pts[0].x, pts[0].y);
+      ctx.lineTo(pts[1].x, pts[1].y);
       ctx.stroke();
+    };
 
-      // Glow for high-vote edges
-      if (votes > 0) {
-        const norm = Math.log(votes + 1) / Math.log(maxVotes + 1);
-        if (norm > 0.5) {
-          ctx.globalAlpha = 0.1 + norm * 0.15;
-          ctx.shadowColor = DESIRE_PATH.stroke;
-          ctx.shadowBlur = 2 + norm * 3;
-          ctx.lineWidth = ctx.lineWidth + 1;
-          ctx.beginPath();
-          ctx.moveTo(fromScreen.x, fromScreen.y);
-          ctx.lineTo(toScreen.x, toScreen.y);
-          ctx.stroke();
-          ctx.shadowBlur = 0;
-        }
+    // ----------------------------------------------------------------
+    // Phase 1 — zero-vote baseline (source-over, faint white)
+    // Drawn before lighter mode so the network outline doesn't itself
+    // accumulate at intersections (which would highlight random nodes).
+    // ----------------------------------------------------------------
+    ctx.globalCompositeOperation = "source-over";
+    ctx.lineWidth = 0.5 * zoomScale;
+    ctx.globalAlpha = 0.05;
+    ctx.strokeStyle = "#ffffff";
+    for (let i = 0; i < data.edges.length; i++) {
+      if ((edgeVotes[i] ?? 0) > 0) continue;
+      const pts = screenFor(i);
+      if (pts) drawLine(pts);
+    }
+
+    // ----------------------------------------------------------------
+    // Phase 2 — voted edges, additive blending (Strava-style)
+    // Sort ascending so the hottest edges paint last and dominate at
+    // overlaps; "lighter" composite means RGB channels sum, naturally
+    // shifting toward yellow/white as intensity stacks.
+    // ----------------------------------------------------------------
+    const voted: number[] = [];
+    for (let i = 0; i < data.edges.length; i++) {
+      if ((edgeVotes[i] ?? 0) > 0) voted.push(i);
+    }
+    voted.sort((a, b) => (edgeVotes[a] ?? 0) - (edgeVotes[b] ?? 0));
+
+    ctx.globalCompositeOperation = "lighter";
+
+    for (const i of voted) {
+      const pts = screenFor(i);
+      if (!pts) continue;
+      const norm = Math.log((edgeVotes[i] ?? 0) + 1) / Math.log(maxVotes + 1);
+
+      // Pass 1 — wide deep-red outer halo (low alpha, broad falloff).
+      // Approximates Gaussian halo via stroke width + low opacity.
+      ctx.lineWidth = (2 + norm * 8) * zoomScale;
+      ctx.globalAlpha = 0.025 + norm * 0.06;
+      ctx.strokeStyle = HEAT_HALO;
+      drawLine(pts);
+
+      // Pass 2 — warm orange "heat" mid stroke (the dominant color).
+      ctx.lineWidth = (1 + norm * 2) * zoomScale;
+      ctx.globalAlpha = 0.08 + norm * 0.20;
+      ctx.strokeStyle = HEAT_WARM;
+      drawLine(pts);
+
+      // Pass 3 — yellow hot core (kicks in past ~mid intensity).
+      if (norm > 0.2) {
+        const t = (norm - 0.2) / 0.8;
+        ctx.lineWidth = (0.6 + t * 1.0) * zoomScale;
+        ctx.globalAlpha = 0.10 + t * 0.30;
+        ctx.strokeStyle = HEAT_HOT;
+        drawLine(pts);
+      }
+
+      // Pass 4 — pale warm-white peak (only the hottest edges).
+      if (norm > 0.7) {
+        const t = (norm - 0.7) / 0.3;
+        ctx.lineWidth = Math.max(0.3, 0.4 * zoomScale);
+        ctx.globalAlpha = 0.30 * t;
+        ctx.strokeStyle = HEAT_PEAK;
+        drawLine(pts);
       }
     }
 
+    ctx.globalCompositeOperation = "source-over";
     ctx.globalAlpha = 1.0;
-    ctx.shadowColor = "transparent";
+
     redrawHoverHighlightRef.current();
   }, [map]);
 
@@ -551,11 +654,11 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
       setHoverTarget(null);
     };
     const handleZoomEnd = () => {
-      queueMicrotask(() => { isZoomingRef.current = false; });
+      isZoomingRef.current = false;
       scheduleRedrawRef.current();
     };
     const handleMoveEnd = () => {
-      if (isZoomingRef.current) return;
+      // Always redraw on moveend — isZoomingRef is cleared synchronously in zoomend
       scheduleRedrawRef.current();
     };
     const handleResize = () => scheduleRedrawRef.current();

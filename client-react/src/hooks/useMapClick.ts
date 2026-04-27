@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { isWithinMappedBounds } from "../utils/bounds";
+import type { InputMode } from "../themes";
 import type { LatLng, RoutePoint } from "../types";
 
 interface MapClickState {
@@ -9,8 +10,10 @@ interface MapClickState {
 
 interface UseMapClickOptions {
   state: MapClickState;
+  inputMode: InputMode;
   onUpdateStart: (coords: LatLng) => void;
   onUpdateEnd: (coords: LatLng) => void;
+  onClearPoints: () => void;
   onClearGhostWaypoints: () => void;
   onSetError: (message: string) => void;
   suppressNextClick?: () => boolean;
@@ -19,8 +22,10 @@ interface UseMapClickOptions {
 
 export function useMapClick({
   state,
+  inputMode,
   onUpdateStart,
   onUpdateEnd,
+  onClearPoints,
   onClearGhostWaypoints,
   onSetError,
   suppressNextClick,
@@ -40,16 +45,21 @@ export function useMapClick({
         return;
       }
 
-      // New map click always clears ghost waypoints (starting fresh route segment)
+      // Point-only mode (e.g. trees): every click sets a new single location
+      if (inputMode === "point") {
+        onClearPoints();
+        onUpdateStart(latlng);
+        return;
+      }
+
+      // Route / both mode: standard two-point flow
       onClearGhostWaypoints();
 
-      // If no start, set start
       if (!state.start.coords) {
         onUpdateStart(latlng);
         return;
       }
 
-      // If start exists but no end, set end
       if (!state.end.coords) {
         onUpdateEnd(latlng);
         return;
@@ -60,7 +70,18 @@ export function useMapClick({
       onUpdateStart(prevEnd);
       onUpdateEnd(latlng);
     },
-    [state.start.coords, state.end.coords, onUpdateStart, onUpdateEnd, onClearGhostWaypoints, onSetError, suppressNextClick, onClearSuppress]
+    [
+      state.start.coords,
+      state.end.coords,
+      inputMode,
+      onUpdateStart,
+      onUpdateEnd,
+      onClearPoints,
+      onClearGhostWaypoints,
+      onSetError,
+      suppressNextClick,
+      onClearSuppress,
+    ]
   );
 
   return { handleMapClick };

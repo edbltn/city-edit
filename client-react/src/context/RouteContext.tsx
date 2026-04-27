@@ -10,7 +10,8 @@ import {
 } from "react";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { CONFIG } from "../config";
-import { getDefaultVoteType } from "../constants/voteTypes";
+import { getDefaultVoteTypeForTheme } from "../constants/voteTypes";
+import { useTheme } from "./ThemeContext";
 import type {
   LatLng,
   RoutePoint,
@@ -146,6 +147,8 @@ interface RouteContextValue {
 const RouteContext = createContext<RouteContextValue | null>(null);
 
 export function RouteProvider({ children }: { children: ReactNode }) {
+  const theme = useTheme();
+
   // Core state
   const [start, setStart] = useState<RoutePoint>({ coords: null, timestamp: null });
   const [end, setEnd] = useState<RoutePoint>({ coords: null, timestamp: null });
@@ -157,7 +160,9 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const [isCalculatingSplit, setIsCalculatingSplit] = useState(false);
   const [hasVoted, setHasVoted] = useState(false);
   const [isVoting, setIsVoting] = useState(false);
-  const [voteType, setVoteTypeState] = useState<string>(() => getDefaultVoteType("route"));
+  const [voteType, setVoteTypeState] = useState<string>(() =>
+    getDefaultVoteTypeForTheme(theme, theme.inputMode === "point" ? "point" : "route")
+  );
 
   // Ref for click suppression (needs immediate effect, not async like state)
   const suppressNextClickRef = useRef(false);
@@ -660,7 +665,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     setIsVoting(true);
     try {
       const body: Record<string, unknown> = {
-        mode: "walk",
+        mode: theme.mode,
         vote_type: voteType,
       };
 
@@ -776,8 +781,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // Auto-update vote type when pointType changes
   // ============================================
   useEffect(() => {
-    setVoteTypeState(getDefaultVoteType(pointType));
-  }, [pointType]);
+    setVoteTypeState(getDefaultVoteTypeForTheme(theme, pointType));
+  }, [pointType, theme]);
 
   // ============================================
   // Context value

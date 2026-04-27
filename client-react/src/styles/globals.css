@@ -21,9 +21,9 @@
   --paper: #0d0d0d;
   --ink: #d4d4d4;
   --hairline: rgba(212, 212, 212, 0.2);
-  --color-start: #5B8FBF;
+  --color-start: #00C4D4;
   --color-end: #E05A60;
-  --color-start-light: rgba(91, 143, 191, 0.15);
+  --color-start-light: rgba(0, 196, 212, 0.15);
   --hover-bg: rgba(212, 212, 212, 0.06);
   --hover-bg-strong: rgba(212, 212, 212, 0.12);
 

@@ -1,1 +1,0 @@
-export { HexHeatmapLayer } from "./HexHeatmapLayer";

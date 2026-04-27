@@ -12,15 +12,6 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_sock import Sock
 from desire_path_voting import compute_desire_path_votes, cast_desire_path_votes, extract_all_segments
-from hex_voting import (
-    build_hex_overlay_from_segments,
-    get_cached_hex_overlay,
-    update_hex_cache_incremental,
-    regenerate_hex_cache,
-    rebuild_weighted_hex_cache,
-    ZOOM_TO_RESOLUTION,
-    H3_RESOLUTIONS,
-)
 from database import init_db, record_segment_votes
 
 # Configure logging for Cloud Run (unbuffered, structured)
@@ -55,31 +46,21 @@ redis_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=Tr
 SEGMENT_VOTES_KEY = "segment_votes"
 REDIS_CHANNEL = "state_updates"
 
-# In-memory cache for hex overlays (keyed by "mode:resolution")
-# This avoids Redis round-trips for every WebSocket push
-hex_cache = {}
-hex_cache_revision = 0  # Incremented when cache is invalidated
+# Bumped on every vote (locally) and via pubsub from peer instances.
+# /api/graph-votes uses this to cache its JSON response between writes.
+_votes_revision = 0
+# Cache keyed by mode-filter string ("" for unfiltered). Each entry holds the
+# revision it was built from and the serialized JSON body.
+_graph_votes_cache: dict = {}
 
 
-def invalidate_hex_cache_local():
-    """Clear in-memory hex cache (local instance only)."""
-    global hex_cache, hex_cache_revision
-    hex_cache = {}
-    hex_cache_revision += 1
-
-
-def invalidate_hex_cache():
-    """Clear in-memory hex cache and notify other instances via pub/sub."""
-    invalidate_hex_cache_local()
-    # Publish invalidation message so other Flask instances clear their cache
-    try:
-        redis_client.publish(REDIS_CHANNEL, json.dumps({"type": "cache_invalidate"}))
-    except redis.ConnectionError:
-        pass  # If Redis is down, just clear local cache
-
+def _bump_votes_revision():
+    global _votes_revision
+    _votes_revision += 1
 
 def publish_votes_changed():
     """Publish votes_changed message to trigger WebSocket broadcasts."""
+    _bump_votes_revision()
     try:
         rev = redis_client.get("revision") or 1
         redis_client.publish(REDIS_CHANNEL, json.dumps({
@@ -106,13 +87,11 @@ def start_pubsub_listener():
                 data = json.loads(message["data"])
                 msg_type = data.get("type")
 
-                if msg_type == "cache_invalidate":
-                    # Another instance invalidated cache, clear ours too
-                    invalidate_hex_cache_local()
-                    logger.info("[PUBSUB] Received cache_invalidate, cleared local cache")
-                elif msg_type == "votes_changed":
-                    # This triggers WebSocket push - handled by WS handler
-                    pass
+                if msg_type == "votes_changed":
+                    # Peer instance cast a vote; invalidate our graph-votes
+                    # response cache. The WebSocket handler reads pubsub
+                    # separately for its own broadcasting needs.
+                    _bump_votes_revision()
 
             except (json.JSONDecodeError, KeyError) as e:
                 logger.warning(f"[PUBSUB] Invalid message: {e}")
@@ -121,38 +100,6 @@ def start_pubsub_listener():
     thread.start()
     return thread
 
-def get_hex_overlay_cached(mode_filter: str, resolution: int) -> dict:
-    """Get hex overlay from in-memory cache, falling back to Redis."""
-    global hex_cache
-    cache_key = f"{mode_filter or 'all'}:{resolution}"
-
-    if cache_key in hex_cache:
-        return hex_cache[cache_key]
-
-    # Load from Redis
-    result = get_cached_hex_overlay(redis_client, mode_filter, resolution)
-    hex_cache[cache_key] = result
-    return result
-
-def clear_hex_cache():
-    """Clear in-memory hex cache to force reload from Redis."""
-    global hex_cache
-    hex_cache = {}
-    logger.info("[HEX_CACHE] Cleared in-memory cache")
-
-def preload_hex_cache():
-    """Preload all resolutions into memory on startup."""
-    global hex_cache
-    hex_cache = {}  # Clear first
-    logger.info("[HEX_CACHE] Preloading hex cache for all resolutions...")
-    for mode in ["bike", "walk", "drive", "trees", "pedestrian", None]:
-        for res in H3_RESOLUTIONS:
-            cache_key = f"{mode or 'all'}:{res}"
-            result = get_cached_hex_overlay(redis_client, mode, res)
-            hex_count = len(result.get("hexes", {}))
-            hex_cache[cache_key] = result
-            logger.info(f"[HEX_CACHE] {cache_key}: {hex_count} hexes")
-    logger.info(f"[HEX_CACHE] Preloaded {len(hex_cache)} cache entries")
 
 # Log Redis connection info at startup
 logger.info(f"[REDIS] Connecting to Redis at: {redis_host}:6379")
@@ -179,183 +126,39 @@ def _load_graph_cache():
     try:
         # get_graph_for_bbox(south, west, north, east) — full Manhattan
         data = router.get_graph_for_bbox(40.700, -74.020, 40.880, -73.907)
+        nodes = data.get("nodes", [])
+        edges = data.get("edges", [])
+
+        # Pre-compute the segment-key strings for every edge once. Without
+        # this, /api/graph-votes was burning ~2.5M f-string format ops per
+        # request rebuilding these keys for all 313K edges.
+        edge_coord_keys: list[tuple[str, str]] = []
+        coord_to_edge_idx: dict[tuple[str, str], int] = {}
+        for i, edge in enumerate(edges):
+            from_idx, to_idx = edge[0], edge[1]
+            from_lat, from_lon = nodes[from_idx]
+            to_lat, to_lon = nodes[to_idx]
+            c1 = f"{round(from_lon, 5)},{round(from_lat, 5)}"
+            c2 = f"{round(to_lon, 5)},{round(to_lat, 5)}"
+            edge_coord_keys.append((c1, c2))
+            # Reverse index — both directions point at the same edge
+            coord_to_edge_idx[(c1, c2)] = i
+            coord_to_edge_idx[(c2, c1)] = i
+
+        data["edge_coord_keys"] = edge_coord_keys
+        data["coord_to_edge_idx"] = coord_to_edge_idx
         _graph_cache = data
-        logger.info(f"[STARTUP] Cached graph: {len(data.get('nodes', []))} nodes, {len(data.get('edges', []))} edges")
+        logger.info(
+            f"[STARTUP] Cached graph: {len(nodes)} nodes, {len(edges)} edges, "
+            f"{len(coord_to_edge_idx)} coord index entries"
+        )
     except Exception as e:
         logger.error(f"[STARTUP] Failed to load graph cache: {e}")
 
 _load_graph_cache()
 
-# Preload hex cache into memory
-preload_hex_cache()
-
 # Initialize database (creates tables if needed)
 init_db()
-
-# Migrate suggestion data from DB → Redis on startup (ensures hex_suggestions
-# stay in sync after regenerate_hex_cache or Redis restarts)
-def _migrate_suggestions_on_startup():
-    from database import DATABASE_URL, get_cursor
-    from hex_voting import (
-        line_to_hexes_exact,
-        get_jittered_hex_deterministic,
-        segment_key_from_coords,
-        rebuild_all_resolutions,
-        rebuild_all_modes_weighted_cache,
-        H3_FINEST_RESOLUTION,
-        H3_RESOLUTIONS,
-    )
-    import h3 as h3_lib
-
-    if not DATABASE_URL:
-        return
-
-    try:
-        # Check if suggestions already exist
-        for mode in ["bike", "walk", "drive"]:
-            key = f"hex_suggestions:{mode}:res{H3_FINEST_RESOLUTION}"
-            if redis_client.hlen(key) > 0:
-                logger.info(f"[MIGRATE] Suggestions already exist in Redis, skipping migration")
-                return
-
-        logger.info("[MIGRATE] No suggestion data in Redis, migrating from DB...")
-
-        # Read vote_types from DB
-        with get_cursor() as cursor:
-            cursor.execute("""
-                SELECT segment_key, mode, vote_type
-                FROM votes WHERE vote_type IS NOT NULL
-            """)
-            rows = cursor.fetchall()
-
-        if not rows:
-            logger.info("[MIGRATE] No votes with vote_type in DB")
-            return
-
-        # Build normalized key → vote_types mapping
-        vote_type_map = {}
-        point_votes = []
-        for db_seg_key, mode, vote_type in rows:
-            parts = db_seg_key.split("|")
-            if len(parts) < 2:
-                continue
-            if not parts[1]:
-                point_votes.append((db_seg_key, mode, vote_type))
-                continue
-            try:
-                c1 = [float(x) for x in parts[0].split(",")]
-                c2 = [float(x) for x in parts[1].split(",")]
-            except (ValueError, IndexError):
-                continue
-            norm_key = segment_key_from_coords(c1, c2, mode)
-            if norm_key not in vote_type_map:
-                vote_type_map[norm_key] = set()
-            vote_type_map[norm_key].add(vote_type)
-
-        # Iterate segment_votes Redis (same coords/jitter as regenerate_hex_cache)
-        segment_votes = redis_client.hgetall("segment_votes")
-        suggestions_by_mode = {}
-        matched = 0
-
-        for key, count in segment_votes.items():
-            parts = key.split("|")
-            if len(parts) < 3:
-                continue
-            mode = parts[2]
-            vote_types = vote_type_map.get(key, set())
-            if not vote_types:
-                continue
-            matched += 1
-            try:
-                c1 = [float(x) for x in parts[0].split(",")]
-                c2 = [float(x) for x in parts[1].split(",")]
-            except (ValueError, IndexError):
-                continue
-            exact_hexes = list(line_to_hexes_exact(c1, c2))
-            if mode not in suggestions_by_mode:
-                suggestions_by_mode[mode] = {}
-            for _ in range(int(count)):
-                for vi, ch in enumerate(exact_hexes):
-                    jittered = get_jittered_hex_deterministic(ch, key, vi)
-                    for vt in vote_types:
-                        sk = f"{jittered}|{vt}"
-                        suggestions_by_mode[mode][sk] = suggestions_by_mode[mode].get(sk, 0) + 1
-
-        # Handle point votes
-        for db_seg_key, mode, vote_type in point_votes:
-            parts = db_seg_key.split("|")
-            try:
-                lon, lat = [float(x) for x in parts[0].split(",")]
-            except (ValueError, IndexError):
-                continue
-            hex_id = h3_lib.latlng_to_cell(lat, lon, H3_FINEST_RESOLUTION)
-            jittered = get_jittered_hex_deterministic(hex_id, f"point:{lat},{lon}:{mode}", 0)
-            if mode not in suggestions_by_mode:
-                suggestions_by_mode[mode] = {}
-            suggestions_by_mode[mode][f"{jittered}|{vote_type}"] = suggestions_by_mode[mode].get(f"{jittered}|{vote_type}", 0) + 1
-
-        # Write to Redis
-        pipe = redis_client.pipeline()
-        total = 0
-        for mode, sug_data in suggestions_by_mode.items():
-            rk = f"hex_suggestions:{mode}:res{H3_FINEST_RESOLUTION}"
-            for field, cnt in sug_data.items():
-                pipe.hset(rk, field, str(cnt))
-                total += 1
-        pipe.execute()
-
-        # Aggregate to coarser resolutions
-        for mode in suggestions_by_mode:
-            rebuild_all_resolutions(redis_client, mode)
-        rebuild_all_modes_weighted_cache(redis_client)
-
-        logger.info(f"[MIGRATE] Migrated {total} suggestion entries for {list(suggestions_by_mode.keys())}, matched {matched} segments")
-
-        # Reload hex cache with new suggestions
-        preload_hex_cache()
-
-    except Exception as e:
-        logger.error(f"[MIGRATE] Startup migration failed: {e}")
-
-_migrate_suggestions_on_startup()
-
-
-def _migrate_raw_counts_on_startup():
-    """One-time rebuild to populate hex_votes_raw keys for existing data."""
-    from hex_voting import (
-        rebuild_weighted_hex_cache,
-        rebuild_all_resolutions,
-        rebuild_all_modes_weighted_cache,
-        H3_FINEST_RESOLUTION,
-    )
-
-    try:
-        # Check if raw counts already exist for any mode
-        for mode in ["bike", "walk", "drive"]:
-            raw_key = f"hex_votes_raw:{mode}:res{H3_FINEST_RESOLUTION}"
-            if redis_client.hlen(raw_key) > 0:
-                return
-
-        # Check if weighted data exists (otherwise nothing to rebuild)
-        has_data = False
-        for mode in ["bike", "walk", "drive"]:
-            if redis_client.hlen(f"hex_votes_by_ip:{mode}") > 0:
-                has_data = True
-                break
-        if not has_data:
-            return
-
-        logger.info("[MIGRATE] Rebuilding weighted caches to populate raw vote counts...")
-        rebuild_weighted_hex_cache(redis_client, None)
-        for mode in ["bike", "walk", "drive"]:
-            rebuild_all_resolutions(redis_client, mode)
-        rebuild_all_modes_weighted_cache(redis_client)
-        preload_hex_cache()
-        logger.info("[MIGRATE] Raw vote counts populated")
-    except Exception as e:
-        logger.error(f"[MIGRATE] Raw counts migration failed: {e}")
-
-_migrate_raw_counts_on_startup()
 
 
 def _migrate_segment_votes_on_startup():
@@ -589,81 +392,14 @@ def get_segment_overlay(mode_filter=None):
     }
 
 
-def get_hex_overlay(mode_filter=None, resolution=None):
-    """Get hex overlay from in-memory cache, falling back to Redis if needed."""
-    try:
-        # Use in-memory cache for fast access
-        result = get_hex_overlay_cached(mode_filter, resolution)
-
-        # If cache is empty but we have segment votes, regenerate
-        if not result.get("hexes"):
-            segment_votes = redis_client.hgetall(SEGMENT_VOTES_KEY)
-            if segment_votes:
-                logger.info("[HEX_CACHE] Cache empty but segment votes exist, regenerating...")
-                regenerate_hex_cache(redis_client)
-                invalidate_hex_cache()  # Clear in-memory cache
-                result = get_hex_overlay_cached(mode_filter, resolution)
-
-        return result
-    except redis.ConnectionError:
-        return {"hexes": {}, "max_votes": 1, "res": resolution or 13, "suggestions": {}}
-
-
-def make_state(rev: int, mode_filter=None, resolution=None):
-    """Build map state with segment overlay and a single hex overlay.
-
-    Sends only the requested resolution to keep payload small (~80-120 KB
-    instead of ~500 KB for all 6). Client merges and caches resolutions
-    as they arrive.
-    Uses compact format for hex overlay to reduce bandwidth:
-    - 'res': resolution level
-    - 'h': array of [hex_id, weight] tuples (more compact than object)
-    - 'm': max votes
-    """
+def make_state(rev: int, mode_filter=None):
+    """Build map state with the segment overlay."""
     segment_overlay = get_segment_overlay(mode_filter)
-
-    # Build hex overlay for requested resolution only
-    target_res = resolution or 13
-    hex_overlays = {}
-    hex_data = get_hex_overlay(mode_filter, target_res)
-    hex_list = [[hex_id, round(weight, 4)] for hex_id, weight in hex_data.get("hexes", {}).items()]
-
-    # Build suggestion legend and per-hex indices (top 3 per hex)
-    suggestions = hex_data.get("suggestions", {})
-    legend = []
-    legend_index = {}
-    hex_sug = {}
-    for hex_id, type_counts in suggestions.items():
-        sorted_types = sorted(type_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-        indices = []
-        for vtype, _count in sorted_types:
-            if vtype not in legend_index:
-                legend_index[vtype] = len(legend)
-                legend.append(vtype)
-            indices.append(legend_index[vtype])
-        if indices:
-            hex_sug[hex_id] = indices
-
-    overlay = {
-        "res": target_res,
-        "h": hex_list,
-        "m": hex_data.get("max_votes", 1.0)
-    }
-    if legend:
-        overlay["sl"] = legend
-        overlay["s"] = hex_sug
-    # Include raw vote counts per hex (for tooltip display)
-    raw_counts = hex_data.get("raw_counts", {})
-    if raw_counts:
-        overlay["rc"] = raw_counts
-    hex_overlays[target_res] = overlay
-
     return {
         "revision": rev,
         "overlays": {
             "desire_paths": segment_overlay
-        },
-        "hex_overlays": hex_overlays
+        }
     }
 
 
@@ -677,225 +413,10 @@ def health():
         return jsonify({"status": "unhealthy", "redis": "disconnected"}), 503
 
 
-@app.route("/api/admin/db-diagnostic")
-def db_diagnostic():
-    """Temporary endpoint to diagnose vote_type data."""
-    result = {}
-
-    # Database stats
-    try:
-        from database import get_cursor
-        with get_cursor() as cursor:
-            cursor.execute("""
-                SELECT
-                    COUNT(*) as total_votes,
-                    COUNT(vote_type) as with_vote_type,
-                    COUNT(*) - COUNT(vote_type) as without_vote_type,
-                    MIN(created_at)::text as earliest_vote,
-                    MIN(CASE WHEN vote_type IS NOT NULL THEN created_at END)::text as earliest_with_type,
-                    MAX(created_at)::text as latest_vote
-                FROM votes
-            """)
-            row = cursor.fetchone()
-            result["db_summary"] = {
-                "total_votes": row[0],
-                "with_vote_type": row[1],
-                "without_vote_type": row[2],
-                "earliest_vote": row[3],
-                "earliest_with_type": row[4],
-                "latest_vote": row[5],
-            }
-    except Exception as e:
-        result["db_error"] = str(e)
-
-    # Redis suggestion stats
-    try:
-        redis_sug = {}
-        for mode in ["bike", "walk", "drive", "all"]:
-            for res in [10, 11, 12, 13, 14, 15]:
-                key = f"hex_suggestions:{mode}:res{res}"
-                count = redis_client.hlen(key)
-                if count > 0:
-                    # Sample a few entries
-                    sample = dict(list(redis_client.hscan_iter(key, count=5))[:5])
-                    redis_sug[key] = {"entries": count, "sample": sample}
-                else:
-                    redis_sug[key] = {"entries": 0}
-        result["redis_suggestions"] = redis_sug
-
-        # Also check hex_votes_weighted counts
-        hex_weighted = {}
-        for mode in ["bike", "walk", "drive", "all"]:
-            for res in [10, 11, 12, 13, 14, 15]:
-                key = f"hex_votes_weighted:{mode}:res{res}"
-                count = redis_client.hlen(key)
-                if count > 0:
-                    hex_weighted[key] = count
-        result["redis_hex_weighted"] = hex_weighted
-    except Exception as e:
-        result["redis_error"] = str(e)
-
-    return jsonify(result)
-
-
-@app.route("/api/admin/migrate-suggestions", methods=["POST"])
-def migrate_suggestions():
-    """Replay vote_type data from Postgres into Redis hex_suggestions.
-
-    Uses segment_votes Redis hash as source of truth for coordinates and
-    jitter (matching regenerate_hex_cache exactly), cross-referenced with
-    DB votes table for vote_type information.
-    """
-    from database import get_cursor
-    from hex_voting import (
-        line_to_hexes_exact,
-        get_jittered_hex_deterministic,
-        segment_key_from_coords,
-        rebuild_all_resolutions,
-        rebuild_all_modes_weighted_cache,
-        H3_FINEST_RESOLUTION,
-        H3_RESOLUTIONS,
-    )
-    import h3 as h3_lib
-
-    try:
-        # Step 1: Clear all existing hex_suggestions keys
-        pipe = redis_client.pipeline()
-        for mode in ["bike", "walk", "drive", "all"]:
-            for res in H3_RESOLUTIONS:
-                pipe.delete(f"hex_suggestions:{mode}:res{res}")
-        pipe.execute()
-
-        # Step 2: Read all votes with vote_type from DB, build normalized lookup
-        # DB segment_key format: "lon.6dp,lat.6dp|lon.6dp,lat.6dp|mode"
-        # Normalize to match segment_votes Redis format (5dp)
-        with get_cursor() as cursor:
-            cursor.execute("""
-                SELECT segment_key, mode, vote_type
-                FROM votes
-                WHERE vote_type IS NOT NULL
-            """)
-            rows = cursor.fetchall()
-
-        # Map: normalized_segment_key -> set of vote_types
-        vote_type_map = {}
-        point_votes = []
-        for db_seg_key, mode, vote_type in rows:
-            parts = db_seg_key.split("|")
-            if len(parts) < 2:
-                continue
-
-            if not parts[1]:
-                # Point vote — handle separately
-                point_votes.append((db_seg_key, mode, vote_type))
-                continue
-
-            try:
-                coord1 = [float(x) for x in parts[0].split(",")]
-                coord2 = [float(x) for x in parts[1].split(",")]
-            except (ValueError, IndexError):
-                continue
-
-            # Normalize to 5dp key (matches segment_votes Redis format)
-            norm_key = segment_key_from_coords(coord1, coord2, mode)
-            if norm_key not in vote_type_map:
-                vote_type_map[norm_key] = set()
-            vote_type_map[norm_key].add(vote_type)
-
-        # Step 3: Iterate segment_votes Redis (same as regenerate_hex_cache)
-        segment_votes = redis_client.hgetall("segment_votes")
-        stats = {"segment_votes": len(segment_votes), "matched": 0, "unmatched": 0,
-                 "points": 0, "hex_entries": 0}
-        suggestions_by_mode = {}
-
-        for key, count in segment_votes.items():
-            parts = key.split("|")
-            if len(parts) < 3:
-                continue
-
-            mode = parts[2]
-            vote_count = int(count)
-
-            # Look up vote_types for this segment
-            vote_types = vote_type_map.get(key, set())
-            if not vote_types:
-                stats["unmatched"] += 1
-                continue
-            stats["matched"] += 1
-
-            try:
-                coord1 = [float(x) for x in parts[0].split(",")]
-                coord2 = [float(x) for x in parts[1].split(",")]
-            except (ValueError, IndexError):
-                continue
-
-            # Use same logic as regenerate_hex_cache: exact hexes + jitter
-            exact_hexes = list(line_to_hexes_exact(coord1, coord2))
-
-            if mode not in suggestions_by_mode:
-                suggestions_by_mode[mode] = {}
-
-            for _ in range(vote_count):
-                for vote_idx, center_hex in enumerate(exact_hexes):
-                    # Use raw Redis key as jitter seed (matches regenerate_hex_cache)
-                    jittered = get_jittered_hex_deterministic(center_hex, key, vote_idx)
-                    for vtype in vote_types:
-                        sug_key = f"{jittered}|{vtype}"
-                        suggestions_by_mode[mode][sug_key] = suggestions_by_mode[mode].get(sug_key, 0) + 1
-                        stats["hex_entries"] += 1
-
-        # Step 4: Handle point votes from DB
-        for db_seg_key, mode, vote_type in point_votes:
-            parts = db_seg_key.split("|")
-            try:
-                lon, lat = [float(x) for x in parts[0].split(",")]
-            except (ValueError, IndexError):
-                continue
-
-            hex_id = h3_lib.latlng_to_cell(lat, lon, H3_FINEST_RESOLUTION)
-            jittered = get_jittered_hex_deterministic(hex_id, f"point:{lat},{lon}:{mode}", 0)
-
-            if mode not in suggestions_by_mode:
-                suggestions_by_mode[mode] = {}
-            sug_key = f"{jittered}|{vote_type}"
-            suggestions_by_mode[mode][sug_key] = suggestions_by_mode[mode].get(sug_key, 0) + 1
-            stats["points"] += 1
-            stats["hex_entries"] += 1
-
-        # Step 5: Write suggestions to Redis at finest resolution
-        pipe = redis_client.pipeline()
-        for mode, sug_data in suggestions_by_mode.items():
-            key = f"hex_suggestions:{mode}:res{H3_FINEST_RESOLUTION}"
-            for field, cnt in sug_data.items():
-                pipe.hset(key, field, str(cnt))
-        pipe.execute()
-
-        # Step 6: Aggregate to coarser resolutions for each mode
-        for mode in suggestions_by_mode:
-            rebuild_all_resolutions(redis_client, mode)
-
-        # Step 7: Rebuild "all" mode aggregation
-        rebuild_all_modes_weighted_cache(redis_client)
-
-        # Step 8: Invalidate in-memory cache on all Flask instances
-        invalidate_hex_cache()
-
-
-        stats["modes_migrated"] = list(suggestions_by_mode.keys())
-        return jsonify({"status": "ok", "stats": stats})
-
-    except Exception as e:
-        logger.error(f"[MIGRATE] Error: {e}")
-        import traceback
-        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
-
-
 @sock.route("/ws")
 def ws(ws):
     """WebSocket handler using Redis pub/sub for efficient push updates."""
     rev = 1
-    current_zoom = 14  # Default zoom level
-    current_resolution = ZOOM_TO_RESOLUTION.get(current_zoom, 13)
     last_push_time = 0
     KEEPALIVE_INTERVAL = 30  # Send keepalive every 30 seconds
 
@@ -905,31 +426,18 @@ def ws(ws):
     pubsub.subscribe(REDIS_CHANNEL)
 
     # Send initial state immediately on connect
-    state_msg = {"type": "map_state", "state": make_state(rev, None, current_resolution)}
+    state_msg = {"type": "map_state", "state": make_state(rev)}
     ws.send(json.dumps(state_msg))
     rev += 1
     last_push_time = time.time()
 
     try:
         while True:
-            # Check for incoming WebSocket messages (non-blocking)
+            # Drain any inbound messages (we don't act on them, but keep the
+            # socket healthy by reading).
             try:
-                msg = ws.receive(timeout=0)
-                if msg:
-                    data = json.loads(msg)
-                    if data.get("type") == "set_zoom":
-                        new_zoom = data.get("zoom", 14)
-                        if isinstance(new_zoom, (int, float)) and 0 <= new_zoom <= 22:
-                            current_zoom = int(new_zoom)
-                            new_resolution = ZOOM_TO_RESOLUTION.get(current_zoom, 13)
-                            if new_resolution != current_resolution:
-                                current_resolution = new_resolution
-                                state_msg = {"type": "map_state", "state": make_state(rev, None, current_resolution)}
-                                ws.send(json.dumps(state_msg))
-                                rev += 1
-                                last_push_time = time.time()
+                ws.receive(timeout=0)
             except Exception as e:
-                # Timeout, no data, and connection closed are expected - don't log
                 err_str = str(e).lower()
                 if "timed out" not in err_str and "no data" not in err_str and "connection closed" not in err_str:
                     logger.warning(f"[WS] Exception in receive: {e}")
@@ -951,7 +459,7 @@ def ws(ws):
                 should_push = True
 
             if should_push:
-                state_msg = {"type": "map_state", "state": make_state(rev, None, current_resolution)}
+                state_msg = {"type": "map_state", "state": make_state(rev)}
                 ws.send(json.dumps(state_msg))
                 rev += 1
                 last_push_time = time.time()
@@ -1068,78 +576,37 @@ def cast_vote():
 
     try:
         if point:
-            # Single-point vote (no route, just a location)
-            from hex_voting import cast_point_vote
-            cast_point_vote(redis_client, point, mode, ip_hash, defer_rebuild=True, vote_type=vote_type)
-            logger.info(f"[VOTE] Cast point vote for '{vote_type}' at {point} as '{mode}' from IP {ip_hash[:8]}...")
-
-            # Record to database for persistence (vote_type only stored here)
+            # Point votes are persisted to the DB but not currently surfaced on
+            # the map (the hex visualisation that consumed them was removed).
             from database import record_point_vote
             record_point_vote(point, mode, ip_hash, vote_type)
+            logger.info(f"[VOTE] Recorded point vote for '{vote_type}' at {point} as '{mode}' from IP {ip_hash[:8]}...")
 
-            # Invalidate in-memory cache so next request gets fresh data
-            invalidate_hex_cache()
-
-            # Increment revision and notify all instances
             redis_client.incr("revision")
             publish_votes_changed()
-
-            # Run expensive hex cache rebuild in background thread
-            def background_rebuild():
-                try:
-                    rebuild_weighted_hex_cache(redis_client, mode)
-                    invalidate_hex_cache()
-                    publish_votes_changed()
-                    logger.info(f"[VOTE] Background hex rebuild complete for point vote mode={mode}")
-                except Exception as e:
-                    logger.error(f"[VOTE] Background rebuild failed: {e}")
-
-            threading.Thread(target=background_rebuild, daemon=True).start()
 
             return jsonify({
                 "success": True,
                 "point_vote": True,
                 "vote_type": vote_type
             })
-        else:
-            # Route vote (existing logic)
-            # Cast segment votes (updates ip_vote_counts)
-            vote_count = cast_desire_path_votes(redis_client, segments, mode, ip_hash, vote_type=vote_type)
-            logger.info(f"[VOTE] Cast {vote_count} segment votes for '{vote_type}' as '{mode}' from IP {ip_hash[:8]}...")
 
-            # Update hex cache incrementally with IP-weighted votes (defer expensive rebuild)
-            update_hex_cache_incremental(redis_client, segments, mode, ip_hash, defer_rebuild=True, vote_type=vote_type)
-            logger.info(f"[VOTE] Updated hex cache with {len(segments)} segments")
+        # Route vote — write to Redis segment_votes (consumed by /api/graph-votes)
+        # and persist to the DB for durability.
+        vote_count = cast_desire_path_votes(redis_client, segments, mode, ip_hash, vote_type=vote_type)
+        logger.info(f"[VOTE] Cast {vote_count} segment votes for '{vote_type}' as '{mode}' from IP {ip_hash[:8]}...")
 
-            # Record to database for persistence (async, doesn't block response)
-            # Weight per segment = 1.0 / (previous votes from this IP + 1)
-            weight_per_segment = 1.0 / len(segments) if segments else 1.0
-            record_segment_votes(segments, mode, ip_hash, weight_per_segment, vote_type)
+        weight_per_segment = 1.0 / len(segments) if segments else 1.0
+        record_segment_votes(segments, mode, ip_hash, weight_per_segment, vote_type)
 
-            # Invalidate in-memory cache so next request gets fresh data
-            invalidate_hex_cache()
+        redis_client.incr("revision")
+        publish_votes_changed()
 
-            # Increment revision and notify all instances to push WebSocket updates
-            redis_client.incr("revision")
-            publish_votes_changed()
-
-            # Run expensive hex cache rebuild in background thread
-            def background_rebuild():
-                try:
-                    rebuild_weighted_hex_cache(redis_client, mode)
-                    invalidate_hex_cache()
-                    publish_votes_changed()
-                    logger.info(f"[VOTE] Background hex rebuild complete for mode={mode}")
-                except Exception as e:
-                    logger.error(f"[VOTE] Background rebuild failed: {e}")
-
-            threading.Thread(target=background_rebuild, daemon=True).start()
-
-            return jsonify({
-                "success": True,
-                "segments_voted": vote_count,
-                "vote_type": vote_type
-            })
+        return jsonify({
+            "success": True,
+            "segments_voted": vote_count,
+            "vote_type": vote_type
+        })
 
     except Exception as e:
         logger.error(f"[VOTE] Error casting votes: {e}")
@@ -1317,6 +784,155 @@ def vote_match_diagnostic():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/admin/retag-mode", methods=["POST"])
+def admin_retag_mode():
+    """One-shot migration: rewrite every vote's mode to the target value.
+
+    Touches both Redis (segment_votes, segment_vote_types) and Postgres
+    (votes table). Idempotent — running it twice with the same target is a
+    no-op. Optional `from_modes` filter restricts which modes are migrated;
+    if omitted, EVERY mode that isn't already the target is rewritten.
+
+    Body (JSON):
+        {
+          "to": "bikepath",
+          "from_modes": ["walk", "bike", "drive"]   // optional
+        }
+    """
+    from desire_path_voting import SEGMENT_VOTE_TYPES_KEY
+
+    data = request.get_json(silent=True) or {}
+    target = (data.get("to") or "").strip()
+    if not target:
+        return jsonify({"error": "Missing 'to' (target mode)"}), 400
+    from_modes = data.get("from_modes")
+    from_set = set(from_modes) if from_modes else None
+
+    def should_migrate(old_mode: str) -> bool:
+        if old_mode == target:
+            return False
+        return from_set is None or old_mode in from_set
+
+    summary: dict = {"target": target}
+
+    # ---- Redis: SEGMENT_VOTES_KEY (raw counts) ----
+    seg_migrated = 0
+    seg_collisions = 0
+    try:
+        all_keys = list(redis_client.hgetall(SEGMENT_VOTES_KEY).items())
+        delete_keys: list[str] = []
+        pipe = redis_client.pipeline()
+        for seg_key, count_raw in all_keys:
+            parts = seg_key.split("|")
+            if len(parts) < 3:
+                continue
+            if not should_migrate(parts[2]):
+                continue
+            new_key = f"{parts[0]}|{parts[1]}|{target}"
+            try:
+                count = int(count_raw)
+            except ValueError:
+                continue
+            if redis_client.hexists(SEGMENT_VOTES_KEY, new_key):
+                seg_collisions += 1
+            pipe.hincrby(SEGMENT_VOTES_KEY, new_key, count)
+            delete_keys.append(seg_key)
+            seg_migrated += 1
+        if delete_keys:
+            pipe.hdel(SEGMENT_VOTES_KEY, *delete_keys)
+        pipe.execute()
+        summary["redis_segment_votes"] = {
+            "migrated": seg_migrated,
+            "merged_into_existing": seg_collisions,
+        }
+    except Exception as e:
+        summary["redis_segment_votes_error"] = str(e)
+
+    # ---- Redis: SEGMENT_VOTE_TYPES_KEY (per-segment vote_type → count JSON) ----
+    vt_migrated = 0
+    try:
+        all_vt = list(redis_client.hgetall(SEGMENT_VOTE_TYPES_KEY).items())
+        for seg_key, vt_json in all_vt:
+            parts = seg_key.split("|")
+            if len(parts) < 3:
+                continue
+            if not should_migrate(parts[2]):
+                continue
+            new_key = f"{parts[0]}|{parts[1]}|{target}"
+            try:
+                old_dict = json.loads(vt_json) if vt_json else {}
+            except json.JSONDecodeError:
+                old_dict = {}
+            existing_raw = redis_client.hget(SEGMENT_VOTE_TYPES_KEY, new_key)
+            try:
+                merged = json.loads(existing_raw) if existing_raw else {}
+            except json.JSONDecodeError:
+                merged = {}
+            for vt, cnt in old_dict.items():
+                merged[vt] = int(merged.get(vt, 0)) + int(cnt)
+            redis_client.hset(SEGMENT_VOTE_TYPES_KEY, new_key, json.dumps(merged))
+            redis_client.hdel(SEGMENT_VOTE_TYPES_KEY, seg_key)
+            vt_migrated += 1
+        summary["redis_vote_types"] = {"migrated": vt_migrated}
+    except Exception as e:
+        summary["redis_vote_types_error"] = str(e)
+
+    # ---- Postgres: votes table ----
+    try:
+        from database import DATABASE_URL, get_cursor
+        if not DATABASE_URL:
+            summary["postgres"] = "DATABASE_URL not set, skipped"
+        else:
+            with get_cursor() as cursor:
+                if from_set:
+                    cursor.execute(
+                        """
+                        INSERT INTO votes (segment_key, mode, ip_hash, weight, vote_type, created_at)
+                        SELECT
+                          regexp_replace(segment_key, '\\|[^|]+$', '|' || %s),
+                          %s, ip_hash, weight, vote_type, created_at
+                        FROM votes
+                        WHERE mode <> %s AND mode = ANY(%s)
+                        ON CONFLICT (segment_key, ip_hash, vote_type) DO NOTHING
+                        """,
+                        (target, target, target, list(from_set)),
+                    )
+                    inserted = cursor.rowcount
+                    cursor.execute(
+                        "DELETE FROM votes WHERE mode <> %s AND mode = ANY(%s)",
+                        (target, list(from_set)),
+                    )
+                    deleted = cursor.rowcount
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO votes (segment_key, mode, ip_hash, weight, vote_type, created_at)
+                        SELECT
+                          regexp_replace(segment_key, '\\|[^|]+$', '|' || %s),
+                          %s, ip_hash, weight, vote_type, created_at
+                        FROM votes
+                        WHERE mode <> %s
+                        ON CONFLICT (segment_key, ip_hash, vote_type) DO NOTHING
+                        """,
+                        (target, target, target),
+                    )
+                    inserted = cursor.rowcount
+                    cursor.execute(
+                        "DELETE FROM votes WHERE mode <> %s",
+                        (target,),
+                    )
+                    deleted = cursor.rowcount
+                summary["postgres"] = {"inserted": inserted, "deleted": deleted}
+    except Exception as e:
+        summary["postgres_error"] = str(e)
+
+    # Bump revision so any cached graph-votes responses are invalidated and
+    # peer flask instances flush their caches via pubsub.
+    publish_votes_changed()
+    summary["votes_revision"] = _votes_revision
+    return jsonify(summary)
 
 
 @app.route("/api/admin/router-stats", methods=["GET"])
@@ -1517,91 +1133,117 @@ def graph_votes():
 
     No bbox needed — indices match /api/graph-topology.
     Returns edge_votes, node_votes, vote_type_legend, edge_vote_types.
+
+    Two optimizations vs. naive implementation:
+      1. Iterates over the (small) Redis vote rows and looks up the affected
+         edge index via a precomputed coord_to_edge_idx table. Avoids walking
+         the full 313K-edge graph on every request.
+      2. Caches the serialized response keyed by `_votes_revision`. While no
+         votes have been cast (or received via pubsub), every request short-
+         circuits to the cached body.
     """
-    global _graph_cache
+    global _graph_cache, _graph_votes_cache, _votes_revision
     if _graph_cache is None:
         return jsonify({"error": "Graph not loaded"}), 500
 
-    nodes = _graph_cache["nodes"]
+    # Optional ?mode=X filter scopes the heatmap to a single theme namespace.
+    mode_filter = (request.args.get("mode") or "").strip() or None
+    cache_key = mode_filter or ""
+
+    # Cache hit — body is already-serialized JSON bytes
+    cached = _graph_votes_cache.get(cache_key)
+    if cached and cached["revision"] == _votes_revision:
+        resp = app.response_class(
+            response=cached["body"],
+            status=200,
+            mimetype="application/json",
+        )
+        resp.headers["Cache-Control"] = "public, max-age=5"
+        return resp
+
     edges = _graph_cache["edges"]
+    nodes = _graph_cache["nodes"]
+    coord_to_edge_idx: dict[tuple[str, str], int] = _graph_cache["coord_to_edge_idx"]
 
     try:
         segment_votes = redis_client.hgetall(SEGMENT_VOTES_KEY)
 
-        # Build lookup dict: coord_pair -> vote_count
-        vote_lookup = {}
+        # Walk the (small) vote rows, not the (huge) edge list
+        edge_votes = [0] * len(edges)
         for seg_key, vote_count in segment_votes.items():
             parts = seg_key.split("|")
-            if len(parts) >= 3:
-                c1, c2 = parts[0], parts[1]
-                vote_count = int(vote_count)
-                vote_lookup[(c1, c2)] = vote_lookup.get((c1, c2), 0) + vote_count
-                vote_lookup[(c2, c1)] = vote_lookup.get((c2, c1), 0) + vote_count
+            if len(parts) < 3 or not parts[1]:
+                continue
+            if mode_filter is not None and parts[2] != mode_filter:
+                continue
+            edge_idx = coord_to_edge_idx.get((parts[0], parts[1]))
+            if edge_idx is not None:
+                edge_votes[edge_idx] += int(vote_count)
 
-        # Compute edge votes
-        edge_votes = []
-        for from_idx, to_idx, *rest in edges:
-            from_lat, from_lon = nodes[from_idx]
-            to_lat, to_lon = nodes[to_idx]
-            c1_str = f"{round(from_lon, 5)},{round(from_lat, 5)}"
-            c2_str = f"{round(to_lon, 5)},{round(to_lat, 5)}"
-            edge_votes.append(vote_lookup.get((c1_str, c2_str), 0))
-
-        # Compute node votes (max of adjacent edge votes)
+        # Node votes = max of adjacent edge votes. Iterate edges only when
+        # there are any non-zero values to propagate.
         node_votes = [0] * len(nodes)
-        for i, (from_idx, to_idx, *rest) in enumerate(edges):
-            votes = edge_votes[i]
-            if votes > node_votes[from_idx]:
-                node_votes[from_idx] = votes
-            if votes > node_votes[to_idx]:
-                node_votes[to_idx] = votes
+        for i, edge in enumerate(edges):
+            v = edge_votes[i]
+            if v == 0:
+                continue
+            from_idx, to_idx = edge[0], edge[1]
+            if v > node_votes[from_idx]:
+                node_votes[from_idx] = v
+            if v > node_votes[to_idx]:
+                node_votes[to_idx] = v
 
-        # Vote types — look up via segment_votes keys (same keys in both hashes)
-        edge_vote_types = [[] for _ in edges]
+        # Vote types — same trick: iterate the small vote-types hash
+        edge_vote_types: list = [None] * len(edges)
         legend: list[str] = []
+        legend_idx: dict[str, int] = {}
         try:
             from desire_path_voting import SEGMENT_VOTE_TYPES_KEY
             raw_vt = redis_client.hgetall(SEGMENT_VOTE_TYPES_KEY)
-
-            # Build coord-pair lookup from segment_vote_types using raw keys
-            vt_lookup: dict[tuple[str, str], dict[str, int]] = {}
             for seg_key, vt_json in raw_vt.items():
                 parts = seg_key.split("|")
                 if len(parts) < 3 or not parts[1]:
                     continue
-                c1, c2 = parts[0], parts[1]
+                if mode_filter is not None and parts[2] != mode_filter:
+                    continue
+                edge_idx = coord_to_edge_idx.get((parts[0], parts[1]))
+                if edge_idx is None:
+                    continue
                 vt_map = json.loads(vt_json)
-                for pair in [(c1, c2), (c2, c1)]:
-                    if pair not in vt_lookup:
-                        vt_lookup[pair] = {}
-                    for vt, cnt in vt_map.items():
-                        vt_lookup[pair][vt] = vt_lookup[pair].get(vt, 0) + cnt
-
-            legend_idx: dict[str, int] = {}
-            for i, (from_idx, to_idx, *rest) in enumerate(edges):
-                from_lat, from_lon = nodes[from_idx]
-                to_lat, to_lon = nodes[to_idx]
-                c1_str = f"{round(from_lon, 5)},{round(from_lat, 5)}"
-                c2_str = f"{round(to_lon, 5)},{round(to_lat, 5)}"
-                vt_map = vt_lookup.get((c1_str, c2_str))
-                if vt_map:
-                    sorted_vts = sorted(vt_map.items(), key=lambda x: -x[1])
-                    indices = []
-                    for vt, cnt in sorted_vts:
-                        if vt not in legend_idx:
-                            legend_idx[vt] = len(legend)
-                            legend.append(vt)
-                        indices.append([legend_idx[vt], cnt])
-                    edge_vote_types[i] = indices
+                # Aggregate (an edge may have entries from both directions in Redis)
+                existing = edge_vote_types[edge_idx]
+                merged: dict[str, int] = {}
+                if existing:
+                    for idx, cnt in existing:
+                        merged[legend[idx]] = cnt
+                for vt, cnt in vt_map.items():
+                    merged[vt] = merged.get(vt, 0) + cnt
+                # Re-encode to [legend_idx, count] pairs sorted by count desc
+                sorted_vts = sorted(merged.items(), key=lambda x: -x[1])
+                indices = []
+                for vt, cnt in sorted_vts:
+                    if vt not in legend_idx:
+                        legend_idx[vt] = len(legend)
+                        legend.append(vt)
+                    indices.append([legend_idx[vt], cnt])
+                edge_vote_types[edge_idx] = indices
         except Exception as e:
             logger.warning(f"[GRAPH-VOTES] Failed to fetch vote types: {e}")
 
-        resp = jsonify({
+        # Replace remaining None placeholders with [] for the JSON contract
+        for i in range(len(edge_vote_types)):
+            if edge_vote_types[i] is None:
+                edge_vote_types[i] = []
+
+        body = json.dumps({
             "edge_votes": edge_votes,
             "node_votes": node_votes,
             "vote_type_legend": legend,
             "edge_vote_types": edge_vote_types,
         })
+        _graph_votes_cache[cache_key] = {"revision": _votes_revision, "body": body}
+
+        resp = app.response_class(response=body, status=200, mimetype="application/json")
         resp.headers["Cache-Control"] = "public, max-age=5"
         return resp
     except Exception as e:
