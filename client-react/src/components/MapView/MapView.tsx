@@ -105,14 +105,19 @@ function SnapMarker({
   snappedNode,
   hasStart,
   suppress,
+  pointOnly,
 }: {
   snappedNode: LatLng | null;
   hasStart: boolean;
   suppress: boolean;
+  pointOnly: boolean;
 }) {
+  // In point-only themes (e.g. trees) every click resets the single waypoint,
+  // so the hover ghost always represents a fresh start — never an end pin.
+  const showAsEnd = !pointOnly && hasStart;
   const icon = useMemo(
-    () => kiteGhostIcon(hasStart ? COLOR_END : COLOR_START),
-    [hasStart]
+    () => kiteGhostIcon(showAsEnd ? COLOR_END : COLOR_START),
+    [showAsEnd]
   );
 
   if (suppress || !snappedNode) return null;
@@ -216,6 +221,7 @@ export function MapView() {
       <SnapMarker
         snappedNode={snappedNode}
         hasStart={!!start.coords}
+        pointOnly={theme.inputMode === "point"}
         suppress={isHoveringPath || ghostState.isDragging || isDraggingMarker}
       />
 

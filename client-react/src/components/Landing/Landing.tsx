@@ -35,7 +35,7 @@ export function Landing() {
     <div className="landing">
       <header className="landing-header">
         <img src="/logo.svg" alt="City Edit" className="landing-logo" />
-        <p className="landing-tagline">Choose your cause.</p>
+        <p className="landing-tagline">Help redraw your city.</p>
       </header>
 
       <main className="landing-grid">

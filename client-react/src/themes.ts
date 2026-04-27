@@ -15,22 +15,27 @@ export interface Theme {
   id: string;
   name: string;
   tagline: string;
-  mode: string;          // Vote namespace sent to the API (e.g. "bike", "trees")
+  mode: string;          // Vote namespace sent to the API (e.g. "bikepath", "trees")
   inputMode: InputMode;  // What input modality the user gets
   suggestions: VoteSuggestion[];
   locationLabel: string; // Label for start point (e.g. "Location", "Start")
+  symbol: string;        // Emoji shown in mode switcher and landing card
+  subdomain: string;     // Subdomain that hosts this theme (e.g. "bikepaths")
 }
 
 export const THEMES: Record<string, Theme> = {
   bikepaths: {
     id: "bikepaths",
     name: "Bike Paths",
-    tagline: "Vote for new or better bike lanes",
+    tagline: "Vote for new or better bike lanes.",
     mode: "bikepath",
     inputMode: "both",
     locationLabel: "Start",
+    symbol: "🚴",
+    subdomain: "bikepaths",
     suggestions: [
       // Route votes (2 points)
+      { label: "🛠️ Improve bike lane", pointType: "route" },
       { label: "🚴 Add bike lane", pointType: "route" },
       { label: "🛡️ Add protected bike lane", pointType: "route" },
       { label: "↔️ Widen bike lane", pointType: "route" },
@@ -39,8 +44,8 @@ export const THEMES: Record<string, Theme> = {
       { label: "🚦 Add bike signal phase", pointType: "route" },
       { label: "🌉 Add bike bridge / greenway", pointType: "route" },
       // Point votes (1 point)
-      { label: "🚲 Add Citi Bike station", pointType: "point" },
       { label: "🅿️ Add bike parking", pointType: "point" },
+      { label: "🚲 Add Citi Bike station", pointType: "point" },
       { label: "🔧 Add bike repair station", pointType: "point" },
       { label: "📊 Add bike counter", pointType: "point" },
       { label: "⚠️ Fix dangerous intersection", pointType: "point" },
@@ -50,12 +55,14 @@ export const THEMES: Record<string, Theme> = {
   trees: {
     id: "trees",
     name: "Trees",
-    tagline: "Vote to greenify your city",
+    tagline: "Vote to greenify your city.",
     mode: "trees",
     inputMode: "point",
     locationLabel: "Location",
+    symbol: "🌳",
+    subdomain: "trees",
     suggestions: [
-      { label: "🌳 Plant a street tree", pointType: "point" },
+      { label: "🌳 Add tree", pointType: "point" },
       { label: "🌿 Plant native shrubs", pointType: "point" },
       { label: "🌱 Create a tree pit / planter", pointType: "point" },
       { label: "🪴 Add planter boxes", pointType: "point" },
@@ -70,7 +77,7 @@ export const THEMES: Record<string, Theme> = {
   walkways: {
     id: "walkways",
     name: "Walkways",
-    tagline: "Vote for a more walkable city",
+    tagline: "Vote for a more walkable city.",
     mode: "pedestrian",
     inputMode: "both",
     locationLabel: "Start",
