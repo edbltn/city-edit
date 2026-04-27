@@ -11,8 +11,14 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_sock import Sock
-from desire_path_voting import compute_desire_path_votes, cast_desire_path_votes, extract_all_segments
-from database import init_db, record_segment_votes
+from desire_path_voting import (
+    compute_desire_path_votes,
+    cast_desire_path_votes,
+    cast_node_votes,
+    extract_all_segments,
+    extract_unique_node_coords,
+)
+from database import init_db, record_segment_votes, record_node_votes
 
 # Configure logging for Cloud Run (unbuffered, structured)
 logging.basicConfig(
@@ -44,6 +50,8 @@ sock = Sock(app)
 redis_host = os.environ.get('REDIS_HOST', 'localhost')
 redis_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
 SEGMENT_VOTES_KEY = "segment_votes"
+NODE_VOTES_KEY = "node_votes"
+NODE_VOTE_TYPES_KEY = "node_vote_types"
 REDIS_CHANNEL = "state_updates"
 
 # Bumped on every vote (locally) and via pubsub from peer instances.
@@ -132,8 +140,13 @@ def _load_graph_cache():
         # Pre-compute the segment-key strings for every edge once. Without
         # this, /api/graph-votes was burning ~2.5M f-string format ops per
         # request rebuilding these keys for all 313K edges.
+        # Note: the walk graph is a MultiDiGraph, so multiple edges can share
+        # the same endpoints (one-way pairs, parallel cycleway+sidewalk on the
+        # same street, etc.). The reverse index must be a list so vote data is
+        # broadcast to every twin — otherwise some twins are drawn with no
+        # votes even though the segment is lit up under the cursor.
         edge_coord_keys: list[tuple[str, str]] = []
-        coord_to_edge_idx: dict[tuple[str, str], int] = {}
+        coord_to_edge_idx: dict[tuple[str, str], list[int]] = {}
         for i, edge in enumerate(edges):
             from_idx, to_idx = edge[0], edge[1]
             from_lat, from_lon = nodes[from_idx]
@@ -141,16 +154,27 @@ def _load_graph_cache():
             c1 = f"{round(from_lon, 5)},{round(from_lat, 5)}"
             c2 = f"{round(to_lon, 5)},{round(to_lat, 5)}"
             edge_coord_keys.append((c1, c2))
-            # Reverse index — both directions point at the same edge
-            coord_to_edge_idx[(c1, c2)] = i
-            coord_to_edge_idx[(c2, c1)] = i
+            # Reverse index — both directions point at every twin sharing
+            # this coord pair.
+            coord_to_edge_idx.setdefault((c1, c2), []).append(i)
+            if c1 != c2:
+                coord_to_edge_idx.setdefault((c2, c1), []).append(i)
+
+        # "lon,lat" (5dp) -> node index. Mirrors edge endpoint encoding so
+        # node-vote keys produced by node_key() resolve directly.
+        coord_to_node_idx: dict[str, int] = {}
+        for i, node in enumerate(nodes):
+            lat, lon = node[0], node[1]
+            coord_to_node_idx[f"{round(lon, 5)},{round(lat, 5)}"] = i
 
         data["edge_coord_keys"] = edge_coord_keys
         data["coord_to_edge_idx"] = coord_to_edge_idx
+        data["coord_to_node_idx"] = coord_to_node_idx
         _graph_cache = data
         logger.info(
             f"[STARTUP] Cached graph: {len(nodes)} nodes, {len(edges)} edges, "
-            f"{len(coord_to_edge_idx)} coord index entries"
+            f"{len(coord_to_edge_idx)} edge coord entries, "
+            f"{len(coord_to_node_idx)} node coord entries"
         )
     except Exception as e:
         logger.error(f"[STARTUP] Failed to load graph cache: {e}")
@@ -291,6 +315,185 @@ def _migrate_segment_vote_types_on_startup():
         logger.error(f"[MIGRATE] segment_vote_types migration failed: {e}")
 
 _migrate_segment_vote_types_on_startup()
+
+
+def _backfill_node_votes_table_from_segments():
+    """One-time derivation of the node_votes table from existing segment votes.
+
+    For each segment row in `votes`, both endpoints become node rows. The
+    UNIQUE (node_key, ip_hash, vote_type) constraint dedupes intra-route
+    overlap (a node touched by N segments still gets one row per voter).
+    Skips entirely if `node_votes` is already populated.
+    """
+    from database import DATABASE_URL, get_cursor
+    from psycopg2.extras import execute_values
+
+    if not DATABASE_URL:
+        return
+
+    try:
+        with get_cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM node_votes")
+            existing = cursor.fetchone()[0]
+            if existing > 0:
+                logger.info(f"[BACKFILL] node_votes table has {existing} rows, skipping derivation")
+                return
+
+            cursor.execute("""
+                SELECT segment_key, mode, ip_hash, vote_type, MIN(created_at) AS first_seen
+                FROM votes
+                WHERE segment_key LIKE '%|%|%'
+                  AND split_part(segment_key, '|', 2) <> ''
+                GROUP BY segment_key, mode, ip_hash, vote_type
+            """)
+            rows = cursor.fetchall()
+
+        if not rows:
+            return
+
+        # (node_key, ip_hash, vote_type) -> (mode, earliest_seen)
+        derived: dict[tuple, tuple] = {}
+        for seg_key, mode, ip_hash, vote_type, first_seen in rows:
+            parts = seg_key.split("|")
+            if len(parts) < 3 or not parts[1]:
+                continue
+            for endpoint in (parts[0], parts[1]):
+                nk = f"{endpoint}|{parts[2]}"
+                key = (nk, ip_hash, vote_type)
+                prev = derived.get(key)
+                if prev is None or first_seen < prev[1]:
+                    derived[key] = (mode, first_seen)
+
+        if not derived:
+            return
+
+        data = [
+            (nk, mode, ip_hash, 1.0, vt, ca)
+            for (nk, ip_hash, vt), (mode, ca) in derived.items()
+        ]
+
+        with get_cursor() as cursor:
+            execute_values(
+                cursor,
+                """INSERT INTO node_votes (node_key, mode, ip_hash, weight, vote_type, created_at) VALUES %s
+                   ON CONFLICT (node_key, ip_hash, vote_type) DO NOTHING""",
+                data,
+            )
+        logger.info(f"[BACKFILL] Inserted {len(data)} node_votes rows from existing segment votes")
+    except Exception as e:
+        logger.error(f"[BACKFILL] node_votes derivation failed: {e}")
+
+_backfill_node_votes_table_from_segments()
+
+
+def _migrate_node_votes_on_startup():
+    """Replay node_votes from Postgres into Redis if Redis is underpopulated."""
+    from database import DATABASE_URL, get_cursor
+    from desire_path_voting import NODE_VOTES_KEY as NK_KEY, node_key as make_node_key
+
+    if not DATABASE_URL:
+        return
+
+    try:
+        existing = redis_client.hlen(NK_KEY)
+        if existing >= 1000:
+            logger.info(f"[MIGRATE] node_votes has {existing} keys, skipping replay")
+            return
+
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT node_key, COUNT(*) AS cnt
+                FROM node_votes
+                GROUP BY node_key
+            """)
+            rows = cursor.fetchall()
+
+        if not rows:
+            return
+
+        vote_counts: dict[str, int] = {}
+        for nk_raw, cnt in rows:
+            parts = nk_raw.split("|")
+            if len(parts) < 2:
+                continue
+            try:
+                coord = [float(x) for x in parts[0].split(",")]
+            except (ValueError, IndexError):
+                continue
+            mode = parts[1]
+            norm_key = make_node_key(coord, mode)
+            vote_counts[norm_key] = vote_counts.get(norm_key, 0) + cnt
+
+        pipe = redis_client.pipeline()
+        for i, (key, count) in enumerate(vote_counts.items()):
+            pipe.hset(NK_KEY, key, count)
+            if (i + 1) % 5000 == 0:
+                pipe.execute()
+                pipe = redis_client.pipeline()
+        pipe.execute()
+
+        logger.info(f"[MIGRATE] Replayed {len(vote_counts)} node keys into Redis")
+    except Exception as e:
+        logger.error(f"[MIGRATE] node_votes replay failed: {e}")
+
+_migrate_node_votes_on_startup()
+
+
+def _migrate_node_vote_types_on_startup():
+    """Populate node_vote_types Redis hash from Postgres for existing votes."""
+    from database import DATABASE_URL, get_cursor
+    from desire_path_voting import NODE_VOTE_TYPES_KEY as NVT_KEY, node_key as make_node_key
+
+    if not DATABASE_URL:
+        return
+
+    try:
+        existing = redis_client.hlen(NVT_KEY)
+        if existing >= 1000:
+            logger.info(f"[MIGRATE] node_vote_types has {existing} keys, skipping replay")
+            return
+
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT node_key, vote_type, COUNT(*) AS cnt
+                FROM node_votes
+                WHERE vote_type IS NOT NULL AND vote_type != ''
+                GROUP BY node_key, vote_type
+            """)
+            rows = cursor.fetchall()
+
+        if not rows:
+            logger.info("[MIGRATE] No node votes with vote_type in DB, skipping node_vote_types migration")
+            return
+
+        node_vt_maps: dict[str, dict[str, int]] = {}
+        for nk_raw, vote_type, cnt in rows:
+            parts = nk_raw.split("|")
+            if len(parts) < 2:
+                continue
+            try:
+                coord = [float(x) for x in parts[0].split(",")]
+            except (ValueError, IndexError):
+                continue
+            mode = parts[1]
+            norm_key = make_node_key(coord, mode)
+            node_vt_maps.setdefault(norm_key, {})
+            node_vt_maps[norm_key][vote_type] = node_vt_maps[norm_key].get(vote_type, 0) + cnt
+
+        pipe = redis_client.pipeline()
+        for i, (key, vt_map) in enumerate(node_vt_maps.items()):
+            pipe.hset(NVT_KEY, key, json.dumps(vt_map))
+            if (i + 1) % 5000 == 0:
+                pipe.execute()
+                pipe = redis_client.pipeline()
+        pipe.execute()
+
+        logger.info(f"[MIGRATE] Populated node_vote_types for {len(node_vt_maps)} nodes from {len(rows)} DB rows")
+    except Exception as e:
+        logger.error(f"[MIGRATE] node_vote_types migration failed: {e}")
+
+_migrate_node_vote_types_on_startup()
+
 
 # Start pub/sub listener for cross-instance cache synchronization
 start_pubsub_listener()
@@ -599,6 +802,15 @@ def cast_vote():
         weight_per_segment = 1.0 / len(segments) if segments else 1.0
         record_segment_votes(segments, mode, ip_hash, weight_per_segment, vote_type)
 
+        # Mirror to node-level storage so every node along the path gets a
+        # vote too (one per unique node, not per touching segment).
+        node_coords = extract_unique_node_coords(segments)
+        node_count = cast_node_votes(redis_client, node_coords, mode, ip_hash, vote_type=vote_type)
+        if node_count:
+            weight_per_node = 1.0 / node_count
+            record_node_votes(node_coords, mode, ip_hash, weight_per_node, vote_type)
+            logger.info(f"[VOTE] Cast {node_count} node votes for '{vote_type}' as '{mode}'")
+
         redis_client.incr("revision")
         publish_votes_changed()
 
@@ -790,15 +1002,16 @@ def vote_match_diagnostic():
 def admin_retag_mode():
     """One-shot migration: rewrite every vote's mode to the target value.
 
-    Touches both Redis (segment_votes, segment_vote_types) and Postgres
-    (votes table). Idempotent — running it twice with the same target is a
-    no-op. Optional `from_modes` filter restricts which modes are migrated;
-    if omitted, EVERY mode that isn't already the target is rewritten.
+    Touches Redis (segment_votes, segment_vote_types, node_votes,
+    node_vote_types) and Postgres (votes table). Idempotent — running it
+    twice with the same target is a no-op. Optional `from_modes` filter
+    restricts which modes are migrated; if omitted, EVERY mode that isn't
+    already the target is rewritten.
 
     Body (JSON):
         {
-          "to": "bikepath",
-          "from_modes": ["walk", "bike", "drive"]   // optional
+          "to": "bikepaths",
+          "from_modes": ["bike", "bikepath"]   // optional
         }
     """
     from desire_path_voting import SEGMENT_VOTE_TYPES_KEY
@@ -878,6 +1091,68 @@ def admin_retag_mode():
         summary["redis_vote_types"] = {"migrated": vt_migrated}
     except Exception as e:
         summary["redis_vote_types_error"] = str(e)
+
+    # ---- Redis: NODE_VOTES_KEY (node-level raw counts, key = "coord|mode") ----
+    nv_migrated = 0
+    nv_collisions = 0
+    try:
+        all_nv = list(redis_client.hgetall(NODE_VOTES_KEY).items())
+        delete_nv: list[str] = []
+        pipe = redis_client.pipeline()
+        for nk, count_raw in all_nv:
+            parts = nk.split("|")
+            if len(parts) < 2:
+                continue
+            if not should_migrate(parts[1]):
+                continue
+            new_key = f"{parts[0]}|{target}"
+            try:
+                count = int(count_raw)
+            except ValueError:
+                continue
+            if redis_client.hexists(NODE_VOTES_KEY, new_key):
+                nv_collisions += 1
+            pipe.hincrby(NODE_VOTES_KEY, new_key, count)
+            delete_nv.append(nk)
+            nv_migrated += 1
+        if delete_nv:
+            pipe.hdel(NODE_VOTES_KEY, *delete_nv)
+        pipe.execute()
+        summary["redis_node_votes"] = {
+            "migrated": nv_migrated,
+            "merged_into_existing": nv_collisions,
+        }
+    except Exception as e:
+        summary["redis_node_votes_error"] = str(e)
+
+    # ---- Redis: NODE_VOTE_TYPES_KEY (per-node vote_type → count JSON) ----
+    nvt_migrated = 0
+    try:
+        all_nvt = list(redis_client.hgetall(NODE_VOTE_TYPES_KEY).items())
+        for nk, vt_json in all_nvt:
+            parts = nk.split("|")
+            if len(parts) < 2:
+                continue
+            if not should_migrate(parts[1]):
+                continue
+            new_key = f"{parts[0]}|{target}"
+            try:
+                old_dict = json.loads(vt_json) if vt_json else {}
+            except json.JSONDecodeError:
+                old_dict = {}
+            existing_raw = redis_client.hget(NODE_VOTE_TYPES_KEY, new_key)
+            try:
+                merged = json.loads(existing_raw) if existing_raw else {}
+            except json.JSONDecodeError:
+                merged = {}
+            for vt, cnt in old_dict.items():
+                merged[vt] = int(merged.get(vt, 0)) + int(cnt)
+            redis_client.hset(NODE_VOTE_TYPES_KEY, new_key, json.dumps(merged))
+            redis_client.hdel(NODE_VOTE_TYPES_KEY, nk)
+            nvt_migrated += 1
+        summary["redis_node_vote_types"] = {"migrated": nvt_migrated}
+    except Exception as e:
+        summary["redis_node_vote_types_error"] = str(e)
 
     # ---- Postgres: votes table ----
     try:
@@ -1163,12 +1438,15 @@ def graph_votes():
 
     edges = _graph_cache["edges"]
     nodes = _graph_cache["nodes"]
-    coord_to_edge_idx: dict[tuple[str, str], int] = _graph_cache["coord_to_edge_idx"]
+    coord_to_edge_idx: dict[tuple[str, str], list[int]] = _graph_cache["coord_to_edge_idx"]
+    coord_to_node_idx: dict[str, int] = _graph_cache.get("coord_to_node_idx", {})
 
     try:
         segment_votes = redis_client.hgetall(SEGMENT_VOTES_KEY)
 
-        # Walk the (small) vote rows, not the (huge) edge list
+        # Walk the (small) vote rows, not the (huge) edge list. A coord pair
+        # can map to multiple parallel edges in a multigraph; broadcast the
+        # vote count to every twin so all of them light up consistently.
         edge_votes = [0] * len(edges)
         for seg_key, vote_count in segment_votes.items():
             parts = seg_key.split("|")
@@ -1176,27 +1454,50 @@ def graph_votes():
                 continue
             if mode_filter is not None and parts[2] != mode_filter:
                 continue
-            edge_idx = coord_to_edge_idx.get((parts[0], parts[1]))
-            if edge_idx is not None:
-                edge_votes[edge_idx] += int(vote_count)
+            v = int(vote_count)
+            for edge_idx in coord_to_edge_idx.get((parts[0], parts[1]), ()):
+                edge_votes[edge_idx] += v
 
-        # Node votes = max of adjacent edge votes. Iterate edges only when
-        # there are any non-zero values to propagate.
+        # Node votes — read directly from the dedicated NODE_VOTES_KEY hash.
+        # Each route vote increments one count per unique node it touches.
         node_votes = [0] * len(nodes)
-        for i, edge in enumerate(edges):
-            v = edge_votes[i]
-            if v == 0:
-                continue
-            from_idx, to_idx = edge[0], edge[1]
-            if v > node_votes[from_idx]:
-                node_votes[from_idx] = v
-            if v > node_votes[to_idx]:
-                node_votes[to_idx] = v
+        try:
+            raw_nv = redis_client.hgetall(NODE_VOTES_KEY)
+            for nk, vote_count in raw_nv.items():
+                parts = nk.split("|")
+                if len(parts) < 2:
+                    continue
+                if mode_filter is not None and parts[1] != mode_filter:
+                    continue
+                node_idx = coord_to_node_idx.get(parts[0])
+                if node_idx is not None:
+                    node_votes[node_idx] += int(vote_count)
+        except Exception as e:
+            logger.warning(f"[GRAPH-VOTES] Failed to fetch node votes: {e}")
 
         # Vote types — same trick: iterate the small vote-types hash
         edge_vote_types: list = [None] * len(edges)
+        node_vote_types: list = [None] * len(nodes)
         legend: list[str] = []
         legend_idx: dict[str, int] = {}
+
+        def _merge_vote_types(target_list, idx, vt_map):
+            existing = target_list[idx]
+            merged: dict[str, int] = {}
+            if existing:
+                for li, cnt in existing:
+                    merged[legend[li]] = cnt
+            for vt, cnt in vt_map.items():
+                merged[vt] = merged.get(vt, 0) + cnt
+            sorted_vts = sorted(merged.items(), key=lambda x: -x[1])
+            encoded = []
+            for vt, cnt in sorted_vts:
+                if vt not in legend_idx:
+                    legend_idx[vt] = len(legend)
+                    legend.append(vt)
+                encoded.append([legend_idx[vt], cnt])
+            target_list[idx] = encoded
+
         try:
             from desire_path_voting import SEGMENT_VOTE_TYPES_KEY
             raw_vt = redis_client.hgetall(SEGMENT_VOTE_TYPES_KEY)
@@ -1206,40 +1507,44 @@ def graph_votes():
                     continue
                 if mode_filter is not None and parts[2] != mode_filter:
                     continue
-                edge_idx = coord_to_edge_idx.get((parts[0], parts[1]))
-                if edge_idx is None:
+                indices = coord_to_edge_idx.get((parts[0], parts[1]))
+                if not indices:
                     continue
                 vt_map = json.loads(vt_json)
-                # Aggregate (an edge may have entries from both directions in Redis)
-                existing = edge_vote_types[edge_idx]
-                merged: dict[str, int] = {}
-                if existing:
-                    for idx, cnt in existing:
-                        merged[legend[idx]] = cnt
-                for vt, cnt in vt_map.items():
-                    merged[vt] = merged.get(vt, 0) + cnt
-                # Re-encode to [legend_idx, count] pairs sorted by count desc
-                sorted_vts = sorted(merged.items(), key=lambda x: -x[1])
-                indices = []
-                for vt, cnt in sorted_vts:
-                    if vt not in legend_idx:
-                        legend_idx[vt] = len(legend)
-                        legend.append(vt)
-                    indices.append([legend_idx[vt], cnt])
-                edge_vote_types[edge_idx] = indices
+                for edge_idx in indices:
+                    _merge_vote_types(edge_vote_types, edge_idx, vt_map)
         except Exception as e:
-            logger.warning(f"[GRAPH-VOTES] Failed to fetch vote types: {e}")
+            logger.warning(f"[GRAPH-VOTES] Failed to fetch edge vote types: {e}")
+
+        try:
+            raw_nvt = redis_client.hgetall(NODE_VOTE_TYPES_KEY)
+            for nk, vt_json in raw_nvt.items():
+                parts = nk.split("|")
+                if len(parts) < 2:
+                    continue
+                if mode_filter is not None and parts[1] != mode_filter:
+                    continue
+                node_idx = coord_to_node_idx.get(parts[0])
+                if node_idx is None:
+                    continue
+                _merge_vote_types(node_vote_types, node_idx, json.loads(vt_json))
+        except Exception as e:
+            logger.warning(f"[GRAPH-VOTES] Failed to fetch node vote types: {e}")
 
         # Replace remaining None placeholders with [] for the JSON contract
         for i in range(len(edge_vote_types)):
             if edge_vote_types[i] is None:
                 edge_vote_types[i] = []
+        for i in range(len(node_vote_types)):
+            if node_vote_types[i] is None:
+                node_vote_types[i] = []
 
         body = json.dumps({
             "edge_votes": edge_votes,
             "node_votes": node_votes,
             "vote_type_legend": legend,
             "edge_vote_types": edge_vote_types,
+            "node_vote_types": node_vote_types,
         })
         _graph_votes_cache[cache_key] = {"revision": _votes_revision, "body": body}
 

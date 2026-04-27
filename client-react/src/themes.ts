@@ -15,7 +15,7 @@ export interface Theme {
   id: string;
   name: string;
   tagline: string;
-  mode: string;          // Vote namespace sent to the API (e.g. "bikepath", "trees")
+  mode: string;          // Vote namespace sent to the API (e.g. "bikepaths", "trees")
   inputMode: InputMode;  // What input modality the user gets
   suggestions: VoteSuggestion[];
   locationLabel: string; // Label for start point (e.g. "Location", "Start")
@@ -28,7 +28,7 @@ export const THEMES: Record<string, Theme> = {
     id: "bikepaths",
     name: "Bike Paths",
     tagline: "Vote for new or better bike lanes.",
-    mode: "bikepath",
+    mode: "bikepaths",
     inputMode: "both",
     locationLabel: "Start",
     symbol: "🚴",
@@ -78,11 +78,14 @@ export const THEMES: Record<string, Theme> = {
     id: "walkways",
     name: "Walkways",
     tagline: "Vote for a more walkable city.",
-    mode: "pedestrian",
+    mode: "walkways",
     inputMode: "both",
     locationLabel: "Start",
+    symbol: "🚶",
+    subdomain: "walkways",
     suggestions: [
       // Route votes (2 points)
+      { label: "🛠️ Improve sidewalk", pointType: "route" },
       { label: "🚶 Add crosswalk", pointType: "route" },
       { label: "↔️ Widen sidewalk", pointType: "route" },
       { label: "🔨 Fix broken sidewalk", pointType: "route" },
@@ -100,6 +103,34 @@ export const THEMES: Record<string, Theme> = {
     ],
   },
 };
+
+/**
+ * Display order for the mode switcher and landing page cards.
+ */
+export const THEME_ORDER: Theme[] = [
+  THEMES.bikepaths,
+  THEMES.walkways,
+  THEMES.trees,
+];
+
+/**
+ * Build a URL that points at a given theme's subdomain.
+ * Production: https://<subdomain>.<root>/   Local dev: /?theme=<id>
+ */
+export function themeHref(theme: Theme): string {
+  if (typeof window === "undefined") return `https://${theme.subdomain}.cityedit.org/`;
+
+  const { hostname, protocol, port } = window.location;
+  const parts = hostname.split(".");
+
+  if (parts.length >= 3) {
+    const root = parts.slice(1).join(".");
+    const portSuffix = port ? `:${port}` : "";
+    return `${protocol}//${theme.subdomain}.${root}${portSuffix}/`;
+  }
+
+  return `/?theme=${theme.id}`;
+}
 
 /**
  * Detect which theme to use based on the current hostname.
