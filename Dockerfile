@@ -27,8 +27,10 @@ RUN mkdir -p osm_data && python refresh_osm.py --region manhattan --force
 
 COPY --from=client-builder /app/dist /var/www/html/
 
-# PMTiles — nginx serves /tiles/ from /var/www/html/tiles/
-RUN mkdir -p /var/www/html/tiles && cp osm_data/graph.pmtiles /var/www/html/tiles/
+# Build PMTiles from the walk graph (requires pmtiles + vtzero/mapbox_vector_tile)
+RUN python build_pmtiles.py -o osm_data/graph.pmtiles && \
+    mkdir -p /var/www/html/tiles && \
+    cp osm_data/graph.pmtiles /var/www/html/tiles/
 
 COPY deploy/nginx-cloudrun.conf /etc/nginx/nginx.conf
 COPY deploy/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
