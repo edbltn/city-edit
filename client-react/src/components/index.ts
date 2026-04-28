@@ -7,3 +7,6 @@ export { GhostPin } from "./GhostPin";
 export { VoteTypeSelector } from "./VoteTypeSelector";
 export { Landing } from "./Landing";
 export { ModeSwitcher } from "./ModeSwitcher";
+export { GISLayers } from "./GISLayers";
+export { HVILayer } from "./HVILayer";
+export { OwnPlantsLayer } from "./OwnPlantsLayer";

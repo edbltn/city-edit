@@ -92,6 +92,33 @@ cd server && source env/bin/activate && python app.py
 cd client-react && npm run dev
 ```
 
+For local dev, themes are selected via `?theme=trees`, `?theme=bikepaths`, or `?theme=walkways`. Production routes them by subdomain.
+
+## Tree Theme Overlays
+
+The `trees` theme adds three GIS layers on top of the base map. They are rendered only when `theme.id === "trees"` (see `client-react/src/components/MapView/MapView.tsx`). All three are leaf components with no shared state — each can be removed independently in 3–5 lines.
+
+### Layers
+- **`HVILayer`** (`components/HVILayer/`): NYC Heat Vulnerability Index choropleth. 1–5 score per ZCTA, YlOrRd ramp, non-interactive (clicks pass through). Mounted on a custom Leaflet pane `hviPane` at z-index 350. Status: experimental — kept as a backdrop for siting decisions, may be promoted, demoted, or moved to a blog-only fork.
+- **`GISLayers`** (`components/GISLayers/`): NYC street tree census rendered to canvas. Each dot's radius scales with `tree_dbh`. At low zoom, draws every Nth tree for perf (`strideForZoom`).
+- **`OwnPlantsLayer`** (`components/OwnPlantsLayer/`): The current user's own planted votes as dark-blue ringed dots. Pure local state — see localStorage contract below.
+
+### Data files (committed binaries)
+- `client-react/public/trees.bin` — Float32 LE triples of `[lat, lng, dbh]`, ~684k trees, ~8 MB. Loaded once via `fetch` and rendered to a canvas pane.
+- `client-react/public/hvi.geojson` — 157 HVI-scored ZCTA polygons, ~2.7 MB.
+
+### Rebuilding the data
+Both scripts are stdlib-only Python (no new server deps):
+```bash
+python scripts/build_tree_data.py   # ~30s, NYC Open Data dataset uvpi-gqnh
+python scripts/build_hvi_data.py    # ~3s,  datasets 4mhf-duep + pri4-ifjk
+```
+
+### `OwnPlantsLayer` localStorage contract
+- **Key**: `localStorage["ownPlantedPoints"]` — JSON array of `{lat, lng}`.
+- **Writer**: `RouteContext.castVote` appends and dispatches `window.dispatchEvent(new CustomEvent("ownPlants:changed"))` on a successful tree-theme point vote (`theme.id === "trees" && isPointVote`). Other themes never write this key.
+- **Reader**: `OwnPlantsLayer` reads the key on mount and re-reads on the `ownPlants:changed` custom event and the cross-tab `storage` event. Decoupled from `RouteContext` — no new context state.
+
 ---
 
 # CSS Best Practices

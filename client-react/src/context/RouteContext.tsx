@@ -698,12 +698,26 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       if (routeVersionRef.current === voteRouteVersion) {
         setHasVoted(true);
       }
+
+      // Record tree-theme point votes locally so OwnPlantsLayer can show
+      // immediate feedback without waiting for a WebSocket round-trip.
+      // Gated to trees so point votes in other themes (e.g. bike parking)
+      // don't pollute the planted-trees set.
+      if (theme.id === "trees" && isPointVote && start.coords) {
+        try {
+          const raw = window.localStorage.getItem("ownPlantedPoints");
+          const arr = raw ? JSON.parse(raw) : [];
+          arr.push({ lat: start.coords.lat, lng: start.coords.lng });
+          window.localStorage.setItem("ownPlantedPoints", JSON.stringify(arr));
+          window.dispatchEvent(new CustomEvent("ownPlants:changed"));
+        } catch { /* localStorage unavailable — non-critical */ }
+      }
     } catch (err) {
       console.error("Failed to cast vote:", err);
     } finally {
       setIsVoting(false);
     }
-  }, [splitDesirePaths, desirePathSegments, voteType, start.coords, end.coords]);
+  }, [splitDesirePaths, desirePathSegments, voteType, start.coords, end.coords, theme.id]);
 
   // ============================================
   // Main calculation effect
