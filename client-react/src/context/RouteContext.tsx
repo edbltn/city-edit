@@ -107,6 +107,8 @@ function segmentsFromGeometry(geometry: RouteGeometry): [number, number][][] {
 // Beyond this, fall back to server requests (the waypoint was dragged off-route).
 const LOCAL_SPLIT_THRESHOLD_METERS = 100;
 
+export type ActiveTool = "start" | "end";
+
 interface RouteContextValue {
   start: RoutePoint;
   end: RoutePoint;
@@ -123,9 +125,11 @@ interface RouteContextValue {
   isCalculatingSplit: boolean;
   voteType: string;
   pointType: "route" | "point";
+  activeTool: ActiveTool;
   suppressNextClick: () => boolean;
   setStartPoint: (coords: LatLng) => void;
   setEndPoint: (coords: LatLng) => void;
+  setActiveTool: (tool: ActiveTool) => void;
   clearPoints: () => void;
   clearStart: () => void;
   clearEnd: () => void;
@@ -163,6 +167,11 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const [voteType, setVoteTypeState] = useState<string>(() =>
     getDefaultVoteTypeForTheme(theme, theme.inputMode === "point" ? "point" : "route")
   );
+  const [activeTool, setActiveToolState] = useState<ActiveTool>("start");
+
+  const setActiveTool = useCallback((tool: ActiveTool) => {
+    setActiveToolState(tool);
+  }, []);
 
   // Ref for click suppression (needs immediate effect, not async like state)
   const suppressNextClickRef = useRef(false);
@@ -804,9 +813,11 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       isCalculatingSplit,
       voteType,
       pointType,
+      activeTool,
       suppressNextClick,
       setStartPoint,
       setEndPoint,
+      setActiveTool,
       clearPoints,
       clearStart,
       clearEnd,
@@ -840,9 +851,11 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       isCalculatingSplit,
       voteType,
       pointType,
+      activeTool,
       suppressNextClick,
       setStartPoint,
       setEndPoint,
+      setActiveTool,
       clearPoints,
       clearStart,
       clearEnd,

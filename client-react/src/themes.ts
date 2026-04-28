@@ -26,8 +26,8 @@ export interface Theme {
 export const THEMES: Record<string, Theme> = {
   bikepaths: {
     id: "bikepaths",
-    name: "Bike Paths",
-    tagline: "Vote for new or better bike lanes.",
+    name: "Bikes",
+    tagline: "Vote for better cycling infrastructure.",
     mode: "bikepaths",
     inputMode: "both",
     locationLabel: "Start",
@@ -45,6 +45,8 @@ export const THEMES: Record<string, Theme> = {
       { label: "🌉 Add bike bridge / greenway", pointType: "route" },
       // Point votes (1 point)
       { label: "🅿️ Add bike parking", pointType: "point" },
+      { label: "🔒 Add secure bike parking", pointType: "point" },
+      { label: "⚡ Add e-bike charging point", pointType: "point" },
       { label: "🚲 Add Citi Bike station", pointType: "point" },
       { label: "🔧 Add bike repair station", pointType: "point" },
       { label: "📊 Add bike counter", pointType: "point" },
@@ -155,23 +157,30 @@ export function detectTheme(): Theme {
 
 /**
  * True when the current host should render the landing page (theme picker)
- * instead of a map. Triggered by demo.cityedit.org or `?landing=1` for local dev.
+ * instead of a map. Triggered by the apex (cityedit.org), the legacy demo.*
+ * subdomain, or `?landing=1` for local dev.
  */
 export function isLandingHost(): boolean {
   if (typeof window === "undefined") return false;
 
-  if (window.location.hostname.startsWith("demo.")) return true;
+  const { hostname } = window.location;
+
+  // Apex domain (no subdomain): cityedit.org, sphericalharmonics.org, etc.
+  if (hostname.split(".").length === 2) return true;
+
+  // Legacy: demo.cityedit.org continues to serve landing
+  if (hostname.startsWith("demo.")) return true;
 
   const params = new URLSearchParams(window.location.search);
   return params.get("landing") === "1";
 }
 
 /**
- * URL of the landing page from any subdomain. Production: demo.<root>;
+ * URL of the landing page from any subdomain. Production: the apex domain;
  * local dev: /?landing=1.
  */
 export function landingHref(): string {
-  if (typeof window === "undefined") return "https://demo.cityedit.org/";
+  if (typeof window === "undefined") return "https://cityedit.org/";
 
   const { hostname, protocol, port } = window.location;
   const parts = hostname.split(".");
@@ -179,7 +188,7 @@ export function landingHref(): string {
   if (parts.length >= 3) {
     const root = parts.slice(1).join(".");
     const portSuffix = port ? `:${port}` : "";
-    return `${protocol}//demo.${root}${portSuffix}/`;
+    return `${protocol}//${root}${portSuffix}/`;
   }
 
   return "/?landing=1";

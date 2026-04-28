@@ -259,6 +259,7 @@ variable "custom_domains" {
   description = "Custom domains to map to the Cloud Run service"
   type        = list(string)
   default = [
+    "cityedit.org",
     "bikepaths.cityedit.org",
     "trees.cityedit.org",
     "walkways.cityedit.org",

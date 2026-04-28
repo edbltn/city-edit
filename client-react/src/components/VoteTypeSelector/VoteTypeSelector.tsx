@@ -153,6 +153,10 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           placeholder={isOpen ? "Type to search..." : ""}
+          spellCheck={false}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
         />
         {!isOpen && voteType && (
           <div className="vote-type-display">

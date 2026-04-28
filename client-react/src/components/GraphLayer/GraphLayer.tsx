@@ -10,14 +10,16 @@
  * Clears on zoom, redraws on zoom end and pan.
  */
 
-import { useEffect, useRef, useCallback, useState } from "react";
-import { useMap } from "react-leaflet";
+import { useEffect, useRef, useCallback, useState, useMemo } from "react";
+import { useMap, Marker } from "react-leaflet";
 import { createPortal } from "react-dom";
 import L from "leaflet";
+import Flatbush from "flatbush";
 import { CONFIG } from "../../config";
 import { useWebSocketContext } from "../../context/WebSocketContext";
 import { useGraphSnap, useTheme } from "../../context";
 import type { GraphData } from "../../types";
+import { extractFirstEmoji, hashLabelToColor, makeVoteTypeIcon } from "./voteTypeIcon";
 
 // ---------------------------------------------------------------------------
 // Geometry helpers
@@ -149,21 +151,148 @@ interface HitResult {
   snapLng: number;
 }
 
+interface VoteTypeWinner {
+  legendIdx: number;
+  label: string;
+  edgeIdx: number;
+  count: number;
+}
+
+// Min zoom level at which to show vote-type indicator icons (avoids clutter
+// when many edges crowd a small viewport).
+const INDICATOR_MIN_ZOOM = 13;
+
+/** Find the edge with the highest count for each vote type in the legend. */
+function computeVoteTypeWinners(data: GraphData | null): VoteTypeWinner[] {
+  if (!data) return [];
+  const legend = data.vote_type_legend ?? [];
+  const edgeVoteTypes = data.edge_vote_types ?? [];
+  if (!legend.length || !edgeVoteTypes.length) return [];
+
+  const bestByType = new Map<number, { edgeIdx: number; count: number }>();
+  for (let edgeIdx = 0; edgeIdx < edgeVoteTypes.length; edgeIdx++) {
+    const pairs = edgeVoteTypes[edgeIdx];
+    if (!pairs) continue;
+    for (const [legendIdx, count] of pairs) {
+      const existing = bestByType.get(legendIdx);
+      if (!existing || count > existing.count) {
+        bestByType.set(legendIdx, { edgeIdx, count });
+      }
+    }
+  }
+
+  const winners: VoteTypeWinner[] = [];
+  for (const [legendIdx, { edgeIdx, count }] of bestByType) {
+    const label = legend[legendIdx];
+    if (!label || count <= 0) continue;
+    winners.push({ legendIdx, label, edgeIdx, count });
+  }
+  return winners;
+}
+
+// Number of bbox-nearest candidates to retrieve from the spatial index.
+// 20 is enough for Manhattan-scale edges (~200m max length); the closest
+// segment is always among the top few bbox-nearest in practice.
+const INDEX_NEIGHBOR_K = 20;
+
+/** Build a flatbush spatial index of node points. Done once per graph. */
+function buildNodeIndex(data: Pick<GraphData, "nodes">): Flatbush | null {
+  if (data.nodes.length === 0) return null;
+  const idx = new Flatbush(data.nodes.length);
+  for (let i = 0; i < data.nodes.length; i++) {
+    const node = data.nodes[i];
+    // Point bbox: min == max (lng,lat ordering matches the edge index)
+    idx.add(node[1], node[0], node[1], node[0]);
+  }
+  idx.finish();
+  return idx;
+}
+
+/** Build a flatbush spatial index of edge bounding boxes. Done once per graph. */
+function buildEdgeIndex(data: Pick<GraphData, "nodes" | "edges">): Flatbush | null {
+  if (data.edges.length === 0) return null;
+  const idx = new Flatbush(data.edges.length);
+  for (let i = 0; i < data.edges.length; i++) {
+    const [fromIdx, toIdx] = data.edges[i];
+    const fromNode = data.nodes[fromIdx];
+    const toNode = data.nodes[toIdx];
+    const minLng = Math.min(fromNode[1], toNode[1]);
+    const maxLng = Math.max(fromNode[1], toNode[1]);
+    const minLat = Math.min(fromNode[0], toNode[0]);
+    const maxLat = Math.max(fromNode[0], toNode[0]);
+    idx.add(minLng, minLat, maxLng, maxLat);
+  }
+  idx.finish();
+  return idx;
+}
+
+/**
+ * Find the edge with the minimum pixel distance from (px,py).
+ * No radius limit — used to guarantee hover/click always select *some* segment.
+ *
+ * With a spatial index: O(log n + k) — query the index for k nearest bboxes,
+ * then compute exact projected-pixel distance for just those candidates.
+ * Without: brute-force fallback used during the brief window before the
+ * index is built on first topology load.
+ */
+function findNearestEdgeIndex(
+  data: GraphData,
+  map: L.Map,
+  px: number, py: number,
+  index: Flatbush | null,
+  queryLng: number,
+  queryLat: number
+): number | null {
+  if (data.edges.length === 0) return null;
+
+  const checkEdge = (i: number, currentBestDist: number, currentBestIdx: number): [number, number] => {
+    const [fromIdx, toIdx] = data.edges[i];
+    const fromPt = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);
+    const toPt = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);
+    const dist = pointToSegmentDist(px, py, fromPt.x, fromPt.y, toPt.x, toPt.y);
+    return dist < currentBestDist ? [dist, i] : [currentBestDist, currentBestIdx];
+  };
+
+  let bestDist = Infinity;
+  let bestIdx = -1;
+
+  if (index) {
+    const candidates = index.neighbors(queryLng, queryLat, INDEX_NEIGHBOR_K);
+    for (const i of candidates) {
+      [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);
+    }
+  } else {
+    // Brief fallback while the index is being built
+    for (let i = 0; i < data.edges.length; i++) {
+      [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);
+    }
+  }
+
+  return bestIdx >= 0 ? bestIdx : null;
+}
+
 /**
  * Unified hit-test: find the nearest node or edge within snap radius.
  * Nodes within SNAP_NODE_PX win; otherwise edges within SNAP_EDGE_PX.
  * Returns the target and projected snap position.
+ *
+ * With spatial indices: each loop runs over the top-k bbox-nearest candidates
+ * (typically <30 per call) instead of all nodes/edges. Path-drag fires this
+ * on every mousemove via the snap closure, so this is the hot path.
  */
 function hitTest(
   data: GraphData,
   map: L.Map,
   px: number, py: number,
-  lat: number, lng: number
+  lat: number, lng: number,
+  edgeIndex: Flatbush | null,
+  nodeIndex: Flatbush | null
 ): HitResult | null {
   // 1. Nodes — small radius, highest priority
   let bestNode: number | null = null;
   let bestNodeDist = SNAP_NODE_PX;
-  for (let i = 0; i < data.nodes.length; i++) {
+
+  const checkNode = (i: number) => {
     const node = data.nodes[i];
     const pt = map.latLngToContainerPoint([node[0], node[1]]);
     const dist = Math.sqrt((px - pt.x) ** 2 + (py - pt.y) ** 2);
@@ -171,7 +300,15 @@ function hitTest(
       bestNodeDist = dist;
       bestNode = i;
     }
+  };
+
+  if (nodeIndex) {
+    const candidates = nodeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K);
+    for (const i of candidates) checkNode(i);
+  } else {
+    for (let i = 0; i < data.nodes.length; i++) checkNode(i);
   }
+
   if (bestNode !== null) {
     const n = data.nodes[bestNode];
     return { target: { kind: "node", index: bestNode }, snapLat: n[0], snapLng: n[1] };
@@ -180,7 +317,8 @@ function hitTest(
   // 2. Edges — project onto segment for snap position
   let bestEdge: number | null = null;
   let bestEdgeDist = SNAP_EDGE_PX;
-  for (let i = 0; i < data.edges.length; i++) {
+
+  const checkEdge = (i: number) => {
     const [fromIdx, toIdx] = data.edges[i];
     const fromPt = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);
     const toPt = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);
@@ -189,7 +327,15 @@ function hitTest(
       bestEdgeDist = dist;
       bestEdge = i;
     }
+  };
+
+  if (edgeIndex) {
+    const candidates = edgeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K);
+    for (const i of candidates) checkEdge(i);
+  } else {
+    for (let i = 0; i < data.edges.length; i++) checkEdge(i);
   }
+
   if (bestEdge !== null) {
     const [fromIdx, toIdx] = data.edges[bestEdge];
     const fromNode = data.nodes[fromIdx];
@@ -271,6 +417,8 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
   const hoverCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const graphDataRef = useRef<GraphData | null>(null);
   const topologyRef = useRef<Pick<GraphData, "nodes" | "edges"> | null>(null);
+  const edgeIndexRef = useRef<Flatbush | null>(null);
+  const nodeIndexRef = useRef<Flatbush | null>(null);
   const redrawTimeoutRef = useRef<number | null>(null);
   const isZoomingRef = useRef(false);
   const voteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -279,13 +427,18 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
   const onSnapRef = useRef(onSnap);
   useEffect(() => { onSnapRef.current = onSnap; }, [onSnap]);
 
-  // Register graph snap function for use by path drag
+  // Register graph snap function for use by path drag.
+  // Pulls indices from refs so the closure stays stable across re-renders
+  // but always queries the current spatial structures.
   useEffect(() => {
     setSnapFn((m: L.Map, lat: number, lng: number) => {
       const data = graphDataRef.current;
       if (!data) return null;
       const pt = m.latLngToContainerPoint([lat, lng]);
-      const result = hitTest(data, m, pt.x, pt.y, lat, lng);
+      const result = hitTest(
+        data, m, pt.x, pt.y, lat, lng,
+        edgeIndexRef.current, nodeIndexRef.current
+      );
       if (!result) return null;
       return { lat: result.snapLat, lng: result.snapLng };
     });
@@ -306,6 +459,26 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
   // Increments when a geocode resolves, forcing tooltip re-render
   const [geocodeVersion, setGeocodeVersion] = useState(0);
   const bumpGeocode = useCallback(() => setGeocodeVersion((v) => v + 1), []);
+
+  // Vote-type indicator markers — top-voted segment per vote type
+  const [winners, setWinners] = useState<VoteTypeWinner[]>([]);
+  const [currentZoom, setCurrentZoom] = useState<number>(() => map.getZoom());
+  const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
+
+  // When a vote-type indicator is hovered, this overrides the regular hover
+  // tooltip with an expanded modal anchored to the icon's screen position.
+  const [hoveredIndicator, setHoveredIndicator] = useState<{
+    winner: VoteTypeWinner;
+    screenX: number;
+    screenY: number;
+  } | null>(null);
+
+  // Reset icon cache + winners when theme switches (different vote namespace)
+  useEffect(() => {
+    iconCacheRef.current.clear();
+    setWinners([]);
+    setHoveredIndicator(null);
+  }, [themeMode]);
 
   // Initialize canvases once
   useEffect(() => {
@@ -357,6 +530,7 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
       if (!response.ok) throw new Error(`Vote fetch failed: ${response.status}`);
       const voteData = await response.json();
       graphDataRef.current = { ...topology, ...voteData };
+      setWinners(computeVoteTypeWinners(graphDataRef.current));
       scheduleRedrawRef.current();
     } catch (error) {
       console.error("Failed to fetch graph votes:", error);
@@ -372,23 +546,51 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
     voteDebounceRef.current = setTimeout(() => fetchVotesRef.current(), 500);
   }, []);
 
-  // Fetch topology once on mount, then fetch votes
+  // Fetch topology and votes in parallel on mount. Chaining them serially
+  // doubled the round-trip before the heatmap could appear; firing both at
+  // once means the heatmap pops in as soon as the slower of the two returns.
   useEffect(() => {
     let cancelled = false;
+    const topologyPromise = fetch(`${CONFIG.apiUrl}/graph-topology`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
+        return r.json();
+      });
+    const votesPromise = fetch(
+      `${CONFIG.apiUrl}/graph-votes?mode=${encodeURIComponent(themeMode)}`
+    ).then((r) => {
+      if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);
+      return r.json();
+    });
+
     (async () => {
       try {
-        const response = await fetch(`${CONFIG.apiUrl}/graph-topology`);
-        if (!response.ok) throw new Error(`Topology fetch failed: ${response.status}`);
-        const data = await response.json();
+        const topology = await topologyPromise;
         if (cancelled) return;
-        topologyRef.current = data;
+        topologyRef.current = topology;
         // Set topology-only graph data so hover/snap works immediately
-        graphDataRef.current = data;
+        graphDataRef.current = topology;
+        // Build the spatial indices — one-time O(n log n) so subsequent
+        // hover/snap queries are O(log n + k) instead of O(n) per mousemove.
+        // Edge index for hover/click; node index for snap (path drag).
+        edgeIndexRef.current = buildEdgeIndex(topology);
+        nodeIndexRef.current = buildNodeIndex(topology);
         scheduleRedrawRef.current();
-        // Now fetch votes to overlay
-        fetchVotesRef.current();
       } catch (error) {
         console.error("Failed to fetch graph topology:", error);
+        return;
+      }
+
+      try {
+        const voteData = await votesPromise;
+        if (cancelled) return;
+        const topology = topologyRef.current;
+        if (!topology) return;
+        graphDataRef.current = { ...topology, ...voteData };
+        setWinners(computeVoteTypeWinners(graphDataRef.current));
+        scheduleRedrawRef.current();
+      } catch (error) {
+        console.error("Failed to fetch graph votes:", error);
       }
     })();
     return () => { cancelled = true; };
@@ -655,6 +857,7 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
     };
     const handleZoomEnd = () => {
       isZoomingRef.current = false;
+      setCurrentZoom(map.getZoom());
       scheduleRedrawRef.current();
     };
     const handleMoveEnd = () => {
@@ -696,11 +899,25 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
           return;
         }
 
-        const hit = hitTest(data, map, e.containerPoint.x, e.containerPoint.y, e.latlng.lat, e.latlng.lng);
         const dragging = graphDraggingRef.current;
+        const hit = hitTest(
+          data, map, e.containerPoint.x, e.containerPoint.y, e.latlng.lat, e.latlng.lng,
+          edgeIndexRef.current, nodeIndexRef.current
+        );
 
-        // During drag: suppress hover highlight and tooltip, but still compute snap
-        const newTarget = dragging ? null : (hit?.target ?? null);
+        // During drag: suppress hover highlight and tooltip, but still compute snap.
+        // Otherwise: prefer in-radius hits, then fall back to globally-nearest edge
+        // so hover always reflects the segment a click would pin (1:1 preview).
+        let newTarget: HoverTarget | null = dragging ? null : (hit?.target ?? null);
+        if (!dragging && !newTarget) {
+          const nearestEdgeIdx = findNearestEdgeIndex(
+            data, map, e.containerPoint.x, e.containerPoint.y,
+            edgeIndexRef.current, e.latlng.lng, e.latlng.lat
+          );
+          if (nearestEdgeIdx !== null) {
+            newTarget = { kind: "edge", index: nearestEdgeIdx };
+          }
+        }
         const prev = hoverTargetRef.current;
         const changed = !prev && newTarget
           || prev && !newTarget
@@ -716,18 +933,30 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
           setTooltipPos({ x: e.originalEvent.clientX, y: e.originalEvent.clientY });
         }
 
-        // Snap position: hit result or fallback to nearest node
+        // Snap position: only compute when actually dragging (path-drag system
+        // is the only consumer). Skipping when idle saves ~100k iterations
+        // on every mousemove.
+        if (!dragging) return;
+
         if (hit) {
           const snapPos = { lat: hit.snapLat, lng: hit.snapLng };
           onSnapRef.current?.(snapPos);
           setCurrentSnap(snapPos);
         } else {
+          // Fallback: nearest node out of range. Use the node index when
+          // available (top-1 by bbox distance — for points that's exact).
+          const nodeIdx = nodeIndexRef.current;
           let nearestIdx = -1;
-          let nearestDist = Infinity;
-          for (let i = 0; i < data.nodes.length; i++) {
-            const n = data.nodes[i];
-            const d = (n[0] - e.latlng.lat) ** 2 + (n[1] - e.latlng.lng) ** 2;
-            if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
+          if (nodeIdx) {
+            const candidates = nodeIdx.neighbors(e.latlng.lng, e.latlng.lat, 1);
+            if (candidates.length > 0) nearestIdx = candidates[0];
+          } else {
+            let nearestDist = Infinity;
+            for (let i = 0; i < data.nodes.length; i++) {
+              const n = data.nodes[i];
+              const d = (n[0] - e.latlng.lat) ** 2 + (n[1] - e.latlng.lng) ** 2;
+              if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
+            }
           }
           if (nearestIdx >= 0) {
             const n = data.nodes[nearestIdx];
@@ -780,12 +1009,27 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
       return;
     }
 
-    // Find nearest node/edge for highlight using unified hit-test
+    // Find nearest node/edge for highlight using unified hit-test, with a
+    // global-nearest-edge fallback so the segment always lights up regardless
+    // of how far from the graph the user clicked.
     const data = graphDataRef.current;
     if (data?.edges) {
       const pt = map.latLngToContainerPoint([pinnedLat, pinnedLng]);
-      const hit = hitTest(data, map, pt.x, pt.y, pinnedLat, pinnedLng);
-      pinnedTargetRef.current = hit?.target ?? null;
+      const hit = hitTest(
+        data, map, pt.x, pt.y, pinnedLat, pinnedLng,
+        edgeIndexRef.current, nodeIndexRef.current
+      );
+      if (hit?.target) {
+        pinnedTargetRef.current = hit.target;
+      } else {
+        const nearestEdgeIdx = findNearestEdgeIndex(
+          data, map, pt.x, pt.y,
+          edgeIndexRef.current, pinnedLng, pinnedLat
+        );
+        pinnedTargetRef.current = nearestEdgeIdx !== null
+          ? { kind: "edge", index: nearestEdgeIdx }
+          : null;
+      }
     } else {
       pinnedTargetRef.current = null;
     }
@@ -852,20 +1096,10 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
         tooltipName = resolveAddress(node[0], node[1], bumpGeocode);
         tooltipVotes = (data.node_votes ?? [])[hoverTarget.index] ?? 0;
 
-        const vtMaxMap = new Map<string, number>();
-        const edgeVoteTypes = data.edge_vote_types ?? [];
-        for (let i = 0; i < (data.edges?.length ?? 0); i++) {
-          const [fromIdx, toIdx] = data.edges[i];
-          if (fromIdx === hoverTarget.index || toIdx === hoverTarget.index) {
-            for (const [idx, cnt] of (edgeVoteTypes[i] ?? [])) {
-              const label = legend[idx];
-              if (label) vtMaxMap.set(label, Math.max(vtMaxMap.get(label) ?? 0, cnt));
-            }
-          }
-        }
-        hoverVoteTypes = [...vtMaxMap.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .map(([label, count]) => ({ label, count }));
+        const vtPairs = (data.node_vote_types ?? [])[hoverTarget.index] ?? [];
+        hoverVoteTypes = vtPairs
+          .map(([idx, cnt]) => ({ label: legend[idx], count: cnt }))
+          .filter((v) => v.label);
       }
     }
   }
@@ -901,20 +1135,10 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
       if (node) {
         pinnedName = resolveAddress(node[0], node[1], bumpGeocode);
         pinnedVotes = (data.node_votes ?? [])[pinnedTarget.index] ?? 0;
-        const vtMaxMap = new Map<string, number>();
-        const edgeVoteTypes = data.edge_vote_types ?? [];
-        for (let i = 0; i < (data.edges?.length ?? 0); i++) {
-          const [fromIdx, toIdx] = data.edges[i];
-          if (fromIdx === pinnedTarget.index || toIdx === pinnedTarget.index) {
-            for (const [idx, cnt] of (edgeVoteTypes[i] ?? [])) {
-              const label = legend[idx];
-              if (label) vtMaxMap.set(label, Math.max(vtMaxMap.get(label) ?? 0, cnt));
-            }
-          }
-        }
-        pinnedVoteTypes = [...vtMaxMap.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .map(([label, count]) => ({ label, count }));
+        const vtPairs = (data.node_vote_types ?? [])[pinnedTarget.index] ?? [];
+        pinnedVoteTypes = vtPairs
+          .map(([idx, cnt]) => ({ label: legend[idx], count: cnt }))
+          .filter((v) => v.label);
       }
     }
   }
@@ -925,13 +1149,99 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
 
   const mapContainer = map.getContainer();
   const flipped = tooltipPos.x > window.innerWidth / 2;
-  const showHoverTooltip = hoverTarget !== null;
+  // Hide the regular hover tooltip when the indicator modal is up — the
+  // modal already covers the segment info and we don't want both stacked.
+  const showHoverTooltip = hoverTarget !== null && !hoveredIndicator;
+
+  // Resolve segment info for the hovered indicator's edge (full vote-type list)
+  let indicatorEdgeName = "";
+  let indicatorEdgeVotes = 0;
+  let indicatorVoteTypes: { label: string; count: number }[] = [];
+  if (hoveredIndicator && data) {
+    const edgeIdx = hoveredIndicator.winner.edgeIdx;
+    const edge = data.edges[edgeIdx];
+    if (edge) {
+      const [fromIdx, toIdx] = edge;
+      const fromNode = data.nodes[fromIdx];
+      const toNode = data.nodes[toIdx];
+      const midLat = (fromNode[0] + toNode[0]) / 2;
+      const midLng = (fromNode[1] + toNode[1]) / 2;
+      indicatorEdgeName = edge[2] || resolveAddress(midLat, midLng, bumpGeocode);
+      indicatorEdgeVotes = (data.edge_votes ?? [])[edgeIdx] ?? 0;
+      const vtPairs = (data.edge_vote_types ?? [])[edgeIdx] ?? [];
+      indicatorVoteTypes = vtPairs
+        .map(([idx, cnt]) => ({ label: legend[idx], count: cnt }))
+        .filter((v) => v.label);
+    }
+  }
 
   // geocodeVersion used to re-render when async geocode completes
   void geocodeVersion;
 
+  // Build indicator markers for the top-voted segment per vote type.
+  // Position = edge midpoint. Hover/click sets the same hoverTarget the
+  // map mousemove handler would, so the existing tooltip lights up.
+  const indicatorMarkers = useMemo(() => {
+    if (currentZoom < INDICATOR_MIN_ZOOM) return null;
+    if (!data || winners.length === 0) return null;
+
+    return winners.map((w) => {
+      const edge = data.edges[w.edgeIdx];
+      if (!edge) return null;
+      const [fromIdx, toIdx] = edge;
+      const fromNode = data.nodes[fromIdx];
+      const toNode = data.nodes[toIdx];
+      if (!fromNode || !toNode) return null;
+      const midLat = (fromNode[0] + toNode[0]) / 2;
+      const midLng = (fromNode[1] + toNode[1]) / 2;
+
+      let icon = iconCacheRef.current.get(w.label);
+      if (!icon) {
+        icon = makeVoteTypeIcon(w.label);
+        iconCacheRef.current.set(w.label, icon);
+      }
+
+      const activateIndicator = () => {
+        // Anchor the modal to the icon's screen position so it stays put
+        // even if the cursor jitters within the marker hit area.
+        const iconPt = map.latLngToContainerPoint([midLat, midLng]);
+        const rect = map.getContainer().getBoundingClientRect();
+        setHoveredIndicator({
+          winner: w,
+          screenX: rect.left + iconPt.x,
+          screenY: rect.top + iconPt.y,
+        });
+        // Light up the corresponding segment on canvas, but skip the React
+        // hover-target (which would also pop the regular tooltip — we want
+        // only the expanded modal).
+        hoverTargetRef.current = { kind: "edge", index: w.edgeIdx };
+        redrawHoverHighlightRef.current();
+      };
+
+      const deactivateIndicator = () => {
+        setHoveredIndicator(null);
+        hoverTargetRef.current = null;
+        redrawHoverHighlightRef.current();
+      };
+
+      return (
+        <Marker
+          key={w.legendIdx}
+          position={[midLat, midLng]}
+          icon={icon}
+          eventHandlers={{
+            mouseover: activateIndicator,
+            mouseout: deactivateIndicator,
+            click: activateIndicator,
+          }}
+        />
+      );
+    });
+  }, [winners, currentZoom, data, map]);
+
   return (
     <>
+      {indicatorMarkers}
       {showPinned && pinnedScreenPos && createPortal(
         <div
           className={`graph-tooltip${pinnedScreenPos.x > window.innerWidth / 2 ? " tooltip-flipped" : ""}`}
@@ -950,6 +1260,82 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
         </div>,
         mapContainer
       )}
+      {hoveredIndicator && createPortal(
+        <IndicatorModal
+          winner={hoveredIndicator.winner}
+          screenX={hoveredIndicator.screenX}
+          screenY={hoveredIndicator.screenY}
+          edgeName={indicatorEdgeName}
+          edgeVotes={indicatorEdgeVotes}
+          voteTypes={indicatorVoteTypes}
+        />,
+        mapContainer
+      )}
     </>
+  );
+}
+
+interface IndicatorModalProps {
+  winner: VoteTypeWinner;
+  screenX: number;
+  screenY: number;
+  edgeName: string;
+  edgeVotes: number;
+  voteTypes: { label: string; count: number }[];
+}
+
+function IndicatorModal({
+  winner,
+  screenX,
+  screenY,
+  edgeName,
+  edgeVotes,
+  voteTypes,
+}: IndicatorModalProps) {
+  const flipped = screenX > window.innerWidth / 2;
+  const emoji = extractFirstEmoji(winner.label);
+  const label = winner.label;
+  // Strip a leading emoji + whitespace so the label text reads cleanly next
+  // to the glyph instead of repeating the emoji.
+  const labelText = emoji ? label.replace(emoji, "").trim() : label;
+
+  return (
+    <div
+      className={`graph-indicator-modal${flipped ? " modal-flipped" : ""}`}
+      style={{ left: screenX, top: screenY }}
+    >
+      <div className="graph-indicator-modal-header">
+        <span className="graph-indicator-modal-glyph">
+          {emoji ?? (
+            <span
+              className="graph-indicator-modal-disc"
+              style={{ background: hashLabelToColor(label) }}
+            />
+          )}
+        </span>
+        <div className="graph-indicator-modal-headtext">
+          <div className="graph-indicator-modal-eyebrow">Top Proposal</div>
+          <div className="graph-indicator-modal-label">{labelText || label}</div>
+        </div>
+      </div>
+      <div className="graph-indicator-modal-body">
+        {edgeName && <div className="graph-tooltip-name">{edgeName}</div>}
+        <div className="graph-tooltip-meta">
+          {edgeVotes > 0
+            ? `${edgeVotes} vote${edgeVotes !== 1 ? "s" : ""} on this segment`
+            : "no other votes on this segment"}
+        </div>
+        {voteTypes.length > 0 && (
+          <div className="graph-tooltip-types">
+            {voteTypes.map((t, i) => (
+              <div key={i}>
+                {t.label}
+                <span className="graph-tooltip-type-count">{t.count}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

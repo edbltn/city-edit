@@ -119,6 +119,37 @@ def init_db():
                 END $$;
             """)
 
+            # Node-level vote history. Mirrors `votes` so node tooltips and the
+            # heatmap can show real per-node counts instead of derived max.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS node_votes (
+                    id SERIAL PRIMARY KEY,
+                    node_key TEXT NOT NULL,
+                    mode VARCHAR(10) NOT NULL,
+                    ip_hash VARCHAR(16) NOT NULL,
+                    weight DECIMAL(10,6) NOT NULL,
+                    vote_type TEXT,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_node_votes_node ON node_votes(node_key)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_node_votes_mode ON node_votes(mode)
+            """)
+            cursor.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint WHERE conname = 'node_votes_unique_ip_node_type'
+                    ) THEN
+                        ALTER TABLE node_votes ADD CONSTRAINT node_votes_unique_ip_node_type
+                        UNIQUE (node_key, ip_hash, vote_type);
+                    END IF;
+                END $$;
+            """)
+
             logger.info("[DB] Database schema initialized successfully")
             return True
 
@@ -230,6 +261,40 @@ def get_unique_voters() -> int:
     except Exception as e:
         logger.error(f"[DB] Failed to get unique voters: {e}")
         return 0
+
+
+def record_node_votes(coords: list, mode: str, ip_hash: str, weight_per_node: float, vote_type: str = ""):
+    """Record one row per unique node touched by a route, for persistence.
+
+    Caller passes already-deduplicated coords. The unique constraint
+    (node_key, ip_hash, vote_type) silently absorbs duplicate routes.
+    """
+    if not DATABASE_URL or not coords:
+        return
+
+    try:
+        with get_cursor() as cursor:
+            data = []
+            seen: set[str] = set()
+            for coord in coords:
+                lon, lat = coord[0], coord[1]
+                key = f"{lon:.6f},{lat:.6f}|{mode}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                data.append((key, mode, ip_hash, weight_per_node, vote_type or None))
+
+            if data:
+                execute_values(
+                    cursor,
+                    """INSERT INTO node_votes (node_key, mode, ip_hash, weight, vote_type) VALUES %s
+                       ON CONFLICT (node_key, ip_hash, vote_type) DO NOTHING""",
+                    data,
+                )
+                logger.info(f"[DB] Recorded {len(data)} node votes to database")
+
+    except Exception as e:
+        logger.error(f"[DB] Failed to record node votes: {e}")
 
 
 def record_point_vote(point: list, mode: str, ip_hash: str, vote_type: str = ""):

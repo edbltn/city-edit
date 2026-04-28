@@ -83,45 +83,64 @@ function MapDragCursor() {
   return null;
 }
 
-// Map click handler — uses snappedNode when available so clicks land exactly
-// on the displayed ghost pin position
+// Map click handler — clicks use raw cursor lat/lng so the indicator lands
+// exactly where the user clicked. Segment selection happens via GraphLayer's
+// hit-testing on start/end coords.
 function MapClickHandler({
   onMapClick,
-  snappedNode,
 }: {
   onMapClick: (latlng: LatLng) => void;
-  snappedNode: LatLng | null;
 }) {
   useMapEvents({
     click: (e) => {
-      onMapClick(snappedNode ?? { lat: e.latlng.lat, lng: e.latlng.lng });
+      onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng });
     },
   });
   return null;
 }
 
-// Ghost pin marker for the snapped node position (from GraphLayer onSnap)
+// Tracks raw cursor position on the map so the ghost pin can follow the
+// cursor exactly (not the snapped graph position).
+function CursorTracker({
+  onMove,
+}: {
+  onMove: (pos: LatLng | null) => void;
+}) {
+  useMapEvents({
+    mousemove: (e) => onMove({ lat: e.latlng.lat, lng: e.latlng.lng }),
+    mouseout: () => onMove(null),
+  });
+  return null;
+}
+
+// Ghost pin marker — shows at the raw cursor position to preview where the
+// indicator will land. Color reflects the active tool (start vs end).
 function SnapMarker({
-  snappedNode,
+  cursorLatLng,
+  activeTool,
   hasStart,
   suppress,
   pointOnly,
 }: {
-  snappedNode: LatLng | null;
+  cursorLatLng: LatLng | null;
+  activeTool: "start" | "end";
   hasStart: boolean;
   suppress: boolean;
   pointOnly: boolean;
 }) {
-  // In point-only themes (e.g. trees) every click resets the single waypoint,
-  // so the hover ghost always represents a fresh start — never an end pin.
-  const showAsEnd = !pointOnly && hasStart;
+  // Point-only themes always place a fresh start. Otherwise, color follows
+  // the armed tool — but if End is armed without a start, no ghost (click
+  // would be ignored).
+  const showAsEnd = !pointOnly && activeTool === "end" && hasStart;
   const icon = useMemo(
     () => kiteGhostIcon(showAsEnd ? COLOR_END : COLOR_START),
     [showAsEnd]
   );
 
-  if (suppress || !snappedNode) return null;
-  return <Marker position={[snappedNode.lat, snappedNode.lng]} icon={icon} interactive={false} />;
+  if (suppress || !cursorLatLng) return null;
+  if (!pointOnly && activeTool === "end" && !hasStart) return null;
+
+  return <Marker position={[cursorLatLng.lat, cursorLatLng.lng]} icon={icon} interactive={false} />;
 }
 
 export function MapView() {
@@ -134,8 +153,10 @@ export function MapView() {
     ghostWaypointIds,
     splitDesirePaths,
     suppressNextClick,
+    activeTool,
     setStartPoint,
     setEndPoint,
+    setActiveTool,
     clearStart,
     clearEnd,
     clearPoints,
@@ -154,7 +175,7 @@ export function MapView() {
   const { ghostState } = useGhostPin();
 
   const [leafletMap, setLeafletMap] = useState<L.Map | null>(null);
-  const [snappedNode, setSnappedNode] = useState<LatLng | null>(null);
+  const [cursorLatLng, setCursorLatLng] = useState<LatLng | null>(null);
   const [isHoveringPath, setIsHoveringPath] = useState(false);
   const [isDraggingMarker, setIsDraggingMarker] = useState(false);
 
@@ -172,8 +193,10 @@ export function MapView() {
   const { handleMapClick } = useMapClick({
     state: { start, end },
     inputMode: theme.inputMode,
+    activeTool,
     onUpdateStart: setStartPoint,
     onUpdateEnd: setEndPoint,
+    onSetActiveTool: setActiveTool,
     onClearPoints: clearPoints,
     onClearGhostWaypoints: clearSplitPaths,
     onSetError: setError,
@@ -213,13 +236,14 @@ export function MapView() {
       <MapBridge onMap={setLeafletMap} />
       <MapPanes />
       <GraphLayer
-        onSnap={setSnappedNode}
         pinnedPoint={start.coords && !end.coords ? start.coords : null}
       />
       <MapDragCursor />
-      <MapClickHandler onMapClick={handleMapClick} snappedNode={snappedNode} />
+      <CursorTracker onMove={setCursorLatLng} />
+      <MapClickHandler onMapClick={handleMapClick} />
       <SnapMarker
-        snappedNode={snappedNode}
+        cursorLatLng={cursorLatLng}
+        activeTool={activeTool}
         hasStart={!!start.coords}
         pointOnly={theme.inputMode === "point"}
         suppress={isHoveringPath || ghostState.isDragging || isDraggingMarker}

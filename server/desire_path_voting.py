@@ -13,6 +13,10 @@ SEGMENT_VOTES_KEY = "segment_votes"
 # Redis key for per-segment vote type counts: field = segment_key, value = JSON {vote_type: count}
 SEGMENT_VOTE_TYPES_KEY = "segment_vote_types"
 
+# Node-level mirrors of the segment hashes. Field = "lon,lat|mode" at 5dp.
+NODE_VOTES_KEY = "node_votes"
+NODE_VOTE_TYPES_KEY = "node_vote_types"
+
 
 def extract_all_segments(geometry: dict) -> list[list]:
     """
@@ -136,4 +140,80 @@ def _update_segment_vote_types(redis_client, keys: list[str], vote_type: str):
         vt_map = json.loads(raw) if raw else {}
         vt_map[vote_type] = vt_map.get(vote_type, 0) + 1
         pipe.hset(SEGMENT_VOTE_TYPES_KEY, key, json.dumps(vt_map))
+    pipe.execute()
+
+
+# ---------------------------------------------------------------------------
+# Node-level votes
+# ---------------------------------------------------------------------------
+
+def node_key(coord: list, mode: str) -> str:
+    """Canonical node key: 'lon,lat|mode' at 5dp (matches segment endpoint format)."""
+    p = (round(coord[0], 5), round(coord[1], 5))
+    return f"{p[0]},{p[1]}|{mode}"
+
+
+def extract_unique_node_coords(segments: list) -> list[list]:
+    """Return one representative coord per unique node touched by `segments`.
+
+    A route's node set is the union of all segment endpoints, deduplicated at
+    5dp (the same precision Redis uses for segment keys, so node coords match
+    the topology's `coord_to_node_idx`).
+    """
+    seen: set[tuple[float, float]] = set()
+    unique: list[list] = []
+    for seg in segments:
+        if len(seg) < 2:
+            continue
+        for coord in (seg[0], seg[1]):
+            k = (round(coord[0], 5), round(coord[1], 5))
+            if k in seen:
+                continue
+            seen.add(k)
+            unique.append(coord)
+    return unique
+
+
+def cast_node_votes(redis_client, coords: list, mode: str, ip_hash: str = None, vote_type: str = "") -> int:
+    """Increment one vote per unique node in `coords`.
+
+    Caller is responsible for passing already-deduplicated coords (e.g. via
+    extract_unique_node_coords) — this function does not dedup.
+    """
+    if not redis_client or not coords:
+        return 0
+
+    ip_hash = ip_hash or "system"
+
+    try:
+        pipe = redis_client.pipeline()
+        keys_to_update: list[str] = []
+        for coord in coords:
+            key = node_key(coord, mode)
+            pipe.hincrby(NODE_VOTES_KEY, key, 1)
+            if vote_type:
+                keys_to_update.append(key)
+        pipe.execute()
+
+        if vote_type and keys_to_update:
+            _update_node_vote_types(redis_client, keys_to_update, vote_type)
+
+        return len(coords)
+    except Exception as e:
+        print(f"Node vote casting error: {e}")
+        return 0
+
+
+def _update_node_vote_types(redis_client, keys: list[str], vote_type: str):
+    """Increment vote_type count for each node key in Redis."""
+    pipe = redis_client.pipeline()
+    for key in keys:
+        pipe.hget(NODE_VOTE_TYPES_KEY, key)
+    current_values = pipe.execute()
+
+    pipe = redis_client.pipeline()
+    for key, raw in zip(keys, current_values):
+        vt_map = json.loads(raw) if raw else {}
+        vt_map[vote_type] = vt_map.get(vote_type, 0) + 1
+        pipe.hset(NODE_VOTE_TYPES_KEY, key, json.dumps(vt_map))
     pipe.execute()

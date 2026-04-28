@@ -233,6 +233,19 @@ body {
    Mode Selector
    ========================================================================== */
 
+.mode-switcher-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mode-prefix-label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
 .mode-selector {
   position: relative;
   z-index: var(--z-dropdown);
@@ -243,7 +256,6 @@ body {
   align-items: center;
   gap: var(--space-2);
   padding: 8px var(--space-3);
-  padding-right: calc(var(--space-3) + 1.2em);
   border: 1px solid var(--hairline);
   background: var(--paper);
   font-family: var(--font-main);
@@ -254,6 +266,12 @@ body {
   cursor: pointer;
   height: var(--control-height);
   box-sizing: border-box;
+}
+
+.mode-caret {
+  font-size: var(--font-size-xs);
+  opacity: 0.6;
+  margin-left: var(--space-1);
 }
 
 .mode-btn:hover {
@@ -308,6 +326,7 @@ body {
   font-weight: 600;
   letter-spacing: 0;
   color: var(--ink);
+  text-decoration: none;
   cursor: pointer;
   transition: background 0.1s ease;
   text-align: left;
@@ -345,9 +364,9 @@ body {
 
 .route-legend {
   display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
+  align-items: stretch;
+  gap: var(--space-1);
+  padding: 0;
   background: var(--hover-bg);
   border: 1px solid var(--hairline);
   font-size: var(--font-size-sm);
@@ -358,7 +377,35 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   font-size: var(--font-size-sm);
+}
+
+/* Tool-arming buttons in the legend (Start / End slot pickers).
+   The button itself is the full hit target — own padding lives inside,
+   no negative-margin trick. Active state shows the armed tool. */
+.legend-tool {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.legend-tool:hover:not(:disabled):not(.active) {
+  background: var(--hover-bg);
+}
+
+.legend-tool.active {
+  border-color: var(--ink);
+  background: var(--hover-bg-strong);
+}
+
+.legend-tool:disabled {
+  cursor: default;
 }
 
 .legend-icon-slot {
@@ -561,11 +608,12 @@ body {
 
 .leaflet-control-attribution {
   font-family: var(--font-main) !important;
-  font-size: var(--font-size-xs) !important;
+  font-size: 11px !important;
   letter-spacing: 0 !important;
   opacity: 0.35 !important;
   background: var(--paper) !important;
   color: var(--ink) !important;
+  padding: 2px 6px !important;
 }
 
 .leaflet-control-attribution a {
@@ -1116,8 +1164,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 
   .btn-header,
-  .mode-btn {
+  .mode-btn,
+  .mode-prefix-label {
     font-size: 12px;
+  }
+
+  .btn-header,
+  .mode-btn {
     padding: 4px 8px;
   }
 
@@ -1186,8 +1239,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 
   .btn-header,
-  .mode-btn {
+  .mode-btn,
+  .mode-prefix-label {
     font-size: 11px;
+  }
+
+  .btn-header,
+  .mode-btn {
     padding: 4px 6px;
   }
 
@@ -1287,8 +1345,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 
   .btn-header,
-  .mode-btn {
+  .mode-btn,
+  .mode-prefix-label {
     font-size: 12px;
+  }
+
+  .btn-header,
+  .mode-btn {
     padding: 4px 8px;
     white-space: nowrap;
   }
@@ -1319,7 +1382,9 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 
 .graph-tooltip {
   position: fixed;
-  z-index: var(--z-dropdown);
+  /* Above leaflet marker pane (default z-index 600) so vote-type indicator
+     icons don't occlude the hover tooltip they trigger. */
+  z-index: 1000;
   background: #0d0d0d;
   border: 1px solid rgba(170, 185, 255, 0.35);
   padding: 4px 8px;
@@ -1331,6 +1396,161 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   /* Default: position to the right and above cursor */
   transform: translateY(calc(-100% - 8px));
   margin-left: 8px;
+}
+
+
+/* ==========================================================================
+   Vote-Type Indicator Markers
+   ========================================================================== */
+
+/* Leaflet wraps divIcons in a container; keep it transparent so only our
+   inner box paints. */
+.vote-type-indicator-wrapper {
+  background: transparent !important;
+  border: none !important;
+}
+
+.vote-type-indicator {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  font-family: var(--font-main);
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.vote-type-indicator:hover {
+  border-color: var(--ink);
+  transform: scale(1.1);
+}
+
+.vote-type-indicator-glyph {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.vote-type-indicator-disc {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+/* Expanded modal shown when a vote-type indicator icon is hovered.
+   Anchors at the icon's screen position; the icon "expands" into this panel
+   visually via the entrance scale animation. */
+.graph-indicator-modal {
+  position: fixed;
+  z-index: 1100;
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  padding: 10px 12px;
+  font-family: var(--font-main);
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+  color: var(--ink);
+  min-width: 220px;
+  /* Default: top-left of modal sits just above-right of the icon */
+  transform: translate(16px, calc(-100% - 16px));
+  animation: indicator-modal-in 120ms ease-out;
+  transform-origin: bottom left;
+}
+
+.graph-indicator-modal.modal-flipped {
+  transform: translate(calc(-100% - 16px), calc(-100% - 16px));
+  transform-origin: bottom right;
+}
+
+@keyframes indicator-modal-in {
+  from {
+    opacity: 0;
+    transform: translate(16px, calc(-100% - 16px)) scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: translate(16px, calc(-100% - 16px)) scale(1);
+  }
+}
+
+.graph-indicator-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 8px;
+}
+
+.graph-indicator-modal-glyph {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--hairline);
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.graph-indicator-modal-disc {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.graph-indicator-modal-headtext {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.graph-indicator-modal-eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.graph-indicator-modal-label {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: normal;
+  line-height: 1.3;
+}
+
+.graph-indicator-modal-body {
+  font-size: 11px;
+}
+
+.graph-indicator-modal-body .graph-tooltip-name {
+  color: rgba(200, 210, 255, 0.9);
+  margin-bottom: 2px;
+}
+
+.graph-indicator-modal-body .graph-tooltip-meta {
+  color: rgba(180, 185, 210, 0.7);
+  margin-bottom: 4px;
+}
+
+.graph-indicator-modal-body .graph-tooltip-types {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(170, 185, 255, 0.15);
+  white-space: normal;
+}
+
+.graph-indicator-modal-body .graph-tooltip-types > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  line-height: 1.5;
 }
 
 .graph-tooltip.tooltip-flipped {

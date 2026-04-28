@@ -82,6 +82,7 @@ export interface GraphData {
   edge_votes?: number[];                                  // Vote count for each edge
   vote_type_legend?: string[];                            // Unique vote type labels
   edge_vote_types?: [number, number][][];                  // Per-edge [legend_idx, count] pairs, sorted by frequency
+  node_vote_types?: [number, number][][];                  // Per-node [legend_idx, count] pairs, sorted by frequency
 }
 
 // Vote type suggestion for the selector

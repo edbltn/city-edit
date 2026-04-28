@@ -2,6 +2,7 @@ import { memo, useState } from "react";
 import { useRoute, useTheme } from "../../context";
 import { landingHref } from "../../themes";
 import { HowItWorksModal } from "../HowItWorksModal";
+import { ModeSwitcher } from "../ModeSwitcher";
 import { VoteTypeSelector } from "../VoteTypeSelector";
 import "./TopBar.css";
 
@@ -19,6 +20,8 @@ export const TopBar = memo(function TopBar() {
     hasVoted,
     isVoting,
     pointType,
+    activeTool,
+    setActiveTool,
     clearPoints,
     castVote,
   } = useRoute();
@@ -37,6 +40,27 @@ export const TopBar = memo(function TopBar() {
 
   // Can vote once we have a route (2 points), split paths (waypoints), OR a single point (for point votes)
   const canVote = !!routeData || splitDesirePaths.length > 0 || (pointType === "point" && !!start.coords);
+
+  const startPlaceholder = isPointOnly ? "click map to set location" : "click map to set start";
+  const endPlaceholder = !start.coords
+    ? "place a start first"
+    : activeTool === "end"
+      ? "click map to set endpoint"
+      : "click here to set endpoint";
+
+  const startToolClass = ["legend-item", "legend-item-coords", "legend-tool"];
+  if (!isPointOnly && activeTool === "start") startToolClass.push("active");
+
+  const endToolClass = ["legend-item", "legend-item-coords", "legend-tool"];
+  if (activeTool === "end") endToolClass.push("active");
+
+  const startCoordsClass = ["legend-coords"];
+  if (!start.coords) startCoordsClass.push("empty");
+  if (isLoading) startCoordsClass.push("loading");
+
+  const endCoordsClass = ["legend-coords"];
+  if (!end.coords) endCoordsClass.push("empty");
+  if (isLoading) endCoordsClass.push("loading");
 
   const goToLanding = () => {
     window.location.href = landingHref();
@@ -65,25 +89,36 @@ export const TopBar = memo(function TopBar() {
           {/* Route section: legend with coordinates on top, actions below */}
           <div className="route-section">
           <div className="route-legend">
-            <div className="legend-item legend-item-coords">
+            <button
+              type="button"
+              className={startToolClass.join(" ")}
+              onClick={() => !isPointOnly && setActiveTool("start")}
+              disabled={isPointOnly}
+              aria-pressed={!isPointOnly && activeTool === "start"}
+            >
               <span className="legend-icon-slot">
                 <span className="legend-char-start">●</span>
               </span>
               <span className="legend-label">{theme.locationLabel}</span>
-              <span className={`legend-coords ${!start.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}>
-                {formatLocation(start) || (isPointOnly ? "click map to set location" : "click map to set start")}
+              <span className={startCoordsClass.join(" ")}>
+                {formatLocation(start) || startPlaceholder}
               </span>
-            </div>
+            </button>
             {!isPointOnly && (
-              <div className="legend-item legend-item-coords">
+              <button
+                type="button"
+                className={endToolClass.join(" ")}
+                onClick={() => setActiveTool("end")}
+                aria-pressed={activeTool === "end"}
+              >
                 <span className="legend-icon-slot">
                   <span className="legend-char-end">●</span>
                 </span>
                 <span className="legend-label">End</span>
-                <span className={`legend-coords ${!end.coords ? "empty" : ""} ${isLoading ? "loading" : ""}`}>
-                  {formatLocation(end) || "click map to set end"}
+                <span className={endCoordsClass.join(" ")}>
+                  {formatLocation(end) || endPlaceholder}
                 </span>
-              </div>
+              </button>
             )}
             {(routeData || splitDesirePaths.length > 0) && !isLoading && (
               <div className="legend-item">
@@ -96,6 +131,11 @@ export const TopBar = memo(function TopBar() {
           </div>
 
           <div className="route-actions">
+            <div className="mode-switcher-group">
+              <span className="mode-prefix-label">Mode:</span>
+              <ModeSwitcher />
+            </div>
+
             <button
               className="btn-header"
               onClick={() => setShowHowItWorks(true)}

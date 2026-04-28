@@ -1402,6 +1402,127 @@ def graph_topology():
     return resp
 
 
+def _build_graph_votes_body(mode_filter: str | None) -> str:
+    """Compute the /api/graph-votes JSON body for a given mode filter.
+
+    Extracted so startup pre-warming can populate `_graph_votes_cache` without
+    going through the Flask request stack.
+    """
+    global _graph_cache, _graph_votes_cache, _votes_revision
+
+    edges = _graph_cache["edges"]
+    nodes = _graph_cache["nodes"]
+    coord_to_edge_idx: dict[tuple[str, str], list[int]] = _graph_cache["coord_to_edge_idx"]
+    coord_to_node_idx: dict[str, int] = _graph_cache.get("coord_to_node_idx", {})
+
+    segment_votes = redis_client.hgetall(SEGMENT_VOTES_KEY)
+
+    # Walk the (small) vote rows, not the (huge) edge list. A coord pair
+    # can map to multiple parallel edges in a multigraph; broadcast the
+    # vote count to every twin so all of them light up consistently.
+    edge_votes = [0] * len(edges)
+    for seg_key, vote_count in segment_votes.items():
+        parts = seg_key.split("|")
+        if len(parts) < 3 or not parts[1]:
+            continue
+        if mode_filter is not None and parts[2] != mode_filter:
+            continue
+        v = int(vote_count)
+        for edge_idx in coord_to_edge_idx.get((parts[0], parts[1]), ()):
+            edge_votes[edge_idx] += v
+
+    # Node votes — read directly from the dedicated NODE_VOTES_KEY hash.
+    # Each route vote increments one count per unique node it touches.
+    node_votes = [0] * len(nodes)
+    try:
+        raw_nv = redis_client.hgetall(NODE_VOTES_KEY)
+        for nk, vote_count in raw_nv.items():
+            parts = nk.split("|")
+            if len(parts) < 2:
+                continue
+            if mode_filter is not None and parts[1] != mode_filter:
+                continue
+            node_idx = coord_to_node_idx.get(parts[0])
+            if node_idx is not None:
+                node_votes[node_idx] += int(vote_count)
+    except Exception as e:
+        logger.warning(f"[GRAPH-VOTES] Failed to fetch node votes: {e}")
+
+    # Vote types — same trick: iterate the small vote-types hash
+    edge_vote_types: list = [None] * len(edges)
+    node_vote_types: list = [None] * len(nodes)
+    legend: list[str] = []
+    legend_idx: dict[str, int] = {}
+
+    def _merge_vote_types(target_list, idx, vt_map):
+        existing = target_list[idx]
+        merged: dict[str, int] = {}
+        if existing:
+            for li, cnt in existing:
+                merged[legend[li]] = cnt
+        for vt, cnt in vt_map.items():
+            merged[vt] = merged.get(vt, 0) + cnt
+        sorted_vts = sorted(merged.items(), key=lambda x: -x[1])
+        encoded = []
+        for vt, cnt in sorted_vts:
+            if vt not in legend_idx:
+                legend_idx[vt] = len(legend)
+                legend.append(vt)
+            encoded.append([legend_idx[vt], cnt])
+        target_list[idx] = encoded
+
+    try:
+        from desire_path_voting import SEGMENT_VOTE_TYPES_KEY
+        raw_vt = redis_client.hgetall(SEGMENT_VOTE_TYPES_KEY)
+        for seg_key, vt_json in raw_vt.items():
+            parts = seg_key.split("|")
+            if len(parts) < 3 or not parts[1]:
+                continue
+            if mode_filter is not None and parts[2] != mode_filter:
+                continue
+            indices = coord_to_edge_idx.get((parts[0], parts[1]))
+            if not indices:
+                continue
+            vt_map = json.loads(vt_json)
+            for edge_idx in indices:
+                _merge_vote_types(edge_vote_types, edge_idx, vt_map)
+    except Exception as e:
+        logger.warning(f"[GRAPH-VOTES] Failed to fetch edge vote types: {e}")
+
+    try:
+        raw_nvt = redis_client.hgetall(NODE_VOTE_TYPES_KEY)
+        for nk, vt_json in raw_nvt.items():
+            parts = nk.split("|")
+            if len(parts) < 2:
+                continue
+            if mode_filter is not None and parts[1] != mode_filter:
+                continue
+            node_idx = coord_to_node_idx.get(parts[0])
+            if node_idx is None:
+                continue
+            _merge_vote_types(node_vote_types, node_idx, json.loads(vt_json))
+    except Exception as e:
+        logger.warning(f"[GRAPH-VOTES] Failed to fetch node vote types: {e}")
+
+    # Replace remaining None placeholders with [] for the JSON contract
+    for i in range(len(edge_vote_types)):
+        if edge_vote_types[i] is None:
+            edge_vote_types[i] = []
+    for i in range(len(node_vote_types)):
+        if node_vote_types[i] is None:
+            node_vote_types[i] = []
+
+    body = json.dumps({
+        "edge_votes": edge_votes,
+        "node_votes": node_votes,
+        "vote_type_legend": legend,
+        "edge_vote_types": edge_vote_types,
+        "node_vote_types": node_vote_types,
+    })
+    _graph_votes_cache[mode_filter or ""] = {"revision": _votes_revision, "body": body}
+    return body
+
+
 @app.route("/api/graph-votes", methods=["GET"])
 def graph_votes():
     """Return vote data for the full cached graph topology.
@@ -1425,134 +1546,38 @@ def graph_votes():
     mode_filter = (request.args.get("mode") or "").strip() or None
     cache_key = mode_filter or ""
 
-    # Cache hit — body is already-serialized JSON bytes
     cached = _graph_votes_cache.get(cache_key)
     if cached and cached["revision"] == _votes_revision:
-        resp = app.response_class(
-            response=cached["body"],
-            status=200,
-            mimetype="application/json",
-        )
-        resp.headers["Cache-Control"] = "public, max-age=5"
-        return resp
-
-    edges = _graph_cache["edges"]
-    nodes = _graph_cache["nodes"]
-    coord_to_edge_idx: dict[tuple[str, str], list[int]] = _graph_cache["coord_to_edge_idx"]
-    coord_to_node_idx: dict[str, int] = _graph_cache.get("coord_to_node_idx", {})
-
-    try:
-        segment_votes = redis_client.hgetall(SEGMENT_VOTES_KEY)
-
-        # Walk the (small) vote rows, not the (huge) edge list. A coord pair
-        # can map to multiple parallel edges in a multigraph; broadcast the
-        # vote count to every twin so all of them light up consistently.
-        edge_votes = [0] * len(edges)
-        for seg_key, vote_count in segment_votes.items():
-            parts = seg_key.split("|")
-            if len(parts) < 3 or not parts[1]:
-                continue
-            if mode_filter is not None and parts[2] != mode_filter:
-                continue
-            v = int(vote_count)
-            for edge_idx in coord_to_edge_idx.get((parts[0], parts[1]), ()):
-                edge_votes[edge_idx] += v
-
-        # Node votes — read directly from the dedicated NODE_VOTES_KEY hash.
-        # Each route vote increments one count per unique node it touches.
-        node_votes = [0] * len(nodes)
+        body = cached["body"]
+    else:
         try:
-            raw_nv = redis_client.hgetall(NODE_VOTES_KEY)
-            for nk, vote_count in raw_nv.items():
-                parts = nk.split("|")
-                if len(parts) < 2:
-                    continue
-                if mode_filter is not None and parts[1] != mode_filter:
-                    continue
-                node_idx = coord_to_node_idx.get(parts[0])
-                if node_idx is not None:
-                    node_votes[node_idx] += int(vote_count)
+            body = _build_graph_votes_body(mode_filter)
         except Exception as e:
-            logger.warning(f"[GRAPH-VOTES] Failed to fetch node votes: {e}")
+            return jsonify({"error": str(e)}), 500
 
-        # Vote types — same trick: iterate the small vote-types hash
-        edge_vote_types: list = [None] * len(edges)
-        node_vote_types: list = [None] * len(nodes)
-        legend: list[str] = []
-        legend_idx: dict[str, int] = {}
+    resp = app.response_class(response=body, status=200, mimetype="application/json")
+    resp.headers["Cache-Control"] = "public, max-age=5"
+    return resp
 
-        def _merge_vote_types(target_list, idx, vt_map):
-            existing = target_list[idx]
-            merged: dict[str, int] = {}
-            if existing:
-                for li, cnt in existing:
-                    merged[legend[li]] = cnt
-            for vt, cnt in vt_map.items():
-                merged[vt] = merged.get(vt, 0) + cnt
-            sorted_vts = sorted(merged.items(), key=lambda x: -x[1])
-            encoded = []
-            for vt, cnt in sorted_vts:
-                if vt not in legend_idx:
-                    legend_idx[vt] = len(legend)
-                    legend.append(vt)
-                encoded.append([legend_idx[vt], cnt])
-            target_list[idx] = encoded
 
+# Pre-warm the /api/graph-votes cache so the first page load after a deploy
+# doesn't pay for a full Redis-scan + JSON-serialize round trip. Without this,
+# each Flask replica builds its cache lazily on the first request — which is
+# exactly when the user is staring at an unpopulated heatmap.
+def _prewarm_graph_votes_cache():
+    if _graph_cache is None:
+        return
+    # The unfiltered view (cache_key="") plus each theme's mode namespace.
+    # Keep this list in sync with client-react/src/themes.ts.
+    modes_to_warm = [None, "bikepaths", "trees", "walkways"]
+    for mode in modes_to_warm:
         try:
-            from desire_path_voting import SEGMENT_VOTE_TYPES_KEY
-            raw_vt = redis_client.hgetall(SEGMENT_VOTE_TYPES_KEY)
-            for seg_key, vt_json in raw_vt.items():
-                parts = seg_key.split("|")
-                if len(parts) < 3 or not parts[1]:
-                    continue
-                if mode_filter is not None and parts[2] != mode_filter:
-                    continue
-                indices = coord_to_edge_idx.get((parts[0], parts[1]))
-                if not indices:
-                    continue
-                vt_map = json.loads(vt_json)
-                for edge_idx in indices:
-                    _merge_vote_types(edge_vote_types, edge_idx, vt_map)
+            _build_graph_votes_body(mode)
         except Exception as e:
-            logger.warning(f"[GRAPH-VOTES] Failed to fetch edge vote types: {e}")
+            logger.warning(f"[STARTUP] Failed to pre-warm graph-votes cache for mode={mode!r}: {e}")
+    logger.info(f"[STARTUP] Pre-warmed graph-votes cache for {len(modes_to_warm)} mode(s)")
 
-        try:
-            raw_nvt = redis_client.hgetall(NODE_VOTE_TYPES_KEY)
-            for nk, vt_json in raw_nvt.items():
-                parts = nk.split("|")
-                if len(parts) < 2:
-                    continue
-                if mode_filter is not None and parts[1] != mode_filter:
-                    continue
-                node_idx = coord_to_node_idx.get(parts[0])
-                if node_idx is None:
-                    continue
-                _merge_vote_types(node_vote_types, node_idx, json.loads(vt_json))
-        except Exception as e:
-            logger.warning(f"[GRAPH-VOTES] Failed to fetch node vote types: {e}")
-
-        # Replace remaining None placeholders with [] for the JSON contract
-        for i in range(len(edge_vote_types)):
-            if edge_vote_types[i] is None:
-                edge_vote_types[i] = []
-        for i in range(len(node_vote_types)):
-            if node_vote_types[i] is None:
-                node_vote_types[i] = []
-
-        body = json.dumps({
-            "edge_votes": edge_votes,
-            "node_votes": node_votes,
-            "vote_type_legend": legend,
-            "edge_vote_types": edge_vote_types,
-            "node_vote_types": node_vote_types,
-        })
-        _graph_votes_cache[cache_key] = {"revision": _votes_revision, "body": body}
-
-        resp = app.response_class(response=body, status=200, mimetype="application/json")
-        resp.headers["Cache-Control"] = "public, max-age=5"
-        return resp
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+_prewarm_graph_votes_cache()
 
 
 @app.route("/api/graph.geojson", methods=["GET"])
