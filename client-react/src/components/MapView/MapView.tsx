@@ -19,6 +19,9 @@ import { WaypointConnectors } from "../WaypointConnectors";
 import { GhostPin } from "../GhostPin";
 import { GraphLayer } from "../GraphLayer/GraphLayer";
 import { MapLibreBackground } from "../MapLibreBackground";
+import { GISLayers } from "../GISLayers";
+import { HVILayer } from "../HVILayer";
+import { OwnPlantsLayer } from "../OwnPlantsLayer";
 import type { LatLng } from "../../types";
 import "leaflet/dist/leaflet.css";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -49,6 +52,16 @@ function MapPanes() {
       const desirePathPane = map.getPane("desirePathPane");
       if (desirePathPane) {
         desirePathPane.style.zIndex = "440";
+      }
+    }
+
+    // Pane for HVI choropleth — sits below tree dots and click-throughs.
+    if (!map.getPane("hviPane")) {
+      map.createPane("hviPane");
+      const hviPane = map.getPane("hviPane");
+      if (hviPane) {
+        hviPane.style.zIndex = "350";
+        hviPane.style.pointerEvents = "none";
       }
     }
 
@@ -269,6 +282,15 @@ export function MapView() {
         maxZoom={CONFIG.maxZoom}
         attribution={CONFIG.tileAttribution}
       />
+
+      {/* Tree theme overlays: HVI choropleth, NYC tree census, own-vote feedback. */}
+      {theme.id === "trees" && (
+        <>
+          <HVILayer />
+          <GISLayers />
+          <OwnPlantsLayer />
+        </>
+      )}
 
       {/* Zoom control in bottom right */}
       <ZoomControl />
