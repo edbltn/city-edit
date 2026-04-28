@@ -217,8 +217,18 @@ resource "google_cloud_run_service" "app" {
         resources {
           limits = {
             cpu    = "4"
-            memory = "4Gi"
+            memory = "8Gi"
           }
+        }
+
+        startup_probe {
+          http_get {
+            path = "/health"
+          }
+          initial_delay_seconds = 5
+          period_seconds        = 5
+          failure_threshold     = 30
+          timeout_seconds       = 3
         }
       }
     }

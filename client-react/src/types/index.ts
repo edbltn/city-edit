@@ -77,7 +77,7 @@ export interface WebSocketMessage {
 
 export interface GraphData {
   nodes: [number, number][];                              // [lat, lon]
-  edges: [number, number, string, string, number][];      // [from_idx, to_idx, name, highway, length_m]
+  edges: [number, number, string][];                       // [from_idx, to_idx, name]
   node_votes?: number[];                                  // Vote count for each node
   edge_votes?: number[];                                  // Vote count for each edge
   vote_type_legend?: string[];                            // Unique vote type labels

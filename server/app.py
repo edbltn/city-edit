@@ -127,9 +127,10 @@ logger.info("[STARTUP] Python router initialized")
 
 # Cache graph data for serving as GeoJSON
 _graph_cache = None
+_graph_topology_json: str | None = None
 
 def _load_graph_cache():
-    global _graph_cache
+    global _graph_cache, _graph_topology_json
     logger.info("[STARTUP] Pre-loading graph geometry...")
     try:
         # get_graph_for_bbox(south, west, north, east) — full Manhattan
@@ -171,10 +172,16 @@ def _load_graph_cache():
         data["coord_to_edge_idx"] = coord_to_edge_idx
         data["coord_to_node_idx"] = coord_to_node_idx
         _graph_cache = data
+
+        # Strip highway/length_m from edges — client only uses [from, to, name]
+        edges_slim = [[e[0], e[1], e[2]] for e in edges]
+        _graph_topology_json = json.dumps({"nodes": nodes, "edges": edges_slim})
+        topo_mb = len(_graph_topology_json) / (1024 * 1024)
         logger.info(
             f"[STARTUP] Cached graph: {len(nodes)} nodes, {len(edges)} edges, "
             f"{len(coord_to_edge_idx)} edge coord entries, "
-            f"{len(coord_to_node_idx)} node coord entries"
+            f"{len(coord_to_node_idx)} node coord entries, "
+            f"topology JSON {topo_mb:.1f} MB"
         )
     except Exception as e:
         logger.error(f"[STARTUP] Failed to load graph cache: {e}")
@@ -609,6 +616,8 @@ def make_state(rev: int, mode_filter=None):
 @app.route("/health")
 def health():
     """Health check endpoint for load balancers and monitoring."""
+    if _graph_topology_json is None:
+        return jsonify({"status": "unhealthy", "graph": "not loaded"}), 503
     try:
         redis_client.ping()
         return jsonify({"status": "healthy", "redis": "connected"}), 200
@@ -1390,14 +1399,10 @@ def serve_tiles(filename):
 @app.route("/api/graph-topology", methods=["GET"])
 def graph_topology():
     """Serve full graph topology (nodes + edges, no votes). Highly cacheable."""
-    global _graph_cache
-    if _graph_cache is None:
+    if _graph_topology_json is None:
         return jsonify({"error": "Graph not loaded"}), 500
 
-    resp = jsonify({
-        "nodes": _graph_cache["nodes"],
-        "edges": _graph_cache["edges"],
-    })
+    resp = app.response_class(response=_graph_topology_json, status=200, mimetype="application/json")
     resp.headers["Cache-Control"] = "public, max-age=86400"
     return resp
 

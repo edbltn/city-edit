@@ -162,6 +162,11 @@ interface VoteTypeWinner {
 // when many edges crowd a small viewport).
 const INDICATOR_MIN_ZOOM = 13;
 
+// Cap on how many top-proposal indicators show on the map. Prevents a few
+// spammy votes across many vote types from cluttering the map with one
+// indicator per type — only the 10 most-voted survive.
+const TOP_PROPOSAL_LIMIT = 10;
+
 /** Find the edge with the highest count for each vote type in the legend. */
 function computeVoteTypeWinners(data: GraphData | null): VoteTypeWinner[] {
   if (!data) return [];
@@ -188,6 +193,35 @@ function computeVoteTypeWinners(data: GraphData | null): VoteTypeWinner[] {
     winners.push({ legendIdx, label, edgeIdx, count });
   }
   return winners;
+}
+
+/**
+ * Trim a winner list to the top N by count.
+ * Tiebreak: a deterministic-but-random shuffle keyed on `salt`. Same salt +
+ * same labels → same order, so re-renders within a session don't reshuffle.
+ * A new salt is generated on each page load so equal-count proposals get
+ * different exposure across visits.
+ */
+function applyTopProposalLimit(
+  winners: VoteTypeWinner[],
+  salt: number,
+  limit: number
+): VoteTypeWinner[] {
+  const shuffleKey = (label: string): number => {
+    let h = salt | 0;
+    for (let i = 0; i < label.length; i++) {
+      h = ((h * 31) + label.charCodeAt(i)) | 0;
+    }
+    return h;
+  };
+
+  return winners
+    .slice()
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return shuffleKey(a.label) - shuffleKey(b.label);
+    })
+    .slice(0, limit);
 }
 
 // Number of bbox-nearest candidates to retrieve from the spatial index.
@@ -403,9 +437,13 @@ interface GraphLayerProps {
   onSnap?: (pos: { lat: number; lng: number } | null) => void;
   /** When set, a tooltip is pinned at this point showing nearest node vote data. */
   pinnedPoint?: { lat: number; lng: number } | null;
+  /** Called when a user clicks/taps a top-proposal indicator. Receives the
+   *  edge midpoint of the indicator's segment. Hosts use this to place a
+   *  start point at that location so the segment becomes selected. */
+  onIndicatorClick?: (latlng: { lat: number; lng: number }) => void;
 }
 
-export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
+export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayerProps) {
   const map = useMap();
   const { mapState } = useWebSocketContext();
   const { setSnapFn, setCurrentSnap, isDraggingRef: graphDraggingRef } = useGraphSnap();
@@ -455,6 +493,10 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
   const pinnedRafRef = useRef<number | null>(null);
   // Pinned target (node or edge) for highlight and tooltip
   const pinnedTargetRef = useRef<HoverTarget | null>(null);
+  // When an indicator is clicked, store the exact edge index so the
+  // pinnedPoint effect uses it directly instead of re-running hitTest
+  // (which can snap to a neighboring edge).
+  const pinnedEdgeOverrideRef = useRef<number | null>(null);
 
   // Increments when a geocode resolves, forcing tooltip re-render
   const [geocodeVersion, setGeocodeVersion] = useState(0);
@@ -464,6 +506,28 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
   const [winners, setWinners] = useState<VoteTypeWinner[]>([]);
   const [currentZoom, setCurrentZoom] = useState<number>(() => map.getZoom());
   const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
+
+  // Random tiebreak salt — stable for this page load, different next time.
+  // Used so that equal-count proposals don't always favor the same labels.
+  const tiebreakSaltRef = useRef<number>(Date.now());
+
+  // Only update winners state when the list actually changes (avoids
+  // re-mounting indicator markers on every vote poll).
+  const winnersRef = useRef(winners);
+  const setStableWinners = useCallback((next: VoteTypeWinner[]) => {
+    const prev = winnersRef.current;
+    if (
+      prev.length === next.length &&
+      prev.every((w, i) => w.edgeIdx === next[i].edgeIdx && w.count === next[i].count && w.legendIdx === next[i].legendIdx)
+    ) return;
+    winnersRef.current = next;
+    setWinners(next);
+  }, []);
+
+  // Stable ref for the indicator-click callback (avoids re-running the
+  // useMemo that builds marker components every time the parent re-renders).
+  const onIndicatorClickRef = useRef(onIndicatorClick);
+  useEffect(() => { onIndicatorClickRef.current = onIndicatorClick; }, [onIndicatorClick]);
 
   // When a vote-type indicator is hovered, this overrides the regular hover
   // tooltip with an expanded modal anchored to the icon's screen position.
@@ -530,7 +594,11 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
       if (!response.ok) throw new Error(`Vote fetch failed: ${response.status}`);
       const voteData = await response.json();
       graphDataRef.current = { ...topology, ...voteData };
-      setWinners(computeVoteTypeWinners(graphDataRef.current));
+      setStableWinners(applyTopProposalLimit(
+        computeVoteTypeWinners(graphDataRef.current),
+        tiebreakSaltRef.current,
+        TOP_PROPOSAL_LIMIT
+      ));
       scheduleRedrawRef.current();
     } catch (error) {
       console.error("Failed to fetch graph votes:", error);
@@ -587,7 +655,11 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
         const topology = topologyRef.current;
         if (!topology) return;
         graphDataRef.current = { ...topology, ...voteData };
-        setWinners(computeVoteTypeWinners(graphDataRef.current));
+        setStableWinners(applyTopProposalLimit(
+        computeVoteTypeWinners(graphDataRef.current),
+        tiebreakSaltRef.current,
+        TOP_PROPOSAL_LIMIT
+      ));
         scheduleRedrawRef.current();
       } catch (error) {
         console.error("Failed to fetch graph votes:", error);
@@ -1009,29 +1081,33 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
       return;
     }
 
-    // Find nearest node/edge for highlight using unified hit-test, with a
-    // global-nearest-edge fallback so the segment always lights up regardless
-    // of how far from the graph the user clicked.
-    const data = graphDataRef.current;
-    if (data?.edges) {
-      const pt = map.latLngToContainerPoint([pinnedLat, pinnedLng]);
-      const hit = hitTest(
-        data, map, pt.x, pt.y, pinnedLat, pinnedLng,
-        edgeIndexRef.current, nodeIndexRef.current
-      );
-      if (hit?.target) {
-        pinnedTargetRef.current = hit.target;
-      } else {
-        const nearestEdgeIdx = findNearestEdgeIndex(
-          data, map, pt.x, pt.y,
-          edgeIndexRef.current, pinnedLng, pinnedLat
-        );
-        pinnedTargetRef.current = nearestEdgeIdx !== null
-          ? { kind: "edge", index: nearestEdgeIdx }
-          : null;
-      }
+    // If an indicator click pre-set the edge, use it directly (avoids
+    // hitTest snapping to a different nearby edge).
+    if (pinnedEdgeOverrideRef.current !== null) {
+      pinnedTargetRef.current = { kind: "edge", index: pinnedEdgeOverrideRef.current };
+      pinnedEdgeOverrideRef.current = null;
     } else {
-      pinnedTargetRef.current = null;
+      const data = graphDataRef.current;
+      if (data?.edges) {
+        const pt = map.latLngToContainerPoint([pinnedLat, pinnedLng]);
+        const hit = hitTest(
+          data, map, pt.x, pt.y, pinnedLat, pinnedLng,
+          edgeIndexRef.current, nodeIndexRef.current
+        );
+        if (hit?.target) {
+          pinnedTargetRef.current = hit.target;
+        } else {
+          const nearestEdgeIdx = findNearestEdgeIndex(
+            data, map, pt.x, pt.y,
+            edgeIndexRef.current, pinnedLng, pinnedLat
+          );
+          pinnedTargetRef.current = nearestEdgeIdx !== null
+            ? { kind: "edge", index: nearestEdgeIdx }
+            : null;
+        }
+      } else {
+        pinnedTargetRef.current = null;
+      }
     }
     redrawHoverHighlightRef.current();
 
@@ -1183,14 +1259,15 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
   // map mousemove handler would, so the existing tooltip lights up.
   const indicatorMarkers = useMemo(() => {
     if (currentZoom < INDICATOR_MIN_ZOOM) return null;
-    if (!data || winners.length === 0) return null;
+    const topology = topologyRef.current;
+    if (!topology || winners.length === 0) return null;
 
     return winners.map((w) => {
-      const edge = data.edges[w.edgeIdx];
+      const edge = topology.edges[w.edgeIdx];
       if (!edge) return null;
       const [fromIdx, toIdx] = edge;
-      const fromNode = data.nodes[fromIdx];
-      const toNode = data.nodes[toIdx];
+      const fromNode = topology.nodes[fromIdx];
+      const toNode = topology.nodes[toIdx];
       if (!fromNode || !toNode) return null;
       const midLat = (fromNode[0] + toNode[0]) / 2;
       const midLng = (fromNode[1] + toNode[1]) / 2;
@@ -1224,6 +1301,12 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
         redrawHoverHighlightRef.current();
       };
 
+      const handleClick = () => {
+        activateIndicator();
+        pinnedEdgeOverrideRef.current = w.edgeIdx;
+        onIndicatorClickRef.current?.({ lat: midLat, lng: midLng });
+      };
+
       return (
         <Marker
           key={w.legendIdx}
@@ -1232,12 +1315,12 @@ export function GraphLayer({ onSnap, pinnedPoint }: GraphLayerProps) {
           eventHandlers={{
             mouseover: activateIndicator,
             mouseout: deactivateIndicator,
-            click: activateIndicator,
+            click: handleClick,
           }}
         />
       );
     });
-  }, [winners, currentZoom, data, map]);
+  }, [winners, currentZoom, map]);
 
   return (
     <>

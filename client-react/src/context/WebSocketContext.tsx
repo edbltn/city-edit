@@ -27,6 +27,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
+  const backoffRef = useRef(1000);
+  const MAX_BACKOFF = 30000;
 
   const connect = useCallback(() => {
     setConnectionStatus("connecting...");
@@ -34,6 +36,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
     ws.onopen = () => {
       setConnectionStatus("connected");
+      backoffRef.current = 1000;
     };
 
     ws.onmessage = (evt) => {
@@ -56,7 +59,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
     ws.onclose = () => {
       setConnectionStatus("disconnected");
-      reconnectTimeoutRef.current = setTimeout(connect, 1000);
+      const delay = backoffRef.current;
+      backoffRef.current = Math.min(delay * 2, MAX_BACKOFF);
+      reconnectTimeoutRef.current = setTimeout(connect, delay);
     };
 
     ws.onerror = () => {

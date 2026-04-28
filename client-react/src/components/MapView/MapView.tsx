@@ -190,6 +190,14 @@ export function MapView() {
     setIsDraggingMarker(false);
   }, []);
 
+  // Indicator click mirrors the Start-tool flow: wipe any existing route,
+  // then place a fresh start at the indicator's edge midpoint.
+  const handleIndicatorClick = useCallback((latlng: LatLng) => {
+    if (start.coords || end.coords) clearPoints();
+    clearSplitPaths();
+    setStartPoint(latlng);
+  }, [start.coords, end.coords, clearPoints, clearSplitPaths, setStartPoint]);
+
   const { handleMapClick } = useMapClick({
     state: { start, end },
     inputMode: theme.inputMode,
@@ -237,6 +245,7 @@ export function MapView() {
       <MapPanes />
       <GraphLayer
         pinnedPoint={start.coords && !end.coords ? start.coords : null}
+        onIndicatorClick={handleIndicatorClick}
       />
       <MapDragCursor />
       <CursorTracker onMove={setCursorLatLng} />

@@ -115,23 +115,32 @@ export const THEME_ORDER: Theme[] = [
   THEMES.trees,
 ];
 
+/** True for hostnames that should be treated as the local dev server. */
+function isLocalDevHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || !hostname.includes(".");
+}
+
 /**
  * Build a URL that points at a given theme's subdomain.
  * Production: https://<subdomain>.<root>/   Local dev: /?theme=<id>
+ *
+ * Handles three host shapes:
+ *   - localhost / 127.0.0.1 → query-param fallback for dev
+ *   - apex (cityedit.org, 2 parts) → prepend subdomain to whole hostname
+ *   - subdomain (foo.cityedit.org, 3+ parts) → swap first label for theme subdomain
  */
 export function themeHref(theme: Theme): string {
   if (typeof window === "undefined") return `https://${theme.subdomain}.cityedit.org/`;
 
   const { hostname, protocol, port } = window.location;
-  const parts = hostname.split(".");
-
-  if (parts.length >= 3) {
-    const root = parts.slice(1).join(".");
-    const portSuffix = port ? `:${port}` : "";
-    return `${protocol}//${theme.subdomain}.${root}${portSuffix}/`;
+  if (isLocalDevHost(hostname)) {
+    return `/?theme=${theme.id}`;
   }
 
-  return `/?theme=${theme.id}`;
+  const parts = hostname.split(".");
+  const root = parts.length >= 3 ? parts.slice(1).join(".") : hostname;
+  const portSuffix = port ? `:${port}` : "";
+  return `${protocol}//${theme.subdomain}.${root}${portSuffix}/`;
 }
 
 /**
@@ -183,13 +192,12 @@ export function landingHref(): string {
   if (typeof window === "undefined") return "https://cityedit.org/";
 
   const { hostname, protocol, port } = window.location;
-  const parts = hostname.split(".");
-
-  if (parts.length >= 3) {
-    const root = parts.slice(1).join(".");
-    const portSuffix = port ? `:${port}` : "";
-    return `${protocol}//${root}${portSuffix}/`;
+  if (isLocalDevHost(hostname)) {
+    return "/?landing=1";
   }
 
-  return "/?landing=1";
+  const parts = hostname.split(".");
+  const root = parts.length >= 3 ? parts.slice(1).join(".") : hostname;
+  const portSuffix = port ? `:${port}` : "";
+  return `${protocol}//${root}${portSuffix}/`;
 }
