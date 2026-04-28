@@ -190,13 +190,17 @@ export function MapView() {
     setIsDraggingMarker(false);
   }, []);
 
-  // Indicator click mirrors the Start-tool flow: wipe any existing route,
-  // then place a fresh start at the indicator's edge midpoint.
+  // Indicator click follows the same tool logic as a normal map click.
   const handleIndicatorClick = useCallback((latlng: LatLng) => {
-    if (start.coords || end.coords) clearPoints();
     clearSplitPaths();
-    setStartPoint(latlng);
-  }, [start.coords, end.coords, clearPoints, clearSplitPaths, setStartPoint]);
+    if (activeTool === "end" && start.coords) {
+      setEndPoint(latlng);
+      setActiveTool("start");
+    } else {
+      if (start.coords || end.coords) clearPoints();
+      setStartPoint(latlng);
+    }
+  }, [activeTool, start.coords, end.coords, clearPoints, clearSplitPaths, setStartPoint, setEndPoint, setActiveTool]);
 
   const { handleMapClick } = useMapClick({
     state: { start, end },
