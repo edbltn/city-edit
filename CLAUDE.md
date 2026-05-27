@@ -13,7 +13,8 @@ Desire Path Mapper is a crowdsourced map showing how people actually travel thro
 ## Components
 
 - **Nginx**: Reverse proxy serving static files and load-balancing Flask instances
-- **Flask**: Python backend handling route calculations and vote processing (runs as multiple replicas)
+- **Flask**: Python backend handling vote processing and graph topology (runs as multiple replicas)
+- **OSRM**: Self-hosted Open Source Routing Machine for fast pathfinding (foot profile, MLD algorithm)
 - **Redis**: In-memory store for vote data and real-time state; used for pub/sub to sync state across Flask instances
 - **Client**: React + Leaflet map UI (TypeScript, Vite)
 
@@ -33,6 +34,8 @@ All secrets and configuration are stored in `server/.env`. Copy from `.env.examp
 |----------|-------------|----------|
 | `REDIS_HOST` | Redis host (default: `localhost`) | No |
 | `DATABASE_URL` | PostgreSQL connection URL for persistent vote storage | No |
+| `OSRM_HOST` | OSRM service host (default: `localhost`) | No |
+| `OSRM_PORT` | OSRM service port (default: `5000`) | No |
 
 **Never commit `.env` to git.** It's in `.gitignore`.
 
@@ -40,17 +43,19 @@ All secrets and configuration are stored in `server/.env`. Copy from `.env.examp
 
 1. Client connects via WebSocket to receive real-time map state
 2. User submits a commute route (start/end points + mode)
-3. Flask uses osmnx + rustworkx to calculate route geometry locally
+3. Flask calls self-hosted OSRM for fast pathfinding (sub-ms routing)
 4. Route segments are converted to vote points stored in Redis
 5. WebSocket broadcasts updated heatmap to all clients
 
 ## Routing
 
 ### Architecture
-The app uses a **Python router** based on osmnx and rustworkx for fast local routing. Routes are calculated entirely server-side without external API dependencies.
+Routing uses **OSRM** (Open Source Routing Machine) for fast pathfinding and a **Python graph provider** (osmnx) for topology visualization, nearest-node snapping, and reverse geocoding.
 
-- **Router**: `server/python_router.py` - Graph-based routing with rustworkx
-- **Graph files**: `server/osm_data/walk_graph.pickle` - Pre-built graph from OSM data
+- **OSRM router**: `server/osrm_router.py` - HTTP client calling self-hosted OSRM
+- **Graph provider**: `server/python_router.py` - Graph topology, snapping, reverse geocoding
+- **OSRM config**: `osrm/entrypoint.sh` - Downloads NY state PBF and builds foot profile
+- **Graph files**: `server/osm_data/walk_graph.pkl` - Pre-built graph from OSM data
 - **Refresh script**: `server/refresh_osm.py` - Downloads OSM data and rebuilds graphs
 
 ### Regions
@@ -77,7 +82,7 @@ docker compose up --build
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-Services: `nginx` (port 8080), `flask` (internal, 2 replicas), `redis` (port 6379).
+Services: `nginx` (port 8080), `flask` (internal, 3 replicas), `osrm` (internal, port 5000), `redis` (port 6379).
 
 ## Local Development
 

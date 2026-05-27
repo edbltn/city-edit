@@ -23,6 +23,24 @@ services:
       timeout: 5s
       retries: 5
 
+  osrm:
+    image: osrm/osrm-backend:v5.27.1
+    restart: unless-stopped
+    mem_limit: 4g
+    volumes:
+      - osrm-data:/data
+      - ./osrm/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: /entrypoint.sh
+    environment:
+      - OSRM_PROFILE=foot
+      - OSRM_PBF_URL=https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+
   flask:
     build: ./server
     restart: unless-stopped
@@ -30,11 +48,13 @@ services:
     environment:
       - REDIS_HOST=redis
       - DATABASE_URL=postgresql://app:devpassword@postgres:5432/votes
+      - OSRM_HOST=osrm
     env_file:
       - ./server/.env
     depends_on:
       - redis
       - postgres
+      - osrm
     deploy:
       replicas: 3
     healthcheck:
@@ -100,3 +120,4 @@ volumes:
   redis-data:
   postgres-data:
   osm-data:
+  osrm-data:

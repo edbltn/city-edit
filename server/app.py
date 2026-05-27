@@ -31,9 +31,10 @@ logger = logging.getLogger(__name__)
 # Force unbuffered output for Cloud Run
 sys.stdout.reconfigure(line_buffering=True)
 
-# Import Python router
+# Import routers
 from python_router import PythonRouter
-logger.info("[STARTUP] Using Python router (osmnx + rustworkx)")
+from osrm_router import OsrmRouter
+logger.info("[STARTUP] Using OSRM router + Python graph provider")
 
 # Debug: log all environment variables related to Redis
 logger.info(f"[DEBUG] REDIS_HOST from env: {os.environ.get('REDIS_HOST', 'NOT_SET')}")
@@ -121,9 +122,14 @@ try:
 except redis.ConnectionError as e:
     logger.error(f"[REDIS] WARNING: Could not connect to Redis at {redis_host}: {e}")
 
-# Initialize Python router
-router = PythonRouter(data_dir="osm_data", redis_client=redis_client)
-logger.info("[STARTUP] Python router initialized")
+# Initialize routers
+# OSRM handles fast pathfinding; PythonRouter provides graph topology for
+# visualization, nearest-node snapping, and reverse geocoding.
+osrm_host = os.environ.get('OSRM_HOST', 'localhost')
+osrm_port = int(os.environ.get('OSRM_PORT', '5000'))
+route_router = OsrmRouter(host=osrm_host, port=osrm_port)
+graph_provider = PythonRouter(data_dir="osm_data")
+logger.info("[STARTUP] OSRM router + graph provider initialized")
 
 # Cache graph data for serving as GeoJSON
 _graph_cache = None
@@ -134,7 +140,7 @@ def _load_graph_cache():
     logger.info("[STARTUP] Pre-loading graph geometry...")
     try:
         # get_graph_for_bbox(south, west, north, east) — full Manhattan
-        data = router.get_graph_for_bbox(40.700, -74.020, 40.880, -73.907)
+        data = graph_provider.get_graph_for_bbox(40.700, -74.020, 40.880, -73.907)
         nodes = data.get("nodes", [])
         edges = data.get("edges", [])
 
@@ -718,14 +724,14 @@ def calculate_route():
         # Compute route with optional waypoints
         if waypoints:
             waypoints_tuples = [(wp[0], wp[1]) for wp in waypoints]
-            route = router.calculate_route(
+            route = route_router.calculate_route(
                 start=(start[0], start[1]),
                 end=(end[0], end[1]),
                 mode="walk",
                 waypoints=waypoints_tuples
             )
         else:
-            route = router.calculate_route(
+            route = route_router.calculate_route(
                 start=(start[0], start[1]),
                 end=(end[0], end[1]),
                 mode="walk",
@@ -866,10 +872,8 @@ def admin_refresh_osm():
         logger.info(f"[ADMIN] Refresh completed with exit code {result.returncode}")
 
         if result.returncode == 0:
-            # Reload router if it supports hot-reload
-            if hasattr(router, 'reload'):
-                router.reload()
-                logger.info("[ADMIN] Router reloaded")
+            graph_provider.reload()
+            logger.info("[ADMIN] Graph provider reloaded")
 
             return jsonify({
                 "status": "success",
@@ -1219,22 +1223,116 @@ def admin_retag_mode():
     return jsonify(summary)
 
 
+@app.route("/api/admin/stats", methods=["GET"])
+def admin_stats():
+    """Comprehensive stats for observability dashboard."""
+    from database import DATABASE_URL, get_cursor, get_unique_voters, get_total_votes_by_mode
+
+    result = {"timestamp": time.time()}
+
+    # -- Redis stats --
+    try:
+        info = redis_client.info()
+        result["redis"] = {
+            "connected": True,
+            "version": info.get("redis_version"),
+            "uptime_seconds": info.get("uptime_in_seconds"),
+            "used_memory_bytes": info.get("used_memory"),
+            "used_memory_human": info.get("used_memory_human"),
+            "used_memory_peak_bytes": info.get("used_memory_peak"),
+            "used_memory_peak_human": info.get("used_memory_peak_human"),
+            "maxmemory_bytes": info.get("maxmemory"),
+            "maxmemory_policy": info.get("maxmemory_policy"),
+            "connected_clients": info.get("connected_clients"),
+            "total_commands_processed": info.get("total_commands_processed"),
+            "keyspace_hits": info.get("keyspace_hits"),
+            "keyspace_misses": info.get("keyspace_misses"),
+            "evicted_keys": info.get("evicted_keys"),
+        }
+        result["redis"]["hash_sizes"] = {
+            "segment_votes": redis_client.hlen(SEGMENT_VOTES_KEY),
+            "node_votes": redis_client.hlen(NODE_VOTES_KEY),
+            "node_vote_types": redis_client.hlen(NODE_VOTE_TYPES_KEY),
+        }
+        try:
+            from desire_path_voting import SEGMENT_VOTE_TYPES_KEY
+            result["redis"]["hash_sizes"]["segment_vote_types"] = redis_client.hlen(SEGMENT_VOTE_TYPES_KEY)
+        except Exception:
+            pass
+        result["redis"]["revision"] = int(redis_client.get("revision") or 0)
+    except redis.ConnectionError:
+        result["redis"] = {"connected": False}
+
+    # -- Database stats --
+    if DATABASE_URL:
+        try:
+            db_stats = {}
+            db_stats["votes_by_mode"] = get_total_votes_by_mode()
+            db_stats["unique_voters"] = get_unique_voters()
+            with get_cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) FROM votes")
+                db_stats["total_segment_votes"] = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM node_votes")
+                db_stats["total_node_votes"] = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(DISTINCT vote_type) FROM votes WHERE vote_type IS NOT NULL AND vote_type != ''")
+                db_stats["distinct_vote_types"] = cursor.fetchone()[0]
+                cursor.execute("SELECT MIN(created_at), MAX(created_at) FROM votes")
+                row = cursor.fetchone()
+                db_stats["earliest_vote"] = row[0].isoformat() if row[0] else None
+                db_stats["latest_vote"] = row[1].isoformat() if row[1] else None
+                cursor.execute("""
+                    SELECT date_trunc('day', created_at)::date AS day, COUNT(*)
+                    FROM votes
+                    WHERE created_at > NOW() - INTERVAL '30 days'
+                    GROUP BY day ORDER BY day
+                """)
+                db_stats["votes_last_30_days"] = [
+                    {"date": row[0].isoformat(), "count": row[1]}
+                    for row in cursor.fetchall()
+                ]
+                cursor.execute("""
+                    SELECT vote_type, COUNT(*) AS cnt
+                    FROM votes
+                    WHERE vote_type IS NOT NULL AND vote_type != ''
+                    GROUP BY vote_type ORDER BY cnt DESC LIMIT 20
+                """)
+                db_stats["top_vote_types"] = [
+                    {"vote_type": row[0], "count": row[1]}
+                    for row in cursor.fetchall()
+                ]
+                cursor.execute("""
+                    SELECT pg_database_size(current_database())
+                """)
+                db_stats["database_size_bytes"] = cursor.fetchone()[0]
+            result["database"] = db_stats
+        except Exception as e:
+            result["database"] = {"error": str(e)}
+    else:
+        result["database"] = {"connected": False}
+
+    # -- App stats --
+    result["app"] = {
+        "votes_revision": _votes_revision,
+        "graph_loaded": _graph_cache is not None,
+        "graph_nodes": len(_graph_cache["nodes"]) if _graph_cache else 0,
+        "graph_edges": len(_graph_cache["edges"]) if _graph_cache else 0,
+        "graph_votes_cache_keys": list(_graph_votes_cache.keys()),
+    }
+
+    return jsonify(result)
+
+
 @app.route("/api/admin/router-stats", methods=["GET"])
 def admin_router_stats():
-    """Get statistics about the current router."""
+    """Get statistics about the graph provider and routing backend."""
     try:
-        if hasattr(router, 'stats'):
-            stats = router.stats()
-            return jsonify({
-                "router": "python",
-                "version": router.get_version() if hasattr(router, 'get_version') else "unknown",
-                "stats": stats
-            })
-        else:
-            return jsonify({
-                "router": "python",
-                "stats": "not available"
-            })
+        stats = graph_provider.stats()
+        return jsonify({
+            "router": "osrm",
+            "graph_provider": "python",
+            "version": graph_provider.get_version(),
+            "stats": stats
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1249,7 +1347,7 @@ def nearest_node():
         return jsonify({"error": "lat and lng are required"}), 400
 
     try:
-        node_lat, node_lon = router.nearest_node_coords(lat, lon)
+        node_lat, node_lon = graph_provider.nearest_node_coords(lat, lon)
         return jsonify({"lat": node_lat, "lng": node_lon})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1265,7 +1363,7 @@ def reverse_geocode():
         return jsonify({"error": "lat and lng are required"}), 400
 
     try:
-        address = router.reverse_geocode(lat, lon)
+        address = graph_provider.reverse_geocode(lat, lon)
         return jsonify({
             "address": address or None,
             "lat": lat,
@@ -1286,7 +1384,7 @@ def graph_tiles():
         return jsonify({"error": "bbox=minLon,minLat,maxLon,maxLat required"}), 400
 
     try:
-        data = router.get_graph_for_bbox(south, west, north, east)
+        data = graph_provider.get_graph_for_bbox(south, west, north, east)
 
         # Fetch vote counts from Redis and aggregate to nodes/edges
         segment_votes = redis_client.hgetall(SEGMENT_VOTES_KEY)
@@ -1671,7 +1769,7 @@ def get_votes():
         west, south, east, north = [float(v) for v in bbox.split(",")]
 
         # Get graph data for bbox
-        data = router.get_graph_for_bbox(south, west, north, east)
+        data = graph_provider.get_graph_for_bbox(south, west, north, east)
 
         # Fetch vote counts from Redis
         segment_votes = redis_client.hgetall(SEGMENT_VOTES_KEY)
@@ -1717,5 +1815,5 @@ def get_votes():
 
 if __name__ == "__main__":
     # Run: python app.py
-    app.run(host="0.0.0.0", port=5001, debug=False)
+    app.run(host="0.0.0.0", port=5001, debug=os.environ.get("FLASK_DEBUG") == "1")
 
