@@ -1,0 +1,56 @@
+.address-search {
+  position: relative;
+  width: 250px;
+}
+
+.address-search-input {
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  border-bottom: 1px solid var(--color-start);
+  background: transparent;
+  font-family: var(--font-main);
+  font-size: var(--font-size-xs);
+  color: var(--ink);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.address-search-input::placeholder {
+  color: var(--ink);
+  opacity: 0.3;
+}
+
+.address-search .autocomplete-results {
+  left: 0;
+  min-width: 320px;
+}
+
+.address-search .autocomplete-item strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+@media (max-width: 1080px) {
+  .address-search {
+    width: 160px;
+  }
+
+  .address-search-input {
+    font-size: 11px;
+  }
+
+  .address-search .autocomplete-results {
+    min-width: 240px;
+  }
+}
+
+@media (max-width: 400px) {
+  .address-search {
+    width: 130px;
+  }
+
+  .address-search-input {
+    font-size: 10px;
+  }
+}
