@@ -150,6 +150,36 @@ def init_db():
                 END $$;
             """)
 
+            # ── New packed-key vote tables ──
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vote_types (
+                    id SERIAL PRIMARY KEY,
+                    label TEXT UNIQUE NOT NULL
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS edge_votes (
+                    id SERIAL PRIMARY KEY,
+                    packed_key BIGINT NOT NULL,
+                    edge_id INT NOT NULL,
+                    mode SMALLINT NOT NULL,
+                    vote_type_id INT NOT NULL DEFAULT 0,
+                    ip_hash VARCHAR(16) NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE (packed_key, ip_hash)
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_edge_votes_edge ON edge_votes(edge_id)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_edge_votes_mode ON edge_votes(mode)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_edge_votes_vt ON edge_votes(vote_type_id)
+            """)
+
             logger.info("[DB] Database schema initialized successfully")
             return True
 
@@ -158,33 +188,22 @@ def init_db():
         return False
 
 
-def record_segment_votes(segments: list, mode: str, ip_hash: str, weight_per_segment: float, vote_type: str = ""):
-    """
-    Record segment votes to database for persistence.
-
-    Args:
-        segments: List of [[coord1, coord2], ...] segment pairs
-        mode: Transport mode (bike, walk, drive)
-        ip_hash: Hashed client IP
-        weight_per_segment: Vote weight per segment
-        vote_type: Natural language description of the vote
-    """
+def record_segment_votes(segments: list, mode: str, ip_hash: str, vote_type: str = ""):
+    """Record segment votes to database for persistence."""
     if not DATABASE_URL:
         return
 
     try:
         with get_cursor() as cursor:
-            # Build segment keys and prepare data
             data = []
             for seg in segments:
                 if len(seg) != 2:
                     continue
                 coord1, coord2 = seg
-                # Sort coordinates for consistent key
                 if coord1 > coord2:
                     coord1, coord2 = coord2, coord1
                 segment_key = f"{coord1[0]:.6f},{coord1[1]:.6f}|{coord2[0]:.6f},{coord2[1]:.6f}|{mode}"
-                data.append((segment_key, mode, ip_hash, weight_per_segment, vote_type or None))
+                data.append((segment_key, mode, ip_hash, 1.0, vote_type or None))
 
             if data:
                 execute_values(
@@ -263,12 +282,8 @@ def get_unique_voters() -> int:
         return 0
 
 
-def record_node_votes(coords: list, mode: str, ip_hash: str, weight_per_node: float, vote_type: str = ""):
-    """Record one row per unique node touched by a route, for persistence.
-
-    Caller passes already-deduplicated coords. The unique constraint
-    (node_key, ip_hash, vote_type) silently absorbs duplicate routes.
-    """
+def record_node_votes(coords: list, mode: str, ip_hash: str, vote_type: str = ""):
+    """Record one row per unique node touched by a route, for persistence."""
     if not DATABASE_URL or not coords:
         return
 
@@ -282,7 +297,7 @@ def record_node_votes(coords: list, mode: str, ip_hash: str, weight_per_node: fl
                 if key in seen:
                     continue
                 seen.add(key)
-                data.append((key, mode, ip_hash, weight_per_node, vote_type or None))
+                data.append((key, mode, ip_hash, 1.0, vote_type or None))
 
             if data:
                 execute_values(
@@ -295,6 +310,35 @@ def record_node_votes(coords: list, mode: str, ip_hash: str, weight_per_node: fl
 
     except Exception as e:
         logger.error(f"[DB] Failed to record node votes: {e}")
+
+
+def record_edge_votes(
+    edge_ids: list[int], mode_int: int, vt_id: int, ip_hash: str
+):
+    """Persist packed-key edge votes to Postgres."""
+    if not DATABASE_URL or not edge_ids:
+        return
+
+    from vote_store import pack
+
+    try:
+        with get_cursor() as cursor:
+            data = []
+            for eid in edge_ids:
+                pk = pack(eid, mode_int, vt_id)
+                data.append((pk, eid, mode_int, vt_id, ip_hash))
+            if data:
+                execute_values(
+                    cursor,
+                    """INSERT INTO edge_votes
+                       (packed_key, edge_id, mode, vote_type_id, ip_hash)
+                       VALUES %s
+                       ON CONFLICT (packed_key, ip_hash) DO NOTHING""",
+                    data,
+                )
+                logger.info(f"[DB] Recorded {len(data)} edge votes")
+    except Exception as e:
+        logger.error(f"[DB] Failed to record edge votes: {e}")
 
 
 def record_point_vote(point: list, mode: str, ip_hash: str, vote_type: str = ""):

@@ -85,7 +85,7 @@ def cast_desire_path_votes(redis_client, segments: list, mode: str, ip_hash: str
         redis_client: Redis client
         segments: List of [[coord1, coord2], ...] from compute_desire_path_votes
         mode: Mode to tag votes with (the desired mode)
-        ip_hash: Hashed IP address for weighted voting (optional, defaults to "system")
+        ip_hash: Hashed IP address (optional, defaults to "system")
         vote_type: Vote type label (e.g. "Add bike lane")
 
     Returns:
@@ -94,7 +94,6 @@ def cast_desire_path_votes(redis_client, segments: list, mode: str, ip_hash: str
     if not redis_client or not segments:
         return 0
 
-    # Use "system" for legacy/migration votes
     ip_hash = ip_hash or "system"
 
     try:
@@ -109,9 +108,6 @@ def cast_desire_path_votes(redis_client, segments: list, mode: str, ip_hash: str
             pipe.hincrby(SEGMENT_VOTES_KEY, key, 1)
             if vote_type:
                 keys_to_update.append(key)
-
-        # Track total votes cast by this IP for weighted calculation
-        pipe.hincrby("ip_vote_counts", ip_hash, len(segments))
 
         pipe.execute()
 
