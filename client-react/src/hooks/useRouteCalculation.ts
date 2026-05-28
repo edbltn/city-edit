@@ -13,6 +13,7 @@ interface RouteCalculationState {
   routeData: RouteData | null;
   desirePathData: DesirePathData | null;
   desirePathSegments: [number, number][][] | null;
+  edgeIds: number[] | null;
 }
 
 interface CalculateParams {
@@ -61,6 +62,7 @@ export function useRouteCalculation() {
     routeData: null,
     desirePathData: null,
     desirePathSegments: null,
+    edgeIds: null,
   });
 
   const requestIdRef = useRef(0);
@@ -107,6 +109,7 @@ export function useRouteCalculation() {
           routeData: data.route,
           desirePathData: data.desire_path,
           desirePathSegments: data.desire_path_segments || null,
+          edgeIds: data.edge_ids || null,
         });
 
         return data;
@@ -121,6 +124,7 @@ export function useRouteCalculation() {
             routeData: null,
             desirePathData: null,
             desirePathSegments: null,
+            edgeIds: null,
           });
         }
         return null;
@@ -138,6 +142,7 @@ export function useRouteCalculation() {
       routeData: null,
       desirePathData: null,
       desirePathSegments: null,
+      edgeIds: null,
     });
   }, []);
 

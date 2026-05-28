@@ -19,7 +19,8 @@ import { CONFIG } from "../../config";
 import { useWebSocketContext } from "../../context/WebSocketContext";
 import { useGraphSnap, useTheme } from "../../context";
 import type { GraphData } from "../../types";
-import { extractFirstEmoji, hashLabelToColor, makeVoteTypeIcon } from "./voteTypeIcon";
+import { hashLabelToColor, makeVoteTypeIcon } from "./voteTypeIcon";
+import { iconForLabel, iconSrc } from "../../themes";
 
 // ---------------------------------------------------------------------------
 // Geometry helpers
@@ -430,6 +431,20 @@ function renderTooltipContent(
 }
 
 // ---------------------------------------------------------------------------
+// Node adjacency builder — used to derive node votes from edges
+// ---------------------------------------------------------------------------
+
+function buildNodeAdj(topology: Pick<GraphData, "nodes" | "edges">): number[][] {
+  const adj: number[][] = new Array(topology.nodes.length);
+  for (let i = 0; i < adj.length; i++) adj[i] = [];
+  for (let i = 0; i < topology.edges.length; i++) {
+    adj[topology.edges[i][0]].push(i);
+    adj[topology.edges[i][1]].push(i);
+  }
+  return adj;
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -445,7 +460,7 @@ interface GraphLayerProps {
 
 export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayerProps) {
   const map = useMap();
-  const { mapState } = useWebSocketContext();
+  const { subscribeToDelta } = useWebSocketContext();
   const { setSnapFn, setCurrentSnap, isDraggingRef: graphDraggingRef } = useGraphSnap();
   const theme = useTheme();
   const themeMode = theme.mode;
@@ -459,7 +474,16 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   const nodeIndexRef = useRef<Flatbush | null>(null);
   const redrawTimeoutRef = useRef<number | null>(null);
   const isZoomingRef = useRef(false);
-  const voteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Node adjacency list — node index → [edge indices]. Built once from topology,
+  // used to derive node votes from edge totals (max of adjacent edges).
+  const nodeAdjRef = useRef<number[][] | null>(null);
+
+  // Last-seen revision for gap detection
+  const lastRevRef = useRef(0);
+
+  // Deltas received before the initial vote fetch completes
+  const pendingDeltasRef = useRef<import("../../types").VoteDelta[]>([]);
 
   // Stable ref for onSnap callback
   const onSnapRef = useRef(onSnap);
@@ -524,6 +548,20 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
     setWinners(next);
   }, []);
 
+  const refreshGraphDisplay = useCallback(() => {
+    const data = graphDataRef.current;
+    if (!data) return;
+    setStableWinners(applyTopProposalLimit(
+      computeVoteTypeWinners(data),
+      tiebreakSaltRef.current,
+      TOP_PROPOSAL_LIMIT
+    ));
+    scheduleRedrawRef.current();
+  }, [setStableWinners]);
+
+  const refreshGraphDisplayRef = useRef(refreshGraphDisplay);
+  useEffect(() => { refreshGraphDisplayRef.current = refreshGraphDisplay; }, [refreshGraphDisplay]);
+
   // Stable ref for the indicator-click callback (avoids re-running the
   // useMemo that builds marker components every time the parent re-renders).
   const onIndicatorClickRef = useRef(onIndicatorClick);
@@ -583,23 +621,28 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
     };
   }, [map]);
 
-  // Fetch votes and merge with cached topology. Always scoped to the active
-  // theme — each subdomain shows only its own votes.
+  // Full vote fetch — used on initial load and revision-gap recovery.
   const fetchVotes = useCallback(async () => {
-    const topology = topologyRef.current;
-    if (!topology) return;
+    if (!topologyRef.current) return;
     try {
       const url = `${CONFIG.apiUrl}/graph-votes?mode=${encodeURIComponent(themeMode)}`;
-      const response = await fetch(url);
+      const response = await fetch(url, { cache: "no-store" });
       if (!response.ok) throw new Error(`Vote fetch failed: ${response.status}`);
       const voteData = await response.json();
-      graphDataRef.current = { ...topology, ...voteData };
-      setStableWinners(applyTopProposalLimit(
-        computeVoteTypeWinners(graphDataRef.current),
-        tiebreakSaltRef.current,
-        TOP_PROPOSAL_LIMIT
-      ));
-      scheduleRedrawRef.current();
+      graphDataRef.current = { ...topologyRef.current!, ...voteData };
+      lastRevRef.current = voteData.rev ?? 0;
+
+      // Replay any deltas that arrived while the fetch was in flight
+      const pending = pendingDeltasRef.current;
+      if (pending.length > 0) {
+        pendingDeltasRef.current = [];
+        for (const d of pending) {
+          if (d.rev <= lastRevRef.current) continue;
+          applyDeltaToGraphData(d);
+        }
+      }
+
+      refreshGraphDisplayRef.current();
     } catch (error) {
       console.error("Failed to fetch graph votes:", error);
     }
@@ -608,15 +651,82 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   const fetchVotesRef = useRef(fetchVotes);
   useEffect(() => { fetchVotesRef.current = fetchVotes; }, [fetchVotes]);
 
-  // Debounced vote fetch (collapses rapid WebSocket updates)
-  const debouncedFetchVotes = useCallback(() => {
-    if (voteDebounceRef.current) clearTimeout(voteDebounceRef.current);
-    voteDebounceRef.current = setTimeout(() => fetchVotesRef.current(), 500);
+  // Apply a WebSocket delta directly to graphDataRef (mutate in place).
+  // Updates edge totals, edge vote types, and derives affected node votes.
+  const applyDeltaToGraphData = useCallback((delta: import("../../types").VoteDelta) => {
+    const data = graphDataRef.current;
+    const adj = nodeAdjRef.current;
+    if (!data?.edge_votes || !adj) return;
+
+    const edgeVotes = data.edge_votes;
+    const nodeVotes = data.node_votes ?? [];
+    const legend = data.vote_type_legend ?? [];
+    const edgeVoteTypes = data.edge_vote_types ?? [];
+    const nodeVoteTypes = data.node_vote_types ?? [];
+
+    // Find or create legend entry for this vote type
+    let legendIdx = -1;
+    if (delta.vtLabel) {
+      legendIdx = legend.indexOf(delta.vtLabel);
+      if (legendIdx === -1) {
+        legendIdx = legend.length;
+        legend.push(delta.vtLabel);
+        data.vote_type_legend = legend;
+      }
+    }
+
+    const affectedNodes = new Set<number>();
+
+    for (const eid of delta.edges) {
+      if (eid >= edgeVotes.length) continue;
+      edgeVotes[eid] = (edgeVotes[eid] || 0) + 1;
+
+      // Update per-edge vote type breakdown
+      if (legendIdx >= 0) {
+        const pairs = edgeVoteTypes[eid] || [];
+        const existing = pairs.find(([li]) => li === legendIdx);
+        if (existing) existing[1] += 1;
+        else pairs.push([legendIdx, 1]);
+        pairs.sort((a, b) => b[1] - a[1]);
+        edgeVoteTypes[eid] = pairs;
+      }
+
+      // Collect nodes to re-derive
+      const edge = data.edges[eid];
+      if (edge) {
+        affectedNodes.add(edge[0]);
+        affectedNodes.add(edge[1]);
+      }
+    }
+
+    // Re-derive node votes for affected nodes (max of adjacent edge totals)
+    for (const nid of affectedNodes) {
+      const nodeEdges = adj[nid];
+      if (!nodeEdges) continue;
+      let best = 0;
+      const merged: Map<number, number> = new Map();
+      for (const eid of nodeEdges) {
+        const v = edgeVotes[eid] || 0;
+        if (v > best) best = v;
+        const evtPairs = edgeVoteTypes[eid];
+        if (evtPairs) {
+          for (const [li, cnt] of evtPairs) {
+            merged.set(li, Math.max(merged.get(li) ?? 0, cnt));
+          }
+        }
+      }
+      nodeVotes[nid] = best;
+      if (merged.size > 0) {
+        nodeVoteTypes[nid] = [...merged.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([li, cnt]) => [li, cnt] as [number, number]);
+      }
+    }
+
+    lastRevRef.current = delta.rev;
   }, []);
 
-  // Fetch topology and votes in parallel on mount. Chaining them serially
-  // doubled the round-trip before the heatmap could appear; firing both at
-  // once means the heatmap pops in as soon as the slower of the two returns.
+  // Fetch topology and votes in parallel on mount.
   useEffect(() => {
     let cancelled = false;
     const topologyPromise = fetch(`${CONFIG.apiUrl}/graph-topology`)
@@ -636,13 +746,10 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
         const topology = await topologyPromise;
         if (cancelled) return;
         topologyRef.current = topology;
-        // Set topology-only graph data so hover/snap works immediately
         graphDataRef.current = topology;
-        // Build the spatial indices — one-time O(n log n) so subsequent
-        // hover/snap queries are O(log n + k) instead of O(n) per mousemove.
-        // Edge index for hover/click; node index for snap (path drag).
         edgeIndexRef.current = buildEdgeIndex(topology);
         nodeIndexRef.current = buildNodeIndex(topology);
+        nodeAdjRef.current = buildNodeAdj(topology);
         scheduleRedrawRef.current();
       } catch (error) {
         console.error("Failed to fetch graph topology:", error);
@@ -652,21 +759,54 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
       try {
         const voteData = await votesPromise;
         if (cancelled) return;
-        const topology = topologyRef.current;
-        if (!topology) return;
-        graphDataRef.current = { ...topology, ...voteData };
-        setStableWinners(applyTopProposalLimit(
-        computeVoteTypeWinners(graphDataRef.current),
-        tiebreakSaltRef.current,
-        TOP_PROPOSAL_LIMIT
-      ));
-        scheduleRedrawRef.current();
+        graphDataRef.current = { ...topologyRef.current!, ...voteData };
+        lastRevRef.current = voteData.rev ?? 0;
+
+        // Replay any deltas that arrived while waiting for the fetch
+        const pending = pendingDeltasRef.current;
+        if (pending.length > 0) {
+          pendingDeltasRef.current = [];
+          for (const d of pending) {
+            if (d.rev <= lastRevRef.current) continue;
+            applyDeltaToGraphData(d);
+          }
+        }
+
+        refreshGraphDisplayRef.current();
       } catch (error) {
         console.error("Failed to fetch graph votes:", error);
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [applyDeltaToGraphData]);
+
+  // Subscribe to WebSocket deltas — apply each directly to the vote arrays.
+  // If a revision gap is detected, do a full refetch to recover.
+  useEffect(() => {
+    const unsubscribe = subscribeToDelta((delta) => {
+      // Filter by current theme mode
+      if (delta.m !== themeMode) return;
+
+      // If votes haven't loaded yet, buffer the delta
+      if (!graphDataRef.current?.edge_votes) {
+        pendingDeltasRef.current.push(delta);
+        return;
+      }
+
+      // Gap detection: if we missed revisions, full refetch
+      if (lastRevRef.current > 0 && delta.rev > lastRevRef.current + 1) {
+        fetchVotesRef.current();
+        return;
+      }
+
+      // Skip duplicates
+      if (delta.rev <= lastRevRef.current) return;
+
+      applyDeltaToGraphData(delta);
+      refreshGraphDisplayRef.current();
+    });
+    return unsubscribe;
+  }, [subscribeToDelta, themeMode, applyDeltaToGraphData]);
 
   // Draw hover and pinned highlights on separate canvas
   const redrawHoverHighlight = useCallback(() => {
@@ -907,13 +1047,6 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   const scheduleRedrawRef = useRef(scheduleRedraw);
   useEffect(() => { scheduleRedrawRef.current = scheduleRedraw; }, [scheduleRedraw]);
 
-  // Re-fetch votes when WebSocket indicates new state (votes changed)
-  const mapStateRevision = mapState?.revision;
-  useEffect(() => {
-    if (mapStateRevision === undefined) return;
-    debouncedFetchVotes();
-  }, [mapStateRevision, debouncedFetchVotes]);
-
   // Map event listeners — topology is pre-loaded, just redraw on pan/zoom
   useEffect(() => {
     const handleZoomStart = () => {
@@ -1061,13 +1194,6 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
       if (hoverRafRef.current) cancelAnimationFrame(hoverRafRef.current);
     };
   }, [map]);
-
-  // Clean up debounce timer on unmount
-  useEffect(() => {
-    return () => {
-      if (voteDebounceRef.current) clearTimeout(voteDebounceRef.current);
-    };
-  }, []);
 
   // Track pinned tooltip screen position on map pan/zoom
   const pinnedLat = pinnedPoint?.lat ?? null;
@@ -1376,11 +1502,8 @@ function IndicatorModal({
   voteTypes,
 }: IndicatorModalProps) {
   const flipped = screenX > window.innerWidth / 2;
-  const emoji = extractFirstEmoji(winner.label);
   const label = winner.label;
-  // Strip a leading emoji + whitespace so the label text reads cleanly next
-  // to the glyph instead of repeating the emoji.
-  const labelText = emoji ? label.replace(emoji, "").trim() : label;
+  const icon = iconForLabel(label);
 
   return (
     <div
@@ -1389,7 +1512,9 @@ function IndicatorModal({
     >
       <div className="graph-indicator-modal-header">
         <span className="graph-indicator-modal-glyph">
-          {emoji ?? (
+          {icon ? (
+            <img className="graph-indicator-modal-icon" src={iconSrc(icon)} alt="" />
+          ) : (
             <span
               className="graph-indicator-modal-disc"
               style={{ background: hashLabelToColor(label) }}
@@ -1398,7 +1523,7 @@ function IndicatorModal({
         </span>
         <div className="graph-indicator-modal-headtext">
           <div className="graph-indicator-modal-eyebrow">Top Proposal</div>
-          <div className="graph-indicator-modal-label">{labelText || label}</div>
+          <div className="graph-indicator-modal-label">{label}</div>
         </div>
       </div>
       <div className="graph-indicator-modal-body">

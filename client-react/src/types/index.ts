@@ -36,12 +36,22 @@ export interface SplitDesirePath {
   segmentIndex: number;
   geometry: RouteGeometry;
   segments: [number, number][][];
+  edgeIds: number[];
+}
+
+export interface VoteDelta {
+  rev: number;
+  edges: number[];
+  m: string;
+  vt: number;
+  vtLabel?: string;
 }
 
 export interface RouteResponse {
   route: RouteData;
   desire_path: DesirePathData | null;
   desire_path_segments?: [number, number][][];
+  edge_ids?: number[];
   vote_mode?: TransportMode;
 }
 
@@ -76,17 +86,20 @@ export interface WebSocketMessage {
 }
 
 export interface GraphData {
-  nodes: [number, number][];                              // [lat, lon]
-  edges: [number, number, string][];                       // [from_idx, to_idx, name]
-  node_votes?: number[];                                  // Vote count for each node
-  edge_votes?: number[];                                  // Vote count for each edge
-  vote_type_legend?: string[];                            // Unique vote type labels
-  edge_vote_types?: [number, number][][];                  // Per-edge [legend_idx, count] pairs, sorted by frequency
-  node_vote_types?: [number, number][][];                  // Per-node [legend_idx, count] pairs, sorted by frequency
+  nodes: [number, number][];
+  edges: [number, number, string][];
+  node_votes?: number[];
+  edge_votes?: number[];
+  vote_type_legend?: string[];
+  edge_vote_types?: [number, number][][];
+  node_vote_types?: [number, number][][];
+  rev?: number;
+  vote_types?: Record<string, string>;
 }
 
 // Vote type suggestion for the selector
 export interface VoteTypeSuggestion {
-  label: string;          // Natural language suggestion, e.g. "Add bike lane"
-  pointType: "route" | "point";  // route = 2 points, point = 1 point
+  label: string;
+  icon: string;
+  pointType: "route" | "point";
 }

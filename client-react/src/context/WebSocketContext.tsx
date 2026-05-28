@@ -4,31 +4,30 @@ import {
   useCallback,
   useMemo,
   useState,
-  useEffect,
   useRef,
+  useEffect,
   type ReactNode,
 } from "react";
 import { CONFIG } from "../config";
-import type { MapState, RawMapState } from "../types";
+import type { VoteDelta } from "../types";
+
+type DeltaListener = (delta: VoteDelta) => void;
 
 interface WebSocketContextValue {
-  mapState: MapState | null;
   connectionStatus: string;
+  subscribeToDelta: (listener: DeltaListener) => () => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
-  const [mapState, setMapState] = useState<MapState | null>(null);
   const [connectionStatus, setConnectionStatus] = useState("disconnected");
 
   const wsRef = useRef<WebSocket | null>(null);
-  const latestRevisionRef = useRef(0);
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backoffRef = useRef(1000);
   const MAX_BACKOFF = 30000;
+  const deltaListenersRef = useRef<Set<DeltaListener>>(new Set());
 
   const connect = useCallback(() => {
     setConnectionStatus("connecting...");
@@ -42,16 +41,19 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     ws.onmessage = (evt) => {
       try {
         const msg = JSON.parse(evt.data);
-        if (msg.type === "map_state" && msg.state) {
-          const rawState = msg.state as RawMapState;
-          if (
-            typeof rawState.revision === "number" &&
-            rawState.revision > latestRevisionRef.current
-          ) {
-            latestRevisionRef.current = rawState.revision;
-            setMapState(rawState);
+        if (msg.type === "delta") {
+          const delta: VoteDelta = {
+            rev: msg.rev,
+            edges: msg.edges,
+            m: msg.m,
+            vt: msg.vt,
+            vtLabel: msg.vtLabel,
+          };
+          for (const cb of deltaListenersRef.current) {
+            cb(delta);
           }
         }
+        // "init" and "keepalive" are handled silently
       } catch (e) {
         console.warn("bad ws message", e);
       }
@@ -74,18 +76,21 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     connect();
     return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      if (wsRef.current) wsRef.current.close();
     };
   }, [connect]);
 
+  const subscribeToDelta = useCallback((listener: DeltaListener) => {
+    deltaListenersRef.current.add(listener);
+    return () => {
+      deltaListenersRef.current.delete(listener);
+    };
+  }, []);
+
   const value = useMemo(
-    () => ({ mapState, connectionStatus }),
-    [mapState, connectionStatus]
+    () => ({ connectionStatus, subscribeToDelta }),
+    [connectionStatus, subscribeToDelta],
   );
 
   return (
@@ -98,9 +103,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 export function useWebSocketContext(): WebSocketContextValue {
   const context = useContext(WebSocketContext);
   if (!context) {
-    throw new Error(
-      "useWebSocketContext must be used within a WebSocketProvider"
-    );
+    throw new Error("useWebSocketContext must be used within a WebSocketProvider");
   }
   return context;
 }

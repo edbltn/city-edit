@@ -11,6 +11,7 @@ import {
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { CONFIG } from "../config";
 import { getDefaultVoteTypeForTheme } from "../constants/voteTypes";
+import { getInitialPoints, cleanNavParams } from "../utils/mapViewState";
 import { useTheme } from "./ThemeContext";
 import type {
   LatLng,
@@ -127,8 +128,8 @@ interface RouteContextValue {
   pointType: "route" | "point";
   activeTool: ActiveTool;
   suppressNextClick: () => boolean;
-  setStartPoint: (coords: LatLng) => void;
-  setEndPoint: (coords: LatLng) => void;
+  setStartPoint: (coords: LatLng, address?: string) => void;
+  setEndPoint: (coords: LatLng, address?: string) => void;
   setActiveTool: (tool: ActiveTool) => void;
   clearPoints: () => void;
   clearStart: () => void;
@@ -199,11 +200,51 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     routeData,
     desirePathData,
     desirePathSegments,
+    edgeIds: routeEdgeIds,
     calculateRoute,
     clearRoute,
     clearError,
     setError,
   } = useRouteCalculation();
+
+  // Restore start/end from URL params (set by theme switcher), then clean them up
+  const restoredFromUrlRef = useRef(false);
+  useEffect(() => {
+    if (restoredFromUrlRef.current) return;
+    restoredFromUrlRef.current = true;
+
+    const initial = getInitialPoints();
+    if (initial.start) {
+      const s = initial.start;
+      setStart({ coords: { lat: s.lat, lng: s.lng }, timestamp: Date.now(), address: null });
+      fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${s.lat}&lng=${s.lng}`)
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+        .then(data => {
+          setStart(prev =>
+            prev.coords?.lat === s.lat && prev.coords?.lng === s.lng
+              ? { ...prev, address: data.address }
+              : prev
+          );
+        })
+        .catch(() => {});
+    }
+    if (initial.end) {
+      const e = initial.end;
+      setEnd({ coords: { lat: e.lat, lng: e.lng }, timestamp: Date.now(), address: null });
+      fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${e.lat}&lng=${e.lng}`)
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+        .then(data => {
+          setEnd(prev =>
+            prev.coords?.lat === e.lat && prev.coords?.lng === e.lng
+              ? { ...prev, address: data.address }
+              : prev
+          );
+        })
+        .catch(() => {});
+    }
+    cleanNavParams();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Compute point type based on whether both points are set
   const pointType: "route" | "point" = start.coords && end.coords ? "route" : "point";
@@ -245,7 +286,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
           id: `split-${i}`,
           segmentIndex: i,
           geometry,
-          segments: data.desire_path_segments || []
+          segments: data.desire_path_segments || [],
+          edgeIds: data.edge_ids || [],
         });
       }
     }
@@ -256,38 +298,42 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // ============================================
   // Simple setters
   // ============================================
-  const setStartPoint = useCallback((coords: LatLng) => {
-    setStart({ coords, timestamp: Date.now(), address: null });
-    fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${coords.lat}&lng=${coords.lng}`)
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then(data => {
-        setStart(prev =>
-          prev.coords?.lat === coords.lat && prev.coords?.lng === coords.lng
-            ? { ...prev, address: data.address }
-            : prev
-        );
-      })
-      .catch(() => {});
+  const setStartPoint = useCallback((coords: LatLng, address?: string) => {
+    setStart({ coords, timestamp: Date.now(), address: address ?? null });
+    if (!address) {
+      fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${coords.lat}&lng=${coords.lng}`)
+        .then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
+        .then(data => {
+          setStart(prev =>
+            prev.coords?.lat === coords.lat && prev.coords?.lng === coords.lng
+              ? { ...prev, address: data.address }
+              : prev
+          );
+        })
+        .catch(() => {});
+    }
   }, []);
 
-  const setEndPoint = useCallback((coords: LatLng) => {
-    setEnd({ coords, timestamp: Date.now(), address: null });
-    fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${coords.lat}&lng=${coords.lng}`)
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then(data => {
-        setEnd(prev =>
-          prev.coords?.lat === coords.lat && prev.coords?.lng === coords.lng
-            ? { ...prev, address: data.address }
-            : prev
-        );
-      })
-      .catch(() => {});
+  const setEndPoint = useCallback((coords: LatLng, address?: string) => {
+    setEnd({ coords, timestamp: Date.now(), address: address ?? null });
+    if (!address) {
+      fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${coords.lat}&lng=${coords.lng}`)
+        .then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
+        .then(data => {
+          setEnd(prev =>
+            prev.coords?.lat === coords.lat && prev.coords?.lng === coords.lng
+              ? { ...prev, address: data.address }
+              : prev
+          );
+        })
+        .catch(() => {});
+    }
   }, []);
 
   const addWaypoint = useCallback((coords: LatLng) => {
@@ -339,6 +385,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     routeVersionRef.current++;
     setHasVoted(false);
     setIsVoting(false);
+    setActiveToolState("start");
     clearRoute();
   }, [clearRoute]);
 
@@ -386,12 +433,14 @@ export function RouteProvider({ children }: { children: ReactNode }) {
           segmentIndex,
           geometry: splitResult.first,
           segments: segmentsFromGeometry(splitResult.first),
+          edgeIds: [],
         };
         const secondHalf: SplitDesirePath = {
           id: `split-${segmentIndex + 1}`,
           segmentIndex: segmentIndex + 1,
           geometry: splitResult.second,
           segments: segmentsFromGeometry(splitResult.second),
+          edgeIds: [],
         };
 
         if (existingPaths.length > 0) {
@@ -539,6 +588,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       setEnd({ coords: null, timestamp: null });
       setGhostWaypoints([]);
       setGhostWaypointIds([]);
+      setActiveToolState("start");
     } else if (remaining.length === 1) {
       // One point left -> just start, no route
       const addr = remainingAddresses[0] ?? null;
@@ -546,6 +596,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       setEnd({ coords: null, timestamp: null });
       setGhostWaypoints([]);
       setGhostWaypointIds([]);
+      setActiveToolState("start");
       if (!addr) {
         const pt = remaining[0];
         fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${pt.lat}&lng=${pt.lng}`)
@@ -654,24 +705,30 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // Cast vote
   // ============================================
   const castVote = useCallback(async () => {
-    const segmentsToVote = splitDesirePaths.length > 0
-      ? splitDesirePaths.flatMap(sp => sp.segments)
-      : desirePathSegments;
-
     const isPointVote = start.coords && !end.coords;
 
-    if (!isPointVote && (!segmentsToVote || segmentsToVote.length === 0)) {
-      console.warn("castVote: No segments to vote on", { segmentsToVote });
-      return;
-    }
-    if (isPointVote && !start.coords) {
-      return;
+    // Collect edge IDs: prefer pre-resolved IDs, fall back to segments
+    let edgeIdsToVote: number[] = [];
+    let segmentsFallback: [number, number][][] | null = null;
+    if (splitDesirePaths.length > 0) {
+      edgeIdsToVote = splitDesirePaths.flatMap(sp => sp.edgeIds);
+      if (edgeIdsToVote.length === 0) {
+        segmentsFallback = splitDesirePaths.flatMap(sp => sp.segments);
+      }
+    } else {
+      edgeIdsToVote = routeEdgeIds || [];
+      if (edgeIdsToVote.length === 0) {
+        segmentsFallback = desirePathSegments;
+      }
     }
 
-    // Capture route version at vote start
+    const hasData = edgeIdsToVote.length > 0 || (segmentsFallback && segmentsFallback.length > 0);
+    if (!isPointVote && !hasData) return;
+    if (isPointVote && !start.coords) return;
+
     const voteRouteVersion = routeVersionRef.current;
-
     setIsVoting(true);
+
     try {
       const body: Record<string, unknown> = {
         mode: theme.mode,
@@ -680,8 +737,10 @@ export function RouteProvider({ children }: { children: ReactNode }) {
 
       if (isPointVote && start.coords) {
         body.point = [start.coords.lat, start.coords.lng];
+      } else if (edgeIdsToVote.length > 0) {
+        body.edge_ids = edgeIdsToVote;
       } else {
-        body.segments = segmentsToVote;
+        body.segments = segmentsFallback;
       }
 
       const response = await fetch(`${CONFIG.apiUrl}/vote`, {
@@ -690,11 +749,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify(body),
       });
 
-      if (!response.ok) {
-        throw new Error(`Vote failed: ${response.statusText}`);
-      }
+      if (!response.ok) throw new Error(`Vote failed: ${response.statusText}`);
 
-      // Only mark as voted if route hasn't changed during the vote
       if (routeVersionRef.current === voteRouteVersion) {
         setHasVoted(true);
       }
@@ -703,7 +759,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsVoting(false);
     }
-  }, [splitDesirePaths, desirePathSegments, voteType, start.coords, end.coords]);
+  }, [splitDesirePaths, desirePathSegments, routeEdgeIds, voteType, start.coords, end.coords, theme.mode]);
 
   // ============================================
   // Main calculation effect
