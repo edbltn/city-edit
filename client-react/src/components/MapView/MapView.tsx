@@ -12,6 +12,7 @@ import { COLOR_START, COLOR_END } from "../../colors";
 import { useRoute, useGhostPin, useTheme } from "../../context";
 import { useMapClick } from "../../hooks";
 import { kiteGhostIcon } from "../../utils/kiteIcon";
+import { setMapViewState, getInitialMapView } from "../../utils/mapViewState";
 import { RouteMarker } from "../RouteMarker";
 import { DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
@@ -54,6 +55,28 @@ function MapPanes() {
 
     // Set default map cursor to crosshair (for placing start/end points)
     map.getContainer().style.cursor = "crosshair";
+  }, [map]);
+
+  return null;
+}
+
+// Syncs the Leaflet map view state to the module-level store so
+// ModeSwitcher can read current zoom/center when building theme URLs.
+function MapViewTracker() {
+  const map = useMap();
+
+  useEffect(() => {
+    const sync = () => {
+      const c = map.getCenter();
+      setMapViewState(map.getZoom(), { lat: c.lat, lng: c.lng });
+    };
+    sync();
+    map.on("moveend", sync);
+    map.on("zoomend", sync);
+    return () => {
+      map.off("moveend", sync);
+      map.off("zoomend", sync);
+    };
   }, [map]);
 
   return null;
@@ -142,6 +165,8 @@ function SnapMarker({
 
   return <Marker position={[cursorLatLng.lat, cursorLatLng.lng]} icon={icon} interactive={false} />;
 }
+
+const initialMapView = getInitialMapView();
 
 export function MapView() {
   const {
@@ -235,8 +260,8 @@ export function MapView() {
     <MapLibreBackground leafletMap={leafletMap} />
 
     <MapContainer
-      center={[CONFIG.initialView.lat, CONFIG.initialView.lon]}
-      zoom={CONFIG.initialView.zoom}
+      center={[initialMapView.lat, initialMapView.lng]}
+      zoom={initialMapView.zoom}
       minZoom={CONFIG.minZoom}
       maxZoom={CONFIG.maxZoom}
       maxBounds={bounds}
@@ -246,6 +271,7 @@ export function MapView() {
       className="map-container"
     >
       <MapBridge onMap={setLeafletMap} />
+      <MapViewTracker />
       <MapPanes />
       <GraphLayer
         pinnedPoint={start.coords && !end.coords ? start.coords : null}

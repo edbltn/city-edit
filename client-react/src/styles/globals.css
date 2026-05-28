@@ -81,6 +81,16 @@ body {
 
 
 /* ==========================================================================
+   Utility: reserve layout space while hiding element
+   ========================================================================== */
+
+.hidden-reserve {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+
+/* ==========================================================================
    Topbar
    ========================================================================== */
 
@@ -99,29 +109,18 @@ body {
 .topbar-content {
   flex: 1;
   display: flex;
-  flex-direction: column;
-  padding: var(--space-4) var(--space-5) var(--space-4) 40px;
-  gap: var(--space-3);
+  flex-direction: row;
+  padding: var(--space-4) var(--space-5) var(--space-4) var(--space-5);
+  gap: var(--space-4);
+  align-items: start;
   min-width: 0;
-}
-
-.topbar-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  width: 100%;
-}
-
-.topbar-row-main {
-  justify-content: flex-start;
-  gap: var(--space-4);
 }
 
 .topbar h1 {
   margin: 0;
   font-family: var(--font-main);
   font-size: 22px;
-  font-weight: 500;
+  font-weight: 400;
   letter-spacing: 0;
   white-space: nowrap;
   display: flex;
@@ -135,97 +134,59 @@ body {
 }
 
 .logo-ascii {
-  color: #D4A017;
+  color: #D64045;
   font-size: 1.1em;
   line-height: 1;
 }
 
+
+
 /* ==========================================================================
-   Route Bar
+   Topbar Legend (2×2 grid: Start/Selection over End/Votes)
    ========================================================================== */
 
-.route-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-  flex: 1;
-  min-width: 0;
-  justify-content: flex-start;
+.topbar-legend {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0;
+  font-size: var(--font-size-sm);
+  color: var(--ink);
+  flex-shrink: 0;
+  align-self: stretch;
+  border: 1px solid var(--hairline);
+  background: var(--hover-bg);
+  border-radius: 4px;
 }
 
-.route-section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
+/* Internal hairline dividers — vertical between columns, horizontal on left col only */
+.topbar-legend > :nth-child(odd) {
+  border-right: 1px solid var(--hairline);
 }
 
-.route-fields-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
+.topbar-legend > :nth-child(1) {
+  border-bottom: 1px solid var(--hairline);
 }
 
-.route-fields {
-  display: flex;
-  gap: var(--space-3);
+
+/* ==========================================================================
+   Topbar Actions (2×2 grid: Mode/HowItWorks over VoteType/Actions)
+   ========================================================================== */
+
+.topbar-actions {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: var(--control-height) var(--control-height);
+  gap: var(--space-2) var(--space-4);
+  align-items: stretch;
+  justify-items: stretch;
   flex-shrink: 0;
 }
 
-.route-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
+.actions-group {
   position: relative;
-  min-height: var(--control-height);
-}
-
-.btn-group {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.route-field {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  position: relative;
-  flex-shrink: 0;
-}
-
-.route-field-label {
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  letter-spacing: 0;
-  color: var(--ink);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.route-field-value {
-  font-size: var(--font-size-sm);
-  font-family: var(--font-main);
-  color: var(--ink);
-  min-width: 135px;
-  max-width: 155px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.route-field-value.empty {
-  opacity: 0.4;
-  font-style: italic;
-}
-
-.action-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-shrink: 0;
 }
 
 
@@ -233,7 +194,8 @@ body {
    Mode Selector
    ========================================================================== */
 
-.mode-switcher-group {
+.mode-switcher-group,
+.vote-switcher-group {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -241,7 +203,7 @@ body {
 
 .mode-prefix-label {
   font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-weight: 400;
   color: var(--ink);
   white-space: nowrap;
 }
@@ -249,6 +211,8 @@ body {
 .mode-selector {
   position: relative;
   z-index: var(--z-dropdown);
+  flex: 1;
+  min-width: 0;
 }
 
 .mode-btn {
@@ -260,18 +224,31 @@ body {
   background: var(--paper);
   font-family: var(--font-main);
   font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-weight: 400;
   letter-spacing: 0;
   color: var(--ink);
   cursor: pointer;
   height: var(--control-height);
   box-sizing: border-box;
+  width: 100%;
 }
 
 .mode-caret {
   font-size: var(--font-size-xs);
-  opacity: 0.6;
-  margin-left: var(--space-1);
+  opacity: 0.4;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+.caret-down {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  margin-top: -2px;
 }
 
 .mode-btn:hover {
@@ -287,15 +264,22 @@ body {
   line-height: 1;
 }
 
+.mode-icon-img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  image-rendering: auto;
+}
+
 .mode-label {
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .mode-dropdown {
   position: absolute;
   top: calc(100% + var(--space-1));
   left: 0;
-  min-width: 100px;
+  width: 100%;
   background: var(--paper);
   border: 1px solid var(--hairline);
   opacity: 0;
@@ -323,7 +307,7 @@ body {
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-weight: 400;
   letter-spacing: 0;
   color: var(--ink);
   text-decoration: none;
@@ -349,7 +333,7 @@ body {
 .mode-option .check-icon {
   margin-left: auto;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 400;
   opacity: 0;
 }
 
@@ -386,25 +370,29 @@ body {
    no negative-margin trick. Active state shows the armed tool. */
 .legend-tool {
   appearance: none;
-  border: 1px solid transparent;
+  border: none;
   background: transparent;
   font: inherit;
   color: inherit;
   cursor: pointer;
   text-align: left;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background 0.12s ease;
 }
 
 .legend-tool:hover:not(:disabled):not(.active) {
-  background: var(--hover-bg);
+  background: var(--hover-bg-strong);
 }
 
 .legend-tool.active {
-  border-color: var(--ink);
   background: var(--hover-bg-strong);
 }
 
 .legend-tool:disabled {
+  cursor: default;
+}
+
+.legend-tool.typing {
+  background: var(--hover-bg-strong);
   cursor: default;
 }
 
@@ -445,6 +433,18 @@ body {
   opacity: 0.8;
 }
 
+.legend-heat-swatch {
+  display: block;
+  width: 16px;
+  height: 4px;
+  background: linear-gradient(to right,
+    rgb(180, 50, 30),
+    rgb(255, 110, 30) 40%,
+    rgb(255, 210, 90) 75%,
+    rgb(255, 240, 210)
+  );
+}
+
 /* Keep these for backwards compat but visually hidden now */
 .legend-line,
 .legend-dots,
@@ -454,7 +454,7 @@ body {
 
 .legend-label {
   font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-weight: 400;
   color: var(--ink);
 }
 
@@ -462,11 +462,13 @@ body {
   font-family: var(--font-main);
   font-size: var(--font-size-xs);
   color: var(--ink);
-  min-width: 180px;
+  width: 250px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+
 
 .legend-coords.empty {
   opacity: 0.4;
@@ -488,7 +490,7 @@ body {
   background: var(--paper);
   font-family: var(--font-main);
   font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-weight: 400;
   letter-spacing: 0;
   color: var(--ink);
   cursor: pointer;
@@ -510,13 +512,27 @@ body {
 }
 
 .btn-vote {
-  background: #E3BD33;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  background: #E07070;
   color: #0d0d0d;
-  border-color: #D4A017;
+  border-color: #D64045;
+  font-weight: 600;
+}
+
+.btn-vote > span,
+.btn-vote::after {
+  grid-area: 1 / 1;
+}
+
+.btn-vote::after {
+  content: "Vote Cast!";
+  visibility: hidden;
 }
 
 .btn-vote:hover:not(:disabled) {
-  background: #D4A017;
+  background: #D64045;
 }
 
 .btn-vote:disabled {
@@ -708,7 +724,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .waypoint-marker {
   width: 16px;
   height: 16px;
-  background: #D4A017;
+  background: #D64045;
   border: 2px solid #0d0d0d;
   opacity: 0.9;
   cursor: grab;
@@ -906,7 +922,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 .pac-matched {
-  font-weight: 700 !important;
+  font-weight: 400 !important;
   color: var(--ink) !important;
 }
 
@@ -965,7 +981,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   margin: 0;
   font-family: var(--font-main);
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 400;
   letter-spacing: 0;
 }
 
@@ -1005,7 +1021,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   display: block;
   margin-bottom: var(--space-2);
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 400;
   color: var(--ink);
   opacity: 0.8;
 }
@@ -1037,8 +1053,18 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
    Calculating Indicator (ASCII spinner)
    ========================================================================== */
 
+.vote-action-slot {
+  position: relative;
+}
+
 .calculating-indicator {
-  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  visibility: hidden;
+  pointer-events: none;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
@@ -1054,7 +1080,8 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 .calculating-indicator.active {
-  display: flex;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 /* ASCII text spinner — replaces CSS circle */
@@ -1082,73 +1109,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
    Responsive
    ========================================================================== */
 
-@media (max-width: 900px) {
-  .route-fields-row {
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
-
-  .route-legend {
-    width: 100%;
-    margin-top: var(--space-1);
-  }
-}
-
-@media (max-width: 720px) {
-  .topbar-row-main {
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--space-3);
-  }
-
-  .topbar h1 {
-    align-self: flex-start;
-  }
-
-  .route-section {
-    width: 100%;
-  }
-
-  .route-fields-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .route-fields {
-    flex-direction: column;
-    width: 100%;
-    gap: var(--space-2);
-  }
-
-  .route-field {
-    width: 100%;
-  }
-
-  .route-field-value {
-    min-width: unset;
-    max-width: unset;
-    flex: 1;
-  }
-
-  .route-legend {
-    width: 100%;
-  }
-
-  .route-actions {
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
-
-  .btn-group {
-    flex: 0 0 auto;
-  }
-
-  .mode-btn {
-    justify-content: center;
-  }
-}
-
-@media (max-width: 540px) {
+@media (max-width: 1080px) {
   :root {
     --control-height: 36px;
     --logo-width: 80px;
@@ -1160,7 +1121,35 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 
   .topbar-content {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
+  }
+
+  .topbar-legend,
+  .topbar-actions {
+    grid-column: 1 / -1;
+    width: 100%;
+    grid-template-columns: subgrid;
+  }
+
+  .topbar-legend > :nth-child(even) {
+    text-align: left;
+  }
+
+  .topbar-legend {
+    font-size: 12px;
+  }
+
+  .legend-item,
+  .legend-label {
+    font-size: 12px;
+  }
+
+  .legend-coords {
+    font-size: 11px;
+    width: 160px;
   }
 
   .btn-header,
@@ -1174,37 +1163,25 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
     padding: 4px 8px;
   }
 
-  .mode-btn {
-    padding-right: calc(8px + 1.2em);
-  }
-
   .mode-icon {
     font-size: 14px;
   }
 
-  .route-legend {
-    font-size: 12px;
-    padding: var(--space-2) var(--space-3);
-  }
-
-  .legend-item,
-  .legend-label {
-    font-size: 12px;
-  }
-
-  .legend-coords {
-    font-size: 11px;
-    min-width: 0;
-  }
-
-  .route-legend {
-    flex-direction: column;
+  .topbar-actions {
     gap: var(--space-2);
-    align-items: flex-start;
+    grid-template-rows: var(--control-height);
   }
 
-  .route-actions {
-    gap: var(--space-2);
+  .topbar-actions > :nth-child(n+3) {
+    display: none;
+  }
+
+  .topbar-actions.has-selection {
+    grid-template-rows: var(--control-height) var(--control-height);
+  }
+
+  .topbar-actions.has-selection > :nth-child(n+3) {
+    display: flex;
   }
 
   .calculating-indicator {
@@ -1238,6 +1215,20 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
     font-size: 14px;
   }
 
+  .topbar-legend {
+    font-size: 11px;
+  }
+
+  .legend-item,
+  .legend-label {
+    font-size: 11px;
+  }
+
+  .legend-coords {
+    font-size: 10px;
+    width: 130px;
+  }
+
   .btn-header,
   .mode-btn,
   .mode-prefix-label {
@@ -1250,42 +1241,6 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 
   .mode-btn {
-    padding-right: calc(6px + 1.2em);
-  }
-
-  .route-legend {
-    font-size: 11px;
-    padding: var(--space-1) var(--space-2);
-  }
-
-  .legend-item,
-  .legend-label {
-    font-size: 11px;
-  }
-
-  .legend-coords {
-    font-size: 10px;
-  }
-
-  .route-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .btn-group {
-    width: 100%;
-    justify-content: stretch;
-  }
-
-  .btn-group > * {
-    flex: 1;
-  }
-
-  .mode-selector {
-    flex: 1;
-  }
-
-  .mode-btn {
     width: 100%;
     justify-content: center;
   }
@@ -1295,8 +1250,6 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 
   .calculating-indicator {
-    width: 100%;
-    justify-content: center;
     font-size: 11px;
   }
 
@@ -1318,30 +1271,19 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
     gap: var(--space-1);
   }
 
-  .topbar-row-main {
-    flex-direction: row;
-    align-items: center;
-    gap: var(--space-3);
-  }
-
   .topbar h1 {
     font-size: 14px;
     flex-shrink: 0;
   }
 
-  .route-section {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .route-legend {
+  .topbar-legend {
     display: none;
   }
 
-  .route-actions {
-    flex-wrap: nowrap;
+  .topbar-actions {
+    grid-template-columns: auto auto auto auto;
+    grid-template-rows: auto;
     gap: var(--space-2);
-    align-items: center;
   }
 
   .btn-header,
@@ -1354,14 +1296,6 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   .mode-btn {
     padding: 4px 8px;
     white-space: nowrap;
-  }
-
-  .mode-btn {
-    padding-right: calc(8px + 1.2em);
-  }
-
-  .btn-group {
-    flex: 0 0 auto;
   }
 
   .calculating-indicator {
@@ -1431,6 +1365,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .vote-type-indicator-glyph {
   font-size: 16px;
   line-height: 1;
+}
+
+.vote-type-indicator-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  image-rendering: auto;
 }
 
 .vote-type-indicator-disc {
@@ -1503,6 +1444,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   display: block;
 }
 
+.graph-indicator-modal-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  image-rendering: auto;
+}
+
 .graph-indicator-modal-headtext {
   display: flex;
   flex-direction: column;
@@ -1512,7 +1460,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 
 .graph-indicator-modal-eyebrow {
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 400;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   opacity: 0.55;
@@ -1520,7 +1468,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 
 .graph-indicator-modal-label {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   white-space: normal;
   line-height: 1.3;
 }

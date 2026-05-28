@@ -1,3 +1,4 @@
+export { AddressSearch } from "./AddressSearch";
 export { TopBar } from "./TopBar";
 export { MapView } from "./MapView";
 export { RouteMarker } from "./RouteMarker";

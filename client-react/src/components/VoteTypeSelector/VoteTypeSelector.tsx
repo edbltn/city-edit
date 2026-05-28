@@ -1,27 +1,8 @@
 import { useState, useCallback, useEffect, useRef, memo } from "react";
 import { useRoute, useTheme } from "../../context";
 import { getSuggestionsForTheme } from "../../constants/voteTypes";
+import { iconSrc, iconForLabel } from "../../themes";
 import "./VoteTypeSelector.css";
-
-// Parse emoji and text from a vote type label
-// Matches emoji at start (including compound emojis with variation selectors)
-function parseLabel(label: string): { emoji: string; text: string } {
-  // Match any emoji sequence at the start followed by whitespace
-  const match = label.match(/^([\p{Emoji}\p{Emoji_Modifier}\p{Emoji_Component}\p{Emoji_Modifier_Base}\p{Emoji_Presentation}\u{FE0F}\u{200D}]+)\s+(.*)$/u);
-  if (match) {
-    return { emoji: match[1], text: match[2] };
-  }
-  // Fallback: try to split on first space if first char looks like emoji
-  const firstSpace = label.indexOf(' ');
-  if (firstSpace > 0 && firstSpace <= 4) {
-    const potentialEmoji = label.slice(0, firstSpace);
-    // Check if it's likely an emoji (non-ASCII start)
-    if (potentialEmoji.codePointAt(0)! > 127) {
-      return { emoji: potentialEmoji, text: label.slice(firstSpace + 1) };
-    }
-  }
-  return { emoji: "", text: label };
-}
 
 export const VoteTypeSelector = memo(function VoteTypeSelector() {
   const { voteType, setVoteType, pointType } = useRoute();
@@ -34,29 +15,21 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
 
   const suggestions = getSuggestionsForTheme(theme, pointType);
 
-  // Filter suggestions based on input
   const inputLower = inputValue.trim().toLowerCase();
   const filteredSuggestions = inputLower
-    ? suggestions.filter((s) => {
-        const { text } = parseLabel(s.label);
-        return text.toLowerCase().includes(inputLower);
-      })
+    ? suggestions.filter((s) => s.label.toLowerCase().includes(inputLower))
     : suggestions;
 
-  // Show custom option when input doesn't exactly match any suggestion
-  const hasExactMatch = suggestions.some((s) => {
-    const { text } = parseLabel(s.label);
-    return text.toLowerCase() === inputLower || s.label.toLowerCase() === inputLower;
-  });
+  const hasExactMatch = suggestions.some(
+    (s) => s.label.toLowerCase() === inputLower
+  );
   const showCustomOption = inputLower !== "" && !hasExactMatch;
 
-  // Build options list: filtered suggestions + custom option at bottom
   const options = [
-    ...filteredSuggestions.map((s) => ({ label: s.label, isCustom: false })),
-    ...(showCustomOption ? [{ label: inputValue.trim(), isCustom: true }] : []),
+    ...filteredSuggestions.map((s) => ({ label: s.label, icon: s.icon, isCustom: false })),
+    ...(showCustomOption ? [{ label: inputValue.trim(), icon: "", isCustom: true }] : []),
   ];
 
-  // Reset highlight when options change
   useEffect(() => {
     setHighlightedIndex(0);
   }, [inputValue]);
@@ -77,9 +50,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
     setHighlightedIndex(0);
   }, []);
 
-  const handleBlur = useCallback(() => {
-    // Don't close on blur - only close on outside click or selection
-  }, []);
+  const handleBlur = useCallback(() => {}, []);
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setInputValue(e.target.value);
@@ -122,7 +93,6 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
     }
   }, [isOpen]);
 
-  // Close on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
@@ -134,8 +104,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Display value parsing
-  const { emoji: displayEmoji, text: displayText } = parseLabel(voteType);
+  const displayIcon = voteType ? iconForLabel(voteType) : null;
 
   return (
     <div
@@ -160,22 +129,21 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
         />
         {!isOpen && voteType && (
           <div className="vote-type-display">
-            {displayEmoji && <span className="vote-type-icon">{displayEmoji}</span>}
-            <span className="vote-type-display-text">{displayText}</span>
+            {displayIcon && <img className="vote-type-icon-img" src={iconSrc(displayIcon)} alt="" />}
+            <span className="vote-type-display-text">{voteType}</span>
           </div>
         )}
         {!isOpen && !voteType && (
           <div className="vote-type-placeholder">What should be added here?</div>
         )}
         <span className="vote-type-chevron" onMouseDown={handleChevronClick}>
-          &#9662;
+          <span className="caret-down" />
         </span>
       </div>
 
       {isOpen && options.length > 0 && (
         <div className="vote-type-dropdown">
           {options.map((option, index) => {
-            const { emoji, text } = parseLabel(option.label);
             const isHighlighted = index === highlightedIndex;
             const isSelected = option.label === voteType;
 
@@ -187,7 +155,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
                   onMouseDown={() => selectOption(option.label)}
                   onMouseEnter={() => setHighlightedIndex(index)}
                 >
-                  <span><strong>Suggest:</strong> <em>"{text}"</em></span>
+                  <span><strong>Suggest:</strong> <em>"{option.label}"</em></span>
                 </div>
               );
             }
@@ -199,9 +167,9 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
                 onMouseDown={() => selectOption(option.label)}
                 onMouseEnter={() => setHighlightedIndex(index)}
               >
-                <span className="vote-type-icon">{emoji}</span>
-                <span className="vote-type-label">{text}</span>
-                {isSelected && <span className="check-icon">{"\u2713"}</span>}
+                {option.icon && <img className="vote-type-icon-img" src={iconSrc(option.icon)} alt="" />}
+                <span className="vote-type-label">{option.label}</span>
+                {isSelected && <span className="check-icon">{"✓"}</span>}
               </div>
             );
           })}

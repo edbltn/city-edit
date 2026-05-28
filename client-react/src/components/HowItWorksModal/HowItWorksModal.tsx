@@ -1,6 +1,7 @@
 import { memo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { COLOR_START, COLOR_END } from "../../colors";
+import { iconSrc } from "../../themes";
 import "./HowItWorksModal.css";
 
 interface Props {
@@ -11,7 +12,7 @@ interface Props {
 // Inline presentational components for step references
 const ModeExample = () => (
   <span className="inline-btn-example">
-    <span className="mode-icon">🚴</span> Bike
+    <img className="mode-icon-img" src={iconSrc("bikes")} alt="" /> Bike
   </span>
 );
 
@@ -34,7 +35,7 @@ const DesireLine = () => (
 );
 
 const VoteForExample = () => (
-  <span className="inline-btn-example">▾</span>
+  <span className="inline-btn-example hiw-vote-dropdown"><span className="caret-down" /></span>
 );
 
 const VoteButtonExample = () => (

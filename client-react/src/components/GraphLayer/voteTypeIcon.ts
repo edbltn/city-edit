@@ -1,34 +1,8 @@
 import L from "leaflet";
+import { iconForLabel, iconSrc } from "../../themes";
 
 /**
- * Extracts the first emoji grapheme from a label string.
- * Returns null if the leading grapheme isn't an Extended_Pictographic codepoint.
- *
- * Uses Intl.Segmenter for grapheme awareness so ZWJ sequences and presentation
- * selectors stay together (e.g. "🛠️" = U+1F6E0 + U+FE0F).
- */
-const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
-  ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
-  : null;
-
-const EMOJI_RE = /\p{Extended_Pictographic}/u;
-
-export function extractFirstEmoji(label: string): string | null {
-  if (!label) return null;
-
-  if (segmenter) {
-    const first = segmenter.segment(label.trim())[Symbol.iterator]().next().value;
-    if (!first) return null;
-    return EMOJI_RE.test(first.segment) ? first.segment : null;
-  }
-
-  // Fallback: best-effort first character match
-  const trimmed = label.trim();
-  return EMOJI_RE.test(trimmed[0] ?? "") ? trimmed[0] : null;
-}
-
-/**
- * Deterministic hash → HSL → hex. Same string always produces the same color.
+ * Deterministic hash -> HSL -> hex. Same string always produces the same color.
  * Saturation/lightness chosen to read on the dark base map.
  */
 export function hashLabelToColor(label: string): string {
@@ -54,12 +28,12 @@ function hslToHex(h: number, s: number, l: number): string {
 
 /**
  * Builds a Leaflet divIcon styled to match the app's terminal aesthetic.
- * Either renders the first emoji from the label, or a hex-colored disc.
+ * Renders the matching icon image, or a hex-colored disc as fallback.
  */
 export function makeVoteTypeIcon(label: string): L.DivIcon {
-  const emoji = extractFirstEmoji(label);
-  const html = emoji
-    ? `<div class="vote-type-indicator"><span class="vote-type-indicator-glyph">${emoji}</span></div>`
+  const icon = iconForLabel(label);
+  const html = icon
+    ? `<div class="vote-type-indicator"><img class="vote-type-indicator-icon" src="${iconSrc(icon)}" alt="" /></div>`
     : `<div class="vote-type-indicator"><span class="vote-type-indicator-disc" style="background:${hashLabelToColor(label)}"></span></div>`;
 
   return L.divIcon({

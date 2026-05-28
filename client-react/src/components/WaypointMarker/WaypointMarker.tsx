@@ -25,7 +25,7 @@ export function WaypointMarker({
       L.divIcon({
         className: "custom-marker",
         html: `<div class="pin-container">
-          <div class="pin-head" style="background: #D4A017;"></div>
+          <div class="pin-head" style="background: #D64045;"></div>
           <div class="pin-needle"></div>
           <div class="pin-shadow"></div>
         </div>`,

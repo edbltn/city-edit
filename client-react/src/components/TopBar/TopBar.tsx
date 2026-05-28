@@ -1,13 +1,16 @@
-import { memo, useState } from "react";
+import { memo, useState, useCallback } from "react";
 import { useRoute, useTheme } from "../../context";
 import { landingHref } from "../../themes";
 import { HowItWorksModal } from "../HowItWorksModal";
 import { ModeSwitcher } from "../ModeSwitcher";
 import { VoteTypeSelector } from "../VoteTypeSelector";
+import { AddressSearch } from "../AddressSearch";
+import type { LatLng } from "../../types";
 import "./TopBar.css";
 
 export const TopBar = memo(function TopBar() {
   const [showHowItWorks, setShowHowItWorks] = useState(false);
+  const [typingField, setTypingField] = useState<"start" | "end" | null>(null);
   const theme = useTheme();
 
   const {
@@ -22,6 +25,8 @@ export const TopBar = memo(function TopBar() {
     pointType,
     activeTool,
     setActiveTool,
+    setStartPoint,
+    setEndPoint,
     clearPoints,
     castVote,
   } = useRoute();
@@ -32,11 +37,37 @@ export const TopBar = memo(function TopBar() {
 
   const formatLocation = (point: { coords: { lat: number; lng: number } | null; address?: string | null } | null) => {
     if (!point?.coords) return null;
-    // If address is a string, show it
     if (typeof point.address === 'string') return point.address;
-    // Show coordinates as placeholder while loading or if no address
     return `${point.coords.lat.toFixed(5)}, ${point.coords.lng.toFixed(5)}`;
   };
+
+  const handleStartClick = useCallback(() => {
+    if (isPointOnly) return;
+    setActiveTool("start");
+    setTypingField("start");
+  }, [isPointOnly, setActiveTool]);
+
+  const handleEndClick = useCallback(() => {
+    setActiveTool("end");
+    setTypingField("end");
+  }, [setActiveTool]);
+
+  const handleAddressSelect = useCallback(
+    (field: "start" | "end", coords: LatLng, address: string) => {
+      if (field === "start") {
+        setStartPoint(coords, address);
+      } else {
+        setEndPoint(coords, address);
+        setActiveTool("start");
+      }
+      setTypingField(null);
+    },
+    [setStartPoint, setEndPoint, setActiveTool]
+  );
+
+  const handleTypingClose = useCallback(() => {
+    setTypingField(null);
+  }, []);
 
   // Can vote once we have a route (2 points), split paths (waypoints), OR a single point (for point votes)
   const canVote = !!routeData || splitDesirePaths.length > 0 || (pointType === "point" && !!start.coords);
@@ -72,7 +103,7 @@ export const TopBar = memo(function TopBar() {
         <img src="/logo.svg" alt="City Edit" className="logo-img" />
       </h1>
       <div className="logo-mobile-banner" onClick={goToLanding}>
-        <svg viewBox="-1 -1 233 25" xmlns="http://www.w3.org/2000/svg" className="logo-mobile-svg">
+        <svg viewBox="-1 -1 233 24" xmlns="http://www.w3.org/2000/svg" className="logo-mobile-svg">
           {["C","I","T","Y","","E","D","I","T"].map((ch, i) => {
             const x = i * 26;
             if (!ch) return <rect key={i} x={x} y="0" width="22" height="22" fill="none" stroke="#d4d4d4" strokeWidth="1.5" opacity="0.15"/>;
@@ -85,101 +116,127 @@ export const TopBar = memo(function TopBar() {
       </div>
 
       <div className="topbar-content">
-        <div className="topbar-row topbar-row-main">
-          {/* Route section: legend with coordinates on top, actions below */}
-          <div className="route-section">
-          <div className="route-legend">
+        <div className="topbar-legend">
+          {typingField === "start" ? (
+            <div className={`${startToolClass.join(" ")} typing`}>
+              <span className="legend-icon-slot">
+                <span className="legend-char-start">◆</span>
+              </span>
+              <span className="legend-label">{theme.locationLabel}</span>
+              <AddressSearch
+                onSelect={(coords, address) => handleAddressSelect("start", coords, address)}
+                onClose={handleTypingClose}
+                placeholder="Search address..."
+                accentColor="var(--color-start)"
+              />
+            </div>
+          ) : (
             <button
               type="button"
               className={startToolClass.join(" ")}
-              onClick={() => !isPointOnly && setActiveTool("start")}
+              onClick={handleStartClick}
               disabled={isPointOnly}
               aria-pressed={!isPointOnly && activeTool === "start"}
             >
               <span className="legend-icon-slot">
-                <span className="legend-char-start">●</span>
+                <span className="legend-char-start">◆</span>
               </span>
               <span className="legend-label">{theme.locationLabel}</span>
               <span className={startCoordsClass.join(" ")}>
                 {formatLocation(start) || startPlaceholder}
               </span>
             </button>
-            {!isPointOnly && (
-              <button
-                type="button"
-                className={endToolClass.join(" ")}
-                onClick={() => setActiveTool("end")}
-                aria-pressed={activeTool === "end"}
-              >
-                <span className="legend-icon-slot">
-                  <span className="legend-char-end">●</span>
-                </span>
-                <span className="legend-label">End</span>
-                <span className={endCoordsClass.join(" ")}>
-                  {formatLocation(end) || endPlaceholder}
-                </span>
-              </button>
-            )}
-            {(routeData || splitDesirePaths.length > 0) && !isLoading && (
-              <div className="legend-item">
-                <span className="legend-icon-slot">
-                  <span className="legend-char-selection">◻</span>
-                </span>
-                <span>Selection</span>
-              </div>
-            )}
+          )}
+
+          <div className="legend-item">
+            <span className="legend-icon-slot">
+              <span className="legend-char-selection">◻</span>
+            </span>
+            <span>Selection</span>
           </div>
 
-          <div className="route-actions">
-            <div className="mode-switcher-group">
-              <span className="mode-prefix-label">Mode:</span>
-              <ModeSwitcher />
+          {typingField === "end" ? (
+            <div className={`${endToolClass.join(" ")} typing`}>
+              <span className="legend-icon-slot">
+                <span className="legend-char-end">◆</span>
+              </span>
+              <span className="legend-label">End</span>
+              <AddressSearch
+                onSelect={(coords, address) => handleAddressSelect("end", coords, address)}
+                onClose={handleTypingClose}
+                placeholder="Search address..."
+                accentColor="var(--color-end)"
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              className={[...endToolClass, isPointOnly ? "hidden-reserve" : ""].join(" ")}
+              onClick={handleEndClick}
+              aria-pressed={activeTool === "end"}
+              tabIndex={isPointOnly ? -1 : undefined}
+            >
+              <span className="legend-icon-slot">
+                <span className="legend-char-end">◆</span>
+              </span>
+              <span className="legend-label">End</span>
+              <span className={endCoordsClass.join(" ")}>
+                {formatLocation(end) || endPlaceholder}
+              </span>
+            </button>
+          )}
+
+          <div className="legend-item legend-item-heatmap">
+            <span className="legend-icon-slot">
+              <span className="legend-heat-swatch" />
+            </span>
+            <span>Votes</span>
+          </div>
+        </div>
+
+        <div className={`topbar-actions${start.coords ? " has-selection" : ""}`}>
+          <div className="mode-switcher-group">
+            <span className="mode-prefix-label">Mode:</span>
+            <ModeSwitcher />
+          </div>
+
+          <button
+            className="btn-header"
+            onClick={() => setShowHowItWorks(true)}
+          >
+            How it Works
+          </button>
+
+          <div className={`vote-switcher-group ${(canVote || (start.coords && end.coords)) ? "" : "hidden-reserve"}`}>
+            <span className="mode-prefix-label">Vote:</span>
+            <VoteTypeSelector />
+          </div>
+
+          <div className="actions-group">
+            <div className={`calculating-indicator ${isLoading && start.coords && end.coords ? "active" : ""}`}>
+              <div className="spinner"></div>
+              <span>Calculating...</span>
             </div>
 
             <button
-              className="btn-header"
-              onClick={() => setShowHowItWorks(true)}
+              className={`btn-header btn-clear ${start.coords && !isLoading ? "" : "hidden-reserve"}`}
+              onClick={clearPoints}
+              disabled={isVoting}
+              tabIndex={start.coords && !isLoading ? undefined : -1}
             >
-              How it Works
+              Clear
             </button>
 
-            <div className="btn-group">
-              {(canVote || (start.coords && end.coords)) && <VoteTypeSelector />}
-            </div>
-
-            <div className="btn-group">
-              {start.coords && (
-                <button
-                  className="btn-header btn-clear"
-                  onClick={clearPoints}
-                  disabled={isLoading || isVoting}
-                >
-                  Clear
-                </button>
-              )}
-
-              {/* Show calculating when loading with both points set */}
-              {isLoading && start.coords && end.coords && (
-                <div className="calculating-indicator active">
-                  <div className="spinner"></div>
-                  <span>Calculating...</span>
-                </div>
-              )}
-
-              {/* Show Cast Vote when route ready and not loading */}
-              {canVote && !isLoading && (
-                <button
-                  className="btn-header btn-vote"
-                  onClick={castVote}
-                  disabled={hasVoted || isVoting}
-                >
-                  {isVoting ? "Voting..." : hasVoted ? "Vote Cast!" : "Cast Vote"}
-                </button>
-              )}
-            </div>
+            <button
+              className={`btn-header btn-vote ${canVote && !isLoading ? "" : "hidden-reserve"}`}
+              onClick={castVote}
+              disabled={hasVoted || isVoting}
+              tabIndex={canVote && !isLoading ? undefined : -1}
+            >
+              <span>{isVoting ? "Voting..." : hasVoted ? "Vote Cast!" : "Cast Vote"}</span>
+            </button>
           </div>
         </div>
-      </div>
       </div>
 
       <HowItWorksModal

@@ -79,9 +79,12 @@
   <line x1="35" y1="95" x2="51" y2="111" stroke="#bbb" stroke-width="2.5"/>
   <line x1="51" y1="95" x2="35" y2="111" stroke="#bbb" stroke-width="2.5"/>
 
-  <!-- Empty cells, cols 3-6 -->
+  <!-- Empty cells, cols 3-5 -->
   <rect x="61" y="91" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.15"/>
   <rect x="91" y="91" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.15"/>
   <rect x="121" y="91" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.15"/>
-  <rect x="151" y="91" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.15"/>
+
+  <!-- BETA (single square, col 6) -->
+  <rect x="151" y="91" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.3"/>
+  <text x="163" y="103" font-family="monospace" font-size="7.5" font-weight="400" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central" textLength="18" lengthAdjust="spacingAndGlyphs">BETA</text>
 </svg>

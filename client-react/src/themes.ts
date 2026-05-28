@@ -8,6 +8,7 @@ export type InputMode = "route" | "point" | "both";
 
 export interface VoteSuggestion {
   label: string;
+  icon: string;
   pointType: "route" | "point";
 }
 
@@ -19,7 +20,7 @@ export interface Theme {
   inputMode: InputMode;  // What input modality the user gets
   suggestions: VoteSuggestion[];
   locationLabel: string; // Label for start point (e.g. "Location", "Start")
-  symbol: string;        // Emoji shown in mode switcher and landing card
+  symbol: string;        // Icon filename (in /icons/) shown in mode switcher and landing card
   subdomain: string;     // Subdomain that hosts this theme (e.g. "bikepaths")
 }
 
@@ -31,26 +32,25 @@ export const THEMES: Record<string, Theme> = {
     mode: "bikepaths",
     inputMode: "both",
     locationLabel: "Start",
-    symbol: "🚴",
+    symbol: "bikes",
     subdomain: "bikepaths",
     suggestions: [
-      // Route votes (2 points)
-      { label: "🛠️ Improve bike lane", pointType: "route" },
-      { label: "🚴 Add bike lane", pointType: "route" },
-      { label: "🛡️ Add protected bike lane", pointType: "route" },
-      { label: "↔️ Widen bike lane", pointType: "route" },
-      { label: "🔵 Add sharrow (shared lane markings)", pointType: "route" },
-      { label: "🛣️ Repave bike path", pointType: "route" },
-      { label: "🚦 Add bike signal phase", pointType: "route" },
-      { label: "🌉 Add bike bridge / greenway", pointType: "route" },
-      // Point votes (1 point)
-      { label: "🅿️ Add bike parking", pointType: "point" },
-      { label: "🔒 Add secure bike parking", pointType: "point" },
-      { label: "⚡ Add e-bike charging point", pointType: "point" },
-      { label: "🚲 Add Citi Bike station", pointType: "point" },
-      { label: "🔧 Add bike repair station", pointType: "point" },
-      { label: "📊 Add bike counter", pointType: "point" },
-      { label: "⚠️ Fix dangerous intersection", pointType: "point" },
+      { label: "Improve bike lane", icon: "bikes", pointType: "route" },
+      { label: "Add bike lane", icon: "bikes", pointType: "route" },
+      { label: "Add protected bike lane", icon: "safety", pointType: "route" },
+      { label: "Widen bike lane", icon: "bikes", pointType: "route" },
+      { label: "Add sharrow (shared lane markings)", icon: "bikes", pointType: "route" },
+      { label: "Repave bike path", icon: "bikes", pointType: "route" },
+      { label: "Add bike signal phase", icon: "traffic-reduction", pointType: "route" },
+      { label: "Add bike bridge", icon: "parks", pointType: "route" },
+      { label: "Add bike greenway", icon: "parks", pointType: "route" },
+      { label: "Add bike parking", icon: "bikes", pointType: "point" },
+      { label: "Add secure bike parking", icon: "safety", pointType: "point" },
+      { label: "Add e-bike charging point", icon: "bikes", pointType: "point" },
+      { label: "Add Citi Bike station", icon: "bikes", pointType: "point" },
+      { label: "Add bike repair station", icon: "bikes", pointType: "point" },
+      { label: "Add bike counter", icon: "mapping", pointType: "point" },
+      { label: "Fix dangerous intersection", icon: "safety", pointType: "point" },
     ],
   },
 
@@ -59,20 +59,26 @@ export const THEMES: Record<string, Theme> = {
     name: "Trees",
     tagline: "Vote to greenify your city.",
     mode: "trees",
-    inputMode: "point",
-    locationLabel: "Location",
-    symbol: "🌳",
+    inputMode: "both",
+    locationLabel: "Start",
+    symbol: "trees",
     subdomain: "trees",
     suggestions: [
-      { label: "🌳 Add tree", pointType: "point" },
-      { label: "🌿 Plant native shrubs", pointType: "point" },
-      { label: "🌱 Create a tree pit / planter", pointType: "point" },
-      { label: "🪴 Add planter boxes", pointType: "point" },
-      { label: "🌻 Create a community garden", pointType: "point" },
-      { label: "🏡 De-pave / restore soil", pointType: "point" },
-      { label: "💧 Add a bioswale", pointType: "point" },
-      { label: "🛡️ Protect existing tree", pointType: "point" },
-      { label: "✂️ Tree needs maintenance / pruning", pointType: "point" },
+      { label: "Add tree-lined street", icon: "trees", pointType: "route" },
+      { label: "Create green corridor", icon: "parks", pointType: "route" },
+      { label: "Add greenway", icon: "parks", pointType: "route" },
+      { label: "De-pave street section", icon: "public-space", pointType: "route" },
+      { label: "Add bioswale corridor", icon: "waterfront", pointType: "route" },
+      { label: "Add tree", icon: "trees", pointType: "point" },
+      { label: "Plant native shrubs", icon: "parks", pointType: "point" },
+      { label: "Create a tree pit", icon: "trees", pointType: "point" },
+      { label: "Add planter boxes", icon: "parks", pointType: "point" },
+      { label: "Create a community garden", icon: "community", pointType: "point" },
+      { label: "Restore soil", icon: "public-space", pointType: "point" },
+      { label: "Add a bioswale", icon: "waterfront", pointType: "point" },
+      { label: "Protect existing tree", icon: "safety", pointType: "point" },
+      { label: "Tree needs pruning", icon: "trees", pointType: "point" },
+      { label: "Tree needs maintenance", icon: "trees", pointType: "point" },
     ],
   },
 
@@ -83,28 +89,46 @@ export const THEMES: Record<string, Theme> = {
     mode: "walkways",
     inputMode: "both",
     locationLabel: "Start",
-    symbol: "🚶",
+    symbol: "walkways",
     subdomain: "walkways",
     suggestions: [
-      // Route votes (2 points)
-      { label: "🛠️ Improve sidewalk", pointType: "route" },
-      { label: "🚶 Add crosswalk", pointType: "route" },
-      { label: "↔️ Widen sidewalk", pointType: "route" },
-      { label: "🔨 Fix broken sidewalk", pointType: "route" },
-      { label: "🌉 Add pedestrian bridge", pointType: "route" },
-      { label: "💡 Add street lighting", pointType: "route" },
-      { label: "🚧 Add traffic calming", pointType: "route" },
-      { label: "♿ Improve accessibility", pointType: "route" },
-      // Point votes (1 point)
-      { label: "🚦 Add pedestrian signal", pointType: "point" },
-      { label: "♿ Fix curb cut", pointType: "point" },
-      { label: "🪑 Add bench", pointType: "point" },
-      { label: "🚰 Add water fountain", pointType: "point" },
-      { label: "🚻 Add public restroom", pointType: "point" },
-      { label: "🚌 Add bus shelter", pointType: "point" },
+      { label: "Improve sidewalk", icon: "walkways", pointType: "route" },
+      { label: "Add crosswalk", icon: "pedestrian-streets", pointType: "route" },
+      { label: "Widen sidewalk", icon: "walkways", pointType: "route" },
+      { label: "Fix broken sidewalk", icon: "walkways", pointType: "route" },
+      { label: "Add pedestrian bridge", icon: "walkways", pointType: "route" },
+      { label: "Add street lighting", icon: "public-space", pointType: "route" },
+      { label: "Add traffic calming", icon: "traffic-reduction", pointType: "route" },
+      { label: "Improve accessibility", icon: "accessibility", pointType: "route" },
+      { label: "Add pedestrian signal", icon: "traffic-reduction", pointType: "point" },
+      { label: "Fix curb cut", icon: "accessibility", pointType: "point" },
+      { label: "Add bench", icon: "public-space", pointType: "point" },
+      { label: "Add water fountain", icon: "waterfront", pointType: "point" },
+      { label: "Add public restroom", icon: "public-space", pointType: "point" },
+      { label: "Add bus shelter", icon: "transit", pointType: "point" },
     ],
   },
 };
+
+/**
+ * Returns the path to an icon image in /icons/.
+ */
+export function iconSrc(icon: string): string {
+  return `/icons/${icon}.svg`;
+}
+
+/**
+ * Look up the icon for a vote-type label by searching all theme suggestions.
+ * Falls back to null if no match is found (e.g. custom user-typed vote types).
+ */
+export function iconForLabel(label: string): string | null {
+  for (const theme of Object.values(THEMES)) {
+    for (const s of theme.suggestions) {
+      if (s.label === label) return s.icon;
+    }
+  }
+  return null;
+}
 
 /**
  * Display order for the mode switcher and landing page cards.
@@ -120,6 +144,13 @@ function isLocalDevHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || !hostname.includes(".");
 }
 
+export interface ThemeNavState {
+  zoom?: number;
+  center?: { lat: number; lng: number };
+  start?: { lat: number; lng: number } | null;
+  end?: { lat: number; lng: number } | null;
+}
+
 /**
  * Build a URL that points at a given theme's subdomain.
  * Production: https://<subdomain>.<root>/   Local dev: /?theme=<id>
@@ -128,19 +159,44 @@ function isLocalDevHost(hostname: string): boolean {
  *   - localhost / 127.0.0.1 → query-param fallback for dev
  *   - apex (cityedit.org, 2 parts) → prepend subdomain to whole hostname
  *   - subdomain (foo.cityedit.org, 3+ parts) → swap first label for theme subdomain
+ *
+ * Optional `state` encodes map view + selected points as query params
+ * so they persist across theme switches.
  */
-export function themeHref(theme: Theme): string {
+export function themeHref(theme: Theme, state?: ThemeNavState): string {
   if (typeof window === "undefined") return `https://${theme.subdomain}.cityedit.org/`;
 
   const { hostname, protocol, port } = window.location;
+
+  let base: string;
   if (isLocalDevHost(hostname)) {
-    return `/?theme=${theme.id}`;
+    base = `/?theme=${theme.id}`;
+  } else {
+    const parts = hostname.split(".");
+    const root = parts.length >= 3 ? parts.slice(1).join(".") : hostname;
+    const portSuffix = port ? `:${port}` : "";
+    base = `${protocol}//${theme.subdomain}.${root}${portSuffix}/`;
   }
 
-  const parts = hostname.split(".");
-  const root = parts.length >= 3 ? parts.slice(1).join(".") : hostname;
-  const portSuffix = port ? `:${port}` : "";
-  return `${protocol}//${theme.subdomain}.${root}${portSuffix}/`;
+  if (!state) return base;
+
+  const params = new URLSearchParams();
+  if (state.zoom != null) params.set("z", String(state.zoom));
+  if (state.center) {
+    params.set("lat", state.center.lat.toFixed(5));
+    params.set("lng", state.center.lng.toFixed(5));
+  }
+  if (state.start) {
+    params.set("slat", state.start.lat.toFixed(5));
+    params.set("slng", state.start.lng.toFixed(5));
+  }
+  if (state.end) {
+    params.set("elat", state.end.lat.toFixed(5));
+    params.set("elng", state.end.lng.toFixed(5));
+  }
+  const qs = params.toString();
+  if (!qs) return base;
+  return base + (base.includes("?") ? "&" : "?") + qs;
 }
 
 /**

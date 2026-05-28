@@ -35,7 +35,7 @@
 
 .error-toast-icon {
   color: #C4841D;
-  font-weight: 700;
+  font-weight: 400;
   font-size: 13px;
 }
 
@@ -55,7 +55,7 @@
   background: transparent;
   font-family: var(--font-main);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   color: #d4d4d4;
   cursor: pointer;
   transition: background 0.15s ease;

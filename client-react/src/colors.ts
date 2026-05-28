@@ -10,34 +10,33 @@
 export const COLOR_START = "#00C4D4"; // Bright cyan-teal — pops against orange heatmap
 export const COLOR_END = "#DC343B"; // Poppy Red - vibrant 2025 red
 
-// Desire path overlay - blue like walking dots
+// Desire path overlay - green like bike paths
 export const DESIRE_PATH = {
-  fill: "#5B8FBF", // Light blue (matches walk core)
-  stroke: "#5B8FBF",
+  fill: "#3CB371",
+  stroke: "#3CB371",
 };
 
 // Route mode colors
 export const ROUTE_COLORS = {
   walk: {
-    glow: "#98DDDF", // Limpet Shell - soft teal glow
-    edge: "#3B6EA5", // Brighter dark blue outline
-    core: "#5B8FBF", // Lighter blue fill
+    glow: "#98E0B0",
+    edge: "#2E8B57",
+    core: "#3CB371",
   },
   bike: {
-    glow: "#98DDDF", // Soft teal glow (matches walk)
-    middle: "#3B6EA5", // Blue
-    core: "#3B6EA5", // Blue core
+    glow: "#98E0B0",
+    middle: "#2E8B57",
+    core: "#2E8B57",
   },
-  // Bike desire path - green
   bikeDesire: {
-    glow: "#98E0B0", // Soft green glow
-    edge: "#2E8B57", // Sea green outline
-    core: "#3CB371", // Medium sea green fill
+    glow: "#98E0B0",
+    edge: "#2E8B57",
+    core: "#3CB371",
   },
   drive: {
     glow: "#B8B0A8", // Warmer, more emphatic glow
     asphalt: "#343148", // Eclipse - deep purple-gray
-    centerLine: "#E3BD33", // Misted Marigold - bold yellow
+    centerLine: "#E07070", // Warm red accent
   },
   desire: {
     glow: "rgba(255, 255, 255, 0.15)", // Soft white glow

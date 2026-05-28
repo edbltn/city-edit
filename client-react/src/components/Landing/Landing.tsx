@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { THEME_ORDER, themeHref } from "../../themes";
+import { THEME_ORDER, themeHref, iconSrc } from "../../themes";
 import "./Landing.css";
 
 export function Landing() {
@@ -24,16 +24,15 @@ export function Landing() {
         <a href={homeHref} className="landing-logo-link" aria-label="City Edit home">
           <img src="/logo.svg" alt="City Edit" className="landing-logo" />
         </a>
-        <p className="landing-tagline">Help redraw your city.</p>
+        <p className="landing-tagline">Redraw your city.</p>
       </header>
 
       <main className="landing-grid">
         {THEME_ORDER.map((theme) => (
           <a key={theme.id} className="landing-card" href={themeHref(theme)}>
-            <div className="landing-card-symbol">{theme.symbol}</div>
+            <img className="landing-card-symbol" src={iconSrc(theme.symbol)} alt={theme.name} />
             <div className="landing-card-name">{theme.name}</div>
             <div className="landing-card-tagline">{theme.tagline}</div>
-            <div className="landing-card-cta">Open map →</div>
           </a>
         ))}
       </main>
