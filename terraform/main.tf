@@ -142,7 +142,13 @@ resource "google_sql_database_instance" "votes" {
     }
 
     backup_configuration {
-      enabled = true
+      enabled                        = true
+      point_in_time_recovery_enabled = true
+      transaction_log_retention_days = 7
+      backup_retention_settings {
+        retained_backups = 14
+        retention_unit   = "COUNT"
+      }
     }
   }
 
@@ -216,8 +222,8 @@ resource "google_cloud_run_service" "app" {
 
         resources {
           limits = {
-            cpu    = "4"
-            memory = "16Gi"
+            cpu    = "1"
+            memory = "2Gi"
           }
         }
 
@@ -235,8 +241,8 @@ resource "google_cloud_run_service" "app" {
 
     metadata {
       annotations = {
-        "autoscaling.knative.dev/minScale"        = "2"
-        "autoscaling.knative.dev/maxScale"        = "10"
+        "autoscaling.knative.dev/minScale"        = "0"
+        "autoscaling.knative.dev/maxScale"        = "3"
         "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.connector.id
         "run.googleapis.com/vpc-access-egress"    = "private-ranges-only"
       }

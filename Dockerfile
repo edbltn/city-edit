@@ -7,7 +7,7 @@ COPY client-react/ ./
 RUN npm run build
 
 # Stage 2: Python + Nginx
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ RUN uv pip install --system --no-cache -r requirements.txt gunicorn
 COPY server/*.py ./
 
 # Build routing graph during image build (bakes graph into image)
-RUN mkdir -p osm_data && python refresh_osm.py --region manhattan --force
+RUN mkdir -p osm_data && python refresh_osm.py --region downtown --force
 
 COPY --from=client-builder /app/dist /var/www/html/
 

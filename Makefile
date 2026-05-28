@@ -6,7 +6,7 @@ REGION := us-central1
 SERVICE := desire-path-mapper-prod
 REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/desire-path-mapper/app
 
-.PHONY: help dev redis flask client docker push deploy test-cloud clean
+.PHONY: help dev redis flask client docker push deploy test-cloud tf-init tf-plan tf-apply logs clean monitoring monitoring-down
 
 help:
 	@echo "Usage: make <target>"
@@ -26,8 +26,18 @@ help:
 	@echo "  deploy       Build and deploy to Cloud Run"
 	@echo "  test-cloud   Test the cloud instance"
 	@echo ""
+	@echo "Terraform:"
+	@echo "  tf-init      Initialize Terraform"
+	@echo "  tf-plan      Preview infrastructure changes"
+	@echo "  tf-apply     Apply infrastructure changes"
+	@echo ""
+	@echo "Monitoring:"
+	@echo "  monitoring       Start Grafana dashboard (localhost:3001)"
+	@echo "  monitoring-down  Stop Grafana dashboard"
+	@echo ""
 	@echo "Utilities:"
 	@echo "  clean        Stop all local services"
+	@echo "  logs         Tail Cloud Run logs"
 
 # Local Development
 redis:
@@ -37,7 +47,7 @@ flask:
 	cd server && source env/bin/activate && python app.py
 
 client:
-	cd client && bun run dev
+	cd client-react && npm run dev
 
 dev:
 	@echo "Starting all services..."
@@ -72,6 +82,29 @@ deploy:
 
 test-cloud:
 	./scripts/test-cloud.sh
+
+# Terraform
+tf-init:
+	cd terraform && terraform init
+
+tf-plan:
+	cd terraform && terraform plan
+
+tf-apply:
+	cd terraform && terraform apply
+
+# Monitoring
+monitoring:
+	cd monitoring && docker compose up -d
+	@echo "Grafana running at http://localhost:3001"
+	@echo "Login: admin / desirepath (change via GRAFANA_PASSWORD env var)"
+
+monitoring-down:
+	cd monitoring && docker compose down
+
+# Logs
+logs:
+	gcloud run services logs read desire-path-mapper --project=$(PROJECT_ID) --region=$(REGION) --limit=50
 
 # Utilities
 clean:

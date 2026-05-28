@@ -47,12 +47,15 @@ class OsrmRouter(RouterInterface):
             "?overview=full&geometries=geojson&steps=false"
         )
 
+        logger.info(f"[OSRM] GET {url}")
+
         try:
             resp = requests.get(url, timeout=10)
+            logger.info(f"[OSRM] Response status={resp.status_code}, body={resp.text[:500]}")
             resp.raise_for_status()
             data = resp.json()
-        except requests.ConnectionError:
-            logger.error("[OSRM] Connection refused — is the OSRM service running?")
+        except requests.ConnectionError as e:
+            logger.error(f"[OSRM] Connection refused to {self._base_url}: {e}")
             return {"error": "OSRM service unavailable"}
         except requests.RequestException as e:
             logger.error(f"[OSRM] Request failed: {e}")
@@ -60,10 +63,15 @@ class OsrmRouter(RouterInterface):
 
         if data.get("code") != "Ok" or not data.get("routes"):
             msg = data.get("message", "No route found")
-            logger.warning(f"[OSRM] Routing failed: {msg}")
+            logger.warning(f"[OSRM] Routing failed: code={data.get('code')}, msg={msg}")
             return {"error": msg}
 
         route = data["routes"][0]
+        logger.info(
+            f"[OSRM] Route OK: {route['distance']:.0f}m, "
+            f"{route['duration']:.0f}s, "
+            f"{len(route['geometry']['coordinates'])} coords"
+        )
 
         return {
             "geometry": route["geometry"],
