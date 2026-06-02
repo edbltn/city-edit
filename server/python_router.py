@@ -11,6 +11,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+from scipy.spatial import cKDTree
+
 from router_interface import RouterInterface
 
 logger = logging.getLogger(__name__)
@@ -52,6 +55,9 @@ class PythonRouter(RouterInterface):
         self._version = None
         self._cache_ttl = 86400  # 24 hours
         self._bbox_cache: dict[tuple, dict] = {}
+        self._kdtree: cKDTree | None = None
+        self._kdtree_node_ids: list[int] = []
+        self._kdtree_coords: np.ndarray | None = None
 
     # Grid precision for coordinate snapping (3 decimals = ~100 meters, roughly half an avenue block)
     COORD_SNAP_PRECISION = 3
@@ -258,6 +264,14 @@ class PythonRouter(RouterInterface):
                 v_idx = self._node_index[v]
                 self._graph.add_edge(u_idx, v_idx, weight)
 
+        # Pre-build spatial index for fast nearest-node lookups
+        self._kdtree_node_ids = list(self._nx_graph.nodes())
+        self._kdtree_coords = np.array(
+            [(self._nx_graph.nodes[n]["y"], self._nx_graph.nodes[n]["x"])
+             for n in self._kdtree_node_ids]
+        )
+        self._kdtree = cKDTree(self._kdtree_coords)
+
         logger.info(
             f"Python router loaded: {self._graph.num_nodes()} nodes, "
             f"{self._graph.num_edges()} edges, version: {self._version}"
@@ -316,10 +330,9 @@ class PythonRouter(RouterInterface):
             return {"error": error_msg}
 
     def _find_nearest_node(self, lat: float, lon: float) -> int:
-        """Find the nearest graph node to a point."""
-        node_id = ox.distance.nearest_nodes(self._nx_graph, lon, lat)
-        if node_id not in self._node_index:
-            raise ValueError(f"Node {node_id} not in index")
+        """Find the nearest graph node to a point using pre-built KDTree."""
+        _, idx = self._kdtree.query([lat, lon])
+        node_id = self._kdtree_node_ids[idx]
         return self._node_index[node_id]
 
     def _route_direct(
@@ -503,7 +516,21 @@ class PythonRouter(RouterInterface):
             length = round(data.get("length", 0.0), 1)
             edge_list.append([node_id_to_idx[u], node_id_to_idx[v], name, highway, length])
 
-        result = {"nodes": node_list, "edges": edge_list}
+        # OSM node ID → graph index (for OSRM annotation-based edge mapping)
+        osm_to_graph_idx = {int(osm_id): idx for osm_id, idx in node_id_to_idx.items()}
+
+        # (graph_node_a, graph_node_b) → edge index (both directions for undirected)
+        node_pair_to_edge: dict[tuple[int, int], int] = {}
+        for i, edge in enumerate(edge_list):
+            node_pair_to_edge[(edge[0], edge[1])] = i
+            node_pair_to_edge[(edge[1], edge[0])] = i
+
+        result = {
+            "nodes": node_list,
+            "edges": edge_list,
+            "osm_to_graph_idx": osm_to_graph_idx,
+            "node_pair_to_edge": node_pair_to_edge,
+        }
 
         # Cache (limit to 64 entries to bound memory)
         if len(self._bbox_cache) >= 64:
@@ -517,14 +544,13 @@ class PythonRouter(RouterInterface):
     def nearest_node_coords(self, lat: float, lon: float) -> tuple[float, float]:
         """Return (lat, lon) of the nearest graph node to the given point."""
         self._ensure_loaded()
-        node_id = ox.distance.nearest_nodes(self._nx_graph, lon, lat)
-        node_data = self._nx_graph.nodes[node_id]
-        return node_data["y"], node_data["x"]
+        _, idx = self._kdtree.query([lat, lon])
+        return float(self._kdtree_coords[idx, 0]), float(self._kdtree_coords[idx, 1])
 
     def reverse_geocode(self, lat: float, lon: float) -> str:
         """Return a street-level address for a point using the local OSM graph.
 
-        Finds the nearest node, then BFS outward (up to 3 hops) to collect
+        Finds the nearest node, then BFS outward (up to 5 hops) to collect
         street names from nearby edges.  Walk graphs have many unnamed
         footways/crosswalks, so the immediate node often has none.
 
@@ -532,7 +558,8 @@ class PythonRouter(RouterInterface):
         One street name → that name.  No names → empty string.
         """
         self._ensure_loaded()
-        start_node = ox.distance.nearest_nodes(self._nx_graph, lon, lat)
+        _, idx = self._kdtree.query([lat, lon])
+        start_node = self._kdtree_node_ids[idx]
 
         names: list[str] = []
         seen_names: set[str] = set()
@@ -577,6 +604,9 @@ class PythonRouter(RouterInterface):
         self._index_to_node = {}
         self._version = None
         self._bbox_cache = {}
+        self._kdtree = None
+        self._kdtree_node_ids = []
+        self._kdtree_coords = None
         self._ensure_loaded()
 
     def stats(self) -> dict:
@@ -619,7 +649,11 @@ def build_graph(bbox: tuple, output_dir: str) -> dict:
     G = ox.graph_from_bbox(
         bbox=(west, south, east, north),
         network_type="all",   # Include all roads for bridge connectivity
-        simplify=True,
+        # simplify=False keeps every OSM shape-point as its own node, so edges are
+        # short straight segments that hug the real street curvature. Simplifying
+        # collapses degree-2 chains into single edges, which the client renders as
+        # straight chords between intersections — the "choppy" off-street lines.
+        simplify=False,
         retain_all=True,      # Keep all nodes, even if not connected to main graph
         truncate_by_edge=True  # Include edges that cross bbox boundary
     )

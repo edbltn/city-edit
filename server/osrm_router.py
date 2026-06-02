@@ -23,6 +23,7 @@ class OsrmRouter(RouterInterface):
 
     def __init__(self, host: str = "localhost", port: int = 5000):
         self._base_url = f"http://{host}:{port}"
+        self._session = requests.Session()
         logger.info(f"[OSRM] Router initialized: {self._base_url}")
 
     def calculate_route(
@@ -44,13 +45,13 @@ class OsrmRouter(RouterInterface):
 
         url = (
             f"{self._base_url}/route/v1/{profile}/{coords_str}"
-            "?overview=full&geometries=geojson&steps=false"
+            "?overview=full&geometries=geojson&steps=false&annotations=nodes"
         )
 
         logger.info(f"[OSRM] GET {url}")
 
         try:
-            resp = requests.get(url, timeout=10)
+            resp = self._session.get(url, timeout=10)
             logger.info(f"[OSRM] Response status={resp.status_code}, body={resp.text[:500]}")
             resp.raise_for_status()
             data = resp.json()
@@ -67,10 +68,23 @@ class OsrmRouter(RouterInterface):
             return {"error": msg}
 
         route = data["routes"][0]
+
+        # Collect OSM node IDs from leg annotations
+        osm_node_ids: list[int] = []
+        for leg in route.get("legs", []):
+            ann = leg.get("annotation", {})
+            nodes = ann.get("nodes", [])
+            if osm_node_ids and nodes:
+                # Legs share a junction node — skip the duplicate
+                osm_node_ids.extend(nodes[1:])
+            else:
+                osm_node_ids.extend(nodes)
+
         logger.info(
             f"[OSRM] Route OK: {route['distance']:.0f}m, "
             f"{route['duration']:.0f}s, "
-            f"{len(route['geometry']['coordinates'])} coords"
+            f"{len(route['geometry']['coordinates'])} coords, "
+            f"{len(osm_node_ids)} osm nodes"
         )
 
         return {
@@ -78,5 +92,6 @@ class OsrmRouter(RouterInterface):
             "distance": route["distance"],
             "duration": route["duration"],
             "mode": mode,
+            "osm_node_ids": osm_node_ids,
             "_cache_hit": False,
         }

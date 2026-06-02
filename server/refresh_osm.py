@@ -1,28 +1,26 @@
 #!/usr/bin/env python3
 """
-Weekly OSM data refresh with CH graph rebuilding.
+Per-city OSM walk-graph builder + weekly refresh.
 
-Downloads fresh OSM data from Geofabrik, rebuilds CH graphs if data changed,
-and invalidates the route cache.
+Builds the rustworkx walk graph (via osmnx) for a given city into its own data
+directory: osm_data/<city>/walk_graph.pkl + metadata.json. OSRM routing datasets
+are built separately by the per-city OSRM containers (see docker-compose.yml).
 
 Usage:
-    python refresh_osm.py                    # Check and rebuild if needed (fidi region)
-    python refresh_osm.py --force            # Force rebuild
-    python refresh_osm.py --region manhattan # Build full Manhattan (higher memory)
-    python refresh_osm.py --region nyc-metro # Build full NYC metro (high memory)
-    python refresh_osm.py --download-only    # Just download, don't build
-    python refresh_osm.py --check            # Check status without changes
+    python refresh_osm.py                      # build the default city (nyc) if missing
+    python refresh_osm.py --city sf            # build San Francisco
+    python refresh_osm.py --city sf --force    # force rebuild
+    python refresh_osm.py --all                # build every registered city
+    python refresh_osm.py --check              # report status without changes
 
 Can be run as a cron job:
-    0 3 * * 0 cd /path/to/server && python refresh_osm.py >> /var/log/osm-refresh.log 2>&1
+    0 3 * * 0 cd /path/to/server && python refresh_osm.py --all >> /var/log/osm-refresh.log 2>&1
 """
 import os
 import sys
 import json
-import hashlib
 import logging
 import argparse
-import requests
 from datetime import datetime
 from pathlib import Path
 
@@ -31,82 +29,50 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import redis
 
+from cities import CITIES, DEFAULT_CITY_ID, get_city
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# Configuration
+# Base directory; each city builds into osm_data/<city>/
 OSM_DATA_DIR = Path(__file__).parent / "osm_data"
-METADATA_FILE = OSM_DATA_DIR / "metadata.json"
 
-# NYC metro area PBF from Geofabrik
-# This includes NYC, parts of NJ, Westchester, and Long Island
-GEOFABRIK_URL = "https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf"
-
-# NYC metro bounding box
-NYC_METRO_BBOX = (
-    40.49,   # min_lat (south)
-    -74.26,  # min_lon (west)
-    41.05,   # max_lat (north)
-    -73.65   # max_lon (east)
-)
-
-# Full NYC map bounds (matches client config exactly)
-NYC_BBOX = (
-    40.4774,  # min_lat (south)
-    -74.2591, # min_lon (west)
-    40.9176,  # max_lat (north)
-    -73.7004  # max_lon (east)
-)
-
-# Manhattan-only bounding box (smaller, memory-safe)
-MANHATTAN_BBOX = (
-    40.700,  # min_lat (south - Battery Park)
-    -74.020, # min_lon (west - Hudson River)
-    40.880,  # max_lat (north - Inwood)
-    -73.907  # max_lon (east - East River)
-)
-
-# FiDi bounding box - very small test area for fast builds
-FIDI_BBOX = (
-    40.7025,  # min_lat (south - Bowling Green)
-    -74.015,  # min_lon (west - Hudson)
-    40.715,   # max_lat (north - City Hall)
-    -74.000   # max_lon (east - FDR)
-)
-
-# Downtown Manhattan bounding box (Battery Park to 34th St)
-DOWNTOWN_BBOX = (
-    40.700,   # min_lat (south - Battery Park)
-    -74.020,  # min_lon (west - Hudson River)
-    40.754,   # max_lat (north - 34th Street)
-    -73.970   # max_lon (east - East River)
-)
-
-# Available regions for --region flag
-REGIONS = {
-    "downtown": DOWNTOWN_BBOX,
-    "fidi": FIDI_BBOX,
-    "manhattan": MANHATTAN_BBOX,
-    "nyc": NYC_BBOX,
-    "nyc-metro": NYC_METRO_BBOX,
+# Legacy/test build targets (smaller NYC subsets for fast local builds). These are
+# build-only bboxes — not selectable cities — and write to osm_data/<name>/.
+TEST_BBOXES: dict[str, tuple] = {
+    "fidi": (40.7025, -74.015, 40.715, -74.000),
+    "downtown": (40.700, -74.020, 40.754, -73.970),
+    "manhattan": (40.700, -74.020, 40.880, -73.907),
 }
+
+
+def bbox_for(target: str) -> tuple:
+    city = get_city(target)
+    if city is not None:
+        return city.bbox
+    if target in TEST_BBOXES:
+        return TEST_BBOXES[target]
+    raise ValueError(f"Unknown city/region '{target}'. "
+                     f"Known: {list(CITIES) + list(TEST_BBOXES)}")
+
+
+def data_dir_for(target: str) -> Path:
+    return OSM_DATA_DIR / target
+
+
+def metadata_file_for(target: str) -> Path:
+    return data_dir_for(target) / "metadata.json"
 
 
 def get_redis_client():
     """Create Redis client from environment."""
     redis_host = os.environ.get("REDIS_HOST", "localhost")
     redis_port = int(os.environ.get("REDIS_PORT", "6379"))
-
     try:
-        client = redis.Redis(
-            host=redis_host,
-            port=redis_port,
-            db=0,
-            decode_responses=True
-        )
+        client = redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
         client.ping()
         logger.info(f"Connected to Redis at {redis_host}:{redis_port}")
         return client
@@ -115,269 +81,116 @@ def get_redis_client():
         return None
 
 
-def load_metadata() -> dict:
-    """Load previous build metadata."""
-    if METADATA_FILE.exists():
+def load_metadata(target: str) -> dict:
+    path = metadata_file_for(target)
+    if path.exists():
         try:
-            return json.loads(METADATA_FILE.read_text())
+            return json.loads(path.read_text())
         except json.JSONDecodeError:
             return {}
     return {}
 
 
-def save_metadata(data: dict):
-    """Save build metadata."""
-    OSM_DATA_DIR.mkdir(exist_ok=True)
-    METADATA_FILE.write_text(json.dumps(data, indent=2))
-
-
-def download_osm(region: str, bbox: tuple) -> tuple[Path, str]:
-    """
-    Download OSM PBF file and compute hash.
-
-    Note: Downloads full NY state file then filters by bbox during build.
-    First download is slow (~485MB) but subsequent builds use cached file.
-
-    Returns:
-        Tuple of (file_path, sha256_hash)
-    """
-    OSM_DATA_DIR.mkdir(exist_ok=True)
-    pbf_path = OSM_DATA_DIR / "new-york-metro.osm.pbf"
-
-    # Skip download if file exists and is recent (within 7 days)
-    if pbf_path.exists():
-        age_days = (datetime.utcnow() - datetime.fromtimestamp(pbf_path.stat().st_mtime)).days
-        if age_days < 7:
-            logger.info(f"Using cached PBF file ({age_days} days old)")
-            with open(pbf_path, "rb") as f:
-                hasher = hashlib.sha256()
-                for chunk in iter(lambda: f.read(8192), b""):
-                    hasher.update(chunk)
-            return pbf_path, hasher.hexdigest()[:16]
-
-    logger.info(f"Downloading from {GEOFABRIK_URL}...")
-
-    response = requests.get(GEOFABRIK_URL, stream=True, timeout=600)
-    response.raise_for_status()
-
-    total_size = int(response.headers.get("content-length", 0))
-    downloaded = 0
-    hasher = hashlib.sha256()
-
-    with open(pbf_path, "wb") as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            f.write(chunk)
-            hasher.update(chunk)
-            downloaded += len(chunk)
-
-            # Progress update every 10MB
-            if downloaded % (10 * 1024 * 1024) == 0:
-                pct = (downloaded / total_size * 100) if total_size else 0
-                logger.info(f"  Downloaded {downloaded / 1e6:.1f}MB ({pct:.1f}%)")
-
-    file_hash = hasher.hexdigest()[:16]
-    logger.info(f"Download complete: {pbf_path.stat().st_size / 1e6:.1f}MB, hash: {file_hash}")
-
-    return pbf_path, file_hash
+def save_metadata(target: str, data: dict):
+    data_dir_for(target).mkdir(parents=True, exist_ok=True)
+    metadata_file_for(target).write_text(json.dumps(data, indent=2))
 
 
 def invalidate_route_cache(redis_client) -> int:
-    """
-    Clear all cached routes after OSM update.
-
-    Returns:
-        Number of keys deleted
-    """
+    """Clear cached routes after an OSM update."""
     if redis_client is None:
         return 0
 
     logger.info("Invalidating route cache...")
-
-    patterns = ["roam:path:*", "roam:tile_paths:*", "roam:tile:*"]
+    patterns = ["route:walk:*", "route:coord:*", "roam:path:*", "roam:tile_paths:*", "roam:tile:*"]
     total_deleted = 0
-
     for pattern in patterns:
         cursor = 0
         while True:
             cursor, keys = redis_client.scan(cursor, match=pattern, count=1000)
             if keys:
-                deleted = redis_client.delete(*keys)
-                total_deleted += deleted
+                total_deleted += redis_client.delete(*keys)
             if cursor == 0:
                 break
-
     logger.info(f"Deleted {total_deleted} cached route entries")
     return total_deleted
 
 
-def signal_reload(redis_client, version: str):
-    """Signal running instances to reload graphs via Redis pub/sub."""
+def signal_reload(redis_client, target: str, version: str):
+    """Signal running instances to reload a city's graph via Redis pub/sub."""
     if redis_client is None:
         return
-
-    channel = "graph_reload"
-    redis_client.publish(channel, version)
-    logger.info(f"Published reload signal to channel '{channel}'")
+    redis_client.publish("graph_reload", json.dumps({"city": target, "version": version}))
+    logger.info(f"Published reload signal for '{target}' (version {version})")
 
 
-def build_graphs(pbf_path: Path, bbox: tuple = None) -> dict:
-    """
-    Build walk graph from OSM using Python router.
-
-    Note: The PBF file is no longer used. osmnx downloads directly.
-
-    Returns:
-        Build statistics
-    """
+def build_city(target: str, force: bool = False, check_only: bool = False) -> dict:
+    """Build (or rebuild) the walk graph for a single city/region."""
     from python_router import build_graph
 
-    logger.info("Building walk graph...")
-    start_time = datetime.utcnow()
+    bbox = bbox_for(target)
+    out_dir = data_dir_for(target)
+    graph_path = out_dir / "walk_graph.pkl"
+    logger.info(f"[{target}] bbox={bbox}, data_dir={out_dir}")
 
-    stats = build_graph(bbox, str(OSM_DATA_DIR))
-
-    duration = (datetime.utcnow() - start_time).total_seconds()
-    logger.info(f"Graph building complete in {duration:.1f}s")
-
-    return {"build_duration_seconds": duration, **stats}
-
-
-def refresh(force: bool = False, download_only: bool = False, check_only: bool = False, region: str = "fidi") -> dict:
-    """
-    Main refresh logic.
-
-    Args:
-        force: Force rebuild even if data unchanged
-        download_only: Only download, don't build
-        check_only: Only check status, no changes
-        region: Geographic region to build ("manhattan" or "nyc-metro")
-
-    Returns:
-        Summary dict with refresh results
-    """
-    bbox = REGIONS[region]
-    logger.info(f"Region: {region}, bbox: {bbox}")
-    start_time = datetime.utcnow()
-    logger.info(f"OSM refresh started at {start_time.isoformat()}")
-
-    # Load previous metadata
-    metadata = load_metadata()
-    old_hash = metadata.get("osm_hash")
-    logger.info(f"Previous OSM hash: {old_hash or 'none'}")
-
+    prev = load_metadata(target)
     if check_only:
         return {
+            "city": target,
             "status": "check_only",
-            "previous_hash": old_hash,
-            "last_refresh": metadata.get("built_at"),
-            "version": metadata.get("version")
+            "exists": graph_path.exists(),
+            "version": prev.get("version"),
+            "built_at": prev.get("built_at"),
         }
 
-    # Connect to Redis
-    redis_client = get_redis_client()
+    if graph_path.exists() and not force:
+        logger.info(f"[{target}] graph already present, skipping (use --force to rebuild)")
+        return {"city": target, "status": "unchanged", "version": prev.get("version")}
 
-    # Download new OSM data
-    pbf_path, new_hash = download_osm(region, bbox)
+    start = datetime.utcnow()
+    stats = build_graph(bbox, str(out_dir))   # osmnx downloads the network directly
+    duration = (datetime.utcnow() - start).total_seconds()
 
-    # Check if rebuild needed
-    if old_hash == new_hash and not force:
-        logger.info(f"OSM data unchanged (hash: {new_hash}), skipping rebuild")
-        return {
-            "status": "unchanged",
-            "hash": new_hash,
-            "duration_seconds": (datetime.utcnow() - start_time).total_seconds()
-        }
-
-    logger.info(f"OSM data changed: {old_hash} -> {new_hash}")
-
-    if download_only:
-        logger.info("Download-only mode, skipping build")
-        return {
-            "status": "downloaded",
-            "hash": new_hash,
-            "path": str(pbf_path)
-        }
-
-    # Build new CH graphs
-    build_stats = build_graphs(pbf_path, bbox)
-
-    # Invalidate route cache
-    deleted = invalidate_route_cache(redis_client)
-
-    # Generate version string
-    version = f"{new_hash}_{datetime.utcnow().strftime('%Y%m%d')}"
-
-    # Signal running instances to reload
-    signal_reload(redis_client, version)
-
-    # Update metadata
-    end_time = datetime.utcnow()
-    new_metadata = {
-        "osm_hash": new_hash,
+    version = f"{target}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    metadata = {
+        "city": target,
         "version": version,
-        "built_at": end_time.isoformat(),
-        "refresh_duration_seconds": (end_time - start_time).total_seconds(),
-        "build_duration_seconds": build_stats["build_duration_seconds"],
-        "routes_invalidated": deleted,
-        "source": GEOFABRIK_URL,
-        "region": region,
-        "bbox": bbox
+        "built_at": datetime.utcnow().isoformat(),
+        "build_duration_seconds": duration,
+        "bbox": list(bbox),
+        "nodes": stats.get("nodes"),
+        "edges": stats.get("edges"),
     }
-    save_metadata(new_metadata)
+    save_metadata(target, metadata)
 
-    logger.info("=" * 50)
-    logger.info("REFRESH COMPLETE")
-    logger.info("=" * 50)
-    logger.info(f"Version: {version}")
-    logger.info(f"Duration: {new_metadata['refresh_duration_seconds']:.1f}s")
-    logger.info(f"Routes invalidated: {deleted}")
+    redis_client = get_redis_client()
+    deleted = invalidate_route_cache(redis_client)
+    signal_reload(redis_client, target, version)
+    metadata["routes_invalidated"] = deleted
 
-    return new_metadata
+    logger.info(f"[{target}] BUILD COMPLETE — {stats.get('nodes')} nodes, "
+                f"{stats.get('edges')} edges in {duration:.1f}s")
+    return metadata
 
 
 def main():
-    """CLI entry point."""
-    parser = argparse.ArgumentParser(
-        description="Refresh OSM routing data and rebuild CH graphs"
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force rebuild even if data unchanged"
-    )
-    parser.add_argument(
-        "--download-only",
-        action="store_true",
-        help="Only download OSM data, don't build graphs"
-    )
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="Check status without making changes"
-    )
-    parser.add_argument(
-        "--region",
-        choices=list(REGIONS.keys()),
-        default="downtown",
-        help="Geographic region to build (default: downtown)"
-    )
-
+    parser = argparse.ArgumentParser(description="Build per-city OSM walk graphs")
+    parser.add_argument("--city", default=DEFAULT_CITY_ID,
+                        help=f"City/region to build (default: {DEFAULT_CITY_ID}). "
+                             f"Cities: {list(CITIES)}; test regions: {list(TEST_BBOXES)}")
+    parser.add_argument("--region", help="Alias for --city (back-compat)")
+    parser.add_argument("--all", action="store_true", help="Build every registered city")
+    parser.add_argument("--force", action="store_true", help="Force rebuild even if present")
+    parser.add_argument("--check", action="store_true", help="Report status without changes")
     args = parser.parse_args()
 
+    targets = list(CITIES) if args.all else [args.region or args.city]
+
     try:
-        result = refresh(
-            force=args.force,
-            download_only=args.download_only,
-            check_only=args.check,
-            region=args.region
-        )
-        print(json.dumps(result, indent=2))
-
-        if "error" in result:
-            sys.exit(1)
-
+        results = [build_city(t, force=args.force, check_only=args.check) for t in targets]
+        print(json.dumps(results if args.all else results[0], indent=2))
     except Exception as e:
-        logger.error(f"Refresh failed: {e}")
+        logger.error(f"Build failed: {e}")
         sys.exit(1)
 
 

@@ -31,7 +31,7 @@ MAX_ZOOM = 16
 
 def get_all_nodes_edges():
     """Get all nodes and edges from the graph."""
-    router = PythonRouter("osm_data")
+    router = PythonRouter("osm_data/nyc")
     west, south, east, north = DEFAULT_BBOX
     data = router.get_graph_for_bbox(south, west, north, east)
     return data.get("nodes", []), data.get("edges", [])
@@ -138,7 +138,7 @@ def build_pmtiles(output_path: str = "graph.pmtiles"):
             },
             metadata={
                 "name": "desire-path-graph",
-                "description": "OSM walk graph for desire path mapper",
+                "description": "OSM walk graph for city edit",
                 "format": "pbf",
                 "type": "overlay",
                 "minzoom": str(MIN_ZOOM),
