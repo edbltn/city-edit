@@ -77,6 +77,7 @@
   /* Per-map (set by ThemeContext; fallbacks for pre-JS / landing) */
   --accent: #E0A23A;
   --on-accent: #0d0d0d;
+  --selection: #ffffff;
   --heat-gradient: linear-gradient(to right,
     rgb(140, 78, 24),
     rgb(214, 142, 42) 40%,
@@ -93,6 +94,7 @@
   --hover-bg: rgba(40, 40, 35, 0.05);
   --hover-bg-strong: rgba(40, 40, 35, 0.1);
   --on-accent: #ffffff;
+  --selection: #1f2a1c;
 }
 
 
@@ -467,7 +469,7 @@ body {
 }
 
 .legend-char-selection {
-  color: #ffffff;
+  color: var(--selection);
   font-size: 12px;
   line-height: 1;
   opacity: 0.8;
@@ -546,34 +548,69 @@ body {
   cursor: not-allowed;
 }
 
-.btn-vote {
-  display: grid;
+/* Cast control: "Cast:" label + reversible [+] / [−] buttons. The "for" and
+   "against" buttons mirror the proposal modal's up/down tally so the gesture is
+   the same everywhere. Pressed (.is-cast) means this user already holds that
+   direction on the whole selection — clicking again removes it. */
+.cast-group {
+  display: flex;
   align-items: center;
-  justify-items: center;
-  background: #E07070;
-  color: #0d0d0d;
-  border-color: #D64045;
-  font-weight: 600;
+  gap: var(--space-2);
 }
 
-.btn-vote > span,
-.btn-vote::after {
-  grid-area: 1 / 1;
-}
-
-.btn-vote::after {
-  content: "Vote Cast!";
-  visibility: hidden;
-}
-
-.btn-vote:hover:not(:disabled) {
-  background: #D64045;
-}
-
-.btn-vote:disabled {
-  background: var(--paper);
-  border-color: var(--hairline);
+.cast-prefix-label {
+  font-size: var(--font-size-sm);
+  font-weight: 400;
   color: var(--ink);
+  white-space: nowrap;
+}
+
+.btn-cast {
+  width: var(--control-height);
+  height: var(--control-height);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--hairline);
+  background: var(--paper);
+  font-family: var(--font-main);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Minus (against) on the left, plus (for) on the right; glyphs carry their
+   semantic colors — teal "for" matches the start marker, red "against" the end. */
+.btn-cast-down { border-radius: 2px 0 0 2px; color: var(--color-end); }
+.btn-cast-up { border-radius: 0 2px 2px 0; margin-left: -1px; color: var(--color-start); }
+
+.btn-cast-up:hover:not(:disabled) {
+  background: rgba(0, 196, 212, 0.15);
+  border-color: var(--color-start);
+}
+
+.btn-cast-down:hover:not(:disabled) {
+  background: rgba(224, 90, 96, 0.15);
+  border-color: var(--color-end);
+}
+
+.btn-cast-up.is-cast {
+  background: var(--color-start);
+  border-color: var(--color-start);
+  color: #0d0d0d;
+}
+
+.btn-cast-down.is-cast {
+  background: var(--color-end);
+  border-color: var(--color-end);
+  color: #0d0d0d;
+}
+
+.btn-cast:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 
@@ -733,7 +770,6 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .ascii-kite {
   font-size: 22px;
   line-height: 1;
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
 }
 
 .ascii-stem {
@@ -742,13 +778,6 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   background: currentColor;
   margin-top: -4px;
   opacity: 0.7;
-}
-
-.ascii-marker.is-ghost {
-  opacity: 0.65;
-  transform: scale(0.85);
-  transform-origin: bottom center;
-  transition: opacity 0.15s ease;
 }
 
 .waypoint-marker-container {
@@ -785,10 +814,8 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   will-change: transform;
 }
 
-.ghost-pin {
-  opacity: 0.85;
-  filter: drop-shadow(0 4px 12px rgba(212, 160, 23, 0.5));
-}
+/* The pin itself is the shared .ascii-marker (selection color, full size) so the
+   drag-to-place pin matches the hover ghost and placed waypoint. */
 
 
 /* ==========================================================================
@@ -1423,12 +1450,6 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   image-rendering: auto;
 }
 
-.vote-type-indicator-disc {
-  width: 12px;
-  height: 12px;
-  display: block;
-}
-
 /* Expanded modal shown when a vote-type indicator icon is hovered.
    Anchors at the icon's screen position; the icon "expands" into this panel
    visually via the entrance scale animation. */
@@ -1485,12 +1506,6 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   font-size: 16px;
   line-height: 1;
   flex-shrink: 0;
-}
-
-.graph-indicator-modal-disc {
-  width: 12px;
-  height: 12px;
-  display: block;
 }
 
 .graph-indicator-modal-icon {

@@ -4,10 +4,10 @@ import { GeoJSON, Marker, useMap } from "react-leaflet";
 import { ROUTE_COLORS } from "../../colors";
 import { kiteGhostIcon } from "../../utils/kiteIcon";
 import { usePathDrag } from "../../hooks";
+import { useTheme } from "../../context";
+import { mapStyleForTheme } from "../../themes";
 import type { RouteGeometry, LatLng, SplitDesirePath } from "../../types";
 import type { PathOptions } from "leaflet";
-
-const hoverGhostIcon = kiteGhostIcon(ROUTE_COLORS.desire.middle);
 
 interface LayerStyle extends PathOptions {
   pane?: string;
@@ -55,10 +55,10 @@ function getRouteStyles(): LayerStyle[] {
   ];
 }
 
-function getDesirePathStyles(): LayerStyle[] {
+function getDesirePathStyles(selection: string): LayerStyle[] {
   return [
     {
-      color: ROUTE_COLORS.desire.middle,
+      color: selection,
       weight: 7,
       opacity: 1,
       lineCap: "round",
@@ -205,7 +205,9 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, onP
     [handleStart, onPathHoverChange]
   );
 
-  const visualStyles = useMemo(() => getDesirePathStyles(), []);
+  const selection = mapStyleForTheme(useTheme()).selection;
+  const visualStyles = useMemo(() => getDesirePathStyles(selection), [selection]);
+  const ghostIcon = useMemo(() => kiteGhostIcon(selection), [selection]);
   const geometryKey = useMemo(() => makeGeometryKey(geometry.coordinates), [geometry]);
 
   const geojsonData = useMemo(
@@ -254,7 +256,7 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, onP
       {hoverLatLng && !isDraggingRef.current && (
         <Marker
           position={hoverLatLng}
-          icon={hoverGhostIcon}
+          icon={ghostIcon}
           interactive={false}
           pane="desirePathPane"
         />
@@ -294,7 +296,9 @@ export function SplitDesirePathLayer({ splitPath, onSegmentDrag, onPathHoverChan
     [handleStart, onPathHoverChange]
   );
 
-  const visualStyles = useMemo(() => getDesirePathStyles(), []);
+  const selection = mapStyleForTheme(useTheme()).selection;
+  const visualStyles = useMemo(() => getDesirePathStyles(selection), [selection]);
+  const ghostIcon = useMemo(() => kiteGhostIcon(selection), [selection]);
   const geometryKey = useMemo(
     () => makeGeometryKey(splitPath.geometry.coordinates, `${splitPath.id}-`),
     [splitPath]
@@ -346,7 +350,7 @@ export function SplitDesirePathLayer({ splitPath, onSegmentDrag, onPathHoverChan
       {hoverLatLng && !isDraggingRef.current && (
         <Marker
           position={hoverLatLng}
-          icon={hoverGhostIcon}
+          icon={ghostIcon}
           interactive={false}
           pane="desirePathPane"
         />

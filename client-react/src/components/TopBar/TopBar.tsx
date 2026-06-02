@@ -22,10 +22,10 @@ export const TopBar = memo(function TopBar() {
     isCalculatingSplit,
     routeData,
     splitDesirePaths,
-    hasVoted,
     isVoting,
     pointType,
     activeTool,
+    isDirectionCast,
     setActiveTool,
     setStartPoint,
     setEndPoint,
@@ -225,6 +225,36 @@ export const TopBar = memo(function TopBar() {
               <span>Calculating...</span>
             </div>
 
+            <div
+              className={`cast-group ${canVote && !isLoading ? "" : "hidden-reserve"}`}
+              role="group"
+              aria-label="Cast a vote for or against"
+            >
+              <span className="cast-prefix-label">Cast:</span>
+              <button
+                type="button"
+                className={`btn-cast btn-cast-down${isDirectionCast(-1) ? " is-cast" : ""}`}
+                onClick={() => castVote(-1)}
+                disabled={isVoting}
+                aria-pressed={isDirectionCast(-1)}
+                title={isDirectionCast(-1) ? "Remove your vote against" : "Vote against"}
+                tabIndex={canVote && !isLoading ? undefined : -1}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className={`btn-cast btn-cast-up${isDirectionCast(1) ? " is-cast" : ""}`}
+                onClick={() => castVote(1)}
+                disabled={isVoting}
+                aria-pressed={isDirectionCast(1)}
+                title={isDirectionCast(1) ? "Remove your vote for" : "Vote for"}
+                tabIndex={canVote && !isLoading ? undefined : -1}
+              >
+                +
+              </button>
+            </div>
+
             <button
               className={`btn-header btn-clear ${start.coords && !isLoading ? "" : "hidden-reserve"}`}
               onClick={clearPoints}
@@ -232,15 +262,6 @@ export const TopBar = memo(function TopBar() {
               tabIndex={start.coords && !isLoading ? undefined : -1}
             >
               Clear
-            </button>
-
-            <button
-              className={`btn-header btn-vote ${canVote && !isLoading ? "" : "hidden-reserve"}`}
-              onClick={castVote}
-              disabled={hasVoted || isVoting}
-              tabIndex={canVote && !isLoading ? undefined : -1}
-            >
-              <span>{isVoting ? "Voting..." : hasVoted ? "Vote Cast!" : "Cast Vote"}</span>
             </button>
           </div>
         </div>

@@ -1,10 +1,9 @@
-import { useGhostPin } from "../../context";
-import { ROUTE_COLORS } from "../../colors";
-
-const GOLD = ROUTE_COLORS.desire.middle;
+import { useGhostPin, useTheme } from "../../context";
+import { mapStyleForTheme } from "../../themes";
 
 export function GhostPin() {
   const { ghostState } = useGhostPin();
+  const selection = mapStyleForTheme(useTheme()).selection;
 
   if (!ghostState.isDragging || !ghostState.screenPosition) {
     return null;
@@ -17,7 +16,8 @@ export function GhostPin() {
       className="ghost-pin-overlay"
       style={{ transform: `translate(${x}px, ${y}px)` }}
     >
-      <div className="ascii-marker ghost-pin" style={{ color: GOLD }}>
+      {/* Matches the hover ghost and placed waypoint: selection color, full size. */}
+      <div className="ascii-marker ghost-pin" style={{ color: selection }}>
         <span className="ascii-kite">◆</span>
         <span className="ascii-stem"></span>
       </div>

@@ -36,7 +36,6 @@
   font-size: var(--font-size-md);
   font-weight: 500;
   letter-spacing: 0.04em;
-  text-transform: lowercase;
 }
 
 .propose-close {
@@ -117,7 +116,7 @@
 .propose-custom-row input:focus,
 .propose-custom-row select:focus {
   outline: none;
-  border-color: var(--color-start);
+  border-color: #fff;
 }
 
 .propose-field small {
@@ -171,6 +170,22 @@
   background: rgba(212, 212, 212, 0.04);
 }
 
+/* Standalone display-icon button (outside the custom-row grid): give it the
+   frame the grid context would otherwise supply, and keep it a compact square. */
+.propose-field > .propose-icon-btn {
+  align-self: flex-start;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--hairline);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.propose-field > .propose-icon-btn:hover {
+  background: var(--hover-bg);
+  border-color: var(--color-start);
+}
+
 .propose-icon-btn img {
   width: 18px;
   height: 18px;
@@ -209,6 +224,40 @@
   width: 20px;
   height: 20px;
   object-fit: contain;
+}
+
+/* Theme picker — a row of small basemap+accent squares. */
+.propose-theme-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.propose-theme-swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  cursor: pointer;
+}
+
+/* Inner square = the theme's accent; the button background = its basemap. */
+.propose-theme-swatch > span {
+  width: 10px;
+  height: 10px;
+}
+
+.propose-theme-swatch:hover {
+  border-color: var(--ink);
+}
+
+.propose-theme-swatch.selected {
+  border-color: var(--ink);
+  outline: 1px solid var(--ink);
+  outline-offset: 1px;
 }
 
 .propose-add-row {

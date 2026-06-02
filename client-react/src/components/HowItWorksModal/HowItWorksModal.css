@@ -93,6 +93,36 @@
   border-color: #D64045;
 }
 
+/* The +/- cast control, shown inline in the How-to steps (glyph colors are set
+   inline to match the live control: − against = red, + for = teal). */
+.hiw-cast-example {
+  gap: 0;
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.hiw-cast-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--hairline);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.hiw-cast-btn:first-child {
+  border-radius: 2px 0 0 2px;
+}
+
+.hiw-cast-btn:last-child {
+  border-radius: 0 2px 2px 0;
+  margin-left: -1px;
+}
+
 /* Inline kite pin icons (matching map markers) */
 .hiw-kite {
   display: flex;
@@ -121,11 +151,14 @@
   width: 36px;
   height: 2px;
   opacity: 0.6;
+  /* Match the Leaflet drag trail: dashArray "1, 4", weight 2, round caps.
+     With round caps the 1px dash reads as a ~3px rounded dash on a 5px period,
+     so the marks run horizontally (------) instead of as vertical bars (||||). */
   background: repeating-linear-gradient(
     90deg,
-    #999 0,
-    #999 1px,
-    transparent 1px,
+    #999999 0,
+    #999999 3px,
+    transparent 3px,
     transparent 5px
   );
   border-radius: 1px;

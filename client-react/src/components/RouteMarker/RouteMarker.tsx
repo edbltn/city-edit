@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Marker, useMap } from "react-leaflet";
 import L from "leaflet";
-import { COLOR_START, COLOR_END, ROUTE_COLORS } from "../../colors";
+import { COLOR_START, COLOR_END } from "../../colors";
 import { isWithinMappedBounds } from "../../utils/bounds";
 import { kiteIcon } from "../../utils/kiteIcon";
-import { useGraphSnap } from "../../context";
+import { useGraphSnap, useTheme } from "../../context";
+import { mapStyleForTheme } from "../../themes";
 import type { LatLng } from "../../types";
 
 // Minimum distance (in degrees) to consider a drag as intentional movement
@@ -23,15 +24,22 @@ interface RouteMarkerProps {
   onDelete?: () => void;
   onOutOfBounds?: () => void;
   hidden?: boolean;
+  /** The point on the route this marker is connected to (the route endpoint it
+   *  bridges to via the dotted connector). The drag trail anchors here instead
+   *  of the marker's own offset position, so the dotted line stays rooted to the
+   *  path the marker was connected to instead of jumping when the drag begins. */
+  pathAnchor?: LatLng | null;
   /** Fires true/false as the cursor enters/leaves the marker, so the host can
    *  hide the start-placement ghost while the grab cursor is over a marker. */
   onHoverChange?: (hovering: boolean) => void;
 }
 
-function getMarkerColor(which: "start" | "end" | "waypoint"): string {
+// The mid-waypoint takes the active theme's selection color so the placed
+// marker matches its drag-ghost (gray in light themes, white on dark ones).
+function getMarkerColor(which: "start" | "end" | "waypoint", selection: string): string {
   if (which === "start") return COLOR_START;
   if (which === "end") return COLOR_END;
-  return ROUTE_COLORS.desire.middle;
+  return selection;
 }
 
 const DRAG_TRAIL_STYLE: L.PolylineOptions = {
@@ -42,12 +50,13 @@ const DRAG_TRAIL_STYLE: L.PolylineOptions = {
   lineCap: "round",
 };
 
-export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, hidden, onHoverChange }: RouteMarkerProps) {
+export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, hidden, pathAnchor, onHoverChange }: RouteMarkerProps) {
   const map = useMap();
   const { snapToGraph, currentSnapRef, setDragging } = useGraphSnap();
   const markerRef = useRef<L.Marker>(null);
   const dragStartPosition = useRef<LatLng | null>(null);
   const dragTrailRef = useRef<L.Polyline | null>(null);
+  const dragTrailOriginRef = useRef<LatLng | null>(null);
   const touchStartTime = useRef<number>(0);
   const wasDragged = useRef<boolean>(false);
   const originalSetLatLngRef = useRef<Function | null>(null);
@@ -64,7 +73,10 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
     }
   }, []);
 
-  const icon = useMemo(() => kiteIcon(getMarkerColor(which)), [which]);
+  // The mid-waypoint uses the theme's selection color (black on light themes,
+  // white on dark) at full size/opacity, matching the hover and drag ghosts.
+  const selection = mapStyleForTheme(useTheme()).selection;
+  const icon = useMemo(() => kiteIcon(getMarkerColor(which, selection)), [which, selection]);
 
   // Hide/show via Leaflet DOM directly — no unmount/remount flicker
   useEffect(() => {
@@ -118,9 +130,13 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
           originalSetLatLngRef.current = marker.setLatLng.bind(marker);
           (marker as any).setLatLng = function() { return this; };
 
-          // Create dotted trail from original position
+          // Anchor the dotted trail to the route point this marker was connected
+          // to (its previous path connection), not the marker's own offset spot.
+          // Otherwise the line visibly jumps off the path the instant you grab it.
+          const origin = pathAnchor ?? { lat: latlng.lat, lng: latlng.lng };
+          dragTrailOriginRef.current = origin;
           dragTrailRef.current = L.polyline(
-            [latlng, latlng],
+            [[origin.lat, origin.lng], [origin.lat, origin.lng]],
             DRAG_TRAIL_STYLE
           ).addTo(map);
         }
@@ -129,12 +145,12 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
       },
       drag: () => {
         const marker = markerRef.current;
-        if (marker && dragStartPosition.current && dragTrailRef.current) {
+        if (marker && dragTrailOriginRef.current && dragTrailRef.current) {
           const snapped = currentSnapRef.current;
           const latlng = marker.getLatLng();
           const trailEnd = snapped ?? latlng;
           dragTrailRef.current.setLatLngs([
-            [dragStartPosition.current.lat, dragStartPosition.current.lng],
+            [dragTrailOriginRef.current.lat, dragTrailOriginRef.current.lng],
             trailEnd,
           ]);
         }
@@ -145,6 +161,7 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
         // Remove drag trail and clear drag state
         dragTrailRef.current?.remove();
         dragTrailRef.current = null;
+        dragTrailOriginRef.current = null;
         setDragging(false);
 
         // Restore original setLatLng before state updates trigger re-renders
@@ -196,7 +213,7 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
         onDragFinish?.();
       },
     }),
-    [map, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, snapToGraph, currentSnapRef, setDragging, onHoverChange]
+    [map, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, snapToGraph, currentSnapRef, setDragging, pathAnchor, onHoverChange]
   );
 
   return (

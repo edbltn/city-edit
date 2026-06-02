@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme, useRoute } from "../../context";
-import { THEMES, iconSrc, mapHref, type ThemeNavState } from "../../themes";
+import { iconSrc, mapHref, symbolForMap, type ThemeNavState } from "../../themes";
 import { getMapViewState } from "../../utils/mapViewState";
 import { getMapSlug, getCurrentMap } from "../../map/runtime";
 import { CONFIG } from "../../config";
@@ -15,12 +15,8 @@ interface MapItem {
   subdomain?: string | null;
   voteCount?: number;
   voteTypes?: { label: string; icon: string }[];
+  symbol?: string;
   city?: { name: string };
-}
-
-function mapSymbol(m: MapItem): string {
-  const style = m.subdomain ? THEMES[m.subdomain] : undefined;
-  return style?.symbol || m.voteTypes?.[0]?.icon || "mapping";
 }
 
 export const ModeSwitcher = memo(function ModeSwitcher() {
@@ -119,7 +115,7 @@ export const ModeSwitcher = memo(function ModeSwitcher() {
                 role="option"
                 aria-selected={isCurrent}
               >
-                <img className="mode-icon-img" src={iconSrc(mapSymbol(m))} alt="" />
+                <img className="mode-icon-img" src={iconSrc(symbolForMap(m))} alt="" />
                 <span className="mode-option-text">
                   <span className="mode-label">{m.name}</span>
                   {m.subtitle && <span className="mode-sub">{m.subtitle}</span>}

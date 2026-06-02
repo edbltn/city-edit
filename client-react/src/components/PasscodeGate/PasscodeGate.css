@@ -52,6 +52,13 @@
   border-color: var(--color-start);
 }
 
+/* Mask the passcode like a password without a type="password" field, which
+   would make Chrome offer to save it as a login credential. */
+.passcode-input-masked {
+  -webkit-text-security: disc;
+  text-security: disc;
+}
+
 .passcode-error {
   margin-top: var(--space-2);
   color: var(--color-end);

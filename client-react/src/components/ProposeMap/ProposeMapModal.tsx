@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { CONFIG } from "../../config";
 import { iconSrc } from "../../themes";
+import { SELECTABLE_MAP_STYLES, getMapStyle } from "../../mapStyles";
+import { noAutofillProps } from "../../utils/noAutofill";
 import "./ProposeMapModal.css";
 
 // The app's iconset (public/icons/*.svg) — pickable per custom vote type.
@@ -38,6 +40,12 @@ export function ProposeMapModal({ onClose }: { onClose: () => void }) {
   const [lists, setLists] = useState<VoteTypeListSummary[]>([]);
 
   const [name, setName] = useState("");
+  // The map's main display icon (shown on its landing card). Defaults to bikes,
+  // matching the SF Bike Lanes example the form is themed around.
+  const [symbol, setSymbol] = useState("bikes");
+  const [symbolPickerOpen, setSymbolPickerOpen] = useState(false);
+  // Visual theme (basemap + accent + heat ramp); keyed into MAP_STYLES.
+  const [style, setStyle] = useState("default");
   const [slug, setSlug] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
   const [cityId, setCityId] = useState("");
@@ -120,6 +128,8 @@ export function ProposeMapModal({ onClose }: { onClose: () => void }) {
         subtitle: subtitle.trim() || undefined,
         slug: effectiveSlug,
         city_id: cityId,
+        symbol,
+        style,
         allow_suggestions: allowSuggestions,
         passcode: passcode.trim() || undefined,
       };
@@ -154,15 +164,65 @@ export function ProposeMapModal({ onClose }: { onClose: () => void }) {
     <div className="propose-overlay" onClick={onClose}>
       <div className="propose-modal" onClick={(e) => e.stopPropagation()}>
         <header className="propose-header">
-          <h2>Propose a map</h2>
+          <h2>Propose a Map</h2>
           <button className="propose-close" onClick={onClose} aria-label="Close">×</button>
         </header>
 
         <div className="propose-body">
           <label className="propose-field">
             <span>Map name</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. SF Bike Lanes" />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. SF Bike Lanes" {...noAutofillProps} />
           </label>
+
+          <div className="propose-field">
+            <span>Display icon</span>
+            <button
+              type="button"
+              className="propose-icon-btn"
+              onClick={() => setSymbolPickerOpen((open) => !open)}
+              aria-label="Choose display icon"
+              title="Choose display icon"
+            >
+              <img src={iconSrc(symbol)} alt="" />
+            </button>
+            {symbolPickerOpen && (
+              <div className="propose-icon-grid">
+                {ICONS.map((name) => (
+                  <button
+                    type="button"
+                    key={name}
+                    className={`propose-icon-option ${symbol === name ? "selected" : ""}`}
+                    onClick={() => { setSymbol(name); setSymbolPickerOpen(false); }}
+                    title={name}
+                  >
+                    <img src={iconSrc(name)} alt={name} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="propose-field">
+            <span>Theme</span>
+            <div className="propose-theme-row">
+              {SELECTABLE_MAP_STYLES.map((t) => {
+                const ms = getMapStyle(t.id);
+                return (
+                  <button
+                    type="button"
+                    key={t.id}
+                    className={`propose-theme-swatch ${style === t.id ? "selected" : ""}`}
+                    onClick={() => setStyle(t.id)}
+                    title={t.label}
+                    aria-label={t.label}
+                    style={{ background: ms.base }}
+                  >
+                    <span style={{ background: ms.accent }} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           <label className="propose-field">
             <span>URL slug</span>
@@ -170,6 +230,7 @@ export function ProposeMapModal({ onClose }: { onClose: () => void }) {
               value={effectiveSlug}
               onChange={(e) => { setSlugTouched(true); setSlug(slugify(e.target.value)); }}
               placeholder="sf-bike-lanes"
+              {...noAutofillProps}
             />
             {effectiveSlug && (
               <small className={slugAvailable === false ? "propose-bad" : "propose-ok"}>
@@ -211,6 +272,7 @@ export function ProposeMapModal({ onClose }: { onClose: () => void }) {
                       value={row.label}
                       onChange={(e) => updateRow(i, { label: e.target.value })}
                       placeholder="Vote type label"
+                      {...noAutofillProps}
                     />
                     <select value={row.pointType} onChange={(e) => updateRow(i, { pointType: e.target.value as "route" | "point" })}>
                       <option value="route">Route</option>
@@ -250,12 +312,13 @@ export function ProposeMapModal({ onClose }: { onClose: () => void }) {
               value={subtitle}
               onChange={(e) => setSubtitle(e.target.value)}
               placeholder={defaultSubtitle}
+              {...noAutofillProps}
             />
           </label>
 
           <label className="propose-field">
-            <span>Passcode <em>(optional — required to vote)</em></span>
-            <input type="text" value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="Leave blank for open voting" />
+            <span>Passcode <em>(optional — required to open the map)</em></span>
+            <input type="text" name="map-passcode" value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="Leave blank for an open map" {...noAutofillProps} />
           </label>
 
           {error && <div className="propose-error">{error}</div>}

@@ -38,8 +38,11 @@ const VoteForExample = () => (
   <span className="inline-btn-example hiw-vote-dropdown"><span className="caret-down" /></span>
 );
 
-const VoteButtonExample = () => (
-  <span className="inline-btn-example vote-example">Cast Vote</span>
+const CastExample = () => (
+  <span className="inline-btn-example hiw-cast-example">
+    <span className="hiw-cast-btn" style={{ color: COLOR_END }}>−</span>
+    <span className="hiw-cast-btn" style={{ color: COLOR_START }}>+</span>
+  </span>
 );
 
 export const HowItWorksModal = memo(function HowItWorksModal({ isOpen, onClose }: Props) {
@@ -123,9 +126,12 @@ export const HowItWorksModal = memo(function HowItWorksModal({ isOpen, onClose }
               </li>
               <li>
                 <span className="step-icon-slot">
-                  <VoteButtonExample />
+                  <CastExample />
                 </span>
-                <span>Cast your vote to add to the heatmap</span>
+                <span>
+                  Cast <strong>+</strong> for or <strong>−</strong> against — re-click
+                  the same button to undo your vote
+                </span>
               </li>
             </ul>
           </section>
@@ -142,6 +148,11 @@ export const HowItWorksModal = memo(function HowItWorksModal({ isOpen, onClose }
             </p>
             <p>
               You can also type any custom suggestion you like!
+            </p>
+            <p>
+              <strong>For or against</strong>: cast <span style={{ color: COLOR_START, fontWeight: 700 }}>+</span> to
+              support a proposal along your whole selection, or <span style={{ color: COLOR_END, fontWeight: 700 }}>−</span> to
+              push back on it. Click the same button again to remove your vote.
             </p>
           </section>
 

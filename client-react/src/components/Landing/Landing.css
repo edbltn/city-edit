@@ -94,7 +94,7 @@
 
 .landing-search:focus {
   outline: none;
-  border-color: var(--color-start);
+  border-color: #fff;
 }
 
 /* Clear button — matches the app's other × controls (e.g. .propose-close). */
@@ -140,15 +140,17 @@
   background-color: #1a1a1a;
   background-size: cover;
   background-position: center;
-  /* Paint the image right up to (and under) the border so there's no sliver of
-     gap between the screenshot and the frame. */
+  /* Size the image to the full border box (so there's no sliver of gap at the
+     edges) but clip it to the padding box so it sits *inside* the frame instead
+     of bleeding under the translucent border and washing it out. */
   background-origin: border-box;
+  background-clip: padding-box;
   box-sizing: border-box;
   color: #fff;
   text-decoration: none;
   cursor: pointer;
   aspect-ratio: 3 / 4;
-  border: 2px solid var(--hairline);
+  border: 1px solid var(--hairline);
   transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
@@ -260,7 +262,7 @@
   }
 
   .landing-logo {
-    height: 72px;
+    height: 112px;
   }
 
   .landing-grid {

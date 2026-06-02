@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { THEMES, THEME_ORDER, iconSrc, isApexHost, subdomainHref, type Theme } from "../../themes";
+import {
+  THEME_ORDER, iconSrc, isApexHost, subdomainHref, presetForMap, symbolForMap, type Theme,
+} from "../../themes";
 import { CONFIG } from "../../config";
 import { ProposeMapModal } from "../ProposeMap/ProposeMapModal";
 import "./Landing.css";
@@ -12,6 +14,7 @@ interface ApiMap {
   subdomain?: string | null;
   voteCount?: number;
   voteTypes?: { label: string; icon: string }[];
+  symbol?: string;
   city?: { name: string };
 }
 
@@ -25,14 +28,9 @@ interface DisplayCard {
   haystack: string; // lowercased searchable text
 }
 
-const themeBySubdomain: Record<string, Theme> = Object.fromEntries(
-  Object.values(THEMES).map((t) => [t.subdomain, t])
-);
-
 function toCard(m: ApiMap): DisplayCard {
-  const theme = m.subdomain ? themeBySubdomain[m.subdomain] : undefined;
   const cityName = m.city?.name || m.cityId;
-  const tagline = m.subtitle || theme?.tagline || cityName;
+  const tagline = m.subtitle || presetForMap(m)?.tagline || cityName;
   const labels = (m.voteTypes || []).map((v) => v.label).join(" ");
   return {
     key: m.slug,
@@ -41,7 +39,7 @@ function toCard(m: ApiMap): DisplayCard {
     href: m.subdomain && isApexHost() ? subdomainHref(m.subdomain) : `/m/${m.slug}`,
     name: m.name,
     tagline,
-    symbol: theme?.symbol || m.voteTypes?.[0]?.icon || "mapping",
+    symbol: symbolForMap(m),
     bgImage: `/previews/${m.slug}.png`,
     haystack: `${m.name} ${tagline} ${cityName} ${labels}`.toLowerCase(),
   };
@@ -142,7 +140,7 @@ export function Landing() {
         <button className="landing-card landing-card-add" onClick={() => setProposeOpen(true)}>
           <div className="landing-card-content">
             <div className="landing-card-plus" aria-hidden>+</div>
-            <div className="landing-card-name">Propose a map</div>
+            <div className="landing-card-name">Propose a Map</div>
             <div className="landing-card-tagline">Pick a city and vote types.</div>
           </div>
         </button>

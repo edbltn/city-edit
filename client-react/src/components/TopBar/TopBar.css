@@ -22,6 +22,13 @@
   opacity: 0.7;
 }
 
+/* The logo art is light grey (built for the dark basemap). On a light basemap
+   invert it so it reads as a dark mark with proper contrast. */
+[data-basemap="light"] .logo-img,
+[data-basemap="light"] .logo-mobile-svg {
+  filter: invert(1);
+}
+
 
 .logo-mobile-banner {
   display: none;
