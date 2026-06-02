@@ -49,3 +49,16 @@ server/citibike_data/
 # Screenshots and images (local only, not client assets)
 Screenshot*.png
 *.jpg
+
+# Generated map previews (captured by screenshots/capture.py)
+client-react/public/previews/*.png
+
+# Generated/downloaded OSM graph data (rebuilt in the image via refresh_osm.py)
+server/osm_data/
+
+# Database dumps
+*.dump
+
+# Local scratch / debug artifacts
+/debug
+/af2641f3-*.png
