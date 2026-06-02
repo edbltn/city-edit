@@ -2,12 +2,17 @@ import { createContext, useContext, useRef, useCallback, type ReactNode, type Mu
 import type { LatLng } from "../types";
 
 type SnapFn = (map: L.Map, lat: number, lng: number) => LatLng | null;
+type ResolveEdgeFn = (lat: number, lng: number) => number | null;
 
 interface GraphSnapContextValue {
   /** Register a snap function (called by GraphLayer) */
   setSnapFn: (fn: SnapFn) => void;
   /** Snap a lat/lng to the nearest graph node/edge (on-demand, for dragend) */
   snapToGraph: (map: L.Map, lat: number, lng: number) => LatLng | null;
+  /** Register the point→vote-edge resolver (called by GraphLayer) */
+  setResolveVoteEdgeId: (fn: ResolveEdgeFn) => void;
+  /** Resolve a lat/lng to the edge id a vote would land on (same path as hover/click). */
+  resolveVoteEdgeId: (lat: number, lng: number) => number | null;
   /** Current snap position — updated by GraphLayer on every mousemove.
    *  Read this during drag for zero-overhead snapping. */
   currentSnapRef: MutableRefObject<LatLng | null>;
@@ -22,6 +27,7 @@ const GraphSnapContext = createContext<GraphSnapContextValue | null>(null);
 
 export function GraphSnapProvider({ children }: { children: ReactNode }) {
   const snapFnRef = useRef<SnapFn | null>(null);
+  const resolveEdgeFnRef = useRef<ResolveEdgeFn | null>(null);
   const currentSnapRef = useRef<LatLng | null>(null);
   const isDraggingRef = useRef(false);
 
@@ -33,6 +39,14 @@ export function GraphSnapProvider({ children }: { children: ReactNode }) {
     return snapFnRef.current?.(map, lat, lng) ?? null;
   }, []);
 
+  const setResolveVoteEdgeId = useCallback((fn: ResolveEdgeFn) => {
+    resolveEdgeFnRef.current = fn;
+  }, []);
+
+  const resolveVoteEdgeId = useCallback((lat: number, lng: number): number | null => {
+    return resolveEdgeFnRef.current?.(lat, lng) ?? null;
+  }, []);
+
   const setCurrentSnap = useCallback((pos: LatLng | null) => {
     currentSnapRef.current = pos;
   }, []);
@@ -42,7 +56,7 @@ export function GraphSnapProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <GraphSnapContext.Provider value={{ setSnapFn, snapToGraph, currentSnapRef, setCurrentSnap, isDraggingRef, setDragging }}>
+    <GraphSnapContext.Provider value={{ setSnapFn, snapToGraph, setResolveVoteEdgeId, resolveVoteEdgeId, currentSnapRef, setCurrentSnap, isDraggingRef, setDragging }}>
       {children}
     </GraphSnapContext.Provider>
   );

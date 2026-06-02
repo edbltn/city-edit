@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { CONFIG } from "../config";
-import { withMap } from "../map/runtime";
+import { withMap, getMapSlug, getPasscodeToken } from "../map/runtime";
 import type { VoteDelta } from "../types";
 
 type DeltaListener = (delta: VoteDelta) => void;
@@ -32,7 +32,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
   const connect = useCallback(() => {
     setConnectionStatus("connecting...");
-    const ws = new WebSocket(withMap(CONFIG.wsUrl));
+    // Browsers can't set headers on a WS handshake, so a gated map's token
+    // rides in the query string (?token=) the same way the slug does.
+    let wsUrl = withMap(CONFIG.wsUrl);
+    const token = getPasscodeToken(getMapSlug());
+    if (token) wsUrl += (wsUrl.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token);
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
       setConnectionStatus("connected");

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   RouteProvider, WebSocketProvider, GhostPinProvider, GraphSnapProvider,
   ThemeProvider, MapProvider, HeatmapProvider,
@@ -6,8 +6,11 @@ import {
 import { TopBar, MapView, ErrorToast, Landing } from "./components";
 import { PasscodeGate } from "./components/PasscodeGate/PasscodeGate";
 import { useRoute } from "./context";
-import { isLandingHost, isApexHost, subdomainHref } from "./themes";
-import { resolveMapSlug, fetchMapConfig, applyMap, detectMapSlugFromUrl } from "./map/runtime";
+import { isLandingHost, subdomainRedirectUrl } from "./themes";
+import {
+  resolveMapConfig, fetchMapConfig, applyMap, detectMapSlugFromUrl,
+  type MapConfig,
+} from "./map/runtime";
 
 function AppContent() {
   const { error, clearError } = useRoute();
@@ -30,43 +33,76 @@ function AppContent() {
  * (bounds, tiles, camera) read the correct values on first render.
  */
 function MapApp() {
-  const [ready, setReady] = useState(false);
+  // undefined = still resolving; a config with `locked` means the passcode gate
+  // must clear before the map subtree mounts.
+  const [cfg, setCfg] = useState<MapConfig | null | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const cfg = await fetchMapConfig(resolveMapSlug());
+      let resolved = await resolveMapConfig();
       if (cancelled) return;
-      // Preset maps live on their own subdomain — send apex /m/<slug> (or
-      // shared/typed) visitors to e.g. bikepaths.cityedit.org.
-      if (cfg?.subdomain && isApexHost()) {
-        window.location.replace(subdomainHref(cfg.subdomain));
-        return;
+      // A map with a canonical subdomain (presets + admin-assigned vanity hosts)
+      // settles on that host: send apex /m/<slug> and shared/typed visitors to
+      // e.g. bikepaths.cityedit.org, preserving any ?slat/?vt deep-link params.
+      if (resolved?.subdomain) {
+        const target = subdomainRedirectUrl(resolved.subdomain);
+        if (target) {
+          window.location.replace(target);
+          return;
+        }
       }
-      if (cfg) applyMap(cfg);
-      setReady(true);
+      // Locked map but we already hold a token (returning visitor / subdomain
+      // load that couldn't send it): retry by slug, which carries the header.
+      if (resolved?.locked && resolved.slug) {
+        const unlocked = await fetchMapConfig(resolved.slug);
+        if (cancelled) return;
+        if (unlocked && !unlocked.locked) resolved = unlocked;
+      }
+      if (resolved && !resolved.locked) applyMap(resolved);
+      setCfg(resolved);
     })();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  if (!ready) return <div className="map-bootstrap" />;
+  // After a successful unlock the token is stored; re-fetch the full config
+  // (sent with the header) and proceed to mount the map.
+  const handleUnlock = useCallback(async (slug: string) => {
+    const full = await fetchMapConfig(slug);
+    if (full && !full.locked) {
+      applyMap(full);
+      setCfg(full);
+    }
+  }, []);
+
+  if (cfg === undefined) return <div className="map-bootstrap" />;
+
+  if (cfg?.locked) {
+    return (
+      <div className="map-bootstrap">
+        <PasscodeGate slug={cfg.slug} onUnlock={handleUnlock} />
+      </div>
+    );
+  }
 
   return (
     <ThemeProvider>
       <MapProvider>
-        <RouteProvider>
-          <WebSocketProvider>
-            <GhostPinProvider>
-              <GraphSnapProvider>
+        {/* GraphSnapProvider must sit above RouteProvider: RouteContext reads the
+            point→edge snap resolver from it for point/route casts. */}
+        <GraphSnapProvider>
+          <RouteProvider>
+            <WebSocketProvider>
+              <GhostPinProvider>
                 <HeatmapProvider>
                   <AppContent />
                 </HeatmapProvider>
-              </GraphSnapProvider>
-            </GhostPinProvider>
-          </WebSocketProvider>
-        </RouteProvider>
+              </GhostPinProvider>
+            </WebSocketProvider>
+          </RouteProvider>
+        </GraphSnapProvider>
       </MapProvider>
     </ThemeProvider>
   );

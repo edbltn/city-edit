@@ -27,6 +27,12 @@ import "leaflet/dist/leaflet.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./MapView.css";
 
+// Convert a GeoJSON [lng, lat] coordinate to a LatLng (null if absent).
+function coordToLatLng(coord: [number, number] | undefined): LatLng | null {
+  if (!coord) return null;
+  return { lat: coord[1], lng: coord[0] };
+}
+
 // Custom pane setup component
 function MapPanes() {
   const map = useMap();
@@ -195,6 +201,24 @@ export function MapView() {
     clearSplitPaths,
   } = useRoute();
 
+  // Where each draggable endpoint connects to the route geometry, so its drag
+  // trail anchors to the path it was attached to (matching WaypointConnectors).
+  const { startAnchor, endAnchor } = useMemo(() => {
+    if (splitDesirePaths.length > 0) {
+      const firstCoords = splitDesirePaths[0].geometry.coordinates;
+      const lastCoords = splitDesirePaths[splitDesirePaths.length - 1].geometry.coordinates;
+      return {
+        startAnchor: coordToLatLng(firstCoords[0]),
+        endAnchor: coordToLatLng(lastCoords[lastCoords.length - 1]),
+      };
+    }
+    const coords = routeData?.geometry?.coordinates ?? [];
+    return {
+      startAnchor: coordToLatLng(coords[0]),
+      endAnchor: coordToLatLng(coords[coords.length - 1]),
+    };
+  }, [splitDesirePaths, routeData]);
+
   const theme = useTheme();
   const mapStyle = mapStyleForTheme(theme);
 
@@ -357,6 +381,9 @@ export function MapView() {
           key={ghostWaypointIds[index] ?? `ghost-waypoint-${index}`}
           position={wp}
           which="waypoint"
+          pathAnchor={coordToLatLng(
+            splitDesirePaths[index]?.geometry.coordinates.slice(-1)[0]
+          )}
           onDragStart={handleMarkerDragStart}
           onDragEnd={(pos) => updateGhostWaypoint(index, pos)}
           onDragFinish={handleMarkerDragFinish}
@@ -383,6 +410,7 @@ export function MapView() {
         <RouteMarker
           position={start.coords}
           which="start"
+          pathAnchor={startAnchor}
           onDragStart={handleMarkerDragStart}
           onDragEnd={setStartPoint}
           onDragFinish={handleMarkerDragFinish}
@@ -397,6 +425,7 @@ export function MapView() {
         <RouteMarker
           position={end.coords}
           which="end"
+          pathAnchor={endAnchor}
           onDragStart={handleMarkerDragStart}
           onDragEnd={setEndPoint}
           onDragFinish={handleMarkerDragFinish}

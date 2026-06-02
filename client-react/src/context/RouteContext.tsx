@@ -10,12 +10,13 @@ import {
 } from "react";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { CONFIG } from "../config";
-import { getMapSlug, getPasscodeToken } from "../map/runtime";
-import { getVoterId } from "../utils/voterIdentity";
+import { getMapSlug } from "../map/runtime";
 import { getDefaultVoteTypeForTheme } from "../constants/voteTypes";
 import { getInitialPoints, cleanNavParams } from "../utils/mapViewState";
-import { edgeKey, pointKey, hasVotedKey, markVotedKeys } from "../utils/votedSegments";
+import { coverage, type VoteDirection } from "../utils/voteStore";
+import { castVotes } from "../utils/castVote";
 import { useTheme } from "./ThemeContext";
+import { useGraphSnap } from "./GraphSnapContext";
 import type {
   LatLng,
   RoutePoint,
@@ -123,6 +124,12 @@ interface RouteContextValue {
   error: string | null;
   hasVoted: boolean;
   isVoting: boolean;
+  /** Direction the Cast +/- control will apply: 1 (for) | -1 (against). */
+  voteDirection: VoteDirection;
+  setVoteDirection: (dir: VoteDirection) => void;
+  /** True when the current target is fully voted in `voteDirection` (so casting
+   *  again removes it — the control is a reversible toggle, never disabled). */
+  isDirectionCast: (dir: VoteDirection) => boolean;
   ghostWaypoints: LatLng[];
   ghostWaypointIds: string[];
   splitDesirePaths: SplitDesirePath[];
@@ -142,7 +149,7 @@ interface RouteContextValue {
   addWaypoint: (coords: LatLng) => void;
   updateWaypoint: (index: number, coords: LatLng) => void;
   clearWaypoints: () => void;
-  castVote: () => Promise<void>;
+  castVote: (dir?: VoteDirection) => Promise<void>;
   insertWaypointAtSegment: (segmentIndex: number, position: LatLng) => Promise<void>;
   updateGhostWaypoint: (index: number, position: LatLng) => Promise<void>;
   removeGhostWaypoint: (index: number) => void;
@@ -151,6 +158,11 @@ interface RouteContextValue {
   setSuppressClick: () => void;
   setVoteType: (voteType: string) => void;
   isVoteTypeAlreadyCast: (voteType: string) => boolean;
+}
+
+// dedupe while preserving order
+function uniq(ids: number[]): number[] {
+  return [...new Set(ids)];
 }
 
 const RouteContext = createContext<RouteContextValue | null>(null);
@@ -173,7 +185,16 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const [voteType, setVoteTypeState] = useState<string>(() =>
     getDefaultVoteTypeForTheme(theme, theme.inputMode === "point" ? "point" : "route")
   );
+  const [voteDirection, setVoteDirectionState] = useState<VoteDirection>(1);
   const [activeTool, setActiveToolState] = useState<ActiveTool>("start");
+
+  // Snap resolver (registered by GraphLayer) — turns a clicked point into the
+  // edge a vote lands on, so point casts use the same snap path as hover/click.
+  const { resolveVoteEdgeId } = useGraphSnap();
+
+  const setVoteDirection = useCallback((dir: VoteDirection) => {
+    setVoteDirectionState(dir);
+  }, []);
 
   const setActiveTool = useCallback((tool: ActiveTool) => {
     setActiveToolState(tool);
@@ -204,7 +225,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     error,
     routeData,
     desirePathData,
-    desirePathSegments,
     edgeIds: routeEdgeIds,
     calculateRoute,
     clearRoute,
@@ -716,121 +736,76 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const clearEnd = useCallback(() => removePoint("end"), [removePoint]);
   const removeGhostWaypoint = useCallback((index: number) => removePoint(index), [removePoint]);
 
-  // ============================================
-  // Cast vote
-  // ============================================
-  const castVote = useCallback(async () => {
-    const isPointVote = start.coords && !end.coords;
-
-    // Collect edge IDs: prefer pre-resolved IDs, fall back to segments
-    let edgeIdsToVote: number[] = [];
-    let segmentsFallback: [number, number][][] | null = null;
-    if (splitDesirePaths.length > 0) {
-      edgeIdsToVote = splitDesirePaths.flatMap(sp => sp.edgeIds);
-      if (edgeIdsToVote.length === 0) {
-        segmentsFallback = splitDesirePaths.flatMap(sp => sp.segments);
-      }
-    } else {
-      edgeIdsToVote = routeEdgeIds || [];
-      if (edgeIdsToVote.length === 0) {
-        segmentsFallback = desirePathSegments;
-      }
+  // Edge IDs that make up the current vote target. Split paths (dragged route)
+  // take precedence, then the main route's edges, then a point cast resolves the
+  // single clicked location to an edge via the shared snap path.
+  const currentEdgeIds = useMemo(() => {
+    if (splitDesirePaths.length > 0) return uniq(splitDesirePaths.flatMap((sp) => sp.edgeIds));
+    if (routeEdgeIds && routeEdgeIds.length > 0) return uniq(routeEdgeIds);
+    if (start.coords && !end.coords) {
+      const eid = resolveVoteEdgeId(start.coords.lat, start.coords.lng);
+      return eid != null ? [eid] : [];
     }
+    return [];
+    // votedVersion forces a re-resolve of point votes after a cast settles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [splitDesirePaths, routeEdgeIds, start.coords, end.coords, resolveVoteEdgeId, votedVersion]);
 
-    const hasData = edgeIdsToVote.length > 0 || (segmentsFallback && segmentsFallback.length > 0);
-    if (!isPointVote && !hasData) return;
-    if (isPointVote && !start.coords) return;
+  // ============================================
+  // Cast vote — the single path (route, dragged route, or point), directional.
+  // Delegates to castVotes(), which is coverage-aware (only changes edges that
+  // need it), reversible (re-casting the held direction removes), optimistic,
+  // and self-healing. Re-casting the same direction toggles the votes off.
+  // ============================================
+  const castVote = useCallback(async (dirOverride?: VoteDirection) => {
+    const edges = currentEdgeIds;
+    if (edges.length === 0) return;
+    const dir = dirOverride ?? voteDirection;
+    if (dirOverride && dirOverride !== voteDirection) setVoteDirectionState(dirOverride);
 
     const voteRouteVersion = routeVersionRef.current;
     setIsVoting(true);
-
-    if (edgeIdsToVote.length > 0) {
-      window.dispatchEvent(new CustomEvent("optimistic-vote", {
-        detail: { edgeIds: edgeIdsToVote, voteType, mode: theme.mode },
-      }));
-    } else if (isPointVote && start.coords) {
-      window.dispatchEvent(new CustomEvent("optimistic-vote", {
-        detail: { point: { lat: start.coords.lat, lng: start.coords.lng }, voteType, mode: theme.mode },
-      }));
-    }
-
     try {
-      const slug = getMapSlug();
-      const body: Record<string, unknown> = {
+      await castVotes({
         mode: theme.mode,
-        vote_type: voteType,
-        map: slug,
-        voter_id: getVoterId(),
-      };
-      const token = getPasscodeToken(slug);
-      if (token) body.passcode_token = token;
-
-      if (isPointVote && start.coords) {
-        body.point = [start.coords.lat, start.coords.lng];
-      } else if (edgeIdsToVote.length > 0) {
-        body.edge_ids = edgeIdsToVote;
-      } else {
-        body.segments = segmentsFallback;
-      }
-
-      const response = await fetch(`${CONFIG.apiUrl}/vote`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        edgeIds: edges,
+        label: voteType,
+        direction: dir,
       });
-
-      // Map requires a passcode the client doesn't have — prompt for it.
-      if (response.status === 401) {
-        window.dispatchEvent(new CustomEvent("map-passcode-required", { detail: { slug } }));
-        throw new Error("Passcode required");
-      }
-      if (!response.ok) throw new Error(`Vote failed: ${response.statusText}`);
-
-      const result = await response.json();
-
-      // Record the vote unless the path changed mid-flight (stale vote).
-      if (routeVersionRef.current === voteRouteVersion) {
-        if (isPointVote && start.coords) {
-          markVotedKeys([
-            pointKey(theme.mode, start.coords.lat, start.coords.lng, voteType),
-          ]);
-        } else if (edgeIdsToVote.length > 0) {
-          markVotedKeys(edgeIdsToVote.map((eid) => edgeKey(theme.mode, eid, voteType)));
-        }
-        setVotedVersion((v) => v + 1);
-      }
-
-      void result;
-    } catch (err) {
-      console.error("Failed to cast vote:", err);
     } finally {
+      // Only refresh derived "already voted" state if the path didn't change
+      // mid-flight; either way stop the spinner.
+      if (routeVersionRef.current === voteRouteVersion) setVotedVersion((v) => v + 1);
       setIsVoting(false);
     }
-  }, [splitDesirePaths, desirePathSegments, routeEdgeIds, voteType, start.coords, end.coords, theme.mode]);
+  }, [currentEdgeIds, voteType, voteDirection, theme.mode]);
 
-  // Edge IDs that make up the current vote target (split paths take precedence).
-  const currentEdgeIds = useMemo(() => {
-    if (splitDesirePaths.length > 0) return splitDesirePaths.flatMap((sp) => sp.edgeIds);
-    return routeEdgeIds || [];
-  }, [splitDesirePaths, routeEdgeIds]);
-
-  // A vote type counts as "already cast" only when the whole current target is covered:
-  // every edge of the route (or the single point) already has this type from this user.
-  const isVoteTypeAlreadyCast = useCallback(
-    (vt: string) => {
-      void votedVersion; // recompute when a vote is recorded
-      const isPointVote = !!start.coords && !end.coords;
-      if (isPointVote && start.coords) {
-        return hasVotedKey(pointKey(theme.mode, start.coords.lat, start.coords.lng, vt));
-      }
-      if (currentEdgeIds.length === 0) return false;
-      return currentEdgeIds.every((eid) => hasVotedKey(edgeKey(theme.mode, eid, vt)));
+  // Coverage of the current target for a (voteType, direction): which edges are
+  // already at that direction. Drives button state + the "already cast" badge.
+  const isDirectionCast = useCallback(
+    (dir: VoteDirection) => {
+      void votedVersion; // recompute after each cast
+      if (currentEdgeIds.length === 0 || !voteType) return false;
+      const cov = coverage(theme.mode, currentEdgeIds, voteType, dir);
+      return cov.unvoted.length === 0 && cov.opposite.length === 0 && cov.atTarget.length > 0;
     },
-    [votedVersion, currentEdgeIds, start.coords, end.coords, theme.mode]
+    [votedVersion, currentEdgeIds, voteType, theme.mode]
   );
 
-  // Whether the currently-selected vote type is already cast on the current target.
-  const hasVoted = isVoteTypeAlreadyCast(voteType);
+  // A vote type is "already cast" when every edge of the current target has some
+  // vote (either direction) from this user — used to badge selector options.
+  const isVoteTypeAlreadyCast = useCallback(
+    (vt: string) => {
+      void votedVersion;
+      if (currentEdgeIds.length === 0 || !vt) return false;
+      const cov = coverage(theme.mode, currentEdgeIds, vt, 1);
+      return cov.unvoted.length === 0;
+    },
+    [votedVersion, currentEdgeIds, theme.mode]
+  );
+
+  // Whether the current target is fully cast in the selected direction.
+  const hasVoted = isDirectionCast(voteDirection);
 
   // ============================================
   // Main calculation effect
@@ -912,6 +887,26 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   }, [waypoints]);
 
   // ============================================
+  // Smart default: clicking a top proposal selects its vote type, so the Cast
+  // +/- control immediately acts on the proposal the user just clicked.
+  // ============================================
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { label?: string; mode?: string };
+      if (detail?.mode && detail.mode !== theme.mode) return;
+      if (detail?.label) {
+        // Apply now, and stage it in the one-shot ref so the pointType-change
+        // effect (which may fire from the same click placing a point) keeps the
+        // proposal's type instead of resetting to the theme default.
+        restoredVtRef.current = detail.label;
+        setVoteTypeState(detail.label);
+      }
+    };
+    window.addEventListener("proposal-vote-type", handler);
+    return () => window.removeEventListener("proposal-vote-type", handler);
+  }, [theme.mode]);
+
+  // ============================================
   // Auto-update vote type when pointType changes
   // ============================================
   useEffect(() => {
@@ -938,6 +933,9 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       error,
       hasVoted,
       isVoting,
+      voteDirection,
+      setVoteDirection,
+      isDirectionCast,
       ghostWaypoints,
       ghostWaypointIds,
       splitDesirePaths,
@@ -977,6 +975,9 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       error,
       hasVoted,
       isVoting,
+      voteDirection,
+      setVoteDirection,
+      isDirectionCast,
       ghostWaypoints,
       ghostWaypointIds,
       splitDesirePaths,

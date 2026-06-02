@@ -27,6 +27,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.dataset.theme = theme.id;
     root.dataset.basemap = style.basemap;
     root.style.setProperty("--accent", style.accent);
+    root.style.setProperty("--selection", style.selection);
     root.style.setProperty("--heat-gradient", heatGradientCss(style.heat));
   }, [theme]);
 

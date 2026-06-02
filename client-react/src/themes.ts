@@ -199,6 +199,7 @@ interface MapLike {
   subtitle?: string;
   mode?: string;
   style?: string;
+  symbol?: string;
   subdomain?: string | null;
   voteTypes?: VoteSuggestion[];
 }
@@ -211,21 +212,43 @@ const DEFAULT_STYLE = {
 };
 
 /**
- * Build a Theme (styling + copy) from a resolved map. Presets reuse their
- * historical style (keyed by subdomain in THEMES); user maps get a neutral
- * default. This is how a map — not the subdomain — drives the active theme.
+ * The preset theme a map belongs to, or null for user maps. Presets are
+ * identified by their `subdomain` (only seeded preset maps have one) — NOT by
+ * `style`, which a proposer can freely pick (a user "trees"-styled map is not
+ * the trees preset and must keep its own copy/icon/input mode).
+ */
+export function presetForMap(map: { subdomain?: string | null }): Theme | null {
+  return (map.subdomain && THEMES[map.subdomain]) || null;
+}
+
+/**
+ * A map's display icon, derived once so the mode switcher, landing cards, and
+ * active-map button always agree: the proposer's chosen symbol wins, then the
+ * preset's symbol (seeded maps store none), then the first vote type's icon.
+ */
+export function symbolForMap(
+  map: { symbol?: string; subdomain?: string | null; voteTypes?: { icon: string }[] },
+): string {
+  return map.symbol || presetForMap(map)?.symbol || map.voteTypes?.[0]?.icon || DEFAULT_STYLE.symbol;
+}
+
+/**
+ * Build a Theme (styling + copy) from a resolved map. The visual style is keyed
+ * by the map's `style` (see mapStyles.ts); the copy/input mode come from the
+ * preset it belongs to (by subdomain) or, for user maps, from the map's own
+ * fields. This is how a map — not the subdomain — drives the active theme.
  */
 export function themeFromMap(map: MapLike): Theme {
-  const style = (map.style && THEMES[map.style]) || null;
+  const preset = presetForMap(map);
   return {
     id: map.style || map.slug,
     name: map.name,
-    tagline: map.subtitle || style?.tagline || DEFAULT_STYLE.tagline,
+    tagline: map.subtitle || preset?.tagline || DEFAULT_STYLE.tagline,
     mode: map.mode || "walk",
-    inputMode: style?.inputMode ?? DEFAULT_STYLE.inputMode,
+    inputMode: preset?.inputMode ?? DEFAULT_STYLE.inputMode,
     suggestions: map.voteTypes ?? [],
-    locationLabel: style?.locationLabel ?? DEFAULT_STYLE.locationLabel,
-    symbol: style?.symbol || map.voteTypes?.[0]?.icon || DEFAULT_STYLE.symbol,
+    locationLabel: preset?.locationLabel ?? DEFAULT_STYLE.locationLabel,
+    symbol: symbolForMap(map),
     subdomain: map.subdomain || "",
   };
 }
@@ -290,6 +313,38 @@ export function subdomainHref(subdomain: string): string {
   const root = parts.length >= 3 ? parts.slice(1).join(".") : hostname;
   const portSuffix = port ? `:${port}` : "";
   return `${protocol}//${subdomain}.${root}${portSuffix}/`;
+}
+
+/**
+ * The current host's subdomain label (e.g. "bikepaths" for
+ * bikepaths.cityedit.org), or null on the apex, localhost, or the reserved
+ * www/demo hosts. This is the key to data-driven subdomain routing: the app
+ * resolves it against the DB `subdomain` column, so an admin can point any
+ * subdomain at any map without a code change.
+ */
+export function detectSubdomain(): string | null {
+  if (typeof window === "undefined") return null;
+  const { hostname } = window.location;
+  if (isLocalDevHost(hostname)) return null;
+  const parts = hostname.split(".");
+  if (parts.length < 3) return null; // apex (cityedit.org) has no subdomain
+  const sub = parts[0];
+  if (sub === "www" || sub === "demo") return null; // reserved / landing hosts
+  return sub;
+}
+
+/**
+ * Where to send a visitor whose resolved map has a canonical `subdomain` — the
+ * apex (cityedit.org/m/<slug>) or a different subdomain — so a preset/vanity map
+ * always settles on its own host. Returns null when already there or on
+ * localhost. Preserves the query string so shared deep links (?slat,?vt,…)
+ * survive the redirect.
+ */
+export function subdomainRedirectUrl(subdomain: string): string | null {
+  if (typeof window === "undefined" || !subdomain) return null;
+  if (isLocalDevHost(window.location.hostname)) return null;
+  if (detectSubdomain() === subdomain) return null; // already canonical
+  return subdomainHref(subdomain) + window.location.search;
 }
 
 /**
