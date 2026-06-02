@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyEdgeVoteChange, applyAuthoritativeCounts } from "./voteApply";
+import { applyEdgeVoteChange, applyAuthoritativeCounts, applyMyVoteChange } from "./voteApply";
 import type { GraphData } from "../../types";
 
 // Minimal graph: 2 edges sharing node 1.  edge0 = (0,1), edge1 = (1,2)
@@ -39,6 +39,44 @@ describe("applyEdgeVoteChange (optimistic increment)", () => {
     applyEdgeVoteChange(d, ADJ, [0], "X", -1, true);        // −  (reversal)
     expect(row(d, 0, "X")).toEqual({ up: 0, down: 1 });     // NOT up:1, down:1
     expect(d.edge_votes![0]).toBe(-1);
+  });
+});
+
+describe("applyMyVoteChange (optimistic transition: fresh / reverse / remove)", () => {
+  it("fresh up (0 → +1) increments the up side", () => {
+    const d = makeData();
+    applyMyVoteChange(d, ADJ, [0], "X", 0, 1);
+    expect(row(d, 0, "X")).toEqual({ up: 1, down: 0 });
+    expect(d.edge_votes![0]).toBe(1);
+  });
+
+  it("reversal (+1 → -1) moves the vote across sides (net ±2)", () => {
+    const d = makeData();
+    applyMyVoteChange(d, ADJ, [0], "X", 0, 1); // up:1
+    applyMyVoteChange(d, ADJ, [0], "X", 1, -1); // reverse to down
+    expect(row(d, 0, "X")).toEqual({ up: 0, down: 1 });
+    expect(d.edge_votes![0]).toBe(-1);
+  });
+
+  it("removal (+1 → 0) decrements and drops the type at 0/0", () => {
+    const d = makeData();
+    applyMyVoteChange(d, ADJ, [0], "X", 0, 1); // up:1
+    applyMyVoteChange(d, ADJ, [0], "X", 1, 0); // remove
+    expect(row(d, 0, "X")).toBeNull();
+    expect(d.edge_votes![0]).toBe(0);
+    expect((d.edge_vote_types ?? [])[0]).toEqual([]);
+  });
+
+  it("a no-op transition (same dir) changes nothing", () => {
+    const d = makeData();
+    applyMyVoteChange(d, ADJ, [0], "X", 1, 1);
+    expect(d.edge_votes![0]).toBe(0);
+  });
+
+  it("re-derives the shared node after a transition", () => {
+    const d = makeData();
+    applyMyVoteChange(d, ADJ, [1], "X", 0, 1); // edge1 up:1 → node1 borders it
+    expect(d.node_votes![1]).toBe(1);
   });
 });
 

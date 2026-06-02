@@ -16,13 +16,14 @@ import { createPortal } from "react-dom";
 import L from "leaflet";
 import Flatbush from "flatbush";
 import { CONFIG } from "../../config";
-import { withMap, getMapSlug } from "../../map/runtime";
+import { withMap, getMapSlug, passcodeHeaders } from "../../map/runtime";
 import { useWebSocketContext } from "../../context/WebSocketContext";
 import { useGraphSnap, useTheme, useHeatmap } from "../../context";
 import type { GraphData } from "../../types";
-import { hashLabelToColor, makeVoteTypeIcon } from "./voteTypeIcon";
+import { makeVoteTypeIcon } from "./voteTypeIcon";
+import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import { selectTopProposals, type VoteTypeWinner } from "./topProposals";
-import { applyEdgeVoteChange, applyAuthoritativeCounts } from "./voteApply";
+import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts } from "./voteApply";
 import { iconForLabel, iconSrc, mapStyleForTheme } from "../../themes";
 import {
   getCachedTopology,
@@ -30,7 +31,8 @@ import {
   getCachedVotes,
   setCachedVotes,
 } from "../../utils/graphCache";
-import { getMyVote, setMyVote, reconcileEdge, type VoteDirection } from "../../utils/myVotes";
+import { getVote, reconcileEdge, setVoteTypeMap, type VoteDirection } from "../../utils/voteStore";
+import { castVotes } from "../../utils/castVote";
 import { getVoterId } from "../../utils/voterIdentity";
 import { buildSelectionUrl, copyToClipboard } from "../../utils/shareLink";
 import { CheckIcon } from "../CheckIcon";
@@ -427,7 +429,7 @@ interface GraphLayerProps {
 export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSelected, suppressHover = false }: GraphLayerProps) {
   const map = useMap();
   const { subscribeToDelta } = useWebSocketContext();
-  const { setSnapFn, setCurrentSnap, isDraggingRef: graphDraggingRef } = useGraphSnap();
+  const { setSnapFn, setResolveVoteEdgeId, setCurrentSnap, isDraggingRef: graphDraggingRef } = useGraphSnap();
   const { setHeatmapLoaded, isHeatmapLoading } = useHeatmap();
   const theme = useTheme();
   const themeMode = theme.mode;
@@ -473,14 +475,6 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
 
   // Deltas received before the initial vote fetch completes
   const pendingDeltasRef = useRef<import("../../types").VoteDelta[]>([]);
-
-  // Optimistic increments not yet reconciled by their own WebSocket delta.
-  // Keyed by `${edgeId}:${voteType}` → count. When a vote is cast we apply +1
-  // optimistically and record it here; the server then broadcasts the same vote
-  // as a delta, which would double-count. We absorb that delta against this
-  // ledger so the caster's own vote is counted exactly once. Other users'
-  // coincident votes on the same edge aren't in the ledger and still apply.
-  const pendingOptimisticRef = useRef<Map<string, number>>(new Map());
 
   // Stable ref for onSnap callback
   const onSnapRef = useRef(onSnap);
@@ -559,6 +553,15 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       return { lat: result.snapLat, lng: result.snapLng };
     });
   }, [setSnapFn]);
+
+  // Register the point→vote-edge resolver so the route/point cast (RouteContext)
+  // resolves a click to the SAME edge the in-map hover/click would — one snap
+  // path, no client/server divergence. resolveSelection always yields an edge.
+  useEffect(() => {
+    setResolveVoteEdgeId((lat: number, lng: number) => {
+      return resolveSelectionRef.current(lat, lng)?.voteEdgeId ?? null;
+    });
+  }, [setResolveVoteEdgeId]);
 
   // Hover state
   const [hoverTarget, setHoverTarget] = useState<HoverTarget | null>(null);
@@ -663,7 +666,6 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   // Reset icon cache + winners when theme switches (different vote namespace)
   useEffect(() => {
     iconCacheRef.current.clear();
-    pendingOptimisticRef.current.clear();
     setWinners([]);
   }, [themeMode]);
 
@@ -712,14 +714,13 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     if (!topologyRef.current) return;
     try {
       const url = `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`;
-      const response = await fetch(url, { cache: "no-store" });
+      const response = await fetch(url, { cache: "no-store", headers: passcodeHeaders() });
       if (!response.ok) throw new Error(`Vote fetch failed: ${response.status}`);
       const voteData = await response.json();
       graphDataRef.current = { ...topologyRef.current!, ...voteData };
       lastRevRef.current = voteData.rev ?? 0;
-      // Authoritative snapshot — any unreconciled optimistic increments are now
-      // baked into (or superseded by) this data, so drop the ledger.
-      pendingOptimisticRef.current.clear();
+      // Teach the vote store this map's label→id map so packed lookups resolve.
+      setVoteTypeMap(voteData.vote_types);
 
       // Replay any deltas that arrived while the fetch was in flight
       const pending = pendingDeltasRef.current;
@@ -746,13 +747,12 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   // (down); `reversed` means a prior opposite vote is being flipped, so one vote
   // moves across directions (net delta ±2). Updates the per-type [li, up, down]
   // triples, the net edge_votes total, and re-derives affected node values.
-  // Apply a WebSocket delta to graphDataRef.
-  //
-  // Directional (modal +/−) deltas carry `vtCounts` — the server's authoritative
-  // [up, down] for the changed proposals — which we SET (idempotent), so the
-  // caster's optimistic guess is corrected, never compounded. Legacy bulk-cast
-  // deltas have no vtCounts: they INCREMENT, with the optimistic ledger
-  // absorbing the caster's own echo so it isn't double-counted.
+  // Apply a WebSocket delta to graphDataRef. Every delta carries `vtCounts` —
+  // the server's authoritative [up, down] for each changed proposal — which we
+  // SET (idempotent). Because the SET is idempotent, the caster's own optimistic
+  // guess is corrected to truth rather than double-counted, and re-applying a
+  // delta is a no-op. The pre-vtCounts increment path is kept only as a
+  // defensive fallback for any delta that somehow lacks counts.
   const applyDeltaToGraphData = useCallback((delta: import("../../types").VoteDelta) => {
     const data = graphDataRef.current;
     const adj = nodeAdjRef.current;
@@ -761,26 +761,9 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
 
     if (delta.vtCounts) {
       applyAuthoritativeCounts(data, adj, vtLabel, delta.vtCounts);
-      lastRevRef.current = delta.rev;
-      return;
+    } else {
+      applyEdgeVoteChange(data, adj, delta.edges, vtLabel, delta.dir ?? 1, delta.reversed ?? false);
     }
-
-    const dir = delta.dir ?? 1;
-    const reversed = delta.reversed ?? false;
-    const pending = pendingOptimisticRef.current;
-    const toApply: number[] = [];
-    for (const eid of delta.edges) {
-      const key = `${eid}:${vtLabel}:${dir}:${reversed ? 1 : 0}`;
-      const optimistic = pending.get(key) ?? 0;
-      if (optimistic > 0) {
-        if (optimistic === 1) pending.delete(key);
-        else pending.set(key, optimistic - 1);
-      } else {
-        toApply.push(eid);
-      }
-    }
-
-    if (toApply.length > 0) applyEdgeVoteChange(data, adj, toApply, vtLabel, dir, reversed);
     lastRevRef.current = delta.rev;
   }, []);
 
@@ -796,7 +779,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       let usedCachedTopology = false;
       try {
         try {
-          const vr = await fetch(withMap(`${CONFIG.apiUrl}/graph-version`));
+          const vr = await fetch(withMap(`${CONFIG.apiUrl}/graph-version`), { headers: passcodeHeaders() });
           if (vr.ok) version = (await vr.json()).version ?? null;
         } catch {
           // Version probe failed — fall back to a direct topology fetch.
@@ -810,7 +793,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
           }
         }
         if (!topology) {
-          const r = await fetch(withMap(`${CONFIG.apiUrl}/graph-topology`));
+          const r = await fetch(withMap(`${CONFIG.apiUrl}/graph-topology`), { headers: passcodeHeaders() });
           if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
           topology = await r.json();
           if (version && topology) setCachedTopology(version, topology);
@@ -837,6 +820,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         if (cachedVotes) {
           graphDataRef.current = { ...topology, ...cachedVotes };
           lastRevRef.current = cachedVotes.rev ?? 0;
+          setVoteTypeMap(cachedVotes.vote_types);
           refreshGraphDisplayRef.current();
           setHeatmapLoaded();
         }
@@ -846,14 +830,15 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       //    any deltas that arrived while the fetch was in flight.
       try {
         const r = await fetch(
-          `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`
+          `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`,
+          { headers: passcodeHeaders() }
         );
         if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);
         const voteData = await r.json();
         if (cancelled) return;
         graphDataRef.current = { ...topologyRef.current!, ...voteData };
         lastRevRef.current = voteData.rev ?? 0;
-        pendingOptimisticRef.current.clear();
+        setVoteTypeMap(voteData.vote_types);
         if (version) setCachedVotes(getMapSlug() || themeMode, version, voteData);
 
         // Replay any deltas that arrived while waiting for the fetch
@@ -907,53 +892,24 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     return unsubscribe;
   }, [subscribeToDelta, themeMode, applyDeltaToGraphData]);
 
-  // Optimistic vote — apply edge increments immediately on cast so the heatmap
-  // and top-proposal counts update before the server round-trip completes. The
-  // increments are recorded in pendingOptimisticRef; when the server's matching
-  // WebSocket delta arrives it is absorbed (see applyDeltaToGraphData) so the
-  // caster's own vote is counted exactly once instead of being double-counted.
-  // Accepts either {edgeIds} (path votes) or {point} (single-location votes).
+  // Optimistic vote — apply this user's vote transition (prevDir → newDir)
+  // immediately on cast so the heatmap and top-proposal counts update before the
+  // server round-trip completes. No ledger is needed: every server delta now
+  // carries authoritative vtCounts and is applied as an idempotent SET (see
+  // applyDeltaToGraphData), so the caster's own optimistic guess is corrected to
+  // truth rather than double-counted. The cast path (utils/castVote.ts) emits a
+  // reverse transition to roll back if the request fails.
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      const { voteType: vtLabel, mode } = detail;
-      if (mode !== themeMode) return;
+      const detail = (e as CustomEvent).detail as import("../../utils/castVote").OptimisticVoteDetail;
+      if (detail.mode !== themeMode) return;
 
       const data = graphDataRef.current;
       const adj = nodeAdjRef.current;
       if (!data?.edge_votes || !adj) return;
+      if (!detail.edgeIds?.length) return;
 
-      // Direction defaults to up (route/point casts); modal +/- supplies it.
-      const dir: number = detail.direction ?? 1;
-      const reversed: boolean = detail.reversed ?? false;
-
-      let edgeIds: number[] | undefined = detail.edgeIds;
-
-      // Point vote: resolve the point through the SAME hierarchy as hover/click
-      // so the vote lands on exactly the component that was highlighted (an
-      // edge votes on itself; a node on its first adjacent edge).
-      if (!edgeIds && detail.point) {
-        const sel = resolveSelectionRef.current(detail.point.lat, detail.point.lng);
-        if (sel?.voteEdgeId == null) return;
-        edgeIds = [sel.voteEdgeId];
-      }
-
-      if (!edgeIds?.length) return;
-
-      applyEdgeVoteChange(data, adj, edgeIds, vtLabel, dir, reversed);
-
-      // Directional (modal +/−) votes are `authoritative`: their confirming
-      // delta carries vtCounts and is applied as an idempotent SET, so we do
-      // NOT ledger them (no echo to absorb). Legacy bulk casts increment, so we
-      // ledger them to absorb the caster's own echo and avoid double-counting.
-      if (!detail.authoritative) {
-        const pending = pendingOptimisticRef.current;
-        for (const eid of edgeIds) {
-          const key = `${eid}:${vtLabel ?? ""}:${dir}:${reversed ? 1 : 0}`;
-          pending.set(key, (pending.get(key) ?? 0) + 1);
-        }
-      }
-
+      applyMyVoteChange(data, adj, detail.edgeIds, detail.label, detail.prevDir, detail.newDir);
       refreshGraphDisplayRef.current();
     };
     window.addEventListener("optimistic-vote", handler);
@@ -993,7 +949,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
 
       hoverCtx.globalCompositeOperation = "source-over";
       hoverCtx.globalAlpha = alpha;
-      hoverCtx.fillStyle = "#ffffff";
+      hoverCtx.fillStyle = mapStyle.selection;
       hoverCtx.beginPath();
       hoverCtx.arc(pt.x, pt.y, HIGHLIGHT_NODE_OUTER_R, 0, Math.PI * 2);
       hoverCtx.fill();
@@ -1027,7 +983,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
 
       hoverCtx.globalCompositeOperation = "source-over";
       hoverCtx.globalAlpha = alpha;
-      hoverCtx.strokeStyle = "#ffffff";
+      hoverCtx.strokeStyle = mapStyle.selection;
       hoverCtx.lineWidth = HIGHLIGHT_RING_WIDTH;
       strokeLine();
 
@@ -1061,7 +1017,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     // Reset state for any subsequent canvas operations
     hoverCtx.globalCompositeOperation = "source-over";
     hoverCtx.globalAlpha = 1.0;
-  }, [map]);
+  }, [map, mapStyle.selection]);
 
   const redrawHoverHighlightRef = useRef(redrawHoverHighlight);
   useEffect(() => { redrawHoverHighlightRef.current = redrawHoverHighlight; }, [redrawHoverHighlight]);
@@ -1175,7 +1131,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     ctx.globalCompositeOperation = "source-over";
     ctx.lineWidth = 0.5 * zoomScale;
     ctx.globalAlpha = 0.05;
-    ctx.strokeStyle = "#ffffff";
+    ctx.strokeStyle = mapStyle.selection;
     for (let k = 0; k < count; k++) {
       const i = edgeAt(k);
       if ((edgeVotes[i] ?? 0) > 0) continue;
@@ -1238,7 +1194,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     ctx.globalAlpha = 1.0;
 
     redrawHoverHighlightRef.current();
-  }, [map, mapStyle.heat, mapStyle.heatComposite]);
+  }, [map, mapStyle.heat, mapStyle.heatComposite, mapStyle.selection]);
 
   // Schedule redraw
   const scheduleRedraw = useCallback(() => {
@@ -1706,6 +1662,11 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         clearSpread();
         activateIndicator();
         pinnedEdgeOverrideRef.current = w.edgeIdx;
+        // Smart default: selecting a top proposal makes its vote type the active
+        // one, so the Cast +/- control acts on the proposal you just clicked.
+        window.dispatchEvent(new CustomEvent("proposal-vote-type", {
+          detail: { label: w.label, mode: themeMode },
+        }));
         // Lock the start point to the icon's true edge midpoint, not its
         // temporary fanned-out grid cell — the spread offset is display-only.
         onIndicatorClickRef.current?.({ lat: midLat, lng: midLng });
@@ -1727,34 +1688,17 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     });
   }, [winners, currentZoom, map, spreadPositions, clearSpread, selectedEdgeIdx]);
 
-  // Cast a directional vote on a single proposal (edge, vote type). Optimistic:
-  // applies immediately via the same event the route cast uses, records the
-  // local "my vote" for instant button state, then persists to the server.
+  // Cast a directional vote on a single proposal (edge, vote type) through the
+  // SAME unified path the top-bar route cast uses. castVotes() handles the
+  // optimistic apply, the local store, reversal, toggle-off (clicking the
+  // direction you already hold removes the vote), rollback, and the POST.
   const castProposalVote = useCallback((
     edgeId: number | null, label: string, newDir: VoteDirection,
   ) => {
     if (edgeId == null || !label) return;
-    const prev = getMyVote(themeMode, edgeId, label);
-    if (prev === newDir) return; // already cast this direction — button is greyed
-    const reversed = prev !== 0;
-
-    window.dispatchEvent(new CustomEvent("optimistic-vote", {
-      detail: {
-        edgeIds: [edgeId], voteType: label, mode: themeMode,
-        direction: newDir, reversed, authoritative: true,
-      },
-    }));
-    setMyVote(themeMode, edgeId, label, newDir);
+    castVotes({ mode: themeMode, edgeIds: [edgeId], label, direction: newDir })
+      .finally(() => setMyVotesVersion((v) => v + 1));
     setMyVotesVersion((v) => v + 1);
-
-    fetch(`${CONFIG.apiUrl}/vote`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        map: getMapSlug(), edge_id: edgeId, mode: themeMode,
-        vote_type: label, direction: newDir, voter_id: getVoterId(),
-      }),
-    }).catch((err) => console.error("Proposal vote failed:", err));
   }, [themeMode]);
 
   // Reconcile local "my votes" against the server when a proposal modal opens
@@ -1923,14 +1867,15 @@ function ProposalCard({
     if (!interactive) {
       return <span className={cls}>{inner}</span>;
     }
-    const myVote = edgeId != null ? getMyVote(mode, edgeId, row.label) : 0;
+    const myVote = edgeId != null ? getVote(mode, edgeId, row.label) : 0;
+    const pressed = myVote === dir;
     return (
       <button
         type="button"
-        className={`${cls} is-btn`}
-        disabled={myVote === dir || edgeId == null}
-        aria-pressed={myVote === dir}
-        title={dir === -1 ? "Downvote" : "Upvote"}
+        className={`${cls} is-btn${pressed ? " is-mine" : ""}`}
+        disabled={edgeId == null}
+        aria-pressed={pressed}
+        title={pressed ? "Remove your vote" : dir === -1 ? "Downvote" : "Upvote"}
         onClick={() => onVote?.(edgeId, row.label, dir)}
       >
         {inner}
@@ -1952,7 +1897,10 @@ function ProposalCard({
             {icon ? (
               <img className="graph-indicator-modal-icon" src={iconSrc(icon)} alt="" />
             ) : (
-              <span className="graph-indicator-modal-disc" style={{ background: hashLabelToColor(winner.label) }} />
+              <span
+                className="graph-indicator-modal-icon"
+                dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(winner.label, 22) }}
+              />
             )}
           </span>
           <div className="graph-indicator-modal-headtext">

@@ -2,7 +2,9 @@ import { useState, useCallback, useEffect, useRef, memo } from "react";
 import { useRoute, useTheme, useMap } from "../../context";
 import { getSuggestionsForTheme } from "../../constants/voteTypes";
 import { iconSrc, iconForLabel } from "../../themes";
+import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import { CheckIcon } from "../CheckIcon";
+import { noAutofillProps } from "../../utils/noAutofill";
 import "./VoteTypeSelector.css";
 
 export const VoteTypeSelector = memo(function VoteTypeSelector() {
@@ -28,9 +30,20 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
     ? suggestions.filter((s) => s.label.toLowerCase().includes(inputLower))
     : suggestions;
 
-  const hasExactMatch = suggestions.some(
-    (s) => s.label.toLowerCase() === inputLower
-  );
+  // Custom vote types already voted on this map. They surface only while the
+  // user is typing — never in the default list — and carry no themed icon, so
+  // they render with the colorized suggestion glyph.
+  const extraLabels = inputLower
+    ? (map?.searchVoteTypes ?? []).filter(
+        (lbl) =>
+          lbl.toLowerCase().includes(inputLower) &&
+          !suggestions.some((s) => s.label.toLowerCase() === lbl.toLowerCase())
+      )
+    : [];
+
+  const hasExactMatch =
+    suggestions.some((s) => s.label.toLowerCase() === inputLower) ||
+    extraLabels.some((lbl) => lbl.toLowerCase() === inputLower);
   // Maps that disallow user suggestions can't add custom vote types.
   const allowCustom = map ? map.allowSuggestions : true;
   const showCustomOption = allowCustom && inputLower !== "" && !hasExactMatch;
@@ -39,11 +52,19 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
     ...filteredSuggestions.map((s) => ({
       label: s.label,
       icon: s.icon,
+      glyph: false,
       isCustom: false,
       alreadyVoted: isVoteTypeAlreadyCast(s.label),
     })),
+    ...extraLabels.map((lbl) => ({
+      label: lbl,
+      icon: "",
+      glyph: true,
+      isCustom: false,
+      alreadyVoted: isVoteTypeAlreadyCast(lbl),
+    })),
     ...(showCustomOption
-      ? [{ label: inputValue.trim(), icon: "", isCustom: true, alreadyVoted: false }]
+      ? [{ label: inputValue.trim(), icon: "", glyph: false, isCustom: true, alreadyVoted: false }]
       : []),
   ];
 
@@ -144,7 +165,12 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [selectOption, setVoteType, isOpen]);
 
-  const displayIcon = voteType ? iconForLabel(voteType) : null;
+  // The committed type's themed icon: the map's own vote-type icon wins (user
+  // maps define their own), then a matching preset icon. Null → it's a custom
+  // type and renders the colorized suggestion glyph instead.
+  const displayIcon = voteType
+    ? map?.voteTypes?.find((s) => s.label === voteType)?.icon || iconForLabel(voteType)
+    : null;
 
   return (
     <div
@@ -155,6 +181,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
         <input
           ref={inputRef}
           type="text"
+          name="vote-type"
           className="vote-type-input"
           value={isOpen ? inputValue : ""}
           onChange={handleInputChange}
@@ -163,13 +190,23 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
           onKeyDown={handleKeyDown}
           placeholder={isOpen ? "Type to search..." : ""}
           spellCheck={false}
-          autoComplete="off"
           autoCorrect="off"
           autoCapitalize="off"
+          role="combobox"
+          aria-expanded={isOpen}
+          aria-autocomplete="list"
+          {...noAutofillProps}
         />
         {!isOpen && voteType && (
           <div className="vote-type-display">
-            {displayIcon && <img className="vote-type-icon-img" src={iconSrc(displayIcon)} alt="" />}
+            {displayIcon ? (
+              <img className="vote-type-icon-img" src={iconSrc(displayIcon)} alt="" />
+            ) : (
+              <span
+                className="vote-type-icon-img"
+                dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(voteType, 18) }}
+              />
+            )}
             <span className="vote-type-display-text">{voteType}</span>
           </div>
         )}
@@ -195,7 +232,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
                   onMouseDown={() => selectOption(option.label)}
                   onMouseEnter={() => setHighlightedIndex(index)}
                 >
-                  <span><strong>Suggest:</strong> <em>"{option.label}"</em></span>
+                  <span>Suggest: <em>"{option.label}"</em></span>
                 </div>
               );
             }
@@ -210,7 +247,14 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
                 }}
                 onMouseEnter={() => setHighlightedIndex(index)}
               >
-                {option.icon && <img className="vote-type-icon-img" src={iconSrc(option.icon)} alt="" />}
+                {option.icon ? (
+                  <img className="vote-type-icon-img" src={iconSrc(option.icon)} alt="" />
+                ) : option.glyph ? (
+                  <span
+                    className="vote-type-icon-img"
+                    dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(option.label, 18) }}
+                  />
+                ) : null}
                 <span className="vote-type-label">{option.label}</span>
                 {option.alreadyVoted ? (
                   <span className="vote-type-voted-badge">Vote Cast!</span>

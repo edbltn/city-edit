@@ -69,6 +69,59 @@ export function rederiveNodes(
 }
 
 /**
+ * Apply THIS user's vote transition (`prevDir` → `newDir`) on each edge to the
+ * global in-memory counts. Generalizes applyEdgeVoteChange to the full set of
+ * transitions a unified cast can produce:
+ *   0 → ±1   fresh vote      (increment one side)
+ *  ±1 → 0    remove vote     (decrement one side)
+ *  ±1 → ∓1   reversal        (move one vote across sides)
+ * Optimistic only — the server's authoritative `vtCounts` SET later corrects
+ * this to truth, so a wrong guess can't persist.
+ */
+export function applyMyVoteChange(
+  data: VoteData,
+  adj: number[][],
+  edgeIds: number[],
+  vtLabel: string,
+  prevDir: number,
+  newDir: number,
+) {
+  if (prevDir === newDir || !data.edge_votes) return;
+  const edgeVotes = data.edge_votes;
+  const edgeVoteTypes = data.edge_vote_types ?? (data.edge_vote_types = []);
+  const li = legendIndex(data, vtLabel);
+  if (li < 0) return;
+
+  // Per-edge delta to the [up, down] pair for this transition.
+  let upDelta = 0;
+  let downDelta = 0;
+  if (prevDir > 0) upDelta -= 1;
+  else if (prevDir < 0) downDelta -= 1;
+  if (newDir > 0) upDelta += 1;
+  else if (newDir < 0) downDelta += 1;
+  const netDelta = upDelta - downDelta;
+
+  const affected = new Set<number>();
+  for (const eid of edgeIds) {
+    if (eid >= edgeVotes.length) continue;
+    edgeVotes[eid] = (edgeVotes[eid] || 0) + netDelta;
+
+    const pairs = edgeVoteTypes[eid] || [];
+    let triple = pairs.find(([l]) => l === li);
+    if (!triple) { triple = [li, 0, 0]; pairs.push(triple); }
+    triple[1] = Math.max(0, triple[1] + upDelta);
+    triple[2] = Math.max(0, triple[2] + downDelta);
+    edgeVoteTypes[eid] = pairs.filter((t) => t[1] !== 0 || t[2] !== 0)
+      .sort((a, b) => b[1] - b[2] - (a[1] - a[2]));
+
+    const edge = data.edges[eid];
+    if (edge) { affected.add(edge[0]); affected.add(edge[1]); }
+  }
+
+  rederiveNodes(data, adj, affected);
+}
+
+/**
  * INCREMENT one vote on each edge. `dir` is +1 (up) / −1 (down); `reversed`
  * means a prior opposite vote is being flipped (net delta ±2).
  */
