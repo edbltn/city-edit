@@ -62,3 +62,8 @@ server/osm_data/
 # Local scratch / debug artifacts
 /debug
 /af2641f3-*.png
+
+# Locust run output and venv
+loadtest/env/
+loadtest/sf_run*
+loadtest/*.log
