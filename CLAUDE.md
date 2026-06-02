@@ -2,6 +2,7 @@
 
 ## Claude Instructions
 
+- **Python dependencies**: ALWAYS install and manage Python packages with `uv pip` — never bare `pip`, `pip3`, `python -m pip`, `poetry`, `conda`, or `easy_install`. Add a package by editing `requirements.in`, recompile with `uv pip compile requirements.in -o requirements.txt`, then `uv pip install -r requirements.txt`. For one-off installs use `uv pip install <pkg>`. This applies everywhere: local venvs, scripts, and Dockerfiles.
 - **gcloud commands**: Run gcloud commands directly (e.g. `gcloud builds submit`, `gcloud run services logs read`, etc.) without asking the user.
 - **docker commands**: Run docker commands directly (e.g. `docker compose up --build -d`, `docker compose logs`, etc.) without asking the user.
 - **Browser testing**: I have a browser AI helper that can report on status. When you need me to test something, ask questions that this AI can answer (descriptions of screenshots, UI changes that need verification, functionality checks, error messages visible on screen).
@@ -461,6 +462,8 @@ function createLayer(id, style, opacity, visible, zIndex) {
 # Python Best Practices
 
 ## Package Management with uv
+
+**ALWAYS use `uv pip` for every dependency operation — never bare `pip`/`pip3`, `python -m pip`, `poetry`, or `conda`.** This is non-negotiable across local venvs, scripts, and Docker builds. If `uv` isn't installed, install it (`pip install uv` once, or `brew install uv`) rather than falling back to bare pip.
 
 ### Dependency Files
 Use a two-file approach with `uv`:

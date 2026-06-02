@@ -7,7 +7,7 @@ SERVICE := desire-path-mapper
 REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/desire-path-mapper/app
 SCREENSHOT_REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/desire-path-mapper/screenshot
 
-.PHONY: help dev redis flask client docker push deploy test-cloud tf-init tf-plan tf-apply logs clean monitoring monitoring-down loadtest-local loadtest-prod
+.PHONY: help dev redis flask client docker push deploy test test-frontend test-backend test-cloud tf-init tf-plan tf-apply logs clean monitoring monitoring-down loadtest-local loadtest-prod loadtest-verify
 
 # Load test (override on the command line, e.g. USERS=25 RATE=5 TIME=3m)
 PROD_URL := https://desire-path-mapper-katze52zaq-uc.a.run.app
@@ -100,6 +100,22 @@ deploy:
 
 test-cloud:
 	./scripts/test-cloud.sh
+
+# Unit/integration tests (offline). Frontend: vitest. Backend: pytest (fakeredis,
+# no DB/Redis needed for the unit suite).
+test: test-frontend test-backend
+
+test-frontend:
+	cd client-react && npm test
+
+test-backend:
+	cd server && env/bin/python -m pytest
+
+# Stateful load test: assign each agent an expected final vote state, march them
+# there concurrently, then verify the server converged. USERS defaults to 10.
+loadtest-verify:
+	cd loadtest && . env/bin/activate && \
+		python verify_loadtest.py --host $(or $(HOST),http://localhost:8080) --users $(or $(USERS),10)
 
 # Terraform
 tf-init:
