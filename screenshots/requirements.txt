@@ -1,0 +1,2 @@
+playwright>=1.40
+google-cloud-storage>=2.10
