@@ -1,49 +1,56 @@
 import json
 import logging
 import os
+import re
 import sys
 import time
 import hashlib
 import threading
+from functools import lru_cache
+
 import redis
+import requests
 from dotenv import load_dotenv
+
+load_dotenv()
+
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_sock import Sock
+from itsdangerous import URLSafeTimedSerializer, BadSignature
+from werkzeug.security import generate_password_hash, check_password_hash
 
 import vote_store
+import database
+from cities import CITIES, DEFAULT_CITY_ID, get_city, all_cities
+from graph_registry import GraphRegistry, OsrmRegistry
 from database import (
     init_db, get_cursor, record_edge_votes, record_point_vote,
+    get_voter_edge_direction, get_voter_edge_directions,
+    seed_presets, list_maps, get_map, get_map_by_subdomain, slug_available,
+    create_map, get_map_passcode_hash, list_vote_type_lists,
     DATABASE_URL,
 )
 
 # ── Logging ────────────────────────────────────────────────────────────────
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(message)s',
-    stream=sys.stdout,
-)
+logging.basicConfig(level=logging.INFO, format='%(message)s', stream=sys.stdout)
 logger = logging.getLogger(__name__)
 sys.stdout.reconfigure(line_buffering=True)
 
-# ── Routers ────────────────────────────────────────────────────────────────
-
-from python_router import PythonRouter
-from osrm_router import OsrmRouter
-logger.info("[STARTUP] Using OSRM router + Python graph provider")
-
-# ── Environment ────────────────────────────────────────────────────────────
-
-logger.info(f"[DEBUG] REDIS_HOST from env: {os.environ.get('REDIS_HOST', 'NOT_SET')}")
-logger.info(f"[DEBUG] REDIS_PORT from env: {os.environ.get('REDIS_PORT', 'NOT_SET')}")
-load_dotenv()
+logger.info("[STARTUP] Multi-city: OSRM-per-city router + per-city Python graph provider")
 
 # ── Flask ──────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
 CORS(app)
 sock = Sock(app)
+
+SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+_passcode_serializer = URLSafeTimedSerializer(SECRET_KEY, salt="map-passcode")
+PASSCODE_TOKEN_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
+
+DEFAULT_MAP_SLUG = "nyc-walkways"
 
 # ── Redis ──────────────────────────────────────────────────────────────────
 
@@ -57,298 +64,197 @@ try:
 except redis.ConnectionError as e:
     logger.error(f"[REDIS] Could not connect: {e}")
 
-# ── Routers init ───────────────────────────────────────────────────────────
+# ── Registries (per-city graph + OSRM) ───────────────────────────────────────
 
-osrm_host = os.environ.get('OSRM_HOST', 'localhost')
-osrm_port = int(os.environ.get('OSRM_PORT', '5000'))
-route_router = OsrmRouter(host=osrm_host, port=osrm_port)
-graph_provider = PythonRouter(data_dir="osm_data")
-logger.info("[STARTUP] OSRM router + graph provider initialized")
-
-# ── Graph cache ────────────────────────────────────────────────────────────
-
-_graph_cache = None
-_graph_topology_json: str | None = None
-_node_adj: list[list[int]] = []
-
-
-def _load_graph_cache():
-    global _graph_cache, _graph_topology_json, _node_adj
-    logger.info("[STARTUP] Pre-loading graph geometry...")
-    try:
-        data = graph_provider.get_graph_for_bbox(40.700, -74.020, 40.880, -73.907)
-        nodes = data.get("nodes", [])
-        edges = data.get("edges", [])
-
-        # coord → edge index reverse map (both directions for undirected lookup)
-        edge_coord_keys: list[tuple[str, str]] = []
-        coord_to_edge_idx: dict[tuple[str, str], list[int]] = {}
-        for i, edge in enumerate(edges):
-            from_idx, to_idx = edge[0], edge[1]
-            from_lat, from_lon = nodes[from_idx]
-            to_lat, to_lon = nodes[to_idx]
-            c1 = f"{round(from_lon, 5)},{round(from_lat, 5)}"
-            c2 = f"{round(to_lon, 5)},{round(to_lat, 5)}"
-            edge_coord_keys.append((c1, c2))
-            coord_to_edge_idx.setdefault((c1, c2), []).append(i)
-            if c1 != c2:
-                coord_to_edge_idx.setdefault((c2, c1), []).append(i)
-
-        coord_to_node_idx: dict[str, int] = {}
-        for i, node in enumerate(nodes):
-            lat, lon = node[0], node[1]
-            coord_to_node_idx[f"{round(lon, 5)},{round(lat, 5)}"] = i
-
-        # Node adjacency: node_id → [edge_ids]
-        adj: list[list[int]] = [[] for _ in range(len(nodes))]
-        for i, edge in enumerate(edges):
-            adj[edge[0]].append(i)
-            adj[edge[1]].append(i)
-        _node_adj = adj
-
-        data["edge_coord_keys"] = edge_coord_keys
-        data["coord_to_edge_idx"] = coord_to_edge_idx
-        data["coord_to_node_idx"] = coord_to_node_idx
-        _graph_cache = data
-
-        edges_slim = [[e[0], e[1], e[2]] for e in edges]
-        _graph_topology_json = json.dumps({"nodes": nodes, "edges": edges_slim})
-        topo_mb = len(_graph_topology_json) / (1024 * 1024)
-        logger.info(
-            f"[STARTUP] Cached graph: {len(nodes)} nodes, {len(edges)} edges, "
-            f"{len(coord_to_edge_idx)} edge coord entries, "
-            f"{len(coord_to_node_idx)} node coord entries, "
-            f"topology JSON {topo_mb:.1f} MB"
-        )
-    except Exception as e:
-        logger.error(f"[STARTUP] Failed to load graph cache: {e}")
-
-
-_load_graph_cache()
+graph_registry = GraphRegistry(redis_client=redis_client, max_loaded=3)
+osrm_registry = OsrmRegistry()
 
 # ── Database + vote types ──────────────────────────────────────────────────
 
 init_db()
+seed_presets()
 
 if DATABASE_URL:
     try:
-        with get_cursor() as cursor:
-            vote_store.load_vote_types(cursor)
+        vote_store.load_vote_types()
     except Exception as e:
         logger.error(f"[STARTUP] Failed to load vote types: {e}")
 
 
-# ── Migration: old coordinate-keyed votes → packed-key edge_votes ─────────
+# ── Map resolution ───────────────────────────────────────────────────────────
 
-def _migrate_old_votes():
-    """One-time migration from the old votes/node_votes tables to edge_votes.
+class ResolvedMap:
+    """A map plus its resolved city, loaded graph, OSRM router, and policy."""
 
-    Parses coordinate-string segment keys, maps them to graph edge IDs via
-    coord_to_edge_idx, creates vote_type records, and inserts into edge_votes.
-    Skips entirely when edge_votes is already populated.
+    __slots__ = ("slug", "city", "graph", "osrm", "allow_suggestions",
+                 "requires_passcode", "vote_type_labels")
+
+    def __init__(self, slug, city, graph, osrm, allow_suggestions,
+                 requires_passcode, vote_type_labels):
+        self.slug = slug
+        self.city = city
+        self.graph = graph
+        self.osrm = osrm
+        self.allow_suggestions = allow_suggestions
+        self.requires_passcode = requires_passcode
+        self.vote_type_labels = vote_type_labels
+
+
+def resolve_map(slug: str | None) -> ResolvedMap:
+    """Resolve a map slug → city, graph, OSRM router, and policy.
+
+    Falls back gracefully so the app still serves a city graph when the map row
+    is missing (e.g. DB unavailable, or slug is a bare city id).
     """
-    if not DATABASE_URL or _graph_cache is None:
-        return
+    slug = (slug or DEFAULT_MAP_SLUG).strip()
 
+    m = get_map(slug)
+    if m:
+        city = get_city(m["cityId"]) or get_city(DEFAULT_CITY_ID)
+        vote_types = m.get("voteTypes") or []
+        labels = {vt.get("label") for vt in vote_types if vt.get("label")}
+        allow_suggestions = m.get("allowSuggestions", True)
+        requires_passcode = m.get("requiresPasscode", False)
+    else:
+        city = get_city(slug) or get_city(DEFAULT_CITY_ID)
+        labels = set()
+        allow_suggestions = True
+        requires_passcode = False
+
+    graph = graph_registry.get(city)
+    osrm = osrm_registry.get(city)
+    return ResolvedMap(slug, city, graph, osrm, allow_suggestions,
+                       requires_passcode, labels)
+
+
+def _passcode_ok(slug: str) -> bool:
+    """True if the request carries a valid passcode token for this map."""
+    token = request.headers.get("X-Map-Passcode") or (
+        request.get_json(silent=True) or {}).get("passcode_token")
+    if not token:
+        return False
     try:
-        with get_cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) FROM edge_votes")
-            if cursor.fetchone()[0] > 0:
-                logger.info("[MIGRATE] edge_votes already populated, skipping")
-                return
-
-            cursor.execute("SELECT COUNT(*) FROM votes")
-            old_count = cursor.fetchone()[0]
-            if old_count == 0:
-                logger.info("[MIGRATE] No old votes to migrate")
-                return
-
-            logger.info(f"[MIGRATE] Migrating {old_count} old votes → edge_votes...")
-
-            # Ensure all distinct vote_type strings have IDs
-            cursor.execute("""
-                SELECT DISTINCT vote_type FROM votes
-                WHERE vote_type IS NOT NULL AND vote_type != ''
-            """)
-            for (label,) in cursor.fetchall():
-                vote_store.get_vote_type_id(label, cursor)
-
-            coord_to_edge = _graph_cache["coord_to_edge_idx"]
-
-            batch_size = 5000
-            offset = 0
-            total_migrated = 0
-            total_skipped = 0
-
-            while True:
-                cursor.execute(
-                    "SELECT segment_key, mode, ip_hash, vote_type "
-                    "FROM votes ORDER BY id LIMIT %s OFFSET %s",
-                    (batch_size, offset),
-                )
-                rows = cursor.fetchall()
-                if not rows:
-                    break
-
-                insert_data = []
-                for seg_key, mode, ip_hash, vt_label in rows:
-                    parts = seg_key.split("|")
-                    if len(parts) < 3 or not parts[1]:
-                        total_skipped += 1
-                        continue
-                    try:
-                        c1_parts = parts[0].split(",")
-                        c2_parts = parts[1].split(",")
-                        c1 = f"{round(float(c1_parts[0]), 5)},{round(float(c1_parts[1]), 5)}"
-                        c2 = f"{round(float(c2_parts[0]), 5)},{round(float(c2_parts[1]), 5)}"
-                    except (ValueError, IndexError):
-                        total_skipped += 1
-                        continue
-
-                    edge_ids = coord_to_edge.get((c1, c2), [])
-                    if not edge_ids:
-                        total_skipped += 1
-                        continue
-
-                    mode_int = vote_store.mode_to_int(mode or "walk")
-                    vt_id = vote_store.get_vote_type_id(vt_label or "", cursor)
-                    for eid in edge_ids:
-                        pk = vote_store.pack(eid, mode_int, vt_id)
-                        insert_data.append((pk, eid, mode_int, vt_id, ip_hash))
-
-                if insert_data:
-                    from psycopg2.extras import execute_values
-                    execute_values(
-                        cursor,
-                        """INSERT INTO edge_votes
-                           (packed_key, edge_id, mode, vote_type_id, ip_hash)
-                           VALUES %s
-                           ON CONFLICT (packed_key, ip_hash) DO NOTHING""",
-                        insert_data,
-                    )
-                    total_migrated += len(insert_data)
-
-                offset += batch_size
-                if len(rows) < batch_size:
-                    break
-
-            logger.info(
-                f"[MIGRATE] Done: {total_migrated} edge_votes inserted, "
-                f"{total_skipped} old rows skipped"
-            )
-
-    except Exception as e:
-        logger.error(f"[MIGRATE] Migration failed: {e}")
-
-_migrate_old_votes()
+        return _passcode_serializer.loads(token, max_age=PASSCODE_TOKEN_MAX_AGE) == slug
+    except (BadSignature, Exception):
+        return False
 
 
-# ── Populate Redis from Postgres ───────────────────────────────────────────
-
-def _populate_redis():
-    """Replay edge_votes from Postgres into Redis if Redis is underpopulated."""
-    if not DATABASE_URL:
-        return
-
-    try:
-        existing = redis_client.hlen(vote_store.REDIS_HASH)
-        if existing >= 100:
-            logger.info(f"[POPULATE] Redis '{vote_store.REDIS_HASH}' has {existing} keys, skipping")
-            return
-
-        with get_cursor() as cursor:
-            cursor.execute("""
-                SELECT packed_key, COUNT(*) AS cnt
-                FROM edge_votes
-                GROUP BY packed_key
-            """)
-            rows = cursor.fetchall()
-
-        if not rows:
-            logger.info("[POPULATE] No edge_votes in Postgres")
-            return
-
-        pipe = redis_client.pipeline()
-        for i, (pk, cnt) in enumerate(rows):
-            pipe.hset(vote_store.REDIS_HASH, str(pk), cnt)
-            if (i + 1) % 5000 == 0:
-                pipe.execute()
-                pipe = redis_client.pipeline()
-        pipe.execute()
-
-        logger.info(f"[POPULATE] Loaded {len(rows)} packed keys into Redis")
-
-    except Exception as e:
-        logger.error(f"[POPULATE] Redis population failed: {e}")
-
-_populate_redis()
-
-
-# ── Vote response cache ───────────────────────────────────────────────────
+# ── Per-map vote response cache ───────────────────────────────────────────
 
 _vote_cache: dict[str, dict] = {}
 
+# Serializes the read-modify-write of a voter's per-proposal direction so a
+# rapid +/− toggle can't read a stale prior direction (see /api/vote).
+_proposal_vote_lock = threading.Lock()
 
-def _build_graph_votes_body(mode_filter_str: str | None) -> str:
-    """Build the /api/graph-votes JSON response, with caching by revision."""
-    global _vote_cache
 
-    rev = int(redis_client.get(vote_store.REVISION_KEY) or 0)
-    cache_key = mode_filter_str or ""
+def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
+    """Build the /api/graph-votes JSON for one map+mode, cached by its revision.
+
+    `mode` scopes the legend and heatmap to a single vote namespace (e.g.
+    "walkways") so proposals cast under other modes on the same map don't leak
+    in. When omitted, all modes are aggregated (legacy behavior).
+    """
+    rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+    cache_key = f"{rmap.slug}:{mode}" if mode else rmap.slug
     cached = _vote_cache.get(cache_key)
     if cached and cached["rev"] == rev:
         return cached["body"]
 
-    votes = vote_store.read_all(redis_client)
-    mode_int = vote_store.mode_to_int(mode_filter_str) if mode_filter_str else None
-
-    edges = _graph_cache["edges"]
-    nodes = _graph_cache["nodes"]
+    rmap.graph.ensure_loaded()
+    votes = vote_store.read_all(redis_client, rmap.slug)
+    mode_filter = vote_store.mode_to_int(mode) if mode else None
     arrays = vote_store.build_arrays(
-        votes, len(edges), len(nodes), _node_adj, mode_int,
+        votes, len(rmap.graph.edges), len(rmap.graph.nodes), rmap.graph.node_adj,
+        mode_filter=mode_filter,
     )
     arrays["rev"] = rev
-    arrays["vote_types"] = {
-        str(k): v for k, v in vote_store.all_vote_types().items()
-    }
+    arrays["vote_types"] = {str(k): v for k, v in vote_store.all_vote_types().items()}
     body = json.dumps(arrays)
 
     _vote_cache[cache_key] = {"rev": rev, "body": body}
     return body
 
 
-def _prewarm_graph_votes_cache():
-    if _graph_cache is None:
+def _populate_redis():
+    """Replay edge_votes from Postgres into each map's Redis hash if underpopulated."""
+    if not DATABASE_URL:
         return
-    for mode in [None, "bikepaths", "trees", "walkways"]:
-        try:
-            _build_graph_votes_body(mode)
-        except Exception as e:
-            logger.warning(f"[STARTUP] Pre-warm failed for mode={mode!r}: {e}")
-    logger.info("[STARTUP] Pre-warmed graph-votes cache")
+    rows = database.aggregate_votes_for_replay()
+    if not rows:
+        logger.info("[POPULATE] No edge_votes in Postgres")
+        return
 
-_prewarm_graph_votes_cache()
+    # The Redis field still carries a 4-bit mode (the map's mode), derived here
+    # from each map rather than stored per-row.
+    slug_mode = {m["slug"]: vote_store.mode_to_int(m.get("mode", "walk"))
+                 for m in list_maps()}
+
+    by_slug: dict[str, list] = {}
+    for map_slug, edge_id, vt_id, direction, cnt in rows:
+        if not map_slug:
+            continue
+        mode_int = slug_mode.get(map_slug, vote_store.mode_to_int("walk"))
+        field = vote_store.redis_field(edge_id, mode_int, vt_id, direction)
+        by_slug.setdefault(map_slug, []).append((field, cnt))
+
+    for slug, fields in by_slug.items():
+        h = vote_store.hash_key(slug)
+        if redis_client.hlen(h) >= len(fields):
+            continue
+        pipe = redis_client.pipeline()
+        for i, (field, cnt) in enumerate(fields):
+            pipe.hset(h, str(field), cnt)
+            if (i + 1) % 5000 == 0:
+                pipe.execute()
+                pipe = redis_client.pipeline()
+        pipe.execute()
+        logger.info(f"[POPULATE] Loaded {len(fields)} fields into {h}")
 
 
-# ── Pubsub delta listener (invalidates vote cache on peer writes) ─────────
+def _prewarm():
+    """Preload preset NYC maps so the first request is fast."""
+    try:
+        for slug in ("nyc-walkways", "nyc-bikes", "nyc-trees"):
+            _build_graph_votes_body(resolve_map(slug))
+        logger.info("[STARTUP] Pre-warmed preset NYC maps")
+    except Exception as e:
+        logger.warning(f"[STARTUP] Pre-warm failed: {e}")
+
+
+# SKIP_WARMUP=1 skips the heavy graph preload/replay (used by tests + fast boots).
+# _prewarm() builds the ~65MB topology JSON for the preset NYC maps, which takes
+# minutes. Running it inline would block the single gevent worker past the startup
+# probe / gunicorn worker-timeout / healthcheck watchdog windows, so the container
+# never goes Ready. Run it in a background daemon thread instead: the worker becomes
+# Ready immediately (graphs still load on demand via ensure_loaded), and the preset
+# caches warm up shortly after. _populate_redis() stays inline — it's idempotent and
+# fast, and serving before it completes could return empty vote data.
+if os.environ.get("SKIP_WARMUP") != "1":
+    _populate_redis()
+    threading.Thread(target=_prewarm, name="prewarm", daemon=True).start()
+
+
+# ── Pubsub delta listener (invalidates per-map vote cache on peer writes) ───
 
 def _start_delta_listener():
     def listener():
         ps_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
         ps = ps_client.pubsub()
-        ps.subscribe(vote_store.REDIS_CHANNEL)
-        logger.info(f"[PUBSUB] Subscribed to {vote_store.REDIS_CHANNEL}")
+        ps.psubscribe("vote_deltas:*")
+        logger.info("[PUBSUB] Subscribed to vote_deltas:*")
         for msg in ps.listen():
-            if msg["type"] != "message":
+            if msg["type"] != "pmessage":
                 continue
-            # Invalidate the local vote cache so the next /api/graph-votes
-            # request rebuilds from Redis. WebSocket clients are notified
-            # via their own pubsub subscriptions inside the /ws handler.
-            _vote_cache.clear()
+            channel = msg["channel"]
+            slug = channel.split(":", 1)[1] if ":" in channel else None
+            if slug:
+                _vote_cache.pop(slug, None)
 
     t = threading.Thread(target=listener, daemon=True, name="delta-listener")
     t.start()
     return t
+
 
 _start_delta_listener()
 
@@ -357,11 +263,18 @@ _start_delta_listener()
 
 def get_client_ip() -> str:
     forwarded = request.headers.get("X-Forwarded-For", "")
-    if forwarded:
-        ip = forwarded.split(",")[0].strip()
-    else:
-        ip = request.remote_addr or "unknown"
+    ip = forwarded.split(",")[0].strip() if forwarded else (request.remote_addr or "unknown")
     return hashlib.sha256(ip.encode()).hexdigest()[:16]
+
+
+def _resolve_user(data_or_args) -> tuple[str, str]:
+    """Return (device_id, ip_hash). device_id is the hashed device id when the
+    client sends one (the dedup key), falling back to the IP for anonymous
+    voters; ip_hash is always the hashed IP (recorded for abuse/analytics)."""
+    ip_hash = get_client_ip()
+    voter_id = data_or_args.get("voter_id")
+    device_id = hashlib.sha256(str(voter_id).encode()).hexdigest()[:16] if voter_id else ip_hash
+    return device_id, ip_hash
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -370,8 +283,6 @@ def get_client_ip() -> str:
 
 @app.route("/health")
 def health():
-    if _graph_topology_json is None:
-        return jsonify({"status": "unhealthy", "graph": "not loaded"}), 503
     try:
         redis_client.ping()
         return jsonify({"status": "healthy", "redis": "connected"}), 200
@@ -379,26 +290,140 @@ def health():
         return jsonify({"status": "unhealthy", "redis": "disconnected"}), 503
 
 
-# ── WebSocket (delta-based) ───────────────────────────────────────────────
+# ── Cities / vote-type lists / maps API ──────────────────────────────────────
+
+@app.route("/api/cities", methods=["GET"])
+def cities_list():
+    return jsonify({"cities": [c.to_public() for c in all_cities()]})
+
+
+@app.route("/api/vote-type-lists", methods=["GET"])
+def vote_type_lists():
+    return jsonify({"lists": list_vote_type_lists()})
+
+
+@app.route("/api/maps", methods=["GET"])
+def maps_list():
+    maps = list_maps()
+    # Enrich with the city's public view config for the landing grid.
+    for m in maps:
+        city = get_city(m["cityId"])
+        if city:
+            m["city"] = city.to_public()
+    return jsonify({"maps": maps})
+
+
+@app.route("/api/maps/<slug>", methods=["GET"])
+def map_get(slug):
+    m = get_map(slug)
+    if not m:
+        return jsonify({"error": "Map not found"}), 404
+    city = get_city(m["cityId"])
+    if city:
+        m["city"] = city.to_public()
+    return jsonify(m)
+
+
+@app.route("/api/maps/check-slug", methods=["GET"])
+def map_check_slug():
+    slug = (request.args.get("slug") or "").strip().lower()
+    return jsonify({"slug": slug, "available": bool(slug) and slug_available(slug)})
+
+
+def _normalize_slug(raw: str) -> str:
+    import re
+    s = (raw or "").strip().lower()
+    s = re.sub(r"[^a-z0-9-]+", "-", s).strip("-")
+    return s
+
+
+@app.route("/api/maps", methods=["POST"])
+def map_create():
+    data = request.get_json() or {}
+    name = (data.get("name") or "").strip()
+    city_id = (data.get("city_id") or "").strip()
+    slug = _normalize_slug(data.get("slug") or name)
+    allow_suggestions = bool(data.get("allow_suggestions", True))
+    passcode = (data.get("passcode") or "").strip()
+
+    if not name:
+        return jsonify({"error": "Map name is required"}), 400
+    if not get_city(city_id):
+        return jsonify({"error": f"Unknown city '{city_id}'"}), 400
+    if not slug:
+        return jsonify({"error": "Could not derive a valid slug"}), 400
+    if not slug_available(slug):
+        return jsonify({"error": f"Slug '{slug}' is already taken"}), 409
+
+    # Vote-type list: either an existing preset id, or an inline custom list.
+    vote_type_list_id = data.get("vote_type_list_id")
+    custom_vote_types = data.get("custom_vote_types")
+    if not vote_type_list_id and not custom_vote_types:
+        return jsonify({"error": "Provide vote_type_list_id or custom_vote_types"}), 400
+    if custom_vote_types and not isinstance(custom_vote_types, list):
+        return jsonify({"error": "custom_vote_types must be a list"}), 400
+
+    # Subtitle defaults to "<city> · <vote-type-list name>". The custom-list name
+    # defaults to its first vote type's label.
+    city = get_city(city_id)
+    list_name = ""
+    if vote_type_list_id:
+        list_name = next((l["name"] for l in list_vote_type_lists()
+                          if l["id"] == int(vote_type_list_id)), "")
+    elif custom_vote_types:
+        list_name = (custom_vote_types[0].get("label") or "").strip()
+    subtitle = (data.get("subtitle") or "").strip()
+    if not subtitle:
+        subtitle = " · ".join(p for p in (city.name if city else city_id, list_name) if p)
+
+    passcode_hash = generate_password_hash(passcode) if passcode else None
+    created = create_map(
+        slug=slug, name=name, city_id=city_id, subtitle=subtitle,
+        vote_type_list_id=vote_type_list_id,
+        custom_vote_types=custom_vote_types,
+        allow_suggestions=allow_suggestions,
+        passcode_hash=passcode_hash,
+        created_by_ip_hash=get_client_ip(),
+    )
+    if not created:
+        return jsonify({"error": "Failed to create map"}), 500
+
+    city = get_city(city_id)
+    if city:
+        created["city"] = city.to_public()
+    return jsonify(created), 201
+
+
+@app.route("/api/maps/<slug>/auth", methods=["POST"])
+def map_auth(slug):
+    data = request.get_json() or {}
+    passcode = (data.get("passcode") or "").strip()
+    h = get_map_passcode_hash(slug)
+    if not h:
+        # No passcode required → trivially authorized.
+        return jsonify({"token": _passcode_serializer.dumps(slug)})
+    if passcode and check_password_hash(h, passcode):
+        return jsonify({"token": _passcode_serializer.dumps(slug)})
+    return jsonify({"error": "Incorrect passcode"}), 403
+
+
+# ── WebSocket (delta-based, per-map) ─────────────────────────────────────────
 
 @sock.route("/ws")
 def ws(ws):
-    """Push vote deltas to clients in real time.
+    """Push a single map's vote deltas to a client in real time."""
+    slug = (request.args.get("map") or DEFAULT_MAP_SLUG).strip()
+    channel = vote_store.channel_key(slug)
 
-    On connect: send init message.
-    On vote (via pubsub): forward delta verbatim.
-    Every 30s: keepalive ping.
-    """
     ws_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
     pubsub = ws_client.pubsub()
-    pubsub.subscribe(vote_store.REDIS_CHANNEL)
+    pubsub.subscribe(channel)
 
-    rev = int(redis_client.get(vote_store.REVISION_KEY) or 0)
-    ws.send(json.dumps({"type": "init", "rev": rev}))
+    rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)
+    ws.send(json.dumps({"type": "init", "rev": rev, "map": slug}))
 
     last_push = time.time()
     KEEPALIVE = 30
-
     try:
         while True:
             try:
@@ -417,7 +442,7 @@ def ws(ws):
                 ws.send('{"type":"keepalive"}')
                 last_push = time.time()
     finally:
-        pubsub.unsubscribe(vote_store.REDIS_CHANNEL)
+        pubsub.unsubscribe(channel)
         pubsub.close()
         ws_client.close()
 
@@ -433,18 +458,24 @@ def calculate_route():
     start = data.get("start")
     end = data.get("end")
     waypoints = data.get("waypoints", [])
-
     if not start or not end:
         return jsonify({"error": "Missing start or end coordinates"}), 400
 
+    rmap = resolve_map(data.get("map"))
+
     try:
         waypoints_tuples = [(wp[0], wp[1]) for wp in waypoints]
-        route = route_router.calculate_route(
-            start=(start[0], start[1]),
-            end=(end[0], end[1]),
-            mode="walk",
-            waypoints=waypoints_tuples,
+        route = rmap.osrm.calculate_route(
+            start=(start[0], start[1]), end=(end[0], end[1]),
+            mode="walk", waypoints=waypoints_tuples,
         )
+
+        if "error" in route:
+            logger.info("[ROUTE] OSRM failed, falling back to Python router")
+            route = rmap.graph.provider.calculate_route(
+                start=(start[0], start[1]), end=(end[0], end[1]),
+                mode="walk", waypoints=waypoints_tuples,
+            )
 
         if "error" in route:
             return jsonify(route), 404
@@ -452,12 +483,16 @@ def calculate_route():
         from desire_path_voting import extract_all_segments
         segments = extract_all_segments(route.get("geometry"))
 
-        # Map segments → graph edge IDs for fast voting
+        # Map OSRM route → graph edge IDs for fast voting + optimistic updates.
+        rmap.graph.ensure_loaded()
         edge_ids = []
-        if _graph_cache:
-            edge_ids = vote_store.coords_to_edge_ids(
-                segments, _graph_cache["coord_to_edge_idx"]
+        osm_node_ids = route.get("osm_node_ids", [])
+        if osm_node_ids:
+            edge_ids = vote_store.osm_nodes_to_edge_ids(
+                osm_node_ids, rmap.graph.osm_to_graph_idx, rmap.graph.node_pair_to_edge,
             )
+        if not edge_ids:
+            edge_ids = vote_store.coords_to_edge_ids(segments, rmap.graph.coord_to_edge_idx)
 
         return jsonify({
             "route": route,
@@ -478,82 +513,155 @@ def calculate_route():
 
 @app.route("/api/vote", methods=["POST"])
 def cast_vote():
-    """Cast votes using packed integer keys.
-
-    Accepts edge_ids (preferred) or segments (legacy, mapped to edge_ids).
-    """
+    """Cast votes (packed integer keys), scoped to a map."""
     data = request.get_json()
     if not data:
         return jsonify({"error": "Missing request body"}), 400
 
+    rmap = resolve_map(data.get("map"))
+
+    # Passcode gate: voting (not viewing) requires a valid token for this map.
+    if rmap.requires_passcode and not _passcode_ok(rmap.slug):
+        return jsonify({"error": "Passcode required", "requires_passcode": True}), 401
+
     edge_ids = data.get("edge_ids", [])
+    if not edge_ids and data.get("edge_id") is not None:
+        edge_ids = [int(data["edge_id"])]
     segments = data.get("segments", [])
     point = data.get("point")
     mode = data.get("mode", "walk")
-    vt_label = data.get("vote_type", "")
+    vt_label = (data.get("vote_type", "") or "").strip()
 
-    # Legacy: map coordinate segments to edge IDs
-    if not edge_ids and segments and _graph_cache:
-        edge_ids = vote_store.coords_to_edge_ids(
-            segments, _graph_cache["coord_to_edge_idx"]
-        )
+    # Reject unknown vote types when the map disallows user suggestions.
+    if (vt_label and not rmap.allow_suggestions
+            and rmap.vote_type_labels and vt_label not in rmap.vote_type_labels):
+        return jsonify({"error": "This map does not accept custom vote types"}), 403
+
+    is_proposal = data.get("direction") is not None
+    direction = vote_store.UP if (data.get("direction") or 1) >= 0 else vote_store.DOWN
+
+    rmap.graph.ensure_loaded()
+    if not edge_ids and segments:
+        edge_ids = vote_store.coords_to_edge_ids(segments, rmap.graph.coord_to_edge_idx)
 
     if not edge_ids and not point:
         return jsonify({"error": "No edge_ids or point to vote on"}), 400
 
-    voter_id = data.get("voter_id")
-    if voter_id:
-        ip_hash = hashlib.sha256(str(voter_id).encode()).hexdigest()[:16]
-    else:
-        ip_hash = get_client_ip()
-
-    mode_int = vote_store.mode_to_int(mode)
+    device_id, ip_hash = _resolve_user(data)
+    mode_int = vote_store.mode_to_int(mode)  # Redis key only; DB scopes by map_slug
+    slug = rmap.slug
 
     try:
-        # Point vote — Postgres only, no heatmap
         if point and not edge_ids:
-            threading.Thread(
-                target=lambda: record_point_vote(point, mode, ip_hash, vt_label),
-                daemon=True,
-            ).start()
-            return jsonify({"success": True, "point_vote": True})
+            edge_ids = rmap.graph.snap_point_to_edge(point[0], point[1])
+            if not is_proposal:
+                threading.Thread(
+                    target=lambda: record_point_vote(point, mode, ip_hash, vt_label),
+                    daemon=True,
+                ).start()
+            if not edge_ids:
+                return jsonify({"success": True, "point_vote": True})
 
-        # Resolve vote type → integer ID
-        vt_id = 0
-        if vt_label:
-            with get_cursor() as cursor:
-                vt_id = vote_store.get_vote_type_id(vt_label, cursor)
+        vt_id = vote_store.get_vote_type_id(vt_label) if vt_label else 0
 
-        # Redis: one HINCRBY per edge (fast path)
-        count = vote_store.cast(redis_client, edge_ids, mode_int, vt_id)
-        logger.info(
-            f"[VOTE] {count} edges, mode={mode}, "
-            f"vt={vt_id} ({vt_label!r}), ip={ip_hash[:8]}…"
-        )
+        # ── Directional single-proposal vote (modal +/-) ──
+        # Read-modify-write of the voter's stored direction must be serialized
+        # and persisted SYNCHRONOUSLY: otherwise a quick +/− sees a stale prior
+        # direction (its predecessor's write was still in flight), so a reversal
+        # is mistaken for a fresh vote — the Redis up count is never decremented
+        # and the server's `reversed` flag stops matching the client's optimistic
+        # update. The lock + in-request persist make each vote observe the
+        # committed result of the previous one, so `−` correctly overwrites `+`.
+        if is_proposal:
+            with _proposal_vote_lock:
+                reversed_any = False
+                changed: list[int] = []
+                for eid in edge_ids:
+                    prev = get_voter_edge_direction(slug, eid, vt_id, device_id)
+                    if prev != direction:
+                        vote_store.apply_directional(
+                            redis_client, slug, eid, mode_int, vt_id, direction, prev
+                        )
+                        changed.append(eid)
+                        if prev in (vote_store.UP, vote_store.DOWN):
+                            reversed_any = True
 
-        # Publish delta for instant cross-client sync
-        vote_store.publish_delta(redis_client, edge_ids, mode_int, vt_id)
+                logger.info(f"[VOTE:{slug}] proposal dir={direction} changed={changed} "
+                            f"vt={vt_id} ({vt_label!r}) ip={ip_hash[:8]}…")
 
-        # Invalidate local vote cache
-        _vote_cache.clear()
+                if changed:
+                    # Persist before publishing so the next vote reads the new
+                    # direction (not a background-thread race).
+                    try:
+                        record_edge_votes(slug, changed, vt_id, device_id, ip_hash, direction)
+                    except Exception as e:
+                        logger.error(f"[VOTE] DB persist failed: {e}")
+                    # Broadcast authoritative post-write counts so clients SET
+                    # (not increment) — immune to optimistic drift / double-count.
+                    vt_counts = vote_store.read_edge_vt_counts(
+                        redis_client, slug, changed, mode_int, vt_id
+                    )
+                    vote_store.publish_delta(
+                        redis_client, slug, changed, mode_int, vt_id,
+                        direction=direction, reversed_vote=reversed_any,
+                        vt_counts=vt_counts,
+                    )
+                    _vote_cache.pop(slug, None)
 
-        # Background Postgres persist
+            return jsonify({
+                "success": True, "edge_ids": edge_ids, "changed": changed,
+                "direction": direction, "reversed": reversed_any,
+            })
+
+        # ── Bulk upvote (route/point cast) ──
+        count = vote_store.cast(redis_client, slug, edge_ids, mode_int, vt_id)
+        logger.info(f"[VOTE:{slug}] {count} edges, vt={vt_id} ({vt_label!r}), ip={ip_hash[:8]}…")
+        vote_store.publish_delta(redis_client, slug, edge_ids, mode_int, vt_id)
+        _vote_cache.pop(slug, None)
+
         def _persist():
             try:
-                record_edge_votes(edge_ids, mode_int, vt_id, ip_hash)
+                record_edge_votes(slug, edge_ids, vt_id, device_id, ip_hash)
             except Exception as e:
                 logger.error(f"[VOTE] DB persist failed: {e}")
 
         threading.Thread(target=_persist, daemon=True).start()
-
-        return jsonify({"success": True, "edges_voted": count})
+        return jsonify({"success": True, "edges_voted": count, "edge_ids": edge_ids})
 
     except Exception as e:
         logger.error(f"[VOTE] Error: {e}")
         return jsonify({"error": f"Vote failed: {str(e)}"}), 500
 
 
-# ── Graph data APIs ────────────────────────────────────────────────────────
+@app.route("/api/my-votes", methods=["GET"])
+def my_votes():
+    """Return the requesting voter's directional votes for the given edges on a map."""
+    rmap_slug = (request.args.get("map") or DEFAULT_MAP_SLUG).strip()
+
+    raw = request.args.get("edge_ids", "")
+    try:
+        edge_ids = [int(x) for x in raw.split(",") if x.strip() != ""]
+    except ValueError:
+        return jsonify({"error": "edge_ids must be comma-separated integers"}), 400
+    if not edge_ids:
+        return jsonify({"votes": {}})
+
+    device_id, _ip_hash = _resolve_user(request.args)
+    by_edge = get_voter_edge_directions(rmap_slug, edge_ids, device_id)
+    votes: dict[str, dict[str, int]] = {}
+    for edge_id, vt_map in by_edge.items():
+        labels: dict[str, int] = {}
+        for vt_id, direction in vt_map.items():
+            label = vote_store.resolve_vote_type(vt_id)
+            if label:
+                labels[label] = int(direction)
+        if labels:
+            votes[str(edge_id)] = labels
+
+    return jsonify({"votes": votes})
+
+
+# ── Graph data APIs ──────────────────────────────────────────────────────────
 
 @app.route("/api/nearest-node", methods=["GET"])
 def nearest_node():
@@ -563,9 +671,155 @@ def nearest_node():
     except (KeyError, ValueError):
         return jsonify({"error": "lat and lng are required"}), 400
     try:
-        node_lat, node_lon = graph_provider.nearest_node_coords(lat, lon)
+        rmap = resolve_map(request.args.get("map"))
+        node_lat, node_lon = rmap.graph.provider.nearest_node_coords(lat, lon)
         return jsonify({"lat": node_lat, "lng": node_lon})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def _compose_address(props: dict) -> str:
+    """Build a clean label from Photon's structured fields.
+
+    Photon returns address parts separately, so we space-join the house number
+    and street ("410 Riverside Drive") and comma-separate logical components,
+    rather than echoing a fully comma-joined string ("410, Riverside Drive, …").
+    """
+    name = props.get("name")
+    street = props.get("street")
+    house = props.get("housenumber")
+    parts: list[str] = []
+    # POIs carry a name distinct from the street; lead with it.
+    if name and name != street:
+        parts.append(name)
+    if house and street:
+        parts.append(f"{house} {street}")
+    elif street:
+        parts.append(street)
+    elif not parts and name:
+        parts.append(name)
+    # One level of locality context to disambiguate similar streets.
+    locality = props.get("locality") or props.get("district") or props.get("city")
+    if locality and locality not in parts:
+        parts.append(locality)
+    return ", ".join(parts)
+
+
+@lru_cache(maxsize=512)
+def _photon_features(query: str, bbox: str, lat: float, lon: float) -> tuple:
+    """One Photon (OSM autocomplete geocoder) request, biased to a city, cached.
+
+    Photon does prefix matching ("410 river" -> "410 Riverside Drive"), which
+    Nominatim's /search does not. Its bbox is a soft bias, so we hard-filter
+    results to the city's bounds to keep out-of-city hits out of the dropdown.
+    Returns raw features so callers can read structured fields (street/name/
+    housenumber), not just the composed label.
+    """
+    resp = requests.get(
+        "https://photon.komoot.io/api/",
+        params={"q": query, "limit": 10, "bbox": bbox, "lat": lat, "lon": lon},
+        headers={"User-Agent": (
+            "CityEdit/1.0 "
+            "(https://github.com/edbltn/city-edit; "
+            "eric.didier.bolton@gmail.com)")},
+        timeout=5,
+    )
+    resp.raise_for_status()
+    minlon, minlat, maxlon, maxlat = (float(v) for v in bbox.split(","))
+    feats = []
+    for feat in resp.json().get("features", []):
+        coords = feat.get("geometry", {}).get("coordinates")
+        if not coords or len(coords) < 2:
+            continue
+        flon, flat = float(coords[0]), float(coords[1])
+        if not (minlat <= flat <= maxlat and minlon <= flon <= maxlon):
+            continue
+        feats.append({"lat": flat, "lon": flon, "props": feat.get("properties", {})})
+    return tuple(feats)
+
+
+def _to_result(feat: dict) -> dict | None:
+    """Compose a feature into the {lat, lon, display_name} client shape."""
+    display = _compose_address(feat["props"])
+    if not display:
+        return None
+    return {"lat": feat["lat"], "lon": feat["lon"], "display_name": display}
+
+
+def _matches_fragment(text: str, fragment: str) -> bool:
+    """True if any word in `text` starts with the fragment's first word.
+
+    Keeps fallback results relevant ("Riv" -> "Riverside Drive") while dropping
+    unrelated hits Photon returns when matching a bare fragment near the center.
+    """
+    head = fragment.lower().split()[0]
+    return any(w.startswith(head) for w in re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def _photon_search(query: str, bbox: str, lat: float, lon: float) -> tuple:
+    """Search Photon, recovering the exact address for "<house> <short fragment>".
+
+    Photon won't match a house number followed by a very short street fragment
+    ("410 Riv"), though it matches the fragment alone. When the direct query is
+    empty we discover the street name from the bare fragment, then re-ask Photon
+    for that street WITH the house number, so the exact "410 Riverside Drive" is
+    returned. If no such house number exists, we show street-level hits instead.
+    """
+    direct = [r for f in _photon_features(query, bbox, lat, lon) if (r := _to_result(f))]
+    if direct:
+        return tuple(direct[:6])
+
+    m = re.match(r"(\d+)\s+(.+)", query)
+    if not m:
+        return ()
+    house, fragment = m.group(1), m.group(2).strip()
+    if len(fragment) < 2:
+        return ()
+
+    frag_feats = _photon_features(fragment, bbox, lat, lon)
+    # Prefer real street names; fall back to place names if none prefix-match.
+    streets: list[str] = []
+    names: list[str] = []
+    for f in frag_feats:
+        street = f["props"].get("street")
+        if street and _matches_fragment(street, fragment) and street not in streets:
+            streets.append(street)
+        name = f["props"].get("name")
+        if name and _matches_fragment(name, fragment) and name not in names:
+            names.append(name)
+
+    # Re-query each candidate street with the house number; keep exact matches.
+    exact: list[dict] = []
+    seen: set[str] = set()
+    for street in (streets or names)[:3]:
+        for f in _photon_features(f"{house} {street}", bbox, lat, lon):
+            if f["props"].get("housenumber") != house:
+                continue
+            r = _to_result(f)
+            if r and r["display_name"] not in seen:
+                seen.add(r["display_name"])
+                exact.append(r)
+    if exact:
+        return tuple(exact[:6])
+
+    # No exact house number on a matching street; show street-level hits.
+    street_level = [r for f in frag_feats
+                    if (r := _to_result(f)) and _matches_fragment(r["display_name"], fragment)]
+    return tuple(street_level[:6])
+
+
+@app.route("/api/geocode", methods=["GET"])
+def geocode():
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "Missing query parameter 'q'"}), 400
+    rmap = resolve_map(request.args.get("map"))
+    try:
+        clat, clon = rmap.city.center
+        results = _photon_search(query, rmap.city.geocode_bbox, clat, clon)
+        return jsonify({"results": list(results)})
+    except requests.RequestException as e:
+        logger.error(f"Geocoding error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -577,7 +831,8 @@ def reverse_geocode():
     except (KeyError, ValueError):
         return jsonify({"error": "lat and lng are required"}), 400
     try:
-        address = graph_provider.reverse_geocode(lat, lon)
+        rmap = resolve_map(request.args.get("map"))
+        address = rmap.graph.provider.reverse_geocode(lat, lon)
         return jsonify({"address": address or None, "lat": lat, "lng": lon})
     except Exception as e:
         logger.error(f"Reverse geocoding error: {e}")
@@ -593,8 +848,12 @@ def graph_data():
     except (KeyError, ValueError):
         return jsonify({"error": "bbox=minLon,minLat,maxLon,maxLat required"}), 400
     try:
-        data = graph_provider.get_graph_for_bbox(south, west, north, east)
-        return jsonify(data)
+        rmap = resolve_map(request.args.get("map"))
+        data = rmap.graph.provider.get_graph_for_bbox(south, west, north, east)
+        # Only the JSON-serializable topology goes over the wire; the lookup maps
+        # (node_pair_to_edge keyed by int tuples, osm_to_graph_idx) are server-side
+        # routing helpers and can't be JSON-encoded.
+        return jsonify({"nodes": data["nodes"], "edges": data["edges"]})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -609,48 +868,79 @@ def serve_tiles(filename):
     return response
 
 
+@app.route("/api/graph-version", methods=["GET"])
+def graph_version():
+    """Cheap content hash of a city's topology, used as a client cache key."""
+    rmap = resolve_map(request.args.get("map"))
+    rmap.graph.ensure_loaded()
+    if rmap.graph.topology_etag is None:
+        return jsonify({"error": "Graph not loaded"}), 500
+    resp = jsonify({"version": rmap.graph.topology_etag})
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 @app.route("/api/graph-topology", methods=["GET"])
 def graph_topology():
-    if _graph_topology_json is None:
+    rmap = resolve_map(request.args.get("map"))
+    rmap.graph.ensure_loaded()
+    if rmap.graph.topology_json is None:
         return jsonify({"error": "Graph not loaded"}), 500
+
+    etag = rmap.graph.topology_etag
+    if request.headers.get("If-None-Match") == etag:
+        resp = app.response_class(status=304)
+        resp.headers["ETag"] = etag
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
+
     resp = app.response_class(
-        response=_graph_topology_json, status=200, mimetype="application/json",
+        response=rmap.graph.topology_json, status=200, mimetype="application/json",
     )
     resp.headers["Cache-Control"] = "public, max-age=86400"
+    if etag:
+        resp.headers["ETag"] = etag
     return resp
 
 
 @app.route("/api/graph-votes", methods=["GET"])
 def graph_votes():
-    """Return per-edge and per-node vote arrays.
+    """Return per-edge and per-node vote arrays for a map.
 
-    Indices match /api/graph-topology. Cached by revision — only rebuilds
-    after a vote is cast.
+    Indices match /api/graph-topology. Cached by the map's revision.
     """
-    if _graph_cache is None:
-        return jsonify({"error": "Graph not loaded"}), 500
+    rmap = resolve_map(request.args.get("map"))
+    rmap.graph.ensure_loaded()
 
-    mode_filter = (request.args.get("mode") or "").strip() or None
+    mode = request.args.get("mode") or None
+    rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+    etag = f'"v-{rmap.slug}-{mode or "all"}-{rev}"'
+    if request.headers.get("If-None-Match") == etag:
+        resp = app.response_class(status=304)
+        resp.headers["ETag"] = etag
+        resp.headers["Cache-Control"] = "public, max-age=5"
+        return resp
+
     try:
-        body = _build_graph_votes_body(mode_filter)
+        body = _build_graph_votes_body(rmap, mode)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
     resp = app.response_class(response=body, status=200, mimetype="application/json")
     resp.headers["Cache-Control"] = "public, max-age=5"
+    resp.headers["ETag"] = etag
     return resp
 
 
 @app.route("/api/graph.geojson", methods=["GET"])
 def graph_geojson():
-    if _graph_cache is None:
-        return jsonify({"error": "Graph cache not loaded"}), 500
-
-    nodes = _graph_cache.get("nodes", [])
-    edges = _graph_cache.get("edges", [])
+    rmap = resolve_map(request.args.get("map"))
+    rmap.graph.ensure_loaded()
+    nodes = rmap.graph.nodes
+    edges = rmap.graph.edges
     features = []
 
-    for edge_idx, edge in enumerate(edges):
+    for edge in edges:
         from_idx, to_idx = edge[0], edge[1]
         name = edge[2] if len(edge) > 2 else ""
         highway = edge[3] if len(edge) > 3 else ""
@@ -659,30 +949,18 @@ def graph_geojson():
         to_lat, to_lon = nodes[to_idx]
         features.append({
             "type": "Feature",
-            "geometry": {
-                "type": "LineString",
-                "coordinates": [[from_lon, from_lat], [to_lon, to_lat]],
-            },
-            "properties": {
-                "type": "edge",
-                "from_idx": from_idx,
-                "to_idx": to_idx,
-                "name": name,
-                "highway": highway,
-                "length": length,
-            },
+            "geometry": {"type": "LineString",
+                         "coordinates": [[from_lon, from_lat], [to_lon, to_lat]]},
+            "properties": {"type": "edge", "from_idx": from_idx, "to_idx": to_idx,
+                           "name": name, "highway": highway, "length": length},
         })
 
     for node_idx, (lat, lon) in enumerate(nodes):
         features.append({
             "type": "Feature",
             "geometry": {"type": "Point", "coordinates": [lon, lat]},
-            "properties": {
-                "type": "node",
-                "node_id": node_idx,
-                "lat": round(lat, 6),
-                "lon": round(lon, 6),
-            },
+            "properties": {"type": "node", "node_id": node_idx,
+                           "lat": round(lat, 6), "lon": round(lon, 6)},
         })
 
     return jsonify({"type": "FeatureCollection", "features": features})
@@ -693,28 +971,23 @@ def graph_geojson():
 @app.route("/api/admin/refresh-osm", methods=["POST"])
 def admin_refresh_osm():
     logger.info("[ADMIN] OSM refresh triggered")
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header:
-        logger.info("[ADMIN] Request has Authorization header (Cloud Scheduler)")
+    city_id = (request.get_json(silent=True) or {}).get("city", "nyc")
+    if not get_city(city_id):
+        return jsonify({"error": f"Unknown city '{city_id}'"}), 400
     try:
         import subprocess
         result = subprocess.run(
-            ["python", "refresh_osm.py", "--region", "manhattan"],
+            ["python", "refresh_osm.py", "--city", city_id, "--force"],
             capture_output=True, text=True, timeout=1800,
         )
         logger.info(f"[ADMIN] Refresh exit code {result.returncode}")
         if result.returncode == 0:
-            graph_provider.reload()
-            return jsonify({
-                "status": "success",
-                "stdout": result.stdout[-2000:] if result.stdout else "",
-            })
-        else:
-            return jsonify({
-                "status": "failed",
-                "stdout": result.stdout[-2000:] if result.stdout else "",
-                "stderr": result.stderr[-2000:] if result.stderr else "",
-            }), 500
+            graph_registry.get(get_city(city_id))  # reload into registry
+            return jsonify({"status": "success",
+                            "stdout": result.stdout[-2000:] if result.stdout else ""})
+        return jsonify({"status": "failed",
+                        "stdout": result.stdout[-2000:] if result.stdout else "",
+                        "stderr": result.stderr[-2000:] if result.stderr else ""}), 500
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Refresh timed out"}), 500
     except Exception as e:
@@ -724,7 +997,6 @@ def admin_refresh_osm():
 @app.route("/api/admin/stats", methods=["GET"])
 def admin_stats():
     result = {"timestamp": time.time()}
-
     try:
         info = redis_client.info()
         result["redis"] = {
@@ -732,53 +1004,18 @@ def admin_stats():
             "version": info.get("redis_version"),
             "used_memory_human": info.get("used_memory_human"),
             "connected_clients": info.get("connected_clients"),
-            "hash_size_ev": redis_client.hlen(vote_store.REDIS_HASH),
-            "revision": int(redis_client.get(vote_store.REVISION_KEY) or 0),
         }
     except redis.ConnectionError:
         result["redis"] = {"connected": False}
 
-    if DATABASE_URL:
-        try:
-            with get_cursor() as cursor:
-                cursor.execute("SELECT COUNT(*) FROM edge_votes")
-                ev_count = cursor.fetchone()[0]
-                cursor.execute("SELECT COUNT(*) FROM vote_types")
-                vt_count = cursor.fetchone()[0]
-                cursor.execute("SELECT COUNT(DISTINCT ip_hash) FROM edge_votes")
-                unique_voters = cursor.fetchone()[0]
-            result["database"] = {
-                "edge_votes": ev_count,
-                "vote_types": vt_count,
-                "unique_voters": unique_voters,
-            }
-        except Exception as e:
-            result["database"] = {"error": str(e)}
-    else:
-        result["database"] = {"connected": False}
+    result["database"] = database.get_admin_counts() if DATABASE_URL else {"connected": False}
 
     result["app"] = {
-        "graph_loaded": _graph_cache is not None,
-        "graph_nodes": len(_graph_cache["nodes"]) if _graph_cache else 0,
-        "graph_edges": len(_graph_cache["edges"]) if _graph_cache else 0,
+        "loaded_cities": graph_registry.loaded_ids(),
+        "cities": list(CITIES),
         "vote_types_cached": len(vote_store.all_vote_types()),
     }
-
     return jsonify(result)
-
-
-@app.route("/api/admin/router-stats", methods=["GET"])
-def admin_router_stats():
-    try:
-        stats = graph_provider.stats()
-        return jsonify({
-            "router": "osrm",
-            "graph_provider": "python",
-            "version": graph_provider.get_version(),
-            "stats": stats,
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 # ═══════════════════════════════════════════════════════════════════════════

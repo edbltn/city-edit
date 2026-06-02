@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Import Citibike trip data as votes into the Desire Path Mapper.
+Import Citibike trip data as votes into the City Edit.
 
 Downloads 1 month of 2025 Citibike data, picks 5 random days,
 samples 1000 rows, filters for Manhattan rides, then concurrently

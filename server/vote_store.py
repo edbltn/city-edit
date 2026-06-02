@@ -1,12 +1,20 @@
 """
-Vote storage using packed integer keys.
+Redis vote cache using packed integer field keys.
 
-Composite key layout (44 bits, fits JS Number.MAX_SAFE_INTEGER):
+This is purely the Redis cache representation — Postgres stores the canonical
+votes as natural columns (see database.edge_votes: map_slug, edge_id,
+vote_type_id, device_id, ip_hash, direction).
+
+Redis field layout (45 bits, fits JS Number.MAX_SAFE_INTEGER):
   bits [23..0]   edge_id      (24 bits, up to 16M edges)
-  bits [27..24]  mode         (4 bits, up to 16 modes)
+  bits [27..24]  mode         (4 bits — the map's mode; constant per map hash)
   bits [43..28]  vote_type_id (16 bits, up to 65K vote types)
+  bit  [44]      direction    (0 = upvote, 1 = downvote)
 
-Redis: single hash "ev" — field = str(packed_key), value = count.
+Redis is namespaced per map: hash "ev:<slug>", channel "vote_deltas:<slug>",
+revision "vote_rev:<slug>" — field = str(redis_field), value = count. Each map's
+edge_id space is its own city graph, so isolating by slug avoids cross-map
+collisions.
 """
 
 import json
@@ -14,9 +22,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-REDIS_HASH = "ev"
-REDIS_CHANNEL = "vote_deltas"
-REVISION_KEY = "vote_rev"
+
+def hash_key(slug: str) -> str:
+    return f"ev:{slug}"
+
+
+def channel_key(slug: str) -> str:
+    return f"vote_deltas:{slug}"
+
+
+def revision_key(slug: str) -> str:
+    return f"vote_rev:{slug}"
 
 # ── Mode enum ──────────────────────────────────────────────────────────────
 
@@ -38,35 +54,34 @@ def int_to_mode(i: int) -> str:
 
 
 # ── Vote type cache ────────────────────────────────────────────────────────
+# In-memory label↔id cache. All SQL lives in database.py; this just caches it.
 
 _vt_label: dict[str, int] = {}
 _vt_id: dict[int, str] = {}
 
 
-def load_vote_types(cursor) -> None:
+def load_vote_types() -> None:
+    """Populate the cache from the database (called once at startup)."""
     global _vt_label, _vt_id
-    cursor.execute("SELECT id, label FROM vote_types ORDER BY id")
-    rows = cursor.fetchall()
-    _vt_label = {r[1]: r[0] for r in rows}
-    _vt_id = {r[0]: r[1] for r in rows}
+    import database
+    rows = database.fetch_all_vote_types()
+    _vt_label = {label: vid for vid, label in rows}
+    _vt_id = {vid: label for vid, label in rows}
     logger.info(f"[VOTES] Loaded {len(rows)} vote types into cache")
 
 
-def get_vote_type_id(label: str, cursor) -> int:
+def get_vote_type_id(label: str) -> int:
+    """Return the id for a label, creating + caching it on first use."""
     if not label:
         return 0
     cached = _vt_label.get(label)
     if cached is not None:
         return cached
-    cursor.execute(
-        "INSERT INTO vote_types (label) VALUES (%s) "
-        "ON CONFLICT (label) DO UPDATE SET label = EXCLUDED.label "
-        "RETURNING id",
-        (label,),
-    )
-    vid = cursor.fetchone()[0]
-    _vt_label[label] = vid
-    _vt_id[vid] = label
+    import database
+    vid = database.get_or_create_vote_type_id(label)
+    if vid:
+        _vt_label[label] = vid
+        _vt_id[vid] = label
     return vid
 
 
@@ -82,45 +97,119 @@ def all_vote_types() -> dict[int, str]:
 
 # ── Bit packing ────────────────────────────────────────────────────────────
 
+DIR_BIT = 44  # direction bit position in the Redis field key
+
+# Vote directions (API/app layer): +1 = up, -1 = down, 0 = no vote
+UP = 1
+DOWN = -1
+
+
 def pack(edge_id: int, mode: int, vt_id: int) -> int:
+    """Direction-less proposal key — the base of the Redis field (no direction bit)."""
     return (vt_id << 28) | (mode << 24) | edge_id
 
 
-def unpack(key: int) -> tuple[int, int, int]:
-    return key & 0xFF_FFFF, (key >> 24) & 0xF, key >> 28
+def dir_to_bit(direction: int) -> int:
+    """Map a +1/-1 direction to the Redis field's direction bit (0=up, 1=down)."""
+    return 0 if direction >= 0 else 1
+
+
+def redis_field(edge_id: int, mode: int, vt_id: int, direction: int) -> int:
+    """Redis hash field key — proposal key plus the direction bit."""
+    base = pack(edge_id, mode, vt_id)
+    return base | (1 << DIR_BIT) if dir_to_bit(direction) else base
+
+
+def unpack(key: int) -> tuple[int, int, int, int]:
+    """Return (edge_id, mode, vt_id, dir_bit) for a Redis field key."""
+    return (
+        key & 0xFF_FFFF,
+        (key >> 24) & 0xF,
+        (key >> 28) & 0xFFFF,
+        (key >> DIR_BIT) & 0x1,
+    )
 
 
 # ── Write path ─────────────────────────────────────────────────────────────
 
-def cast(redis_client, edge_ids: list[int], mode: int, vt_id: int) -> int:
+def cast(redis_client, slug: str, edge_ids: list[int], mode: int, vt_id: int) -> int:
+    """Bulk upvote (route/point cast): +1 to each edge's up field."""
     if not edge_ids:
         return 0
+    h = hash_key(slug)
     pipe = redis_client.pipeline()
     for eid in edge_ids:
-        pipe.hincrby(REDIS_HASH, str(pack(eid, mode, vt_id)), 1)
+        pipe.hincrby(h, str(redis_field(eid, mode, vt_id, UP)), 1)
     pipe.execute()
     return len(edge_ids)
 
 
-def publish_delta(redis_client, edge_ids: list[int], mode: int, vt_id: int) -> int:
-    rev = redis_client.incr(REVISION_KEY)
+def apply_directional(
+    redis_client, slug: str, edge_id: int, mode: int, vt_id: int,
+    new_dir: int, prev_dir: int,
+) -> None:
+    """Apply a single proposal vote, reversing a prior opposite vote if needed.
+
+    new_dir / prev_dir use +1 (up), -1 (down), 0 (none). Increments the new
+    direction's field and decrements the prior direction's field when it differs
+    (a reversal). A no-op when the direction is unchanged.
+    """
+    if new_dir == prev_dir:
+        return
+    h = hash_key(slug)
+    pipe = redis_client.pipeline()
+    pipe.hincrby(h, str(redis_field(edge_id, mode, vt_id, new_dir)), 1)
+    if prev_dir in (UP, DOWN):
+        pipe.hincrby(h, str(redis_field(edge_id, mode, vt_id, prev_dir)), -1)
+    pipe.execute()
+
+
+def publish_delta(
+    redis_client, slug: str, edge_ids: list[int], mode: int, vt_id: int,
+    direction: int = UP, reversed_vote: bool = False,
+    vt_counts: dict[int, list[int]] | None = None,
+) -> int:
+    rev = redis_client.incr(revision_key(slug))
     delta: dict = {
         "type": "delta",
         "rev": rev,
         "edges": edge_ids,
         "m": int_to_mode(mode),
         "vt": vt_id,
+        "dir": 1 if direction >= 0 else -1,
+        "reversed": reversed_vote,
     }
     if vt_id > 0:
         delta["vtLabel"] = resolve_vote_type(vt_id)
-    redis_client.publish(REDIS_CHANNEL, json.dumps(delta))
+    # Authoritative post-write [up, down] for this vote type on each changed
+    # edge. When present, clients SET these counts (idempotent) instead of
+    # incrementing — so a caster's optimistic guess can't drift or double-count.
+    if vt_counts is not None:
+        delta["vtCounts"] = {str(eid): counts for eid, counts in vt_counts.items()}
+    redis_client.publish(channel_key(slug), json.dumps(delta))
     return rev
 
 
 # ── Read path ──────────────────────────────────────────────────────────────
 
-def read_all(redis_client) -> dict[int, int]:
-    raw = redis_client.hgetall(REDIS_HASH)
+def read_edge_vt_counts(
+    redis_client, slug: str, edge_ids: list[int], mode: int, vt_id: int,
+) -> dict[int, list[int]]:
+    """Return {edge_id: [up, down]} for one vote type on the given edges,
+    read straight from Redis after a write (the authoritative aggregate)."""
+    h = hash_key(slug)
+    pipe = redis_client.pipeline()
+    for eid in edge_ids:
+        pipe.hget(h, str(redis_field(eid, mode, vt_id, UP)))
+        pipe.hget(h, str(redis_field(eid, mode, vt_id, DOWN)))
+    vals = pipe.execute()
+    out: dict[int, list[int]] = {}
+    for i, eid in enumerate(edge_ids):
+        out[eid] = [int(vals[2 * i] or 0), int(vals[2 * i + 1] or 0)]
+    return out
+
+def read_all(redis_client, slug: str) -> dict[int, int]:
+    raw = redis_client.hgetall(hash_key(slug))
     return {int(k): int(v) for k, v in raw.items()}
 
 
@@ -131,48 +220,68 @@ def build_arrays(
     node_adj: list[list[int]],
     mode_filter: int | None = None,
 ) -> dict:
-    """Unpack votes into per-edge and derived per-node arrays."""
-    edge_totals = [0] * edge_count
-    # edge_id → {vt_id: count}
-    edge_vt: dict[int, dict[int, int]] = {}
+    """Unpack votes into per-edge and derived per-node arrays.
+
+    `edge_votes`/`node_votes` are NET counts (up − down) — the heatmap value
+    (clamped to ≥ 0 client-side). Per-type breakdowns are encoded as
+    [legendIdx, up, down] so modals can show "net (−down, +up)".
+    """
+    edge_up = [0] * edge_count
+    edge_down = [0] * edge_count
+    # edge_id → {vt_id: [up, down]}
+    edge_vt: dict[int, dict[int, list[int]]] = {}
 
     for packed, count in votes.items():
-        eid, m, vtid = unpack(packed)
+        eid, m, vtid, dbit = unpack(packed)
         if eid >= edge_count:
             continue
         if mode_filter is not None and m != mode_filter:
             continue
-        edge_totals[eid] += count
+        if dbit:
+            edge_down[eid] += count
+        else:
+            edge_up[eid] += count
         if vtid:
             evd = edge_vt.get(eid)
             if evd is None:
                 evd = {}
                 edge_vt[eid] = evd
-            evd[vtid] = evd.get(vtid, 0) + count
+            pair = evd.get(vtid)
+            if pair is None:
+                pair = [0, 0]
+                evd[vtid] = pair
+            pair[1 if dbit else 0] += count
 
-    # Build legend + per-edge vote types
+    edge_totals = [edge_up[i] - edge_down[i] for i in range(edge_count)]
+
+    # Build legend + per-edge vote types — sorted by net descending
     legend: list[str] = []
     li: dict[int, int] = {}
-    edge_vote_types: list[list] = [[] for _ in range(edge_count)]
-    for eid, vt_map in edge_vt.items():
-        pairs = sorted(vt_map.items(), key=lambda x: -x[1])
+
+    def encode(vt_map: dict[int, list[int]]) -> list:
+        pairs = sorted(vt_map.items(), key=lambda x: -(x[1][0] - x[1][1]))
         enc = []
-        for vtid, cnt in pairs:
+        for vtid, (up, down) in pairs:
             if vtid not in li:
                 li[vtid] = len(legend)
                 legend.append(resolve_vote_type(vtid))
-            enc.append([li[vtid], cnt])
-        edge_vote_types[eid] = enc
+            enc.append([li[vtid], up, down])
+        return enc
 
-    # Derive node votes from edges (max of adjacent edge totals)
+    edge_vote_types: list[list] = [[] for _ in range(edge_count)]
+    for eid, vt_map in edge_vt.items():
+        edge_vote_types[eid] = encode(vt_map)
+
+    # Derive node votes from edges (max net of adjacent edges; per-type pair
+    # taken from the adjacent edge with the larger net for that type).
     node_totals = [0] * node_count
-    node_vt_merged: dict[int, dict[int, int]] = {}
+    node_vt_merged: dict[int, dict[int, list[int]]] = {}
     for nid in range(node_count):
         adj = node_adj[nid]
         if not adj:
             continue
         best = 0
-        merged: dict[int, int] | None = None
+        merged: dict[int, list[int]] | None = None
         for eid in adj:
             v = edge_totals[eid]
             if v > best:
@@ -181,22 +290,17 @@ def build_arrays(
             if evd:
                 if merged is None:
                     merged = {}
-                for vtid, cnt in evd.items():
-                    merged[vtid] = max(merged.get(vtid, 0), cnt)
+                for vtid, pair in evd.items():
+                    cur = merged.get(vtid)
+                    if cur is None or (pair[0] - pair[1]) > (cur[0] - cur[1]):
+                        merged[vtid] = [pair[0], pair[1]]
         node_totals[nid] = best
         if merged:
             node_vt_merged[nid] = merged
 
     node_vote_types: list[list] = [[] for _ in range(node_count)]
     for nid, vt_map in node_vt_merged.items():
-        pairs = sorted(vt_map.items(), key=lambda x: -x[1])
-        enc = []
-        for vtid, cnt in pairs:
-            if vtid not in li:
-                li[vtid] = len(legend)
-                legend.append(resolve_vote_type(vtid))
-            enc.append([li[vtid], cnt])
-        node_vote_types[nid] = enc
+        node_vote_types[nid] = encode(vt_map)
 
     return {
         "edge_votes": edge_totals,
@@ -222,4 +326,25 @@ def coords_to_edge_ids(segments: list, coord_to_edge: dict) -> list[int]:
             if eid not in seen:
                 seen.add(eid)
                 result.append(eid)
+    return result
+
+
+def osm_nodes_to_edge_ids(
+    osm_node_ids: list[int],
+    osm_to_graph_idx: dict[int, int],
+    node_pair_to_edge: dict[tuple[int, int], int],
+) -> list[int]:
+    """Map a sequence of OSM node IDs (from OSRM annotations) to graph edge IDs."""
+    seen: set[int] = set()
+    result: list[int] = []
+    prev_graph_idx: int | None = None
+    for osm_id in osm_node_ids:
+        graph_idx = osm_to_graph_idx.get(osm_id)
+        if graph_idx is not None and prev_graph_idx is not None and graph_idx != prev_graph_idx:
+            eid = node_pair_to_edge.get((prev_graph_idx, graph_idx))
+            if eid is not None and eid not in seen:
+                seen.add(eid)
+                result.append(eid)
+        if graph_idx is not None:
+            prev_graph_idx = graph_idx
     return result
