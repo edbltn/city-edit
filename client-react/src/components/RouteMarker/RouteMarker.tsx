@@ -23,6 +23,9 @@ interface RouteMarkerProps {
   onDelete?: () => void;
   onOutOfBounds?: () => void;
   hidden?: boolean;
+  /** Fires true/false as the cursor enters/leaves the marker, so the host can
+   *  hide the start-placement ghost while the grab cursor is over a marker. */
+  onHoverChange?: (hovering: boolean) => void;
 }
 
 function getMarkerColor(which: "start" | "end" | "waypoint"): string {
@@ -39,7 +42,7 @@ const DRAG_TRAIL_STYLE: L.PolylineOptions = {
   lineCap: "round",
 };
 
-export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, hidden }: RouteMarkerProps) {
+export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, hidden, onHoverChange }: RouteMarkerProps) {
   const map = useMap();
   const { snapToGraph, currentSnapRef, setDragging } = useGraphSnap();
   const markerRef = useRef<L.Marker>(null);
@@ -48,6 +51,18 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
   const touchStartTime = useRef<number>(0);
   const wasDragged = useRef<boolean>(false);
   const originalSetLatLngRef = useRef<Function | null>(null);
+  const hoveredRef = useRef(false);
+
+  // If the marker unmounts while hovered (e.g. click-to-delete), release the
+  // hover so the host's counter doesn't get stuck.
+  const onHoverChangeRef = useRef(onHoverChange);
+  useEffect(() => { onHoverChangeRef.current = onHoverChange; }, [onHoverChange]);
+  useEffect(() => () => {
+    if (hoveredRef.current) {
+      hoveredRef.current = false;
+      onHoverChangeRef.current?.(false);
+    }
+  }, []);
 
   const icon = useMemo(() => kiteIcon(getMarkerColor(which)), [which]);
 
@@ -73,6 +88,8 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
 
   const eventHandlers = useMemo(
     () => ({
+      mouseover: () => { hoveredRef.current = true; onHoverChange?.(true); },
+      mouseout: () => { hoveredRef.current = false; onHoverChange?.(false); },
       // Desktop: click fires if there was no drag
       click: () => {
         if (!wasDragged.current) {
@@ -179,7 +196,7 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
         onDragFinish?.();
       },
     }),
-    [map, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, snapToGraph, currentSnapRef, setDragging]
+    [map, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, snapToGraph, currentSnapRef, setDragging, onHoverChange]
   );
 
   return (

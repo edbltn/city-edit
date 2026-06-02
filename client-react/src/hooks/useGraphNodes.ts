@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMap } from "react-leaflet";
 import { CONFIG } from "../config";
+import { withMap } from "../map/runtime";
 
 /**
  * Fetch graph nodes for the current map viewport.
@@ -16,7 +17,7 @@ export function useGraphNodes(): [number, number][] {
         const bounds = map.getBounds();
         const bbox = `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`;
 
-        const response = await fetch(`${CONFIG.apiUrl}/graph?bbox=${encodeURIComponent(bbox)}`);
+        const response = await fetch(withMap(`${CONFIG.apiUrl}/graph?bbox=${encodeURIComponent(bbox)}`));
         if (!response.ok) throw new Error(`Graph fetch failed: ${response.status}`);
 
         const data = await response.json();

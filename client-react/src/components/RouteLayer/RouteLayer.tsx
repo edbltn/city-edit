@@ -237,6 +237,9 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, onP
           style={() => ({
             ...interactiveStyle,
             pane: "desirePathPane",
+            // Force SVG (a real DOM <path>) so hover events fire reliably and
+            // aren't shadowed by a sibling canvas renderer under preferCanvas.
+            renderer: svgRenderer,
             className: "desire-path-interactive",
           })}
           eventHandlers={{
@@ -326,6 +329,9 @@ export function SplitDesirePathLayer({ splitPath, onSegmentDrag, onPathHoverChan
           style={() => ({
             ...interactiveStyle,
             pane: "desirePathPane",
+            // Force SVG (a real DOM <path>) so hover events fire reliably and
+            // aren't shadowed by a sibling canvas renderer under preferCanvas.
+            renderer: svgRenderer,
             className: "split-path-interactive",
           })}
           eventHandlers={{

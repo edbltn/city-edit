@@ -1,0 +1,101 @@
+.passcode-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 400);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.passcode-modal {
+  width: 100%;
+  max-width: 360px;
+  padding: var(--space-5);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-main);
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+
+.passcode-modal h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+}
+
+.passcode-modal p {
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-size-2xs);
+  opacity: 0.65;
+}
+
+.passcode-modal input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-main);
+  font-size: var(--font-size-xs);
+  color: var(--ink);
+  background: rgba(212, 212, 212, 0.04);
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  box-sizing: border-box;
+}
+
+.passcode-modal input:focus {
+  outline: none;
+  border-color: var(--color-start);
+}
+
+.passcode-error {
+  margin-top: var(--space-2);
+  color: var(--color-end);
+  font-size: var(--font-size-2xs);
+}
+
+.passcode-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.passcode-cancel,
+.passcode-submit {
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--font-main);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.03em;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.passcode-cancel {
+  border: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink);
+}
+
+.passcode-cancel:hover {
+  background: var(--hover-bg);
+}
+
+.passcode-submit {
+  border: 1px solid var(--color-start);
+  background: none;
+  color: var(--color-start);
+}
+
+.passcode-submit:hover:not(:disabled) {
+  background: var(--color-start-light);
+}
+
+.passcode-submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

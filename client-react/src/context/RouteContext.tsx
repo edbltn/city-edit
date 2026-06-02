@@ -10,8 +10,11 @@ import {
 } from "react";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { CONFIG } from "../config";
+import { getMapSlug, getPasscodeToken } from "../map/runtime";
+import { getVoterId } from "../utils/voterIdentity";
 import { getDefaultVoteTypeForTheme } from "../constants/voteTypes";
 import { getInitialPoints, cleanNavParams } from "../utils/mapViewState";
+import { edgeKey, pointKey, hasVotedKey, markVotedKeys } from "../utils/votedSegments";
 import { useTheme } from "./ThemeContext";
 import type {
   LatLng,
@@ -147,6 +150,7 @@ interface RouteContextValue {
   clearSuppressClick: () => void;
   setSuppressClick: () => void;
   setVoteType: (voteType: string) => void;
+  isVoteTypeAlreadyCast: (voteType: string) => boolean;
 }
 
 const RouteContext = createContext<RouteContextValue | null>(null);
@@ -163,7 +167,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const nextGhostIdRef = useRef(0);
   const [splitDesirePaths, setSplitDesirePaths] = useState<SplitDesirePath[]>([]);
   const [isCalculatingSplit, setIsCalculatingSplit] = useState(false);
-  const [hasVoted, setHasVoted] = useState(false);
+  // Bumped whenever a vote is recorded so derived "already voted" values recompute.
+  const [votedVersion, setVotedVersion] = useState(0);
   const [isVoting, setIsVoting] = useState(false);
   const [voteType, setVoteTypeState] = useState<string>(() =>
     getDefaultVoteTypeForTheme(theme, theme.inputMode === "point" ? "point" : "route")
@@ -209,6 +214,9 @@ export function RouteProvider({ children }: { children: ReactNode }) {
 
   // Restore start/end from URL params (set by theme switcher), then clean them up
   const restoredFromUrlRef = useRef(false);
+  // A vote type restored from the URL (?vt=). Consumed once by the pointType
+  // auto-update effect so a deep link selects it instead of the theme default.
+  const restoredVtRef = useRef<string | null>(null);
   useEffect(() => {
     if (restoredFromUrlRef.current) return;
     restoredFromUrlRef.current = true;
@@ -217,7 +225,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     if (initial.start) {
       const s = initial.start;
       setStart({ coords: { lat: s.lat, lng: s.lng }, timestamp: Date.now(), address: null });
-      fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${s.lat}&lng=${s.lng}`)
+      fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${s.lat}&lng=${s.lng}`)
         .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
         .then(data => {
           setStart(prev =>
@@ -231,7 +239,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     if (initial.end) {
       const e = initial.end;
       setEnd({ coords: { lat: e.lat, lng: e.lng }, timestamp: Date.now(), address: null });
-      fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${e.lat}&lng=${e.lng}`)
+      fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${e.lat}&lng=${e.lng}`)
         .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
         .then(data => {
           setEnd(prev =>
@@ -241,6 +249,10 @@ export function RouteProvider({ children }: { children: ReactNode }) {
           );
         })
         .catch(() => {});
+    }
+    if (initial.vt) {
+      restoredVtRef.current = initial.vt;
+      setVoteTypeState(initial.vt);
     }
     cleanNavParams();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -252,8 +264,15 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // ============================================
   // Helper: Calculate all route segments for split paths
   // ============================================
+  const splitAbortRef = useRef<AbortController | null>(null);
+
   const calculateAllSegments = useCallback(async (points: LatLng[]): Promise<SplitDesirePath[]> => {
     if (points.length < 2) return [];
+
+    // Abort previous batch of split requests
+    splitAbortRef.current?.abort();
+    const controller = new AbortController();
+    splitAbortRef.current = controller;
 
     const fetchPromises = [];
     for (let i = 0; i < points.length - 1; i++) {
@@ -264,8 +283,10 @@ export function RouteProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({
             start: [points[i].lat, points[i].lng],
             end: [points[i + 1].lat, points[i + 1].lng],
-            waypoints: []
-          })
+            waypoints: [],
+            map: getMapSlug(),
+          }),
+          signal: controller.signal,
         })
       );
     }
@@ -301,7 +322,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const setStartPoint = useCallback((coords: LatLng, address?: string) => {
     setStart({ coords, timestamp: Date.now(), address: address ?? null });
     if (!address) {
-      fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${coords.lat}&lng=${coords.lng}`)
+      fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${coords.lat}&lng=${coords.lng}`)
         .then(r => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json();
@@ -320,7 +341,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const setEndPoint = useCallback((coords: LatLng, address?: string) => {
     setEnd({ coords, timestamp: Date.now(), address: address ?? null });
     if (!address) {
-      fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${coords.lat}&lng=${coords.lng}`)
+      fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${coords.lat}&lng=${coords.lng}`)
         .then(r => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json();
@@ -368,8 +389,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
 
   const setVoteType = useCallback((newVoteType: string) => {
     setVoteTypeState(newVoteType);
-    // Allow re-voting with a different suggestion
-    setHasVoted(false);
   }, []);
 
   // ============================================
@@ -383,7 +402,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     setGhostWaypointIds([]);
     setSplitDesirePaths([]);
     routeVersionRef.current++;
-    setHasVoted(false);
     setIsVoting(false);
     setActiveToolState("start");
     clearRoute();
@@ -409,9 +427,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     newIds.splice(segmentIndex, 0, newId);
     setGhostWaypointIds(newIds);
 
-    // Path changed - reset vote state immediately
+    // Path changed - bump version so any in-flight vote isn't recorded
     routeVersionRef.current++;
-    setHasVoted(false);
     setIsVoting(false);
 
     // Try client-side geometry splitting: if the insertion point is on the
@@ -506,9 +523,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     ghostWaypointsRef.current = newWaypoints;
     setGhostWaypoints(newWaypoints);
 
-    // Path changed - reset vote state immediately
+    // Path changed - bump version so any in-flight vote isn't recorded
     routeVersionRef.current++;
-    setHasVoted(false);
     setIsVoting(false);
 
     // Clear paths immediately - they'll reappear when calculation completes
@@ -575,7 +591,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     const remainingAddresses = allAddresses.filter((_, i) => i !== removeIndex);
 
     routeVersionRef.current++;
-    setHasVoted(false);
     setIsVoting(false);
 
     // Clear paths immediately - they'll reappear when calculation completes
@@ -599,7 +614,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       setActiveToolState("start");
       if (!addr) {
         const pt = remaining[0];
-        fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${pt.lat}&lng=${pt.lng}`)
+        fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${pt.lat}&lng=${pt.lng}`)
           .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
           .then(data => {
             setStart(prev =>
@@ -641,7 +656,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         setStart({ coords: newStart, timestamp: Date.now(), address: startAddr });
         // Fetch reverse geocode if promoted point lacks an address
         if (!startAddr) {
-          fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${newStart.lat}&lng=${newStart.lng}`)
+          fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${newStart.lat}&lng=${newStart.lng}`)
             .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
             .then(data => {
               setStart(prev =>
@@ -657,7 +672,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         const endAddr = remainingAddresses[remainingAddresses.length - 1] ?? null;
         setEnd({ coords: newEnd, timestamp: Date.now(), address: endAddr });
         if (!endAddr) {
-          fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${newEnd.lat}&lng=${newEnd.lng}`)
+          fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${newEnd.lat}&lng=${newEnd.lng}`)
             .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
             .then(data => {
               setEnd(prev =>
@@ -729,11 +744,26 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     const voteRouteVersion = routeVersionRef.current;
     setIsVoting(true);
 
+    if (edgeIdsToVote.length > 0) {
+      window.dispatchEvent(new CustomEvent("optimistic-vote", {
+        detail: { edgeIds: edgeIdsToVote, voteType, mode: theme.mode },
+      }));
+    } else if (isPointVote && start.coords) {
+      window.dispatchEvent(new CustomEvent("optimistic-vote", {
+        detail: { point: { lat: start.coords.lat, lng: start.coords.lng }, voteType, mode: theme.mode },
+      }));
+    }
+
     try {
+      const slug = getMapSlug();
       const body: Record<string, unknown> = {
         mode: theme.mode,
         vote_type: voteType,
+        map: slug,
+        voter_id: getVoterId(),
       };
+      const token = getPasscodeToken(slug);
+      if (token) body.passcode_token = token;
 
       if (isPointVote && start.coords) {
         body.point = [start.coords.lat, start.coords.lng];
@@ -749,17 +779,58 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify(body),
       });
 
+      // Map requires a passcode the client doesn't have — prompt for it.
+      if (response.status === 401) {
+        window.dispatchEvent(new CustomEvent("map-passcode-required", { detail: { slug } }));
+        throw new Error("Passcode required");
+      }
       if (!response.ok) throw new Error(`Vote failed: ${response.statusText}`);
 
+      const result = await response.json();
+
+      // Record the vote unless the path changed mid-flight (stale vote).
       if (routeVersionRef.current === voteRouteVersion) {
-        setHasVoted(true);
+        if (isPointVote && start.coords) {
+          markVotedKeys([
+            pointKey(theme.mode, start.coords.lat, start.coords.lng, voteType),
+          ]);
+        } else if (edgeIdsToVote.length > 0) {
+          markVotedKeys(edgeIdsToVote.map((eid) => edgeKey(theme.mode, eid, voteType)));
+        }
+        setVotedVersion((v) => v + 1);
       }
+
+      void result;
     } catch (err) {
       console.error("Failed to cast vote:", err);
     } finally {
       setIsVoting(false);
     }
   }, [splitDesirePaths, desirePathSegments, routeEdgeIds, voteType, start.coords, end.coords, theme.mode]);
+
+  // Edge IDs that make up the current vote target (split paths take precedence).
+  const currentEdgeIds = useMemo(() => {
+    if (splitDesirePaths.length > 0) return splitDesirePaths.flatMap((sp) => sp.edgeIds);
+    return routeEdgeIds || [];
+  }, [splitDesirePaths, routeEdgeIds]);
+
+  // A vote type counts as "already cast" only when the whole current target is covered:
+  // every edge of the route (or the single point) already has this type from this user.
+  const isVoteTypeAlreadyCast = useCallback(
+    (vt: string) => {
+      void votedVersion; // recompute when a vote is recorded
+      const isPointVote = !!start.coords && !end.coords;
+      if (isPointVote && start.coords) {
+        return hasVotedKey(pointKey(theme.mode, start.coords.lat, start.coords.lng, vt));
+      }
+      if (currentEdgeIds.length === 0) return false;
+      return currentEdgeIds.every((eid) => hasVotedKey(edgeKey(theme.mode, eid, vt)));
+    },
+    [votedVersion, currentEdgeIds, start.coords, end.coords, theme.mode]
+  );
+
+  // Whether the currently-selected vote type is already cast on the current target.
+  const hasVoted = isVoteTypeAlreadyCast(voteType);
 
   // ============================================
   // Main calculation effect
@@ -780,9 +851,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Reset vote status on any change
+    // Path changed - bump version so a stale in-flight vote isn't recorded
     routeVersionRef.current++;
-    setHasVoted(false);
     setIsVoting(false);
     setWaypoints([]);
 
@@ -835,7 +905,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (start.coords && end.coords && waypoints.length > 0) {
       routeVersionRef.current++;
-      setHasVoted(false);
       setIsVoting(false);
       calculateRoute({ start: start.coords, end: end.coords, waypoints });
     }
@@ -846,6 +915,12 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // Auto-update vote type when pointType changes
   // ============================================
   useEffect(() => {
+    // A URL-restored vote type wins once, so a deep link lands on its proposal.
+    if (restoredVtRef.current) {
+      setVoteTypeState(restoredVtRef.current);
+      restoredVtRef.current = null;
+      return;
+    }
     setVoteTypeState(getDefaultVoteTypeForTheme(theme, pointType));
   }, [pointType, theme]);
 
@@ -890,6 +965,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       clearSuppressClick,
       setSuppressClick,
       setVoteType,
+      isVoteTypeAlreadyCast,
     }),
     [
       start,
@@ -928,6 +1004,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       clearSuppressClick,
       setSuppressClick,
       setVoteType,
+      isVoteTypeAlreadyCast,
     ]
   );
 

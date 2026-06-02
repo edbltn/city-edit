@@ -10,17 +10,30 @@
  * Clears on zoom, redraws on zoom end and pan.
  */
 
-import { useEffect, useRef, useCallback, useState, useMemo } from "react";
+import { useEffect, useLayoutEffect, useRef, useCallback, useState, useMemo } from "react";
 import { useMap, Marker } from "react-leaflet";
 import { createPortal } from "react-dom";
 import L from "leaflet";
 import Flatbush from "flatbush";
 import { CONFIG } from "../../config";
+import { withMap, getMapSlug } from "../../map/runtime";
 import { useWebSocketContext } from "../../context/WebSocketContext";
-import { useGraphSnap, useTheme } from "../../context";
+import { useGraphSnap, useTheme, useHeatmap } from "../../context";
 import type { GraphData } from "../../types";
 import { hashLabelToColor, makeVoteTypeIcon } from "./voteTypeIcon";
-import { iconForLabel, iconSrc } from "../../themes";
+import { selectTopProposals, type VoteTypeWinner } from "./topProposals";
+import { applyEdgeVoteChange, applyAuthoritativeCounts } from "./voteApply";
+import { iconForLabel, iconSrc, mapStyleForTheme } from "../../themes";
+import {
+  getCachedTopology,
+  setCachedTopology,
+  getCachedVotes,
+  setCachedVotes,
+} from "../../utils/graphCache";
+import { getMyVote, setMyVote, reconcileEdge, type VoteDirection } from "../../utils/myVotes";
+import { getVoterId } from "../../utils/voterIdentity";
+import { buildSelectionUrl, copyToClipboard } from "../../utils/shareLink";
+import { CheckIcon } from "../CheckIcon";
 
 // ---------------------------------------------------------------------------
 // Geometry helpers
@@ -60,15 +73,10 @@ function arrayMax(arr: number[]): number {
 // Heatmap color stops — flame cross-section
 // ---------------------------------------------------------------------------
 // Each pass uses a different color and width so the gradient runs ACROSS the
-// stroke (deep-red halo on the outside, white-hot core on the inside) rather
-// than ALONG it. Combined with `globalCompositeOperation = "lighter"` this
-// gives Strava-style natural intersection brightening: when edges cross, RGB
-// channels add and the apparent hue shifts toward yellow→white as expected.
-
-const HEAT_HALO = "rgb(180, 50, 30)";   // deep red — outer glow
-const HEAT_WARM = "rgb(255, 110, 30)";  // warm orange — main "heat"
-const HEAT_HOT = "rgb(255, 210, 90)";   // bright yellow — hot core
-const HEAT_PEAK = "rgb(255, 240, 210)"; // pale warm white — peak intensity
+// stroke (halo on the outside, hot core on the inside) rather than ALONG it.
+// The ramp + blend mode come from the active map style (mapStyles.ts): dark
+// styles blend additively (`lighter`/`screen`) for Strava-style intersection
+// brightening; the light style blends via `multiply` so heat darkens the map.
 
 // ---------------------------------------------------------------------------
 // Reverse-geocode cache (module-level, survives re-renders)
@@ -102,7 +110,7 @@ function resolveAddress(
   // Not cached — show placeholder and fire async fetch
   if (!geocodeInFlight.has(key)) {
     geocodeInFlight.add(key);
-    fetch(`${CONFIG.apiUrl}/reverse-geocode?lat=${lat}&lng=${lng}`)
+    fetch(withMap(`${CONFIG.apiUrl}/reverse-geocode?lat=${lat}&lng=${lng}`))
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -146,84 +154,59 @@ interface HoverEdge { kind: "edge"; index: number }
 interface HoverNode { kind: "node"; index: number }
 type HoverTarget = HoverEdge | HoverNode;
 
+// The single resolved selection shared by hover, click/pin, the point-vote
+// handler, and top-proposal indicators. `voteEdgeId` is the edge a vote lands
+// on (an edge target votes on itself; a node votes on its first adjacent edge),
+// so the highlighted component always matches the vote target.
+interface ResolvedSelection {
+  target: HoverTarget;
+  snapLat: number;
+  snapLng: number;
+  voteEdgeId: number | null;
+}
+
 interface HitResult {
   target: HoverTarget;
   snapLat: number;
   snapLng: number;
 }
 
-interface VoteTypeWinner {
-  legendIdx: number;
+// A vote-type breakdown row shown in tooltips/modals.
+interface VoteTypeRow {
   label: string;
-  edgeIdx: number;
-  count: number;
+  up: number;
+  down: number;
+}
+
+/** Decode a [legendIdx, up, down][] breakdown into labelled rows. */
+function decodeVoteTypes(
+  pairs: [number, number, number][] | undefined,
+  legend: string[]
+): VoteTypeRow[] {
+  if (!pairs) return [];
+  return pairs
+    .map(([idx, up, down]) => ({ label: legend[idx], up: up ?? 0, down: down ?? 0 }))
+    .filter((v) => v.label);
 }
 
 // Min zoom level at which to show vote-type indicator icons (avoids clutter
 // when many edges crowd a small viewport).
 const INDICATOR_MIN_ZOOM = 13;
 
-// Cap on how many top-proposal indicators show on the map. Prevents a few
-// spammy votes across many vote types from cluttering the map with one
-// indicator per type — only the 10 most-voted survive.
+// Cap on how many top-proposal indicators show on the map. Each surviving
+// EDGE consumes one slot (winners are deduped per edge first), so the 10 most
+// net-voted segments survive — not one per vote type.
 const TOP_PROPOSAL_LIMIT = 10;
 
-/** Find the edge with the highest count for each vote type in the legend. */
-function computeVoteTypeWinners(data: GraphData | null): VoteTypeWinner[] {
-  if (!data) return [];
-  const legend = data.vote_type_legend ?? [];
-  const edgeVoteTypes = data.edge_vote_types ?? [];
-  if (!legend.length || !edgeVoteTypes.length) return [];
-
-  const bestByType = new Map<number, { edgeIdx: number; count: number }>();
-  for (let edgeIdx = 0; edgeIdx < edgeVoteTypes.length; edgeIdx++) {
-    const pairs = edgeVoteTypes[edgeIdx];
-    if (!pairs) continue;
-    for (const [legendIdx, count] of pairs) {
-      const existing = bestByType.get(legendIdx);
-      if (!existing || count > existing.count) {
-        bestByType.set(legendIdx, { edgeIdx, count });
-      }
-    }
-  }
-
-  const winners: VoteTypeWinner[] = [];
-  for (const [legendIdx, { edgeIdx, count }] of bestByType) {
-    const label = legend[legendIdx];
-    if (!label || count <= 0) continue;
-    winners.push({ legendIdx, label, edgeIdx, count });
-  }
-  return winners;
-}
-
-/**
- * Trim a winner list to the top N by count.
- * Tiebreak: a deterministic-but-random shuffle keyed on `salt`. Same salt +
- * same labels → same order, so re-renders within a session don't reshuffle.
- * A new salt is generated on each page load so equal-count proposals get
- * different exposure across visits.
- */
-function applyTopProposalLimit(
-  winners: VoteTypeWinner[],
-  salt: number,
-  limit: number
-): VoteTypeWinner[] {
-  const shuffleKey = (label: string): number => {
-    let h = salt | 0;
-    for (let i = 0; i < label.length; i++) {
-      h = ((h * 31) + label.charCodeAt(i)) | 0;
-    }
-    return h;
-  };
-
-  return winners
-    .slice()
-    .sort((a, b) => {
-      if (b.count !== a.count) return b.count - a.count;
-      return shuffleKey(a.label) - shuffleKey(b.label);
-    })
-    .slice(0, limit);
-}
+// "Spread to grid" interaction for crowded indicators. When a top-proposal
+// icon is clicked and other icons sit within CLUSTER_RADIUS_PX of it on screen,
+// the first click is swallowed: instead of selecting, the cluster fans out into
+// a grid so each icon becomes individually clickable, then snaps back after
+// SPREAD_DURATION_MS.
+const CLUSTER_RADIUS_PX = 26; // screen distance that counts as "clustered"
+const SPREAD_CELL_PX = 38;    // grid cell pitch when fanned out
+const SPREAD_DURATION_MS = 2200;
+const SPREAD_ANIM_MS = 280;   // keep in sync with the CSS transition
 
 // Number of bbox-nearest candidates to retrieve from the spatial index.
 // 20 is enough for Manhattan-scale edges (~200m max length); the closest
@@ -372,63 +355,39 @@ function hitTest(
   }
 
   if (bestEdge !== null) {
-    const [fromIdx, toIdx] = data.edges[bestEdge];
-    const fromNode = data.nodes[fromIdx];
-    const toNode = data.nodes[toIdx];
-    const dx = toNode[1] - fromNode[1];
-    const dy = toNode[0] - fromNode[0];
-    const lenSq = dx * dx + dy * dy;
-    let snapLat: number, snapLng: number;
-    if (lenSq === 0) {
-      snapLat = fromNode[0]; snapLng = fromNode[1];
-    } else {
-      const t = Math.max(0, Math.min(1,
-        ((lng - fromNode[1]) * dx + (lat - fromNode[0]) * dy) / lenSq
-      ));
-      snapLat = fromNode[0] + t * dy;
-      snapLng = fromNode[1] + t * dx;
-    }
+    const { lat: snapLat, lng: snapLng } = projectOntoEdge(data, bestEdge, lat, lng);
     return { target: { kind: "edge", index: bestEdge }, snapLat, snapLng };
   }
 
   return null;
 }
 
+/**
+ * Project (lat,lng) onto edge `edgeIdx`, returning the closest point on the
+ * segment (clamped to the endpoints). Shared by hitTest and the nearest-edge
+ * fallback so both produce a real snap position.
+ */
+function projectOntoEdge(
+  data: Pick<GraphData, "nodes" | "edges">,
+  edgeIdx: number,
+  lat: number, lng: number
+): { lat: number; lng: number } {
+  const [fromIdx, toIdx] = data.edges[edgeIdx];
+  const fromNode = data.nodes[fromIdx];
+  const toNode = data.nodes[toIdx];
+  const dx = toNode[1] - fromNode[1];
+  const dy = toNode[0] - fromNode[0];
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return { lat: fromNode[0], lng: fromNode[1] };
+  const t = Math.max(0, Math.min(1,
+    ((lng - fromNode[1]) * dx + (lat - fromNode[0]) * dy) / lenSq
+  ));
+  return { lat: fromNode[0] + t * dy, lng: fromNode[1] + t * dx };
+}
+
 // ---------------------------------------------------------------------------
 // Tooltip content helper (shared by hover and pinned tooltips)
 // ---------------------------------------------------------------------------
-
-function renderTooltipContent(
-  name: string,
-  votes: number,
-  voteTypes: { label: string; count: number }[]
-) {
-  const topTypes = voteTypes.slice(0, 3);
-  const overflowCount = voteTypes.length - 3;
-  return (
-    <>
-      {name && <div className="graph-tooltip-name">{name}</div>}
-      <div className="graph-tooltip-meta">
-        {votes > 0 ? `${votes} vote${votes !== 1 ? "s" : ""}` : "no votes yet"}
-      </div>
-      {topTypes.length > 0 && (
-        <div className="graph-tooltip-types">
-          {topTypes.map((t, i) => (
-            <div key={i}>
-              {t.label}
-              <span className="graph-tooltip-type-count">{t.count}</span>
-            </div>
-          ))}
-          {overflowCount > 0 && (
-            <div className="graph-tooltip-types-more">
-              and {overflowCount} other{overflowCount !== 1 ? "s" : ""}
-            </div>
-          )}
-        </div>
-      )}
-    </>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Node adjacency builder — used to derive node votes from edges
@@ -456,14 +415,23 @@ interface GraphLayerProps {
    *  edge midpoint of the indicator's segment. Hosts use this to place a
    *  start point at that location so the segment becomes selected. */
   onIndicatorClick?: (latlng: { lat: number; lng: number }) => void;
+  /** Removes the currently-selected point. Wired to the same handler as the
+   *  start marker's delete so the modal's X is functionally identical. */
+  onRemoveSelected?: () => void;
+  /** True while the cursor is over the route/desire path. The graph hover yields
+   *  (no card/highlight) so the path's own midwaypoint grab affordance isn't
+   *  competed with by a graph proposal tooltip. */
+  suppressHover?: boolean;
 }
 
-export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayerProps) {
+export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSelected, suppressHover = false }: GraphLayerProps) {
   const map = useMap();
   const { subscribeToDelta } = useWebSocketContext();
   const { setSnapFn, setCurrentSnap, isDraggingRef: graphDraggingRef } = useGraphSnap();
+  const { setHeatmapLoaded, isHeatmapLoading } = useHeatmap();
   const theme = useTheme();
   const themeMode = theme.mode;
+  const mapStyle = mapStyleForTheme(theme);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const hoverCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -475,6 +443,27 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   const redrawTimeoutRef = useRef<number | null>(null);
   const isZoomingRef = useRef(false);
 
+  // Per-zoom projection cache for node layer-points. Leaflet layer-points are
+  // stable across pans at a fixed zoom (panning only translates the map pane),
+  // so we project each node at most once per zoom and reuse it across all pan
+  // frames — turning every redraw into cheap "layerPoint + paneOffset" adds.
+  // Keyed by zoom + pixelOrigin (origin only changes on zoom / view reset).
+  // `done` marks which nodes have been projected so we project lazily, paying
+  // only for nodes that actually enter the viewport.
+  const projCacheRef = useRef<{
+    zoom: number;
+    ox: number;
+    oy: number;
+    xs: Float64Array;
+    ys: Float64Array;
+    done: Uint8Array;
+  } | null>(null);
+
+  // Memoized max edge-vote count, recomputed only when the vote revision
+  // changes (i.e. on a vote/delta) rather than on every zoom/pan frame.
+  const maxVotesRef = useRef(1);
+  const maxVotesRevRef = useRef(-1);
+
   // Node adjacency list — node index → [edge indices]. Built once from topology,
   // used to derive node votes from edge totals (max of adjacent edges).
   const nodeAdjRef = useRef<number[][] | null>(null);
@@ -485,13 +474,78 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   // Deltas received before the initial vote fetch completes
   const pendingDeltasRef = useRef<import("../../types").VoteDelta[]>([]);
 
+  // Optimistic increments not yet reconciled by their own WebSocket delta.
+  // Keyed by `${edgeId}:${voteType}` → count. When a vote is cast we apply +1
+  // optimistically and record it here; the server then broadcasts the same vote
+  // as a delta, which would double-count. We absorb that delta against this
+  // ledger so the caster's own vote is counted exactly once. Other users'
+  // coincident votes on the same edge aren't in the ledger and still apply.
+  const pendingOptimisticRef = useRef<Map<string, number>>(new Map());
+
   // Stable ref for onSnap callback
   const onSnapRef = useRef(onSnap);
   useEffect(() => { onSnapRef.current = onSnap; }, [onSnap]);
 
-  // Register graph snap function for use by path drag.
-  // Pulls indices from refs so the closure stays stable across re-renders
-  // but always queries the current spatial structures.
+  // Unified selection resolver — the single source of truth for "what graph
+  // component does this point map to". Used by hover, the pinned/selected
+  // effect, the point-vote handler, and top-proposal indicators so the
+  // highlighted component always equals the vote target. Hierarchy:
+  //   1. overrideEdgeIdx (a top-proposal icon) dominates everything.
+  //   2. a node within SNAP_NODE_PX wins (same radius for hover and click).
+  //   3. otherwise the nearest edge (in-radius via hitTest, else globally).
+  // Pulls indices/data from refs so the closure stays stable across renders.
+  const resolveSelection = useCallback((
+    lat: number, lng: number, overrideEdgeIdx?: number | null
+  ): ResolvedSelection | null => {
+    const data = graphDataRef.current;
+    if (!data?.edges?.length) return null;
+
+    // 1. Indicator override — select that edge directly.
+    if (overrideEdgeIdx != null) {
+      const snap = projectOntoEdge(data, overrideEdgeIdx, lat, lng);
+      return {
+        target: { kind: "edge", index: overrideEdgeIdx },
+        snapLat: snap.lat, snapLng: snap.lng, voteEdgeId: overrideEdgeIdx,
+      };
+    }
+
+    const pt = map.latLngToContainerPoint([lat, lng]);
+
+    // 2. Node-then-edge within radius.
+    const hit = hitTest(
+      data, map, pt.x, pt.y, lat, lng,
+      edgeIndexRef.current, nodeIndexRef.current
+    );
+    if (hit) {
+      const voteEdgeId = hit.target.kind === "edge"
+        ? hit.target.index
+        : nodeAdjRef.current?.[hit.target.index]?.[0] ?? null;
+      return { target: hit.target, snapLat: hit.snapLat, snapLng: hit.snapLng, voteEdgeId };
+    }
+
+    // 3. Nearest-edge fallback (no radius) so a selection always resolves.
+    const nearestEdgeIdx = findNearestEdgeIndex(
+      data, map, pt.x, pt.y, edgeIndexRef.current, lng, lat
+    );
+    if (nearestEdgeIdx !== null) {
+      const snap = projectOntoEdge(data, nearestEdgeIdx, lat, lng);
+      return {
+        target: { kind: "edge", index: nearestEdgeIdx },
+        snapLat: snap.lat, snapLng: snap.lng, voteEdgeId: nearestEdgeIdx,
+      };
+    }
+
+    return null;
+  }, [map]);
+
+  // Ref so stable effects (hover, point-vote listener) can call the resolver
+  // without re-subscribing when it changes.
+  const resolveSelectionRef = useRef(resolveSelection);
+  useEffect(() => { resolveSelectionRef.current = resolveSelection; }, [resolveSelection]);
+
+  // Register graph snap function for use by path drag. Uses hitTest directly
+  // (in-radius only, null when out of range) so dragging stays free when far
+  // from the graph — unlike resolveSelection, which always resolves to an edge.
   useEffect(() => {
     setSnapFn((m: L.Map, lat: number, lng: number) => {
       const data = graphDataRef.current;
@@ -511,6 +565,16 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const hoverTargetRef = useRef<HoverTarget | null>(null);
   const hoverRafRef = useRef<number | null>(null);
+  // True while the cursor is over a top-proposal icon, so the map hover handler
+  // yields the highlight to the icon (hierarchy rule #1).
+  const overIndicatorRef = useRef(false);
+  // True while the cursor is over the pinned/selected modal, so the map hover
+  // handler doesn't fire (and surface other hover modals) underneath it.
+  const overModalRef = useRef(false);
+  // Mirrors the `suppressHover` prop (cursor over the route path) for the
+  // stable mousemove handler to read without re-subscribing.
+  const suppressHoverRef = useRef(suppressHover);
+  useEffect(() => { suppressHoverRef.current = suppressHover; }, [suppressHover]);
 
   // Pinned tooltip screen position (follows start pin on map pan/zoom)
   const [pinnedScreenPos, setPinnedScreenPos] = useState<{ x: number; y: number } | null>(null);
@@ -526,21 +590,45 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   const [geocodeVersion, setGeocodeVersion] = useState(0);
   const bumpGeocode = useCallback(() => setGeocodeVersion((v) => v + 1), []);
 
+  // Increments when graph vote data mutates, forcing tooltip re-render. The
+  // value is read so the vote-type decode memos re-run in lockstep with the
+  // winners recompute (both happen in refreshGraphDisplay) — avoiding a stale
+  // winner indexing into emptied vote data ("no votes yet" on a top proposal).
+  const [graphVoteVersion, setGraphVoteVersion] = useState(0);
+  void graphVoteVersion; // read so decode memos/winners re-render in lockstep
+
+  // Increments when the user's own votes change, forcing the proposal modal to
+  // re-evaluate +/- button state (myVotes lives outside React state).
+  const [myVotesVersion, setMyVotesVersion] = useState(0);
+
   // Vote-type indicator markers — top-voted segment per vote type
   const [winners, setWinners] = useState<VoteTypeWinner[]>([]);
   const [currentZoom, setCurrentZoom] = useState<number>(() => map.getZoom());
   const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
+
+  // Temporary "fan out crowded icons into a grid" state. Maps a winner's
+  // legendIdx -> overridden [lat, lng] while the spread is active; null when
+  // icons sit at their natural edge midpoints. spreadActiveRef mirrors this for
+  // synchronous reads inside click handlers (state is async).
+  const [spreadPositions, setSpreadPositions] =
+    useState<Map<number, [number, number]> | null>(null);
+  const spreadActiveRef = useRef(false);
+  const spreadTimeoutRef = useRef<number | null>(null);
 
   // Random tiebreak salt — stable for this page load, different next time.
   // Used so that equal-count proposals don't always favor the same labels.
   const tiebreakSaltRef = useRef<number>(Date.now());
 
   // Only update winners state when the list actually changes (avoids
-  // re-mounting indicator markers on every vote poll).
+  // re-mounting indicator markers on every vote poll). `force` bypasses the
+  // skip when the legend grew, so a winner can't keep pointing at a legend
+  // index the card would decode differently.
   const winnersRef = useRef(winners);
-  const setStableWinners = useCallback((next: VoteTypeWinner[]) => {
+  const lastLegendLenRef = useRef(0);
+  const setStableWinners = useCallback((next: VoteTypeWinner[], force = false) => {
     const prev = winnersRef.current;
     if (
+      !force &&
       prev.length === next.length &&
       prev.every((w, i) => w.edgeIdx === next[i].edgeIdx && w.count === next[i].count && w.legendIdx === next[i].legendIdx)
     ) return;
@@ -551,11 +639,13 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   const refreshGraphDisplay = useCallback(() => {
     const data = graphDataRef.current;
     if (!data) return;
-    setStableWinners(applyTopProposalLimit(
-      computeVoteTypeWinners(data),
-      tiebreakSaltRef.current,
-      TOP_PROPOSAL_LIMIT
-    ));
+    const legendLen = data.vote_type_legend?.length ?? 0;
+    const legendChanged = legendLen !== lastLegendLenRef.current;
+    lastLegendLenRef.current = legendLen;
+    setStableWinners(selectTopProposals(
+      data, tiebreakSaltRef.current, TOP_PROPOSAL_LIMIT,
+    ), legendChanged);
+    setGraphVoteVersion((v) => v + 1);
     scheduleRedrawRef.current();
   }, [setStableWinners]);
 
@@ -567,19 +657,14 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   const onIndicatorClickRef = useRef(onIndicatorClick);
   useEffect(() => { onIndicatorClickRef.current = onIndicatorClick; }, [onIndicatorClick]);
 
-  // When a vote-type indicator is hovered, this overrides the regular hover
-  // tooltip with an expanded modal anchored to the icon's screen position.
-  const [hoveredIndicator, setHoveredIndicator] = useState<{
-    winner: VoteTypeWinner;
-    screenX: number;
-    screenY: number;
-  } | null>(null);
+  const onRemoveSelectedRef = useRef(onRemoveSelected);
+  useEffect(() => { onRemoveSelectedRef.current = onRemoveSelected; }, [onRemoveSelected]);
 
   // Reset icon cache + winners when theme switches (different vote namespace)
   useEffect(() => {
     iconCacheRef.current.clear();
+    pendingOptimisticRef.current.clear();
     setWinners([]);
-    setHoveredIndicator(null);
   }, [themeMode]);
 
   // Initialize canvases once
@@ -590,10 +675,11 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
     canvas.style.top = "0";
     canvas.style.left = "0";
     canvas.style.pointerEvents = "none";
-    // CSS-level softness: a hint of blur smooths the geometric snap, and
-    // `screen` lightens the dark base map where heat accumulates.
+    // CSS-level softness: a hint of blur smooths the geometric snap. The blend
+    // mode comes from the map style — `screen` lightens a dark basemap where
+    // heat accumulates; `multiply` darkens a light basemap.
     canvas.style.filter = "blur(0.6px)";
-    canvas.style.mixBlendMode = "screen";
+    canvas.style.mixBlendMode = mapStyle.heatBlend;
 
     const hoverCanvas = document.createElement("canvas");
     hoverCanvas.className = "graph-layer-hover";
@@ -619,18 +705,21 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
       if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
       if (hoverCanvas.parentNode) hoverCanvas.parentNode.removeChild(hoverCanvas);
     };
-  }, [map]);
+  }, [map, mapStyle.heatBlend]);
 
   // Full vote fetch — used on initial load and revision-gap recovery.
   const fetchVotes = useCallback(async () => {
     if (!topologyRef.current) return;
     try {
-      const url = `${CONFIG.apiUrl}/graph-votes?mode=${encodeURIComponent(themeMode)}`;
+      const url = `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`;
       const response = await fetch(url, { cache: "no-store" });
       if (!response.ok) throw new Error(`Vote fetch failed: ${response.status}`);
       const voteData = await response.json();
       graphDataRef.current = { ...topologyRef.current!, ...voteData };
       lastRevRef.current = voteData.rev ?? 0;
+      // Authoritative snapshot — any unreconciled optimistic increments are now
+      // baked into (or superseded by) this data, so drop the ledger.
+      pendingOptimisticRef.current.clear();
 
       // Replay any deltas that arrived while the fetch was in flight
       const pending = pendingDeltasRef.current;
@@ -651,116 +740,121 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   const fetchVotesRef = useRef(fetchVotes);
   useEffect(() => { fetchVotesRef.current = fetchVotes; }, [fetchVotes]);
 
-  // Apply a WebSocket delta directly to graphDataRef (mutate in place).
-  // Updates edge totals, edge vote types, and derives affected node votes.
+  // Shared helper: increment edge votes, update vote-type breakdowns, re-derive
+  // affected node votes. Used by both WebSocket deltas and optimistic updates.
+  // Apply a vote change to the in-memory graph data. `dir` is +1 (up) / -1
+  // (down); `reversed` means a prior opposite vote is being flipped, so one vote
+  // moves across directions (net delta ±2). Updates the per-type [li, up, down]
+  // triples, the net edge_votes total, and re-derives affected node values.
+  // Apply a WebSocket delta to graphDataRef.
+  //
+  // Directional (modal +/−) deltas carry `vtCounts` — the server's authoritative
+  // [up, down] for the changed proposals — which we SET (idempotent), so the
+  // caster's optimistic guess is corrected, never compounded. Legacy bulk-cast
+  // deltas have no vtCounts: they INCREMENT, with the optimistic ledger
+  // absorbing the caster's own echo so it isn't double-counted.
   const applyDeltaToGraphData = useCallback((delta: import("../../types").VoteDelta) => {
     const data = graphDataRef.current;
     const adj = nodeAdjRef.current;
-    if (!data?.edge_votes || !adj) return;
+    if (!data?.edge_votes || !adj) { lastRevRef.current = delta.rev; return; }
+    const vtLabel = delta.vtLabel ?? "";
 
-    const edgeVotes = data.edge_votes;
-    const nodeVotes = data.node_votes ?? [];
-    const legend = data.vote_type_legend ?? [];
-    const edgeVoteTypes = data.edge_vote_types ?? [];
-    const nodeVoteTypes = data.node_vote_types ?? [];
-
-    // Find or create legend entry for this vote type
-    let legendIdx = -1;
-    if (delta.vtLabel) {
-      legendIdx = legend.indexOf(delta.vtLabel);
-      if (legendIdx === -1) {
-        legendIdx = legend.length;
-        legend.push(delta.vtLabel);
-        data.vote_type_legend = legend;
-      }
+    if (delta.vtCounts) {
+      applyAuthoritativeCounts(data, adj, vtLabel, delta.vtCounts);
+      lastRevRef.current = delta.rev;
+      return;
     }
 
-    const affectedNodes = new Set<number>();
-
+    const dir = delta.dir ?? 1;
+    const reversed = delta.reversed ?? false;
+    const pending = pendingOptimisticRef.current;
+    const toApply: number[] = [];
     for (const eid of delta.edges) {
-      if (eid >= edgeVotes.length) continue;
-      edgeVotes[eid] = (edgeVotes[eid] || 0) + 1;
-
-      // Update per-edge vote type breakdown
-      if (legendIdx >= 0) {
-        const pairs = edgeVoteTypes[eid] || [];
-        const existing = pairs.find(([li]) => li === legendIdx);
-        if (existing) existing[1] += 1;
-        else pairs.push([legendIdx, 1]);
-        pairs.sort((a, b) => b[1] - a[1]);
-        edgeVoteTypes[eid] = pairs;
-      }
-
-      // Collect nodes to re-derive
-      const edge = data.edges[eid];
-      if (edge) {
-        affectedNodes.add(edge[0]);
-        affectedNodes.add(edge[1]);
+      const key = `${eid}:${vtLabel}:${dir}:${reversed ? 1 : 0}`;
+      const optimistic = pending.get(key) ?? 0;
+      if (optimistic > 0) {
+        if (optimistic === 1) pending.delete(key);
+        else pending.set(key, optimistic - 1);
+      } else {
+        toApply.push(eid);
       }
     }
 
-    // Re-derive node votes for affected nodes (max of adjacent edge totals)
-    for (const nid of affectedNodes) {
-      const nodeEdges = adj[nid];
-      if (!nodeEdges) continue;
-      let best = 0;
-      const merged: Map<number, number> = new Map();
-      for (const eid of nodeEdges) {
-        const v = edgeVotes[eid] || 0;
-        if (v > best) best = v;
-        const evtPairs = edgeVoteTypes[eid];
-        if (evtPairs) {
-          for (const [li, cnt] of evtPairs) {
-            merged.set(li, Math.max(merged.get(li) ?? 0, cnt));
-          }
-        }
-      }
-      nodeVotes[nid] = best;
-      if (merged.size > 0) {
-        nodeVoteTypes[nid] = [...merged.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .map(([li, cnt]) => [li, cnt] as [number, number]);
-      }
-    }
-
+    if (toApply.length > 0) applyEdgeVoteChange(data, adj, toApply, vtLabel, dir, reversed);
     lastRevRef.current = delta.rev;
   }, []);
 
-  // Fetch topology and votes in parallel on mount.
+  // Load topology + votes on mount, preferring persisted caches.
   useEffect(() => {
     let cancelled = false;
-    const topologyPromise = fetch(`${CONFIG.apiUrl}/graph-topology`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
-        return r.json();
-      });
-    const votesPromise = fetch(
-      `${CONFIG.apiUrl}/graph-votes?mode=${encodeURIComponent(themeMode)}`
-    ).then((r) => {
-      if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);
-      return r.json();
-    });
 
     (async () => {
+      // 1. Resolve the graph version, then load topology from IndexedDB when it
+      //    matches — skipping the multi-MB download and JSON parse entirely.
+      let topology: GraphData | null = null;
+      let version: string | null = null;
+      let usedCachedTopology = false;
       try {
-        const topology = await topologyPromise;
-        if (cancelled) return;
-        topologyRef.current = topology;
-        graphDataRef.current = topology;
-        edgeIndexRef.current = buildEdgeIndex(topology);
-        nodeIndexRef.current = buildNodeIndex(topology);
-        nodeAdjRef.current = buildNodeAdj(topology);
-        scheduleRedrawRef.current();
+        try {
+          const vr = await fetch(withMap(`${CONFIG.apiUrl}/graph-version`));
+          if (vr.ok) version = (await vr.json()).version ?? null;
+        } catch {
+          // Version probe failed — fall back to a direct topology fetch.
+        }
+
+        if (version) {
+          const cached = await getCachedTopology<GraphData>(version);
+          if (cached) {
+            topology = cached;
+            usedCachedTopology = true;
+          }
+        }
+        if (!topology) {
+          const r = await fetch(withMap(`${CONFIG.apiUrl}/graph-topology`));
+          if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
+          topology = await r.json();
+          if (version && topology) setCachedTopology(version, topology);
+        }
       } catch (error) {
-        console.error("Failed to fetch graph topology:", error);
+        console.error("Failed to load graph topology:", error);
         return;
       }
+      if (cancelled || !topology) return;
 
+      topologyRef.current = topology;
+      graphDataRef.current = topology;
+      edgeIndexRef.current = buildEdgeIndex(topology);
+      nodeIndexRef.current = buildNodeIndex(topology);
+      nodeAdjRef.current = buildNodeAdj(topology);
+      scheduleRedrawRef.current();
+
+      // 2. Paint immediately from cached votes (same graph version only) so the
+      //    heatmap appears without waiting on the network. Skipped when the
+      //    topology was freshly downloaded, since edge indices may have shifted.
+      if (usedCachedTopology && version) {
+        const cachedVotes = await getCachedVotes<Partial<GraphData>>(getMapSlug() || themeMode, version);
+        if (cancelled) return;
+        if (cachedVotes) {
+          graphDataRef.current = { ...topology, ...cachedVotes };
+          lastRevRef.current = cachedVotes.rev ?? 0;
+          refreshGraphDisplayRef.current();
+          setHeatmapLoaded();
+        }
+      }
+
+      // 3. Authoritative vote fetch — replaces the cached snapshot and replays
+      //    any deltas that arrived while the fetch was in flight.
       try {
-        const voteData = await votesPromise;
+        const r = await fetch(
+          `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`
+        );
+        if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);
+        const voteData = await r.json();
         if (cancelled) return;
         graphDataRef.current = { ...topologyRef.current!, ...voteData };
         lastRevRef.current = voteData.rev ?? 0;
+        pendingOptimisticRef.current.clear();
+        if (version) setCachedVotes(getMapSlug() || themeMode, version, voteData);
 
         // Replay any deltas that arrived while waiting for the fetch
         const pending = pendingDeltasRef.current;
@@ -773,19 +867,22 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
         }
 
         refreshGraphDisplayRef.current();
+        setHeatmapLoaded();
       } catch (error) {
         console.error("Failed to fetch graph votes:", error);
       }
     })();
     return () => { cancelled = true; };
-  }, [applyDeltaToGraphData]);
+  }, [applyDeltaToGraphData, setHeatmapLoaded]);
 
   // Subscribe to WebSocket deltas — apply each directly to the vote arrays.
   // If a revision gap is detected, do a full refetch to recover.
   useEffect(() => {
     const unsubscribe = subscribeToDelta((delta) => {
       // Filter by current theme mode
-      if (delta.m !== themeMode) return;
+      if (delta.m !== themeMode) {
+        return;
+      }
 
       // If votes haven't loaded yet, buffer the delta
       if (!graphDataRef.current?.edge_votes) {
@@ -800,13 +897,68 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
       }
 
       // Skip duplicates
-      if (delta.rev <= lastRevRef.current) return;
+      if (delta.rev <= lastRevRef.current) {
+        return;
+      }
 
       applyDeltaToGraphData(delta);
       refreshGraphDisplayRef.current();
     });
     return unsubscribe;
   }, [subscribeToDelta, themeMode, applyDeltaToGraphData]);
+
+  // Optimistic vote — apply edge increments immediately on cast so the heatmap
+  // and top-proposal counts update before the server round-trip completes. The
+  // increments are recorded in pendingOptimisticRef; when the server's matching
+  // WebSocket delta arrives it is absorbed (see applyDeltaToGraphData) so the
+  // caster's own vote is counted exactly once instead of being double-counted.
+  // Accepts either {edgeIds} (path votes) or {point} (single-location votes).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      const { voteType: vtLabel, mode } = detail;
+      if (mode !== themeMode) return;
+
+      const data = graphDataRef.current;
+      const adj = nodeAdjRef.current;
+      if (!data?.edge_votes || !adj) return;
+
+      // Direction defaults to up (route/point casts); modal +/- supplies it.
+      const dir: number = detail.direction ?? 1;
+      const reversed: boolean = detail.reversed ?? false;
+
+      let edgeIds: number[] | undefined = detail.edgeIds;
+
+      // Point vote: resolve the point through the SAME hierarchy as hover/click
+      // so the vote lands on exactly the component that was highlighted (an
+      // edge votes on itself; a node on its first adjacent edge).
+      if (!edgeIds && detail.point) {
+        const sel = resolveSelectionRef.current(detail.point.lat, detail.point.lng);
+        if (sel?.voteEdgeId == null) return;
+        edgeIds = [sel.voteEdgeId];
+      }
+
+      if (!edgeIds?.length) return;
+
+      applyEdgeVoteChange(data, adj, edgeIds, vtLabel, dir, reversed);
+
+      // Directional (modal +/−) votes are `authoritative`: their confirming
+      // delta carries vtCounts and is applied as an idempotent SET, so we do
+      // NOT ledger them (no echo to absorb). Legacy bulk casts increment, so we
+      // ledger them to absorb the caster's own echo and avoid double-counting.
+      if (!detail.authoritative) {
+        const pending = pendingOptimisticRef.current;
+        for (const eid of edgeIds) {
+          const key = `${eid}:${vtLabel ?? ""}:${dir}:${reversed ? 1 : 0}`;
+          pending.set(key, (pending.get(key) ?? 0) + 1);
+        }
+      }
+
+      refreshGraphDisplayRef.current();
+    };
+    window.addEventListener("optimistic-vote", handler);
+    return () => window.removeEventListener("optimistic-vote", handler);
+  }, [themeMode]);
 
   // Draw hover and pinned highlights on separate canvas
   const redrawHoverHighlight = useCallback(() => {
@@ -896,10 +1048,15 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
     };
 
     // Pinned highlight (selected start point) — full opacity, exact path match
-    if (pinnedTargetRef.current) drawTarget(pinnedTargetRef.current, 1.0);
+    const pinned = pinnedTargetRef.current;
+    if (pinned) drawTarget(pinned, 1.0);
 
-    // Hover highlight — slightly dimmer to read as "preview"
-    if (hoverTargetRef.current) drawTarget(hoverTargetRef.current, 0.6);
+    // Hover highlight — slightly dimmer to read as "preview". Suppress it when
+    // it resolves to the already-pinned target so the selection's hover version
+    // doesn't double-draw; only show hover for a *different* proposal.
+    const hover = hoverTargetRef.current;
+    const hoverIsPinned = pinned && hover && hover.kind === pinned.kind && hover.index === pinned.index;
+    if (hover && !hoverIsPinned) drawTarget(hover, 0.6);
 
     // Reset state for any subsequent canvas operations
     hoverCtx.globalCompositeOperation = "source-over";
@@ -925,46 +1082,90 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
     L.DomUtil.setPosition(canvas, topLeft);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (!data.edges) return;
+    if (!data.edges || !data.nodes) return;
 
+    const nodes = data.nodes;
+    const edges = data.edges;
     const edgeVotes = data.edge_votes ?? [];
-    const maxVotes = Math.max(1, arrayMax(edgeVotes));
-    const bounds = map.getBounds();
 
+    // maxVotes is global (so colors stay consistent across the viewport) but
+    // only changes when votes change — recompute on revision change, not every
+    // frame. lastRevRef advances on every full fetch and applied delta.
+    if (maxVotesRevRef.current !== lastRevRef.current) {
+      maxVotesRef.current = Math.max(1, arrayMax(edgeVotes));
+      maxVotesRevRef.current = lastRevRef.current;
+    }
+    const maxVotes = maxVotesRef.current;
+
+    const bounds = map.getBounds();
     const zoom = map.getZoom();
     const zoomScale = Math.pow(2, (zoom - 14) / 2);
 
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    const south = bounds.getSouth();
-    const north = bounds.getNorth();
-    const west = bounds.getWest();
-    const east = bounds.getEast();
+    // ----------------------------------------------------------------
+    // Projection cache — node layer-points, valid for the current zoom.
+    // Rebuilt when zoom or pixelOrigin changes; nodes projected lazily as
+    // they're first drawn and reused across pans. Per-frame we only add the
+    // pane offset to convert cached layer-points → container pixels.
+    // ----------------------------------------------------------------
+    const origin = map.getPixelOrigin();
+    let proj = projCacheRef.current;
+    if (!proj || proj.zoom !== zoom || proj.ox !== origin.x || proj.oy !== origin.y) {
+      const n = nodes.length;
+      proj = {
+        zoom,
+        ox: origin.x,
+        oy: origin.y,
+        xs: new Float64Array(n),
+        ys: new Float64Array(n),
+        done: new Uint8Array(n),
+      };
+      projCacheRef.current = proj;
+    }
+    const { xs, ys, done } = proj;
+    const offset = map.layerPointToContainerPoint(L.point(0, 0));
+    const offX = offset.x;
+    const offY = offset.y;
 
-    // Returns [from, to] container points, or null if the edge is fully off-screen.
-    const screenFor = (i: number): [L.Point, L.Point] | null => {
-      const [fromIdx, toIdx] = data.edges[i];
-      const a = data.nodes[fromIdx];
-      const b = data.nodes[toIdx];
-      if (
-        (a[0] < south && b[0] < south) ||
-        (a[0] > north && b[0] > north) ||
-        (a[1] < west && b[1] < west) ||
-        (a[1] > east && b[1] > east)
-      ) return null;
-      return [
-        map.latLngToContainerPoint([a[0], a[1]]),
-        map.latLngToContainerPoint([b[0], b[1]]),
-      ];
+    const projectNode = (i: number) => {
+      if (done[i]) return;
+      const p = map.latLngToLayerPoint([nodes[i][0], nodes[i][1]]);
+      xs[i] = p.x;
+      ys[i] = p.y;
+      done[i] = 1;
     };
 
-    const drawLine = (pts: [L.Point, L.Point]) => {
+    const drawSeg = (i: number) => {
+      const a = edges[i][0];
+      const b = edges[i][1];
+      projectNode(a);
+      projectNode(b);
       ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      ctx.lineTo(pts[1].x, pts[1].y);
+      ctx.moveTo(xs[a] + offX, ys[a] + offY);
+      ctx.lineTo(xs[b] + offX, ys[b] + offY);
       ctx.stroke();
     };
+
+    // ----------------------------------------------------------------
+    // Viewport culling — query the edge spatial index for edges whose bbox
+    // intersects the visible bounds (+ small margin for wide strokes). Falls
+    // back to all edges only in the brief window before the index is built.
+    // ----------------------------------------------------------------
+    const mLat = (bounds.getNorth() - bounds.getSouth()) * 0.05;
+    const mLng = (bounds.getEast() - bounds.getWest()) * 0.05;
+    const edgeIndex = edgeIndexRef.current;
+    const visible = edgeIndex
+      ? edgeIndex.search(
+          bounds.getWest() - mLng,
+          bounds.getSouth() - mLat,
+          bounds.getEast() + mLng,
+          bounds.getNorth() + mLat,
+        )
+      : null;
+    const count = visible ? visible.length : edges.length;
+    const edgeAt = (k: number): number => (visible ? visible[k] : k);
 
     // ----------------------------------------------------------------
     // Phase 1 — zero-vote baseline (source-over, faint white)
@@ -975,60 +1176,61 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
     ctx.lineWidth = 0.5 * zoomScale;
     ctx.globalAlpha = 0.05;
     ctx.strokeStyle = "#ffffff";
-    for (let i = 0; i < data.edges.length; i++) {
+    for (let k = 0; k < count; k++) {
+      const i = edgeAt(k);
       if ((edgeVotes[i] ?? 0) > 0) continue;
-      const pts = screenFor(i);
-      if (pts) drawLine(pts);
+      drawSeg(i);
     }
 
     // ----------------------------------------------------------------
     // Phase 2 — voted edges, additive blending (Strava-style)
     // Sort ascending so the hottest edges paint last and dominate at
     // overlaps; "lighter" composite means RGB channels sum, naturally
-    // shifting toward yellow/white as intensity stacks.
+    // shifting toward yellow/white as intensity stacks. Only the visible
+    // subset is collected/sorted, so this is cheap regardless of graph size.
     // ----------------------------------------------------------------
     const voted: number[] = [];
-    for (let i = 0; i < data.edges.length; i++) {
+    for (let k = 0; k < count; k++) {
+      const i = edgeAt(k);
       if ((edgeVotes[i] ?? 0) > 0) voted.push(i);
     }
     voted.sort((a, b) => (edgeVotes[a] ?? 0) - (edgeVotes[b] ?? 0));
 
-    ctx.globalCompositeOperation = "lighter";
+    ctx.globalCompositeOperation = mapStyle.heatComposite;
+    const heat = mapStyle.heat;
 
     for (const i of voted) {
-      const pts = screenFor(i);
-      if (!pts) continue;
       const norm = Math.log((edgeVotes[i] ?? 0) + 1) / Math.log(maxVotes + 1);
 
-      // Pass 1 — wide deep-red outer halo (low alpha, broad falloff).
+      // Pass 1 — wide outer halo (low alpha, broad falloff).
       // Approximates Gaussian halo via stroke width + low opacity.
       ctx.lineWidth = (2 + norm * 8) * zoomScale;
       ctx.globalAlpha = 0.025 + norm * 0.06;
-      ctx.strokeStyle = HEAT_HALO;
-      drawLine(pts);
+      ctx.strokeStyle = heat.halo;
+      drawSeg(i);
 
-      // Pass 2 — warm orange "heat" mid stroke (the dominant color).
+      // Pass 2 — "heat" mid stroke (the dominant color).
       ctx.lineWidth = (1 + norm * 2) * zoomScale;
       ctx.globalAlpha = 0.08 + norm * 0.20;
-      ctx.strokeStyle = HEAT_WARM;
-      drawLine(pts);
+      ctx.strokeStyle = heat.warm;
+      drawSeg(i);
 
-      // Pass 3 — yellow hot core (kicks in past ~mid intensity).
+      // Pass 3 — hot core (kicks in past ~mid intensity).
       if (norm > 0.2) {
         const t = (norm - 0.2) / 0.8;
         ctx.lineWidth = (0.6 + t * 1.0) * zoomScale;
         ctx.globalAlpha = 0.10 + t * 0.30;
-        ctx.strokeStyle = HEAT_HOT;
-        drawLine(pts);
+        ctx.strokeStyle = heat.hot;
+        drawSeg(i);
       }
 
-      // Pass 4 — pale warm-white peak (only the hottest edges).
+      // Pass 4 — bright peak (only the hottest edges).
       if (norm > 0.7) {
         const t = (norm - 0.7) / 0.3;
         ctx.lineWidth = Math.max(0.3, 0.4 * zoomScale);
         ctx.globalAlpha = 0.30 * t;
-        ctx.strokeStyle = HEAT_PEAK;
-        drawLine(pts);
+        ctx.strokeStyle = heat.peak;
+        drawSeg(i);
       }
     }
 
@@ -1036,7 +1238,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
     ctx.globalAlpha = 1.0;
 
     redrawHoverHighlightRef.current();
-  }, [map]);
+  }, [map, mapStyle.heat, mapStyle.heatComposite]);
 
   // Schedule redraw
   const scheduleRedraw = useCallback(() => {
@@ -1104,25 +1306,40 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
           return;
         }
 
-        const dragging = graphDraggingRef.current;
-        const hit = hitTest(
-          data, map, e.containerPoint.x, e.containerPoint.y, e.latlng.lat, e.latlng.lng,
-          edgeIndexRef.current, nodeIndexRef.current
-        );
+        // A top-proposal icon owns the highlight while hovered (hierarchy rule
+        // #1) — it sets the hover target itself, so just yield without clearing.
+        if (overIndicatorRef.current) return;
 
-        // During drag: suppress hover highlight and tooltip, but still compute snap.
-        // Otherwise: prefer in-radius hits, then fall back to globally-nearest edge
-        // so hover always reflects the segment a click would pin (1:1 preview).
-        let newTarget: HoverTarget | null = dragging ? null : (hit?.target ?? null);
-        if (!dragging && !newTarget) {
-          const nearestEdgeIdx = findNearestEdgeIndex(
-            data, map, e.containerPoint.x, e.containerPoint.y,
-            edgeIndexRef.current, e.latlng.lng, e.latlng.lat
-          );
-          if (nearestEdgeIdx !== null) {
-            newTarget = { kind: "edge", index: nearestEdgeIdx };
+        // The pinned modal and the route path (mid-waypoint grab) both suppress
+        // the graph hover beneath them; clear any active card and yield.
+        if (overModalRef.current || suppressHoverRef.current) {
+          if (hoverTargetRef.current) {
+            hoverTargetRef.current = null;
+            setHoverTarget(null);
+            redrawHoverHighlightRef.current();
           }
+          return;
         }
+
+        const dragging = graphDraggingRef.current;
+
+        // During drag: suppress hover highlight and tooltip, but still compute
+        // snap below. Otherwise resolve the hover target through the unified
+        // hierarchy so hover reflects exactly the component a click would pin.
+        let newTarget: HoverTarget | null = null;
+        if (!dragging) {
+          const sel = resolveSelectionRef.current(e.latlng.lat, e.latlng.lng);
+          newTarget = sel?.target ?? null;
+        }
+
+        // Don't hover the component that's already selected — its pinned modal
+        // is showing, so a duplicate hover highlight/card adds nothing.
+        const pinned = pinnedTargetRef.current;
+        if (newTarget && pinned
+            && newTarget.kind === pinned.kind && newTarget.index === pinned.index) {
+          newTarget = null;
+        }
+
         const prev = hoverTargetRef.current;
         const changed = !prev && newTarget
           || prev && !newTarget
@@ -1140,9 +1357,14 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
 
         // Snap position: only compute when actually dragging (path-drag system
         // is the only consumer). Skipping when idle saves ~100k iterations
-        // on every mousemove.
+        // on every mousemove. Uses hitTest directly (in-radius only) so the drag
+        // stays free when far from the graph — not resolveSelection's edge fallback.
         if (!dragging) return;
 
+        const hit = hitTest(
+          data, map, e.containerPoint.x, e.containerPoint.y, e.latlng.lat, e.latlng.lng,
+          edgeIndexRef.current, nodeIndexRef.current
+        );
         if (hit) {
           const snapPos = { lat: hit.snapLat, lng: hit.snapLng };
           onSnapRef.current?.(snapPos);
@@ -1207,34 +1429,12 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
       return;
     }
 
-    // If an indicator click pre-set the edge, use it directly (avoids
-    // hitTest snapping to a different nearby edge).
-    if (pinnedEdgeOverrideRef.current !== null) {
-      pinnedTargetRef.current = { kind: "edge", index: pinnedEdgeOverrideRef.current };
-      pinnedEdgeOverrideRef.current = null;
-    } else {
-      const data = graphDataRef.current;
-      if (data?.edges) {
-        const pt = map.latLngToContainerPoint([pinnedLat, pinnedLng]);
-        const hit = hitTest(
-          data, map, pt.x, pt.y, pinnedLat, pinnedLng,
-          edgeIndexRef.current, nodeIndexRef.current
-        );
-        if (hit?.target) {
-          pinnedTargetRef.current = hit.target;
-        } else {
-          const nearestEdgeIdx = findNearestEdgeIndex(
-            data, map, pt.x, pt.y,
-            edgeIndexRef.current, pinnedLng, pinnedLat
-          );
-          pinnedTargetRef.current = nearestEdgeIdx !== null
-            ? { kind: "edge", index: nearestEdgeIdx }
-            : null;
-        }
-      } else {
-        pinnedTargetRef.current = null;
-      }
-    }
+    // Resolve through the unified hierarchy. An indicator click pre-sets the
+    // edge via pinnedEdgeOverrideRef (single-shot), which dominates; otherwise
+    // it's node-within-radius then nearest edge — same logic as hover.
+    const sel = resolveSelection(pinnedLat, pinnedLng, pinnedEdgeOverrideRef.current);
+    pinnedEdgeOverrideRef.current = null;
+    pinnedTargetRef.current = sel?.target ?? null;
     redrawHoverHighlightRef.current();
 
     const update = () => {
@@ -1262,7 +1462,9 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
         pinnedRafRef.current = null;
       }
     };
-  }, [map, pinnedLat, pinnedLng]);
+    // isHeatmapLoading re-triggers resolution once the graph finishes loading,
+    // so a cold deep-link (point set before the graph arrives) still resolves.
+  }, [map, pinnedLat, pinnedLng, resolveSelection, isHeatmapLoading]);
 
   // -------------------------------------------------------------------------
   // Tooltip content — hover
@@ -1271,8 +1473,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   const data = graphDataRef.current;
   const legend = data?.vote_type_legend ?? [];
   let tooltipName = "";
-  let tooltipVotes = 0;
-  let hoverVoteTypes: { label: string; count: number }[] = [];
+  let hoverVoteTypes: VoteTypeRow[] = [];
 
   if (hoverTarget && data) {
     if (hoverTarget.kind === "edge") {
@@ -1285,23 +1486,13 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
         const midLng = (fromNode[1] + toNode[1]) / 2;
 
         tooltipName = edge[2] || resolveAddress(midLat, midLng, bumpGeocode);
-        tooltipVotes = (data.edge_votes ?? [])[hoverTarget.index] ?? 0;
-
-        const vtPairs = (data.edge_vote_types ?? [])[hoverTarget.index] ?? [];
-        hoverVoteTypes = vtPairs
-          .map(([idx, cnt]) => ({ label: legend[idx], count: cnt }))
-          .filter((v) => v.label);
+        hoverVoteTypes = decodeVoteTypes((data.edge_vote_types ?? [])[hoverTarget.index], legend);
       }
     } else {
       const node = data.nodes[hoverTarget.index];
       if (node) {
         tooltipName = resolveAddress(node[0], node[1], bumpGeocode);
-        tooltipVotes = (data.node_votes ?? [])[hoverTarget.index] ?? 0;
-
-        const vtPairs = (data.node_vote_types ?? [])[hoverTarget.index] ?? [];
-        hoverVoteTypes = vtPairs
-          .map(([idx, cnt]) => ({ label: legend[idx], count: cnt }))
-          .filter((v) => v.label);
+        hoverVoteTypes = decodeVoteTypes((data.node_vote_types ?? [])[hoverTarget.index], legend);
       }
     }
   }
@@ -1311,8 +1502,11 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   // -------------------------------------------------------------------------
 
   let pinnedName = "";
-  let pinnedVotes = 0;
-  let pinnedVoteTypes: { label: string; count: number }[] = [];
+  let pinnedVoteTypes: VoteTypeRow[] = [];
+  // Edge the pinned modal votes on (node targets snap to a representative edge)
+  // and the lat/lng used for the shareable copy-link.
+  let pinnedVoteEdgeId: number | null = null;
+  let pinnedPointLatLng: { lat: number; lng: number } | null = null;
   const pinnedTarget = pinnedTargetRef.current;
   const showPinned = pinnedPoint && pinnedScreenPos && pinnedTarget && data;
 
@@ -1326,21 +1520,17 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
         const midLat = (fromNode[0] + toNode[0]) / 2;
         const midLng = (fromNode[1] + toNode[1]) / 2;
         pinnedName = edge[2] || resolveAddress(midLat, midLng, bumpGeocode);
-        pinnedVotes = (data.edge_votes ?? [])[pinnedTarget.index] ?? 0;
-        const vtPairs = (data.edge_vote_types ?? [])[pinnedTarget.index] ?? [];
-        pinnedVoteTypes = vtPairs
-          .map(([idx, cnt]) => ({ label: legend[idx], count: cnt }))
-          .filter((v) => v.label);
+        pinnedVoteTypes = decodeVoteTypes((data.edge_vote_types ?? [])[pinnedTarget.index], legend);
+        pinnedVoteEdgeId = pinnedTarget.index;
+        pinnedPointLatLng = { lat: midLat, lng: midLng };
       }
     } else {
       const node = data.nodes[pinnedTarget.index];
       if (node) {
         pinnedName = resolveAddress(node[0], node[1], bumpGeocode);
-        pinnedVotes = (data.node_votes ?? [])[pinnedTarget.index] ?? 0;
-        const vtPairs = (data.node_vote_types ?? [])[pinnedTarget.index] ?? [];
-        pinnedVoteTypes = vtPairs
-          .map(([idx, cnt]) => ({ label: legend[idx], count: cnt }))
-          .filter((v) => v.label);
+        pinnedVoteTypes = decodeVoteTypes((data.node_vote_types ?? [])[pinnedTarget.index], legend);
+        pinnedVoteEdgeId = nodeAdjRef.current?.[pinnedTarget.index]?.[0] ?? null;
+        pinnedPointLatLng = { lat: node[0], lng: node[1] };
       }
     }
   }
@@ -1350,31 +1540,33 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   // -------------------------------------------------------------------------
 
   const mapContainer = map.getContainer();
-  const flipped = tooltipPos.x > window.innerWidth / 2;
-  // Hide the regular hover tooltip when the indicator modal is up — the
-  // modal already covers the segment info and we don't want both stacked.
-  const showHoverTooltip = hoverTarget !== null && !hoveredIndicator;
+  // The hover card shows for any hovered segment/node — top proposal or not —
+  // but NOT for the proposal that's currently pinned/selected: that one already
+  // has its interactive card, so its hover version is suppressed. Hover only
+  // surfaces when it resolves to a *different* proposal. "Top proposal" is simply
+  // whether the hovered edge is a current winner, so hover and select route
+  // through the same ProposalCard with a `winner` flag.
+  const hoverMatchesPinned =
+    showPinned && pinnedTarget && hoverTarget &&
+    hoverTarget.kind === pinnedTarget.kind && hoverTarget.index === pinnedTarget.index;
+  const showHoverTooltip = hoverTarget !== null && !hoverMatchesPinned;
+  const hoverWinner = (hoverTarget?.kind === "edge")
+    ? winners.find(w => w.edgeIdx === hoverTarget.index) ?? null
+    : null;
 
-  // Resolve segment info for the hovered indicator's edge (full vote-type list)
-  let indicatorEdgeName = "";
-  let indicatorEdgeVotes = 0;
-  let indicatorVoteTypes: { label: string; count: number }[] = [];
-  if (hoveredIndicator && data) {
-    const edgeIdx = hoveredIndicator.winner.edgeIdx;
-    const edge = data.edges[edgeIdx];
-    if (edge) {
-      const [fromIdx, toIdx] = edge;
-      const fromNode = data.nodes[fromIdx];
-      const toNode = data.nodes[toIdx];
-      const midLat = (fromNode[0] + toNode[0]) / 2;
-      const midLng = (fromNode[1] + toNode[1]) / 2;
-      indicatorEdgeName = edge[2] || resolveAddress(midLat, midLng, bumpGeocode);
-      indicatorEdgeVotes = (data.edge_votes ?? [])[edgeIdx] ?? 0;
-      const vtPairs = (data.edge_vote_types ?? [])[edgeIdx] ?? [];
-      indicatorVoteTypes = vtPairs
-        .map(([idx, cnt]) => ({ label: legend[idx], count: cnt }))
-        .filter((v) => v.label);
-    }
+  const pinnedWinner = (showPinned && pinnedTarget?.kind === "edge")
+    ? winners.find(w => w.edgeIdx === pinnedTarget.index) ?? null
+    : null;
+
+  // Safety net for a momentary winners/data desync: if an edge is a current
+  // winner but its live breakdown decoded empty, show the winner's own proposal
+  // so a top-proposal card never reads "no proposals yet". Net support maps to
+  // up (positive) so the row's net (up − down) matches the winner's count.
+  if (hoverWinner && hoverVoteTypes.length === 0) {
+    hoverVoteTypes = [{ label: hoverWinner.label, up: hoverWinner.count, down: 0 }];
+  }
+  if (pinnedWinner && pinnedVoteTypes.length === 0) {
+    pinnedVoteTypes = [{ label: pinnedWinner.label, up: pinnedWinner.count, down: 0 }];
   }
 
   // geocodeVersion used to re-render when async geocode completes
@@ -1383,20 +1575,88 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   // Build indicator markers for the top-voted segment per vote type.
   // Position = edge midpoint. Hover/click sets the same hoverTarget the
   // map mousemove handler would, so the existing tooltip lights up.
+  // Cancel any in-flight spread and snap icons back to their edge midpoints.
+  const clearSpread = useCallback(() => {
+    if (spreadTimeoutRef.current) {
+      clearTimeout(spreadTimeoutRef.current);
+      spreadTimeoutRef.current = null;
+    }
+    spreadActiveRef.current = false;
+    setSpreadPositions(null);
+    // Leave the transition class on briefly so the snap-back animates too.
+    const container = map.getContainer();
+    window.setTimeout(
+      () => container.classList.remove("votes-spreading"),
+      SPREAD_ANIM_MS,
+    );
+  }, [map]);
+
+  // Edge index of the currently selected top proposal (if any), so its icon
+  // can float above the others.
+  const selectedEdgeIdx =
+    pinnedTarget?.kind === "edge" ? pinnedTarget.index : null;
+
   const indicatorMarkers = useMemo(() => {
     if (currentZoom < INDICATOR_MIN_ZOOM) return null;
     const topology = topologyRef.current;
     if (!topology || winners.length === 0) return null;
 
-    return winners.map((w) => {
-      const edge = topology.edges[w.edgeIdx];
-      if (!edge) return null;
-      const [fromIdx, toIdx] = edge;
-      const fromNode = topology.nodes[fromIdx];
-      const toNode = topology.nodes[toIdx];
-      if (!fromNode || !toNode) return null;
-      const midLat = (fromNode[0] + toNode[0]) / 2;
-      const midLng = (fromNode[1] + toNode[1]) / 2;
+    // Resolve every winner to its edge-midpoint once up front so click handlers
+    // can measure on-screen distance between icons for cluster detection.
+    const placed = winners
+      .map((w) => {
+        const edge = topology.edges[w.edgeIdx];
+        if (!edge) return null;
+        const [fromIdx, toIdx] = edge;
+        const fromNode = topology.nodes[fromIdx];
+        const toNode = topology.nodes[toIdx];
+        if (!fromNode || !toNode) return null;
+        const midLat = (fromNode[0] + toNode[0]) / 2;
+        const midLng = (fromNode[1] + toNode[1]) / 2;
+        return { w, midLat, midLng };
+      })
+      .filter(Boolean) as Array<{
+      w: VoteTypeWinner;
+      midLat: number;
+      midLng: number;
+    }>;
+
+    // Fan a cluster of icons out into a centered grid of cells around their
+    // shared anchor point, then schedule a snap-back. Each icon's overridden
+    // position is stored by legendIdx for the render below to pick up.
+    const spreadCluster = (
+      members: typeof placed,
+      anchor: L.Point,
+    ) => {
+      const cols = Math.ceil(Math.sqrt(members.length));
+      const rows = Math.ceil(members.length / cols);
+      const next = new Map<number, [number, number]>();
+      members.forEach((m, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const offsetX = (col - (cols - 1) / 2) * SPREAD_CELL_PX;
+        const offsetY = (row - (rows - 1) / 2) * SPREAD_CELL_PX;
+        const ll = map.containerPointToLatLng([
+          anchor.x + offsetX,
+          anchor.y + offsetY,
+        ]);
+        next.set(m.w.legendIdx, [ll.lat, ll.lng]);
+      });
+
+      map.getContainer().classList.add("votes-spreading");
+      spreadActiveRef.current = true;
+      setSpreadPositions(next);
+      if (spreadTimeoutRef.current) clearTimeout(spreadTimeoutRef.current);
+      spreadTimeoutRef.current = window.setTimeout(
+        clearSpread,
+        SPREAD_DURATION_MS,
+      );
+    };
+
+    return placed.map(({ w, midLat, midLng }) => {
+      const override = spreadPositions?.get(w.legendIdx);
+      const posLat = override ? override[0] : midLat;
+      const posLng = override ? override[1] : midLng;
 
       let icon = iconCacheRef.current.get(w.label);
       if (!icon) {
@@ -1405,39 +1665,58 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
       }
 
       const activateIndicator = () => {
-        // Anchor the modal to the icon's screen position so it stays put
-        // even if the cursor jitters within the marker hit area.
-        const iconPt = map.latLngToContainerPoint([midLat, midLng]);
+        // Hovering the icon sets the same hoverTarget the map mousemove would,
+        // anchoring the hover card near the icon. The card derives "top proposal"
+        // from this edge being a winner, so the markup matches a segment hover.
+        // overIndicatorRef tells the map hover handler to yield (hierarchy #1).
+        overIndicatorRef.current = true;
+        const target: HoverTarget = { kind: "edge", index: w.edgeIdx };
+        const iconPt = map.latLngToContainerPoint([posLat, posLng]);
         const rect = map.getContainer().getBoundingClientRect();
-        setHoveredIndicator({
-          winner: w,
-          screenX: rect.left + iconPt.x,
-          screenY: rect.top + iconPt.y,
-        });
-        // Light up the corresponding segment on canvas, but skip the React
-        // hover-target (which would also pop the regular tooltip — we want
-        // only the expanded modal).
-        hoverTargetRef.current = { kind: "edge", index: w.edgeIdx };
+        setTooltipPos({ x: rect.left + iconPt.x, y: rect.top + iconPt.y });
+        hoverTargetRef.current = target;
+        setHoverTarget(target);
         redrawHoverHighlightRef.current();
       };
 
       const deactivateIndicator = () => {
-        setHoveredIndicator(null);
+        overIndicatorRef.current = false;
         hoverTargetRef.current = null;
+        setHoverTarget(null);
         redrawHoverHighlightRef.current();
       };
 
       const handleClick = () => {
+        // When icons are already fanned out, a click selects normally.
+        if (!spreadActiveRef.current) {
+          const selfPt = map.latLngToContainerPoint([midLat, midLng]);
+          const cluster = placed.filter(({ midLat: la, midLng: ln }) => {
+            const p = map.latLngToContainerPoint([la, ln]);
+            const dx = p.x - selfPt.x;
+            const dy = p.y - selfPt.y;
+            return dx * dx + dy * dy <= CLUSTER_RADIUS_PX * CLUSTER_RADIUS_PX;
+          });
+          // Crowded: swallow this click and fan the cluster out instead.
+          if (cluster.length > 1) {
+            spreadCluster(cluster, selfPt);
+            return;
+          }
+        }
+
+        clearSpread();
         activateIndicator();
         pinnedEdgeOverrideRef.current = w.edgeIdx;
+        // Lock the start point to the icon's true edge midpoint, not its
+        // temporary fanned-out grid cell — the spread offset is display-only.
         onIndicatorClickRef.current?.({ lat: midLat, lng: midLng });
       };
 
       return (
         <Marker
           key={w.legendIdx}
-          position={[midLat, midLng]}
+          position={[posLat, posLng]}
           icon={icon}
+          zIndexOffset={w.edgeIdx === selectedEdgeIdx ? 2000 : 1000}
           eventHandlers={{
             mouseover: activateIndicator,
             mouseout: deactivateIndicator,
@@ -1446,37 +1725,100 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
         />
       );
     });
-  }, [winners, currentZoom, map]);
+  }, [winners, currentZoom, map, spreadPositions, clearSpread, selectedEdgeIdx]);
+
+  // Cast a directional vote on a single proposal (edge, vote type). Optimistic:
+  // applies immediately via the same event the route cast uses, records the
+  // local "my vote" for instant button state, then persists to the server.
+  const castProposalVote = useCallback((
+    edgeId: number | null, label: string, newDir: VoteDirection,
+  ) => {
+    if (edgeId == null || !label) return;
+    const prev = getMyVote(themeMode, edgeId, label);
+    if (prev === newDir) return; // already cast this direction — button is greyed
+    const reversed = prev !== 0;
+
+    window.dispatchEvent(new CustomEvent("optimistic-vote", {
+      detail: {
+        edgeIds: [edgeId], voteType: label, mode: themeMode,
+        direction: newDir, reversed, authoritative: true,
+      },
+    }));
+    setMyVote(themeMode, edgeId, label, newDir);
+    setMyVotesVersion((v) => v + 1);
+
+    fetch(`${CONFIG.apiUrl}/vote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        map: getMapSlug(), edge_id: edgeId, mode: themeMode,
+        vote_type: label, direction: newDir, voter_id: getVoterId(),
+      }),
+    }).catch((err) => console.error("Proposal vote failed:", err));
+  }, [themeMode]);
+
+  // Reconcile local "my votes" against the server when a proposal modal opens
+  // (authoritative across devices). Keyed on the pinned edge so it refetches
+  // whenever the selection changes.
+  useEffect(() => {
+    if (pinnedVoteEdgeId == null) return;
+    let cancelled = false;
+    const url = `${CONFIG.apiUrl}/my-votes?map=${encodeURIComponent(getMapSlug())}`
+      + `&mode=${encodeURIComponent(themeMode)}&edge_ids=${pinnedVoteEdgeId}`
+      + `&voter_id=${encodeURIComponent(getVoterId())}`;
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j?.votes) return;
+        const labels = j.votes[String(pinnedVoteEdgeId)];
+        if (labels) {
+          reconcileEdge(themeMode, pinnedVoteEdgeId, labels);
+          setMyVotesVersion((v) => v + 1);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [pinnedVoteEdgeId, themeMode]);
 
   return (
     <>
       {indicatorMarkers}
       {showPinned && pinnedScreenPos && createPortal(
-        <div
-          className={`graph-tooltip${pinnedScreenPos.x > window.innerWidth / 2 ? " tooltip-flipped" : ""}`}
-          style={{ left: pinnedScreenPos.x, top: pinnedScreenPos.y }}
-        >
-          {renderTooltipContent(pinnedName, pinnedVotes, pinnedVoteTypes)}
-        </div>,
+        <ProposalCard
+          winner={pinnedWinner}
+          screenX={pinnedScreenPos.x}
+          screenY={pinnedScreenPos.y}
+          name={pinnedName}
+          rows={pinnedVoteTypes}
+          interactive
+          edgeId={pinnedVoteEdgeId}
+          mode={themeMode}
+          myVotesVersion={myVotesVersion}
+          shareUrl={pinnedPointLatLng
+            ? buildSelectionUrl(pinnedPointLatLng, pinnedWinner?.label ?? pinnedVoteTypes[0]?.label)
+            : null}
+          onVote={castProposalVote}
+          onRemove={onRemoveSelectedRef.current}
+          onHoverChange={(over) => {
+            overModalRef.current = over;
+            // Clear any transient hover card when entering the pinned modal so
+            // it doesn't linger over the selection.
+            if (over && hoverTargetRef.current) {
+              hoverTargetRef.current = null;
+              setHoverTarget(null);
+              redrawHoverHighlightRef.current();
+            }
+          }}
+        />,
         mapContainer
       )}
       {showHoverTooltip && createPortal(
-        <div
-          className={`graph-tooltip${flipped ? " tooltip-flipped" : ""}`}
-          style={{ left: tooltipPos.x, top: tooltipPos.y }}
-        >
-          {renderTooltipContent(tooltipName, tooltipVotes, hoverVoteTypes)}
-        </div>,
-        mapContainer
-      )}
-      {hoveredIndicator && createPortal(
-        <IndicatorModal
-          winner={hoveredIndicator.winner}
-          screenX={hoveredIndicator.screenX}
-          screenY={hoveredIndicator.screenY}
-          edgeName={indicatorEdgeName}
-          edgeVotes={indicatorEdgeVotes}
-          voteTypes={indicatorVoteTypes}
+        <ProposalCard
+          winner={hoverWinner}
+          screenX={tooltipPos.x}
+          screenY={tooltipPos.y}
+          name={tooltipName}
+          rows={hoverVoteTypes}
         />,
         mapContainer
       )}
@@ -1484,61 +1826,182 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick }: GraphLayer
   );
 }
 
-interface IndicatorModalProps {
-  winner: VoteTypeWinner;
-  screenX: number;
-  screenY: number;
-  edgeName: string;
-  edgeVotes: number;
-  voteTypes: { label: string; count: number }[];
+// ---------------------------------------------------------------------------
+// Proposal card — one component for hover preview and the pinned/selected
+// modal. They render identically (same markup + spacing); only when
+// `interactive` does the −/+ tally become a pressable button and a discrete
+// copy-link icon appear. Minus is on the left, plus on the right; each shows
+// its own count so you see how many of each there are.
+// ---------------------------------------------------------------------------
+
+function LinkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" />
+      <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
+    </svg>
+  );
 }
 
-function IndicatorModal({
-  winner,
-  screenX,
-  screenY,
-  edgeName,
-  edgeVotes,
-  voteTypes,
-}: IndicatorModalProps) {
+interface ProposalCardProps {
+  winner: VoteTypeWinner | null;
+  screenX: number;
+  screenY: number;
+  name: string;
+  rows: VoteTypeRow[];
+  interactive?: boolean;
+  edgeId?: number | null;
+  mode?: string;
+  myVotesVersion?: number;
+  shareUrl?: string | null;
+  onVote?: (edgeId: number | null, label: string, dir: VoteDirection) => void;
+  onRemove?: () => void;
+  /** Notifies when the cursor enters/leaves the card (pinned modal only) so the
+   *  map hover can yield beneath it. */
+  onHoverChange?: (over: boolean) => void;
+}
+
+function ProposalCard({
+  winner, screenX, screenY, name, rows,
+  interactive = false, edgeId = null, mode = "", myVotesVersion, shareUrl = null, onVote, onRemove, onHoverChange,
+}: ProposalCardProps) {
+  const [copied, setCopied] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
   const flipped = screenX > window.innerWidth / 2;
-  const label = winner.label;
-  const icon = iconForLabel(label);
+  const icon = winner ? iconForLabel(winner.label) : null;
+  void myVotesVersion; // read so the card re-renders when my votes change
+
+  // Keep the card fully on-screen: from its untransformed size (offsetWidth/Height
+  // ignore the CSS scale-in animation) + the known anchor transform, compute where
+  // each edge lands and nudge it back in from any viewport edge it overflows.
+  const [corr, setCorr] = useState({ x: 0, y: 0 });
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const M = 8, GAP = 16; // viewport margin + the anchor offset baked into the CSS transform
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const baseLeft = flipped ? screenX - w - GAP : screenX + GAP;
+    const baseTop = screenY - h - GAP; // card sits above the point
+    let x = 0, y = 0;
+    if (baseLeft < M) x = M - baseLeft;
+    else if (baseLeft + w > window.innerWidth - M) x = window.innerWidth - M - (baseLeft + w);
+    if (baseTop < M) y = M - baseTop;
+    else if (baseTop + h > window.innerHeight - M) y = window.innerHeight - M - (baseTop + h);
+    setCorr((prev) => (Math.abs(prev.x - x) > 0.5 || Math.abs(prev.y - y) > 0.5 ? { x, y } : prev));
+  }, [screenX, screenY, flipped, rows]);
+
+  // Stop Leaflet from treating clicks/drags on the card as map interactions:
+  // this keeps the modal from being cleared (a map click) and lets the user
+  // select text and press buttons. Native-level handling (React's
+  // stopPropagation doesn't reach Leaflet's own DOM listeners).
+  useEffect(() => {
+    if (!interactive || !cardRef.current) return;
+    L.DomEvent.disableClickPropagation(cardRef.current);
+    L.DomEvent.disableScrollPropagation(cardRef.current);
+  }, [interactive]);
+
+  const handleCopy = () => {
+    if (!shareUrl) return;
+    copyToClipboard(shareUrl).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    });
+  };
+
+  const tally = (row: VoteTypeRow, dir: VoteDirection) => {
+    const sign = dir === -1 ? "−" : "+";
+    const count = dir === -1 ? row.down : row.up;
+    const cls = `graph-vote-cell ${dir === -1 ? "is-down" : "is-up"}`;
+    const inner = (
+      <>
+        <span className="graph-vote-sign">{sign}</span>
+        <span className="graph-vote-count">{count}</span>
+      </>
+    );
+    if (!interactive) {
+      return <span className={cls}>{inner}</span>;
+    }
+    const myVote = edgeId != null ? getMyVote(mode, edgeId, row.label) : 0;
+    return (
+      <button
+        type="button"
+        className={`${cls} is-btn`}
+        disabled={myVote === dir || edgeId == null}
+        aria-pressed={myVote === dir}
+        title={dir === -1 ? "Downvote" : "Upvote"}
+        onClick={() => onVote?.(edgeId, row.label, dir)}
+      >
+        {inner}
+      </button>
+    );
+  };
 
   return (
     <div
-      className={`graph-indicator-modal${flipped ? " modal-flipped" : ""}`}
-      style={{ left: screenX, top: screenY }}
+      ref={cardRef}
+      className={`graph-indicator-modal graph-proposal-card${interactive ? " is-interactive" : " is-hover"}${flipped ? " modal-flipped" : ""}`}
+      style={{ left: screenX + corr.x, top: screenY + corr.y }}
+      onMouseEnter={onHoverChange ? () => onHoverChange(true) : undefined}
+      onMouseLeave={onHoverChange ? () => onHoverChange(false) : undefined}
     >
-      <div className="graph-indicator-modal-header">
-        <span className="graph-indicator-modal-glyph">
-          {icon ? (
-            <img className="graph-indicator-modal-icon" src={iconSrc(icon)} alt="" />
-          ) : (
-            <span
-              className="graph-indicator-modal-disc"
-              style={{ background: hashLabelToColor(label) }}
-            />
+      {winner && (
+        <div className="graph-indicator-modal-header">
+          <span className="graph-indicator-modal-glyph">
+            {icon ? (
+              <img className="graph-indicator-modal-icon" src={iconSrc(icon)} alt="" />
+            ) : (
+              <span className="graph-indicator-modal-disc" style={{ background: hashLabelToColor(winner.label) }} />
+            )}
+          </span>
+          <div className="graph-indicator-modal-headtext">
+            <div className="graph-indicator-modal-eyebrow">Top Proposal</div>
+            <div className="graph-indicator-modal-label">{winner.label}</div>
+          </div>
+        </div>
+      )}
+      {interactive && (shareUrl || onRemove) && (
+        <div className="graph-proposal-tools">
+          {shareUrl && (
+            <button
+              type="button"
+              className="graph-proposal-tool"
+              title={copied ? "Link copied!" : "Copy link"}
+              aria-label="Copy link to this proposal"
+              onClick={handleCopy}
+            >
+              {copied ? <CheckIcon size={13} /> : <LinkIcon />}
+            </button>
           )}
-        </span>
-        <div className="graph-indicator-modal-headtext">
-          <div className="graph-indicator-modal-eyebrow">Top Proposal</div>
-          <div className="graph-indicator-modal-label">{label}</div>
+          {onRemove && (
+            <button
+              type="button"
+              className="graph-proposal-tool graph-proposal-close"
+              title="Remove"
+              aria-label="Remove this point"
+              onClick={() => onRemove()}
+            >✕</button>
+          )}
         </div>
-      </div>
+      )}
       <div className="graph-indicator-modal-body">
-        {edgeName && <div className="graph-tooltip-name">{edgeName}</div>}
+        {name && <div className="graph-tooltip-name">{name}</div>}
         <div className="graph-tooltip-meta">
-          {edgeVotes > 0
-            ? `${edgeVotes} vote${edgeVotes !== 1 ? "s" : ""} on this segment`
-            : "no other votes on this segment"}
+          {rows.length > 0
+            ? `${rows.length} proposal${rows.length !== 1 ? "s" : ""}`
+            : "no proposals yet"}
         </div>
-        {voteTypes.length > 0 && (
-          <div className="graph-tooltip-types">
-            {voteTypes.map((t, i) => (
-              <div key={i}>
-                {t.label}
-                <span className="graph-tooltip-type-count">{t.count}</span>
+        {rows.length > 0 && (
+          <div className="graph-proposal-rows">
+            {rows.map((row) => (
+              <div className="graph-proposal-row" key={row.label}>
+                <span className="graph-proposal-row-label">{row.label}</span>
+                <span className="graph-vote" role="group" aria-label={`${row.label} votes`}>
+                  {tally(row, -1)}
+                  <span className="graph-vote-net" title="net votes (up − down)">{row.up - row.down}</span>
+                  {tally(row, 1)}
+                </span>
               </div>
             ))}
           </div>

@@ -5,35 +5,49 @@ import type { RouteGeometry, LatLng } from "../types";
 
 
 /**
- * Find the closest geometry vertex to a given lat/lng.
- * Returns actual graph node coordinates (not interpolated) so the
- * server-side coordinate cache can match pre-cached sub-paths.
+ * Closest point on the path *polyline* (not just a vertex) to a given lat/lng,
+ * projected onto the nearest segment. Returns a continuous point so the hover
+ * ghost glides smoothly along the path's shape instead of jumping between
+ * discrete vertices. Display-only — the committed drop still snaps via the graph.
  */
-function closestVertexOnPath(
+function closestPointOnPath(
   map: L.Map,
   coordinates: [number, number][],
   latlng: L.LatLng,
   thresholdPx: number = 40
-): (LatLng & { index: number }) | null {
+): LatLng | null {
   if (coordinates.length === 0) return null;
+  if (coordinates.length === 1) {
+    const only = map.latLngToContainerPoint(L.latLng(coordinates[0][1], coordinates[0][0]));
+    const p0 = map.latLngToContainerPoint(latlng);
+    return p0.distanceTo(only) <= thresholdPx
+      ? { lat: coordinates[0][1], lng: coordinates[0][0] }
+      : null;
+  }
 
-  const point = map.latLngToContainerPoint(latlng);
+  const p = map.latLngToContainerPoint(latlng);
   let bestDist = Infinity;
-  let bestIdx = -1;
+  let bestPoint: L.Point | null = null;
 
-  for (let i = 0; i < coordinates.length; i++) {
-    const vertex = map.latLngToContainerPoint(
-      L.latLng(coordinates[i][1], coordinates[i][0])
-    );
-    const dist = point.distanceTo(vertex);
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const a = map.latLngToContainerPoint(L.latLng(coordinates[i][1], coordinates[i][0]));
+    const b = map.latLngToContainerPoint(L.latLng(coordinates[i + 1][1], coordinates[i + 1][0]));
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    // Project p onto segment a→b, clamped to the segment.
+    const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
+    const proj = L.point(a.x + t * dx, a.y + t * dy);
+    const dist = p.distanceTo(proj);
     if (dist < bestDist) {
       bestDist = dist;
-      bestIdx = i;
+      bestPoint = proj;
     }
   }
 
-  if (bestDist > thresholdPx || bestIdx < 0) return null;
-  return { lat: coordinates[bestIdx][1], lng: coordinates[bestIdx][0], index: bestIdx };
+  if (bestDist > thresholdPx || !bestPoint) return null;
+  const ll = map.containerPointToLatLng(bestPoint);
+  return { lat: ll.lat, lng: ll.lng };
 }
 
 interface UsePathDragOptions {
@@ -92,20 +106,12 @@ export function usePathDrag({
         const rect = container.getBoundingClientRect();
         const containerPoint = L.point(pos.x - rect.left, pos.y - rect.top);
         const latLng = map.containerPointToLatLng(containerPoint);
-        // Compute snap position directly for immediate feedback
+        // Underlying snap (edge/node via hitTest — never a top proposal). The
+        // ghost itself follows the raw cursor, like the start/end markers; the
+        // snap only drives the trail end and the committed drop position.
         const snapped = snapToGraph(map, latLng.lat, latLng.lng);
 
-        // Convert snapped position to screen position for ghost pin rendering
-        let screenPos = pos;
-        if (snapped) {
-          const snappedScreenPoint = map.latLngToContainerPoint(L.latLng(snapped.lat, snapped.lng));
-          screenPos = {
-            x: snappedScreenPoint.x + rect.left,
-            y: snappedScreenPoint.y + rect.top
-          };
-        }
-
-        updateDrag(screenPos, snapped);
+        updateDrag(pos, snapped);
 
         // Update drag trail line
         const trailEnd = snapped ? L.latLng(snapped.lat, snapped.lng) : latLng;
@@ -166,23 +172,12 @@ export function usePathDrag({
       document.body.classList.add("dragging-from-path");
       setHoverLatLng(null);
 
-      // Get initial position with snapping
+      // Ghost starts at the raw grab point (unsnapped); snapped is the
+      // underlying edge/node used for the trail + drop.
       const pos = getEventPosition(e.originalEvent);
       const snapped = snapToGraph(map, e.latlng.lat, e.latlng.lng);
 
-      // Convert snapped position to screen position for ghost pin rendering
-      let screenPos = pos;
-      if (snapped) {
-        const container = map.getContainer();
-        const rect = container.getBoundingClientRect();
-        const snappedScreenPoint = map.latLngToContainerPoint(L.latLng(snapped.lat, snapped.lng));
-        screenPos = {
-          x: snappedScreenPoint.x + rect.left,
-          y: snappedScreenPoint.y + rect.top
-        };
-      }
-
-      startDrag(screenPos, snapped);
+      startDrag(pos, snapped);
 
       // Create drag trail from grab point
       const origin = snapped ? L.latLng(snapped.lat, snapped.lng) : e.latlng;
@@ -222,7 +217,7 @@ export function usePathDrag({
   const handleHoverMove = useCallback(
     (e: L.LeafletMouseEvent) => {
       if (isDraggingRef.current) return;
-      const snapped = closestVertexOnPath(map, geometry.coordinates, e.latlng);
+      const snapped = closestPointOnPath(map, geometry.coordinates, e.latlng);
       setHoverLatLng(snapped ? L.latLng(snapped.lat, snapped.lng) : null);
     },
     [map, geometry.coordinates]
@@ -264,18 +259,8 @@ export function usePathDrag({
         const snapped = snapToGraph(map, latlng.lat, latlng.lng);
         const pos = { x: touch.clientX, y: touch.clientY };
 
-        // Convert snapped position to screen position for ghost pin rendering
-        let screenPos = pos;
-        if (snapped) {
-          const rect = container.getBoundingClientRect();
-          const snappedScreenPoint = map.latLngToContainerPoint(L.latLng(snapped.lat, snapped.lng));
-          screenPos = {
-            x: snappedScreenPoint.x + rect.left,
-            y: snappedScreenPoint.y + rect.top
-          };
-        }
-
-        startDrag(screenPos, snapped);
+        // Ghost follows the finger (unsnapped); snapped is the underlying drop.
+        startDrag(pos, snapped);
 
         // Create drag trail from grab point
         const origin = snapped ? L.latLng(snapped.lat, snapped.lng) : latlng;

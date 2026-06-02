@@ -1,5 +1,5 @@
 // ==========================================================================
-// Type Definitions for Desire Path Mapper
+// Type Definitions for City Edit
 // ==========================================================================
 
 export type TransportMode = "bike" | "walk" | "drive";
@@ -45,6 +45,13 @@ export interface VoteDelta {
   m: string;
   vt: number;
   vtLabel?: string;
+  /** Vote direction: 1 (up) | -1 (down). Absent on legacy deltas → treat as up. */
+  dir?: number;
+  /** True when this delta reverses a prior opposite vote (move one vote across directions). */
+  reversed?: boolean;
+  /** Authoritative post-write [up, down] per edge id for this vote type. Present
+   *  on directional votes → clients SET (idempotent) instead of incrementing. */
+  vtCounts?: Record<string, [number, number]>;
 }
 
 export interface RouteResponse {
@@ -91,8 +98,9 @@ export interface GraphData {
   node_votes?: number[];
   edge_votes?: number[];
   vote_type_legend?: string[];
-  edge_vote_types?: [number, number][][];
-  node_vote_types?: [number, number][][];
+  // Per-edge / per-node vote-type breakdown: [legendIdx, up, down][]
+  edge_vote_types?: [number, number, number][][];
+  node_vote_types?: [number, number, number][][];
   rev?: number;
   vote_types?: Record<string, string>;
 }

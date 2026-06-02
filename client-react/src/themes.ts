@@ -4,12 +4,23 @@
 // the input mode, vote suggestions, and display copy.
 // ==========================================================================
 
+import { getMapStyle, type MapStyle } from "./mapStyles";
+
 export type InputMode = "route" | "point" | "both";
 
 export interface VoteSuggestion {
   label: string;
   icon: string;
   pointType: "route" | "point";
+}
+
+/**
+ * Resolve a theme's map style (basemap + accent + heat ramp). A theme's `id`
+ * is the map's `style` key (see map/runtime.ts), so presets resolve to their
+ * named style and user maps fall back to the neutral default.
+ */
+export function mapStyleForTheme(theme: Theme): MapStyle {
+  return getMapStyle(theme.id);
 }
 
 export interface Theme {
@@ -149,37 +160,14 @@ export interface ThemeNavState {
   center?: { lat: number; lng: number };
   start?: { lat: number; lng: number } | null;
   end?: { lat: number; lng: number } | null;
+  /** Pre-selected vote type — opens the proposal modal on the selected point. */
+  vt?: string | null;
 }
 
-/**
- * Build a URL that points at a given theme's subdomain.
- * Production: https://<subdomain>.<root>/   Local dev: /?theme=<id>
- *
- * Handles three host shapes:
- *   - localhost / 127.0.0.1 → query-param fallback for dev
- *   - apex (cityedit.org, 2 parts) → prepend subdomain to whole hostname
- *   - subdomain (foo.cityedit.org, 3+ parts) → swap first label for theme subdomain
- *
- * Optional `state` encodes map view + selected points as query params
- * so they persist across theme switches.
- */
-export function themeHref(theme: Theme, state?: ThemeNavState): string {
-  if (typeof window === "undefined") return `https://${theme.subdomain}.cityedit.org/`;
 
-  const { hostname, protocol, port } = window.location;
-
-  let base: string;
-  if (isLocalDevHost(hostname)) {
-    base = `/?theme=${theme.id}`;
-  } else {
-    const parts = hostname.split(".");
-    const root = parts.length >= 3 ? parts.slice(1).join(".") : hostname;
-    const portSuffix = port ? `:${port}` : "";
-    base = `${protocol}//${theme.subdomain}.${root}${portSuffix}/`;
-  }
-
-  if (!state) return base;
-
+/** Serialize map view + selected points to a query string (shared by hrefs). */
+function navStateToQuery(state?: ThemeNavState): string {
+  if (!state) return "";
   const params = new URLSearchParams();
   if (state.zoom != null) params.set("z", String(state.zoom));
   if (state.center) {
@@ -194,14 +182,58 @@ export function themeHref(theme: Theme, state?: ThemeNavState): string {
     params.set("elat", state.end.lat.toFixed(5));
     params.set("elng", state.end.lng.toFixed(5));
   }
-  const qs = params.toString();
-  if (!qs) return base;
-  return base + (base.includes("?") ? "&" : "?") + qs;
+  if (state.vt) params.set("vt", state.vt);
+  return params.toString();
+}
+
+/** Path-based link to a map by slug (the canonical addressing). */
+export function mapHref(slug: string, state?: ThemeNavState): string {
+  const base = `/m/${slug}`;
+  const qs = navStateToQuery(state);
+  return qs ? `${base}?${qs}` : base;
+}
+
+interface MapLike {
+  slug: string;
+  name: string;
+  subtitle?: string;
+  mode?: string;
+  style?: string;
+  subdomain?: string | null;
+  voteTypes?: VoteSuggestion[];
+}
+
+const DEFAULT_STYLE = {
+  inputMode: "both" as InputMode,
+  locationLabel: "Start",
+  symbol: "mapping",
+  tagline: "",
+};
+
+/**
+ * Build a Theme (styling + copy) from a resolved map. Presets reuse their
+ * historical style (keyed by subdomain in THEMES); user maps get a neutral
+ * default. This is how a map — not the subdomain — drives the active theme.
+ */
+export function themeFromMap(map: MapLike): Theme {
+  const style = (map.style && THEMES[map.style]) || null;
+  return {
+    id: map.style || map.slug,
+    name: map.name,
+    tagline: map.subtitle || style?.tagline || DEFAULT_STYLE.tagline,
+    mode: map.mode || "walk",
+    inputMode: style?.inputMode ?? DEFAULT_STYLE.inputMode,
+    suggestions: map.voteTypes ?? [],
+    locationLabel: style?.locationLabel ?? DEFAULT_STYLE.locationLabel,
+    symbol: style?.symbol || map.voteTypes?.[0]?.icon || DEFAULT_STYLE.symbol,
+    subdomain: map.subdomain || "",
+  };
 }
 
 /**
- * Detect which theme to use based on the current hostname.
- * Falls back to URL param `?theme=X` for local development.
+ * Fallback theme/style from the hostname's preset subdomain, used only when no
+ * map could be resolved (the active theme normally comes from the map via
+ * themeFromMap). Maps are addressed by slug, so there's no theme= param.
  */
 export function detectTheme(): Theme {
   if (typeof window === "undefined") return THEMES.walkways;
@@ -211,11 +243,6 @@ export function detectTheme(): Theme {
   if (hostname.startsWith("bikepaths.")) return THEMES.bikepaths;
   if (hostname.startsWith("trees.")) return THEMES.trees;
   if (hostname.startsWith("walkways.")) return THEMES.walkways;
-
-  // Local dev: ?theme=bikepaths, ?theme=trees, ?theme=walkways
-  const params = new URLSearchParams(window.location.search);
-  const param = params.get("theme");
-  if (param && THEMES[param]) return THEMES[param];
 
   return THEMES.walkways;
 }

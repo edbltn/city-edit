@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Marker } from "react-leaflet";
 import L from "leaflet";
 import { isWithinMappedBounds } from "../../utils/bounds";
@@ -9,6 +9,9 @@ interface WaypointMarkerProps {
   index: number;
   onDragEnd: (index: number, newPosition: LatLng) => void;
   onOutOfBounds?: () => void;
+  /** Fires true/false as the cursor enters/leaves the marker, so the host can
+   *  hide the start-placement ghost while the grab cursor is over a marker. */
+  onHoverChange?: (hovering: boolean) => void;
 }
 
 export function WaypointMarker({
@@ -16,9 +19,21 @@ export function WaypointMarker({
   index,
   onDragEnd,
   onOutOfBounds,
+  onHoverChange,
 }: WaypointMarkerProps) {
   const markerRef = useRef<L.Marker>(null);
   const dragStartPosition = useRef<LatLng | null>(null);
+  const hoveredRef = useRef(false);
+
+  // Release hover if the marker unmounts while hovered.
+  const onHoverChangeRef = useRef(onHoverChange);
+  useEffect(() => { onHoverChangeRef.current = onHoverChange; }, [onHoverChange]);
+  useEffect(() => () => {
+    if (hoveredRef.current) {
+      hoveredRef.current = false;
+      onHoverChangeRef.current?.(false);
+    }
+  }, []);
 
   const icon = useMemo(
     () =>
@@ -37,6 +52,8 @@ export function WaypointMarker({
 
   const eventHandlers = useMemo(
     () => ({
+      mouseover: () => { hoveredRef.current = true; onHoverChange?.(true); },
+      mouseout: () => { hoveredRef.current = false; onHoverChange?.(false); },
       dragstart: () => {
         const marker = markerRef.current;
         if (marker) {
@@ -66,7 +83,7 @@ export function WaypointMarker({
         }
       },
     }),
-    [index, onDragEnd, onOutOfBounds]
+    [index, onDragEnd, onOutOfBounds, onHoverChange]
   );
 
   return (

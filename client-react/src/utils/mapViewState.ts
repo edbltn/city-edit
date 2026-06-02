@@ -1,3 +1,4 @@
+import type L from "leaflet";
 import { CONFIG } from "../config";
 
 interface MapViewState {
@@ -10,6 +11,16 @@ let current: MapViewState = {
   center: { lat: CONFIG.initialView.lat, lng: CONFIG.initialView.lon },
 };
 
+let mapInstance: L.Map | null = null;
+
+export function setMapInstance(map: L.Map | null) {
+  mapInstance = map;
+}
+
+export function panTo(coords: { lat: number; lng: number }) {
+  mapInstance?.panTo([coords.lat, coords.lng]);
+}
+
 export function setMapViewState(zoom: number, center: { lat: number; lng: number }) {
   current = { zoom, center };
 }
@@ -18,7 +29,7 @@ export function getMapViewState(): MapViewState {
   return { ...current };
 }
 
-const NAV_PARAMS = ["z", "lat", "lng", "slat", "slng", "elat", "elng"];
+const NAV_PARAMS = ["z", "lat", "lng", "slat", "slng", "elat", "elng", "vt"];
 
 export function getInitialMapView(): { lat: number; lng: number; zoom: number } {
   if (typeof window === "undefined") {
@@ -39,17 +50,20 @@ export function getInitialMapView(): { lat: number; lng: number; zoom: number } 
 export function getInitialPoints(): {
   start: { lat: number; lng: number } | null;
   end: { lat: number; lng: number } | null;
+  vt: string | null;
 } {
-  if (typeof window === "undefined") return { start: null, end: null };
+  if (typeof window === "undefined") return { start: null, end: null, vt: null };
   const params = new URLSearchParams(window.location.search);
   const slat = params.get("slat");
   const slng = params.get("slng");
   const elat = params.get("elat");
   const elng = params.get("elng");
+  const vt = params.get("vt");
 
   return {
     start: slat && slng ? { lat: parseFloat(slat), lng: parseFloat(slng) } : null,
     end: elat && elng ? { lat: parseFloat(elat), lng: parseFloat(elng) } : null,
+    vt: vt || null,
   };
 }
 

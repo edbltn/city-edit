@@ -5,13 +5,11 @@
 // Re-export all colors for convenient access
 export * from "./colors";
 
-// Detect environment: use direct Flask URLs only when running Vite dev server (port 3000)
-// When running in Docker (port 8080), use relative paths through nginx
+// Detect environment: when running the Vite dev server (any port — including
+// incremented ports for parallel worktrees) talk to Flask directly on :5001.
+// In Docker/production (built bundle served by nginx) use relative paths.
 const isLocalDev =
-  typeof window !== "undefined" &&
-  (window.location.hostname === "localhost" ||
-    window.location.hostname === "127.0.0.1") &&
-  window.location.port === "3000";
+  typeof window !== "undefined" && import.meta.env.DEV;
 
 const wsProtocol =
   typeof window !== "undefined" && window.location.protocol === "https:"
@@ -19,24 +17,30 @@ const wsProtocol =
     : "ws:";
 
 export const CONFIG = {
+  // Active map slug (set at bootstrap from the URL; empty = legacy single-map mode)
+  mapSlug: "",
+
   // Initial camera
   initialView: { lat: 40.7580, lon: -73.9855, zoom: 14 },
 
   // Pan limits (generous padding around mapped region)
   nycBounds: {
-    sw: { lat: 40.550, lon: -74.200 },
-    ne: { lat: 41.000, lon: -73.750 },
+    sw: { lat: 40.400, lon: -74.350 },
+    ne: { lat: 41.000, lon: -73.600 },
   },
 
-  // Routing limits (mapped region bounds)
+  // Routing limits (all 5 boroughs)
   mappedBounds: {
-    sw: { lat: 40.70121, lon: -74.03069 },
-    ne: { lat: 40.87043, lon: -73.90752 },
+    sw: { lat: 40.4774, lon: -74.2591 },
+    ne: { lat: 40.9176, lon: -73.7004 },
   },
 
-  // Zoom limits
-  minZoom: 12,
-  maxZoom: 18,
+  // Zoom limits. Max is intentionally deep so short edges can be zoomed until
+  // they exceed the node hit radius and become selectable (per-city value from
+  // the server overrides this at bootstrap; the raster basemap upscales past
+  // its native zoom, the canvas graph stays crisp at any zoom).
+  minZoom: 10,
+  maxZoom: 21,
 
   // Tiles - CartoDB DarkMatter No Labels
   tileUrlTemplate:
@@ -59,3 +63,35 @@ export const CONFIG = {
     ? "ws://localhost:5001/ws"
     : `${wsProtocol}//${typeof window !== "undefined" ? window.location.host : ""}/ws`,
 };
+
+// Public city shape returned by the API (matches server cities.City.to_public()).
+export interface CityConfig {
+  id: string;
+  name: string;
+  bounds: { sw: { lat: number; lon: number }; ne: { lat: number; lon: number } };
+  center: { lat: number; lon: number };
+  defaultZoom: number;
+  minZoom: number;
+  maxZoom: number;
+  tilesPath: string;
+}
+
+/**
+ * Rebind the camera, bounds, zoom, and graph-tile URL to a given city. Called
+ * once at bootstrap (before the map subtree renders) so all CONFIG consumers
+ * read the active city's values. Pan limits get generous padding around the bbox.
+ */
+export function applyCityConfig(city: CityConfig): void {
+  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath } = city;
+  CONFIG.initialView = { lat: center.lat, lon: center.lon, zoom: defaultZoom };
+  CONFIG.mappedBounds = { sw: { ...bounds.sw }, ne: { ...bounds.ne } };
+  CONFIG.nycBounds = {
+    sw: { lat: bounds.sw.lat - 0.1, lon: bounds.sw.lon - 0.15 },
+    ne: { lat: bounds.ne.lat + 0.1, lon: bounds.ne.lon + 0.15 },
+  };
+  CONFIG.minZoom = minZoom;
+  CONFIG.maxZoom = maxZoom;
+  if (tilesPath) {
+    CONFIG.graphTilesUrl = isLocalDev ? `http://localhost:5001${tilesPath}` : tilesPath;
+  }
+}

@@ -1,6 +1,7 @@
 import { memo, useState, useCallback } from "react";
-import { useRoute, useTheme } from "../../context";
+import { useRoute, useTheme, useHeatmap } from "../../context";
 import { landingHref } from "../../themes";
+import { panTo } from "../../utils/mapViewState";
 import { HowItWorksModal } from "../HowItWorksModal";
 import { ModeSwitcher } from "../ModeSwitcher";
 import { VoteTypeSelector } from "../VoteTypeSelector";
@@ -12,6 +13,7 @@ export const TopBar = memo(function TopBar() {
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [typingField, setTypingField] = useState<"start" | "end" | null>(null);
   const theme = useTheme();
+  const { isHeatmapLoading } = useHeatmap();
 
   const {
     start,
@@ -61,6 +63,7 @@ export const TopBar = memo(function TopBar() {
         setActiveTool("start");
       }
       setTypingField(null);
+      panTo(coords);
     },
     [setStartPoint, setEndPoint, setActiveTool]
   );
@@ -188,9 +191,13 @@ export const TopBar = memo(function TopBar() {
 
           <div className="legend-item legend-item-heatmap">
             <span className="legend-icon-slot">
-              <span className="legend-heat-swatch" />
+              {isHeatmapLoading ? (
+                <span className="spinner" aria-label="Loading votes" />
+              ) : (
+                <span className="legend-heat-swatch" />
+              )}
             </span>
-            <span>Votes</span>
+            <span>{isHeatmapLoading ? "Loading…" : "Votes"}</span>
           </div>
         </div>
 

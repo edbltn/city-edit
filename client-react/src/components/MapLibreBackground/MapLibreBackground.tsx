@@ -11,28 +11,25 @@ import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { CONFIG } from "../../config";
 import { DESIRE_PATH } from "../../colors";
+import { maplibreRasterTiles, type MapStyle } from "../../mapStyles";
 
 // Register PMTiles protocol once at module level
 const protocol = new Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 
-// Dark base map style matching CartoDB DarkMatter aesthetic
-const DARK_BACKGROUND = "#0d0d0d";
-
-function buildStyle(graphTilesUrl: string): maplibregl.StyleSpecification {
+function buildStyle(
+  graphTilesUrl: string,
+  tiles: string[],
+  background: string,
+): maplibregl.StyleSpecification {
   return {
     version: 8,
-    name: "desire-path-dark",
+    name: "desire-path",
     sources: {
-      // CartoDB raster tiles as base map (same as current Leaflet TileLayer)
-      "carto-dark": {
+      // CartoDB raster tiles as base map (same as the Leaflet TileLayer)
+      "carto-base": {
         type: "raster",
-        tiles: [
-          "https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png",
-          "https://b.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png",
-          "https://c.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png",
-          "https://d.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png",
-        ],
+        tiles,
         tileSize: 256,
         attribution:
           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
@@ -44,17 +41,17 @@ function buildStyle(graphTilesUrl: string): maplibregl.StyleSpecification {
       },
     },
     layers: [
-      // Dark background fill
+      // Background fill (shows through before tiles load) — matches the map style.
       {
         id: "background",
         type: "background",
-        paint: { "background-color": DARK_BACKGROUND },
+        paint: { "background-color": background },
       },
       // Base map raster tiles
       {
         id: "carto-tiles",
         type: "raster",
-        source: "carto-dark",
+        source: "carto-base",
         minzoom: 0,
         maxzoom: 19,
       },
@@ -87,9 +84,11 @@ function buildStyle(graphTilesUrl: string): maplibregl.StyleSpecification {
 interface MapLibreBackgroundProps {
   /** Leaflet map instance to sync camera from */
   leafletMap: L.Map | null;
+  /** Active map style — drives basemap tiles + background color */
+  mapStyle: MapStyle;
 }
 
-export function MapLibreBackground({ leafletMap }: MapLibreBackgroundProps) {
+export function MapLibreBackground({ leafletMap, mapStyle }: MapLibreBackgroundProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 
@@ -100,7 +99,11 @@ export function MapLibreBackground({ leafletMap }: MapLibreBackgroundProps) {
     try {
       const map = new maplibregl.Map({
         container: containerRef.current,
-        style: buildStyle(CONFIG.graphTilesUrl),
+        style: buildStyle(
+          CONFIG.graphTilesUrl,
+          maplibreRasterTiles(mapStyle),
+          mapStyle.base,
+        ),
         center: [CONFIG.initialView.lon, CONFIG.initialView.lat],
         zoom: CONFIG.initialView.zoom,
         interactive: false,
@@ -121,7 +124,8 @@ export function MapLibreBackground({ leafletMap }: MapLibreBackgroundProps) {
       console.warn("MapLibre GL JS unavailable (WebGL required):", err);
       // Leaflet TileLayer provides the fallback base map
     }
-  }, []);
+    // mapStyle is resolved once at bootstrap and stable for the session.
+  }, [mapStyle]);
 
   // Sync camera from Leaflet
   useEffect(() => {

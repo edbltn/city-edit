@@ -135,7 +135,7 @@
   position: absolute;
   top: calc(100% + var(--space-1));
   left: 0;
-  min-width: 240px;
+  min-width: max(100%, 240px);
   background: var(--paper);
   border: 1px solid var(--hairline);
   overflow: hidden;
@@ -196,6 +196,27 @@
 
 .vote-type-option.vote-type-custom.highlighted {
   opacity: 1;
+}
+
+.vote-type-option.already-voted {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Already-voted rows are non-selectable, so suppress the hover highlight */
+.vote-type-option.already-voted.highlighted {
+  background: transparent;
+}
+
+.vote-type-voted-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--hairline);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 @media (max-width: 1080px) {

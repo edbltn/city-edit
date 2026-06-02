@@ -1,0 +1,283 @@
+.propose-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 400);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.propose-modal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-main);
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+
+.propose-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.propose-header h2 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+}
+
+.propose-close {
+  border: none;
+  background: none;
+  font-family: var(--font-main);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--ink);
+  opacity: 0.6;
+}
+
+.propose-close:hover {
+  opacity: 1;
+}
+
+.propose-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  overflow-y: auto;
+}
+
+.propose-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--font-size-2xs);
+}
+
+.propose-field > span {
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+.propose-field em {
+  font-style: normal;
+  opacity: 0.5;
+}
+
+.propose-field input,
+.propose-field select,
+.propose-custom-row input,
+.propose-custom-row select {
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-main);
+  font-size: var(--font-size-xs);
+  color: var(--ink);
+  background: rgba(212, 212, 212, 0.04);
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+}
+
+/* Custom chevron for selects — drop the native arrow and inset it to match the
+   vote-type / mode selectors (~var(--space-3) from the right, faded ink). */
+.propose-field select,
+.propose-custom-row select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: calc(var(--space-3) + 16px);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 1L4 4L7 1' fill='none' stroke='%23d4d4d4' stroke-opacity='0.5' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-3) center;
+}
+
+.propose-field input::placeholder,
+.propose-custom-row input::placeholder {
+  color: var(--ink);
+  opacity: 0.35;
+}
+
+.propose-field input:focus,
+.propose-field select:focus,
+.propose-custom-row input:focus,
+.propose-custom-row select:focus {
+  outline: none;
+  border-color: var(--color-start);
+}
+
+.propose-field small {
+  font-size: var(--font-size-2xs);
+  opacity: 0.8;
+}
+
+.propose-ok { color: var(--color-start); }
+.propose-bad { color: var(--color-end); }
+
+.propose-custom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--hairline);
+}
+
+.propose-custom-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.propose-custom-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: var(--space-2);
+}
+
+.propose-custom-row button {
+  border: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 var(--space-2);
+}
+
+.propose-custom-row button:hover {
+  background: var(--hover-bg);
+}
+
+/* Per-row icon picker. */
+.propose-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 0;
+  background: rgba(212, 212, 212, 0.04);
+}
+
+.propose-icon-btn img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.propose-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--hairline);
+  background: rgba(212, 212, 212, 0.03);
+}
+
+.propose-icon-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  padding: 5px;
+  border: 1px solid transparent;
+  background: none;
+  cursor: pointer;
+}
+
+.propose-icon-option:hover {
+  background: var(--hover-bg);
+}
+
+.propose-icon-option.selected {
+  border-color: var(--color-start);
+}
+
+.propose-icon-option img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.propose-add-row {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  color: var(--color-start);
+  cursor: pointer;
+  font-family: var(--font-main);
+  font-size: var(--font-size-2xs);
+  padding: 2px 0;
+}
+
+.propose-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-2xs);
+  cursor: pointer;
+}
+
+.propose-check input {
+  accent-color: var(--color-start);
+}
+
+.propose-error {
+  color: var(--color-end);
+  font-size: var(--font-size-2xs);
+}
+
+.propose-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--hairline);
+}
+
+.propose-cancel,
+.propose-submit {
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--font-main);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.03em;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.propose-cancel {
+  border: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink);
+}
+
+.propose-cancel:hover {
+  background: var(--hover-bg);
+}
+
+.propose-submit {
+  border: 1px solid var(--color-start);
+  background: none;
+  color: var(--color-start);
+}
+
+.propose-submit:hover:not(:disabled) {
+  background: var(--color-start-light);
+}
+
+.propose-submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

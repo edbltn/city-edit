@@ -1,4 +1,4 @@
-/* Landing page — theme picker shown on demo.cityedit.org */
+/* Landing page — theme picker shown on cityedit.org */
 
 .landing {
   height: 100vh;
@@ -42,6 +42,80 @@
   color: var(--ink);
 }
 
+/* Search/filter toolbar — same grid as the cards, so the search field lines up
+   with (and is the same width as) one map card. */
+.landing-toolbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-5) 0;
+  box-sizing: border-box;
+}
+
+.landing-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* occupies a single grid column → same width as a map card */
+}
+
+.landing-search-loupe {
+  position: absolute;
+  left: var(--space-3);
+  width: 16px;
+  height: 16px;
+  color: var(--ink);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.landing-search {
+  width: 100%;
+  padding: var(--space-3) var(--space-3) var(--space-3) 38px;
+  font-family: var(--font-main);
+  font-size: var(--font-size-xs);
+  color: var(--ink);
+  background: rgba(212, 212, 212, 0.04);
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+}
+
+.landing-search::placeholder {
+  color: var(--ink);
+  opacity: 0.4;
+}
+
+.landing-search:focus {
+  outline: none;
+  border-color: var(--color-start);
+}
+
+/* Clear button — matches the app's other × controls (e.g. .propose-close). */
+.landing-search-clear {
+  position: absolute;
+  right: var(--space-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  font-family: var(--font-main);
+  font-size: 20px;
+  line-height: 1;
+  color: var(--ink);
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.landing-search-clear:hover {
+  opacity: 1;
+}
+
 .landing-grid {
   flex: 1;
   display: grid;
@@ -55,26 +129,74 @@
 }
 
 .landing-card {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-5);
-  border: 1px solid var(--hairline);
-  background: var(--paper);
-  color: var(--ink);
+  background-color: #1a1a1a;
+  background-size: cover;
+  background-position: center;
+  color: #fff;
   text-decoration: none;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-  aspect-ratio: 1;
+  aspect-ratio: 3 / 4;
+  border: 1px solid var(--hairline);
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.landing-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.78) 0%,
+    rgba(0, 0, 0, 0.3) 45%,
+    transparent 100%
+  );
+  pointer-events: none;
+  z-index: 1;
 }
 
 .landing-card:hover {
-  background: var(--hover-bg);
   border-color: var(--ink);
+  background-color: var(--hover-bg);
 }
 
 .landing-card:active {
   transform: translateY(1px);
+}
+
+/* Propose-a-map tile: styled exactly like the other cards — plus where the
+   symbol goes, with the title + subtitle at the top left. */
+.landing-card-add {
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.landing-card-add::before {
+  display: none;
+}
+
+.landing-card-plus {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 64px;
+  line-height: 1;
+  font-weight: 400;
+}
+
+.landing-card-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
 }
 
 .landing-card-symbol {
@@ -86,14 +208,16 @@
 
 .landing-card-name {
   font-size: 22px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
 }
 
 .landing-card-tagline {
   flex: 1;
   font-size: var(--font-size-sm);
   line-height: 1.4;
+  opacity: 0.88;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
-
 
 .landing-footer {
   display: flex;
@@ -134,6 +258,11 @@
   .landing-grid {
     grid-template-columns: 1fr;
     padding: var(--space-4);
+  }
+
+  .landing-toolbar {
+    grid-template-columns: 1fr;
+    padding: var(--space-4) var(--space-4) 0;
   }
 
   .landing-card {

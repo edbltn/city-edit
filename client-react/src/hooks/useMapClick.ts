@@ -66,7 +66,7 @@ export function useMapClick({
       }
 
       if (!isWithinMappedBounds(latlng)) {
-        onSetError("Not mapped yet — please limit to Manhattan");
+        onSetError("That's outside this map — drop your pins inside the highlighted area.");
         return;
       }
 

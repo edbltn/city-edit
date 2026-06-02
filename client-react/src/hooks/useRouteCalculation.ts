@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { CONFIG } from "../config";
+import { getMapSlug } from "../map/runtime";
 import type {
   LatLng,
   RouteData,
@@ -43,6 +44,11 @@ async function fetchWithRetry(
     } catch (error) {
       lastError = error as Error;
 
+      // Don't retry aborted requests
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw error;
+      }
+
       // Don't retry on the last attempt
       if (attempt < maxRetries - 1) {
         // Exponential backoff: 1s, 2s, 4s, 8s, 16s
@@ -65,13 +71,14 @@ export function useRouteCalculation() {
     edgeIds: null,
   });
 
-  const requestIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const calculateRoute = useCallback(
     async ({ start, end, waypoints }: CalculateParams) => {
-      // Increment request ID and capture it for this request
-      requestIdRef.current++;
-      const requestId = requestIdRef.current;
+      // Abort any in-flight request before starting a new one
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
 
       setState((prev) => ({
         ...prev,
@@ -89,7 +96,9 @@ export function useRouteCalculation() {
             start: [start.lat, start.lng],
             end: [end.lat, end.lng],
             waypoints: waypoints?.map((wp) => [wp.lat, wp.lng]) || [],
+            map: getMapSlug(),
           }),
+          signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -98,8 +107,8 @@ export function useRouteCalculation() {
 
         const data: RouteResponse = await response.json();
 
-        // Ignore response if a newer request was made
-        if (requestId !== requestIdRef.current) {
+        // Ignore response if this request was aborted
+        if (controller.signal.aborted) {
           return null;
         }
 
@@ -114,8 +123,10 @@ export function useRouteCalculation() {
 
         return data;
       } catch (error) {
-        // Only update state if this is still the current request
-        if (requestId === requestIdRef.current) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return null;
+        }
+        if (!controller.signal.aborted) {
           const errorMessage =
             error instanceof Error ? error.message : "Route calculation failed";
           setState({
@@ -134,8 +145,7 @@ export function useRouteCalculation() {
   );
 
   const clearRoute = useCallback(() => {
-    // Invalidate any in-flight requests so they don't overwrite the cleared state
-    requestIdRef.current++;
+    abortRef.current?.abort();
     setState({
       isCalculating: false,
       error: null,

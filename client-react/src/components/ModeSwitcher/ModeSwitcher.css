@@ -1,0 +1,68 @@
+/* Searchable map (mode) switcher — builds on the base .mode-* styles in
+   globals.css, adding a search field, a scrollable list, subtitle + vote count. */
+
+.mode-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-main);
+  font-size: var(--font-size-xs);
+  color: var(--ink);
+  background: rgba(212, 212, 212, 0.04);
+  border: none;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.mode-search::placeholder {
+  color: var(--ink);
+  opacity: 0.4;
+}
+
+.mode-search:focus {
+  outline: none;
+  border-bottom-color: var(--color-start);
+}
+
+.mode-options {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.mode-option-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.mode-option-text .mode-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mode-sub {
+  font-size: var(--font-size-2xs);
+  opacity: 0.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mode-votes {
+  font-size: var(--font-size-2xs);
+  opacity: 0.55;
+  margin-left: var(--space-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.mode-option .check-icon {
+  margin-left: var(--space-2);
+}
+
+.mode-empty {
+  padding: var(--space-3);
+  font-size: var(--font-size-2xs);
+  opacity: 0.5;
+  text-align: center;
+}

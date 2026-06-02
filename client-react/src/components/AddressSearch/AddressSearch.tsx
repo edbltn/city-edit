@@ -1,7 +1,11 @@
-import { useState, useCallback, useRef, useEffect, memo } from "react";
+import { type JSX, useState, useCallback, useRef, useEffect, memo } from "react";
 import { CONFIG } from "../../config";
+import { withMap } from "../../map/runtime";
 import type { LatLng } from "../../types";
 import "./AddressSearch.css";
+
+const MIN_QUERY_LENGTH = 3;
+const DEBOUNCE_MS = 400;
 
 interface GeocodeResult {
   lat: number;
@@ -59,8 +63,8 @@ export const AddressSearch = memo(function AddressSearch({
   const [hasSearched, setHasSearched] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
-  const abortRef = useRef<AbortController>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const abortRef = useRef<AbortController | undefined>(undefined);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => inputRef.current?.focus());
@@ -78,7 +82,9 @@ export const AddressSearch = memo(function AddressSearch({
   }, [onClose]);
 
   const fetchResults = useCallback(async (q: string) => {
-    if (!q.trim()) {
+    // The geocode backend (Photon) is a shared public service; debounce and a
+    // min length keep request volume down. Don't search on a stray keystroke.
+    if (q.trim().length < MIN_QUERY_LENGTH) {
       setResults([]);
       setHasSearched(false);
       return;
@@ -91,7 +97,7 @@ export const AddressSearch = memo(function AddressSearch({
     setIsLoading(true);
     try {
       const res = await fetch(
-        `${CONFIG.apiUrl}/geocode?q=${encodeURIComponent(q)}`,
+        withMap(`${CONFIG.apiUrl}/geocode?q=${encodeURIComponent(q)}`),
         { signal: controller.signal }
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -116,7 +122,7 @@ export const AddressSearch = memo(function AddressSearch({
       const value = e.target.value;
       setQuery(value);
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => fetchResults(value), 150);
+      debounceRef.current = setTimeout(() => fetchResults(value), DEBOUNCE_MS);
     },
     [fetchResults]
   );

@@ -1,5 +1,7 @@
 /* ==========================================================================
-   Design Tokens
+   Design Tokens — Structural
+   Theme-invariant: typography, spacing, radius, z-index, layout. These never
+   change between map styles. Palette tokens live in the next section.
    ========================================================================== */
 
 :root {
@@ -16,16 +18,6 @@
 
   /* Control Heights */
   --control-height: 44px;
-
-  /* Colors — dark terminal palette */
-  --paper: #0d0d0d;
-  --ink: #d4d4d4;
-  --hairline: rgba(212, 212, 212, 0.2);
-  --color-start: #00C4D4;
-  --color-end: #E05A60;
-  --color-start-light: rgba(0, 196, 212, 0.15);
-  --hover-bg: rgba(212, 212, 212, 0.06);
-  --hover-bg-strong: rgba(212, 212, 212, 0.12);
 
   /* Spacing (4px base) */
   --space-1: 4px;
@@ -53,6 +45,54 @@
   --topbar-height: auto;
   --topbar-min-height: 72px;
   --logo-width: 150px;
+}
+
+
+/* ==========================================================================
+   Design Tokens — Palette
+   The themeable layer. Defaults below are the dark "terminal" palette used by
+   dark map styles (bikepaths/walkways/default). [data-basemap="light"] overrides
+   the surface/ink/hairline tokens for light map styles (trees).
+
+   Two tokens are injected per-map at runtime by ThemeContext from the active
+   map style (mapStyles.ts):
+     --accent         the map style's accent color (heat identity)
+     --heat-gradient  the legend swatch gradient matching the heatmap ramp
+   Fallbacks are declared here so the page is styled before JS runs.
+   ========================================================================== */
+
+:root {
+  /* Surface + text */
+  --paper: #0d0d0d;
+  --ink: #d4d4d4;
+  --hairline: rgba(212, 212, 212, 0.2);
+  --hover-bg: rgba(212, 212, 212, 0.06);
+  --hover-bg-strong: rgba(212, 212, 212, 0.12);
+
+  /* Start/end markers — constant across themes */
+  --color-start: #00C4D4;
+  --color-end: #E05A60;
+  --color-start-light: rgba(0, 196, 212, 0.15);
+
+  /* Per-map (set by ThemeContext; fallbacks for pre-JS / landing) */
+  --accent: #E0A23A;
+  --on-accent: #0d0d0d;
+  --heat-gradient: linear-gradient(to right,
+    rgb(140, 78, 24),
+    rgb(214, 142, 42) 40%,
+    rgb(245, 200, 96) 75%,
+    rgb(255, 242, 212)
+  );
+}
+
+/* Light map styles (trees) — warm paper, dark ink. */
+[data-basemap="light"] {
+  --paper: #F4F5F0;
+  --ink: #2b2b28;
+  --hairline: rgba(40, 40, 35, 0.18);
+  --hover-bg: rgba(40, 40, 35, 0.05);
+  --hover-bg-strong: rgba(40, 40, 35, 0.1);
+  --on-accent: #ffffff;
 }
 
 
@@ -437,12 +477,7 @@ body {
   display: block;
   width: 16px;
   height: 4px;
-  background: linear-gradient(to right,
-    rgb(180, 50, 30),
-    rgb(255, 110, 30) 40%,
-    rgb(255, 210, 90) 75%,
-    rgb(255, 240, 210)
-  );
+  background: var(--heat-gradient);
 }
 
 /* Keep these for backwards compat but visually hidden now */
@@ -558,7 +593,7 @@ body {
 .leaflet-container {
   z-index: var(--z-map) !important;
   cursor: crosshair !important;
-  background: #0d0d0d !important;
+  background: var(--paper) !important;
 }
 
 .leaflet-pane {
@@ -725,7 +760,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   width: 16px;
   height: 16px;
   background: #D64045;
-  border: 2px solid #0d0d0d;
+  border: 2px solid var(--paper);
   opacity: 0.9;
   cursor: grab;
 }
@@ -1192,7 +1227,8 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   .vote-type-input,
   .vote-type-display,
   .vote-type-placeholder,
-  .vote-type-option {
+  .vote-type-option,
+  .mode-option {
     font-size: 12px;
   }
 }
@@ -1256,7 +1292,8 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   .vote-type-input,
   .vote-type-display,
   .vote-type-placeholder,
-  .vote-type-option {
+  .vote-type-option,
+  .mode-option {
     font-size: 11px;
   }
 }
@@ -1298,6 +1335,10 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
     white-space: nowrap;
   }
 
+  .mode-option {
+    font-size: 12px;
+  }
+
   .calculating-indicator {
     font-size: 12px;
     padding: 4px 8px;
@@ -1319,8 +1360,8 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   /* Above leaflet marker pane (default z-index 600) so vote-type indicator
      icons don't occlude the hover tooltip they trigger. */
   z-index: 1000;
-  background: #0d0d0d;
-  border: 1px solid rgba(170, 185, 255, 0.35);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
   padding: 4px 8px;
   font-family: var(--font-main);
   font-size: 11px;
@@ -1360,6 +1401,14 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .vote-type-indicator:hover {
   border-color: var(--ink);
   transform: scale(1.1);
+}
+
+/* While a crowded cluster is fanned out, animate the marker wrapper's position
+   so icons glide into (and back out of) their temporary grid. Scoped to the
+   .votes-spreading window so it never lags normal panning, when Leaflet rewrites
+   these transforms every frame. */
+.votes-spreading .vote-type-indicator-wrapper {
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .vote-type-indicator-glyph {
@@ -1478,19 +1527,19 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 .graph-indicator-modal-body .graph-tooltip-name {
-  color: rgba(200, 210, 255, 0.9);
+  color: color-mix(in srgb, var(--ink) 90%, transparent);
   margin-bottom: 2px;
 }
 
 .graph-indicator-modal-body .graph-tooltip-meta {
-  color: rgba(180, 185, 210, 0.7);
+  color: color-mix(in srgb, var(--ink) 70%, transparent);
   margin-bottom: 4px;
 }
 
 .graph-indicator-modal-body .graph-tooltip-types {
   margin-top: 4px;
   padding-top: 4px;
-  border-top: 1px solid rgba(170, 185, 255, 0.15);
+  border-top: 1px solid var(--hairline);
   white-space: normal;
 }
 
@@ -1501,6 +1550,181 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   line-height: 1.5;
 }
 
+/* Proposal card — shared by hover preview and the interactive pinned modal.
+   Both render identically; only `.is-interactive` enables text selection,
+   pressable tallies, and the copy-link button. */
+.graph-proposal-card {
+  white-space: normal;
+}
+
+/* The card body passes mouse events THROUGH to the map/desire-path beneath, so
+   the path's hover (e.g. the midwaypoint grab affordance) still works when the
+   card overlaps the route. Only the actual controls below re-enable pointer
+   events; their clicks are still kept off the map by disableClickPropagation on
+   the card root (events bubble up through it). */
+.graph-proposal-card.is-interactive {
+  pointer-events: none;
+  cursor: default;
+}
+
+.graph-proposal-card.is-interactive button,
+.graph-proposal-card.is-interactive .graph-vote {
+  pointer-events: auto;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Transient hover card sits above the pinned/selection modal (z-index 1100) so
+   it's never occluded when both are visible. */
+.graph-proposal-card.is-hover {
+  z-index: 1200;
+}
+
+/* Per-vote-type rows: label on the left, a connected −/net/+ control on the right. */
+.graph-proposal-rows {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.graph-proposal-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  line-height: 1.4;
+}
+
+.graph-proposal-row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Connected vote control: [ −down │ net │ +up ] reads as ONE unit rather than
+   three free-floating numbers. Square (radius 0) and tabular monospace to match
+   the terminal aesthetic; the outer hairline + internal dividers do the framing. */
+.graph-vote {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--hairline);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.graph-vote-cell,
+.graph-vote-net {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* Net score is the anchor: full-strength ink, framed by hairline dividers. */
+.graph-vote-net {
+  min-width: 18px;
+  border-left: 1px solid var(--hairline);
+  border-right: 1px solid var(--hairline);
+}
+
+/* Directional counts read quieter than the net until hovered/cast. */
+.graph-vote-cell {
+  min-width: 34px;
+  color: color-mix(in srgb, var(--ink) 62%, transparent);
+}
+
+.graph-vote-sign {
+  font-weight: 700;
+}
+
+/* Interactive variant: each side becomes a pressable up/down button. */
+.graph-vote-cell.is-btn {
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.graph-vote-cell.is-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+  color: var(--ink);
+}
+
+/* Direction-tinted on hover: cyan = up (start color), red = down (end color). */
+.graph-vote-cell.is-up.is-btn:hover:not(:disabled) {
+  color: var(--color-start);
+}
+
+.graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
+  color: var(--color-end);
+}
+
+/* The direction you've already cast: filled cell + full-accent text. */
+.graph-vote-cell.is-btn[aria-pressed="true"] {
+  background: var(--hover-bg-strong);
+  color: var(--ink);
+}
+
+.graph-vote-cell.is-up.is-btn[aria-pressed="true"] {
+  color: var(--color-start);
+}
+
+.graph-vote-cell.is-down.is-btn[aria-pressed="true"] {
+  color: var(--color-end);
+}
+
+.graph-vote-cell.is-btn:disabled:not([aria-pressed="true"]) {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* Discrete icon tools (copy link, remove), top-right of the interactive card. */
+.graph-proposal-tools {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.graph-proposal-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink);
+  background: none;
+  cursor: pointer;
+}
+
+.graph-proposal-tool:hover {
+  background: var(--hover-bg);
+}
+
+/* Keep the top line clear of the copy / remove icons (up to two, ~52px). */
+.graph-proposal-card.is-interactive .graph-indicator-modal-header,
+.graph-proposal-card.is-interactive > .graph-indicator-modal-body > .graph-tooltip-name,
+.graph-proposal-card.is-interactive > .graph-indicator-modal-body > .graph-tooltip-meta {
+  padding-right: 54px;
+}
+
 .graph-tooltip.tooltip-flipped {
   /* When near right edge: position to the left of cursor */
   transform: translateY(calc(-100% - 8px)) translateX(-100%);
@@ -1508,18 +1732,18 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 .graph-tooltip-name {
-  color: rgba(200, 210, 255, 0.9);
+  color: color-mix(in srgb, var(--ink) 90%, transparent);
 }
 
 .graph-tooltip-meta {
-  color: rgba(180, 185, 210, 0.6);
+  color: color-mix(in srgb, var(--ink) 60%, transparent);
 }
 
 .graph-tooltip-types {
   margin-top: 2px;
   padding-top: 2px;
-  border-top: 1px solid rgba(170, 185, 255, 0.15);
-  color: rgba(200, 210, 255, 0.75);
+  border-top: 1px solid var(--hairline);
+  color: color-mix(in srgb, var(--ink) 75%, transparent);
   font-size: 10px;
   line-height: 1.5;
 }
@@ -1531,12 +1755,12 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 .graph-tooltip-type-count {
-  color: rgba(170, 185, 255, 0.5);
+  color: color-mix(in srgb, var(--ink) 50%, transparent);
   font-variant-numeric: tabular-nums;
 }
 
 .graph-tooltip-types-more {
-  color: rgba(180, 185, 210, 0.45);
+  color: color-mix(in srgb, var(--ink) 45%, transparent);
   font-style: italic;
 }
 

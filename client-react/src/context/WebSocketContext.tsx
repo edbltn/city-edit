@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { CONFIG } from "../config";
+import { withMap } from "../map/runtime";
 import type { VoteDelta } from "../types";
 
 type DeltaListener = (delta: VoteDelta) => void;
@@ -31,7 +32,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
   const connect = useCallback(() => {
     setConnectionStatus("connecting...");
-    const ws = new WebSocket(CONFIG.wsUrl);
+    const ws = new WebSocket(withMap(CONFIG.wsUrl));
 
     ws.onopen = () => {
       setConnectionStatus("connected");
@@ -42,15 +43,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       try {
         const msg = JSON.parse(evt.data);
         if (msg.type === "delta") {
-          const delta: VoteDelta = {
-            rev: msg.rev,
-            edges: msg.edges,
-            m: msg.m,
-            vt: msg.vt,
-            vtLabel: msg.vtLabel,
-          };
+          // Pass the whole payload through — must include dir/reversed/vtCounts
+          // (directional + authoritative-count fields), not just the basics.
+          const { type: _type, ...delta } = msg;
+          void _type;
           for (const cb of deltaListenersRef.current) {
-            cb(delta);
+            cb(delta as VoteDelta);
           }
         }
         // "init" and "keepalive" are handled silently

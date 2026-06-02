@@ -9,16 +9,18 @@ import {
 import L from "leaflet";
 import { CONFIG } from "../../config";
 import { COLOR_START, COLOR_END } from "../../colors";
+import { mapStyleForTheme } from "../../themes";
 import { useRoute, useGhostPin, useTheme } from "../../context";
 import { useMapClick } from "../../hooks";
 import { kiteGhostIcon } from "../../utils/kiteIcon";
-import { setMapViewState, getInitialMapView } from "../../utils/mapViewState";
+import { setMapViewState, setMapInstance, getInitialMapView } from "../../utils/mapViewState";
 import { RouteMarker } from "../RouteMarker";
 import { DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
 import { WaypointConnectors } from "../WaypointConnectors";
 import { GhostPin } from "../GhostPin";
 import { GraphLayer } from "../GraphLayer/GraphLayer";
+import { BoundaryLayer } from "../BoundaryLayer";
 import { MapLibreBackground } from "../MapLibreBackground";
 import type { LatLng } from "../../types";
 import "leaflet/dist/leaflet.css";
@@ -166,8 +168,6 @@ function SnapMarker({
   return <Marker position={[cursorLatLng.lat, cursorLatLng.lng]} icon={icon} interactive={false} />;
 }
 
-const initialMapView = getInitialMapView();
-
 export function MapView() {
   const {
     start,
@@ -196,6 +196,7 @@ export function MapView() {
   } = useRoute();
 
   const theme = useTheme();
+  const mapStyle = mapStyleForTheme(theme);
 
   const { ghostState } = useGhostPin();
 
@@ -203,6 +204,12 @@ export function MapView() {
   const [cursorLatLng, setCursorLatLng] = useState<LatLng | null>(null);
   const [isHoveringPath, setIsHoveringPath] = useState(false);
   const [isDraggingMarker, setIsDraggingMarker] = useState(false);
+  // Count of draggable markers (start/end/waypoints) currently hovered, so the
+  // start-placement ghost hides while the grab cursor is over one.
+  const [markerHoverCount, setMarkerHoverCount] = useState(0);
+  const handleMarkerHover = useCallback((hovering: boolean) => {
+    setMarkerHoverCount((c) => Math.max(0, c + (hovering ? 1 : -1)));
+  }, []);
 
   // Wrapper for marker drag start — suppresses ghost pin and next click
   const handleMarkerDragStart = useCallback(() => {
@@ -242,7 +249,7 @@ export function MapView() {
   });
 
   const handleOutOfBounds = useCallback(() => {
-    setError("Not mapped yet — please limit to Manhattan");
+    setError("That's outside this map — drop your pins inside the highlighted area.");
   }, [setError]);
 
   const bounds = useMemo(
@@ -254,10 +261,15 @@ export function MapView() {
     []
   );
 
+  // Computed at first render (not module load) so it reflects the active city's
+  // center after applyCityConfig has run — otherwise non-default cities (SF,
+  // Chicago) would mount at the stale NYC default and get clamped off-center.
+  const initialMapView = useMemo(() => getInitialMapView(), []);
+
   return (
     <>
     {/* MapLibre GL JS background — renders base map + graph from PMTiles */}
-    <MapLibreBackground leafletMap={leafletMap} />
+    <MapLibreBackground leafletMap={leafletMap} mapStyle={mapStyle} />
 
     <MapContainer
       center={[initialMapView.lat, initialMapView.lng]}
@@ -273,9 +285,12 @@ export function MapView() {
       <MapBridge onMap={setLeafletMap} />
       <MapViewTracker />
       <MapPanes />
+      <BoundaryLayer />
       <GraphLayer
         pinnedPoint={start.coords && !end.coords ? start.coords : null}
         onIndicatorClick={handleIndicatorClick}
+        onRemoveSelected={clearStart}
+        suppressHover={isHoveringPath || markerHoverCount > 0}
       />
       <MapDragCursor />
       <CursorTracker onMove={setCursorLatLng} />
@@ -285,15 +300,19 @@ export function MapView() {
         activeTool={activeTool}
         hasStart={!!start.coords}
         pointOnly={theme.inputMode === "point"}
-        suppress={isHoveringPath || ghostState.isDragging || isDraggingMarker}
+        suppress={isHoveringPath || ghostState.isDragging || isDraggingMarker || markerHoverCount > 0}
       />
 
-      {/* Raster tile fallback — visible until MapLibre loads, or when WebGL unavailable */}
+      {/* Raster tile fallback — visible until MapLibre loads, or when WebGL unavailable.
+          maxNativeZoom caps tile requests at CartoDB's available zoom and upscales
+          beyond it, so deep zoom (maxZoom) doesn't request nonexistent blank tiles. */}
       <TileLayer
-        url={CONFIG.tileUrlTemplate}
+        key={mapStyle.id}
+        url={mapStyle.tileUrl}
         subdomains={["a", "b", "c", "d"]}
         maxZoom={CONFIG.maxZoom}
-        attribution={CONFIG.tileAttribution}
+        maxNativeZoom={19}
+        attribution={mapStyle.tileAttribution}
       />
 
       {/* Zoom control in bottom right */}
@@ -343,6 +362,7 @@ export function MapView() {
           onDragFinish={handleMarkerDragFinish}
           onDelete={() => removeGhostWaypoint(index)}
           onOutOfBounds={handleOutOfBounds}
+          onHoverChange={handleMarkerHover}
         />
       ))}
 
@@ -354,6 +374,7 @@ export function MapView() {
           index={index}
           onDragEnd={updateWaypoint}
           onOutOfBounds={handleOutOfBounds}
+          onHoverChange={handleMarkerHover}
         />
       ))}
 
@@ -367,6 +388,7 @@ export function MapView() {
           onDragFinish={handleMarkerDragFinish}
           onDelete={clearStart}
           onOutOfBounds={handleOutOfBounds}
+          onHoverChange={handleMarkerHover}
         />
       )}
 
@@ -380,6 +402,7 @@ export function MapView() {
           onDragFinish={handleMarkerDragFinish}
           onDelete={clearEnd}
           onOutOfBounds={handleOutOfBounds}
+          onHoverChange={handleMarkerHover}
         />
       )}
     </MapContainer>
@@ -390,10 +413,14 @@ export function MapView() {
   );
 }
 
-// Bridge to expose Leaflet map instance to parent
+// Bridge to expose Leaflet map instance to parent and module-level store
 function MapBridge({ onMap }: { onMap: (map: L.Map) => void }) {
   const map = useMap();
-  useEffect(() => { onMap(map); }, [map, onMap]);
+  useEffect(() => {
+    onMap(map);
+    setMapInstance(map);
+    return () => setMapInstance(null);
+  }, [map, onMap]);
   return null;
 }
 
