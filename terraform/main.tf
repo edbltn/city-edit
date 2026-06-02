@@ -210,13 +210,14 @@ resource "google_cloud_run_service" "app" {
           value = google_redis_instance.cache.port
         }
 
-        # Skip the inline graph preload/topology prewarm at boot: under the
-        # single gevent worker it spikes memory past the limit and starves the
-        # startup probe. Graphs load lazily on first request per city instead
-        # (each city well under the memory limit), matching local behavior.
+        # Warm graphs at boot in a background thread (the worker still goes Ready
+        # immediately, so the startup probe passes). This pre-loads the NYC graph
+        # off the request path — its ~60-120s load would otherwise blow the
+        # gunicorn 120s worker timeout when loaded lazily inside a request (502).
+        # Safe at 16Gi (the OOM that forced SKIP_WARMUP=1 was at 8Gi).
         env {
           name  = "SKIP_WARMUP"
-          value = "1"
+          value = "0"
         }
 
         env {
