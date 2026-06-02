@@ -210,6 +210,15 @@ resource "google_cloud_run_service" "app" {
           value = google_redis_instance.cache.port
         }
 
+        # Skip the inline graph preload/topology prewarm at boot: under the
+        # single gevent worker it spikes memory past the limit and starves the
+        # startup probe. Graphs load lazily on first request per city instead
+        # (each city well under the memory limit), matching local behavior.
+        env {
+          name  = "SKIP_WARMUP"
+          value = "1"
+        }
+
         env {
           name = "DATABASE_URL"
           value_from {
@@ -236,7 +245,7 @@ resource "google_cloud_run_service" "app" {
           }
           initial_delay_seconds = 5
           period_seconds        = 5
-          failure_threshold     = 30
+          failure_threshold     = 60
           timeout_seconds       = 3
         }
       }
