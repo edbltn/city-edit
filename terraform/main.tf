@@ -99,7 +99,7 @@ data "google_project" "project" {
 resource "google_artifact_registry_repository" "app" {
   location      = var.region
   repository_id = "desire-path-mapper"
-  description   = "Docker repository for Desire Path Mapper"
+  description   = "Docker repository for City Edit"
   format        = "DOCKER"
 }
 
@@ -111,7 +111,7 @@ resource "google_redis_instance" "cache" {
   region         = var.region
 
   redis_version = "REDIS_7_0"
-  display_name  = "Desire Path Mapper Redis"
+  display_name  = "City Edit Redis"
 
   # Use LRU eviction to auto-remove old cache entries when memory is full
   redis_configs = {
@@ -221,9 +221,12 @@ resource "google_cloud_run_service" "app" {
         }
 
         resources {
+          # Holds up to 3 city walk graphs in memory (GraphRegistry max_loaded=3);
+          # NYC alone is a 320MB pickle that expands several-fold when loaded.
+          # 8Gi requires >=2 vCPU per Cloud Run's CPU/memory pairing rules.
           limits = {
-            cpu    = "1"
-            memory = "2Gi"
+            cpu    = "2"
+            memory = "8Gi"
           }
         }
 
@@ -241,7 +244,7 @@ resource "google_cloud_run_service" "app" {
 
     metadata {
       annotations = {
-        "autoscaling.knative.dev/minScale"        = "0"
+        "autoscaling.knative.dev/minScale"        = "1"
         "autoscaling.knative.dev/maxScale"        = "3"
         "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.connector.id
         "run.googleapis.com/vpc-access-egress"    = "private-ranges-only"
@@ -480,4 +483,104 @@ output "bastion_name" {
 
 output "bastion_zone" {
   value = google_compute_instance.bastion.zone
+}
+
+# =============================================================================
+# Map Preview Screenshots
+# =============================================================================
+
+resource "google_storage_bucket" "previews" {
+  name     = "cityedit-map-previews-${var.environment}"
+  location = var.region
+
+  uniform_bucket_level_access = true
+  public_access_prevention    = "inherited"
+}
+
+resource "google_service_account" "screenshot_sa" {
+  account_id   = "map-screenshot"
+  display_name = "Map Screenshot Job"
+  description  = "Service account for hourly map preview screenshot capture"
+}
+
+resource "google_storage_bucket_iam_member" "screenshot_writer" {
+  bucket = google_storage_bucket.previews.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.screenshot_sa.email}"
+}
+
+resource "google_cloud_run_v2_job" "screenshot" {
+  name     = "map-screenshot-${var.environment}"
+  location = var.region
+
+  template {
+    template {
+      containers {
+        image = "${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper/screenshot:latest"
+
+        env {
+          name  = "PREVIEW_BUCKET"
+          value = google_storage_bucket.previews.name
+        }
+
+        resources {
+          limits = {
+            cpu    = "2"
+            memory = "2Gi"
+          }
+        }
+      }
+
+      service_account = google_service_account.screenshot_sa.email
+      timeout         = "300s"
+      max_retries     = 1
+    }
+  }
+
+  depends_on = [
+    google_project_service.cloud_run,
+    google_artifact_registry_repository.app,
+  ]
+}
+
+resource "google_cloud_run_v2_job_iam_member" "screenshot_invoker" {
+  name     = google_cloud_run_v2_job.screenshot.name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.screenshot_sa.email}"
+}
+
+resource "google_cloud_scheduler_job" "screenshot" {
+  name        = "map-screenshot-hourly-${var.environment}"
+  description = "Hourly map preview screenshot capture"
+  schedule    = "0 * * * *"
+  time_zone   = "America/New_York"
+  region      = var.region
+
+  retry_config {
+    retry_count = 1
+  }
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/jobs/${google_cloud_run_v2_job.screenshot.name}:run"
+
+    oauth_token {
+      service_account_email = google_service_account.screenshot_sa.email
+      scope                 = "https://www.googleapis.com/auth/cloud-platform"
+    }
+  }
+
+  depends_on = [
+    google_project_service.cloudscheduler,
+    google_cloud_run_v2_job.screenshot,
+  ]
+}
+
+output "preview_bucket_url" {
+  value = "https://storage.googleapis.com/${google_storage_bucket.previews.name}"
+}
+
+output "screenshot_job" {
+  value = google_cloud_run_v2_job.screenshot.name
 }

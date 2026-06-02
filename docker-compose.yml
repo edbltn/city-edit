@@ -23,12 +23,12 @@ services:
       timeout: 5s
       retries: 5
 
-  osrm:
+  osrm-nyc:
     image: osrm/osrm-backend:v5.27.1
     restart: unless-stopped
     mem_limit: 4g
     volumes:
-      - osrm-data:/data
+      - osrm-nyc-data:/data
       - ./osrm/entrypoint.sh:/entrypoint.sh:ro
     entrypoint: /entrypoint.sh
     environment:
@@ -41,20 +41,59 @@ services:
       retries: 3
       start_period: 300s
 
+  osrm-sf:
+    image: osrm/osrm-backend:v5.27.1
+    restart: unless-stopped
+    mem_limit: 2g
+    volumes:
+      - osrm-sf-data:/data
+      - ./osrm/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: /entrypoint.sh
+    environment:
+      - OSRM_PROFILE=foot
+      # BBBike per-city extract — already clipped to the SF bbox.
+      - OSRM_PBF_URL=https://download.bbbike.org/osm/bbbike/SanFrancisco/SanFrancisco.osm.pbf
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  osrm-chicago:
+    image: osrm/osrm-backend:v5.27.1
+    restart: unless-stopped
+    mem_limit: 2g
+    volumes:
+      - osrm-chicago-data:/data
+      - ./osrm/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: /entrypoint.sh
+    environment:
+      - OSRM_PROFILE=foot
+      - OSRM_PBF_URL=https://download.bbbike.org/osm/bbbike/Chicago/Chicago.osm.pbf
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
   flask:
     build: ./server
     restart: unless-stopped
-    mem_limit: 2g
+    mem_limit: 4g
     environment:
       - REDIS_HOST=redis
       - DATABASE_URL=postgresql://app:devpassword@postgres:5432/votes
-      - OSRM_HOST=osrm
+      # Per-city OSRM hosts default to service names in cities.py; override here if needed.
     env_file:
       - ./server/.env
     depends_on:
       - redis
       - postgres
-      - osrm
+      - osrm-nyc
+      - osrm-sf
+      - osrm-chicago
     deploy:
       replicas: 3
     healthcheck:
@@ -73,14 +112,10 @@ services:
       sh -c "
         echo 'OSM refresh service started'
 
-        # Build graphs on first startup if they don't exist
-        if [ ! -f /app/osm_data/walk_graph.pkl ]; then
-          echo 'Graph files not found, building now...'
-          python refresh_osm.py --region manhattan --force 2>&1
-          echo 'Initial graph build complete'
-        else
-          echo 'Graph files exist, skipping initial build'
-        fi
+        # Build any missing per-city graphs on first startup
+        echo 'Building missing city graphs...'
+        python refresh_osm.py --all 2>&1
+        echo 'Initial graph build complete'
 
         # Weekly refresh loop
         while true; do
@@ -89,7 +124,7 @@ services:
           current_hour=$$(date +%H)
           if [ \"$$current_day\" = \"7\" ] && [ \"$$current_hour\" = \"03\" ]; then
             echo 'Starting weekly OSM refresh...'
-            python refresh_osm.py --region manhattan 2>&1
+            python refresh_osm.py --all --force 2>&1
             # Sleep for 1 hour to avoid running again
             sleep 3600
           fi
@@ -120,4 +155,6 @@ volumes:
   redis-data:
   postgres-data:
   osm-data:
-  osrm-data:
+  osrm-nyc-data:
+  osrm-sf-data:
+  osrm-chicago-data:

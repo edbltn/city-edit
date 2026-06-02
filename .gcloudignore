@@ -27,7 +27,19 @@ terraform/*.tfstate*
 docs/
 dump.rdb
 server/cache/
+debug/
+monitoring/
 
-# Screenshots (not client assets)
+# OSM data artifacts (rebuilt in image via refresh_osm.py)
+server/osm_data/*.pbf
+server/osm_data/*.pkl
+server/osm_data/*.pmtiles
+
+# DB dumps
+*.dump
+
+# Screenshots / stray images (keep client-react favicons!)
+screenshots/
 Screenshot*.png
 *.jpg
+/*.png

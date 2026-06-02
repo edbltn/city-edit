@@ -30,6 +30,15 @@ steps:
       - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:${BUILD_ID}'
       - '--region=${_REGION}'
 
+# Building three city walk graphs (osmnx) sequentially exceeds the default
+# 10-minute build timeout.
+timeout: '3600s'
+
+options:
+  # Building the full NYC walk graph (osmnx) is memory-hungry; the default
+  # e2-medium worker (~4GB) OOM-kills refresh_osm.py. Use a high-memory worker.
+  machineType: 'E2_HIGHCPU_32'
+
 substitutions:
   _REGION: us-central1
 

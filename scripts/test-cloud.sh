@@ -1,7 +1,7 @@
 #!/bin/bash
 # Test the cloud instance for health and basic functionality
 
-CLOUD_URL="${1:-https://desire-path-mapper-prod-906562157830.us-central1.run.app}"
+CLOUD_URL="${1:-https://desire-path-mapper-katze52zaq-uc.a.run.app}"
 
 echo "Testing cloud instance: $CLOUD_URL"
 echo "========================================"

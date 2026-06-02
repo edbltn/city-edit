@@ -7,6 +7,9 @@ CHECK_INTERVAL=60
 MAX_FAILURES=3
 
 failures=0
+# Don't restart gunicorn until it has been healthy at least once. Startup can take
+# a while (graph load + background prewarm); restarting mid-boot would loop forever.
+became_healthy=0
 
 echo "[healthcheck] Starting health checker (interval=${CHECK_INTERVAL}s, max_failures=${MAX_FAILURES})"
 
@@ -20,7 +23,10 @@ while true; do
         if [ $failures -gt 0 ]; then
             echo "[healthcheck] Recovered after $failures failures"
         fi
+        became_healthy=1
         failures=0
+    elif [ $became_healthy -eq 0 ]; then
+        echo "[healthcheck] Waiting for first healthy response (HTTP $HTTP_CODE); not restarting during startup"
     else
         failures=$((failures + 1))
         echo "[healthcheck] Health check failed (HTTP $HTTP_CODE), failure $failures/$MAX_FAILURES"

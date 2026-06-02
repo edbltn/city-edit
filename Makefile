@@ -1,12 +1,21 @@
-# Desire Path Mapper - Makefile
+# City Edit - Makefile
 
 # Configuration
 PROJECT_ID := google-mpf-ywspom2sxeey
 REGION := us-central1
-SERVICE := desire-path-mapper-prod
+SERVICE := desire-path-mapper
 REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/desire-path-mapper/app
+SCREENSHOT_REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/desire-path-mapper/screenshot
 
-.PHONY: help dev redis flask client docker push deploy test-cloud tf-init tf-plan tf-apply logs clean monitoring monitoring-down
+.PHONY: help dev redis flask client docker push deploy test-cloud tf-init tf-plan tf-apply logs clean monitoring monitoring-down loadtest-local loadtest-prod
+
+# Load test (override on the command line, e.g. USERS=25 RATE=5 TIME=3m)
+PROD_URL := https://desire-path-mapper-katze52zaq-uc.a.run.app
+USERS :=
+RATE :=
+TIME :=
+# When USERS is set, run headless for the given run-time; otherwise open the web UI.
+LOCUST_FLAGS := $(if $(USERS),--headless --users $(USERS) --spawn-rate $(or $(RATE),2)$(if $(TIME), --run-time $(TIME)),)
 
 help:
 	@echo "Usage: make <target>"
@@ -34,6 +43,15 @@ help:
 	@echo "Monitoring:"
 	@echo "  monitoring       Start Grafana dashboard (localhost:3001)"
 	@echo "  monitoring-down  Stop Grafana dashboard"
+	@echo ""
+	@echo "Load testing (USERS=10 RATE=2 TIME=5m for headless; omit USERS for web UI):"
+	@echo "  loadtest-local   Simulate concurrent voters against localhost:8080"
+	@echo "  loadtest-prod    Simulate concurrent voters against prod"
+	@echo ""
+	@echo "Screenshots:"
+	@echo "  screenshot-build  Build screenshot container image"
+	@echo "  screenshot-push   Push screenshot image to Artifact Registry"
+	@echo "  screenshot-run    Trigger screenshot Cloud Run Job"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  clean        Stop all local services"
@@ -102,9 +120,28 @@ monitoring:
 monitoring-down:
 	cd monitoring && docker compose down
 
+# Load testing
+loadtest-local:
+	cd loadtest && . env/bin/activate && \
+		locust -f locustfile.py --host http://localhost:8080 $(LOCUST_FLAGS)
+
+loadtest-prod:
+	cd loadtest && . env/bin/activate && \
+		locust -f locustfile.py --host $(PROD_URL) $(LOCUST_FLAGS)
+
 # Logs
 logs:
 	gcloud run services logs read desire-path-mapper --project=$(PROJECT_ID) --region=$(REGION) --limit=50
+
+# Screenshots
+screenshot-build:
+	docker build -t $(SCREENSHOT_REGISTRY):latest screenshots/
+
+screenshot-push: screenshot-build
+	docker push $(SCREENSHOT_REGISTRY):latest
+
+screenshot-run:
+	gcloud run jobs execute map-screenshot-prod --region=$(REGION) --project=$(PROJECT_ID)
 
 # Utilities
 clean:
