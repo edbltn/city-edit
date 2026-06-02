@@ -230,12 +230,14 @@ resource "google_cloud_run_service" "app" {
         }
 
         resources {
-          # Holds up to 3 city walk graphs in memory (GraphRegistry max_loaded=3);
-          # NYC alone is a 320MB pickle that expands several-fold when loaded.
-          # 8Gi requires >=2 vCPU per Cloud Run's CPU/memory pairing rules.
+          # Holds up to 3 city walk graphs resident (GraphRegistry max_loaded=3).
+          # On Linux the NYC graph (333MB pickle) churns to several GB while it
+          # deserializes into networkx + rustworkx; all three resident plus that
+          # load transient exceeds 8Gi (observed OOM at ~8.3Gi). 16Gi requires
+          # >=4 vCPU per Cloud Run's CPU/memory pairing rules.
           limits = {
-            cpu    = "2"
-            memory = "8Gi"
+            cpu    = "4"
+            memory = "16Gi"
           }
         }
 
