@@ -11,6 +11,7 @@ pointing at that city's OSRM container.
 import hashlib
 import json
 import logging
+import threading
 from collections import OrderedDict
 
 from cities import City
@@ -27,6 +28,11 @@ class CityGraph:
         self.city = city
         self.provider = PythonRouter(data_dir=city.data_dir, redis_client=redis_client)
         self._loaded = False
+        # Serializes concurrent first-loads of this city. Under the gevent worker
+        # pickle.load yields on file I/O, so without this two requests for the
+        # same unloaded city would each load the full graph (e.g. 3x the NYC
+        # graph at once → OOM). threading.Lock is gevent-patched at runtime.
+        self._load_lock = threading.Lock()
 
         self.nodes: list = []
         self.edges: list = []
@@ -41,6 +47,13 @@ class CityGraph:
     def ensure_loaded(self):
         if self._loaded:
             return
+        with self._load_lock:
+            # Re-check: another greenlet/thread may have loaded while we waited.
+            if self._loaded:
+                return
+            self._load_locked()
+
+    def _load_locked(self):
         logger.info(f"[GRAPH] Loading graph for city '{self.city.id}'...")
         south, west, north, east = self.city.bbox
         data = self.provider.get_graph_for_bbox(south, west, north, east)
@@ -129,18 +142,23 @@ class GraphRegistry:
         self.redis = redis_client
         self.max_loaded = max_loaded
         self._graphs: "OrderedDict[str, CityGraph]" = OrderedDict()
+        self._lock = threading.RLock()
 
     def get(self, city: City) -> CityGraph:
-        cg = self._graphs.get(city.id)
-        if cg is None:
-            cg = CityGraph(city, self.redis)
-            self._graphs[city.id] = cg
-            while len(self._graphs) > self.max_loaded:
-                old_id, old = self._graphs.popitem(last=False)
-                logger.info(f"[GRAPH] Evicting '{old_id}' (LRU)")
-                old.unload()
-        else:
-            self._graphs.move_to_end(city.id)
+        # Hold the registry lock only for the fast bookkeeping; the (slow) graph
+        # load happens outside it under the per-graph lock, so different cities
+        # can load concurrently and repeated hits to one city don't double-load.
+        with self._lock:
+            cg = self._graphs.get(city.id)
+            if cg is None:
+                cg = CityGraph(city, self.redis)
+                self._graphs[city.id] = cg
+                while len(self._graphs) > self.max_loaded:
+                    old_id, old = self._graphs.popitem(last=False)
+                    logger.info(f"[GRAPH] Evicting '{old_id}' (LRU)")
+                    old.unload()
+            else:
+                self._graphs.move_to_end(city.id)
         cg.ensure_loaded()
         return cg
 
