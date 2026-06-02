@@ -30,10 +30,9 @@ server/cache/
 debug/
 monitoring/
 
-# OSM data artifacts (rebuilt in image via refresh_osm.py)
-server/osm_data/*.pbf
-server/osm_data/*.pkl
-server/osm_data/*.pmtiles
+# OSM data artifacts (rebuilt in image via refresh_osm.py) — whole tree,
+# including per-city subdirs (server/osm_data/<city>/walk_graph.pkl).
+server/osm_data/
 
 # DB dumps
 *.dump
