@@ -119,6 +119,54 @@ class CityGraph:
             return [self.node_adj[best_idx][0]]
         return []
 
+    def edge_midpoint(self, edge_id: int) -> tuple[float, float] | None:
+        """(lat, lon) midpoint of an edge — the migration anchor stored per vote."""
+        self.ensure_loaded()
+        if edge_id < 0 or edge_id >= len(self.edges):
+            return None
+        e = self.edges[edge_id]
+        a = self.nodes[e[0]]
+        b = self.nodes[e[1]]
+        return ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+
+    def edge_midpoints(self, edge_ids) -> dict[int, tuple[float, float]]:
+        """{edge_id: (lat, lon)} midpoints for many edges (skips out-of-range ids)."""
+        self.ensure_loaded()
+        out: dict[int, tuple[float, float]] = {}
+        n = len(self.edges)
+        for eid in edge_ids:
+            if 0 <= eid < n:
+                e = self.edges[eid]
+                a = self.nodes[e[0]]
+                b = self.nodes[e[1]]
+                out[eid] = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+        return out
+
+    def nearest_edge_by_midpoint(self, lat: float, lon: float) -> int | None:
+        """Edge whose midpoint is closest to (lat, lon).
+
+        DUPLICITY (intentional, documented): this is the Python mirror of the
+        client's nearest-edge snap (GraphLayer hitTest / projectOntoEdge). They
+        live in different languages so can't share code, but both answer the same
+        question — "which edge does this coordinate belong to" — so a vote
+        re-snapped here after a graph rebuild lands on the same edge a fresh click
+        would. Used only by resnap_votes_for_map (a maintenance pass), so the
+        O(edges) scan is acceptable.
+        """
+        self.ensure_loaded()
+        best_eid = None
+        best_dist = float("inf")
+        for i, e in enumerate(self.edges):
+            a = self.nodes[e[0]]
+            b = self.nodes[e[1]]
+            mlat = (a[0] + b[0]) / 2.0
+            mlon = (a[1] + b[1]) / 2.0
+            d = (mlat - lat) ** 2 + (mlon - lon) ** 2
+            if d < best_dist:
+                best_dist = d
+                best_eid = i
+        return best_eid
+
     def unload(self):
         """Drop derived caches and the underlying graph to free memory on eviction."""
         redis_client = self.provider.redis

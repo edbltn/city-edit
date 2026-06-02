@@ -235,6 +235,10 @@ def init_db():
                 )
             """)
             _migrate_edge_votes(cursor)
+            # Migration anchor: the edge midpoint, so votes survive a graph
+            # rebuild (edge_id indices shift) via resnap_votes_for_map().
+            cursor.execute("ALTER TABLE edge_votes ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION")
+            cursor.execute("ALTER TABLE edge_votes ADD COLUMN IF NOT EXISTS lon DOUBLE PRECISION")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_edge ON edge_votes(edge_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_vt ON edge_votes(vote_type_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_map ON edge_votes(map_slug)")
@@ -269,8 +273,16 @@ def init_db():
                 )
             """)
             cursor.execute("ALTER TABLE maps ADD COLUMN IF NOT EXISTS subtitle TEXT")
+            cursor.execute("ALTER TABLE maps ADD COLUMN IF NOT EXISTS symbol TEXT")
+            cursor.execute("ALTER TABLE maps ADD COLUMN IF NOT EXISTS style TEXT")
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_maps_city ON maps(city_id)
+            """)
+            # A vanity subdomain points at exactly one map. Partial index so any
+            # number of maps may have no subdomain (NULL) while set ones stay unique.
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_maps_subdomain
+                ON maps(subdomain) WHERE subdomain IS NOT NULL
             """)
 
             logger.info("[DB] Database schema initialized successfully")
@@ -408,31 +420,103 @@ def record_node_votes(coords: list, mode: str, ip_hash: str, vote_type: str = ""
 def record_edge_votes(
     map_slug: str, edge_ids: list[int], vt_id: int,
     device_id: str, ip_hash: str | None = None, direction: int = 1,
+    coords: dict[int, tuple[float, float]] | None = None,
 ):
     """Persist edge votes, scoped to a map and deduped per device.
 
     One row per (map, edge, vote_type, device); on conflict the direction is
-    updated so a reversal (up↔down) overwrites the prior vote.
+    updated so a reversal (up↔down) overwrites the prior vote. `coords` maps
+    edge_id → (lat, lon) of the edge midpoint — the migration anchor that lets
+    votes survive a graph rebuild (see resnap_votes_for_map). lat/lon is only
+    written when supplied, and kept (COALESCE) on conflict.
     """
     if not DATABASE_URL or not edge_ids:
         return
 
     dir_val = 1 if direction >= 0 else -1
+    coords = coords or {}
     try:
         with get_cursor() as cursor:
-            data = [(map_slug, eid, vt_id, device_id, ip_hash, dir_val) for eid in edge_ids]
+            data = []
+            for eid in edge_ids:
+                lat, lon = coords.get(eid, (None, None))
+                data.append((map_slug, eid, vt_id, device_id, ip_hash, dir_val, lat, lon))
             execute_values(
                 cursor,
                 """INSERT INTO edge_votes
-                   (map_slug, edge_id, vote_type_id, device_id, ip_hash, direction)
+                   (map_slug, edge_id, vote_type_id, device_id, ip_hash, direction, lat, lon)
                    VALUES %s
                    ON CONFLICT (map_slug, edge_id, vote_type_id, device_id)
-                   DO UPDATE SET direction = EXCLUDED.direction, ip_hash = EXCLUDED.ip_hash""",
+                   DO UPDATE SET direction = EXCLUDED.direction,
+                                 ip_hash = EXCLUDED.ip_hash,
+                                 lat = COALESCE(EXCLUDED.lat, edge_votes.lat),
+                                 lon = COALESCE(EXCLUDED.lon, edge_votes.lon)""",
                 data,
             )
             logger.info(f"[DB] Recorded {len(data)} edge votes for '{map_slug}' (dir={dir_val})")
     except Exception as e:
         logger.error(f"[DB] Failed to record edge votes: {e}")
+
+
+def delete_edge_votes(
+    map_slug: str, edge_ids: list[int], vt_id: int, device_id: str,
+):
+    """Remove a device's votes for a type on given edges (a toggle-off / un-vote)."""
+    if not DATABASE_URL or not edge_ids:
+        return
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                """DELETE FROM edge_votes
+                   WHERE map_slug = %s AND vote_type_id = %s AND device_id = %s
+                     AND edge_id = ANY(%s)""",
+                (map_slug, vt_id, device_id, list(edge_ids)),
+            )
+            logger.info(f"[DB] Removed {cursor.rowcount} edge votes for '{map_slug}'")
+    except Exception as e:
+        logger.error(f"[DB] Failed to delete edge votes: {e}")
+
+
+def get_edge_vote_anchors(map_slug: str) -> list[tuple[int, float, float]]:
+    """(row_id, lat, lon) for every vote on a map that has a migration anchor."""
+    if not DATABASE_URL:
+        return []
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                "SELECT id, lat, lon FROM edge_votes "
+                "WHERE map_slug = %s AND lat IS NOT NULL AND lon IS NOT NULL",
+                (map_slug,),
+            )
+            return cursor.fetchall()
+    except Exception as e:
+        logger.error(f"[DB] Failed to read edge vote anchors: {e}")
+        return []
+
+
+def update_edge_vote_edge_id(row_id: int, new_edge_id: int) -> bool:
+    """Re-point one vote row at a new edge_id (after a graph rebuild re-snap).
+
+    Returns False if the move would collide with an existing identity row (the
+    caller drops the loser), True otherwise.
+    """
+    if not DATABASE_URL:
+        return False
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                "UPDATE edge_votes SET edge_id = %s WHERE id = %s", (new_edge_id, row_id)
+            )
+        return True
+    except Exception:
+        # Unique-identity collision: another row already holds this edge for the
+        # same (map, type, device). Drop this now-duplicate row.
+        try:
+            with get_cursor() as cursor:
+                cursor.execute("DELETE FROM edge_votes WHERE id = %s", (row_id,))
+        except Exception as e:
+            logger.error(f"[DB] Re-snap collision cleanup failed: {e}")
+        return False
 
 
 def get_voter_edge_directions(
@@ -490,6 +574,31 @@ def fetch_all_vote_types() -> list[tuple[int, str]]:
             return cursor.fetchall()
     except Exception as e:
         logger.error(f"[DB] Failed to fetch vote types: {e}")
+        return []
+
+
+def fetch_voted_vote_type_labels(map_slug: str) -> list[str]:
+    """Distinct vote-type labels actually voted on a map (newest activity first).
+
+    Backs the selector's *search-only* suggestions: a custom vote type surfaces
+    when searched for once someone has voted it, but never joins the default
+    suggestion list. Excludes the blank/default type (vote_type_id 0)."""
+    if not DATABASE_URL or not map_slug:
+        return []
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                """SELECT vt.label
+                     FROM edge_votes ev
+                     JOIN vote_types vt ON vt.id = ev.vote_type_id
+                    WHERE ev.map_slug = %s AND ev.vote_type_id <> 0
+                    GROUP BY vt.label
+                    ORDER BY MAX(ev.created_at) DESC""",
+                (map_slug,),
+            )
+            return [r[0] for r in cursor.fetchall() if r[0]]
+    except Exception as e:
+        logger.error(f"[DB] Failed to fetch voted vote types for '{map_slug}': {e}")
         return []
 
 
@@ -618,7 +727,8 @@ _PRESET_STYLES = {"bikepaths", "trees", "walkways"}
 def _map_row_to_dict(row) -> dict:
     """Shape a maps JOIN vote_type_lists row into the public map dict."""
     (slug, name, subtitle, city_id, allow_suggestions, has_passcode,
-     subdomain, list_vote_types, custom_vote_types, vote_count) = row
+     subdomain, list_vote_types, custom_vote_types, vote_count, symbol, style) = row
+    vote_types = custom_vote_types or list_vote_types or []
     return {
         "slug": slug,
         "name": name,
@@ -628,9 +738,14 @@ def _map_row_to_dict(row) -> dict:
         "requiresPasscode": has_passcode,
         "subdomain": subdomain,
         "mode": subdomain if subdomain in _PRESET_STYLES else "walk",
-        "style": subdomain if subdomain in _PRESET_STYLES else "default",
+        # The proposer-chosen visual style wins; presets keep their subdomain
+        # style; everything else falls back to the neutral default.
+        "style": style or (subdomain if subdomain in _PRESET_STYLES else "default"),
         "voteCount": int(vote_count or 0),
-        "voteTypes": custom_vote_types or list_vote_types or [],
+        "voteTypes": vote_types,
+        # The map's display icon for the landing card. Falls back to the first
+        # vote type's icon when the proposer didn't pick one explicitly.
+        "symbol": symbol or (vote_types[0].get("icon") if vote_types else "") or "",
     }
 
 
@@ -638,7 +753,7 @@ _MAP_SELECT = """
     SELECT m.slug, m.name, m.subtitle, m.city_id, m.allow_suggestions,
            (m.passcode_hash IS NOT NULL) AS has_passcode,
            m.subdomain, vtl.vote_types, m.custom_vote_types,
-           COALESCE(vc.cnt, 0) AS vote_count
+           COALESCE(vc.cnt, 0) AS vote_count, m.symbol, m.style
     FROM maps m
     LEFT JOIN vote_type_lists vtl ON vtl.id = m.vote_type_list_id
     LEFT JOIN (SELECT map_slug, COUNT(*) AS cnt FROM edge_votes GROUP BY map_slug) vc
@@ -685,6 +800,37 @@ def get_map_by_subdomain(subdomain: str) -> Optional[dict]:
         return None
 
 
+def set_map_subdomain(slug: str, subdomain: Optional[str]) -> tuple[bool, str]:
+    """Attach (or clear) a vanity subdomain on a map.
+
+    `subdomain=None`/"" clears it. Subdomains are unique across maps (enforced by
+    idx_maps_subdomain); this also checks first so callers get a clear message
+    instead of an integrity error. Returns (ok, message).
+    """
+    if not DATABASE_URL:
+        return False, "database unavailable"
+    sub = (subdomain or "").strip().lower() or None
+    try:
+        with get_cursor() as cursor:
+            if sub:
+                cursor.execute(
+                    "SELECT slug FROM maps WHERE subdomain = %s AND slug <> %s",
+                    (sub, slug),
+                )
+                taken = cursor.fetchone()
+                if taken:
+                    return False, f"subdomain '{sub}' already used by map '{taken[0]}'"
+            cursor.execute(
+                "UPDATE maps SET subdomain = %s WHERE slug = %s", (sub, slug)
+            )
+            if cursor.rowcount == 0:
+                return False, f"no map with slug '{slug}'"
+        return True, ("cleared" if sub is None else f"set to '{sub}'")
+    except Exception as e:
+        logger.error(f"[DB] set_map_subdomain failed: {e}")
+        return False, str(e)
+
+
 def slug_available(slug: str) -> bool:
     if not DATABASE_URL:
         return False
@@ -705,6 +851,8 @@ def create_map(
     allow_suggestions: bool = True,
     passcode_hash: Optional[str] = None,
     created_by_ip_hash: Optional[str] = None,
+    symbol: Optional[str] = None,
+    style: Optional[str] = None,
 ) -> Optional[dict]:
     """Insert a new map. Returns the public map dict, or None on failure."""
     if not DATABASE_URL:
@@ -715,11 +863,12 @@ def create_map(
             cursor.execute(
                 """INSERT INTO maps
                      (slug, name, subtitle, city_id, vote_type_list_id, custom_vote_types,
-                      allow_suggestions, passcode_hash, created_by_ip_hash)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                      allow_suggestions, passcode_hash, created_by_ip_hash, symbol, style)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (slug, name, subtitle or None, city_id, vote_type_list_id,
                  _json.dumps(custom_vote_types) if custom_vote_types else None,
-                 allow_suggestions, passcode_hash, created_by_ip_hash),
+                 allow_suggestions, passcode_hash, created_by_ip_hash, symbol or None,
+                 style or None),
             )
         return get_map(slug)
     except Exception as e:

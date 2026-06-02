@@ -132,33 +132,24 @@ def unpack(key: int) -> tuple[int, int, int, int]:
 
 # ── Write path ─────────────────────────────────────────────────────────────
 
-def cast(redis_client, slug: str, edge_ids: list[int], mode: int, vt_id: int) -> int:
-    """Bulk upvote (route/point cast): +1 to each edge's up field."""
-    if not edge_ids:
-        return 0
-    h = hash_key(slug)
-    pipe = redis_client.pipeline()
-    for eid in edge_ids:
-        pipe.hincrby(h, str(redis_field(eid, mode, vt_id, UP)), 1)
-    pipe.execute()
-    return len(edge_ids)
-
-
 def apply_directional(
     redis_client, slug: str, edge_id: int, mode: int, vt_id: int,
     new_dir: int, prev_dir: int,
 ) -> None:
-    """Apply a single proposal vote, reversing a prior opposite vote if needed.
+    """Apply a single proposal vote, moving this voter across directions.
 
-    new_dir / prev_dir use +1 (up), -1 (down), 0 (none). Increments the new
-    direction's field and decrements the prior direction's field when it differs
-    (a reversal). A no-op when the direction is unchanged.
+    new_dir / prev_dir use +1 (up), -1 (down), 0 (none/removed). Increments the
+    new direction's field (only when it's an actual vote, not removal) and
+    decrements the prior direction's field when there was one. Handles every
+    transition: fresh (0→±1), reversal (±1→∓1), and removal (±1→0). A no-op when
+    the direction is unchanged.
     """
     if new_dir == prev_dir:
         return
     h = hash_key(slug)
     pipe = redis_client.pipeline()
-    pipe.hincrby(h, str(redis_field(edge_id, mode, vt_id, new_dir)), 1)
+    if new_dir in (UP, DOWN):
+        pipe.hincrby(h, str(redis_field(edge_id, mode, vt_id, new_dir)), 1)
     if prev_dir in (UP, DOWN):
         pipe.hincrby(h, str(redis_field(edge_id, mode, vt_id, prev_dir)), -1)
     pipe.execute()

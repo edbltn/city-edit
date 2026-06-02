@@ -25,10 +25,12 @@ import database
 from cities import CITIES, DEFAULT_CITY_ID, get_city, all_cities
 from graph_registry import GraphRegistry, OsrmRegistry
 from database import (
-    init_db, get_cursor, record_edge_votes, record_point_vote,
+    init_db, get_cursor, record_edge_votes, delete_edge_votes,
     get_voter_edge_direction, get_voter_edge_directions,
+    get_edge_vote_anchors, update_edge_vote_edge_id,
     seed_presets, list_maps, get_map, get_map_by_subdomain, slug_available,
-    create_map, get_map_passcode_hash, list_vote_type_lists,
+    create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,
+    fetch_voted_vote_type_labels,
     DATABASE_URL,
 )
 
@@ -49,6 +51,15 @@ sock = Sock(app)
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 _passcode_serializer = URLSafeTimedSerializer(SECRET_KEY, salt="map-passcode")
 PASSCODE_TOKEN_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
+
+# Gate for state-changing admin endpoints (e.g. assigning vanity subdomains).
+# When unset, those endpoints are disabled (403) rather than silently open.
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+
+
+def _admin_authorized() -> bool:
+    """True when ADMIN_TOKEN is configured and matches the request header."""
+    return bool(ADMIN_TOKEN) and request.headers.get("X-Admin-Token") == ADMIN_TOKEN
 
 DEFAULT_MAP_SLUG = "nyc-walkways"
 
@@ -127,16 +138,80 @@ def resolve_map(slug: str | None) -> ResolvedMap:
                        requires_passcode, labels)
 
 
+# ── Passcode gate ────────────────────────────────────────────────────────────
+
+# Brute-force protection for /api/maps/<slug>/auth: cap wrong guesses per
+# (ip, slug) in a rolling window, then lock that pair out for a cooldown.
+# Counters live in Redis so the limit holds across all Flask replicas.
+AUTH_MAX_ATTEMPTS = 8
+AUTH_WINDOW_SECONDS = 300       # window the attempts are counted in
+AUTH_LOCKOUT_SECONDS = 900      # cooldown once the cap is hit
+
+# Mirrors the app's other inline notices (e.g. the out-of-bounds toast): one
+# plain, friendly sentence. Shown on the load-time gate and on any gated API.
+PASSCODE_REQUIRED_MESSAGE = "This map is private — enter its passcode to open it."
+
+
+def _passcode_pv(passcode_hash: str | None) -> str:
+    """Short fingerprint of the current passcode hash.
+
+    Embedded in every session token so rotating a map's passcode (which changes
+    the stored hash) invalidates every token minted against the old one.
+    """
+    if not passcode_hash:
+        return ""
+    return hashlib.sha256(passcode_hash.encode()).hexdigest()[:12]
+
+
+def _issue_passcode_token(slug: str, passcode_hash: str | None) -> str:
+    return _passcode_serializer.dumps({"s": slug, "pv": _passcode_pv(passcode_hash)})
+
+
+def _request_passcode_token() -> str | None:
+    """Pull the passcode token from wherever this request can carry it.
+
+    Header for REST GETs, `?token=` for the WebSocket handshake (browsers can't
+    set WS headers), JSON body for vote POSTs.
+    """
+    return (
+        request.headers.get("X-Map-Passcode")
+        or request.args.get("token")
+        or (request.get_json(silent=True) or {}).get("passcode_token")
+    )
+
+
 def _passcode_ok(slug: str) -> bool:
-    """True if the request carries a valid passcode token for this map."""
-    token = request.headers.get("X-Map-Passcode") or (
-        request.get_json(silent=True) or {}).get("passcode_token")
+    """True if the request carries a valid, current passcode token for `slug`."""
+    token = _request_passcode_token()
     if not token:
         return False
     try:
-        return _passcode_serializer.loads(token, max_age=PASSCODE_TOKEN_MAX_AGE) == slug
+        data = _passcode_serializer.loads(token, max_age=PASSCODE_TOKEN_MAX_AGE)
     except (BadSignature, Exception):
         return False
+    # Legacy tokens were a bare slug string (no passcode-version binding); accept
+    # them so sessions issued before this change keep working until they expire.
+    if isinstance(data, str):
+        return data == slug
+    if not isinstance(data, dict) or data.get("s") != slug:
+        return False
+    return data.get("pv", "") == _passcode_pv(get_map_passcode_hash(slug))
+
+
+def _locked(rmap: "ResolvedMap") -> bool:
+    """True if this map gates viewing and the request hasn't proven the passcode."""
+    return rmap.requires_passcode and not _passcode_ok(rmap.slug)
+
+
+def _locked_response():
+    """401 used by every gated content endpoint — single shape the client keys on."""
+    resp = jsonify({
+        "error": PASSCODE_REQUIRED_MESSAGE,
+        "requires_passcode": True,
+        "locked": True,
+    })
+    resp.headers["Cache-Control"] = "no-store"
+    return resp, 401
 
 
 # ── Per-map vote response cache ───────────────────────────────────────────
@@ -313,15 +388,53 @@ def maps_list():
     return jsonify({"maps": maps})
 
 
+def _map_response(m: dict):
+    """Enrich a map dict with its city's public config and JSON-ify it."""
+    city = get_city(m["cityId"])
+    if city:
+        m["city"] = city.to_public()
+    # Custom vote types people have already voted here — surfaced by the selector
+    # only when searched, never in the default list. Drop the map's own defaults.
+    default_labels = {vt.get("label") for vt in (m.get("voteTypes") or [])}
+    m["searchVoteTypes"] = [
+        lbl for lbl in fetch_voted_vote_type_labels(m["slug"])
+        if lbl not in default_labels
+    ]
+    return jsonify(m)
+
+
+def _locked_stub(slug: str):
+    """Minimal config for a gated map: enough for the client to show the prompt,
+    nothing about the map's content (name, votes, area)."""
+    resp = jsonify({"slug": slug, "requiresPasscode": True, "locked": True})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/api/maps/<slug>", methods=["GET"])
 def map_get(slug):
     m = get_map(slug)
     if not m:
         return jsonify({"error": "Map not found"}), 404
-    city = get_city(m["cityId"])
-    if city:
-        m["city"] = city.to_public()
-    return jsonify(m)
+    if m.get("requiresPasscode") and not _passcode_ok(slug):
+        return _locked_stub(slug)
+    return _map_response(m)
+
+
+@app.route("/api/maps/by-subdomain/<subdomain>", methods=["GET"])
+def map_get_by_subdomain(subdomain):
+    """Resolve a vanity subdomain (e.g. "bikepaths") to its map config.
+
+    The client calls this when loaded on a subdomain host so admins can point
+    any subdomain at any map purely by setting the DB `subdomain` column — no
+    code change. Two path segments, so it never collides with /api/maps/<slug>.
+    """
+    m = get_map_by_subdomain((subdomain or "").strip().lower())
+    if not m:
+        return jsonify({"error": "Map not found"}), 404
+    if m.get("requiresPasscode") and not _passcode_ok(m["slug"]):
+        return _locked_stub(m["slug"])
+    return _map_response(m)
 
 
 @app.route("/api/maps/check-slug", methods=["GET"])
@@ -337,6 +450,13 @@ def _normalize_slug(raw: str) -> str:
     return s
 
 
+# Visual styles a proposer may pick (must mirror MAP_STYLES in mapStyles.ts).
+_VALID_MAP_STYLES = {
+    "default", "bikepaths", "walkways", "trees",
+    "transit", "terracotta", "waterfront",
+}
+
+
 @app.route("/api/maps", methods=["POST"])
 def map_create():
     data = request.get_json() or {}
@@ -345,6 +465,12 @@ def map_create():
     slug = _normalize_slug(data.get("slug") or name)
     allow_suggestions = bool(data.get("allow_suggestions", True))
     passcode = (data.get("passcode") or "").strip()
+    symbol = (data.get("symbol") or "").strip()
+    # Visual theme (basemap + accent + heat ramp). Falls back to the neutral
+    # default for anything the client doesn't recognize.
+    style = (data.get("style") or "").strip()
+    if style not in _VALID_MAP_STYLES:
+        style = "default"
 
     if not name:
         return jsonify({"error": "Map name is required"}), 400
@@ -384,6 +510,8 @@ def map_create():
         allow_suggestions=allow_suggestions,
         passcode_hash=passcode_hash,
         created_by_ip_hash=get_client_ip(),
+        symbol=symbol or None,
+        style=style,
     )
     if not created:
         return jsonify({"error": "Failed to create map"}), 500
@@ -400,11 +528,36 @@ def map_auth(slug):
     passcode = (data.get("passcode") or "").strip()
     h = get_map_passcode_hash(slug)
     if not h:
-        # No passcode required → trivially authorized.
-        return jsonify({"token": _passcode_serializer.dumps(slug)})
+        # No passcode set on this map → trivially authorized.
+        return jsonify({"token": _issue_passcode_token(slug, None)})
+
+    # Throttle guessing before doing any hash work.
+    rl_key = f"auth_attempts:{slug}:{get_client_ip()}"
+    try:
+        attempts = redis_client.get(rl_key)
+        if attempts is not None and int(attempts) >= AUTH_MAX_ATTEMPTS:
+            return jsonify({
+                "error": "Too many attempts — wait a few minutes and try again.",
+            }), 429
+    except redis.RedisError:
+        pass  # fail open on the counter; never block on the limiter itself
+
     if passcode and check_password_hash(h, passcode):
-        return jsonify({"token": _passcode_serializer.dumps(slug)})
-    return jsonify({"error": "Incorrect passcode"}), 403
+        try:
+            redis_client.delete(rl_key)  # reset the window on success
+        except redis.RedisError:
+            pass
+        return jsonify({"token": _issue_passcode_token(slug, h)})
+
+    # Wrong passcode — count the miss; lengthen the window into a lockout at the cap.
+    try:
+        n = redis_client.incr(rl_key)
+        redis_client.expire(
+            rl_key, AUTH_LOCKOUT_SECONDS if n >= AUTH_MAX_ATTEMPTS else AUTH_WINDOW_SECONDS
+        )
+    except redis.RedisError:
+        pass
+    return jsonify({"error": "That passcode doesn't match — check it and try again."}), 403
 
 
 # ── WebSocket (delta-based, per-map) ─────────────────────────────────────────
@@ -413,6 +566,18 @@ def map_auth(slug):
 def ws(ws):
     """Push a single map's vote deltas to a client in real time."""
     slug = (request.args.get("map") or DEFAULT_MAP_SLUG).strip()
+
+    # Gate the live stream exactly like the REST content: a locked map's deltas
+    # never leave the server without a valid `?token=` on the handshake.
+    m = get_map(slug)
+    if m and m.get("requiresPasscode") and not _passcode_ok(slug):
+        try:
+            ws.send(json.dumps({"type": "error", "error": "locked",
+                                "requires_passcode": True}))
+        except Exception:
+            pass
+        return
+
     channel = vote_store.channel_key(slug)
 
     ws_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
@@ -513,21 +678,34 @@ def calculate_route():
 
 @app.route("/api/vote", methods=["POST"])
 def cast_vote():
-    """Cast votes (packed integer keys), scoped to a map."""
+    """Cast (or reverse, or remove) votes on a map — the single vote codepath.
+
+    Body: { map, mode, vote_type, voter_id, edge_ids: [int], direction }
+      direction: +1 vote for · -1 vote against · 0 remove this voter's vote.
+
+    Every cast is directional and per-voter. For each edge we read this voter's
+    prior direction and only touch the ones that change (so a multi-select leaves
+    already-cast edges alone, and reverses ones holding the opposite). The DB
+    write is synchronous (under a lock) so the next vote observes the committed
+    prior direction, and the broadcast carries authoritative [up, down] counts so
+    clients SET — never increment — and can't drift or double-count.
+    """
     data = request.get_json()
     if not data:
         return jsonify({"error": "Missing request body"}), 400
 
     rmap = resolve_map(data.get("map"))
 
-    # Passcode gate: voting (not viewing) requires a valid token for this map.
-    if rmap.requires_passcode and not _passcode_ok(rmap.slug):
-        return jsonify({"error": "Passcode required", "requires_passcode": True}), 401
+    # Passcode gate: a vote needs the same valid token that unlocked the map.
+    if _locked(rmap):
+        return _locked_response()
 
     edge_ids = data.get("edge_ids", [])
     if not edge_ids and data.get("edge_id") is not None:
         edge_ids = [int(data["edge_id"])]
-    segments = data.get("segments", [])
+    # `point` is a fallback for clients that can't resolve a click to an edge
+    # themselves; the client normally sends edge_ids (snapped via the same path
+    # it uses for hover), so the server and client never disagree on the target.
     point = data.get("point")
     mode = data.get("mode", "walk")
     vt_label = (data.get("vote_type", "") or "").strip()
@@ -537,100 +715,102 @@ def cast_vote():
             and rmap.vote_type_labels and vt_label not in rmap.vote_type_labels):
         return jsonify({"error": "This map does not accept custom vote types"}), 403
 
-    is_proposal = data.get("direction") is not None
-    direction = vote_store.UP if (data.get("direction") or 1) >= 0 else vote_store.DOWN
+    # direction: +1 (for) / -1 (against) / 0 (remove). Default +1.
+    raw_dir = data.get("direction", 1)
+    direction = 0 if raw_dir == 0 else (vote_store.UP if (raw_dir or 1) >= 0 else vote_store.DOWN)
 
     rmap.graph.ensure_loaded()
-    if not edge_ids and segments:
-        edge_ids = vote_store.coords_to_edge_ids(segments, rmap.graph.coord_to_edge_idx)
-
-    if not edge_ids and not point:
-        return jsonify({"error": "No edge_ids or point to vote on"}), 400
+    if not edge_ids and point:
+        edge_ids = rmap.graph.snap_point_to_edge(point[0], point[1])
+    try:
+        edge_ids = [int(e) for e in edge_ids]
+    except (TypeError, ValueError):
+        return jsonify({"error": "edge_ids must be integers"}), 400
+    if not edge_ids:
+        return jsonify({"error": "No edges to vote on"}), 400
 
     device_id, ip_hash = _resolve_user(data)
     mode_int = vote_store.mode_to_int(mode)  # Redis key only; DB scopes by map_slug
     slug = rmap.slug
 
     try:
-        if point and not edge_ids:
-            edge_ids = rmap.graph.snap_point_to_edge(point[0], point[1])
-            if not is_proposal:
-                threading.Thread(
-                    target=lambda: record_point_vote(point, mode, ip_hash, vt_label),
-                    daemon=True,
-                ).start()
-            if not edge_ids:
-                return jsonify({"success": True, "point_vote": True})
-
         vt_id = vote_store.get_vote_type_id(vt_label) if vt_label else 0
 
-        # ── Directional single-proposal vote (modal +/-) ──
-        # Read-modify-write of the voter's stored direction must be serialized
-        # and persisted SYNCHRONOUSLY: otherwise a quick +/− sees a stale prior
-        # direction (its predecessor's write was still in flight), so a reversal
-        # is mistaken for a fresh vote — the Redis up count is never decremented
-        # and the server's `reversed` flag stops matching the client's optimistic
-        # update. The lock + in-request persist make each vote observe the
-        # committed result of the previous one, so `−` correctly overwrites `+`.
-        if is_proposal:
-            with _proposal_vote_lock:
-                reversed_any = False
-                changed: list[int] = []
-                for eid in edge_ids:
-                    prev = get_voter_edge_direction(slug, eid, vt_id, device_id)
-                    if prev != direction:
-                        vote_store.apply_directional(
-                            redis_client, slug, eid, mode_int, vt_id, direction, prev
-                        )
-                        changed.append(eid)
-                        if prev in (vote_store.UP, vote_store.DOWN):
-                            reversed_any = True
-
-                logger.info(f"[VOTE:{slug}] proposal dir={direction} changed={changed} "
-                            f"vt={vt_id} ({vt_label!r}) ip={ip_hash[:8]}…")
-
-                if changed:
-                    # Persist before publishing so the next vote reads the new
-                    # direction (not a background-thread race).
-                    try:
-                        record_edge_votes(slug, changed, vt_id, device_id, ip_hash, direction)
-                    except Exception as e:
-                        logger.error(f"[VOTE] DB persist failed: {e}")
-                    # Broadcast authoritative post-write counts so clients SET
-                    # (not increment) — immune to optimistic drift / double-count.
-                    vt_counts = vote_store.read_edge_vt_counts(
-                        redis_client, slug, changed, mode_int, vt_id
+        with _proposal_vote_lock:
+            reversed_any = False
+            changed: list[int] = []
+            for eid in edge_ids:
+                prev = get_voter_edge_direction(slug, eid, vt_id, device_id)
+                if prev != direction:
+                    vote_store.apply_directional(
+                        redis_client, slug, eid, mode_int, vt_id, direction, prev
                     )
-                    vote_store.publish_delta(
-                        redis_client, slug, changed, mode_int, vt_id,
-                        direction=direction, reversed_vote=reversed_any,
-                        vt_counts=vt_counts,
-                    )
-                    _vote_cache.pop(slug, None)
+                    changed.append(eid)
+                    if prev in (vote_store.UP, vote_store.DOWN) and direction != 0:
+                        reversed_any = True
 
-            return jsonify({
-                "success": True, "edge_ids": edge_ids, "changed": changed,
-                "direction": direction, "reversed": reversed_any,
-            })
+            logger.info(f"[VOTE:{slug}] dir={direction} changed={len(changed)} "
+                        f"vt={vt_id} ({vt_label!r}) ip={ip_hash[:8]}…")
 
-        # ── Bulk upvote (route/point cast) ──
-        count = vote_store.cast(redis_client, slug, edge_ids, mode_int, vt_id)
-        logger.info(f"[VOTE:{slug}] {count} edges, vt={vt_id} ({vt_label!r}), ip={ip_hash[:8]}…")
-        vote_store.publish_delta(redis_client, slug, edge_ids, mode_int, vt_id)
-        _vote_cache.pop(slug, None)
+            if changed:
+                # Persist synchronously so the next vote reads the new direction.
+                try:
+                    if direction == 0:
+                        delete_edge_votes(slug, changed, vt_id, device_id)
+                    else:
+                        coords = rmap.graph.edge_midpoints(changed)  # migration anchor
+                        record_edge_votes(slug, changed, vt_id, device_id, ip_hash,
+                                          direction, coords=coords)
+                except Exception as e:
+                    logger.error(f"[VOTE] DB persist failed: {e}")
+                # Broadcast authoritative post-write [up, down] so clients SET.
+                vt_counts = vote_store.read_edge_vt_counts(
+                    redis_client, slug, changed, mode_int, vt_id
+                )
+                vote_store.publish_delta(
+                    redis_client, slug, changed, mode_int, vt_id,
+                    direction=direction or vote_store.UP, reversed_vote=reversed_any,
+                    vt_counts=vt_counts,
+                )
+                _vote_cache.pop(slug, None)
 
-        def _persist():
-            try:
-                record_edge_votes(slug, edge_ids, vt_id, device_id, ip_hash)
-            except Exception as e:
-                logger.error(f"[VOTE] DB persist failed: {e}")
-
-        threading.Thread(target=_persist, daemon=True).start()
-        return jsonify({"success": True, "edges_voted": count, "edge_ids": edge_ids})
+        return jsonify({
+            "success": True, "edge_ids": edge_ids, "changed": changed,
+            "direction": direction, "reversed": reversed_any,
+        })
 
     except Exception as e:
         logger.error(f"[VOTE] Error: {e}")
         return jsonify({"error": f"Vote failed: {str(e)}"}), 500
+
+
+def resnap_votes_for_map(slug: str) -> dict:
+    """Re-anchor a map's votes to the current graph after a rebuild.
+
+    Each vote stores its edge midpoint (lat/lon). When the graph is rebuilt,
+    edge_id indices shift, so we re-snap every stored anchor to the nearest edge
+    on the new graph (the Python mirror of the client's nearest-edge snap). Then
+    Redis is repopulated from the corrected rows. Returns a small summary.
+    """
+    rmap = resolve_map(slug)
+    rmap.graph.ensure_loaded()
+    anchors = get_edge_vote_anchors(slug)
+    moved = dropped = 0
+    for row_id, lat, lon in anchors:
+        new_eid = rmap.graph.nearest_edge_by_midpoint(lat, lon)
+        if new_eid is None:
+            continue
+        if update_edge_vote_edge_id(row_id, new_eid):
+            moved += 1
+        else:
+            dropped += 1
+    # Rebuild the Redis hash from the corrected DB rows.
+    redis_client.delete(vote_store.hash_key(slug))
+    redis_client.delete(vote_store.revision_key(slug))
+    _populate_redis()
+    _vote_cache.pop(slug, None)
+    logger.info(f"[RESNAP:{slug}] re-anchored {moved} votes, dropped {dropped} collisions")
+    return {"map": slug, "votes": len(anchors), "moved": moved, "dropped": dropped}
 
 
 @app.route("/api/my-votes", methods=["GET"])
@@ -849,6 +1029,8 @@ def graph_data():
         return jsonify({"error": "bbox=minLon,minLat,maxLon,maxLat required"}), 400
     try:
         rmap = resolve_map(request.args.get("map"))
+        if _locked(rmap):
+            return _locked_response()
         data = rmap.graph.provider.get_graph_for_bbox(south, west, north, east)
         # Only the JSON-serializable topology goes over the wire; the lookup maps
         # (node_pair_to_edge keyed by int tuples, osm_to_graph_idx) are server-side
@@ -872,6 +1054,8 @@ def serve_tiles(filename):
 def graph_version():
     """Cheap content hash of a city's topology, used as a client cache key."""
     rmap = resolve_map(request.args.get("map"))
+    if _locked(rmap):
+        return _locked_response()
     rmap.graph.ensure_loaded()
     if rmap.graph.topology_etag is None:
         return jsonify({"error": "Graph not loaded"}), 500
@@ -883,6 +1067,8 @@ def graph_version():
 @app.route("/api/graph-topology", methods=["GET"])
 def graph_topology():
     rmap = resolve_map(request.args.get("map"))
+    if _locked(rmap):
+        return _locked_response()
     rmap.graph.ensure_loaded()
     if rmap.graph.topology_json is None:
         return jsonify({"error": "Graph not loaded"}), 500
@@ -910,6 +1096,8 @@ def graph_votes():
     Indices match /api/graph-topology. Cached by the map's revision.
     """
     rmap = resolve_map(request.args.get("map"))
+    if _locked(rmap):
+        return _locked_response()
     rmap.graph.ensure_loaded()
 
     mode = request.args.get("mode") or None
@@ -935,6 +1123,8 @@ def graph_votes():
 @app.route("/api/graph.geojson", methods=["GET"])
 def graph_geojson():
     rmap = resolve_map(request.args.get("map"))
+    if _locked(rmap):
+        return _locked_response()
     rmap.graph.ensure_loaded()
     nodes = rmap.graph.nodes
     edges = rmap.graph.edges
@@ -967,6 +1157,26 @@ def graph_geojson():
 
 
 # ── Admin ──────────────────────────────────────────────────────────────────
+
+@app.route("/api/admin/maps/<slug>/subdomain", methods=["POST", "DELETE"])
+def admin_set_subdomain(slug):
+    """Attach (POST {subdomain}) or clear (DELETE) a map's vanity subdomain.
+
+    Requires the X-Admin-Token header to match ADMIN_TOKEN. Once set, the map is
+    reachable at <subdomain>.<root> and apex/slug visitors redirect there. DNS +
+    TLS for the subdomain must already point at this service (see docs).
+    """
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 403
+    if request.method == "DELETE":
+        ok, msg = set_map_subdomain(slug, None)
+    else:
+        sub = _normalize_slug((request.get_json(silent=True) or {}).get("subdomain") or "")
+        if not sub:
+            return jsonify({"error": "subdomain is required"}), 400
+        ok, msg = set_map_subdomain(slug, sub)
+    return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
+
 
 @app.route("/api/admin/refresh-osm", methods=["POST"])
 def admin_refresh_osm():
