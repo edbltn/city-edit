@@ -1,0 +1,9 @@
+apiVersion: 1
+
+datasources:
+  - name: Desire Path API
+    type: yesoreyeram-infinity-datasource
+    access: proxy
+    isDefault: true
+    uid: desire-path-api
+    url: ${PROD_URL}

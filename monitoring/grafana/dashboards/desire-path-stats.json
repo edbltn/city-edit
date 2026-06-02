@@ -1,0 +1,835 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "title": "Redis Cache",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "Redis Memory Used",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 536870912 },
+              { "color": "red", "value": 858993459 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "redis.used_memory_bytes", "text": "Memory Used", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Redis Peak Memory",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 536870912 },
+              { "color": "red", "value": 858993459 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "redis.used_memory_peak_bytes", "text": "Peak Memory", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Connected Clients",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "redis.connected_clients", "text": "Clients", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Evicted Keys",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "redis.evicted_keys", "text": "Evicted", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Redis Version",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "text" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "redis.version", "text": "Version", "type": "string" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "title": "Redis Hash Key Counts",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showUnfilled": true,
+        "minVizWidth": 8,
+        "minVizHeight": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 10000 },
+              { "color": "yellow", "value": 100000 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "redis.hash_sizes.segment_votes", "text": "Segment Votes", "type": "number" },
+            { "selector": "redis.hash_sizes.segment_vote_types", "text": "Segment Vote Types", "type": "number" },
+            { "selector": "redis.hash_sizes.node_votes", "text": "Node Votes", "type": "number" },
+            { "selector": "redis.hash_sizes.node_vote_types", "text": "Node Vote Types", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Redis Uptime",
+      "gridPos": { "h": 3, "w": 4, "x": 12, "y": 5 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "fixed", "fixedColor": "text" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "redis.uptime_seconds", "text": "Uptime", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Vote Revision",
+      "gridPos": { "h": 3, "w": 4, "x": 16, "y": 5 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "text" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "redis.revision", "text": "Revision", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Maxmemory Policy",
+      "gridPos": { "h": 3, "w": 4, "x": 20, "y": 5 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "text" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "redis.maxmemory_policy", "text": "Policy", "type": "string" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Max Memory Limit",
+      "gridPos": { "h": 3, "w": 6, "x": 12, "y": 8 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": { "mode": "fixed", "fixedColor": "text" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "redis.maxmemory_bytes", "text": "Max Memory", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Commands Processed",
+      "gridPos": { "h": 3, "w": 6, "x": 18, "y": 8 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "text" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "redis.total_commands_processed", "text": "Commands", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "PostgreSQL Database",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 11 },
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "Total Segment Votes",
+      "gridPos": { "h": 4, "w": 5, "x": 0, "y": 12 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "database.total_segment_votes", "text": "Segment Votes", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Total Node Votes",
+      "gridPos": { "h": 4, "w": 5, "x": 5, "y": 12 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "purple", "value": null }]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "database.total_node_votes", "text": "Node Votes", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Unique Voters",
+      "gridPos": { "h": 4, "w": 5, "x": 10, "y": 12 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "database.unique_voters", "text": "Voters", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Distinct Vote Types",
+      "gridPos": { "h": 4, "w": 5, "x": 15, "y": 12 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "orange", "value": null }]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "database.distinct_vote_types", "text": "Vote Types", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Database Size",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 12 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 524288000 },
+              { "color": "red", "value": 1073741824 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "database.database_size_bytes", "text": "DB Size", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Votes per Day (Last 30 Days)",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 16 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "orientation": "vertical",
+        "xTickLabelRotation": -45,
+        "barWidth": 0.8,
+        "groupWidth": 0.7,
+        "showValue": "never"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "blue" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "database.votes_last_30_days",
+          "columns": [
+            { "selector": "date", "text": "Date", "type": "string" },
+            { "selector": "count", "text": "Votes", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Top Vote Types",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Count", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Count" },
+            "properties": [{ "id": "custom.width", "value": 80 }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "database.top_vote_types",
+          "columns": [
+            { "selector": "vote_type", "text": "Vote Type", "type": "string" },
+            { "selector": "count", "text": "Count", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Application",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "Graph Nodes",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 25 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "text" } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "app.graph_nodes", "text": "Nodes", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Graph Edges",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 25 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "text" } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "app.graph_edges", "text": "Edges", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Graph Loaded",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 25 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "true": { "text": "YES", "color": "green" }, "false": { "text": "NO", "color": "red" } } }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "app.graph_loaded", "text": "Loaded", "type": "string" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Earliest Vote",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 25 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "text" } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "database.earliest_vote", "text": "Earliest", "type": "string" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Latest Vote",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 25 },
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "desire-path-api" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "text" } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/admin/stats",
+          "url_options": { "method": "GET" },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            { "selector": "database.latest_vote", "text": "Latest", "type": "string" }
+          ]
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["desire-path-mapper", "observability"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "City Edit - Production",
+  "uid": "desire-path-prod",
+  "version": 1
+}
