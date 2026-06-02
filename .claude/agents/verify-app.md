@@ -5,7 +5,7 @@ tools: Bash, Read, Grep, Glob
 model: haiku
 ---
 
-Verify the Desire Path Mapper application is working correctly.
+Verify the City Edit application is working correctly.
 
 Verification steps:
 1. Check Redis is running: `redis-cli ping`

@@ -5,7 +5,7 @@ tools: Bash, Read, Grep, Glob
 model: sonnet
 ---
 
-Help with Docker-related tasks for the Desire Path Mapper.
+Help with Docker-related tasks for the City Edit.
 
 Capabilities:
 1. Build and run: `docker compose up --build`

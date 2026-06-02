@@ -5,7 +5,7 @@ tools: Bash, Read, Grep
 model: haiku
 ---
 
-Test the Flask API endpoints for the Desire Path Mapper.
+Test the Flask API endpoints for the City Edit.
 
 Testing approach:
 1. Verify Flask server is running on port 5001

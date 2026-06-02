@@ -1,4 +1,4 @@
-# Desire Path Mapper - TODO
+# City Edit - TODO
 
 ## Current Status (2026-01-05)
 
@@ -7,7 +7,7 @@ The app is deployed and working at https://demo.sphericalharmonics.org
 ## Recent Changes
 
 - Fixed favicon to use 💠 emoji
-- Renamed title to "Desire Path Mapper"
+- Renamed title to "City Edit"
 - Auto-detect prod/dev environment for API/WS URLs in client config
 - Added Redis connection logging to confirm cloud vs local
 - Avoid ferries for all modes (bike, walk, drive)

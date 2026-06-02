@@ -5,7 +5,7 @@ tools: Read, Edit, Bash, Grep, Glob
 model: sonnet
 ---
 
-Debug issues in the Desire Path Mapper application.
+Debug issues in the City Edit application.
 
 Debugging process:
 1. Capture the error message and full stack trace

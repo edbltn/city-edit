@@ -2,13 +2,13 @@
 
 ## Claude Instructions
 
-- **gcloud commands**: Don't run gcloud commands directly. Ask me to run them and I'll provide the output.
+- **gcloud commands**: Run gcloud commands directly (e.g. `gcloud builds submit`, `gcloud run services logs read`, etc.) without asking the user.
 - **docker commands**: Run docker commands directly (e.g. `docker compose up --build -d`, `docker compose logs`, etc.) without asking the user.
 - **Browser testing**: I have a browser AI helper that can report on status. When you need me to test something, ask questions that this AI can answer (descriptions of screenshots, UI changes that need verification, functionality checks, error messages visible on screen).
 
 ## Overview
 
-Desire Path Mapper is a crowdsourced map showing how people actually travel through a city. Users submit their commute routes, which are aggregated and visualized as a heatmap overlay.
+City Edit is a crowdsourced map showing how people actually travel through a city. Users submit their commute routes, which are aggregated and visualized as a heatmap overlay.
 
 ## Components
 
@@ -60,16 +60,17 @@ Routing uses **OSRM** (Open Source Routing Machine) for fast pathfinding and a *
 
 ### Regions
 Available regions for graph building:
-- `downtown` (default): Battery Park to 34th Street (~6km x 4km)
+- `downtown`: Battery Park to 34th Street (~6km x 4km)
 - `fidi`: Financial District only (~1.6km x 1.5km)
 - `manhattan`: Full Manhattan
+- `nyc` (default): All 5 boroughs (~673K nodes, ~1.97M edges)
 - `nyc-metro`: Full NYC metro area (high memory)
 
 ### Rebuilding Graphs
 If graphs are missing or outdated:
 ```bash
 cd server && source env/bin/activate
-python refresh_osm.py --region downtown --force
+python refresh_osm.py --region nyc --force
 ```
 
 ## Docker
@@ -794,6 +795,7 @@ After completing any task that modifies code or files, always provide a summary 
 1. **What was done**: Brief description of the changes made
 2. **Key line changes**: Specific files and line numbers that were modified (e.g., `app.js:42-45`)
 3. **Key concepts**: Important architectural decisions, patterns used, or concepts the user should understand
+4. **Checklist to verify**: A short, concrete checklist (3–6 items) of things the user should manually check to confirm the work — phrased as actions in the running app or commands to run, not restatements of the code change. Always include this when work is finished.
 
 Example format:
 ```

@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash
 model: inherit
 ---
 
-Review code changes for the Desire Path Mapper following CLAUDE.md standards.
+Review code changes for the City Edit following CLAUDE.md standards.
 
 Steps:
 1. Run `git diff` to see recent changes

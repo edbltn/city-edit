@@ -1,4 +1,4 @@
-# Desire Path Mapper
+# City Edit
 
 Crowdsourced map of how people actually travel through a city.
 
