@@ -268,6 +268,31 @@ export function isLandingHost(): boolean {
 }
 
 /**
+ * True only on the bare apex domain in production (cityedit.org) — not on a
+ * theme subdomain (bikepaths.cityedit.org) and not on localhost. Used to decide
+ * whether a preset map opened via /m/<slug> should redirect to its subdomain.
+ */
+export function isApexHost(): boolean {
+  if (typeof window === "undefined") return false;
+  const { hostname } = window.location;
+  if (isLocalDevHost(hostname)) return false;
+  return hostname.split(".").length === 2;
+}
+
+/**
+ * Absolute URL of a preset map's subdomain on the current root domain, e.g.
+ * "bikepaths" → https://bikepaths.cityedit.org/.
+ */
+export function subdomainHref(subdomain: string): string {
+  if (typeof window === "undefined") return `https://${subdomain}.cityedit.org/`;
+  const { protocol, hostname, port } = window.location;
+  const parts = hostname.split(".");
+  const root = parts.length >= 3 ? parts.slice(1).join(".") : hostname;
+  const portSuffix = port ? `:${port}` : "";
+  return `${protocol}//${subdomain}.${root}${portSuffix}/`;
+}
+
+/**
  * URL of the landing page from any subdomain. Production: the apex domain;
  * local dev: /?landing=1.
  */

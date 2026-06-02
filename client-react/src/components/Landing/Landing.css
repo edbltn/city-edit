@@ -2,12 +2,16 @@
 
 .landing {
   height: 100vh;
+  /* dvh tracks the *visible* viewport as mobile browser chrome shows/hides, so
+     the footer isn't stuck below the fold and the page scrolls to the bottom. */
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-main);
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .landing-header {
@@ -136,11 +140,15 @@
   background-color: #1a1a1a;
   background-size: cover;
   background-position: center;
+  /* Paint the image right up to (and under) the border so there's no sliver of
+     gap between the screenshot and the frame. */
+  background-origin: border-box;
+  box-sizing: border-box;
   color: #fff;
   text-decoration: none;
   cursor: pointer;
   aspect-ratio: 3 / 4;
-  border: 1px solid var(--hairline);
+  border: 2px solid var(--hairline);
   transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
@@ -258,6 +266,8 @@
   .landing-grid {
     grid-template-columns: 1fr;
     padding: var(--space-4);
+    /* clear the iOS home-bar / notch so the last card and footer are reachable */
+    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
   }
 
   .landing-toolbar {
@@ -267,5 +277,7 @@
 
   .landing-card {
     aspect-ratio: auto;
+    /* keep the preview image visible in the single-column mobile layout */
+    min-height: 168px;
   }
 }

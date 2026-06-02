@@ -6,8 +6,8 @@ import {
 import { TopBar, MapView, ErrorToast, Landing } from "./components";
 import { PasscodeGate } from "./components/PasscodeGate/PasscodeGate";
 import { useRoute } from "./context";
-import { isLandingHost } from "./themes";
-import { resolveMapSlug, fetchMapConfig, applyMap } from "./map/runtime";
+import { isLandingHost, isApexHost, subdomainHref } from "./themes";
+import { resolveMapSlug, fetchMapConfig, applyMap, detectMapSlugFromUrl } from "./map/runtime";
 
 function AppContent() {
   const { error, clearError } = useRoute();
@@ -36,8 +36,15 @@ function MapApp() {
     let cancelled = false;
     (async () => {
       const cfg = await fetchMapConfig(resolveMapSlug());
-      if (!cancelled && cfg) applyMap(cfg);
-      if (!cancelled) setReady(true);
+      if (cancelled) return;
+      // Preset maps live on their own subdomain — send apex /m/<slug> (or
+      // shared/typed) visitors to e.g. bikepaths.cityedit.org.
+      if (cfg?.subdomain && isApexHost()) {
+        window.location.replace(subdomainHref(cfg.subdomain));
+        return;
+      }
+      if (cfg) applyMap(cfg);
+      setReady(true);
     })();
     return () => {
       cancelled = true;
@@ -66,7 +73,9 @@ function MapApp() {
 }
 
 function App() {
-  if (isLandingHost()) {
+  // An explicit map in the URL (/m/<slug> or ?map=) means map mode even on the
+  // apex/landing host — otherwise clicking a map card just re-rendered Landing.
+  if (!detectMapSlugFromUrl() && isLandingHost()) {
     return <Landing />;
   }
   return <MapApp />;

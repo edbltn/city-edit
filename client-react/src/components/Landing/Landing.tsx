@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { THEMES, THEME_ORDER, iconSrc, type Theme } from "../../themes";
+import { THEMES, THEME_ORDER, iconSrc, isApexHost, subdomainHref, type Theme } from "../../themes";
 import { CONFIG } from "../../config";
 import { ProposeMapModal } from "../ProposeMap/ProposeMapModal";
 import "./Landing.css";
@@ -36,11 +36,13 @@ function toCard(m: ApiMap): DisplayCard {
   const labels = (m.voteTypes || []).map((v) => v.label).join(" ");
   return {
     key: m.slug,
-    href: `/m/${m.slug}`, // slug-based for all maps (presets included)
+    // Preset maps live on a subdomain (bikepaths.cityedit.org); link straight
+    // there from the apex. Everything else opens by slug.
+    href: m.subdomain && isApexHost() ? subdomainHref(m.subdomain) : `/m/${m.slug}`,
     name: m.name,
     tagline,
     symbol: theme?.symbol || m.voteTypes?.[0]?.icon || "mapping",
-    bgImage: theme ? `/previews/${theme.id}.png` : undefined,
+    bgImage: `/previews/${m.slug}.png`,
     haystack: `${m.name} ${tagline} ${cityName} ${labels}`.toLowerCase(),
   };
 }
@@ -52,11 +54,11 @@ const presetSlug = (t: Theme) => `nyc-${t.id === "bikepaths" ? "bikes" : t.id}`;
 function fallbackCards(): DisplayCard[] {
   return THEME_ORDER.map((t) => ({
     key: t.id,
-    href: `/m/${presetSlug(t)}`,
+    href: isApexHost() ? subdomainHref(t.subdomain) : `/m/${presetSlug(t)}`,
     name: t.name,
     tagline: t.tagline,
     symbol: t.symbol,
-    bgImage: `/previews/${t.id}.png`,
+    bgImage: `/previews/${presetSlug(t)}.png`,
     haystack: `${t.name} ${t.tagline}`.toLowerCase(),
   }));
 }
