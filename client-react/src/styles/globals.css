@@ -121,6 +121,51 @@ body {
   position: relative;
 }
 
+/* ==========================================================================
+   Map bootstrap — shown while the active map config resolves, before the map
+   subtree mounts. Also the backdrop for the passcode gate.
+   ========================================================================== */
+.map-bootstrap {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-main);
+}
+
+.map-bootstrap-spinner {
+  width: 30px;
+  height: 30px;
+  border: 2px solid var(--hairline);
+  border-top-color: var(--color-start);
+  border-radius: 50%;
+  animation: map-bootstrap-spin 0.8s linear infinite;
+}
+
+.map-bootstrap-label {
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  opacity: 0.7;
+}
+
+@keyframes map-bootstrap-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-bootstrap-spinner {
+    animation-duration: 2s;
+  }
+}
+
 
 /* ==========================================================================
    Utility: reserve layout space while hiding element

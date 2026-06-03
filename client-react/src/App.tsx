@@ -77,7 +77,14 @@ function MapApp() {
     }
   }, []);
 
-  if (cfg === undefined) return <div className="map-bootstrap" />;
+  if (cfg === undefined) {
+    return (
+      <div className="map-bootstrap">
+        <div className="map-bootstrap-spinner" aria-hidden />
+        <div className="map-bootstrap-label">Loading map…</div>
+      </div>
+    );
+  }
 
   if (cfg?.locked) {
     return (
