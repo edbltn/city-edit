@@ -288,11 +288,20 @@ def _populate_redis():
 
 
 def _prewarm():
-    """Preload preset NYC maps so the first request is fast."""
+    """Preload every map's graph + vote cache so no map cold-loads on first hit.
+
+    Loads each city's walk graph (the slow part — NYC ~60-120s) and builds each
+    map's vote body in a background thread. All registered cities fit resident at
+    16Gi (GraphRegistry max_loaded=3 == the current city count)."""
     try:
-        for slug in ("nyc-walkways", "nyc-bikes", "nyc-trees"):
-            _build_graph_votes_body(resolve_map(slug))
-        logger.info("[STARTUP] Pre-warmed preset NYC maps")
+        warmed = 0
+        for m in list_maps():
+            try:
+                _build_graph_votes_body(resolve_map(m["slug"]))
+                warmed += 1
+            except Exception as e:
+                logger.warning(f"[STARTUP] Pre-warm '{m['slug']}' failed: {e}")
+        logger.info(f"[STARTUP] Pre-warmed {warmed} map(s) across all cities")
     except Exception as e:
         logger.warning(f"[STARTUP] Pre-warm failed: {e}")
 
