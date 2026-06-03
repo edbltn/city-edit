@@ -15,6 +15,7 @@ expects: node attrs y=lat, x=lon; edge attrs length (m), name, highway.
 import logging
 import math
 import os
+import time
 from pathlib import Path
 
 import networkx as nx
@@ -45,12 +46,45 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return _EARTH_RADIUS_M * 2 * math.asin(math.sqrt(a))
 
 
+# bbbike.org reliably refuses connections from datacenter IP ranges (e.g. Cloud
+# Build), where it just connect-times-out. Each bbbike city extract therefore has a
+# geofabrik regional fallback: the builder clips to the city bbox, so a regional
+# extract yields the SAME graph — only the download is larger. geofabrik does not
+# block automated clients, so it's the reliable source for CI image builds.
+_PBF_FALLBACKS = {
+    "https://download.bbbike.org/osm/bbbike/SanFrancisco/SanFrancisco.osm.pbf":
+        "https://download.geofabrik.de/north-america/us/california-latest.osm.pbf",
+    "https://download.bbbike.org/osm/bbbike/Chicago/Chicago.osm.pbf":
+        "https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf",
+    "https://download.bbbike.org/osm/bbbike/WashingtonDC/WashingtonDC.osm.pbf":
+        "https://download.geofabrik.de/north-america/us/district-of-columbia-latest.osm.pbf",
+}
+
+# (connect, read) timeouts: a short connect timeout fails fast over to the fallback
+# when a host is silently dropping connections; the read window stays generous for
+# large (~1GB) regional extracts.
+_PBF_TIMEOUT = (30, 600)
+_PBF_ATTEMPTS = 3
+
+
+def _stream_pbf(url: str, tmp: Path) -> None:
+    """Stream one PBF URL to a temp file (raises on any HTTP/network error)."""
+    with requests.get(url, stream=True, timeout=_PBF_TIMEOUT) as r:
+        r.raise_for_status()
+        with open(tmp, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1 << 20):
+                if chunk:
+                    f.write(chunk)
+
+
 def ensure_pbf(pbf_url: str, dest_dir: str, force: bool = False) -> str:
     """Download the source PBF into dest_dir/source.osm.pbf (cached). Returns the path.
 
     Mirrors the freshness-skip pattern used elsewhere: skip the download if the file
     already exists unless force=True. Streams to a .part file and renames atomically
-    so an interrupted download never leaves a truncated PBF that looks complete.
+    so an interrupted download never leaves a truncated PBF that looks complete. Tries
+    the primary URL, then any geofabrik fallback (see _PBF_FALLBACKS), retrying each
+    with backoff so a flaky/blocking mirror doesn't fail the whole image build.
     """
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
@@ -61,16 +95,30 @@ def ensure_pbf(pbf_url: str, dest_dir: str, force: bool = False) -> str:
         return str(pbf_path)
 
     tmp = pbf_path.with_suffix(".pbf.part")
-    logger.info(f"[PBF] downloading {pbf_url} -> {pbf_path}")
-    with requests.get(pbf_url, stream=True, timeout=300) as r:
-        r.raise_for_status()
-        with open(tmp, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1 << 20):
-                if chunk:
-                    f.write(chunk)
-    os.replace(tmp, pbf_path)
-    logger.info(f"[PBF] downloaded: {pbf_path} ({pbf_path.stat().st_size / 1e6:.0f} MB)")
-    return str(pbf_path)
+    urls = [pbf_url]
+    if pbf_url in _PBF_FALLBACKS:
+        urls.append(_PBF_FALLBACKS[pbf_url])
+
+    last_err: Exception | None = None
+    for url in urls:
+        for attempt in range(1, _PBF_ATTEMPTS + 1):
+            try:
+                logger.info(f"[PBF] downloading {url} -> {pbf_path} (attempt {attempt})")
+                _stream_pbf(url, tmp)
+                os.replace(tmp, pbf_path)
+                logger.info(f"[PBF] downloaded: {pbf_path} "
+                            f"({pbf_path.stat().st_size / 1e6:.0f} MB)")
+                return str(pbf_path)
+            except Exception as e:
+                last_err = e
+                logger.warning(f"[PBF] download failed ({url}, attempt {attempt}): {e}")
+                tmp.unlink(missing_ok=True)
+                if attempt < _PBF_ATTEMPTS:
+                    time.sleep(min(30, 5 * attempt))
+        if url != urls[-1]:
+            logger.warning(f"[PBF] giving up on {url}; trying fallback")
+
+    raise RuntimeError(f"[PBF] all sources failed for {pbf_url}: {last_err}")
 
 
 def build_walk_graph_from_pbf(pbf_path: str, bbox: tuple) -> "nx.MultiDiGraph":
