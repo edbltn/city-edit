@@ -1,9 +1,14 @@
 """
 OSRM-based routing via the OSRM HTTP API.
 
-Uses a self-hosted OSRM instance for fast, local routing.
+Uses a self-hosted OSRM instance for fast, local routing. A single merged OSRM
+dataset serves every city (coordinates are global, so one routed instance covers
+NYC + SF + Chicago). Locally that's the `osrm` compose service over plain HTTP;
+in prod it's a private Cloud Run service reached over HTTPS with a Google-signed
+ID token for service-to-service auth.
 """
 import logging
+import time
 from typing import Optional
 
 import requests
@@ -18,13 +23,56 @@ OSRM_MODE_MAP = {
     "drive": "car",
 }
 
+# GCE/Cloud Run metadata server: mints an OIDC ID token whose audience is the
+# target service URL. Cloud Run validates it before forwarding to the container.
+_METADATA_ID_TOKEN_URL = (
+    "http://metadata.google.internal/computeMetadata/v1/"
+    "instance/service-accounts/default/identity"
+)
+
 
 class OsrmRouter(RouterInterface):
 
-    def __init__(self, host: str = "localhost", port: int = 5000):
-        self._base_url = f"http://{host}:{port}"
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 5000,
+        base_url: Optional[str] = None,
+        use_id_token: bool = False,
+    ):
+        self._base_url = base_url.rstrip("/") if base_url else f"http://{host}:{port}"
         self._session = requests.Session()
-        logger.info(f"[OSRM] Router initialized: {self._base_url}")
+        # When talking to a private Cloud Run OSRM service, every request must
+        # carry an ID token scoped to that service's URL.
+        self._use_id_token = use_id_token
+        self._token: Optional[str] = None
+        self._token_exp: float = 0.0
+        logger.info(
+            f"[OSRM] Router initialized: {self._base_url} (auth={'id-token' if use_id_token else 'none'})"
+        )
+
+    def _auth_headers(self) -> dict:
+        """Bearer header with a cached Cloud Run ID token (refreshed before expiry)."""
+        if not self._use_id_token:
+            return {}
+        now = time.time()
+        if self._token and now < self._token_exp:
+            return {"Authorization": f"Bearer {self._token}"}
+        try:
+            resp = requests.get(
+                _METADATA_ID_TOKEN_URL,
+                params={"audience": self._base_url, "format": "full"},
+                headers={"Metadata-Flavor": "Google"},
+                timeout=5,
+            )
+            resp.raise_for_status()
+            self._token = resp.text
+            # Tokens live ~1h; refresh a little early to avoid edge-of-expiry 401s.
+            self._token_exp = now + 50 * 60
+            return {"Authorization": f"Bearer {self._token}"}
+        except requests.RequestException as e:
+            logger.error(f"[OSRM] Failed to fetch ID token from metadata server: {e}")
+            return {}
 
     def calculate_route(
         self,
@@ -51,7 +99,7 @@ class OsrmRouter(RouterInterface):
         logger.info(f"[OSRM] GET {url}")
 
         try:
-            resp = self._session.get(url, timeout=10)
+            resp = self._session.get(url, timeout=10, headers=self._auth_headers())
             logger.info(f"[OSRM] Response status={resp.status_code}, body={resp.text[:500]}")
             resp.raise_for_status()
             data = resp.json()

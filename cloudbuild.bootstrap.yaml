@@ -1,0 +1,52 @@
+# ONE-TIME bootstrap: build + push both images WITHOUT deploying.
+#
+# The normal cloudbuild.yaml deploys with `gcloud run services update
+# desire-path-osrm`, which fails on the very first run because the osrm Cloud Run
+# service doesn't exist yet. So for the initial rollout: run this to push both
+# images, then `terraform apply` (which creates desire-path-osrm from osrm:latest,
+# grants the app SA run.invoker, and sets OSRM_URL on the app). After that, the
+# normal cloudbuild.yaml works for every subsequent deploy. This file can be
+# deleted once bootstrapped.
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-osrm'
+    waitFor: ['-']
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/osrm:latest'
+      - 'osrm'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-app'
+    waitFor: ['-']
+    args:
+      - 'build'
+      - '--no-cache'
+      - '-f'
+      - 'Dockerfile'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-osrm'
+    waitFor: ['build-osrm']
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/osrm:latest']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-app'
+    waitFor: ['build-app']
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest']
+
+timeout: '3600s'
+
+options:
+  machineType: 'E2_HIGHCPU_32'
+
+substitutions:
+  _REGION: us-central1
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/osrm:latest'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'

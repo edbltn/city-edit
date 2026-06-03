@@ -22,7 +22,8 @@ export function buildSelectionUrl(
     vt: voteType ?? null,
   });
   if (typeof window === "undefined") return href;
-  // mapHref returns a relative URL — resolve to absolute for copy.
+  // mapHref is apex-absolute on a subdomain, relative on the apex — normalize
+  // either form to an absolute URL for copy.
   return new URL(href, window.location.origin).toString();
 }
 

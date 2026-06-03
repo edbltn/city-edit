@@ -69,13 +69,14 @@
 }
 
 .propose-field > span {
-  text-transform: lowercase;
+  text-transform: capitalize;
   letter-spacing: 0.04em;
   opacity: 0.75;
 }
 
 .propose-field em {
   font-style: normal;
+  text-transform: lowercase;
   opacity: 0.5;
 }
 
@@ -126,6 +127,11 @@
 
 .propose-ok { color: var(--color-start); }
 .propose-bad { color: var(--color-end); }
+
+.propose-hint {
+  font-size: var(--font-size-2xs);
+  opacity: 0.6;
+}
 
 .propose-custom {
   display: flex;
@@ -217,7 +223,7 @@
 }
 
 .propose-icon-option.selected {
-  border-color: var(--color-start);
+  border-color: #fff;
 }
 
 .propose-icon-option img {
@@ -258,6 +264,13 @@
   border-color: var(--ink);
   outline: 1px solid var(--ink);
   outline-offset: 1px;
+}
+
+/* Light themes have a near-white basemap, so a white selection ring is invisible.
+   Use the theme's own accent (its inner square) as the selection color instead. */
+.propose-theme-swatch.selected.light {
+  border-color: var(--swatch-accent);
+  outline-color: var(--swatch-accent);
 }
 
 .propose-add-row {

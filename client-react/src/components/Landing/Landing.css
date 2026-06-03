@@ -177,6 +177,42 @@
   transform: translateY(1px);
 }
 
+/* Loading skeleton — placeholder tiles shown while /api/maps is in flight, so a
+   slow or failed fetch never flashes a misleading partial list. Reuses the card
+   sizing; swaps the preview image for an animated shimmer. */
+.landing-card-skeleton {
+  pointer-events: none;
+  cursor: default;
+  background-color: #1a1a1a;
+  background-image: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0.04) 30%,
+    rgba(255, 255, 255, 0.1) 50%,
+    rgba(255, 255, 255, 0.04) 70%
+  );
+  background-size: 200% 100%;
+  animation: landing-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.landing-card-skeleton::before {
+  display: none;
+}
+
+@keyframes landing-skeleton-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-card-skeleton {
+    animation: none;
+  }
+}
+
 /* Propose-a-map tile: styled exactly like the other cards — plus where the
    symbol goes, with the title + subtitle at the top left. */
 .landing-card-add {

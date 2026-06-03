@@ -154,6 +154,14 @@ export const MAP_STYLES: Record<string, MapStyle> = {
     peak: "rgb(120, 56, 38)",
   }),
 
+  // Culture & community — light basemap, plum/violet.
+  plum: lightStyle("plum", "#8E5AA8", {
+    halo: "rgb(224, 210, 234)",
+    warm: "rgb(178, 140, 200)",
+    hot: "rgb(132, 86, 168)",
+    peak: "rgb(78, 44, 110)",
+  }),
+
   // Neutral default for user-created maps without a preset style.
   default: { id: "default", ...DARK_WARM },
 };
@@ -162,10 +170,10 @@ export const DEFAULT_MAP_STYLE = MAP_STYLES.default;
 
 /**
  * Themes a proposer can pick for a new map (must mirror _VALID_MAP_STYLES in
- * server/app.py). A small, curated set: four dark looks plus two light ones in
+ * server/app.py). A small, curated set: four dark looks plus three light ones in
  * hues that read as urbanist (amber streets, bike green, transit blue, harbor
- * teal, park green, terracotta public space). `walkways` is omitted because
- * it's visually identical to `default`; each id keys into MAP_STYLES.
+ * teal, park green, terracotta public space, plum culture). `walkways` is omitted
+ * because it's visually identical to `default`; each id keys into MAP_STYLES.
  */
 export const SELECTABLE_MAP_STYLES: { id: string; label: string }[] = [
   { id: "default", label: "Streets (amber)" },
@@ -174,6 +182,7 @@ export const SELECTABLE_MAP_STYLES: { id: string; label: string }[] = [
   { id: "waterfront", label: "Waterfront (teal)" },
   { id: "trees", label: "Parks (green)" },
   { id: "terracotta", label: "Public space (terracotta)" },
+  { id: "plum", label: "Culture (purple)" },
 ];
 
 /** Resolve a style id to its MapStyle, falling back to the default. */

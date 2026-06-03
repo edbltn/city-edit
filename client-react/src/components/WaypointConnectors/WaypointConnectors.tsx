@@ -17,6 +17,10 @@ interface WaypointConnectorsProps {
   ghostWaypoints: LatLng[];
   routeGeometry: [number, number][] | null; // Used when no split paths
   splitDesirePaths: SplitDesirePath[];
+  // While a pin is being dragged, RouteMarker draws its own live drag trail to
+  // the path. The static connectors below would otherwise linger pointing at the
+  // pre-drag endpoint (a stale line to the "wrong spot"), so we hide them.
+  isDragging?: boolean;
 }
 
 // Generate a straight line between a waypoint and a path endpoint
@@ -55,8 +59,16 @@ export function WaypointConnectors({
   ghostWaypoints,
   routeGeometry,
   splitDesirePaths,
+  isDragging = false,
 }: WaypointConnectorsProps) {
   const connectors = useMemo(() => {
+    // A pin is being dragged: its live drag trail is the only connector that
+    // should show. Suppress the static ones so no stale line points at the
+    // pre-drag endpoint.
+    if (isDragging) {
+      return [];
+    }
+
     // If there are ghost waypoints but no split paths yet, we're mid-calculation
     // Don't show stale connectors from the old route geometry
     if (ghostWaypoints.length > 0 && splitDesirePaths.length === 0) {
@@ -117,7 +129,7 @@ export function WaypointConnectors({
     }
 
     return arcs;
-  }, [start, end, ghostWaypoints, routeGeometry, splitDesirePaths]);
+  }, [start, end, ghostWaypoints, routeGeometry, splitDesirePaths, isDragging]);
 
   if (connectors.length === 0) return null;
 

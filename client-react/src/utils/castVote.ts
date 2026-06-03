@@ -136,7 +136,22 @@ export async function castVotes(params: {
       throw new Error("Passcode required");
     }
     if (!res.ok) throw new Error(`Vote failed: ${res.status}`);
-    return { ok: true, targetDir, changedEdges };
+
+    // The server may decline some edges under the per-IP abuse cap, returning
+    // them in `capped` (absent from `changed`, with no count broadcast). Roll
+    // back our optimistic apply for those so the heatmap/button can't show a
+    // vote the server never recorded.
+    const result = await res.json();
+    const declined = new Set<number>(result?.capped ?? []);
+    if (declined.size > 0) {
+      for (const g of groups) {
+        const edges = g.edges.filter((e) => declined.has(e));
+        if (edges.length === 0) continue;
+        dispatchOptimistic({ mode, label, edgeIds: edges, prevDir: g.newDir, newDir: g.prevDir });
+        setVotes(mode, edges, label, g.prevDir as VoteDirection | 0);
+      }
+    }
+    return { ok: true, targetDir, changedEdges: changedEdges.filter((e) => !declined.has(e)) };
   } catch (err) {
     // Roll back the optimistic apply and the local store so a failed sync can't
     // leave the heatmap or button state showing a vote the server never took.

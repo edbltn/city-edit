@@ -9,6 +9,7 @@ python-dotenv
 osmnx
 networkx
 rustworkx
+osmium
 scikit-learn
 h3
 psycopg2-binary

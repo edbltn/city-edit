@@ -4,9 +4,12 @@ Python-based OSM routing using osmnx + rustworkx.
 This module provides local routing without external API dependencies.
 Uses osmnx for OSM graph building and rustworkx for fast Dijkstra routing.
 """
+import gc
 import json
 import logging
+import os
 import pickle
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -48,16 +51,24 @@ class PythonRouter(RouterInterface):
         """
         self.data_dir = Path(data_dir)
         self.redis = redis_client
-        self._graph = None
-        self._nx_graph = None
-        self._node_index = {}
-        self._index_to_node = {}
+        self._loaded = False
+        self._graph = None  # rustworkx routing graph, built lazily (fallback only)
+        self._node_index = {}    # osm id -> graph index
+        self._index_to_node = {}  # graph index -> osm id
         self._version = None
         self._cache_ttl = 86400  # 24 hours
         self._bbox_cache: dict[tuple, dict] = {}
         self._kdtree: cKDTree | None = None
-        self._kdtree_node_ids: list[int] = []
-        self._kdtree_coords: np.ndarray | None = None
+        # Compact graph representation (replaces the heavy networkx graph after
+        # load). Coords indexed by graph index; edges as parallel arrays; names
+        # interned to dedupe; adjacency as edge-positions per node.
+        self._coords: np.ndarray | None = None      # [n, 2] -> (lat, lon)
+        self._edge_u: np.ndarray | None = None       # [e] int32 from-index
+        self._edge_v: np.ndarray | None = None       # [e] int32 to-index
+        self._edge_len: np.ndarray | None = None      # [e] float32 length (m)
+        self._edge_name: list[str] = []               # [e] interned street names
+        self._edge_highway: list[str] = []            # [e] interned highway tags
+        self._edge_adj: list[list[int]] = []          # node index -> [edge positions]
 
     # Grid precision for coordinate snapping (3 decimals = ~100 meters, roughly half an avenue block)
     COORD_SNAP_PRECISION = 3
@@ -224,9 +235,26 @@ class PythonRouter(RouterInterface):
         except Exception as e:
             logger.warning(f"[PYTHON_ROUTER] Cache write error: {e}")
 
+    @staticmethod
+    def _first_str(val) -> str:
+        """OSM tags can be a string or a list of strings (multi-valued); take one."""
+        if isinstance(val, list):
+            return val[0] if val else ""
+        return val or ""
+
     def _ensure_loaded(self):
-        """Lazy-load the graph on first request."""
-        if self._graph is not None:
+        """Load the OSM graph into compact arrays + spatial index, then free networkx.
+
+        The pickled networkx graph is the single biggest structure (a Python dict
+        per node and per edge → several GB for NYC), but everything we actually
+        need from it — node coords, edge endpoints/lengths/names, and adjacency —
+        fits in compact numpy arrays + interned-string lists an order of magnitude
+        smaller. We extract those, build the kdtree from them, drop networkx, and
+        let gc reclaim it. The rustworkx routing graph is built separately and
+        lazily (see _ensure_routing_graph) since OSRM handles routing and the
+        fallback rarely runs.
+        """
+        if self._loaded:
             return
 
         if not HAS_PYTHON_ROUTER:
@@ -246,35 +274,88 @@ class PythonRouter(RouterInterface):
         with open(graph_path, "rb") as f:
             data = pickle.load(f)
 
-        self._nx_graph = data["graph"]
+        nx_graph = data["graph"]
         self._node_index = data["node_index"]
         self._index_to_node = data["index_to_node"]
         self._version = data.get("version", "unknown")
+        data = None
 
-        # Build rustworkx graph from networkx graph
-        self._graph = rx.PyDiGraph()
-        node_count = len(self._node_index)
-        self._graph.add_nodes_from(range(node_count))
+        n = len(self._node_index)
 
-        # Add edges with weights (length in meters)
-        for u, v, edge_data in self._nx_graph.edges(data=True):
-            if u in self._node_index and v in self._node_index:
-                weight = edge_data.get("length", 1.0)
-                u_idx = self._node_index[u]
-                v_idx = self._node_index[v]
-                self._graph.add_edge(u_idx, v_idx, weight)
+        # Node coords indexed by graph index (osmnx stores y=lat, x=lon). The
+        # kdtree is built on this array, so a query returns the graph index directly.
+        coords = np.zeros((n, 2), dtype=np.float64)
+        for osmid, idx in self._node_index.items():
+            nd = nx_graph.nodes[osmid]
+            coords[idx, 0] = nd["y"]
+            coords[idx, 1] = nd["x"]
 
-        # Pre-build spatial index for fast nearest-node lookups
-        self._kdtree_node_ids = list(self._nx_graph.nodes())
-        self._kdtree_coords = np.array(
-            [(self._nx_graph.nodes[n]["y"], self._nx_graph.nodes[n]["x"])
-             for n in self._kdtree_node_ids]
-        )
-        self._kdtree = cKDTree(self._kdtree_coords)
+        # Compact edge arrays + per-node adjacency (edge positions touching a node).
+        edge_u: list[int] = []
+        edge_v: list[int] = []
+        edge_len: list[float] = []
+        edge_name: list[str] = []
+        edge_highway: list[str] = []
+        adj: list[list[int]] = [[] for _ in range(n)]
+
+        for u, v, ed in nx_graph.edges(data=True):
+            ui = self._node_index.get(u)
+            vi = self._node_index.get(v)
+            if ui is None or vi is None:
+                continue
+            pos = len(edge_u)
+            edge_u.append(ui)
+            edge_v.append(vi)
+            edge_len.append(float(ed.get("length", 1.0)))
+            # Intern names/highways: street names repeat heavily across edges, so
+            # interning collapses millions of references onto a small unique set.
+            edge_name.append(sys.intern(str(self._first_str(ed.get("name", "")))))
+            edge_highway.append(sys.intern(str(self._first_str(ed.get("highway", "")))))
+            adj[ui].append(pos)
+            adj[vi].append(pos)
+
+        self._coords = coords
+        self._edge_u = np.array(edge_u, dtype=np.int32)
+        self._edge_v = np.array(edge_v, dtype=np.int32)
+        self._edge_len = np.array(edge_len, dtype=np.float32)
+        self._edge_name = edge_name
+        self._edge_highway = edge_highway
+        self._edge_adj = adj
+        self._kdtree = cKDTree(coords)
+
+        # Free the heavy networkx graph — its data now lives in the compact arrays.
+        del nx_graph
+        gc.collect()
+        self._loaded = True
 
         logger.info(
-            f"Python router loaded: {self._graph.num_nodes()} nodes, "
-            f"{self._graph.num_edges()} edges, version: {self._version}"
+            f"Python router loaded: {n} nodes, {len(edge_u)} edges, "
+            f"version: {self._version} (networkx freed; routing graph deferred)"
+        )
+
+    def _ensure_routing_graph(self):
+        """Build the rustworkx routing graph — lazily, on the first fallback route.
+
+        Skipped entirely when OSRM serves every route (the common case), which is
+        why it's split out of _ensure_loaded. Built from the compact edge arrays
+        (networkx is already gone by now).
+        """
+        self._ensure_loaded()
+        if self._graph is not None:
+            return
+
+        logger.info("[PYTHON_ROUTER] Building rustworkx routing graph (OSRM fallback path)")
+        self._graph = rx.PyDiGraph()
+        self._graph.add_nodes_from(range(len(self._node_index)))
+        # (from, to, weight=length_m) for every edge.
+        self._graph.add_edges_from([
+            (int(self._edge_u[i]), int(self._edge_v[i]), float(self._edge_len[i]))
+            for i in range(len(self._edge_u))
+        ])
+
+        logger.info(
+            f"[PYTHON_ROUTER] Routing graph built: {self._graph.num_nodes()} nodes, "
+            f"{self._graph.num_edges()} edges"
         )
 
     def calculate_route(
@@ -298,7 +379,7 @@ class PythonRouter(RouterInterface):
         Returns:
             dict with geometry, distance, duration, mode, _cache_hit
         """
-        self._ensure_loaded()
+        self._ensure_routing_graph()
 
         logger.info(
             f"[PYTHON_ROUTER] Route request: start={start}, end={end}, "
@@ -330,10 +411,13 @@ class PythonRouter(RouterInterface):
             return {"error": error_msg}
 
     def _find_nearest_node(self, lat: float, lon: float) -> int:
-        """Find the nearest graph node to a point using pre-built KDTree."""
+        """Find the nearest graph node to a point using pre-built KDTree.
+
+        The kdtree is built on the graph-index-ordered coord array, so its result
+        IS the graph index — no osm-id indirection needed.
+        """
         _, idx = self._kdtree.query([lat, lon])
-        node_id = self._kdtree_node_ids[idx]
-        return self._node_index[node_id]
+        return int(idx)
 
     def _route_direct(
         self,
@@ -391,19 +475,17 @@ class PythonRouter(RouterInterface):
         total_distance = 0.0
 
         for i, idx in enumerate(path_indices):
-            node_id = self._index_to_node[idx]
-            node_data = self._nx_graph.nodes[node_id]
-            lat = node_data["y"]
-            lon = node_data["x"]
+            lat = float(self._coords[idx, 0])
+            lon = float(self._coords[idx, 1])
             coords.append([lon, lat])
 
-            # Calculate distance
+            # Calculate distance — the rustworkx edge weight IS the length (m).
             if i > 0:
                 prev_idx = path_indices[i - 1]
-                prev_node_id = self._index_to_node[prev_idx]
-                edge_data = self._nx_graph.get_edge_data(prev_node_id, node_id)
-                if edge_data:
-                    total_distance += edge_data.get("length", 0)
+                try:
+                    total_distance += float(self._graph.get_edge_data(prev_idx, idx))
+                except Exception:
+                    pass
                 cumulative_distances.append(total_distance)
 
         # Estimate duration (walking speed ~5 km/h = 1.4 m/s)
@@ -489,35 +571,35 @@ class PythonRouter(RouterInterface):
         if cache_key in self._bbox_cache:
             return self._bbox_cache[cache_key]
 
-        # Collect nodes within bbox (osmnx stores y=lat, x=lon)
-        node_list = []       # [[lat, lon], ...]
-        node_id_to_idx = {}  # osmid → position in node_list
+        # Nodes within bbox — vectorized mask over the coord array (coords[:,0]=lat).
+        lat = self._coords[:, 0]
+        lon = self._coords[:, 1]
+        node_mask = (lat >= south) & (lat <= north) & (lon >= west) & (lon <= east)
+        included = np.nonzero(node_mask)[0]  # graph indices inside the bbox
 
-        for node_id, data in self._nx_graph.nodes(data=True):
-            lat = data.get("y")
-            lon = data.get("x")
-            if lat is None or lon is None:
-                continue
-            if south <= lat <= north and west <= lon <= east:
-                node_id_to_idx[node_id] = len(node_list)
-                node_list.append([lat, lon])
+        # graph index → position in node_list
+        gidx_to_pos = {int(g): pos for pos, g in enumerate(included)}
+        node_list = [[float(lat[g]), float(lon[g])] for g in included]  # [[lat, lon], ...]
 
-        # Collect edges between filtered nodes
+        # Edges with both endpoints inside the bbox — filter via the node mask,
+        # then build only the surviving rows (no full-graph Python scan).
+        edge_mask = node_mask[self._edge_u] & node_mask[self._edge_v]
+        edge_positions = np.nonzero(edge_mask)[0]
+
         edge_list = []  # [[from_idx, to_idx, name, highway, length_m], ...]
-        for u, v, data in self._nx_graph.edges(data=True):
-            if u not in node_id_to_idx or v not in node_id_to_idx:
-                continue
-            name = data.get("name", "") or ""
-            if isinstance(name, list):
-                name = name[0] if name else ""
-            highway = data.get("highway", "") or ""
-            if isinstance(highway, list):
-                highway = highway[0] if highway else ""
-            length = round(data.get("length", 0.0), 1)
-            edge_list.append([node_id_to_idx[u], node_id_to_idx[v], name, highway, length])
+        for ep in edge_positions:
+            ui = int(self._edge_u[ep])
+            vi = int(self._edge_v[ep])
+            edge_list.append([
+                gidx_to_pos[ui], gidx_to_pos[vi],
+                self._edge_name[ep], self._edge_highway[ep],
+                round(float(self._edge_len[ep]), 1),
+            ])
 
-        # OSM node ID → graph index (for OSRM annotation-based edge mapping)
-        osm_to_graph_idx = {int(osm_id): idx for osm_id, idx in node_id_to_idx.items()}
+        # OSM node ID → position in node_list (for OSRM annotation-based edge mapping)
+        osm_to_graph_idx = {
+            int(self._index_to_node[int(g)]): pos for pos, g in enumerate(included)
+        }
 
         # (graph_node_a, graph_node_b) → edge index (both directions for undirected)
         node_pair_to_edge: dict[tuple[int, int], int] = {}
@@ -545,7 +627,7 @@ class PythonRouter(RouterInterface):
         """Return (lat, lon) of the nearest graph node to the given point."""
         self._ensure_loaded()
         _, idx = self._kdtree.query([lat, lon])
-        return float(self._kdtree_coords[idx, 0]), float(self._kdtree_coords[idx, 1])
+        return float(self._coords[idx, 0]), float(self._coords[idx, 1])
 
     def reverse_geocode(self, lat: float, lon: float) -> str:
         """Return a street-level address for a point using the local OSM graph.
@@ -559,26 +641,27 @@ class PythonRouter(RouterInterface):
         """
         self._ensure_loaded()
         _, idx = self._kdtree.query([lat, lon])
-        start_node = self._kdtree_node_ids[idx]
+        start_node = int(idx)
 
         names: list[str] = []
         seen_names: set[str] = set()
 
-        # BFS up to 5 hops from nearest node (pedestrian plazas can be wide)
+        # BFS up to 5 hops from nearest node (pedestrian plazas can be wide),
+        # walking the compact adjacency (node index → incident edge positions).
         visited: set = {start_node}
         frontier = [start_node]
         for _ in range(5):
             if len(names) >= 2:
                 break
             next_frontier = []
-            for node_id in frontier:
-                for _, neighbor, data in self._nx_graph.edges(node_id, data=True):
-                    name = data.get("name", "") or ""
-                    if isinstance(name, list):
-                        name = name[0] if name else ""
+            for node in frontier:
+                for ep in self._edge_adj[node]:
+                    name = self._edge_name[ep]
                     if name and name not in seen_names:
                         seen_names.add(name)
                         names.append(name)
+                    u = int(self._edge_u[ep])
+                    neighbor = int(self._edge_v[ep]) if u == node else u
                     if neighbor not in visited:
                         visited.add(neighbor)
                         next_frontier.append(neighbor)
@@ -598,65 +681,67 @@ class PythonRouter(RouterInterface):
     def reload(self):
         """Force reload of graph (called after OSM refresh)."""
         logger.info("Reloading Python router...")
+        self._loaded = False
         self._graph = None
-        self._nx_graph = None
         self._node_index = {}
         self._index_to_node = {}
         self._version = None
         self._bbox_cache = {}
         self._kdtree = None
-        self._kdtree_node_ids = []
-        self._kdtree_coords = None
+        self._coords = None
+        self._edge_u = None
+        self._edge_v = None
+        self._edge_len = None
+        self._edge_name = []
+        self._edge_highway = []
+        self._edge_adj = []
+        gc.collect()
         self._ensure_loaded()
 
     def stats(self) -> dict:
         """Get graph statistics."""
         self._ensure_loaded()
         return {
-            "nodes": self._graph.num_nodes(),
-            "edges": self._graph.num_edges(),
+            "nodes": len(self._node_index),
+            "edges": int(len(self._edge_u)) if self._edge_u is not None else 0,
             "version": self._version
         }
 
 
-def build_graph(bbox: tuple, output_dir: str) -> dict:
+def build_graph(bbox: tuple, output_dir: str, pbf_url: str | None = None) -> dict:
     """
-    Build walk graph from OSM using osmnx.
+    Build the walk graph from the same OSM PBF that feeds OSRM.
+
+    Reads the city's `pbf_url` extract and keeps every way OSRM's foot profile would
+    route (see osm_graph_builder / foot_profile), so the topology graph is a superset
+    of OSRM's foot network and route votes map cleanly by OSM node id. Replaces the
+    old live-Overpass osmnx download, which used a different snapshot and filter.
 
     Args:
         bbox: (south, west, north, east) bounding box
-        output_dir: Directory to save the graph pickle
+        output_dir: Directory to save the graph pickle (and cache the source PBF)
+        pbf_url: Source OSM extract URL (same one OSRM uses; from cities.py)
 
     Returns:
         dict with build statistics
     """
-    if not HAS_PYTHON_ROUTER:
-        raise RuntimeError("osmnx not available. Install with: pip install osmnx")
+    # build_graph is the only path that needs osmium; loading/routing does not.
+    from osm_graph_builder import HAS_OSMIUM, build_walk_graph_from_pbf, ensure_pbf
+
+    if not HAS_OSMIUM:
+        raise RuntimeError("pyosmium not available. Install with: uv pip install osmium")
+    if not pbf_url:
+        raise RuntimeError("build_graph requires pbf_url (the source extract OSRM uses)")
 
     import time
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    south, west, north, east = bbox
-    logger.info(f"Building walk graph for bbox: {bbox}")
-
+    logger.info(f"Building walk graph for bbox: {bbox} from {pbf_url}")
     start_time = time.time()
 
-    # Download OSM walk network
-    # osmnx 2.0+ uses bbox as tuple: (west, south, east, north)
-    # Use "all" network type to include bridges/tunnels that connect regions
-    logger.info("Downloading OSM network (all types for connectivity)...")
-    G = ox.graph_from_bbox(
-        bbox=(west, south, east, north),
-        network_type="all",   # Include all roads for bridge connectivity
-        # simplify=False keeps every OSM shape-point as its own node, so edges are
-        # short straight segments that hug the real street curvature. Simplifying
-        # collapses degree-2 chains into single edges, which the client renders as
-        # straight chords between intersections — the "choppy" off-street lines.
-        simplify=False,
-        retain_all=True,      # Keep all nodes, even if not connected to main graph
-        truncate_by_edge=True  # Include edges that cross bbox boundary
-    )
+    pbf_path = ensure_pbf(pbf_url, str(output_path))
+    G = build_walk_graph_from_pbf(pbf_path, bbox)
 
     # Create node index mappings
     node_index = {}
@@ -668,8 +753,10 @@ def build_graph(bbox: tuple, output_dir: str) -> dict:
     # Generate version timestamp
     version = time.strftime("%Y%m%d_%H%M%S")
 
-    # Save as pickle
+    # Save as pickle (atomic: write a temp then rename, so a killed build never
+    # leaves a truncated walk_graph.pkl).
     graph_path = output_path / "walk_graph.pkl"
+    tmp_path = output_path / "walk_graph.pkl.tmp"
     data = {
         "graph": G,
         "node_index": node_index,
@@ -678,8 +765,9 @@ def build_graph(bbox: tuple, output_dir: str) -> dict:
         "bbox": bbox
     }
 
-    with open(graph_path, "wb") as f:
+    with open(tmp_path, "wb") as f:
         pickle.dump(data, f)
+    os.replace(tmp_path, graph_path)
 
     elapsed = time.time() - start_time
 

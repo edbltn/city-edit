@@ -8,7 +8,7 @@ import { noAutofillProps } from "../../utils/noAutofill";
 import "./VoteTypeSelector.css";
 
 export const VoteTypeSelector = memo(function VoteTypeSelector() {
-  const { voteType, setVoteType, pointType, isVoteTypeAlreadyCast } = useRoute();
+  const { voteType, setVoteType, pointType } = useRoute();
   const theme = useTheme();
   const map = useMap();
   const [isOpen, setIsOpen] = useState(false);
@@ -48,23 +48,25 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
   const allowCustom = map ? map.allowSuggestions : true;
   const showCustomOption = allowCustom && inputLower !== "" && !hasExactMatch;
 
+  // When suggestions are off and the map offers exactly one vote type for this
+  // point type, there's nothing to choose — show a frozen chip, not a dropdown.
+  const frozenLabel = !allowCustom && suggestions.length === 1 ? suggestions[0].label : null;
+
   const options = [
     ...filteredSuggestions.map((s) => ({
       label: s.label,
       icon: s.icon,
       glyph: false,
       isCustom: false,
-      alreadyVoted: isVoteTypeAlreadyCast(s.label),
     })),
     ...extraLabels.map((lbl) => ({
       label: lbl,
       icon: "",
       glyph: true,
       isCustom: false,
-      alreadyVoted: isVoteTypeAlreadyCast(lbl),
     })),
     ...(showCustomOption
-      ? [{ label: inputValue.trim(), icon: "", glyph: false, isCustom: true, alreadyVoted: false }]
+      ? [{ label: inputValue.trim(), icon: "", glyph: false, isCustom: true }]
       : []),
   ];
 
@@ -116,7 +118,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
         e.preventDefault();
         if (options.length > 0) {
           const opt = options[highlightedIndex];
-          if (opt && !opt.alreadyVoted) selectOption(opt.label);
+          if (opt) selectOption(opt.label);
         } else if (inputValue.trim()) {
           selectOption(inputValue.trim());
         }
@@ -168,9 +170,29 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
   // The committed type's themed icon: the map's own vote-type icon wins (user
   // maps define their own), then a matching preset icon. Null → it's a custom
   // type and renders the colorized suggestion glyph instead.
-  const displayIcon = voteType
-    ? map?.voteTypes?.find((s) => s.label === voteType)?.icon || iconForLabel(voteType)
-    : null;
+  const displayIcon = voteType ? iconForLabel(voteType, map?.voteTypes) : null;
+
+  // Frozen state: a single, fixed vote type — render a static chip (no input,
+  // no chevron, no dropdown). The actual vote type defaults to it via
+  // getDefaultVoteTypeForTheme, so casting still works.
+  if (frozenLabel) {
+    const frozenIcon = iconForLabel(frozenLabel, map?.voteTypes);
+    return (
+      <div className="vote-type-selector vote-type-frozen" title={frozenLabel}>
+        <div className="vote-type-control">
+          {frozenIcon ? (
+            <img className="vote-type-icon-img" src={iconSrc(frozenIcon)} alt="" />
+          ) : (
+            <span
+              className="vote-type-icon-img"
+              dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(frozenLabel, 18) }}
+            />
+          )}
+          <span className="vote-type-display-text">{frozenLabel}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -211,7 +233,9 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
           </div>
         )}
         {!isOpen && !voteType && (
-          <div className="vote-type-placeholder">What should be added here?</div>
+          <div className="vote-type-placeholder">
+            {allowCustom ? "Suggest a change..." : "Select a vote type"}
+          </div>
         )}
         <span className="vote-type-chevron" onMouseDown={handleChevronClick}>
           <span className="caret-down" />
@@ -240,11 +264,8 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
             return (
               <div
                 key={option.label}
-                className={`vote-type-option ${isHighlighted ? "highlighted" : ""} ${isSelected ? "selected" : ""} ${option.alreadyVoted ? "already-voted" : ""}`}
-                onMouseDown={() => {
-                  if (option.alreadyVoted) return;
-                  selectOption(option.label);
-                }}
+                className={`vote-type-option ${isHighlighted ? "highlighted" : ""} ${isSelected ? "selected" : ""}`}
+                onMouseDown={() => selectOption(option.label)}
                 onMouseEnter={() => setHighlightedIndex(index)}
               >
                 {option.icon ? (
@@ -256,11 +277,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
                   />
                 ) : null}
                 <span className="vote-type-label">{option.label}</span>
-                {option.alreadyVoted ? (
-                  <span className="vote-type-voted-badge">Vote Cast!</span>
-                ) : (
-                  isSelected && <span className="check-icon"><CheckIcon size={11} /></span>
-                )}
+                {isSelected && <span className="check-icon"><CheckIcon size={11} /></span>}
               </div>
             );
           })}

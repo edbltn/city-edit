@@ -14,6 +14,7 @@ import { useRoute, useGhostPin, useTheme } from "../../context";
 import { useMapClick } from "../../hooks";
 import { kiteGhostIcon } from "../../utils/kiteIcon";
 import { setMapViewState, setMapInstance, getInitialMapView } from "../../utils/mapViewState";
+import { getCurrentMap } from "../../map/runtime";
 import { RouteMarker } from "../RouteMarker";
 import { DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
@@ -222,6 +223,11 @@ export function MapView() {
   const theme = useTheme();
   const mapStyle = mapStyleForTheme(theme);
 
+  // Station networks (e.g. ebikes) vote on a single point — never a route — so
+  // the map behaves point-only regardless of the theme's input mode (no end pin).
+  const isStationNetwork = (getCurrentMap()?.network ?? "streets") !== "streets";
+  const inputMode = isStationNetwork ? "point" : theme.inputMode;
+
   const { ghostState } = useGhostPin();
 
   const [leafletMap, setLeafletMap] = useState<L.Map | null>(null);
@@ -260,7 +266,7 @@ export function MapView() {
 
   const { handleMapClick } = useMapClick({
     state: { start, end },
-    inputMode: theme.inputMode,
+    inputMode,
     activeTool,
     onUpdateStart: setStartPoint,
     onUpdateEnd: setEndPoint,
@@ -323,7 +329,7 @@ export function MapView() {
         cursorLatLng={cursorLatLng}
         activeTool={activeTool}
         hasStart={!!start.coords}
-        pointOnly={theme.inputMode === "point"}
+        pointOnly={inputMode === "point"}
         suppress={isHoveringPath || ghostState.isDragging || isDraggingMarker || markerHoverCount > 0}
       />
 
@@ -373,6 +379,7 @@ export function MapView() {
         ghostWaypoints={ghostWaypoints}
         routeGeometry={routeData?.geometry?.coordinates ?? null}
         splitDesirePaths={splitDesirePaths}
+        isDragging={isDraggingMarker}
       />
 
       {/* Ghost waypoint markers - persistent after drop, draggable to recalculate split */}

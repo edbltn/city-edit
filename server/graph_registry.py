@@ -11,8 +11,12 @@ pointing at that city's OSRM container.
 import hashlib
 import json
 import logging
+import os
 import threading
 from collections import OrderedDict
+
+import numpy as np
+from scipy.spatial import cKDTree
 
 from cities import City
 from python_router import PythonRouter
@@ -20,12 +24,37 @@ from osrm_router import OsrmRouter
 
 logger = logging.getLogger(__name__)
 
+_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+
+# A "network" is what a map votes on. "streets" (default) is the city's full
+# pedestrian walk graph. The others are fixed point sets loaded from a committed
+# JSON of {name, lat, lon} and served as a *degenerate graph* (one node + one
+# self-edge per point), so the entire topology/vote/render stack is reused
+# unchanged. See build_ebike_stations.py for how the data is produced.
+STATION_NETWORKS = {
+    "ebikes": "ebike_stations.json",
+}
+
+
+def load_station_graph(network: str) -> dict:
+    """Load a station network into the same shape PythonRouter.get_graph_for_bbox
+    returns: each station i is a node and a zero-length self-edge [i, i, name, ...].
+    A self-edge's midpoint is the node itself, so map markers land on the station.
+    """
+    path = os.path.join(_DATA_DIR, STATION_NETWORKS[network])
+    with open(path) as f:
+        stations = json.load(f)
+    nodes = [[float(s["lat"]), float(s["lon"])] for s in stations]
+    edges = [[i, i, s.get("name", ""), "station", 0.0] for i, s in enumerate(stations)]
+    return {"nodes": nodes, "edges": edges, "osm_to_graph_idx": {}, "node_pair_to_edge": {}}
+
 
 class CityGraph:
-    """Lazily-loaded graph + derived lookups for a single city."""
+    """Lazily-loaded graph + derived lookups for a single city + network."""
 
-    def __init__(self, city: City, redis_client=None):
+    def __init__(self, city: City, redis_client=None, network: str = "streets"):
         self.city = city
+        self.network = network
         self.provider = PythonRouter(data_dir=city.data_dir, redis_client=redis_client)
         self._loaded = False
         # Serializes concurrent first-loads of this city. Under the gevent worker
@@ -43,6 +72,9 @@ class CityGraph:
         self.node_pair_to_edge: dict = {}
         self.topology_json: str | None = None
         self.topology_etag: str | None = None
+        # Lazily-built cKDTree over edge midpoints, used by the vote migration to
+        # re-snap many anchors at once (kept off the hot load path / common case).
+        self._edge_mid_tree: cKDTree | None = None
 
     def ensure_loaded(self):
         if self._loaded:
@@ -54,9 +86,13 @@ class CityGraph:
             self._load_locked()
 
     def _load_locked(self):
-        logger.info(f"[GRAPH] Loading graph for city '{self.city.id}'...")
-        south, west, north, east = self.city.bbox
-        data = self.provider.get_graph_for_bbox(south, west, north, east)
+        logger.info(f"[GRAPH] Loading graph for '{self.city.id}:{self.network}'...")
+        if self.network in STATION_NETWORKS:
+            # Fixed point network — never touches the heavy city walk graph.
+            data = load_station_graph(self.network)
+        else:
+            south, west, north, east = self.city.bbox
+            data = self.provider.get_graph_for_bbox(south, west, north, east)
         nodes = data.get("nodes", [])
         edges = data.get("edges", [])
 
@@ -77,11 +113,13 @@ class CityGraph:
             lat, lon = node[0], node[1]
             coord_to_node_idx[f"{round(lon, 5)},{round(lat, 5)}"] = i
 
-        # Node adjacency: node_id → [edge_ids]
+        # Node adjacency: node_id → [edge_ids]. A self-edge (station network) is
+        # added once, not twice, so snap_point_to_edge returns it cleanly.
         adj: list[list[int]] = [[] for _ in range(len(nodes))]
         for i, edge in enumerate(edges):
             adj[edge[0]].append(i)
-            adj[edge[1]].append(i)
+            if edge[1] != edge[0]:
+                adj[edge[1]].append(i)
 
         edges_slim = [[e[0], e[1], e[2]] for e in edges]
         topology_json = json.dumps({"nodes": nodes, "edges": edges_slim})
@@ -96,11 +134,12 @@ class CityGraph:
         self.node_pair_to_edge = data.get("node_pair_to_edge", {})
         self.topology_json = topology_json
         self.topology_etag = topology_etag
+        self._edge_mid_tree = None  # rebuilt lazily for the new edge set
         self._loaded = True
 
         logger.info(
-            f"[GRAPH] '{self.city.id}' loaded: {len(nodes)} nodes, {len(edges)} edges, "
-            f"topology {len(topology_json) / (1024 * 1024):.1f} MB"
+            f"[GRAPH] '{self.city.id}:{self.network}' loaded: {len(nodes)} nodes, "
+            f"{len(edges)} edges, topology {len(topology_json) / (1024 * 1024):.1f} MB"
         )
 
     def snap_point_to_edge(self, lat: float, lon: float) -> list[int]:
@@ -142,30 +181,41 @@ class CityGraph:
                 out[eid] = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
         return out
 
-    def nearest_edge_by_midpoint(self, lat: float, lon: float) -> int | None:
-        """Edge whose midpoint is closest to (lat, lon).
+    def _ensure_edge_mid_tree(self) -> cKDTree | None:
+        """Build (once) a cKDTree over edge midpoints in (lat, lon) space.
 
-        DUPLICITY (intentional, documented): this is the Python mirror of the
-        client's nearest-edge snap (GraphLayer hitTest / projectOntoEdge). They
-        live in different languages so can't share code, but both answer the same
-        question — "which edge does this coordinate belong to" — so a vote
-        re-snapped here after a graph rebuild lands on the same edge a fresh click
-        would. Used only by resnap_votes_for_map (a maintenance pass), so the
-        O(edges) scan is acceptable.
+        DUPLICITY (intentional, documented): this answers the same question as the
+        client's nearest-edge snap (GraphLayer hitTest / projectOntoEdge) — "which
+        edge does this coordinate belong to" — so a vote re-snapped here after a
+        graph rebuild lands on the same edge a fresh click would. Built lazily and
+        only for the migration, so the kdtree memory never burdens the hot path.
         """
         self.ensure_loaded()
-        best_eid = None
-        best_dist = float("inf")
-        for i, e in enumerate(self.edges):
-            a = self.nodes[e[0]]
-            b = self.nodes[e[1]]
-            mlat = (a[0] + b[0]) / 2.0
-            mlon = (a[1] + b[1]) / 2.0
-            d = (mlat - lat) ** 2 + (mlon - lon) ** 2
-            if d < best_dist:
-                best_dist = d
-                best_eid = i
-        return best_eid
+        if self._edge_mid_tree is None:
+            if not self.edges:
+                return None
+            nodes = np.asarray(self.nodes, dtype=np.float64)  # [N, 2] = (lat, lon)
+            e = np.asarray([(edge[0], edge[1]) for edge in self.edges], dtype=np.int64)
+            mids = (nodes[e[:, 0]] + nodes[e[:, 1]]) / 2.0  # [E, 2]
+            self._edge_mid_tree = cKDTree(mids)
+        return self._edge_mid_tree
+
+    def nearest_edges(self, points) -> list[int]:
+        """Vectorized: nearest edge id (by midpoint) for each (lat, lon) point.
+
+        O((P + E) log E) via a kdtree, vs the old O(P·E) scan — the difference
+        between feasible and not when re-snapping hundreds of thousands of votes.
+        """
+        tree = self._ensure_edge_mid_tree()
+        if tree is None or not len(points):
+            return []
+        _, idx = tree.query(np.asarray(points, dtype=np.float64))
+        return [int(i) for i in np.atleast_1d(idx)]
+
+    def nearest_edge_by_midpoint(self, lat: float, lon: float) -> int | None:
+        """Edge whose midpoint is closest to (lat, lon). Single-point convenience."""
+        out = self.nearest_edges([(lat, lon)])
+        return out[0] if out else None
 
     def unload(self):
         """Drop derived caches and the underlying graph to free memory on eviction."""
@@ -181,10 +231,11 @@ class CityGraph:
         self.node_pair_to_edge = {}
         self.topology_json = None
         self.topology_etag = None
+        self._edge_mid_tree = None
 
 
 class GraphRegistry:
-    """LRU-bounded set of loaded CityGraphs, keyed by city id."""
+    """LRU-bounded set of loaded CityGraphs, keyed by '<city>:<network>'."""
 
     def __init__(self, redis_client=None, max_loaded: int = 3):
         self.redis = redis_client
@@ -192,35 +243,63 @@ class GraphRegistry:
         self._graphs: "OrderedDict[str, CityGraph]" = OrderedDict()
         self._lock = threading.RLock()
 
-    def get(self, city: City) -> CityGraph:
+    def get(self, city: City, network: str = "streets") -> CityGraph:
         # Hold the registry lock only for the fast bookkeeping; the (slow) graph
-        # load happens outside it under the per-graph lock, so different cities
-        # can load concurrently and repeated hits to one city don't double-load.
+        # load happens outside it under the per-graph lock, so different graphs
+        # can load concurrently and repeated hits to one don't double-load.
+        key = f"{city.id}:{network}"
         with self._lock:
-            cg = self._graphs.get(city.id)
+            cg = self._graphs.get(key)
             if cg is None:
-                cg = CityGraph(city, self.redis)
-                self._graphs[city.id] = cg
+                cg = CityGraph(city, self.redis, network=network)
+                self._graphs[key] = cg
                 while len(self._graphs) > self.max_loaded:
                     old_id, old = self._graphs.popitem(last=False)
                     logger.info(f"[GRAPH] Evicting '{old_id}' (LRU)")
                     old.unload()
             else:
-                self._graphs.move_to_end(city.id)
+                self._graphs.move_to_end(key)
         cg.ensure_loaded()
         return cg
 
     def loaded_ids(self) -> list[str]:
         return list(self._graphs.keys())
 
+    def reload_city(self, city_id: str) -> list[CityGraph]:
+        """Force-reload every loaded graph for a city from disk (after a rebuild).
+
+        Returns the reloaded CityGraphs so callers can re-snap votes against them.
+        """
+        with self._lock:
+            affected = [cg for k, cg in self._graphs.items() if cg.city.id == city_id]
+        for cg in affected:
+            cg.unload()
+            cg.ensure_loaded()
+            logger.info(f"[GRAPH] Reloaded '{cg.city.id}:{cg.network}' from disk")
+        return affected
+
 
 class OsrmRegistry:
-    """One OsrmRouter per city, pointing at that city's OSRM container."""
+    """Routers to OSRM.
+
+    Preferred: a single merged OSRM serves every city (set OSRM_URL) → one shared
+    router for all cities. Falls back to per-city hosts (OSRM_HOST_<CITY> / the
+    service name in cities.py) for legacy setups that still run one OSRM per city.
+    """
 
     def __init__(self):
+        self._shared: OsrmRouter | None = None
         self._routers: dict[str, OsrmRouter] = {}
 
     def get(self, city: City) -> OsrmRouter:
+        url = os.environ.get("OSRM_URL")
+        if url:
+            if self._shared is None:
+                # HTTPS target ⇒ private Cloud Run service ⇒ needs ID-token auth.
+                self._shared = OsrmRouter(
+                    base_url=url, use_id_token=url.startswith("https://")
+                )
+            return self._shared
         r = self._routers.get(city.id)
         if r is None:
             r = OsrmRouter(host=city.osrm_host, port=city.osrm_port)

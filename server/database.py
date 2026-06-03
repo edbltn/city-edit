@@ -250,10 +250,18 @@ def init_db():
                     key TEXT UNIQUE,
                     name TEXT NOT NULL,
                     is_preset BOOLEAN NOT NULL DEFAULT FALSE,
+                    featured BOOLEAN NOT NULL DEFAULT FALSE,
                     vote_types JSONB NOT NULL,
                     created_at TIMESTAMP DEFAULT NOW()
                 )
             """)
+            # `featured` (added later) decouples "shows in the Propose-a-Map
+            # picker" from `is_preset` ("system-seeded"), so a community-created
+            # set can be promoted into the picker without being a system preset.
+            cursor.execute(
+                "ALTER TABLE vote_type_lists ADD COLUMN IF NOT EXISTS "
+                "featured BOOLEAN NOT NULL DEFAULT FALSE"
+            )
 
             # Maps (the user-facing "modes"): city × vote-type list + options.
             cursor.execute("""
@@ -275,6 +283,9 @@ def init_db():
             cursor.execute("ALTER TABLE maps ADD COLUMN IF NOT EXISTS subtitle TEXT")
             cursor.execute("ALTER TABLE maps ADD COLUMN IF NOT EXISTS symbol TEXT")
             cursor.execute("ALTER TABLE maps ADD COLUMN IF NOT EXISTS style TEXT")
+            # What the map votes on: "streets" (default) or a station network
+            # (e.g. "ebikes"). NULL/absent reads back as "streets".
+            cursor.execute("ALTER TABLE maps ADD COLUMN IF NOT EXISTS network TEXT")
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_maps_city ON maps(city_id)
             """)
@@ -542,6 +553,35 @@ def get_voter_edge_directions(
         return {}
 
 
+def count_devices_per_ip_for_edges(
+    map_slug: str, edge_ids: list[int], vt_id: int, ip_hash: str,
+    exclude_device_id: str | None = None,
+) -> dict[int, int]:
+    """{edge_id: # of DISTINCT devices this IP already votes it with} for a type.
+
+    Powers the soft per-IP abuse cap (one IP minting many device_ids to re-vote
+    the same edge). The caller's own device is excluded so a normal re-vote or
+    reversal never counts against the cap. Rows with a NULL ip_hash (legacy, or
+    imports keyed per-ride) are naturally ignored by the equality match.
+    """
+    if not DATABASE_URL or not edge_ids or not ip_hash:
+        return {}
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                """SELECT edge_id, COUNT(DISTINCT device_id)
+                   FROM edge_votes
+                   WHERE map_slug = %s AND vote_type_id = %s AND ip_hash = %s
+                     AND edge_id = ANY(%s) AND device_id <> %s
+                   GROUP BY edge_id""",
+                (map_slug, vt_id, ip_hash, list(edge_ids), exclude_device_id or ""),
+            )
+            return {edge_id: cnt for edge_id, cnt in cursor.fetchall()}
+    except Exception as e:
+        logger.error(f"[DB] Failed to count devices per ip: {e}")
+        return {}
+
+
 def get_voter_edge_direction(
     map_slug: str, edge_id: int, vt_id: int, device_id: str
 ) -> int:
@@ -621,21 +661,142 @@ def get_or_create_vote_type_id(label: str) -> int:
 
 # ── Aggregates / admin (replaces inline SQL elsewhere) ───────────────────────
 
-def aggregate_votes_for_replay() -> list[tuple[str, int, int, int, int]]:
-    """Per (map_slug, edge_id, vote_type_id, direction) vote counts, for Redis replay."""
+def aggregate_votes_for_replay(map_slug: Optional[str] = None) -> list[tuple[str, int, int, int, int]]:
+    """Per (map_slug, edge_id, vote_type_id, direction) vote counts, for Redis replay.
+
+    Pass map_slug to replay a single map (used by the vote migration after a resnap).
+    """
+    if not DATABASE_URL:
+        return []
+    try:
+        with get_cursor() as cursor:
+            if map_slug is None:
+                cursor.execute("""
+                    SELECT map_slug, edge_id, vote_type_id, direction, COUNT(*)
+                    FROM edge_votes
+                    GROUP BY map_slug, edge_id, vote_type_id, direction
+                """)
+            else:
+                cursor.execute("""
+                    SELECT map_slug, edge_id, vote_type_id, direction, COUNT(*)
+                    FROM edge_votes WHERE map_slug = %s
+                    GROUP BY map_slug, edge_id, vote_type_id, direction
+                """, (map_slug,))
+            return cursor.fetchall()
+    except Exception as e:
+        logger.error(f"[DB] Failed to aggregate votes: {e}")
+        return []
+
+
+# ── Vote migration (graph rebuild → re-snap anchors to current edge ids) ─────
+
+def resnap_edge_votes(map_slug: str, pairs: list[tuple[int, int]]) -> dict:
+    """Re-point votes at new edge ids after a graph rebuild, deduping collisions.
+
+    `pairs` is [(row_id, new_edge_id)]. Done in ONE transaction on a dedicated
+    connection (the shared one is autocommit) so it's atomic — votes are never
+    left deleted-but-not-reinserted. Dedup avoids per-id double-voting: when
+    several old edges collapse onto the same new edge for the same
+    (map, vote_type, device), only one survives (lowest row id). Idempotent: the
+    lat/lon anchor is preserved, so re-running re-snaps to the same edge.
+    """
+    if not DATABASE_URL or not pairs:
+        return {"rows": 0, "kept": 0, "merged": 0}
+
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        conn.autocommit = False
+        with conn.cursor() as cur:
+            cur.execute(
+                "CREATE TEMP TABLE _resnap (id INT PRIMARY KEY, new_edge INT) ON COMMIT DROP"
+            )
+            execute_values(cur, "INSERT INTO _resnap (id, new_edge) VALUES %s", pairs)
+
+            cur.execute("SELECT COUNT(*) FROM edge_votes WHERE map_slug = %s", (map_slug,))
+            before = cur.fetchone()[0]
+
+            # One survivor per target identity (lowest id wins), carrying its
+            # attributes + the new edge. Then delete the migrated rows and reinsert
+            # the deduped survivors — delete+reinsert sidesteps unique-constraint
+            # churn that an in-place UPDATE that permutes edge ids would hit.
+            cur.execute("""
+                CREATE TEMP TABLE _staged ON COMMIT DROP AS
+                SELECT DISTINCT ON (ev.map_slug, r.new_edge, ev.vote_type_id, ev.device_id)
+                       ev.map_slug, r.new_edge AS edge_id, ev.vote_type_id, ev.device_id,
+                       ev.ip_hash, ev.direction, ev.created_at, ev.lat, ev.lon
+                FROM edge_votes ev JOIN _resnap r ON r.id = ev.id
+                ORDER BY ev.map_slug, r.new_edge, ev.vote_type_id, ev.device_id, ev.id
+            """)
+            cur.execute("DELETE FROM edge_votes ev USING _resnap r WHERE ev.id = r.id")
+            cur.execute("""
+                INSERT INTO edge_votes
+                    (map_slug, edge_id, vote_type_id, device_id, ip_hash, direction, created_at, lat, lon)
+                SELECT map_slug, edge_id, vote_type_id, device_id, ip_hash, direction, created_at, lat, lon
+                FROM _staged
+                ON CONFLICT (map_slug, edge_id, vote_type_id, device_id) DO NOTHING
+            """)
+
+            cur.execute("SELECT COUNT(*) FROM edge_votes WHERE map_slug = %s", (map_slug,))
+            after = cur.fetchone()[0]
+        conn.commit()
+        return {"rows": before, "kept": after, "merged": before - after}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def orphaned_vote_type_counts(map_slug: str) -> list[tuple[int, int]]:
+    """[(vote_type_id, rows)] for a map's votes whose type id has no vote_types row,
+    most-voted first. These render as '#<id>' in the legend until repaired."""
     if not DATABASE_URL:
         return []
     try:
         with get_cursor() as cursor:
             cursor.execute("""
-                SELECT map_slug, edge_id, vote_type_id, direction, COUNT(*)
-                FROM edge_votes
-                GROUP BY map_slug, edge_id, vote_type_id, direction
-            """)
+                SELECT ev.vote_type_id, COUNT(*)
+                FROM edge_votes ev
+                LEFT JOIN vote_types vt ON vt.id = ev.vote_type_id
+                WHERE ev.map_slug = %s AND ev.vote_type_id <> 0 AND vt.id IS NULL
+                GROUP BY ev.vote_type_id
+                ORDER BY COUNT(*) DESC
+            """, (map_slug,))
             return cursor.fetchall()
     except Exception as e:
-        logger.error(f"[DB] Failed to aggregate votes: {e}")
+        logger.error(f"[DB] Failed to read orphaned vote types: {e}")
         return []
+
+
+def remap_edge_vote_type(map_slug: str, old_vt_id: int, new_vt_id: int) -> int:
+    """Re-point a map's votes from one vote_type_id to another; returns rows changed.
+
+    Collision-safe: if the target id already has a vote by the same device on the
+    same edge (e.g. an orphan repaired onto an existing label), the duplicate is
+    dropped before the update so the unique identity constraint can't fail.
+    """
+    if not DATABASE_URL or old_vt_id == new_vt_id:
+        return 0
+    try:
+        with get_cursor() as cursor:
+            # Drop would-be duplicates (device already voted target type on that edge).
+            cursor.execute("""
+                DELETE FROM edge_votes ev
+                WHERE ev.map_slug = %s AND ev.vote_type_id = %s
+                  AND EXISTS (
+                    SELECT 1 FROM edge_votes o
+                    WHERE o.map_slug = ev.map_slug AND o.edge_id = ev.edge_id
+                      AND o.vote_type_id = %s AND o.device_id = ev.device_id
+                  )
+            """, (map_slug, old_vt_id, new_vt_id))
+            cursor.execute(
+                "UPDATE edge_votes SET vote_type_id = %s WHERE map_slug = %s AND vote_type_id = %s",
+                (new_vt_id, map_slug, old_vt_id),
+            )
+            return cursor.rowcount
+    except Exception as e:
+        logger.error(f"[DB] Failed to remap vote type {old_vt_id}->{new_vt_id}: {e}")
+        return 0
 
 
 def get_admin_counts() -> dict:
@@ -671,10 +832,11 @@ def seed_presets():
             list_ids: dict[str, int] = {}
             for key, spec in PRESET_LISTS.items():
                 cursor.execute(
-                    """INSERT INTO vote_type_lists (key, name, is_preset, vote_types)
-                       VALUES (%s, %s, TRUE, %s)
+                    """INSERT INTO vote_type_lists (key, name, is_preset, featured, vote_types)
+                       VALUES (%s, %s, TRUE, TRUE, %s)
                        ON CONFLICT (key) DO UPDATE
-                         SET name = EXCLUDED.name, vote_types = EXCLUDED.vote_types
+                         SET name = EXCLUDED.name, vote_types = EXCLUDED.vote_types,
+                             featured = TRUE
                        RETURNING id""",
                     (key, spec["name"], _json.dumps(spec["vote_types"])),
                 )
@@ -694,20 +856,39 @@ def seed_presets():
                     (m["slug"], m["name"], m.get("subtitle"), m["city_id"],
                      list_ids.get(m["list_key"]), m["subdomain"]),
                 )
+
+            # Register every preset label in the global vote_types id registry.
+            # Votes pack this integer id into their Redis key; the heatmap legend
+            # resolves id → label through this table. Seeding the canonical labels
+            # here (idempotent on the unique label) guarantees a preset type
+            # always resolves to its name instead of falling back to "#<id>" —
+            # e.g. after a DB reset that renumbered the registry while Redis still
+            # holds the old packed ids. Existing labels keep their ids.
+            for spec in PRESET_LISTS.values():
+                for vt in spec["vote_types"]:
+                    label = vt.get("label")
+                    if label:
+                        cursor.execute(
+                            "INSERT INTO vote_types (label) VALUES (%s) "
+                            "ON CONFLICT (label) DO NOTHING",
+                            (label,),
+                        )
         logger.info("[DB] Seeded preset vote-type lists and maps")
     except Exception as e:
         logger.error(f"[DB] Failed to seed presets: {e}")
 
 
 def list_vote_type_lists() -> list[dict]:
-    """Return preset (and named) vote-type lists for the propose form."""
+    """Return the featured vote-type lists shown in the Propose-a-Map picker.
+    Featured = the curated set offered to map proposers (system presets plus any
+    promoted community sets); see promote_vote_types()."""
     if not DATABASE_URL:
         return []
     try:
         with get_cursor() as cursor:
             cursor.execute(
                 "SELECT id, key, name, is_preset, vote_types "
-                "FROM vote_type_lists WHERE is_preset = TRUE ORDER BY id"
+                "FROM vote_type_lists WHERE featured = TRUE ORDER BY is_preset DESC, id"
             )
             return [
                 {"id": r[0], "key": r[1], "name": r[2], "isPreset": r[3], "voteTypes": r[4]}
@@ -716,6 +897,49 @@ def list_vote_type_lists() -> list[dict]:
     except Exception as e:
         logger.error(f"[DB] Failed to list vote-type lists: {e}")
         return []
+
+
+def promote_vote_types(slug: str, name: Optional[str] = None) -> tuple[bool, str]:
+    """Copy a map's resolved vote-type set into a featured vote_type_lists row so
+    it appears as a selectable option in the Propose-a-Map picker. This is the
+    "I like this community set, add it to the picker" path: the map's inline
+    custom_vote_types (or its linked list) are snapshotted into a reusable list.
+
+    Idempotent by the generated key (``m:<slug>``): re-promoting the same map
+    refreshes that list's name/vote types rather than creating duplicates."""
+    if not DATABASE_URL:
+        return False, "Database not configured"
+    import json as _json
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                """SELECT m.name, m.custom_vote_types, vtl.vote_types
+                   FROM maps m
+                   LEFT JOIN vote_type_lists vtl ON vtl.id = m.vote_type_list_id
+                   WHERE m.slug = %s""",
+                (slug,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False, f"Map '{slug}' not found"
+            map_name, custom_vote_types, list_vote_types = row
+            vote_types = custom_vote_types or list_vote_types
+            if not vote_types:
+                return False, "Map has no vote types to promote"
+            cursor.execute(
+                """INSERT INTO vote_type_lists (key, name, is_preset, featured, vote_types)
+                   VALUES (%s, %s, FALSE, TRUE, %s)
+                   ON CONFLICT (key) DO UPDATE
+                     SET name = EXCLUDED.name, featured = TRUE,
+                         vote_types = EXCLUDED.vote_types
+                   RETURNING id""",
+                (f"m:{slug}", (name or "").strip() or map_name, _json.dumps(vote_types)),
+            )
+            list_id = cursor.fetchone()[0]
+        return True, f"Promoted to featured vote-type list #{list_id}"
+    except Exception as e:
+        logger.error(f"[DB] Failed to promote vote types for {slug}: {e}")
+        return False, "Failed to promote vote types"
 
 
 # Preset subdomains double as the packed-key "mode" string and the client style
@@ -727,8 +951,15 @@ _PRESET_STYLES = {"bikepaths", "trees", "walkways"}
 def _map_row_to_dict(row) -> dict:
     """Shape a maps JOIN vote_type_lists row into the public map dict."""
     (slug, name, subtitle, city_id, allow_suggestions, has_passcode,
-     subdomain, list_vote_types, custom_vote_types, vote_count, symbol, style) = row
+     subdomain, list_vote_types, custom_vote_types, vote_count, symbol, style,
+     network) = row
     vote_types = custom_vote_types or list_vote_types or []
+    # The proposer-chosen visual style wins; presets keep their subdomain style;
+    # everything else falls back to the neutral default. The vote namespace
+    # (mode) follows the resolved style — not the subdomain — so a map can live
+    # in a preset namespace (e.g. "bikepaths") without owning the globally-unique
+    # preset subdomain. Presets are unaffected: their style already == subdomain.
+    resolved_style = style or (subdomain if subdomain in _PRESET_STYLES else "default")
     return {
         "slug": slug,
         "name": name,
@@ -737,10 +968,9 @@ def _map_row_to_dict(row) -> dict:
         "allowSuggestions": allow_suggestions,
         "requiresPasscode": has_passcode,
         "subdomain": subdomain,
-        "mode": subdomain if subdomain in _PRESET_STYLES else "walk",
-        # The proposer-chosen visual style wins; presets keep their subdomain
-        # style; everything else falls back to the neutral default.
-        "style": style or (subdomain if subdomain in _PRESET_STYLES else "default"),
+        "mode": resolved_style if resolved_style in _PRESET_STYLES else "walk",
+        "style": resolved_style,
+        "network": network or "streets",
         "voteCount": int(vote_count or 0),
         "voteTypes": vote_types,
         # The map's display icon for the landing card. Falls back to the first
@@ -753,7 +983,7 @@ _MAP_SELECT = """
     SELECT m.slug, m.name, m.subtitle, m.city_id, m.allow_suggestions,
            (m.passcode_hash IS NOT NULL) AS has_passcode,
            m.subdomain, vtl.vote_types, m.custom_vote_types,
-           COALESCE(vc.cnt, 0) AS vote_count, m.symbol, m.style
+           COALESCE(vc.cnt, 0) AS vote_count, m.symbol, m.style, m.network
     FROM maps m
     LEFT JOIN vote_type_lists vtl ON vtl.id = m.vote_type_list_id
     LEFT JOIN (SELECT map_slug, COUNT(*) AS cnt FROM edge_votes GROUP BY map_slug) vc
@@ -853,6 +1083,7 @@ def create_map(
     created_by_ip_hash: Optional[str] = None,
     symbol: Optional[str] = None,
     style: Optional[str] = None,
+    network: Optional[str] = None,
 ) -> Optional[dict]:
     """Insert a new map. Returns the public map dict, or None on failure."""
     if not DATABASE_URL:
@@ -863,12 +1094,13 @@ def create_map(
             cursor.execute(
                 """INSERT INTO maps
                      (slug, name, subtitle, city_id, vote_type_list_id, custom_vote_types,
-                      allow_suggestions, passcode_hash, created_by_ip_hash, symbol, style)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                      allow_suggestions, passcode_hash, created_by_ip_hash, symbol, style,
+                      network)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (slug, name, subtitle or None, city_id, vote_type_list_id,
                  _json.dumps(custom_vote_types) if custom_vote_types else None,
                  allow_suggestions, passcode_hash, created_by_ip_hash, symbol or None,
-                 style or None),
+                 style or None, network or None),
             )
         return get_map(slug)
     except Exception as e:

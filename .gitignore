@@ -46,6 +46,12 @@ server/cache/
 # Citibike data downloads
 server/citibike_data/
 
+# Raw Lyft ride imports (one-off import source, ~191M — not committed)
+server/lyft_data/
+
+# Terraform plan output (binary, regenerated)
+terraform/tfplan
+
 # Screenshots and images (local only, not client assets)
 Screenshot*.png
 *.jpg

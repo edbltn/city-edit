@@ -23,6 +23,9 @@ export interface MapConfig {
   cityId: string;
   mode: string;   // packed-key vote namespace ("bikepaths"/"trees"/"walkways"/"walk")
   style: string;  // visual style key (see mapStyles.ts) — drives basemap/accent/heat
+  /** What the map votes on: "streets" (routable) or a station network like
+   *  "ebikes" (NYC-only fixed points, no routing). Absent ⇒ "streets". */
+  network?: string;
   symbol: string; // proposer-chosen display icon (in /icons/), may be ""
   allowSuggestions: boolean;
   requiresPasscode: boolean;

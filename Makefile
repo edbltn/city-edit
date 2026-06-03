@@ -7,7 +7,10 @@ SERVICE := desire-path-mapper
 REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/desire-path-mapper/app
 SCREENSHOT_REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/desire-path-mapper/screenshot
 
-.PHONY: help dev redis flask client docker push deploy test test-frontend test-backend test-cloud tf-init tf-plan tf-apply logs clean monitoring monitoring-down loadtest-local loadtest-prod loadtest-verify
+.PHONY: help dev redis flask client graphs tiles docker push deploy test test-frontend test-backend test-cloud tf-init tf-plan tf-apply logs clean monitoring monitoring-down loadtest-local loadtest-prod loadtest-verify
+
+# Python in the server venv (no activation needed inside make recipes)
+PY := env/bin/python
 
 # Load test (override on the command line, e.g. USERS=25 RATE=5 TIME=3m)
 PROD_URL := https://desire-path-mapper-katze52zaq-uc.a.run.app
@@ -21,7 +24,9 @@ help:
 	@echo "Usage: make <target>"
 	@echo ""
 	@echo "Local Development:"
-	@echo "  dev          Start all local services (redis, flask, client)"
+	@echo "  dev          Build graphs+tiles if needed, then run redis+flask+client (no Docker)"
+	@echo "  graphs       Build any missing per-city walk graphs"
+	@echo "  tiles        Build per-city PMTiles (dev profile; matches prod content)"
 	@echo "  redis        Start Redis server"
 	@echo "  flask        Start Flask backend"
 	@echo "  client       Start frontend dev server"
@@ -67,12 +72,25 @@ flask:
 client:
 	cd client-react && npm run dev
 
-dev:
-	@echo "Starting all services..."
-	@echo "Run these in separate terminals:"
-	@echo "  make redis"
-	@echo "  make flask"
-	@echo "  make client"
+# Build any missing per-city walk graphs (skips cities already on disk).
+graphs:
+	cd server && $(PY) refresh_osm.py --all
+
+# Build per-city PMTiles with the 'dev' profile — full city coverage at a lighter
+# zoom band. Same builder/source as prod (which uses --profile full), so the local
+# background network matches prod's content. Skips tiles already newer than their graph.
+tiles: graphs
+	cd server && $(PY) build_pmtiles.py --all --profile dev
+
+# Fast non-Docker local stack: ensure graphs + tiles exist, then run redis (if not
+# already up), flask, and the Vite client. Ctrl-C stops flask too; redis is left
+# running (use `make clean` to stop it).
+dev: tiles
+	@redis-cli ping >/dev/null 2>&1 || { echo "Starting redis..."; redis-server --daemonize yes; }
+	@echo "Starting flask (background) + client (foreground)..."
+	@cd server && $(PY) app.py & echo $$! > /tmp/cityedit-flask.pid
+	@trap 'kill `cat /tmp/cityedit-flask.pid` 2>/dev/null; rm -f /tmp/cityedit-flask.pid' EXIT; \
+		cd client-react && npm run dev
 
 # Docker
 docker:

@@ -34,6 +34,10 @@ monitoring/
 # including per-city subdirs (server/osm_data/<city>/walk_graph.pkl).
 server/osm_data/
 
+# Raw Lyft ride imports (one-off import_lyft.py source data, ~191M) — never
+# needed in the image, don't upload to Cloud Build.
+server/lyft_data/
+
 # DB dumps
 *.dump
 

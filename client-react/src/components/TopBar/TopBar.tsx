@@ -1,6 +1,7 @@
 import { memo, useState, useCallback } from "react";
 import { useRoute, useTheme, useHeatmap } from "../../context";
 import { landingHref } from "../../themes";
+import { getCurrentMap } from "../../map/runtime";
 import { panTo } from "../../utils/mapViewState";
 import { HowItWorksModal } from "../HowItWorksModal";
 import { ModeSwitcher } from "../ModeSwitcher";
@@ -33,7 +34,12 @@ export const TopBar = memo(function TopBar() {
     castVote,
   } = useRoute();
 
-  const isPointOnly = theme.inputMode === "point";
+  // Station networks (e.g. ebikes) vote on a single point, so there's no end
+  // tool — treat them as point-only regardless of the theme's input mode.
+  const isStationNetwork = (getCurrentMap()?.network ?? "streets") !== "streets";
+  const isPointOnly = theme.inputMode === "point" || isStationNetwork;
+  // Point-only maps have a single location, not a route start, so don't say "Start".
+  const locationLabel = isPointOnly ? "Location" : theme.locationLabel;
 
   const isLoading = isCalculating || isCalculatingSplit;
 
@@ -125,7 +131,7 @@ export const TopBar = memo(function TopBar() {
               <span className="legend-icon-slot">
                 <span className="legend-char-start">◆</span>
               </span>
-              <span className="legend-label">{theme.locationLabel}</span>
+              <span className="legend-label">{locationLabel}</span>
               <AddressSearch
                 onSelect={(coords, address) => handleAddressSelect("start", coords, address)}
                 onClose={handleTypingClose}
@@ -144,19 +150,21 @@ export const TopBar = memo(function TopBar() {
               <span className="legend-icon-slot">
                 <span className="legend-char-start">◆</span>
               </span>
-              <span className="legend-label">{theme.locationLabel}</span>
+              <span className="legend-label">{locationLabel}</span>
               <span className={startCoordsClass.join(" ")}>
                 {formatLocation(start) || startPlaceholder}
               </span>
             </button>
           )}
 
-          <div className="legend-item">
-            <span className="legend-icon-slot">
-              <span className="legend-char-selection">◻</span>
-            </span>
-            <span>Selection</span>
-          </div>
+          {!isPointOnly && (
+            <div className="legend-item">
+              <span className="legend-icon-slot">
+                <span className="legend-char-selection">◻</span>
+              </span>
+              <span>Selection</span>
+            </div>
+          )}
 
           {typingField === "end" ? (
             <div className={`${endToolClass.join(" ")} typing`}>
@@ -189,16 +197,18 @@ export const TopBar = memo(function TopBar() {
             </button>
           )}
 
-          <div className="legend-item legend-item-heatmap">
-            <span className="legend-icon-slot">
-              {isHeatmapLoading ? (
-                <span className="spinner" aria-label="Loading votes" />
-              ) : (
-                <span className="legend-heat-swatch" />
-              )}
-            </span>
-            <span>{isHeatmapLoading ? "Loading…" : "Votes"}</span>
-          </div>
+          {!isPointOnly && (
+            <div className="legend-item legend-item-heatmap">
+              <span className="legend-icon-slot">
+                {isHeatmapLoading ? (
+                  <span className="spinner" aria-label="Loading votes" />
+                ) : (
+                  <span className="legend-heat-swatch" />
+                )}
+              </span>
+              <span>{isHeatmapLoading ? "Loading…" : "Votes"}</span>
+            </div>
+          )}
         </div>
 
         <div className={`topbar-actions${start.coords ? " has-selection" : ""}`}>

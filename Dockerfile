@@ -22,20 +22,25 @@ RUN uv pip install --system --no-cache -r requirements.txt gunicorn
 
 COPY server/*.py ./
 
+# Fixed station-network data (e.g. data/ebike_stations.json) read at runtime by
+# graph_registry.load_station_graph — not generated in the image, so copy it in.
+COPY server/data/ ./data/
+
 # Build routing graphs during image build (bakes per-city graphs into image).
 # Separate processes so each city's osmnx memory is freed before the next.
 RUN mkdir -p osm_data && \
     python refresh_osm.py --region nyc --force && \
     python refresh_osm.py --region sf --force && \
-    python refresh_osm.py --region chicago --force
+    python refresh_osm.py --region chicago --force && \
+    python refresh_osm.py --region dc --force
 
 COPY --from=client-builder /app/dist /var/www/html/
 
-# Build PMTiles from the NYC walk graph (served at /api/tiles/nyc/graph.pmtiles;
-# SF/Chicago render from the graph API like local, which has no PMTiles for them).
-RUN python build_pmtiles.py -o osm_data/nyc/graph.pmtiles && \
-    mkdir -p /var/www/html/tiles && \
-    cp osm_data/nyc/graph.pmtiles /var/www/html/tiles/graph.pmtiles
+# Build per-city PMTiles at full resolution into osm_data/<city>/graph.pmtiles.
+# Same canonical builder the local stack runs (just a denser zoom profile), so the
+# background network is identical to dev — only crisper. Served at
+# /api/tiles/<city>/graph.pmtiles, which nginx aliases straight to osm_data.
+RUN python build_pmtiles.py --all --profile full
 
 COPY deploy/nginx-cloudrun.conf /etc/nginx/nginx.conf
 COPY deploy/supervisord.conf /etc/supervisor/conf.d/supervisord.conf

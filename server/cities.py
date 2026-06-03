@@ -112,6 +112,20 @@ CITIES: dict[str, City] = {
         pbf_url="https://download.bbbike.org/osm/bbbike/Chicago/Chicago.osm.pbf",
         osrm_service="osrm-chicago",
     ),
+    "dc": City(
+        id="dc",
+        name="Washington, D.C.",
+        # The District proper (diamond outline); box sized to enclose it. Slightly
+        # larger N-S than SF, comparable to Chicago E-W.
+        bbox=(38.79, -77.12, 39.00, -76.91),
+        # Center on the bbox midpoint so the votable area opens centered.
+        center=(38.895, -77.015),
+        default_zoom=12,
+        min_zoom=11,
+        max_zoom=21,
+        pbf_url="https://download.bbbike.org/osm/bbbike/WashingtonDC/WashingtonDC.osm.pbf",
+        osrm_service="osrm-dc",
+    ),
 }
 
 

@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { CONFIG } from "../config";
-import { getMapSlug } from "../map/runtime";
+import { getMapSlug, getCurrentMap } from "../map/runtime";
 import { getDefaultVoteTypeForTheme } from "../constants/voteTypes";
 import { getInitialPoints, cleanNavParams } from "../utils/mapViewState";
 import { coverage, type VoteDirection } from "../utils/voteStore";
@@ -157,7 +157,6 @@ interface RouteContextValue {
   clearSuppressClick: () => void;
   setSuppressClick: () => void;
   setVoteType: (voteType: string) => void;
-  isVoteTypeAlreadyCast: (voteType: string) => boolean;
 }
 
 // dedupe while preserving order
@@ -278,8 +277,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Station networks (e.g. ebikes) vote on single fixed points — never routes —
+  // so there's no two-point routing regardless of how many points are set.
+  const isStationNetwork = (getCurrentMap()?.network ?? "streets") !== "streets";
+
   // Compute point type based on whether both points are set
-  const pointType: "route" | "point" = start.coords && end.coords ? "route" : "point";
+  const pointType: "route" | "point" =
+    !isStationNetwork && start.coords && end.coords ? "route" : "point";
 
   // ============================================
   // Helper: Calculate all route segments for split paths
@@ -359,6 +363,9 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setEndPoint = useCallback((coords: LatLng, address?: string) => {
+    // No routing on station networks: a would-be "end" click just moves the
+    // single selected station, so there's never a second endpoint to route to.
+    if (isStationNetwork) { setStartPoint(coords, address); return; }
     setEnd({ coords, timestamp: Date.now(), address: address ?? null });
     if (!address) {
       fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${coords.lat}&lng=${coords.lng}`)
@@ -375,7 +382,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         })
         .catch(() => {});
     }
-  }, []);
+  }, [isStationNetwork, setStartPoint]);
 
   const addWaypoint = useCallback((coords: LatLng) => {
     setWaypoints((prev) => [...prev, coords]);
@@ -792,18 +799,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     [votedVersion, currentEdgeIds, voteType, theme.mode]
   );
 
-  // A vote type is "already cast" when every edge of the current target has some
-  // vote (either direction) from this user — used to badge selector options.
-  const isVoteTypeAlreadyCast = useCallback(
-    (vt: string) => {
-      void votedVersion;
-      if (currentEdgeIds.length === 0 || !vt) return false;
-      const cov = coverage(theme.mode, currentEdgeIds, vt, 1);
-      return cov.unvoted.length === 0;
-    },
-    [votedVersion, currentEdgeIds, theme.mode]
-  );
-
   // Whether the current target is fully cast in the selected direction.
   const hasVoted = isDirectionCast(voteDirection);
 
@@ -963,7 +958,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       clearSuppressClick,
       setSuppressClick,
       setVoteType,
-      isVoteTypeAlreadyCast,
     }),
     [
       start,
@@ -1005,7 +999,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       clearSuppressClick,
       setSuppressClick,
       setVoteType,
-      isVoteTypeAlreadyCast,
     ]
   );
 

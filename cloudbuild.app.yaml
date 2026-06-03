@@ -1,0 +1,26 @@
+# Build + push ONLY the app image. Standalone (no parallel OSRM build) so it
+# doesn't hit the combined-build timeout. High-mem worker for the osmnx graph builds.
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--no-cache'
+      - '-f'
+      - 'Dockerfile'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest']
+
+timeout: '3600s'
+
+options:
+  machineType: 'E2_HIGHCPU_32'
+
+substitutions:
+  _REGION: us-central1
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'

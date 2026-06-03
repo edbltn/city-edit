@@ -190,6 +190,83 @@ resource "google_secret_manager_secret_iam_member" "cloud_run_db_access" {
   member    = "serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com"
 }
 
+# Merged OSRM routing service.
+#
+# One routed instance serves every city from a single baked-in dataset (NYC +
+# SF + Chicago, clipped + osmium-merged at image build). Runs as its own service
+# so its RAM lives off the app's strained budget. Not public: the app calls it
+# with a Google-signed ID token (ingress stays "all" so the call works over the
+# app's private-ranges-only VPC egress, but IAM rejects anything unauthenticated).
+resource "google_cloud_run_service" "osrm" {
+  name     = "desire-path-osrm"
+  location = var.region
+
+  template {
+    spec {
+      containers {
+        image = "${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper/osrm:latest"
+
+        # osrm-routed binds $PORT (Cloud Run injects 8080); see osrm/Dockerfile.
+        ports {
+          container_port = 8080
+        }
+
+        resources {
+          # osrm-routed maps the merged foot dataset into resident memory; the
+          # MLD files total ~1.6GB (cell_metrics alone is 756MB), so 2Gi OOM'd on
+          # first deploy. 4Gi gives >2x headroom; 1 vCPU is plenty for sub-ms MLD
+          # queries at this traffic.
+          limits = {
+            cpu    = "1"
+            memory = "4Gi"
+          }
+        }
+
+        # osrm-routed (v5.25.0) has no /health endpoint — it parses any path as a
+        # route and 400s — so probe the TCP port instead. It binds 8080 ~15s after
+        # start, so this passes quickly.
+        startup_probe {
+          tcp_socket {
+            port = 8080
+          }
+          initial_delay_seconds = 5
+          period_seconds        = 5
+          failure_threshold     = 30
+          timeout_seconds       = 3
+        }
+      }
+    }
+
+    metadata {
+      annotations = {
+        # Keep one instance warm so routing never eats an OSRM cold start; one
+        # instance easily serves this traffic (MLD queries are sub-ms), so cap at 1.
+        "autoscaling.knative.dev/minScale" = "1"
+        "autoscaling.knative.dev/maxScale" = "1"
+      }
+    }
+  }
+
+  traffic {
+    percent         = 100
+    latest_revision = true
+  }
+
+  depends_on = [
+    google_project_service.cloud_run,
+    google_artifact_registry_repository.app,
+  ]
+}
+
+# Only the app's service account may invoke OSRM (no allUsers → not open to the
+# internet). The app's default compute SA carries the run.invoker grant.
+resource "google_cloud_run_service_iam_member" "osrm_invoker" {
+  service  = google_cloud_run_service.osrm.name
+  location = google_cloud_run_service.osrm.location
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com"
+}
+
 # Cloud Run service
 resource "google_cloud_run_service" "app" {
   name     = "desire-path-mapper"
@@ -220,6 +297,13 @@ resource "google_cloud_run_service" "app" {
           value = "0"
         }
 
+        # All cities route through the single merged OSRM service. HTTPS target
+        # ⇒ osrm_router.py attaches a Cloud Run ID token (audience = this URL).
+        env {
+          name  = "OSRM_URL"
+          value = google_cloud_run_service.osrm.status[0].url
+        }
+
         env {
           name = "DATABASE_URL"
           value_from {
@@ -231,24 +315,29 @@ resource "google_cloud_run_service" "app" {
         }
 
         resources {
-          # Holds up to 3 city walk graphs resident (GraphRegistry max_loaded=3).
-          # On Linux the NYC graph (333MB pickle) churns to several GB while it
-          # deserializes into networkx + rustworkx; all three resident plus that
-          # load transient exceeds 8Gi (observed OOM at ~8.3Gi). 16Gi requires
-          # >=4 vCPU per Cloud Run's CPU/memory pairing rules.
+          # Holds all 3 city walk graphs resident (GraphRegistry max_loaded=3).
+          # python_router now drops the heavy networkx graph after load (compact
+          # numpy arrays instead) and builds rustworkx only on the OSRM-fallback
+          # path, so all three cities + vote bodies measure ~4-5Gi resident
+          # (was ~16Gi → OOM). 8Gi leaves headroom for the load transient and
+          # pairs with >=2 vCPU per Cloud Run's CPU/memory rules.
           limits = {
-            cpu    = "4"
-            memory = "16Gi"
+            cpu    = "2"
+            memory = "8Gi"
           }
         }
 
+        # 120×5s = 10 min: the background warmup freezes the gevent hub (GIL-bound
+        # graph loads) for a few minutes, so /health only starts answering once the
+        # warmup completes. Give it a generous window so the first revision goes
+        # Ready instead of timing out mid-warmup.
         startup_probe {
           http_get {
             path = "/health"
           }
           initial_delay_seconds = 5
           period_seconds        = 5
-          failure_threshold     = 60
+          failure_threshold     = 120
           timeout_seconds       = 3
         }
       }
@@ -257,7 +346,10 @@ resource "google_cloud_run_service" "app" {
     metadata {
       annotations = {
         "autoscaling.knative.dev/minScale"        = "1"
-        "autoscaling.knative.dev/maxScale"        = "3"
+        "autoscaling.knative.dev/maxScale"        = "2"
+        # Extra CPU during startup so imports + _populate_redis + the background
+        # graph prewarm finish quickly (we run at only 2 vCPU steady-state).
+        "run.googleapis.com/startup-cpu-boost"    = "true"
         "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.connector.id
         "run.googleapis.com/vpc-access-egress"    = "private-ranges-only"
       }

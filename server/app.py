@@ -21,16 +21,17 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature
 from werkzeug.security import generate_password_hash, check_password_hash
 
 import vote_store
+import vote_migration
 import database
 from cities import CITIES, DEFAULT_CITY_ID, get_city, all_cities
-from graph_registry import GraphRegistry, OsrmRegistry
+from graph_registry import GraphRegistry, OsrmRegistry, STATION_NETWORKS
 from database import (
     init_db, get_cursor, record_edge_votes, delete_edge_votes,
     get_voter_edge_direction, get_voter_edge_directions,
-    get_edge_vote_anchors, update_edge_vote_edge_id,
+    count_devices_per_ip_for_edges,
     seed_presets, list_maps, get_map, get_map_by_subdomain, slug_available,
     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,
-    fetch_voted_vote_type_labels,
+    promote_vote_types, fetch_voted_vote_type_labels,
     DATABASE_URL,
 )
 
@@ -56,6 +57,14 @@ PASSCODE_TOKEN_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 # When unset, those endpoints are disabled (403) rather than silently open.
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
+# Soft per-IP abuse cap. device_id stays the hard dedup key, but a single IP may
+# hold at most this many DISTINCT devices voting a given (map, edge, vote_type).
+# This is a speed bump against one person clearing localStorage to mint fresh
+# device_ids and re-vote the same edge — while a threshold > 1 still lets a few
+# genuine people behind one NAT/router each vote. Imports key ip_hash per-ride
+# (ip_from_voter), so they're unique on both axes and never trip this.
+MAX_DEVICES_PER_IP_PER_EDGE = int(os.environ.get("MAX_DEVICES_PER_IP_PER_EDGE", "3"))
+
 
 def _admin_authorized() -> bool:
     """True when ADMIN_TOKEN is configured and matches the request header."""
@@ -77,7 +86,12 @@ except redis.ConnectionError as e:
 
 # ── Registries (per-city graph + OSRM) ───────────────────────────────────────
 
-graph_registry = GraphRegistry(redis_client=redis_client, max_loaded=3)
+# All four cities (nyc, sf, chicago, dc) plus the station networks stay resident
+# (no cross-city reload latency). This fits comfortably under 16Gi now that
+# python_router drops the heavy networkx graph after load (compact arrays instead)
+# and rustworkx is built only on the rare OSRM-fallback path. DC's graph is small
+# (~SF size); station networks are tiny (tens of nodes).
+graph_registry = GraphRegistry(redis_client=redis_client, max_loaded=4 + len(STATION_NETWORKS))
 osrm_registry = OsrmRegistry()
 
 # ── Database + vote types ──────────────────────────────────────────────────
@@ -97,13 +111,14 @@ if DATABASE_URL:
 class ResolvedMap:
     """A map plus its resolved city, loaded graph, OSRM router, and policy."""
 
-    __slots__ = ("slug", "city", "graph", "osrm", "allow_suggestions",
+    __slots__ = ("slug", "city", "network", "graph", "osrm", "allow_suggestions",
                  "requires_passcode", "vote_type_labels")
 
-    def __init__(self, slug, city, graph, osrm, allow_suggestions,
+    def __init__(self, slug, city, network, graph, osrm, allow_suggestions,
                  requires_passcode, vote_type_labels):
         self.slug = slug
         self.city = city
+        self.network = network
         self.graph = graph
         self.osrm = osrm
         self.allow_suggestions = allow_suggestions
@@ -122,19 +137,22 @@ def resolve_map(slug: str | None) -> ResolvedMap:
     m = get_map(slug)
     if m:
         city = get_city(m["cityId"]) or get_city(DEFAULT_CITY_ID)
+        network = m.get("network") or "streets"
         vote_types = m.get("voteTypes") or []
         labels = {vt.get("label") for vt in vote_types if vt.get("label")}
         allow_suggestions = m.get("allowSuggestions", True)
         requires_passcode = m.get("requiresPasscode", False)
     else:
         city = get_city(slug) or get_city(DEFAULT_CITY_ID)
+        network = "streets"
         labels = set()
         allow_suggestions = True
         requires_passcode = False
 
-    graph = graph_registry.get(city)
-    osrm = osrm_registry.get(city)
-    return ResolvedMap(slug, city, graph, osrm, allow_suggestions,
+    graph = graph_registry.get(city, network)
+    # Station networks aren't routable (no OSRM dataset); only streets need a router.
+    osrm = osrm_registry.get(city) if network not in STATION_NETWORKS else None
+    return ResolvedMap(slug, city, network, graph, osrm, allow_suggestions,
                        requires_passcode, labels)
 
 
@@ -291,8 +309,9 @@ def _prewarm():
     """Preload every map's graph + vote cache so no map cold-loads on first hit.
 
     Loads each city's walk graph (the slow part — NYC ~60-120s) and builds each
-    map's vote body in a background thread. All registered cities fit resident at
-    16Gi (GraphRegistry max_loaded=3 == the current city count)."""
+    map's vote body in a background thread. All four cities fit resident now that
+    python_router frees networkx after load (max_loaded=4), so warming everything
+    no longer risks the 16Gi OOM that the all-resident set used to cause."""
     try:
         warmed = 0
         for m in list_maps():
@@ -306,17 +325,41 @@ def _prewarm():
         logger.warning(f"[STARTUP] Pre-warm failed: {e}")
 
 
-# SKIP_WARMUP=1 skips the heavy graph preload/replay (used by tests + fast boots).
-# _prewarm() builds the ~65MB topology JSON for the preset NYC maps, which takes
-# minutes. Running it inline would block the single gevent worker past the startup
-# probe / gunicorn worker-timeout / healthcheck watchdog windows, so the container
-# never goes Ready. Run it in a background daemon thread instead: the worker becomes
-# Ready immediately (graphs still load on demand via ensure_loaded), and the preset
-# caches warm up shortly after. _populate_redis() stays inline — it's idempotent and
-# fast, and serving before it completes could return empty vote data.
+# Under gunicorn's gevent worker, gevent.monkey patches threading.Thread into a
+# GREENLET — and a greenlet running CPU-bound work (the graph preload) never yields
+# the event loop, so /health can't be answered and the startup probe fails. Use a
+# REAL OS thread instead: the GIL is handed off every few ms, so the gevent hub
+# keeps serving /health while the graphs load in the background. Falls back to the
+# stdlib thread when gevent isn't present (e.g. the Flask dev server).
+try:
+    from gevent import monkey as _gmonkey
+    _PrewarmThread = _gmonkey.get_original("threading", "Thread")
+except Exception:
+    _PrewarmThread = threading.Thread
+
+def _startup_warm():
+    """Background warmup: refresh vote data, then preload every city's graph.
+
+    Runs entirely on a REAL OS thread so the worker boots clean and serves /health
+    immediately (the startup probe passes), while the GIL hands off every few ms so
+    the gevent hub keeps serving requests during the CPU-heavy graph loads. Both
+    steps used to run inline/at-import and blocked the worker past the startup probe
+    (populate) or the gunicorn request timeout (graph load) — hence the move here.
+    Vote data already lives in Redis (Memorystore persists across deploys), so a
+    brief gap before _populate_redis refreshes it just serves the existing data.
+    """
+    try:
+        _populate_redis()
+    except Exception as e:
+        logger.warning(f"[STARTUP] populate failed: {e}")
+    if os.environ.get("SKIP_PREWARM") != "1":
+        _prewarm()
+
+
+# SKIP_WARMUP=1 skips the whole background warmup (tests/fast boots). SKIP_PREWARM=1
+# refreshes votes but skips the graph preload.
 if os.environ.get("SKIP_WARMUP") != "1":
-    _populate_redis()
-    threading.Thread(target=_prewarm, name="prewarm", daemon=True).start()
+    _PrewarmThread(target=_startup_warm, name="startup-warm", daemon=True).start()
 
 
 # ── Pubsub delta listener (invalidates per-map vote cache on peer writes) ───
@@ -351,13 +394,21 @@ def get_client_ip() -> str:
     return hashlib.sha256(ip.encode()).hexdigest()[:16]
 
 
-def _resolve_user(data_or_args) -> tuple[str, str]:
+def _resolve_user(data_or_args, ip_from_voter: bool = False) -> tuple[str, str]:
     """Return (device_id, ip_hash). device_id is the hashed device id when the
     client sends one (the dedup key), falling back to the IP for anonymous
-    voters; ip_hash is always the hashed IP (recorded for abuse/analytics)."""
+    voters; ip_hash is the hashed IP (recorded for abuse/analytics + the soft
+    per-IP cap).
+
+    `ip_from_voter` ties ip_hash to the per-voter id instead of the request IP.
+    Bulk imports (Lyft/Citibike) all originate from one source IP but represent
+    thousands of distinct rides; with this set each ride is unique on BOTH the
+    device and IP axes, so the per-IP cap never collapses an import."""
     ip_hash = get_client_ip()
     voter_id = data_or_args.get("voter_id")
     device_id = hashlib.sha256(str(voter_id).encode()).hexdigest()[:16] if voter_id else ip_hash
+    if ip_from_voter and voter_id:
+        ip_hash = device_id
     return device_id, ip_hash
 
 
@@ -462,7 +513,7 @@ def _normalize_slug(raw: str) -> str:
 # Visual styles a proposer may pick (must mirror MAP_STYLES in mapStyles.ts).
 _VALID_MAP_STYLES = {
     "default", "bikepaths", "walkways", "trees",
-    "transit", "terracotta", "waterfront",
+    "transit", "terracotta", "waterfront", "plum",
 }
 
 
@@ -481,10 +532,19 @@ def map_create():
     if style not in _VALID_MAP_STYLES:
         style = "default"
 
+    # Network: what the map votes on. "streets" (default, every city) is the
+    # routable walk graph; station networks (e.g. "ebikes") are NYC-only fixed
+    # point sets with no routing.
+    network = (data.get("network") or "streets").strip()
+
     if not name:
         return jsonify({"error": "Map name is required"}), 400
     if not get_city(city_id):
         return jsonify({"error": f"Unknown city '{city_id}'"}), 400
+    if network != "streets" and network not in STATION_NETWORKS:
+        return jsonify({"error": f"Unknown network '{network}'"}), 400
+    if network in STATION_NETWORKS and city_id != "nyc":
+        return jsonify({"error": f"The '{network}' network is only available for NYC"}), 400
     if not slug:
         return jsonify({"error": "Could not derive a valid slug"}), 400
     if not slug_available(slug):
@@ -521,6 +581,7 @@ def map_create():
         created_by_ip_hash=get_client_ip(),
         symbol=symbol or None,
         style=style,
+        network=network,
     )
     if not created:
         return jsonify({"error": "Failed to create map"}), 500
@@ -637,6 +698,12 @@ def calculate_route():
 
     rmap = resolve_map(data.get("map"))
 
+    # Station networks have no routable street graph — you vote on points, not
+    # paths. Decline cleanly (the client also gates this and never calls it).
+    if rmap.network in STATION_NETWORKS:
+        return jsonify({"error": "Routing is disabled for this map",
+                        "routing_disabled": True}), 400
+
     try:
         waypoints_tuples = [(wp[0], wp[1]) for wp in waypoints]
         route = rmap.osrm.calculate_route(
@@ -703,6 +770,12 @@ def cast_vote():
     if not data:
         return jsonify({"error": "Missing request body"}), 400
 
+    # Every vote must carry a voter_id (the web client always mints one in
+    # localStorage; imports send the ride_id). We no longer silently fall back to
+    # the raw IP as identity, so a missing id is a client bug, not anonymous use.
+    if not data.get("voter_id"):
+        return jsonify({"error": "voter_id required"}), 400
+
     rmap = resolve_map(data.get("map"))
 
     # Passcode gate: a vote needs the same valid token that unlocked the map.
@@ -738,26 +811,42 @@ def cast_vote():
     if not edge_ids:
         return jsonify({"error": "No edges to vote on"}), 400
 
-    device_id, ip_hash = _resolve_user(data)
+    device_id, ip_hash = _resolve_user(data, ip_from_voter=bool(data.get("ip_from_voter")))
     mode_int = vote_store.mode_to_int(mode)  # Redis key only; DB scopes by map_slug
     slug = rmap.slug
 
     try:
         vt_id = vote_store.get_vote_type_id(vt_label) if vt_label else 0
 
+        # Soft per-IP cap: how many OTHER devices this IP already has on each
+        # edge+type. A brand-new vote from a fresh device is dropped once the IP
+        # is at the cap (re-votes/reversals by the same device are exempt).
+        ip_device_counts = count_devices_per_ip_for_edges(
+            slug, edge_ids, vt_id, ip_hash, device_id
+        ) if direction != 0 else {}
+
         with _proposal_vote_lock:
             reversed_any = False
             changed: list[int] = []
+            capped: list[int] = []
             for eid in edge_ids:
                 prev = get_voter_edge_direction(slug, eid, vt_id, device_id)
-                if prev != direction:
-                    vote_store.apply_directional(
-                        redis_client, slug, eid, mode_int, vt_id, direction, prev
-                    )
-                    changed.append(eid)
-                    if prev in (vote_store.UP, vote_store.DOWN) and direction != 0:
-                        reversed_any = True
+                if prev == direction:
+                    continue
+                if (prev == 0 and direction != 0
+                        and ip_device_counts.get(eid, 0) >= MAX_DEVICES_PER_IP_PER_EDGE):
+                    capped.append(eid)
+                    continue
+                vote_store.apply_directional(
+                    redis_client, slug, eid, mode_int, vt_id, direction, prev
+                )
+                changed.append(eid)
+                if prev in (vote_store.UP, vote_store.DOWN) and direction != 0:
+                    reversed_any = True
 
+            if capped:
+                logger.info(f"[VOTE:{slug}] capped {len(capped)} edge(s) for "
+                            f"ip={ip_hash[:8]}… (>= {MAX_DEVICES_PER_IP_PER_EDGE} devices)")
             logger.info(f"[VOTE:{slug}] dir={direction} changed={len(changed)} "
                         f"vt={vt_id} ({vt_label!r}) ip={ip_hash[:8]}…")
 
@@ -785,7 +874,7 @@ def cast_vote():
 
         return jsonify({
             "success": True, "edge_ids": edge_ids, "changed": changed,
-            "direction": direction, "reversed": reversed_any,
+            "capped": capped, "direction": direction, "reversed": reversed_any,
         })
 
     except Exception as e:
@@ -793,33 +882,58 @@ def cast_vote():
         return jsonify({"error": f"Vote failed: {str(e)}"}), 500
 
 
-def resnap_votes_for_map(slug: str) -> dict:
-    """Re-anchor a map's votes to the current graph after a rebuild.
+def _resnap_city_maps(city_id: str) -> None:
+    """Re-snap every map of a city onto its just-reloaded graph, then refresh Redis.
 
-    Each vote stores its edge midpoint (lat/lon). When the graph is rebuilt,
-    edge_id indices shift, so we re-snap every stored anchor to the nearest edge
-    on the new graph (the Python mirror of the client's nearest-edge snap). Then
-    Redis is repopulated from the corrected rows. Returns a small summary.
+    Votes are keyed by edge id, which is only valid for one graph build. After a
+    rebuild we reload the city graph from disk and re-anchor each map's votes by
+    lat/lon (see vote_migration). Without this a rebuild silently mis-points every
+    vote. Self-heals on the graph_reload signal; the same logic backfills via the
+    migrate_votes.py CLI.
     """
-    rmap = resolve_map(slug)
-    rmap.graph.ensure_loaded()
-    anchors = get_edge_vote_anchors(slug)
-    moved = dropped = 0
-    for row_id, lat, lon in anchors:
-        new_eid = rmap.graph.nearest_edge_by_midpoint(lat, lon)
-        if new_eid is None:
+    graph_registry.reload_city(city_id)
+    vote_store.load_vote_types()  # repair may have registered new types
+    for m in list_maps():
+        if m.get("cityId") != city_id:
             continue
-        if update_edge_vote_edge_id(row_id, new_eid):
-            moved += 1
-        else:
-            dropped += 1
-    # Rebuild the Redis hash from the corrected DB rows.
-    redis_client.delete(vote_store.hash_key(slug))
-    redis_client.delete(vote_store.revision_key(slug))
-    _populate_redis()
-    _vote_cache.pop(slug, None)
-    logger.info(f"[RESNAP:{slug}] re-anchored {moved} votes, dropped {dropped} collisions")
-    return {"map": slug, "votes": len(anchors), "moved": moved, "dropped": dropped}
+        slug = m["slug"]
+        try:
+            city = get_city(city_id)
+            cg = graph_registry.get(city, m.get("network") or "streets")
+            mode_int = vote_store.mode_to_int(m.get("mode", "walk"))
+            labels = [vt["label"] for vt in (m.get("voteTypes") or []) if vt.get("label")]
+            vote_migration.migrate_map(cg, redis_client, slug, mode_int, labels)
+            _vote_cache.pop(slug, None)
+        except Exception as e:
+            logger.error(f"[RESNAP:{slug}] failed: {e}")
+
+
+def _start_graph_reload_listener():
+    """Auto-heal votes when a city's graph is rebuilt (refresh_osm publishes here)."""
+    def listener():
+        ps_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
+        ps = ps_client.pubsub()
+        ps.subscribe("graph_reload")
+        logger.info("[PUBSUB] Subscribed to graph_reload")
+        for msg in ps.listen():
+            if msg["type"] != "message":
+                continue
+            try:
+                payload = json.loads(msg["data"])
+                city_id = payload.get("city")
+            except (ValueError, TypeError):
+                continue
+            if city_id:
+                logger.info(f"[PUBSUB] graph_reload for '{city_id}' → re-snapping votes")
+                try:
+                    _resnap_city_maps(city_id)
+                except Exception as e:
+                    logger.error(f"[PUBSUB] graph_reload handling failed: {e}")
+
+    _PrewarmThread(target=listener, name="graph-reload-listener", daemon=True).start()
+
+
+_start_graph_reload_listener()
 
 
 @app.route("/api/my-votes", methods=["GET"])
@@ -1021,6 +1135,10 @@ def reverse_geocode():
         return jsonify({"error": "lat and lng are required"}), 400
     try:
         rmap = resolve_map(request.args.get("map"))
+        # Station networks carry their own names (the intersection) in the
+        # topology, and have no street graph to reverse-geocode against.
+        if rmap.network in STATION_NETWORKS:
+            return jsonify({"address": None, "lat": lat, "lng": lon})
         address = rmap.graph.provider.reverse_geocode(lat, lon)
         return jsonify({"address": address or None, "lat": lat, "lng": lon})
     except Exception as e:
@@ -1184,6 +1302,21 @@ def admin_set_subdomain(slug):
         if not sub:
             return jsonify({"error": "subdomain is required"}), 400
         ok, msg = set_map_subdomain(slug, sub)
+    return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
+
+
+@app.route("/api/admin/maps/<slug>/promote-vote-types", methods=["POST"])
+def admin_promote_vote_types(slug):
+    """Snapshot a map's vote-type set into a featured vote_type_lists row so it
+    becomes a selectable option in the Propose-a-Map picker.
+
+    Requires the X-Admin-Token header to match ADMIN_TOKEN. Optional JSON
+    {name} overrides the list's display name (defaults to the map's name).
+    """
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 403
+    name = (request.get_json(silent=True) or {}).get("name") or ""
+    ok, msg = promote_vote_types(slug, name)
     return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
 
 

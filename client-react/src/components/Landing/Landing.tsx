@@ -61,8 +61,13 @@ function fallbackCards(): DisplayCard[] {
   }));
 }
 
+// Placeholder tiles shown while /api/maps is in flight, so a slow or failed
+// fetch never flashes a misleading partial list of presets.
+const SKELETON_COUNT = 5;
+
 export function Landing() {
-  const [cards, setCards] = useState<DisplayCard[]>(fallbackCards);
+  const [cards, setCards] = useState<DisplayCard[]>([]);
+  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [proposeOpen, setProposeOpen] = useState(false);
 
@@ -77,15 +82,18 @@ export function Landing() {
     }
   }, []);
 
-  // All maps, already ranked by the server (votes desc, then name asc).
+  // All maps, already ranked by the server (votes desc, then name asc). Fall
+  // back to the hardcoded presets only when the fetch fails or returns nothing,
+  // so a healthy response always wins and we never show a stale partial list.
   useEffect(() => {
     fetch(`${CONFIG.apiUrl}/maps`)
       .then((r) => r.json())
       .then((d) => {
         const maps: ApiMap[] = d.maps || [];
-        if (maps.length) setCards(maps.map(toCard));
+        setCards(maps.length ? maps.map(toCard) : fallbackCards());
       })
-      .catch(() => {});
+      .catch(() => setCards(fallbackCards()))
+      .finally(() => setLoading(false));
   }, []);
 
   const q = query.trim().toLowerCase();
@@ -145,20 +153,24 @@ export function Landing() {
           </div>
         </button>
 
-        {visible.map((c) => (
-          <a
-            key={c.key}
-            className="landing-card"
-            href={c.href}
-            style={c.bgImage ? { backgroundImage: `url(${c.bgImage})` } : undefined}
-          >
-            <div className="landing-card-content">
-              <img className="landing-card-symbol" src={iconSrc(c.symbol)} alt={c.name} />
-              <div className="landing-card-name">{c.name}</div>
-              <div className="landing-card-tagline">{c.tagline}</div>
-            </div>
-          </a>
-        ))}
+        {loading
+          ? Array.from({ length: SKELETON_COUNT }, (_, i) => (
+              <div key={`skeleton-${i}`} className="landing-card landing-card-skeleton" aria-hidden />
+            ))
+          : visible.map((c) => (
+              <a
+                key={c.key}
+                className="landing-card"
+                href={c.href}
+                style={c.bgImage ? { backgroundImage: `url(${c.bgImage})` } : undefined}
+              >
+                <div className="landing-card-content">
+                  <img className="landing-card-symbol" src={iconSrc(c.symbol)} alt={c.name} />
+                  <div className="landing-card-name">{c.name}</div>
+                  <div className="landing-card-tagline">{c.tagline}</div>
+                </div>
+              </a>
+            ))}
       </main>
 
       <footer className="landing-footer">

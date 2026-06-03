@@ -55,7 +55,9 @@ CACHE_DIR = Path(__file__).parent / "lyft_data"
 MAX_RANGE_DAYS = 7
 MONTHS_BACK_PROBE = 18  # how far back to look for the latest published month
 
-VOTE_TYPE = "\U0001f6b4 Add bike lane"
+# Canonical bike-map vote label (matches the "bikes" preset list, so imported
+# rides share the same legend/filter as user votes). Override with --vote-type.
+DEFAULT_VOTE_TYPE = "Add bike lane"
 COMPOSE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -252,8 +254,8 @@ def load_rides(args, city, start: dt.date, end: dt.date, months: list[str]) -> p
     log(f"Rides inside {city.name} bbox: {len(df)}")
 
     if len(df) > args.sample_size:
-        df = df.sample(n=args.sample_size, random_state=42).reset_index(drop=True)
-        log(f"Sampled down to {len(df)}")
+        df = df.sample(n=args.sample_size, random_state=args.seed).reset_index(drop=True)
+        log(f"Sampled down to {len(df)} (seed={args.seed})")
     return df
 
 
@@ -265,6 +267,21 @@ def health_check(api_base: str, timeout: int = 15) -> bool:
         return resp.status_code == 200
     except Exception:
         return False
+
+
+def fetch_map_mode(api_base: str, slug: str) -> str | None:
+    """Look up a map's vote namespace (mode) from the public maps API.
+
+    Votes only display on a map when cast under that map's mode, so we read it
+    here rather than trusting the route response's generic vote_mode.
+    """
+    try:
+        resp = requests.get(f"{api_base}/api/maps/{slug}", timeout=30, verify=False)
+        if resp.status_code != 200:
+            return None
+        return (resp.json() or {}).get("mode")
+    except Exception:
+        return None
 
 
 def restart_docker():
@@ -310,8 +327,15 @@ class Stats:
                 log(f"[{self.processed}/{self.total}] {self.success} ok, {self.failed} failed, {self.segments} segments")
 
 
-async def route_and_vote(session, api_base, start, end, stats, voter_id=None):
-    """Calculate route then immediately cast vote for a single ride."""
+async def route_and_vote(session, api_base, start, end, stats, voter_id=None,
+                          map_slug=None, vote_mode_override=None,
+                          vote_type=DEFAULT_VOTE_TYPE):
+    """Calculate route then immediately cast vote for a single ride.
+
+    `map_slug` scopes both routing (which city graph) and the vote (which map).
+    `vote_mode_override` forces the vote's namespace to match the target map's
+    mode (e.g. "bikepaths"); without it the route's reported vote_mode is used.
+    """
     max_retries = 3
 
     route_data = None
@@ -319,7 +343,7 @@ async def route_and_vote(session, api_base, start, end, stats, voter_id=None):
         try:
             async with session.post(
                 f"{api_base}/api/routes",
-                json={"start": start, "end": end, "mode": "bike", "waypoints": []},
+                json={"start": start, "end": end, "mode": "bike", "waypoints": [], "map": map_slug},
                 timeout=aiohttp.ClientTimeout(total=120),
             ) as resp:
                 if resp.status != 200:
@@ -347,7 +371,8 @@ async def route_and_vote(session, api_base, start, end, stats, voter_id=None):
         return
 
     segments = route_data.get("desire_path_segments", [])
-    vote_mode = route_data.get("vote_mode", "bike")
+    edge_ids = route_data.get("edge_ids", [])
+    vote_mode = vote_mode_override or route_data.get("vote_mode", "bike")
     if not segments:
         await stats.record(False)
         return
@@ -356,7 +381,13 @@ async def route_and_vote(session, api_base, start, end, stats, voter_id=None):
         try:
             async with session.post(
                 f"{api_base}/api/vote",
-                json={"segments": segments, "mode": vote_mode, "vote_type": VOTE_TYPE, "voter_id": voter_id},
+                # ip_from_voter ties the server-side ip_hash to this ride's
+                # voter_id (the ride_id) instead of our single source IP, so
+                # every imported ride is unique on BOTH the device and IP axes
+                # and never trips the per-IP abuse cap that gates human voters.
+                json={"segments": segments, "edge_ids": edge_ids, "map": map_slug,
+                      "mode": vote_mode, "vote_type": vote_type, "voter_id": voter_id,
+                      "ip_from_voter": True},
                 timeout=aiohttp.ClientTimeout(total=120),
             ) as resp:
                 if resp.status != 200:
@@ -383,7 +414,8 @@ async def route_and_vote(session, api_base, start, end, stats, voter_id=None):
             return
 
 
-async def run_async(rides: pd.DataFrame, api_base: str, concurrency: int):
+async def run_async(rides: pd.DataFrame, api_base: str, concurrency: int,
+                    map_slug=None, vote_mode_override=None, vote_type=DEFAULT_VOTE_TYPE):
     """Process rides in batches, checking health between batches."""
     stats = Stats(len(rides))
     batch_size = 20
@@ -425,7 +457,11 @@ async def run_async(rides: pd.DataFrame, api_base: str, concurrency: int):
         async with aiohttp.ClientSession(connector=connector) as session:
             async def throttled(start, end, rid):
                 async with sem:
-                    await route_and_vote(session, api_base, start, end, stats, voter_id=rid)
+                    await route_and_vote(
+                        session, api_base, start, end, stats, voter_id=rid,
+                        map_slug=map_slug, vote_mode_override=vote_mode_override,
+                        vote_type=vote_type,
+                    )
 
             tasks = [asyncio.create_task(throttled(s, e, rid)) for s, e, rid in batch]
             await asyncio.gather(*tasks)
@@ -460,14 +496,19 @@ async def run_async(rides: pd.DataFrame, api_base: str, concurrency: int):
 def main():
     valid = ", ".join(c for c in CITIES if c in LYFT_SOURCES)
     parser = argparse.ArgumentParser(description="Import Lyft bikeshare data as votes")
-    parser.add_argument("--city", required=True, help=f"Map/city id ({valid})")
+    parser.add_argument("--city", required=True, help=f"Dataset/city id for download + bbox ({valid})")
+    parser.add_argument("--map", dest="map_slug", help="Target map slug to vote onto (e.g. sf-bike-lanes). Defaults to the backend's default map.")
+    parser.add_argument("--mode", help="Vote namespace; defaults to the target map's mode (e.g. bikepaths)")
+    parser.add_argument("--vote-type", default=DEFAULT_VOTE_TYPE, help=f"Vote type label (default {DEFAULT_VOTE_TYPE!r})")
     parser.add_argument("--start", help="Start date YYYY-MM-DD (default: latest available)")
     parser.add_argument("--end", help="End date YYYY-MM-DD (default: start + days - 1)")
     parser.add_argument("--days", type=int, default=MAX_RANGE_DAYS, help=f"Window length, 1..{MAX_RANGE_DAYS} (default {MAX_RANGE_DAYS})")
     parser.add_argument("--sample-size", type=int, default=10000, help="Max rides to import (default 10000)")
+    parser.add_argument("--seed", type=int, default=42, help="Sampling seed; vary it across batches to draw different rides")
     parser.add_argument("--api-base", default="http://localhost:8080", help="API base URL")
     parser.add_argument("--concurrency", type=int, default=3, help="Max concurrent API requests")
     parser.add_argument("--dry-run", action="store_true", help="Download and filter only, skip API calls")
+    parser.add_argument("--no-restart", action="store_true", help="Never restart Docker, even for a local backend (just wait/abort)")
     args = parser.parse_args()
 
     city = get_city(args.city)
@@ -486,16 +527,42 @@ def main():
         log(f"--dry-run: {len(rides)} rides ready; skipping API calls.")
         return
 
+    # Only ever touch Docker for a local backend. Against a remote target a
+    # `docker compose` restart is wrong (it cycles the local stack, not prod)
+    # and dangerous, so we just wait for the remote to recover on its own.
+    is_local = "localhost" in args.api_base or "127.0.0.1" in args.api_base
     log(f"Checking backend health at {args.api_base} ...")
     if not health_check(args.api_base):
-        log("Backend is not healthy. Attempting Docker restart...")
-        restart_docker()
-        if not wait_for_healthy(args.api_base):
-            sys.exit("ERROR: backend failed to start.")
+        if is_local and not args.no_restart:
+            log("Local backend not healthy. Attempting Docker restart...")
+            restart_docker()
+            if not wait_for_healthy(args.api_base):
+                sys.exit("ERROR: backend failed to start.")
+        else:
+            log("Backend not healthy; waiting for it to recover (no restart for remote)...")
+            if not wait_for_healthy(args.api_base, max_wait=180):
+                sys.exit("ERROR: backend did not become healthy. Aborting (no restart for remote).")
+
+    # Resolve the vote namespace: explicit --mode wins, else the target map's
+    # own mode (so votes display), else fall back to the route's vote_mode.
+    vote_mode = args.mode
+    if not vote_mode and args.map_slug:
+        vote_mode = fetch_map_mode(args.api_base, args.map_slug)
+        if not vote_mode:
+            sys.exit(
+                f"ERROR: could not resolve mode for map '{args.map_slug}'. "
+                f"Pass --mode explicitly or check the slug exists at {args.api_base}."
+            )
+    if not args.map_slug:
+        log("WARNING: no --map given; voting onto the backend's default map.")
+    log(f"Target map: {args.map_slug or '(default)'} | vote mode: {vote_mode or '(route default)'} | vote type: {args.vote_type!r}")
 
     log(f"Routing and voting {len(rides)} rides via {args.api_base} (concurrency={args.concurrency}) ...")
     t0 = time.time()
-    stats = asyncio.run(run_async(rides, args.api_base, args.concurrency))
+    stats = asyncio.run(run_async(
+        rides, args.api_base, args.concurrency,
+        map_slug=args.map_slug, vote_mode_override=vote_mode, vote_type=args.vote_type,
+    ))
     elapsed = time.time() - t0
 
     log(f"Done in {elapsed:.1f}s!")

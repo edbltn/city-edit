@@ -1467,12 +1467,29 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   border: 1px solid var(--hairline);
   font-family: var(--font-main);
   cursor: pointer;
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  /* Zoom-driven shrink (set on the map container by GraphLayer); selected
+     indicators override this with their own scale. */
+  transform: scale(var(--indicator-scale, 1));
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .vote-type-indicator:hover {
   border-color: var(--ink);
   transform: scale(1.1);
+}
+
+/* The currently selected (pinned) top proposal: a double border (inner border +
+   outer ring with a paper gap) so the active icon clearly stands apart from
+   hovered/idle indicators, independent of the map style's accent color. White on
+   dark map styles, black on the light ones (override below). */
+.vote-type-indicator.is-selected {
+  border-color: var(--selected-ring, #fff);
+  box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px var(--selected-ring, #fff);
+  transform: scale(1.1);
+}
+
+[data-basemap="light"] .vote-type-indicator.is-selected {
+  --selected-ring: #000;
 }
 
 /* While a crowded cluster is fanned out, animate the marker wrapper's position
@@ -1510,25 +1527,20 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   white-space: nowrap;
   color: var(--ink);
   min-width: 220px;
-  /* Default: top-left of modal sits just above-right of the icon */
-  transform: translate(16px, calc(-100% - 16px));
+  /* Position (left/top) and grow-from corner (transform-origin) are computed in
+     JS so the card flips into whichever quadrant has room; only the scale-in is
+     animated here, leaving transform free of any positioning offset. */
   animation: indicator-modal-in 120ms ease-out;
-  transform-origin: bottom left;
-}
-
-.graph-indicator-modal.modal-flipped {
-  transform: translate(calc(-100% - 16px), calc(-100% - 16px));
-  transform-origin: bottom right;
 }
 
 @keyframes indicator-modal-in {
   from {
     opacity: 0;
-    transform: translate(16px, calc(-100% - 16px)) scale(0.6);
+    transform: scale(0.6);
   }
   to {
     opacity: 1;
-    transform: translate(16px, calc(-100% - 16px)) scale(1);
+    transform: scale(1);
   }
 }
 
@@ -1693,16 +1705,21 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   color: var(--ink);
 }
 
-/* Net score is the anchor: full-strength ink, framed by hairline dividers. */
+/* Net score is the anchor: full-strength ink, framed by hairline dividers.
+   Width grows 1ch per extra character beyond the first; --vote-net-chars is set
+   on .graph-proposal-rows to the widest net value (incl. sign) across all rows,
+   so every row's net column shares one width and the dividers line up. */
 .graph-vote-net {
-  min-width: 18px;
+  min-width: calc(18px + (var(--vote-net-chars, 1) - 1) * 1ch);
   border-left: 1px solid var(--hairline);
   border-right: 1px solid var(--hairline);
 }
 
-/* Directional counts read quieter than the net until hovered/cast. */
+/* Directional counts read quieter than the net until hovered/cast. Width grows
+   with --vote-cell-chars (widest up/down count across all rows) on the same
+   shared basis, keeping the −/+ columns aligned when any row hits two digits. */
 .graph-vote-cell {
-  min-width: 34px;
+  min-width: calc(34px + (var(--vote-cell-chars, 1) - 1) * 1ch);
   color: color-mix(in srgb, var(--ink) 62%, transparent);
 }
 

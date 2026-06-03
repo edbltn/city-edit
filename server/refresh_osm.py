@@ -147,8 +147,14 @@ def build_city(target: str, force: bool = False, check_only: bool = False) -> di
         logger.info(f"[{target}] graph already present, skipping (use --force to rebuild)")
         return {"city": target, "status": "unchanged", "version": prev.get("version")}
 
+    # Build from the same OSM extract OSRM uses (foot-aligned), so the votable graph
+    # is a superset of OSRM's network. Cities have their own pbf_url; the legacy
+    # TEST_BBOXES are NYC subsets, so they use NYC's extract.
+    city = get_city(target)
+    pbf_url = city.pbf_url if city is not None else get_city(DEFAULT_CITY_ID).pbf_url
+
     start = datetime.utcnow()
-    stats = build_graph(bbox, str(out_dir))   # osmnx downloads the network directly
+    stats = build_graph(bbox, str(out_dir), pbf_url=pbf_url)
     duration = (datetime.utcnow() - start).total_seconds()
 
     version = f"{target}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
@@ -160,6 +166,8 @@ def build_city(target: str, force: bool = False, check_only: bool = False) -> di
         "bbox": list(bbox),
         "nodes": stats.get("nodes"),
         "edges": stats.get("edges"),
+        "source": "pbf",
+        "pbf_url": pbf_url,
     }
     save_metadata(target, metadata)
 

@@ -1,6 +1,41 @@
 steps:
-  # Build the Docker image
+  # ── Merged OSRM image (built in parallel with the app; data baked in) ────────
   - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-osrm'
+    waitFor: ['-']
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/osrm:${BUILD_ID}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/osrm:latest'
+      - 'osrm'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-osrm'
+    waitFor: ['build-osrm']
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/osrm'
+
+  # Deploy OSRM first so the app's OSRM_URL target is live before the app rolls.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-osrm'
+    waitFor: ['push-osrm']
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'services'
+      - 'update'
+      - 'desire-path-osrm'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/osrm:${BUILD_ID}'
+      - '--region=${_REGION}'
+
+  # ── App image ────────────────────────────────────────────────────────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-app'
+    waitFor: ['-']
     args:
       - 'build'
       - '--no-cache'
@@ -14,6 +49,8 @@ steps:
 
   # Push to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-app'
+    waitFor: ['build-app']
     args:
       - 'push'
       - '--all-tags'
@@ -21,6 +58,8 @@ steps:
 
   # Deploy to Cloud Run (update image only, preserve env vars from terraform)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-app'
+    waitFor: ['push-app', 'deploy-osrm']
     entrypoint: 'gcloud'
     args:
       - 'run'
@@ -44,3 +83,4 @@ substitutions:
 
 images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/osrm:latest'

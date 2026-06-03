@@ -87,7 +87,10 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
     }
   }, [hidden]);
 
-  // Restore setLatLng if component unmounts during an active drag
+  // If the marker unmounts during an active drag (e.g. a recalc re-keys or
+  // removes markers mid-drag), `dragend` never fires — so restore setLatLng and
+  // tear down the live drag trail here. Otherwise the dotted trail polyline is
+  // orphaned on the map and accumulates with every interrupted drag.
   useEffect(() => {
     return () => {
       const marker = markerRef.current;
@@ -95,6 +98,9 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
         (marker as any).setLatLng = originalSetLatLngRef.current;
         originalSetLatLngRef.current = null;
       }
+      dragTrailRef.current?.remove();
+      dragTrailRef.current = null;
+      dragTrailOriginRef.current = null;
     };
   }, []);
 
@@ -135,6 +141,9 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
           // Otherwise the line visibly jumps off the path the instant you grab it.
           const origin = pathAnchor ?? { lat: latlng.lat, lng: latlng.lng };
           dragTrailOriginRef.current = origin;
+          // Defensive: drop any trail left over from a prior drag that didn't
+          // get torn down, so trails can't stack up on the map.
+          dragTrailRef.current?.remove();
           dragTrailRef.current = L.polyline(
             [[origin.lat, origin.lng], [origin.lat, origin.lng]],
             DRAG_TRAIL_STYLE

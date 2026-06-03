@@ -1,0 +1,252 @@
+[
+  {
+    "name": "Wadsworth Ave & W 175th St",
+    "lat": 40.845948,
+    "lon": -73.937809
+  },
+  {
+    "name": "Broadway & W 172nd St",
+    "lat": 40.843942,
+    "lon": -73.939025
+  },
+  {
+    "name": "Broadway & W 171st St",
+    "lat": 40.843223,
+    "lon": -73.939177
+  },
+  {
+    "name": "St Nicholas Ave & W 163rd St",
+    "lat": 40.836967,
+    "lon": -73.940136
+  },
+  {
+    "name": "Amsterdam Ave & W 138th St",
+    "lat": 40.820823,
+    "lon": -73.950814
+  },
+  {
+    "name": "12th Ave & W 125th St",
+    "lat": 40.817956,
+    "lon": -73.960534
+  },
+  {
+    "name": "E 138th St & Canal St W",
+    "lat": 40.812033,
+    "lon": -73.928536
+  },
+  {
+    "name": "E 138th St & Rider Ave",
+    "lat": 40.81173,
+    "lon": -73.928134
+  },
+  {
+    "name": "3rd Ave & E 143rd St",
+    "lat": 40.813322,
+    "lon": -73.922873
+  },
+  {
+    "name": "Melrose Ave & E 150th St",
+    "lat": 40.816761,
+    "lon": -73.91746
+  },
+  {
+    "name": "W 126th St & Lenox Ave",
+    "lat": 40.808396,
+    "lon": -73.945035
+  },
+  {
+    "name": "Lenox Ave & W 125th St",
+    "lat": 40.807746,
+    "lon": -73.945413
+  },
+  {
+    "name": "W 110th St & Amsterdam Ave",
+    "lat": 40.802962,
+    "lon": -73.963849
+  },
+  {
+    "name": "Frederick Douglass Blvd & W 112th St",
+    "lat": 40.801857,
+    "lon": -73.957237
+  },
+  {
+    "name": "7th Ave & W 117th St",
+    "lat": 40.803898,
+    "lon": -73.952025
+  },
+  {
+    "name": "W 106th St & Amsterdam Ave",
+    "lat": 40.800429,
+    "lon": -73.965691
+  },
+  {
+    "name": "1st Ave & E 103rd St",
+    "lat": 40.787692,
+    "lon": -73.941478
+  },
+  {
+    "name": "W 94th St & Columbus Ave",
+    "lat": 40.791574,
+    "lon": -73.968495
+  },
+  {
+    "name": "1st Ave & E 99th St",
+    "lat": 40.785172,
+    "lon": -73.943319
+  },
+  {
+    "name": "2nd Ave & E 79th St",
+    "lat": 40.773354,
+    "lon": -73.955069
+  },
+  {
+    "name": "1st Ave & E 73rd St",
+    "lat": 40.768485,
+    "lon": -73.955502
+  },
+  {
+    "name": "9th Ave & W 55th St",
+    "lat": 40.766637,
+    "lon": -73.986668
+  },
+  {
+    "name": "10th Ave & W 49th St",
+    "lat": 40.764057,
+    "lon": -73.992242
+  },
+  {
+    "name": "2nd Ave & E 57th St",
+    "lat": 40.759317,
+    "lon": -73.965308
+  },
+  {
+    "name": "E 54th St & 3rd Ave",
+    "lat": 40.75834,
+    "lon": -73.968945
+  },
+  {
+    "name": "29th St & Queens Plaza N",
+    "lat": 40.749899,
+    "lon": -73.937784
+  },
+  {
+    "name": "44th Dr & Jackson Ave",
+    "lat": 40.74712,
+    "lon": -73.942452
+  },
+  {
+    "name": "11th St & 46th Rd",
+    "lat": 40.745719,
+    "lon": -73.950496
+  },
+  {
+    "name": "9th Ave & W 42nd St",
+    "lat": 40.758433,
+    "lon": -73.992646
+  },
+  {
+    "name": "10th Ave & W 38th St",
+    "lat": 40.757094,
+    "lon": -73.997322
+  },
+  {
+    "name": "7th Ave & W 39th St",
+    "lat": 40.754147,
+    "lon": -73.988323
+  },
+  {
+    "name": "2nd Ave & E 30th St",
+    "lat": 40.742274,
+    "lon": -73.97772
+  },
+  {
+    "name": "1st Ave & E 15th St",
+    "lat": 40.732007,
+    "lon": -73.982169
+  },
+  {
+    "name": "2nd Ave & E 13th St",
+    "lat": 40.731667,
+    "lon": -73.985437
+  },
+  {
+    "name": "E 14th St & Avenue A",
+    "lat": 40.730414,
+    "lon": -73.98036
+  },
+  {
+    "name": "Cooper Sq & E 6th St",
+    "lat": 40.728356,
+    "lon": -73.990788
+  },
+  {
+    "name": "Cooper Sq & E 4th St",
+    "lat": 40.727087,
+    "lon": -73.99155
+  },
+  {
+    "name": "1st Ave & E 5th St",
+    "lat": 40.725796,
+    "lon": -73.986623
+  },
+  {
+    "name": "E 1st St & 1st Ave",
+    "lat": 40.723276,
+    "lon": -73.988446
+  },
+  {
+    "name": "Havemeyer St & Broadway",
+    "lat": 40.708886,
+    "lon": -73.959263
+  },
+  {
+    "name": "Marcy Ave & Division Ave",
+    "lat": 40.70725,
+    "lon": -73.958356
+  },
+  {
+    "name": "Water St & John St",
+    "lat": 40.706852,
+    "lon": -74.005015
+  },
+  {
+    "name": "Water St & Gouverneur Ln",
+    "lat": 40.704678,
+    "lon": -74.008118
+  },
+  {
+    "name": "Navy St & Sands St",
+    "lat": 40.699713,
+    "lon": -73.980464
+  },
+  {
+    "name": "Cadman Plaza W & Tillary St",
+    "lat": 40.696321,
+    "lon": -73.991187
+  },
+  {
+    "name": "Adams St & Fulton St",
+    "lat": 40.692096,
+    "lon": -73.98895
+  },
+  {
+    "name": "Duffield St & Willoughby St",
+    "lat": 40.692127,
+    "lon": -73.984342
+  },
+  {
+    "name": "Fulton St & Pearl St",
+    "lat": 40.707574,
+    "lon": -74.004135
+  },
+  {
+    "name": "Willoughby St & Duffield St",
+    "lat": 40.692127,
+    "lon": -73.984342
+  },
+  {
+    "name": "Schermerhorn St & Bond St",
+    "lat": 40.68817,
+    "lon": -73.983978
+  }
+]

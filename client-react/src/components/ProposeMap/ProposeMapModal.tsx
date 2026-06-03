@@ -8,7 +8,7 @@ import "./ProposeMapModal.css";
 // The app's iconset (public/icons/*.svg) — pickable per custom vote type.
 const ICONS = [
   "walkways", "bikes", "trees", "parks", "transit", "safety", "accessibility",
-  "pedestrian-streets", "traffic-reduction", "public-space", "cafes",
+  "charging", "traffic-reduction", "public-space", "cafes",
   "waterfront", "mapping",
 ];
 const DEFAULT_ICON = "mapping";
@@ -49,6 +49,9 @@ export function ProposeMapModal({ onClose }: { onClose: () => void }) {
   const [slug, setSlug] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
   const [cityId, setCityId] = useState("");
+  // What the map votes on: "streets" (routable, every city) or a station network
+  // (e.g. "ebikes" — NYC-only fixed points, no routing).
+  const [network, setNetwork] = useState("streets");
   const [listChoice, setListChoice] = useState<string>(""); // preset id, or "custom"
   const [customRows, setCustomRows] = useState<CustomRow[]>([{ label: "", pointType: "route", icon: DEFAULT_ICON }]);
   const [iconPickerRow, setIconPickerRow] = useState<number | null>(null);
@@ -119,6 +122,14 @@ export function ProposeMapModal({ onClose }: { onClose: () => void }) {
     !!name.trim() && !!cityId && !!effectiveSlug && slugAvailable !== false && !submitting &&
     (isCustom ? customRows.some((r) => r.label.trim()) : !!listChoice);
 
+  // Suggestions can only be turned OFF when the map already offers at least one
+  // vote type (a preset list always does; a custom list needs ≥1 labeled row).
+  // Otherwise there'd be nothing to vote on, so the toggle is forced on + locked.
+  const hasPredeterminedVoteTypes = isCustom
+    ? customRows.some((r) => r.label.trim())
+    : !!listChoice;
+  const effectiveAllowSuggestions = hasPredeterminedVoteTypes ? allowSuggestions : true;
+
   const submit = async () => {
     setError(null);
     setSubmitting(true);
@@ -128,9 +139,10 @@ export function ProposeMapModal({ onClose }: { onClose: () => void }) {
         subtitle: subtitle.trim() || undefined,
         slug: effectiveSlug,
         city_id: cityId,
+        network,
         symbol,
         style,
-        allow_suggestions: allowSuggestions,
+        allow_suggestions: effectiveAllowSuggestions,
         passcode: passcode.trim() || undefined,
       };
       if (isCustom) {
@@ -207,15 +219,18 @@ export function ProposeMapModal({ onClose }: { onClose: () => void }) {
             <div className="propose-theme-row">
               {SELECTABLE_MAP_STYLES.map((t) => {
                 const ms = getMapStyle(t.id);
+                const isLight = ms.basemap === "light";
                 return (
                   <button
                     type="button"
                     key={t.id}
-                    className={`propose-theme-swatch ${style === t.id ? "selected" : ""}`}
+                    className={`propose-theme-swatch ${style === t.id ? "selected" : ""} ${isLight ? "light" : ""}`}
                     onClick={() => setStyle(t.id)}
                     title={t.label}
                     aria-label={t.label}
-                    style={{ background: ms.base }}
+                    // --swatch-accent lets light themes use their accent as the
+                    // selection ring (white is invisible on a light basemap).
+                    style={{ background: ms.base, ["--swatch-accent" as string]: ms.accent }}
                   >
                     <span style={{ background: ms.accent }} />
                   </button>
@@ -241,10 +256,29 @@ export function ProposeMapModal({ onClose }: { onClose: () => void }) {
 
           <label className="propose-field">
             <span>City</span>
-            <select value={cityId} onChange={(e) => setCityId(e.target.value)}>
+            <select
+              value={cityId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setCityId(id);
+                // Station networks are NYC-only; revert when leaving NYC.
+                if (id !== "nyc") setNetwork("streets");
+              }}
+            >
               {cities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </label>
+
+          {/* Only NYC has more than one network, so the field only appears there. */}
+          {cityId === "nyc" && (
+            <label className="propose-field">
+              <span>Network</span>
+              <select value={network} onChange={(e) => setNetwork(e.target.value)}>
+                <option value="streets">Streets (routes &amp; segments)</option>
+                <option value="ebikes">E-bike stations (fixed points)</option>
+              </select>
+            </label>
+          )}
 
           <label className="propose-field">
             <span>Vote-type list</span>
@@ -302,9 +336,17 @@ export function ProposeMapModal({ onClose }: { onClose: () => void }) {
           )}
 
           <label className="propose-check">
-            <input type="checkbox" checked={allowSuggestions} onChange={(e) => setAllowSuggestions(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={effectiveAllowSuggestions}
+              disabled={!hasPredeterminedVoteTypes}
+              onChange={(e) => setAllowSuggestions(e.target.checked)}
+            />
             <span>Allow users to suggest new vote types</span>
           </label>
+          {!hasPredeterminedVoteTypes && (
+            <small className="propose-hint">Add at least one vote type to turn this off.</small>
+          )}
 
           <label className="propose-field">
             <span>Subtitle <em>(optional)</em></span>

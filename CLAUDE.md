@@ -51,13 +51,17 @@ All secrets and configuration are stored in `server/.env`. Copy from `.env.examp
 ## Routing
 
 ### Architecture
-Routing uses **OSRM** (Open Source Routing Machine) for fast pathfinding and a **Python graph provider** (osmnx) for topology visualization, nearest-node snapping, and reverse geocoding.
+Routing uses **OSRM** (Open Source Routing Machine) for fast pathfinding and a **Python graph provider** for topology visualization, nearest-node snapping, and reverse geocoding.
+
+The votable/topology graph is built from the **same OSM PBF + foot filter as OSRM**, so it's a superset of OSRM's foot network and route votes map cleanly by OSM node id (OSRM returns node ids via `annotations=nodes` → `vote_store.osm_nodes_to_edge_ids`). `server/foot_profile.py` mirrors `osrm/foot.lua` (v5.25.0) — keep them in sync.
 
 - **OSRM router**: `server/osrm_router.py` - HTTP client calling self-hosted OSRM
+- **OSRM profile**: `osrm/foot.lua` - pinned foot profile (the routable-way rules)
 - **Graph provider**: `server/python_router.py` - Graph topology, snapping, reverse geocoding
-- **OSRM config**: `osrm/entrypoint.sh` - Downloads NY state PBF and builds foot profile
-- **Graph files**: `server/osm_data/walk_graph.pkl` - Pre-built graph from OSM data
-- **Refresh script**: `server/refresh_osm.py` - Downloads OSM data and rebuilds graphs
+- **Graph builder**: `server/osm_graph_builder.py` - reads the PBF (pyosmium) into the walk graph; `server/foot_profile.py` decides which ways are foot-routable
+- **Graph files**: `server/osm_data/<city>/walk_graph.pkl` - per-city graph built from `<city>/source.osm.pbf`
+- **Refresh script**: `server/refresh_osm.py` - downloads each city's PBF and rebuilds graphs
+- **Validation**: `server/tests/validate_osrm_topology.py` - confirms OSRM node ids resolve to topology edges
 
 ### Regions
 Available regions for graph building:

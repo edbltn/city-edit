@@ -129,10 +129,22 @@ export function iconSrc(icon: string): string {
 }
 
 /**
- * Look up the icon for a vote-type label by searching all theme suggestions.
- * Falls back to null if no match is found (e.g. custom user-typed vote types).
+ * Resolve the themed icon for a vote-type label — the single resolver shared by
+ * the vote-type selector, map markers, and top-proposal cards so a label always
+ * looks the same everywhere.
+ *
+ * The active map's own vote types win: this is what makes a custom vote-type
+ * *set* (a user map's `voteTypes`, or a preset list) drive its own icons (e.g. a
+ * bus map's "Add bus route" → the transit icon). Preset theme suggestions are
+ * the fallback, then null — at which point callers render the colorized
+ * suggestion glyph (see suggestionIcon.ts) for truly icon-less custom types.
  */
-export function iconForLabel(label: string): string | null {
+export function iconForLabel(
+  label: string,
+  voteTypes?: readonly { label: string; icon: string }[]
+): string | null {
+  const own = voteTypes?.find((s) => s.label === label)?.icon;
+  if (own) return own;
   for (const theme of Object.values(THEMES)) {
     for (const s of theme.suggestions) {
       if (s.label === label) return s.icon;
@@ -186,9 +198,30 @@ function navStateToQuery(state?: ThemeNavState): string {
   return params.toString();
 }
 
-/** Path-based link to a map by slug (the canonical addressing). */
+/**
+ * Origin of the apex/root domain for the current host (e.g. "https://cityedit.org"),
+ * or "" when already on the apex or on localhost. A relative /m/<slug> link would
+ * inherit whatever vanity subdomain you're on (bikepaths.cityedit.org/m/sf-… —
+ * the wrong host); rooting at the apex lets the app's load-time redirect settle
+ * each map onto its own subdomain (if any) instead.
+ */
+function apexOrigin(): string {
+  if (typeof window === "undefined") return "";
+  const { protocol, hostname, port } = window.location;
+  if (isLocalDevHost(hostname)) return "";
+  const parts = hostname.split(".");
+  if (parts.length < 3) return ""; // already on the apex
+  const root = parts.slice(1).join(".");
+  return `${protocol}//${root}${port ? `:${port}` : ""}`;
+}
+
+/**
+ * Link to a map by slug — the canonical apex address (cityedit.org/m/<slug>).
+ * Absolute when on a vanity subdomain so cross-map navigation leaves that host;
+ * relative on the apex and in local dev.
+ */
 export function mapHref(slug: string, state?: ThemeNavState): string {
-  const base = `/m/${slug}`;
+  const base = `${apexOrigin()}/m/${slug}`;
   const qs = navStateToQuery(state);
   return qs ? `${base}?${qs}` : base;
 }

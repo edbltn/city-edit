@@ -49,10 +49,13 @@ export const CONFIG = {
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
   tileSubdomains: "abcd",
 
-  // PMTiles — graph overlay tiles (built from OSM walk graph)
+  // PMTiles — graph overlay tiles (built from OSM walk graph). Per-city path,
+  // served by Flask in dev and aliased to osm_data by nginx in prod. This is the
+  // default for the bootstrap (nyc); applyCityConfig() rebinds it to the active
+  // city's tilesPath once the map config loads.
   graphTilesUrl: isLocalDev
-    ? "http://localhost:5001/api/tiles/graph.pmtiles"
-    : "/tiles/graph.pmtiles",
+    ? "http://localhost:5001/api/tiles/nyc/graph.pmtiles"
+    : "/api/tiles/nyc/graph.pmtiles",
 
   // Leaflet behaviors
   preferCanvas: true,

@@ -4,7 +4,11 @@
 
 HEALTH_URL="http://127.0.0.1:5001/health"
 CHECK_INTERVAL=60
-MAX_FAILURES=3
+# 15 failures (~15 min): the background warmup freezes the gevent hub for a few
+# minutes while it loads city graphs (GIL-bound pickle.load), during which /health
+# can't respond. A low threshold would restart the worker mid-warmup → loop. Only
+# restart on genuinely prolonged unresponsiveness.
+MAX_FAILURES=15
 
 failures=0
 # Don't restart gunicorn until it has been healthy at least once. Startup can take
