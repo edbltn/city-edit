@@ -1780,6 +1780,14 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       midLng: number;
     }>;
 
+    // (Re)start the snap-back countdown. Called when a cluster fans out and
+    // again each time a fanned-out icon is hovered, so the spread stays open
+    // while you're picking through it and only collapses once you move away.
+    const armSpreadTimer = () => {
+      if (spreadTimeoutRef.current) clearTimeout(spreadTimeoutRef.current);
+      spreadTimeoutRef.current = window.setTimeout(clearSpread, SPREAD_DURATION_MS);
+    };
+
     // Fan a cluster of icons out into a centered grid of cells around their
     // shared anchor point, then schedule a snap-back. Each icon's overridden
     // position is stored by legendIdx for the render below to pick up.
@@ -1805,11 +1813,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       map.getContainer().classList.add("votes-spreading");
       spreadActiveRef.current = true;
       setSpreadPositions(next);
-      if (spreadTimeoutRef.current) clearTimeout(spreadTimeoutRef.current);
-      spreadTimeoutRef.current = window.setTimeout(
-        clearSpread,
-        SPREAD_DURATION_MS,
-      );
+      armSpreadTimer();
     };
 
     return placed.map(({ w, midLat, midLng }) => {
@@ -1835,6 +1839,8 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         // from this edge being a winner, so the markup matches a segment hover.
         // overIndicatorRef tells the map hover handler to yield (hierarchy #1).
         overIndicatorRef.current = true;
+        // While fanned out, hovering an icon restarts the snap-back countdown.
+        if (spreadActiveRef.current) armSpreadTimer();
         const target: HoverTarget = { kind: "edge", index: w.edgeIdx };
         const iconPt = map.latLngToContainerPoint([posLat, posLng]);
         const rect = map.getContainer().getBoundingClientRect();

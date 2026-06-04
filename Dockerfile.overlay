@@ -8,6 +8,10 @@
 #
 # _BASE_IMAGE must be the exact (digest-pinned) image currently serving prod.
 
+# Declared before the first FROM so it's in scope for the second stage's FROM
+# (Docker only substitutes a FROM from ARGs that precede the first FROM).
+ARG BASE_IMAGE
+
 FROM node:20-alpine AS client-builder
 WORKDIR /app
 COPY client-react/package.json client-react/package-lock.json ./
@@ -15,7 +19,6 @@ RUN npm ci
 COPY client-react/ ./
 RUN npm run build
 
-ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 WORKDIR /app
 
