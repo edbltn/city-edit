@@ -63,8 +63,8 @@ _PBF_FALLBACKS = {
 # (connect, read) timeouts: a short connect timeout fails fast over to the fallback
 # when a host is silently dropping connections; the read window stays generous for
 # large (~1GB) regional extracts.
-_PBF_TIMEOUT = (30, 600)
-_PBF_ATTEMPTS = 3
+_PBF_TIMEOUT = (15, 600)
+_PBF_ATTEMPTS = 2
 
 
 def _stream_pbf(url: str, tmp: Path) -> None:

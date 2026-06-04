@@ -32,7 +32,8 @@ RUN mkdir -p osm_data && \
     python refresh_osm.py --region nyc --force && \
     python refresh_osm.py --region sf --force && \
     python refresh_osm.py --region chicago --force && \
-    python refresh_osm.py --region dc --force
+    python refresh_osm.py --region dc --force && \
+    rm -f osm_data/*/source.osm.pbf
 
 COPY --from=client-builder /app/dist /var/www/html/
 

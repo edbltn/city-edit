@@ -71,7 +71,7 @@ steps:
 
 # Building three city walk graphs (osmnx) sequentially exceeds the default
 # 10-minute build timeout.
-timeout: '3600s'
+timeout: '7200s'
 
 options:
   # Building the full NYC walk graph (osmnx) is memory-hungry; the default
