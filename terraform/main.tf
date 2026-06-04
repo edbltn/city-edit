@@ -314,6 +314,13 @@ resource "google_cloud_run_service" "app" {
           }
         }
 
+        # Private bucket of map previews; Flask streams /previews/<slug>.png from
+        # here (see serve_preview in app.py).
+        env {
+          name  = "PREVIEW_BUCKET"
+          value = google_storage_bucket.previews.name
+        }
+
         resources {
           # Holds all 3 city walk graphs resident (GraphRegistry max_loaded=3).
           # python_router now drops the heavy networkx graph after load (compact
@@ -614,6 +621,15 @@ resource "google_storage_bucket_iam_member" "screenshot_writer" {
   member = "serviceAccount:${google_service_account.screenshot_sa.email}"
 }
 
+# The app (running as the default compute SA) streams previews from this private
+# bucket — the project enforces Public Access Prevention, so it can't be public.
+# Read-only is enough; the screenshot job is the only writer.
+resource "google_storage_bucket_iam_member" "app_preview_reader" {
+  bucket = google_storage_bucket.previews.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com"
+}
+
 resource "google_cloud_run_v2_job" "screenshot" {
   name     = "map-screenshot-${var.environment}"
   location = var.region
@@ -656,9 +672,9 @@ resource "google_cloud_run_v2_job_iam_member" "screenshot_invoker" {
 }
 
 resource "google_cloud_scheduler_job" "screenshot" {
-  name        = "map-screenshot-hourly-${var.environment}"
-  description = "Hourly map preview screenshot capture"
-  schedule    = "0 * * * *"
+  name        = "map-screenshot-daily-${var.environment}"
+  description = "Daily map preview screenshot capture"
+  schedule    = "0 6 * * *"
   time_zone   = "America/New_York"
   region      = var.region
 

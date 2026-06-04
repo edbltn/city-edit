@@ -103,6 +103,24 @@ cd server && source env/bin/activate && python app.py
 cd client-react && npm run dev
 ```
 
+## Connecting to the Prod Database
+
+Prod Postgres is Cloud SQL `desire-path-votes-prod` (private IP `10.39.0.3:5432`), reached via IAP through the `bastion-prod` VM. Creds are in Secret Manager (`database-url-prod`).
+
+**⚠️ Bind the tunnel to local port 5433, never 5432.** Local dev's own DB lives on `localhost:5432` (`server/.env` `DATABASE_URL` and the `docker-compose.yml` postgres port). A tunnel on `5432` shadows it, so host-run Flask silently connects to **prod**. Keep prod on 5433; never repoint `server/.env` at prod — pass the prod URL inline for the one command that needs it, and kill the tunnel when done.
+
+```bash
+# Terminal A: open the tunnel (prod → local 5433)
+gcloud compute ssh bastion-prod --zone=us-central1-a \
+  --project=google-mpf-ywspom2sxeey --tunnel-through-iap \
+  --ssh-flag="-N" --ssh-flag="-L 5433:10.39.0.3:5432"
+
+# Terminal B: connect with PROD creds via localhost:5433 (rewrites host on the fly)
+PROD_DB_URL="$(gcloud secrets versions access latest --secret=database-url-prod \
+  --project=google-mpf-ywspom2sxeey | sed -E 's#@[^/]+/#@localhost:5433/#')"
+psql "$PROD_DB_URL"
+```
+
 ---
 
 # CSS Best Practices

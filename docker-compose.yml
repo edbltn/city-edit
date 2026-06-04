@@ -31,12 +31,10 @@ services:
     build: ./osrm
     restart: unless-stopped
     mem_limit: 4g
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+    # No healthcheck: the osrm-backend runtime image ships neither curl nor wget,
+    # so the old wget-based probe could never pass and pinned the container to
+    # "unhealthy" even while it served routes fine. Flask depends_on osrm with
+    # service_started (not service_healthy), so a probe isn't required here.
 
   flask:
     build: ./server

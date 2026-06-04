@@ -1,0 +1,31 @@
+# Surgical overlay deploy: add the /previews/ bucket-proxy onto the CURRENT app
+# image (reuses baked graphs/PMTiles/client → no resnap, no client rebuild, no
+# WIP client leak). Pass the digest-pinned base via _BASE_IMAGE. See
+# Dockerfile.previews-overlay. Tags a unique build tag (for a digest-pinned
+# deploy) plus :latest.
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'BASE_IMAGE=${_BASE_IMAGE}'
+      - '-f'
+      - 'Dockerfile.previews-overlay'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:previews-proxy'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app']
+
+timeout: '1800s'
+
+substitutions:
+  _REGION: us-central1
+  _BASE_IMAGE: ''
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:previews-proxy'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'

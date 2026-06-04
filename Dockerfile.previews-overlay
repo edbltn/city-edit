@@ -1,0 +1,15 @@
+# Surgical overlay — adds the /previews/ bucket-proxy without rebuilding anything.
+#
+# Reuses the CURRENT app image wholesale (baked graphs, PMTiles, built client,
+# Python venv) and overlays only app.py (the new serve_preview route) and the
+# nginx config (the new /previews/ location). The client is NOT rebuilt, so the
+# uncommitted client WIP on this branch never ships. Edge ids are untouched, so
+# no vote resnap. Builds in seconds.
+#
+# _BASE_IMAGE must be the digest currently serving prod.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+WORKDIR /app
+
+COPY server/app.py ./app.py
+COPY deploy/nginx-cloudrun.conf /etc/nginx/nginx.conf

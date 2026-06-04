@@ -11,6 +11,9 @@ services:
     image: node:20-alpine
     working_dir: /app
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    # In-container Vite reaches Flask by its compose service name, not localhost.
+    environment:
+      - VITE_API_PROXY=http://flask:5001
     ports:
       - "3000:3000"
     volumes:
