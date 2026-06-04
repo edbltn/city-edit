@@ -190,6 +190,48 @@ resource "google_secret_manager_secret_iam_member" "cloud_run_db_access" {
   member    = "serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com"
 }
 
+# Admin gate token + session-signing key. Previously set out-of-band via
+# `gcloud run services update --update-env-vars`, which made a plain
+# `terraform apply` silently DROP them (breaking admin endpoints and
+# invalidating every passcode session). Managing them here keeps apply safe.
+resource "google_secret_manager_secret" "admin_token" {
+  secret_id = "admin-token-${var.environment}"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_version" "admin_token" {
+  secret      = google_secret_manager_secret.admin_token.id
+  secret_data = var.admin_token
+}
+
+resource "google_secret_manager_secret" "secret_key" {
+  secret_id = "secret-key-${var.environment}"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_version" "secret_key" {
+  secret      = google_secret_manager_secret.secret_key.id
+  secret_data = var.secret_key
+}
+
+resource "google_secret_manager_secret_iam_member" "cloud_run_admin_token_access" {
+  secret_id = google_secret_manager_secret.admin_token.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com"
+}
+
+resource "google_secret_manager_secret_iam_member" "cloud_run_secret_key_access" {
+  secret_id = google_secret_manager_secret.secret_key.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com"
+}
+
 # Merged OSRM routing service.
 #
 # One routed instance serves every city from a single baked-in dataset (NYC +
@@ -321,13 +363,34 @@ resource "google_cloud_run_service" "app" {
           value = google_storage_bucket.previews.name
         }
 
+        env {
+          name = "ADMIN_TOKEN"
+          value_from {
+            secret_key_ref {
+              name = google_secret_manager_secret.admin_token.secret_id
+              key  = "latest"
+            }
+          }
+        }
+
+        env {
+          name = "SECRET_KEY"
+          value_from {
+            secret_key_ref {
+              name = google_secret_manager_secret.secret_key.secret_id
+              key  = "latest"
+            }
+          }
+        }
+
         resources {
-          # Holds all 3 city walk graphs resident (GraphRegistry max_loaded=3).
-          # python_router now drops the heavy networkx graph after load (compact
-          # numpy arrays instead) and builds rustworkx only on the OSRM-fallback
-          # path, so all three cities + vote bodies measure ~4-5Gi resident
-          # (was ~16Gi → OOM). 8Gi leaves headroom for the load transient and
-          # pairs with >=2 vCPU per Cloud Run's CPU/memory rules.
+          # Holds all 4 city walk graphs (nyc/sf/chicago/dc) + the tiny station
+          # networks resident (GraphRegistry max_loaded=4+stations). python_router
+          # keeps only compact numpy arrays after load (drops the heavy networkx
+          # graph); the rustworkx OSRM-fallback representation was removed entirely,
+          # so steady-state runs below the old ~5.9Gi. 8Gi is held through the
+          # ferry-removal deploy + the 589k-vote resnap (both memory-spiky);
+          # right-size down toward ~6Gi once monitoring confirms the new peak.
           limits = {
             cpu    = "2"
             memory = "8Gi"
@@ -373,7 +436,11 @@ resource "google_cloud_run_service" "app" {
     google_artifact_registry_repository.app,
     google_vpc_access_connector.connector,
     google_secret_manager_secret_version.database_url,
-    google_secret_manager_secret_iam_member.cloud_run_db_access
+    google_secret_manager_secret_iam_member.cloud_run_db_access,
+    google_secret_manager_secret_version.admin_token,
+    google_secret_manager_secret_iam_member.cloud_run_admin_token_access,
+    google_secret_manager_secret_version.secret_key,
+    google_secret_manager_secret_iam_member.cloud_run_secret_key_access
   ]
 }
 
@@ -400,6 +467,18 @@ variable "custom_domains" {
 
 variable "db_password" {
   description = "PostgreSQL database password"
+  type        = string
+  sensitive   = true
+}
+
+variable "admin_token" {
+  description = "Token gating state-changing admin endpoints"
+  type        = string
+  sensitive   = true
+}
+
+variable "secret_key" {
+  description = "Session/passcode signing key (itsdangerous). Changing it invalidates all passcode sessions."
   type        = string
   sensitive   = true
 }
