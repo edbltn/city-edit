@@ -137,11 +137,12 @@ export async function castVotes(params: {
     }
     if (!res.ok) throw new Error(`Vote failed: ${res.status}`);
 
+    const result = await res.json();
+
     // The server may decline some edges under the per-IP abuse cap, returning
     // them in `capped` (absent from `changed`, with no count broadcast). Roll
     // back our optimistic apply for those so the heatmap/button can't show a
     // vote the server never recorded.
-    const result = await res.json();
     const declined = new Set<number>(result?.capped ?? []);
     if (declined.size > 0) {
       for (const g of groups) {
@@ -151,6 +152,21 @@ export async function castVotes(params: {
         setVotes(mode, edges, label, g.prevDir as VoteDirection | 0);
       }
     }
+
+    // At the cap the server took over an existing vote instead of adding one
+    // (`evicted`: edge → direction now owned by this device). The vote is real
+    // for us — keep the local "you voted" state — but the TOTAL didn't move, so
+    // undo the optimistic count bump (no server delta corrects it otherwise).
+    const evicted: Record<string, number> = result?.evicted ?? {};
+    for (const g of groups) {
+      const edges = g.edges.filter((e) => evicted[String(e)] !== undefined);
+      if (edges.length === 0) continue;
+      dispatchOptimistic({ mode, label, edgeIds: edges, prevDir: g.newDir, newDir: g.prevDir });
+      for (const e of edges) {
+        setVotes(mode, [e], label, evicted[String(e)] as VoteDirection | 0);
+      }
+    }
+
     return { ok: true, targetDir, changedEdges: changedEdges.filter((e) => !declined.has(e)) };
   } catch (err) {
     // Roll back the optimistic apply and the local store so a failed sync can't

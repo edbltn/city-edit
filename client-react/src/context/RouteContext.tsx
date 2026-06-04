@@ -42,6 +42,13 @@ function haversineMeters(a: [number, number], b: [number, number]): number {
   return 6_371_000 * 2 * Math.atan2(Math.sqrt(sin2), Math.sqrt(1 - sin2));
 }
 
+/** Two points are effectively the same location (within ~1m). Used to detect a
+ *  waypoint dragged onto a neighbor (e.g. snapped onto a proposal that's already
+ *  the adjacent waypoint), which would collapse a route segment to zero length. */
+function sameLatLng(a: LatLng, b: LatLng): boolean {
+  return Math.abs(a.lat - b.lat) < 1e-5 && Math.abs(a.lng - b.lng) < 1e-5;
+}
+
 /** Project point P onto segment A-B, returning the closest point and parameter t in [0,1]. */
 function projectOntoSegment(
   p: [number, number],
@@ -108,9 +115,12 @@ function segmentsFromGeometry(geometry: RouteGeometry): [number, number][][] {
   return segs;
 }
 
-// Max distance (meters) from insertion point to geometry to qualify for local splitting.
-// Beyond this, fall back to server requests (the waypoint was dragged off-route).
-const LOCAL_SPLIT_THRESHOLD_METERS = 100;
+// Max distance (meters) from the dropped point to the existing route geometry to
+// qualify for the fast, instant local geometry split (no server round-trip). The
+// split is forced to pass through the ACTUAL dropped coordinate (see below), so
+// the connector/anchor is correct even for an off-route proposal within range; a
+// far drop (> this) still falls back to server routing for a real path.
+const LOCAL_SPLIT_THRESHOLD_METERS = 30;
 
 export type ActiveTool = "start" | "end";
 
@@ -134,6 +144,9 @@ interface RouteContextValue {
   ghostWaypointIds: string[];
   splitDesirePaths: SplitDesirePath[];
   isCalculatingSplit: boolean;
+  /** Graph edge IDs of the direct (start→end) route. Combined with the split
+   *  segments to tell GraphLayer which top proposals the path passes through. */
+  routeEdgeIds: number[] | null;
   voteType: string;
   pointType: "route" | "point";
   activeTool: ActiveTool;
@@ -208,6 +221,10 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // Ref to track if we're handling point removal (skip main effect)
   const handlingRemovalRef = useRef(false);
 
+  // removePoint is defined below updateGhostWaypoint; this ref lets the latter
+  // delegate to it (delete the dragged waypoint) when a drag collapses a segment.
+  const removePointRef = useRef<(which: "start" | "end" | number) => void>(() => {});
+
   // Route version counter - increments when path changes, used to detect stale votes
   const routeVersionRef = useRef(0);
 
@@ -270,8 +287,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         .catch(() => {});
     }
     if (initial.vt) {
-      restoredVtRef.current = initial.vt;
       setVoteTypeState(initial.vt);
+      // For a route deep link the upcoming point→route transition would reset
+      // the type to the theme default; stage it so that transition keeps the
+      // link's type. A point-only link has no such transition, so the direct
+      // set above is enough (and staging would let a stale value clobber a
+      // route the user builds later).
+      if (initial.end) restoredVtRef.current = initial.vt;
     }
     cleanNavParams();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -298,46 +320,51 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController();
     splitAbortRef.current = controller;
 
-    const fetchPromises = [];
-    for (let i = 0; i < points.length - 1; i++) {
-      fetchPromises.push(
-        fetch(`${CONFIG.apiUrl}/routes`, {
+    // Compute one segment per consecutive pair, INDEPENDENTLY. A single segment
+    // that can't route (e.g. a waypoint snapped onto a proposed bike lane that
+    // isn't in the routable network) must NOT discard the whole route — it falls
+    // back to a straight connector. So we always return exactly points.length-1
+    // segments and the route always renders.
+    const fetchSegment = async (i: number): Promise<SplitDesirePath> => {
+      const a = points[i], b = points[i + 1];
+      const straight: SplitDesirePath = {
+        id: `split-${i}`,
+        segmentIndex: i,
+        geometry: { type: "LineString", coordinates: [[a.lng, a.lat], [b.lng, b.lat]] },
+        segments: [],
+        edgeIds: [],
+      };
+      try {
+        const resp = await fetch(`${CONFIG.apiUrl}/routes`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            start: [points[i].lat, points[i].lng],
-            end: [points[i + 1].lat, points[i + 1].lng],
+            start: [a.lat, a.lng],
+            end: [b.lat, b.lng],
             waypoints: [],
             map: getMapSlug(),
           }),
           signal: controller.signal,
-        })
-      );
-    }
-
-    const responses = await Promise.all(fetchPromises);
-    for (const response of responses) {
-      if (!response.ok) throw new Error("Failed to calculate split paths");
-    }
-
-    const allData = await Promise.all(responses.map(r => r.json()));
-    const splitPaths: SplitDesirePath[] = [];
-
-    for (let i = 0; i < allData.length; i++) {
-      const data = allData[i];
-      const geometry = data.route?.geometry;
-      if (geometry) {
-        splitPaths.push({
+        });
+        if (!resp.ok) return straight;
+        const data = await resp.json();
+        const geometry = data.route?.geometry;
+        if (!geometry) return straight;
+        return {
           id: `split-${i}`,
           segmentIndex: i,
           geometry,
           segments: data.desire_path_segments || [],
           edgeIds: data.edge_ids || [],
-        });
+        };
+      } catch {
+        // Abort or network error: return the straight fallback. Stale aborted
+        // batches are discarded by the caller's calcVersion check regardless.
+        return straight;
       }
-    }
+    };
 
-    return splitPaths;
+    return Promise.all(points.slice(0, -1).map((_, i) => fetchSegment(i)));
   }, []);
 
   // ============================================
@@ -442,6 +469,14 @@ export function RouteProvider({ children }: { children: ReactNode }) {
 
     suppressNextClickRef.current = true;
 
+    // Inserting onto one of the segment's own endpoints (e.g. snapping onto a
+    // proposal that's already the adjacent waypoint) would make a zero-length
+    // segment — skip the no-op insert entirely.
+    const seq = [start.coords, ...ghostWaypointsRef.current, end.coords];
+    const prev = seq[segmentIndex];
+    const next = seq[segmentIndex + 1];
+    if ((prev && sameLatLng(position, prev)) || (next && sameLatLng(position, next))) return;
+
     // Compute new waypoints from ref (always current) and sync both ref and state
     const newWaypoints = [...ghostWaypointsRef.current];
     newWaypoints.splice(segmentIndex, 0, position);
@@ -467,7 +502,21 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     if (currentGeometry) {
       const splitResult = splitGeometryAtPoint(currentGeometry, position);
       if (splitResult && splitResult.distanceMeters <= LOCAL_SPLIT_THRESHOLD_METERS) {
-        // Point is on/near the route -- split locally
+        // Point is on/near the route -- split locally (instant, no server round
+        // trip — the same fast path normal mids use). Force both halves to meet
+        // at the ACTUAL dropped coordinate (not the route projection), so a
+        // waypoint snapped to an off-route proposal still connects exactly at the
+        // proposal: the connector and drag-trail anchor are correct, and a mid
+        // inserted next to it paths from the proposal, not from the projection.
+        const conn: [number, number] = [position.lng, position.lat];
+        const firstGeom: RouteGeometry = {
+          type: "LineString",
+          coordinates: [...splitResult.first.coordinates.slice(0, -1), conn],
+        };
+        const secondGeom: RouteGeometry = {
+          type: "LineString",
+          coordinates: [conn, ...splitResult.second.coordinates.slice(1)],
+        };
         const existingPaths = splitDesirePaths.length > 0
           ? [...splitDesirePaths]
           : [];
@@ -475,15 +524,15 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         const firstHalf: SplitDesirePath = {
           id: `split-${segmentIndex}`,
           segmentIndex,
-          geometry: splitResult.first,
-          segments: segmentsFromGeometry(splitResult.first),
+          geometry: firstGeom,
+          segments: segmentsFromGeometry(firstGeom),
           edgeIds: [],
         };
         const secondHalf: SplitDesirePath = {
           id: `split-${segmentIndex + 1}`,
           segmentIndex: segmentIndex + 1,
-          geometry: splitResult.second,
-          segments: segmentsFromGeometry(splitResult.second),
+          geometry: secondGeom,
+          segments: segmentsFromGeometry(secondGeom),
           edgeIds: [],
         };
 
@@ -544,6 +593,16 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     // Compute new waypoints from ref (always current) and sync both ref and state
     const currentWaypoints = ghostWaypointsRef.current;
     if (index < 0 || index >= currentWaypoints.length) return;
+
+    // Dragged onto a sequence neighbor (e.g. snapped onto a proposal that's
+    // already the adjacent waypoint): that segment would collapse to zero length
+    // and break the recalc. Just delete the dragged waypoint instead.
+    const prev = index === 0 ? start.coords : currentWaypoints[index - 1];
+    const next = index === currentWaypoints.length - 1 ? end.coords : currentWaypoints[index + 1];
+    if ((prev && sameLatLng(position, prev)) || (next && sameLatLng(position, next))) {
+      removePointRef.current(index);
+      return;
+    }
 
     const newWaypoints = [...currentWaypoints];
     newWaypoints[index] = position;
@@ -738,10 +797,20 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     }
   }, [start.coords, end.coords, ghostWaypointIds, calculateAllSegments, calculateRoute, clearRoute]);
 
+  // Keep the ref current so updateGhostWaypoint (defined above) can delegate.
+  useEffect(() => { removePointRef.current = removePoint; }, [removePoint]);
+
   // Convenience wrappers
   const clearStart = useCallback(() => removePoint("start"), [removePoint]);
   const clearEnd = useCallback(() => removePoint("end"), [removePoint]);
   const removeGhostWaypoint = useCallback((index: number) => removePoint(index), [removePoint]);
+
+  // Switching to a point/station map (no routing) while an endpoint is set: drop
+  // the now-meaningless endpoint so we carry over only the start, as if a single
+  // point had been selected. The selected start persists across the switch.
+  useEffect(() => {
+    if (isStationNetwork && end.coords) clearEnd();
+  }, [isStationNetwork, end.coords, clearEnd]);
 
   // Edge IDs that make up the current vote target. Split paths (dragged route)
   // take precedence, then the main route's edges, then a point cast resolves the
@@ -902,10 +971,20 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   }, [theme.mode]);
 
   // ============================================
-  // Auto-update vote type when pointType changes
+  // Reset vote type only on a genuine point↔route transition
   // ============================================
+  // The reset to the theme default must fire only when the user actually
+  // switches between point and route mode — never on the initial mount or
+  // StrictMode's double-invoke, which would clobber a link-restored vote type
+  // (the ?vt= deep link) with the default. Outside a real transition the
+  // current selection is left unchanged.
+  const prevPointTypeRef = useRef(pointType);
   useEffect(() => {
-    // A URL-restored vote type wins once, so a deep link lands on its proposal.
+    if (prevPointTypeRef.current === pointType) return;
+    prevPointTypeRef.current = pointType;
+
+    // A staged vote type (a route deep link, or a proposal click that also
+    // completed a route) wins once, so it lands on its own type.
     if (restoredVtRef.current) {
       setVoteTypeState(restoredVtRef.current);
       restoredVtRef.current = null;
@@ -935,6 +1014,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       ghostWaypointIds,
       splitDesirePaths,
       isCalculatingSplit,
+      routeEdgeIds,
       voteType,
       pointType,
       activeTool,
@@ -976,6 +1056,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       ghostWaypointIds,
       splitDesirePaths,
       isCalculatingSplit,
+      routeEdgeIds,
       voteType,
       pointType,
       activeTool,

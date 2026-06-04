@@ -18,15 +18,22 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  /* Fixed selection box — never grows with the selected label. flex:none keeps
+     it from being stretched by the flex/grid topbar, and overflow:hidden caps
+     its intrinsic (max-content) contribution to the surrounding grid `auto`
+     track: without it, a long selected label's nowrap text inflates the whole
+     column and the box visibly resizes. The dropdown grows instead (below). */
+  flex: none;
   width: 290px;
   height: var(--control-height);
   padding: 0 var(--space-3);
   box-sizing: border-box;
   border: 1px solid var(--hairline);
   background: var(--paper);
+  overflow: hidden;
   cursor: pointer;
   text-align: left;
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size);
 }
 
 .vote-type-control:hover {
@@ -64,7 +71,7 @@
   border: none;
   background: transparent;
   font-family: var(--font-main);
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size);
   font-weight: 400;
   letter-spacing: 0;
   color: var(--ink);
@@ -94,7 +101,7 @@
   min-width: 0;
   padding-right: var(--space-2);
   font-family: var(--font-main);
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size);
   font-weight: 400;
   letter-spacing: 0;
   color: var(--ink);
@@ -143,8 +150,14 @@
 .vote-type-dropdown {
   position: absolute;
   top: calc(100% + var(--space-1));
+  /* Locked to the selection box's left edge and grows rightward with its
+     content. `max-width` is set inline (JS) to the gap between the box's left
+     and the viewport's right edge, so long labels extend to the screen edge
+     then ellipsize (via .vote-type-label) rather than overflowing it. */
   left: 0;
-  min-width: max(100%, 240px);
+  right: auto;
+  width: max-content;
+  min-width: 100%;
   background: var(--paper);
   border: 1px solid var(--hairline);
   overflow: hidden;
@@ -158,7 +171,7 @@
   justify-content: flex-start !important;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size);
   font-weight: 400;
   letter-spacing: 0;
   color: var(--ink);
@@ -217,22 +230,16 @@
     padding: 4px 8px;
   }
 
-  .vote-type-dropdown {
-    left: auto;
-    right: 0;
-  }
-
   .vote-type-input {
     padding: 4px 8px;
     padding-right: calc(8px + 20px);
   }
 
-  .vote-type-input,
-  .vote-type-display,
-  .vote-type-placeholder,
-  .vote-type-option {
-    font-size: 12px;
-  }
+  /* The box is full-width here, so the dropdown's base left:0 already spans it —
+     no right-alignment override needed (it stays locked to the left edge). */
+
+  /* Font size comes from --control-font-size (set once per breakpoint in
+     globals.css), shared with the mode selector and header buttons. */
 }
 
 @media (max-height: 500px) and (orientation: landscape) {
@@ -240,14 +247,6 @@
   .vote-type-control {
     width: auto;
     min-width: 140px;
-  }
-
-  .vote-type-control,
-  .vote-type-input,
-  .vote-type-display,
-  .vote-type-placeholder,
-  .vote-type-option {
-    font-size: 12px;
   }
 
   .vote-type-dropdown {

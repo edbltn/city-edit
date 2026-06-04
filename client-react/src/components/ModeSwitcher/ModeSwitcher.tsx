@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTheme, useRoute } from "../../context";
 import { iconSrc, mapHref, symbolForMap, type ThemeNavState } from "../../themes";
 import { getMapViewState } from "../../utils/mapViewState";
@@ -25,6 +25,11 @@ export const ModeSwitcher = memo(function ModeSwitcher() {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [maps, setMaps] = useState<MapItem[]>([]);
+  // Explicit width for the (left-anchored) dropdown: wide enough to show the
+  // longest map row in full, capped at the viewport's right edge (then rows
+  // ellipsize). Measured in JS because the dropdown's `.mode-options` is a
+  // vertical scroll container, which silently swallows CSS `width: max-content`.
+  const [dropdownWidth, setDropdownWidth] = useState<number>();
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -79,6 +84,45 @@ export const ModeSwitcher = memo(function ModeSwitcher() {
     });
   }, [maps, q]);
 
+  // Size the dropdown to fit the widest map row, left-anchored, capped at the
+  // viewport's right edge. A row's required width = its fixed parts (icon, votes,
+  // check, padding) + the natural text width — `scrollWidth` reports that even
+  // when the label/subtitle is currently ellipsized, so this is independent of
+  // the dropdown's present width and stays correct across resizes.
+  //
+  // Computed even while closed (the dropdown is visibility:hidden, so it's still
+  // laid out and measurable). This is deliberate: with no CSS width, an absolutely
+  // positioned dropdown shrink-to-fits to ~max-content, which flickers between the
+  // button width and the content width and made it flash/pop on open. Pinning an
+  // explicit width up front keeps it stable so opening is just the fade-in.
+  // Depends on `visible` so it recomputes when maps load or the search filters.
+  useLayoutEffect(() => {
+    const update = () => {
+      const el = ref.current;
+      if (!el) return;
+      const dropdown = el.querySelector(".mode-dropdown");
+      if (!dropdown) return;
+      const cap = Math.max(240, Math.round(window.innerWidth - el.getBoundingClientRect().left - 8));
+
+      let needed = 0;
+      el.querySelectorAll<HTMLElement>(".mode-option").forEach((opt) => {
+        const textBlock = opt.querySelector<HTMLElement>(".mode-option-text");
+        if (!textBlock) return;
+        const fixedParts = opt.clientWidth - textBlock.clientWidth; // icon + votes + check + gaps + padding
+        const label = opt.querySelector<HTMLElement>(".mode-label");
+        const sub = opt.querySelector<HTMLElement>(".mode-sub");
+        const naturalText = Math.max(label?.scrollWidth ?? 0, sub?.scrollWidth ?? 0);
+        needed = Math.max(needed, fixedParts + naturalText);
+      });
+      if (needed === 0) return; // list not rendered yet — recomputed when it arrives
+      const border = dropdown.clientWidth ? (dropdown as HTMLElement).offsetWidth - dropdown.clientWidth : 2;
+      setDropdownWidth(Math.min(Math.ceil(needed + border) + 1, cap));
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [visible]);
+
   return (
     <div ref={ref} className={`mode-selector ${isOpen ? "active" : ""}`}>
       <button
@@ -93,7 +137,11 @@ export const ModeSwitcher = memo(function ModeSwitcher() {
         <span className="mode-caret" aria-hidden><span className="caret-down" /></span>
       </button>
 
-      <div className="mode-dropdown" role="listbox">
+      <div
+        className="mode-dropdown"
+        role="listbox"
+        style={dropdownWidth ? { width: dropdownWidth } : undefined}
+      >
         <input
           ref={inputRef}
           className="mode-search"

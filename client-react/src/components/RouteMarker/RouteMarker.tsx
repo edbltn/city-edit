@@ -22,16 +22,19 @@ interface RouteMarkerProps {
   onDragStart?: () => void;
   onDragFinish?: () => void;
   onDelete?: () => void;
+  /** Overrides the tap/click action when set. A waypoint that sits on a top
+   *  proposal uses this to "restart the path from here" (set as the new start &
+   *  clear the rest) instead of deleting — removal moves to the indicator's [x].
+   *  Drag is unaffected. Falls back to onDelete when unset (regular waypoints). */
+  onTap?: () => void;
   onOutOfBounds?: () => void;
   hidden?: boolean;
-  /** The point on the route this marker is connected to (the route endpoint it
-   *  bridges to via the dotted connector). The drag trail anchors here instead
-   *  of the marker's own offset position, so the dotted line stays rooted to the
-   *  path the marker was connected to instead of jumping when the drag begins. */
-  pathAnchor?: LatLng | null;
   /** Fires true/false as the cursor enters/leaves the marker, so the host can
    *  hide the start-placement ghost while the grab cursor is over a marker. */
   onHoverChange?: (hovering: boolean) => void;
+  /** Fires the live dragged position on every `drag` tick (desktop AND touch).
+   *  Hosts use it to light up the proposal a drop would link to. */
+  onDragMove?: (latlng: LatLng) => void;
 }
 
 // The mid-waypoint takes the active theme's selection color so the placed
@@ -50,9 +53,9 @@ const DRAG_TRAIL_STYLE: L.PolylineOptions = {
   lineCap: "round",
 };
 
-export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, hidden, pathAnchor, onHoverChange }: RouteMarkerProps) {
+export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFinish, onDelete, onTap, onOutOfBounds, hidden, onHoverChange, onDragMove }: RouteMarkerProps) {
   const map = useMap();
-  const { snapToGraph, currentSnapRef, setDragging } = useGraphSnap();
+  const { snapToGraph, setDragging } = useGraphSnap();
   const markerRef = useRef<L.Marker>(null);
   const dragStartPosition = useRef<LatLng | null>(null);
   const dragTrailRef = useRef<L.Polyline | null>(null);
@@ -78,13 +81,17 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
   const selection = mapStyleForTheme(useTheme()).selection;
   const icon = useMemo(() => kiteIcon(getMarkerColor(which, selection)), [which, selection]);
 
-  // Hide/show via Leaflet DOM directly — no unmount/remount flicker
+  // When this waypoint sits on a proposal the host passes `hidden`: the fixed,
+  // tinted proposal indicator stands in, so we make the kite invisible — but keep
+  // it INTERACTIVE (the indicator above is click-through), so it's still the grab/
+  // click handle, and it reappears (a kite) while dragging so the proposal stays
+  // put and the kite is what moves.
+  const hiddenRef = useRef(hidden);
+  useEffect(() => { hiddenRef.current = hidden; }, [hidden]);
+  const draggingRef = useRef(false);
   useEffect(() => {
     const el = markerRef.current?.getElement();
-    if (el) {
-      el.style.opacity = hidden ? "0" : "";
-      el.style.pointerEvents = hidden ? "none" : "";
-    }
+    if (el) el.style.opacity = (hidden && !draggingRef.current) ? "0" : "";
   }, [hidden]);
 
   // If the marker unmounts during an active drag (e.g. a recalc re-keys or
@@ -108,10 +115,11 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
     () => ({
       mouseover: () => { hoveredRef.current = true; onHoverChange?.(true); },
       mouseout: () => { hoveredRef.current = false; onHoverChange?.(false); },
-      // Desktop: click fires if there was no drag
+      // Desktop: click fires if there was no drag. A proposal waypoint restarts
+      // the path from here (onTap); a regular waypoint deletes (onDelete).
       click: () => {
         if (!wasDragged.current) {
-          onDelete?.();
+          (onTap ?? onDelete)?.();
         }
         wasDragged.current = false;
       },
@@ -124,22 +132,29 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
         // If touch was quick and no drag occurred, treat as tap
         const elapsed = Date.now() - touchStartTime.current;
         if (elapsed < TAP_TIMEOUT && !wasDragged.current) {
-          onDelete?.();
+          (onTap ?? onDelete)?.();
         }
       },
       dragstart: () => {
         wasDragged.current = true;
         const marker = markerRef.current;
         if (marker) {
+          // A hidden (on-proposal) waypoint reappears as a kite for the drag, so
+          // the proposal indicator stays put and the kite is what moves.
+          draggingRef.current = true;
+          const el = marker.getElement();
+          if (el) el.style.opacity = "";
           const latlng = marker.getLatLng();
           dragStartPosition.current = { lat: latlng.lat, lng: latlng.lng };
           originalSetLatLngRef.current = marker.setLatLng.bind(marker);
           (marker as any).setLatLng = function() { return this; };
 
-          // Anchor the dotted trail to the route point this marker was connected
-          // to (its previous path connection), not the marker's own offset spot.
-          // Otherwise the line visibly jumps off the path the instant you grab it.
-          const origin = pathAnchor ?? { lat: latlng.lat, lng: latlng.lng };
+          // The dotted trail is a plain rubber band: it anchors at the point the
+          // marker was grabbed (where the waypoint was) and its other end tracks
+          // the marker as it moves (below). It deliberately does NOT follow the
+          // path connection or the graph snap — both diverge from the marker when
+          // it sits on a proposal, which is what made the trail jump.
+          const origin = { lat: latlng.lat, lng: latlng.lng };
           dragTrailOriginRef.current = origin;
           // Defensive: drop any trail left over from a prior drag that didn't
           // get torn down, so trails can't stack up on the map.
@@ -155,17 +170,26 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
       drag: () => {
         const marker = markerRef.current;
         if (marker && dragTrailOriginRef.current && dragTrailRef.current) {
-          const snapped = currentSnapRef.current;
+          // Trail end follows the marker itself — the thing being dragged — not
+          // the node/edge it would snap to on drop. Keeps the dotted line glued
+          // to the kite the whole way, including over proposals.
           const latlng = marker.getLatLng();
-          const trailEnd = snapped ?? latlng;
           dragTrailRef.current.setLatLngs([
             [dragTrailOriginRef.current.lat, dragTrailOriginRef.current.lng],
-            trailEnd,
+            [latlng.lat, latlng.lng],
           ]);
+          // Report the live position (fires on touch too) for the drop-target ring.
+          onDragMove?.({ lat: latlng.lat, lng: latlng.lng });
         }
       },
       dragend: () => {
         const marker = markerRef.current;
+
+        // End the drag: re-hide the kite if it's still on a proposal (the prop
+        // hasn't updated yet; the [hidden] effect re-applies after the re-render).
+        draggingRef.current = false;
+        const el = marker?.getElement();
+        if (el) el.style.opacity = hiddenRef.current ? "0" : "";
 
         // Remove drag trail and clear drag state
         dragTrailRef.current?.remove();
@@ -222,7 +246,7 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
         onDragFinish?.();
       },
     }),
-    [map, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, snapToGraph, currentSnapRef, setDragging, pathAnchor, onHoverChange]
+    [map, onDragEnd, onDragStart, onDragFinish, onDelete, onTap, onOutOfBounds, snapToGraph, setDragging, onHoverChange, onDragMove]
   );
 
   return (

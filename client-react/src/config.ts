@@ -35,6 +35,16 @@ export const CONFIG = {
     ne: { lat: 40.9176, lon: -73.7004 },
   },
 
+  // Votable region for station networks (e.g. ebikes). These are NYC-only and
+  // their stations cluster in/around Manhattan, so the votable area — and thus
+  // the boundary scrim and pan limits — is scoped to Manhattan rather than all
+  // five boroughs. Sized to enclose every station in ebike_stations.json with a
+  // little padding. Applied over mappedBounds by applyMap for non-streets maps.
+  stationNetworkBounds: {
+    sw: { lat: 40.64, lon: -74.07 },
+    ne: { lat: 40.88, lon: -73.90 },
+  },
+
   // Zoom limits. Max is intentionally deep so short edges can be zoomed until
   // they exceed the node hit radius and become selectable (per-city value from
   // the server overrides this at bootstrap; the raster basemap upscales past

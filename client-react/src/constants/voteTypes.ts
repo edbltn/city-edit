@@ -1,6 +1,6 @@
 import type { VoteTypeSuggestion } from "../types";
 import type { Theme } from "../themes";
-import { getCurrentMap } from "../map/runtime";
+import { getCurrentMap, mapVoteTypesForPointType } from "../map/runtime";
 
 /**
  * Get suggestions for a theme filtered by point type.
@@ -23,7 +23,16 @@ export function getDefaultVoteTypeForTheme(
 ): string {
   const map = getCurrentMap();
   if (map?.voteTypes?.length) {
-    const fromMap = map.voteTypes.filter((s) => s.pointType === pointType);
+    // Suggestions-off maps with a single authored vote type lock to it in every
+    // mode (see VoteTypeSelector's frozenLabel). The pointType filter below
+    // could otherwise return nothing — e.g. a route-only type while in point
+    // mode — desyncing the committed vote type from the frozen chip and getting
+    // the cast rejected server-side (the fallback theme label isn't in the
+    // map's list). Resolve straight to the sole type so the two always agree.
+    if (!map.allowSuggestions && map.voteTypes.length === 1) {
+      return map.voteTypes[0].label;
+    }
+    const fromMap = mapVoteTypesForPointType(map, pointType);
     if (fromMap.length > 0) return fromMap[0].label;
   }
   const suggestions = getSuggestionsForTheme(theme, pointType);

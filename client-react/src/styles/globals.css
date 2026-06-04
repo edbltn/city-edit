@@ -16,6 +16,22 @@
   --font-size-md: 18px;
   --font-size-base: 19px;
 
+  /* One knob for ALL topbar control text — mode/vote selectors, their dropdown
+     options (label, subtitle, vote count, search field, empty state) and the
+     How-it-Works/Clear/Cast labels. Every control reads this token, so a
+     breakpoint resizes them together via a single `--control-font-size`
+     override instead of a per-element font list that drifts out of sync.
+     Do NOT style topbar control text with the static `--font-size-*` scale
+     tokens below: those are frozen across breakpoints, so an element using them
+     stays at desktop size while its neighbours shrink on mobile. */
+  --control-font-size: var(--font-size-sm);
+  /* Compact sibling for dense topbar fields — the address-search input, its
+     autocomplete results, and the legend coordinate/address slots. Smaller than
+     --control-font-size on desktop (data density), but converges to the SAME
+     mobile sizes so every topbar control + field shrinks together. Same rule:
+     never size these with a frozen --font-size-*; use a --control-font-size* token. */
+  --control-font-size-compact: var(--font-size-xs);
+
   /* Control Heights */
   --control-height: 44px;
 
@@ -236,7 +252,7 @@ body {
   display: grid;
   grid-template-columns: auto auto;
   gap: 0;
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size);
   color: var(--ink);
   flex-shrink: 0;
   align-self: stretch;
@@ -286,10 +302,14 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  /* As grid items wrapping flex content, min-width:0 lets them shrink instead of
+     flooring their grid track at the content's min-content — otherwise a long
+     map name / vote label could widen the column (and the fixed box with it). */
+  min-width: 0;
 }
 
 .mode-prefix-label {
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size);
   font-weight: 400;
   color: var(--ink);
   white-space: nowrap;
@@ -310,7 +330,7 @@ body {
   border: 1px solid var(--hairline);
   background: var(--paper);
   font-family: var(--font-main);
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size);
   font-weight: 400;
   letter-spacing: 0;
   color: var(--ink);
@@ -365,8 +385,18 @@ body {
 .mode-dropdown {
   position: absolute;
   top: calc(100% + var(--space-1));
+  /* Locked to the button's left edge. The actual width is set inline by JS
+     (ModeSwitcher) — wide enough for the longest row, capped at the viewport's
+     right edge, then rows ellipsize (.mode-label/.mode-sub). We deliberately do
+     NOT use `width: max-content` / leave width auto here: `.mode-options` is a
+     vertical scroll container and an absolutely positioned auto width shrink-to-
+     fits to a flickery max-content (button width ↔ content width), which made the
+     dropdown flash/pop on open. `width: 100%` is a stable button-width fallback
+     until JS pins the measured width; min-width keeps it ≥ button. */
   left: 0;
+  right: auto;
   width: 100%;
+  min-width: 100%;
   background: var(--paper);
   border: 1px solid var(--hairline);
   opacity: 0;
@@ -393,7 +423,7 @@ body {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size);
   font-weight: 400;
   letter-spacing: 0;
   color: var(--ink);
@@ -449,7 +479,7 @@ body {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size);
 }
 
 /* Tool-arming buttons in the legend (Start / End slot pickers).
@@ -535,16 +565,24 @@ body {
 }
 
 .legend-label {
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size);
   font-weight: 400;
   color: var(--ink);
 }
 
 .legend-coords {
   font-family: var(--font-main);
-  font-size: var(--font-size-xs);
+  font-size: var(--control-font-size-compact);
   color: var(--ink);
+  /* Fixed-width address slot. min-width:0 is load-bearing: as a flex child its
+     default min-width is `auto` (= min-content), and because the address is
+     `white-space: nowrap` that min-content is the *whole* address — which
+     overrides the 250px width and lets a long address expand the box and bleed
+     the whole topbar past the viewport. Flooring min-width at 0 lets the 250px
+     cap win so long addresses truncate with the ellipsis instead.
+     (The ≤1080px override swaps this for flex:1/width:auto to fill the row.) */
   width: 250px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -571,7 +609,7 @@ body {
   border: 1px solid var(--hairline);
   background: var(--paper);
   font-family: var(--font-main);
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size);
   font-weight: 400;
   letter-spacing: 0;
   color: var(--ink);
@@ -604,7 +642,7 @@ body {
 }
 
 .cast-prefix-label {
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size);
   font-weight: 400;
   color: var(--ink);
   white-space: nowrap;
@@ -907,7 +945,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 
 .autocomplete-item {
   padding: var(--space-3) 14px;
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size-compact);
   color: var(--ink);
   cursor: pointer;
   border-bottom: 1px solid var(--hairline);
@@ -1176,7 +1214,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   justify-content: center;
   gap: var(--space-2);
   padding: 8px var(--space-3);
-  font-size: var(--font-size-sm);
+  font-size: var(--control-font-size);
   font-weight: 400;
   color: var(--ink);
   border: 1px solid var(--hairline);
@@ -1220,6 +1258,8 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   :root {
     --control-height: 36px;
     --logo-width: 80px;
+    --control-font-size: 11px;
+    --control-font-size-compact: 11px;
   }
 
   .topbar {
@@ -1245,24 +1285,22 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
     text-align: left;
   }
 
-  .topbar-legend {
-    font-size: 12px;
+  /* The Start/End tools are flex grid items holding a nowrap address. A grid
+     item that is itself a flex container needs its OWN min-width:0 to shrink
+     below its content — without it the button's automatic minimum is the whole
+     address, which grows the left column and bleeds the bar past the viewport
+     when an address loads. Flooring it here lets .legend-coords truncate. */
+  .legend-item-coords {
+    min-width: 0;
   }
 
-  .legend-item,
-  .legend-label {
-    font-size: 12px;
-  }
-
+  /* Flexible (not a fixed 160px) so the address truncates and the left grid
+     column can shrink — a fixed width here forced the bar past the viewport's
+     right edge once the Cast/Clear column was always reserved. */
   .legend-coords {
-    font-size: 11px;
-    width: 160px;
-  }
-
-  .btn-header,
-  .mode-btn,
-  .mode-prefix-label {
-    font-size: 12px;
+    flex: 1;
+    width: auto;       /* override the desktop 250px so flex-basis governs */
+    min-width: 0;
   }
 
   .btn-header,
@@ -1271,37 +1309,33 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 
   .mode-icon {
-    font-size: 14px;
+    font-size: 13px;
   }
 
+  /* The Cast/Clear group stays in the DOM (just .hidden-reserve'd) with no
+     selection, so it always sizes the right column — Mode and How-it-Works keep
+     a fixed *horizontal* width instead of shrinking when Cast/Clear later
+     appear. The second row itself collapses to 0 height (no row-gap) until a
+     selection, so it pops down from the banner only when the controls show. */
   .topbar-actions {
-    gap: var(--space-2);
-    grid-template-rows: var(--control-height);
-  }
-
-  .topbar-actions > :nth-child(n+3) {
-    display: none;
+    column-gap: var(--space-2);
+    row-gap: 0;
+    grid-template-rows: var(--control-height) 0;
   }
 
   .topbar-actions.has-selection {
+    row-gap: var(--space-2);
     grid-template-rows: var(--control-height) var(--control-height);
   }
 
-  .topbar-actions.has-selection > :nth-child(n+3) {
-    display: flex;
+  /* The −/+ glyphs are self-explanatory; drop the "Cast:" label to slim the
+     control on narrow screens. */
+  .cast-prefix-label {
+    display: none;
   }
 
   .calculating-indicator {
-    font-size: 12px;
     padding: 4px 8px;
-  }
-
-  .vote-type-input,
-  .vote-type-display,
-  .vote-type-placeholder,
-  .vote-type-option,
-  .mode-option {
-    font-size: 12px;
   }
 }
 
@@ -1309,6 +1343,8 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   :root {
     --control-height: 34px;
     --logo-width: 60px;
+    --control-font-size: 10px;
+    --control-font-size-compact: 10px;
   }
 
   .topbar {
@@ -1321,26 +1357,6 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 
   .topbar h1 {
     font-size: 14px;
-  }
-
-  .topbar-legend {
-    font-size: 11px;
-  }
-
-  .legend-item,
-  .legend-label {
-    font-size: 11px;
-  }
-
-  .legend-coords {
-    font-size: 10px;
-    width: 130px;
-  }
-
-  .btn-header,
-  .mode-btn,
-  .mode-prefix-label {
-    font-size: 11px;
   }
 
   .btn-header,
@@ -1356,23 +1372,12 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   .mode-dropdown {
     width: 100%;
   }
-
-  .calculating-indicator {
-    font-size: 11px;
-  }
-
-  .vote-type-input,
-  .vote-type-display,
-  .vote-type-placeholder,
-  .vote-type-option,
-  .mode-option {
-    font-size: 11px;
-  }
 }
 
 @media (max-height: 500px) and (orientation: landscape) {
   :root {
     --control-height: 32px;
+    --control-font-size: 12px;
   }
 
   .topbar {
@@ -1396,23 +1401,12 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 
   .btn-header,
-  .mode-btn,
-  .mode-prefix-label {
-    font-size: 12px;
-  }
-
-  .btn-header,
   .mode-btn {
     padding: 4px 8px;
     white-space: nowrap;
   }
 
-  .mode-option {
-    font-size: 12px;
-  }
-
   .calculating-indicator {
-    font-size: 12px;
     padding: 4px 8px;
   }
 
@@ -1457,42 +1451,134 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   border: none !important;
 }
 
-.vote-type-indicator {
-  width: 28px;
-  height: 28px;
+/* A linked proposal is a fixed visual for its kite waypoint: click-through so the
+   draggable/removable kite RouteMarker underneath receives the pointer events. */
+.vote-type-indicator-wrapper.passthrough {
+  pointer-events: none !important;
+}
+
+/* Tiny [x] pinned to a selected proposal's top-right — removes it from the route
+   sequence (tapping the proposal itself restarts the path). Reset Leaflet's
+   default white div-icon box; the glyph below is the only visible/clickable bit. */
+.proposal-x-icon {
+  background: transparent !important;
+  border: none !important;
+}
+.proposal-x-hit {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 13px;
+  height: 13px;
+  /* Border inherits the matched proposal's selection-ring color; the role
+     modifier classes below set --x-ring (teal start / red end / mid uses --ink,
+     the global equivalent of the white/black selected ring). */
+  border: 1px solid var(--x-ring, var(--ink));
+  border-radius: var(--radius-sm);
   background: var(--paper);
-  border: 1px solid var(--hairline);
+  color: var(--ink);
   font-family: var(--font-main);
+  font-size: 9px;
+  line-height: 1;
   cursor: pointer;
-  /* Zoom-driven shrink (set on the map container by GraphLayer); selected
-     indicators override this with their own scale. */
+  pointer-events: auto;
+}
+.proposal-x-hit--start { --x-ring: var(--color-start); }
+.proposal-x-hit--end { --x-ring: var(--color-end); }
+.proposal-x-hit--mid { --x-ring: var(--ink); }
+/* Hover tint must stay OPAQUE — the box sits directly on the map, so the
+   translucent --hover-bg would make it see-through. Blend ink into paper. */
+.proposal-x-hit:hover {
+  background: color-mix(in srgb, var(--ink) 10%, var(--paper));
+}
+
+/* The indicator is one atomic SVG pin (square + downward tail) with the themed
+   icon overlaid on the square region. The pin shape, the tail, and both borders
+   are SVG strokes — no overlaid pseudo-elements — so the borders link up cleanly
+   and never clip the icon. Geometry mirrors voteTypeIcon.ts (34×42 viewBox; tail
+   tip at 17,38 = the Leaflet anchor on the location). */
+.vote-type-indicator {
+  position: relative;
+  width: 34px;
+  height: 42px;
+  cursor: pointer;
+  /* Zoom-driven shrink (set on the map container by GraphLayer). Origin is the
+     tail tip so every scale — zoom shrink, hover, selected — pivots there,
+     keeping the tip pinned on the exact location. */
   transform: scale(var(--indicator-scale, 1));
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  transform-origin: 17px 36px;
+  transition: transform 0.15s ease;
+}
+
+.vote-type-indicator-pin {
+  display: block;
+  width: 34px;
+  height: 42px;
+  overflow: visible;
+}
+.vote-type-indicator-fill { fill: var(--paper); }
+/* Outer outline (square + tail). Idle = thin hairline; pin states thicken it. */
+.vote-type-indicator-outer {
+  fill: none;
+  stroke: var(--hairline);
+  stroke-width: 1.5;
+  transition: stroke 0.15s ease, stroke-width 0.15s ease;
+}
+/* Inner square border — only shown in the double-border (pin) states. */
+.vote-type-indicator-inner {
+  display: none;
+  fill: none;
+  stroke-width: 1.5;
+}
+
+/* Themed icon / glyph, centered over the square region (its center is 17,17).
+   Sized smaller than the inner square so the border doesn't crowd it. */
+.vote-type-indicator-iconwrap {
+  position: absolute;
+  left: 17px;
+  top: 17px;
+  transform: translate(-50%, -50%);
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .vote-type-indicator:hover {
-  border-color: var(--ink);
   transform: scale(calc(var(--indicator-scale, 1) * 1.1));
 }
+.vote-type-indicator:hover .vote-type-indicator-outer {
+  stroke: var(--ink);
+}
 
-/* The currently selected (pinned) top proposal: a double border (inner border +
-   outer ring with a paper gap) so the active icon clearly stands apart from
-   hovered/idle indicators, independent of the map style's accent color. White on
-   dark map styles, black on the light ones (override below). */
+/* ── Double border (selected / start / end) ─────────────────────────────────
+   Outer outline (square + tail) and inner square, both 2px and the same color
+   so they read at equal thickness. White/black for a plain selection; teal/red
+   when the icon coincides with a start/end waypoint — the same hues as the
+   generic start/end pins, which the host hides in favor of this. is-start/is-end
+   come AFTER is-selected so the waypoint tint wins when an icon is both. */
+.vote-type-indicator.is-selected .vote-type-indicator-outer,
+.vote-type-indicator.is-start .vote-type-indicator-outer,
+.vote-type-indicator.is-end .vote-type-indicator-outer {
+  stroke-width: 1.5;
+}
+.vote-type-indicator.is-selected .vote-type-indicator-inner,
+.vote-type-indicator.is-start .vote-type-indicator-inner,
+.vote-type-indicator.is-end .vote-type-indicator-inner {
+  display: block;
+}
 .vote-type-indicator.is-selected {
-  border-color: var(--selected-ring, #fff);
-  box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px var(--selected-ring, #fff);
-  /* Keep the zoom-driven shrink, just bump it up a touch so the active icon
-     still pops, instead of overriding back to full size. */
   transform: scale(calc(var(--indicator-scale, 1) * 1.1));
 }
 
-[data-basemap="light"] .vote-type-indicator.is-selected {
-  --selected-ring: #000;
-}
+.vote-type-indicator.is-selected .vote-type-indicator-outer,
+.vote-type-indicator.is-selected .vote-type-indicator-inner { stroke: var(--selected-ring, #fff); }
+[data-basemap="light"] .vote-type-indicator.is-selected { --selected-ring: #000; }
+.vote-type-indicator.is-start .vote-type-indicator-outer,
+.vote-type-indicator.is-start .vote-type-indicator-inner { stroke: var(--color-start); }
+.vote-type-indicator.is-end .vote-type-indicator-outer,
+.vote-type-indicator.is-end .vote-type-indicator-inner { stroke: var(--color-end); }
 
 /* While a crowded cluster is fanned out, animate the marker wrapper's position
    so icons glide into (and back out of) their temporary grid. Scoped to the
@@ -1508,8 +1594,8 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 .vote-type-indicator-icon {
-  width: 20px;
-  height: 20px;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   image-rendering: auto;
 }
@@ -1631,19 +1717,28 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   white-space: normal;
 }
 
-/* The card body passes mouse events THROUGH to the map/desire-path beneath, so
-   the path's hover (e.g. the midwaypoint grab affordance) still works when the
-   card overlaps the route. Only the actual controls below re-enable pointer
-   events; their clicks are still kept off the map by disableClickPropagation on
-   the card root (events bubble up through it). */
+/* The pinned/selected modal is a SOLID interaction blocker: it must swallow every
+   click, drag, and hover so none of them reach the map underneath (clicking
+   "copy link", the body, or any padding must never re-select a segment).
+
+   This requires `pointer-events: auto` on the ROOT, not just the controls. The
+   reason is Leaflet's own click-suppression mechanism: `disableClickPropagation`
+   (applied to the card root in ProposalCard) sets a `_leaflet_disable_click`
+   flag, and Leaflet only honors it by walking DOM ancestors UP FROM `e.target`.
+   With `pointer-events: none` the card is transparent to hit-testing, so a click
+   on any non-button pixel sets `e.target` to the map canvas BELOW the card — the
+   walk never reaches the card's flag and the map `click` fires, re-selecting a
+   segment. Making the root solid keeps `e.target` inside the card, so the flag
+   is always found and the click is swallowed. (Trade-off: you can no longer grab
+   the route path through the modal — intentional; blocking takes priority.) */
 .graph-proposal-card.is-interactive {
-  pointer-events: none;
+  pointer-events: auto;
   cursor: default;
 }
 
+/* Controls stay individually selectable for text (counts, names). */
 .graph-proposal-card.is-interactive button,
 .graph-proposal-card.is-interactive .graph-vote {
-  pointer-events: auto;
   -webkit-user-select: text;
   user-select: text;
 }
@@ -1735,17 +1830,19 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   transition: background-color 120ms ease, color 120ms ease;
 }
 
-.graph-vote-cell.is-btn:hover:not(:disabled) {
+/* Hover gated behind `html:not(.hover-off)` so a tap doesn't leave the button
+   stuck in the hover tint on touch (see utils/touchHover.ts). */
+html:not(.hover-off) .graph-vote-cell.is-btn:hover:not(:disabled) {
   background: var(--hover-bg);
   color: var(--ink);
 }
 
 /* Direction-tinted on hover: cyan = up (start color), red = down (end color). */
-.graph-vote-cell.is-up.is-btn:hover:not(:disabled) {
+html:not(.hover-off) .graph-vote-cell.is-up.is-btn:hover:not(:disabled) {
   color: var(--color-start);
 }
 
-.graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
+html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
   color: var(--color-end);
 }
 
@@ -1797,11 +1894,44 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   background: var(--hover-bg);
 }
 
-/* Keep the top line clear of the copy / remove icons (up to two, ~52px). */
-.graph-proposal-card.is-interactive .graph-indicator-modal-header,
-.graph-proposal-card.is-interactive > .graph-indicator-modal-body > .graph-tooltip-name,
-.graph-proposal-card.is-interactive > .graph-indicator-modal-body > .graph-tooltip-meta {
-  padding-right: 54px;
+/* The minimize "–" glyph sits high in its em box; nudge it onto the optical
+   centre so it matches the ✕ and copy icons. */
+.graph-proposal-minimize {
+  font-size: 15px;
+  line-height: 0;
+}
+
+/* Keep the top line clear of the copy / minimize / remove icons (up to three,
+   ~78px). */
+.graph-proposal-card.is-interactive:not(.is-minimized) .graph-indicator-modal-header,
+.graph-proposal-card.is-interactive:not(.is-minimized) > .graph-indicator-modal-body > .graph-tooltip-name,
+.graph-proposal-card.is-interactive:not(.is-minimized) > .graph-indicator-modal-body > .graph-tooltip-meta {
+  padding-right: 80px;
+}
+
+/* Minimized state — the whole card collapses to a small boxed button holding
+   only the expand glyph, so a pinned selection stops covering the map. The
+   glyph inherits --ink (dark on light themes, light on dark ones). */
+.graph-proposal-card.is-minimized {
+  min-width: 0;
+  padding: 0;
+}
+
+.graph-proposal-restore {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.graph-proposal-restore:hover {
+  background: var(--hover-bg);
 }
 
 .graph-tooltip.tooltip-flipped {
@@ -1841,6 +1971,56 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .graph-tooltip-types-more {
   color: color-mix(in srgb, var(--ink) 45%, transparent);
   font-style: italic;
+}
+
+/* Phone screens: shrink the proposal/tooltip cards so a fully-loaded card fits
+   within a narrow viewport without clipping. Scales type, padding, the icon
+   glyph, and the vote-control columns down a notch. */
+@media (max-width: 600px) {
+  .graph-indicator-modal {
+    min-width: 180px;
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+
+  .graph-indicator-modal-glyph {
+    width: 24px;
+    height: 24px;
+  }
+
+  .graph-indicator-modal-icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .graph-indicator-modal-eyebrow {
+    font-size: 9px;
+  }
+
+  .graph-indicator-modal-label {
+    font-size: 10px;
+  }
+
+  .graph-indicator-modal-body {
+    font-size: 10px;
+  }
+
+  .graph-vote {
+    font-size: 10px;
+  }
+
+  .graph-vote-cell,
+  .graph-vote-net {
+    padding: 3px 5px;
+  }
+
+  .graph-vote-net {
+    min-width: calc(14px + (var(--vote-net-chars, 1) - 1) * 1ch);
+  }
+
+  .graph-vote-cell {
+    min-width: calc(26px + (var(--vote-cell-chars, 1) - 1) * 1ch);
+  }
 }
 
 

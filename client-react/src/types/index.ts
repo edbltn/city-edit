@@ -111,3 +111,11 @@ export interface VoteTypeSuggestion {
   icon: string;
   pointType: "route" | "point";
 }
+
+// A waypoint's match to a top proposal: the proposal's edge index and vote-type
+// label (the label builds the pin icon's glyph). Lives here (not in GraphLayer)
+// so the component file exports only its component (react-refresh).
+export interface ProposalMatch {
+  edgeIdx: number;
+  label: string;
+}

@@ -20,7 +20,7 @@ import { CONFIG } from "../../config";
 import { withMap, getMapSlug, passcodeHeaders, getCurrentMap } from "../../map/runtime";
 import { useWebSocketContext } from "../../context/WebSocketContext";
 import { useGraphSnap, useTheme, useHeatmap } from "../../context";
-import type { GraphData } from "../../types";
+import type { GraphData, ProposalMatch } from "../../types";
 import { makeVoteTypeIcon } from "./voteTypeIcon";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import { selectTopProposals, type VoteTypeWinner } from "./topProposals";
@@ -165,6 +165,10 @@ function resolveAddress(
 // Unified radii — used for hover, snap, pinned highlight, and tooltip lookup
 const SNAP_EDGE_PX = 4;   // hit-test radius for edges
 const SNAP_NODE_PX = 3;   // node priority radius (wins over edges when very close)
+// While a feature is pinned, a re-click within this screen distance of it keeps
+// the SAME selection rather than re-resolving to a neighbour/endpoint. Stops the
+// open card — which occludes its own icon — from drifting as you click near it.
+const STICKY_RESELECT_PX = 44;
 
 // Highlight ring dimensions — matched to the desire path SVG filter so hover
 // and pinned highlights look identical to the selected path:
@@ -409,6 +413,30 @@ function projectOntoEdge(
   return { lat: fromNode[0] + t * dy, lng: fromNode[1] + t * dx };
 }
 
+/**
+ * The representative on-graph coordinate for a resolved target: an edge's
+ * midpoint (where its indicator icon sits) or a node's position. This is the
+ * ONE place that maps a target to a point — the pinned modal uses it as both
+ * its anchor AND its React key, so the card tracks the selected FEATURE and is
+ * never positioned by the raw click coordinates.
+ */
+function targetLatLng(
+  target: HoverTarget | null,
+  data: Pick<GraphData, "nodes" | "edges"> | null
+): { lat: number; lng: number } | null {
+  if (!target || !data) return null;
+  if (target.kind === "edge") {
+    const edge = data.edges[target.index];
+    if (!edge) return null;
+    const from = data.nodes[edge[0]];
+    const to = data.nodes[edge[1]];
+    if (!from || !to) return null;
+    return { lat: (from[0] + to[0]) / 2, lng: (from[1] + to[1]) / 2 };
+  }
+  const node = data.nodes[target.index];
+  return node ? { lat: node[0], lng: node[1] } : null;
+}
+
 // ---------------------------------------------------------------------------
 // Tooltip content helper (shared by hover and pinned tooltips)
 // ---------------------------------------------------------------------------
@@ -466,11 +494,14 @@ function buildNodeAdj(topology: Pick<GraphData, "nodes" | "edges">): number[][] 
  * mirroring the same guard RouteMarker uses for its hover counter.
  */
 function IndicatorMarker({
-  position, icon, zIndexOffset, onActivate, onDeactivate, onClick,
+  position, icon, zIndexOffset, interactive = true, onActivate, onDeactivate, onClick,
 }: {
   position: [number, number];
   icon: L.DivIcon;
   zIndexOffset: number;
+  /** When false the marker is a passive visual (no events) — used for a linked
+   *  proposal so the kite waypoint underneath takes the drag/click. */
+  interactive?: boolean;
   onActivate: () => void;
   onDeactivate: () => void;
   onClick: () => void;
@@ -489,6 +520,7 @@ function IndicatorMarker({
       position={position}
       icon={icon}
       zIndexOffset={zIndexOffset}
+      interactive={interactive}
       eventHandlers={{
         mouseover: () => { hoveredRef.current = true; onActivate(); },
         mouseout: () => { hoveredRef.current = false; onDeactivate(); },
@@ -502,10 +534,33 @@ function IndicatorMarker({
 // Component
 // ---------------------------------------------------------------------------
 
+// Stable default so an omitted `ghostWaypoints` prop doesn't churn the match effect.
+const EMPTY_WAYPOINTS: { lat: number; lng: number }[] = [];
+
 interface GraphLayerProps {
   onSnap?: (pos: { lat: number; lng: number } | null) => void;
   /** When set, a tooltip is pinned at this point showing nearest node vote data. */
   pinnedPoint?: { lat: number; lng: number } | null;
+  /** The active start/end/mid waypoints. When one coincides with a top proposal,
+   *  the host renders that waypoint AS the proposal pin (and GraphLayer suppresses
+   *  its own indicator for that edge) — see `onWaypointMatch`. */
+  startPoint?: { lat: number; lng: number } | null;
+  endPoint?: { lat: number; lng: number } | null;
+  /** The mid (ghost) waypoints, so they too can match/skin onto proposals. */
+  ghostWaypoints?: { lat: number; lng: number }[];
+  /** Live position of the waypoint currently being dragged (from the marker's
+   *  `drag` event, so it updates on desktop AND touch). Drives the white/black
+   *  drop-target ring on the proposal the drop would link to. Null when idle. */
+  dragPoint?: { lat: number; lng: number } | null;
+  /** Fires when the waypoint → proposal-edge matches change. Each entry is the
+   *  matched proposal's edge index + label, or null when that waypoint isn't on a
+   *  proposal. `mids` is parallel to `ghostWaypoints`. The host tints/hides the
+   *  matching waypoint marker. */
+  onWaypointMatch?: (m: {
+    start: ProposalMatch | null;
+    end: ProposalMatch | null;
+    mids: (ProposalMatch | null)[];
+  }) => void;
   /** Called when a user clicks/taps a top-proposal indicator. Receives the
    *  edge midpoint of the indicator's segment. Hosts use this to place a
    *  start point at that location so the segment becomes selected. */
@@ -517,9 +572,13 @@ interface GraphLayerProps {
    *  (no card/highlight) so the path's own midwaypoint grab affordance isn't
    *  competed with by a graph proposal tooltip. */
   suppressHover?: boolean;
+  /** Graph edge IDs of the CURRENT rendered route (direct route, or the split
+   *  segments when there are mids). Used to highlight (not add) the top proposals
+   *  the path passes through, matched by undirected node-pair. */
+  pathEdgeIds?: number[] | null;
 }
 
-export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSelected, suppressHover = false }: GraphLayerProps) {
+export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, onWaypointMatch, onIndicatorClick, onRemoveSelected, suppressHover = false, pathEdgeIds = null }: GraphLayerProps) {
   const map = useMap();
   const { subscribeToDelta } = useWebSocketContext();
   const { setSnapFn, setResolveVoteEdgeId, setCurrentSnap, isDraggingRef: graphDraggingRef } = useGraphSnap();
@@ -646,6 +705,9 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   // from the graph — unlike resolveSelection, which always resolves to an edge.
   useEffect(() => {
     setSnapFn((m: L.Map, lat: number, lng: number) => {
+      // Proposals are sticky drop targets: a drop near one links to its midpoint.
+      const sticky = stickyProposalSnapRef.current(lat, lng);
+      if (sticky) return { lat: sticky.lat, lng: sticky.lng };
       const data = graphDataRef.current;
       if (!data) return null;
       const pt = m.latLngToContainerPoint([lat, lng]);
@@ -717,14 +779,31 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   const [currentZoom, setCurrentZoom] = useState<number>(() => map.getZoom());
   const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
 
-  // Temporary "fan out crowded icons into a grid" state. Maps a winner's
-  // legendIdx -> overridden [lat, lng] while the spread is active; null when
-  // icons sit at their natural edge midpoints. spreadActiveRef mirrors this for
-  // synchronous reads inside click handlers (state is async).
-  const [spreadPositions, setSpreadPositions] =
-    useState<Map<number, [number, number]> | null>(null);
-  const spreadActiveRef = useRef(false);
+  // "Fan out crowded icons into a grid" state. Two clusters can be fanned at
+  // once: a LOCKED spread (one of its boxes is selected, so it persists with no
+  // snap-back until the selection clears) and a TRANSIENT spread (the most
+  // recently opened cluster, which lives on a hover/snap-back timer). Each maps
+  // a winner's legendIdx -> overridden [lat, lng]; the render uses the union.
+  // Selecting a box in the transient spread promotes it to locked and collapses
+  // the old locked one. Refs mirror the state for synchronous reads in handlers.
+  type SpreadMap = Map<number, [number, number]>;
+  const [lockedSpread, setLockedSpread] = useState<SpreadMap | null>(null);
+  const [transientSpread, setTransientSpread] = useState<SpreadMap | null>(null);
+  const lockedSpreadRef = useRef<SpreadMap | null>(null);
+  const transientSpreadRef = useRef<SpreadMap | null>(null);
   const spreadTimeoutRef = useRef<number | null>(null);
+  // collapseAll is defined far below; this ref lets earlier effects call it.
+  const collapseAllRef = useRef<() => void>(() => {});
+
+  // Union of both spreads, keyed by legendIdx — the per-icon position override
+  // the render reads. Null when nothing is fanned out.
+  const spreadPositions = useMemo<SpreadMap | null>(() => {
+    if (!lockedSpread && !transientSpread) return null;
+    const merged: SpreadMap = new Map();
+    if (lockedSpread) for (const [k, v] of lockedSpread) merged.set(k, v);
+    if (transientSpread) for (const [k, v] of transientSpread) merged.set(k, v);
+    return merged;
+  }, [lockedSpread, transientSpread]);
 
   // Random tiebreak salt — stable for this page load, different next time.
   // Used so that equal-count proposals don't always favor the same labels.
@@ -770,6 +849,188 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
 
   const onRemoveSelectedRef = useRef(onRemoveSelected);
   useEffect(() => { onRemoveSelectedRef.current = onRemoveSelected; }, [onRemoveSelected]);
+
+  // Nearest "top proposal" edge to a point, by edge-midpoint distance, within a
+  // threshold (meters). The candidate set is what actually renders an indicator:
+  // every station self-edge on a station network (all stations ARE top proposals),
+  // otherwise the vote winners. Used for deep-link reconciliation (a shared point
+  // is a proposal's midpoint) and for matching a start/end waypoint to a proposal.
+  const nearestProposalEdgeIndex = useCallback((
+    lat: number, lng: number, thresholdM: number
+  ): number | null => {
+    const g = graphDataRef.current;
+    if (!g) return null;
+    const candidates = isStationNetwork
+      ? g.edges.map((_, i) => i)
+      : winners.map((w) => w.edgeIdx);
+    let best: number | null = null;
+    let bestDist = Infinity;
+    for (const edgeIdx of candidates) {
+      const edge = g.edges[edgeIdx];
+      if (!edge) continue;
+      const [fromIdx, toIdx] = edge;
+      const fromNode = g.nodes[fromIdx];
+      const toNode = g.nodes[toIdx];
+      if (!fromNode || !toNode) continue;
+      const midLat = (fromNode[0] + toNode[0]) / 2;
+      const midLng = (fromNode[1] + toNode[1]) / 2;
+      const dist = haversineMeters(lat, lng, midLat, midLng);
+      if (dist < bestDist) { bestDist = dist; best = edgeIdx; }
+    }
+    return best !== null && bestDist <= thresholdM ? best : null;
+  }, [winners, isStationNetwork]);
+
+  // Match the start/end waypoints to a coincident proposal so its icon can be
+  // tinted (teal start / red end) and the host can hide the generic marker.
+  // On a point/station network EVERY point IS a station, and the selection
+  // always snaps to the nearest one, so match with no distance limit (Infinity)
+  // — that way the redundant generic pin disappears even when the point was set
+  // by clicking the map a few metres off the station. On street maps a tight 5m
+  // limit keeps it to true coincidences (a proposal click sets the exact edge
+  // midpoint), not arbitrary nearby clicks.
+  const matchThresholdM = isStationNetwork ? Infinity : 5;
+
+  // The matched proposal (edge + label) at a point, or null. The label (the
+  // winning vote type, or the shared station label) builds the pin's glyph.
+  const proposalMatchFor = useCallback((
+    lat: number, lng: number, thresholdM: number
+  ): ProposalMatch | null => {
+    const edgeIdx = nearestProposalEdgeIndex(lat, lng, thresholdM);
+    if (edgeIdx === null) return null;
+    const label = isStationNetwork
+      ? stationLabel
+      : (winners.find((w) => w.edgeIdx === edgeIdx)?.label ?? "");
+    return { edgeIdx, label };
+  }, [nearestProposalEdgeIndex, isStationNetwork, stationLabel, winners]);
+
+  const onWaypointMatchRef = useRef(onWaypointMatch);
+  useEffect(() => { onWaypointMatchRef.current = onWaypointMatch; }, [onWaypointMatch]);
+  const [startEdgeIdx, setStartEdgeIdx] = useState<number | null>(null);
+  const [endEdgeIdx, setEndEdgeIdx] = useState<number | null>(null);
+  const [midEdgeIdxs, setMidEdgeIdxs] = useState<(number | null)[]>([]);
+  // Top proposals the current route merely PASSES THROUGH (not waypoints). They
+  // render selected (highlight only) and stay click-through so the path under
+  // them is still draggable — dragging there spawns a real mid. Recomputed
+  // reactively from winners + the path, so a vote that promotes/demotes a
+  // proposal adds/removes its highlight.
+  const [onPathEdgeSet, setOnPathEdgeSet] = useState<Set<number>>(() => new Set());
+  const startLat = startPoint?.lat ?? null;
+  const startLng = startPoint?.lng ?? null;
+  const endLat = endPoint?.lat ?? null;
+  const endLng = endPoint?.lng ?? null;
+  // Read mids via a ref + a string key so the effect re-runs on coord changes
+  // without depending on the array identity (which churns each render).
+  const ghostWaypointsRef = useRef(ghostWaypoints);
+  ghostWaypointsRef.current = ghostWaypoints;
+  const ghostKey = ghostWaypoints.map((w) => `${w.lat},${w.lng}`).join(";");
+  useEffect(() => {
+    const s = startLat !== null && startLng !== null
+      ? proposalMatchFor(startLat, startLng, matchThresholdM) : null;
+    const e = endLat !== null && endLng !== null
+      ? proposalMatchFor(endLat, endLng, matchThresholdM) : null;
+    const mids = ghostWaypointsRef.current.map(
+      (w) => proposalMatchFor(w.lat, w.lng, matchThresholdM)
+    );
+    setStartEdgeIdx(s?.edgeIdx ?? null);
+    setEndEdgeIdx(e?.edgeIdx ?? null);
+    setMidEdgeIdxs(mids.map((m) => m?.edgeIdx ?? null));
+    onWaypointMatchRef.current?.({ start: s, end: e, mids });
+    // isHeatmapLoading re-runs this once the graph/votes arrive, so a cold
+    // deep-link (waypoint set before the candidates exist) still resolves.
+  }, [startLat, startLng, endLat, endLng, ghostKey, proposalMatchFor, matchThresholdM, isHeatmapLoading]);
+
+  // Edges that host a mid waypoint (start/end are tracked separately). A linked
+  // proposal indicator stays visible as the FIXED pin for its waypoint — tinted
+  // by role and made click-through (the kite RouteMarker underneath handles the
+  // drag/click). So we don't suppress these; we tint + passthrough them.
+  const midEdgeSet = useMemo(() => {
+    const set = new Set<number>();
+    for (const m of midEdgeIdxs) if (m !== null) set.add(m);
+    return set;
+  }, [midEdgeIdxs]);
+
+  // Highlight (but do NOT add as waypoints) the top proposals the current route
+  // PASSES THROUGH. Matched by UNDIRECTED node-pair, not raw edge index: a two-way
+  // street stores each direction as its own edge, and the route often traverses
+  // the twin of the vote winner's edge (an exact edge-id intersection misses it).
+  // Reactive to winners + the path, so a vote promoting/demoting a proposal
+  // adds/removes its highlight. Waypoint proposals (start/end/mid) are excluded —
+  // those are styled by `role`. These stay click-through so the path beneath is
+  // still draggable (dragging there spawns a real mid).
+  useEffect(() => {
+    const clear = () => setOnPathEdgeSet((prev) => (prev.size ? new Set() : prev));
+    if (isStationNetwork || isHeatmapLoading) { clear(); return; }
+    if (startLat === null || endLat === null) { clear(); return; }
+    if (!pathEdgeIds || pathEdgeIds.length === 0 || winners.length === 0) { clear(); return; }
+    const g = graphDataRef.current;
+    if (!g) { clear(); return; }
+
+    const pairKey = (a: number, b: number) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+    const pathPairs = new Set<string>();
+    for (const ei of pathEdgeIds) {
+      const e = g.edges[ei];
+      if (e) pathPairs.add(pairKey(e[0], e[1]));
+    }
+    const next = new Set<number>();
+    for (const w of winners) {
+      // Skip proposals that ARE waypoints — `role` styles those.
+      if (w.edgeIdx === startEdgeIdx || w.edgeIdx === endEdgeIdx || midEdgeSet.has(w.edgeIdx)) continue;
+      const e = g.edges[w.edgeIdx];
+      if (!e) continue;
+      if (pathPairs.has(pairKey(e[0], e[1]))) next.add(w.edgeIdx);
+    }
+    setOnPathEdgeSet((prev) => {
+      if (prev.size === next.size && [...next].every((x) => prev.has(x))) return prev;
+      return next;
+    });
+  }, [startLat, startLng, endLat, endLng, pathEdgeIds, winners, startEdgeIdx, endEdgeIdx, midEdgeSet, isStationNetwork, isHeatmapLoading]);
+
+  // Pixel hit-test: is a screen point over a top-proposal ICON? Tests the icon's
+  // on-screen box (tip at the midpoint, body above). Returns the proposal's edge
+  // + exact midpoint. Pixel-based (not meters) so dropping/hovering ON the icon
+  // body links regardless of zoom — a small meters threshold missed the icon at
+  // most zooms. Street maps only.
+  const ICON_HALF_W = 21, ICON_TOP_PX = 40, ICON_BOTTOM_PX = 10;
+  const proposalIconAt = useCallback((pt: L.Point): { edgeIdx: number; lat: number; lng: number } | null => {
+    if (isStationNetwork) return null;
+    const g = graphDataRef.current;
+    if (!g) return null;
+    let best: { edgeIdx: number; lat: number; lng: number } | null = null;
+    let bestD = Infinity;
+    for (const w of winnersRef.current) {
+      const edge = g.edges[w.edgeIdx];
+      if (!edge) continue;
+      const a = g.nodes[edge[0]], b = g.nodes[edge[1]];
+      if (!a || !b) continue;
+      const lat = (a[0] + b[0]) / 2, lng = (a[1] + b[1]) / 2;
+      const mp = map.latLngToContainerPoint([lat, lng]);
+      if (pt.x < mp.x - ICON_HALF_W || pt.x > mp.x + ICON_HALF_W
+          || pt.y < mp.y - ICON_TOP_PX || pt.y > mp.y + ICON_BOTTOM_PX) continue;
+      const dx = pt.x - mp.x, dy = pt.y - (mp.y - 18);
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = { edgeIdx: w.edgeIdx, lat, lng }; }
+    }
+    return best;
+  }, [isStationNetwork, map]);
+
+  // Sticky snap: a drag on/near a proposal icon snaps to its exact midpoint so
+  // the waypoint links cleanly. Consulted by the registered snapFn (the committed
+  // drop) and the mousemove drag branch (the live trail).
+  const stickyProposalSnap = useCallback(
+    (lat: number, lng: number) => proposalIconAt(map.latLngToContainerPoint([lat, lng])),
+    [proposalIconAt, map]
+  );
+  const stickyProposalSnapRef = useRef(stickyProposalSnap);
+  useEffect(() => { stickyProposalSnapRef.current = stickyProposalSnap; }, [stickyProposalSnap]);
+
+  // The proposal a current waypoint drag would link to → its white/black
+  // drop-target ring. Derived from the host-reported live drag position
+  // (`dragPoint`), which the marker emits on its `drag` event on BOTH desktop and
+  // touch — so the affordance works on mobile (a mousemove source would not).
+  const dropTargetEdgeIdx = useMemo(
+    () => (dragPoint ? proposalIconAt(map.latLngToContainerPoint([dragPoint.lat, dragPoint.lng]))?.edgeIdx ?? null : null),
+    [dragPoint, proposalIconAt, map]
+  );
 
   // Reset icon cache + winners when theme switches (different vote namespace)
   useEffect(() => {
@@ -1460,6 +1721,17 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         // stays free when far from the graph — not resolveSelection's edge fallback.
         if (!dragging) return;
 
+        // Sticky proposal snap wins: snap the live trail to the proposal midpoint
+        // (desktop). Mirrors the registered snapFn so the trail and the committed
+        // drop agree. The drop-target ring is driven separately by `dragPoint`.
+        const sticky = stickyProposalSnapRef.current(e.latlng.lat, e.latlng.lng);
+        if (sticky) {
+          const snapPos = { lat: sticky.lat, lng: sticky.lng };
+          onSnapRef.current?.(snapPos);
+          setCurrentSnap(snapPos);
+          return;
+        }
+
         const hit = hitTest(
           data, map, e.containerPoint.x, e.containerPoint.y, e.latlng.lat, e.latlng.lng,
           edgeIndexRef.current, nodeIndexRef.current
@@ -1516,6 +1788,26 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     };
   }, [map]);
 
+  // Touch devices fire an indicator's `mouseover` (which sets the hover card and
+  // overIndicatorRef) but never the matching `mouseout`, so overIndicatorRef
+  // stays `true` and permanently short-circuits the mousemove cleanup above —
+  // leaving the hover card stuck on screen. A tap on the map itself (select,
+  // deselect, or tap-away) is an unambiguous signal to drop stale hover state;
+  // marker/modal clicks stop their own propagation, so this only fires for true
+  // map taps. Hover devices re-derive the card on the next mousemove.
+  useEffect(() => {
+    const clearStaleHover = () => {
+      overIndicatorRef.current = false;
+      if (hoverTargetRef.current) {
+        hoverTargetRef.current = null;
+        setHoverTarget(null);
+        redrawHoverHighlightRef.current();
+      }
+    };
+    map.on("click", clearStaleHover);
+    return () => { map.off("click", clearStaleHover); };
+  }, [map]);
+
   // Track pinned tooltip screen position on map pan/zoom
   const pinnedLat = pinnedPoint?.lat ?? null;
   const pinnedLng = pinnedPoint?.lng ?? null;
@@ -1524,13 +1816,25 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     if (pinnedLat === null || pinnedLng === null) {
       setPinnedScreenPos(null);
       pinnedTargetRef.current = null;
+      // Clear any pending click-override. Clicking a proposal to set it as the
+      // END pins an override here, but setting an end nulls the pinned point, so
+      // this branch runs WITHOUT the consume-and-clear below. Left set, that
+      // stale override later hijacks the single-start selection once the route is
+      // deleted back down to one point (it would resolve to the old end's edge —
+      // a phantom ring + modal on the wrong proposal).
+      pinnedEdgeOverrideRef.current = null;
       redrawHoverHighlightRef.current();
+      // Deselecting (modal "X" / "Clear", which null the pinned point) also
+      // collapses any open spread. (collapseAll via ref — declared below.)
+      if (lockedSpreadRef.current || transientSpreadRef.current) collapseAllRef.current();
       return;
     }
 
     // Resolve through the unified hierarchy. An indicator click pre-sets the
     // edge via pinnedEdgeOverrideRef (single-shot), which dominates; otherwise
     // it's node-within-radius then nearest edge — same logic as hover.
+    const hadOverride = pinnedEdgeOverrideRef.current != null;
+    const prevTarget = pinnedTargetRef.current;
     const sel = resolveSelection(pinnedLat, pinnedLng, pinnedEdgeOverrideRef.current);
     pinnedEdgeOverrideRef.current = null;
     let target = sel?.target ?? null;
@@ -1539,39 +1843,56 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     // proposal's edge midpoint), so without the click-time pinnedEdgeOverrideRef
     // a top proposal can resolve to a node (short edges at low zoom), the
     // reverse-direction twin edge, or a neighbor — none of which carry the
-    // winner's edge index, so the card reads as a regular proposal. Since the
-    // shared point IS a winner's midpoint, snap to the nearest winner midpoint
-    // when it's within a tight threshold (URL coords are truncated to ~1m, so a
-    // few meters cleanly catches the winner without hijacking unrelated links).
-    if (target?.kind !== "edge" || !winners.some((w) => w.edgeIdx === target!.index)) {
-      const gdata = graphDataRef.current;
-      if (gdata) {
-        const SNAP_THRESHOLD_M = 8;
-        let best: number | null = null;
-        let bestDist = Infinity;
-        for (const w of winners) {
-          const edge = gdata.edges[w.edgeIdx];
-          if (!edge) continue;
-          const [fromIdx, toIdx] = edge;
-          const fromNode = gdata.nodes[fromIdx];
-          const toNode = gdata.nodes[toIdx];
-          if (!fromNode || !toNode) continue;
-          const midLat = (fromNode[0] + toNode[0]) / 2;
-          const midLng = (fromNode[1] + toNode[1]) / 2;
-          const dist = haversineMeters(pinnedLat, pinnedLng, midLat, midLng);
-          if (dist < bestDist) { bestDist = dist; best = w.edgeIdx; }
-        }
-        if (best !== null && bestDist <= SNAP_THRESHOLD_M) {
-          target = { kind: "edge", index: best };
-        }
+    // proposal's edge index, so the card reads as a regular proposal. Since the
+    // shared point IS a proposal's midpoint, snap to the nearest proposal midpoint
+    // within a tight threshold (URL coords are truncated to ~1m, so a few meters
+    // cleanly catches it without hijacking unrelated links). The candidate set
+    // includes every station on a station network, where each station IS a top
+    // proposal even with no net-positive votes (so it isn't in `winners`).
+    const isProposalTarget = target?.kind === "edge"
+      && (isStationNetwork || winners.some((w) => w.edgeIdx === target!.index));
+    if (!isProposalTarget) {
+      const snapped = nearestProposalEdgeIndex(pinnedLat, pinnedLng, 8);
+      if (snapped !== null) target = { kind: "edge", index: snapped };
+    }
+
+    // Sticky reselection: each map click re-places the start waypoint (= the
+    // pinned point), so clicking the map while a card is open re-resolves the
+    // selection. Because the open card occludes its own icon, those clicks land
+    // off-centre and would otherwise flip the target to an endpoint node or a
+    // neighbouring edge, making the card appear to drift. If the new click stays
+    // within STICKY_RESELECT_PX of the currently-pinned feature (point-to-segment
+    // for edges), keep that feature. A direct indicator click (override) always
+    // wins, so you can still jump to another proposal by tapping its icon.
+    if (!hadOverride && prevTarget && target &&
+        (prevTarget.kind !== target.kind || prevTarget.index !== target.index)) {
+      const gd = graphDataRef.current;
+      const onFeature = gd && (prevTarget.kind === "edge"
+        ? projectOntoEdge(gd, prevTarget.index, pinnedLat, pinnedLng)
+        : (gd.nodes[prevTarget.index]
+            ? { lat: gd.nodes[prevTarget.index][0], lng: gd.nodes[prevTarget.index][1] }
+            : null));
+      if (onFeature) {
+        const a = map.latLngToContainerPoint([onFeature.lat, onFeature.lng]);
+        const b = map.latLngToContainerPoint([pinnedLat, pinnedLng]);
+        if (Math.hypot(a.x - b.x, a.y - b.y) <= STICKY_RESELECT_PX) target = prevTarget;
       }
     }
 
     pinnedTargetRef.current = target;
     redrawHoverHighlightRef.current();
 
+    // Anchor the modal to the resolved target's geometry (edge midpoint / node)
+    // — NOT the raw click — via the shared targetLatLng helper, the same point
+    // used for the card's React key. So the card sits on the feature's icon and
+    // only moves when the feature itself changes. Falls back to the click only
+    // if the target has no geometry.
+    const targetAnchor = targetLatLng(target, graphDataRef.current);
+    const anchorLat = targetAnchor?.lat ?? pinnedLat;
+    const anchorLng = targetAnchor?.lng ?? pinnedLng;
+
     const update = () => {
-      const pt = map.latLngToContainerPoint([pinnedLat, pinnedLng]);
+      const pt = map.latLngToContainerPoint([anchorLat, anchorLng]);
       const rect = map.getContainer().getBoundingClientRect();
       setPinnedScreenPos({ x: rect.left + pt.x, y: rect.top + pt.y - 8 });
     };
@@ -1599,7 +1920,11 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     // so a cold deep-link (point set before the graph arrives) still resolves.
     // `winners` re-triggers it so a deep-linked top proposal reconciles to its
     // winner edge once the winners list arrives (votes load after the graph).
-  }, [map, pinnedLat, pinnedLng, resolveSelection, isHeatmapLoading, winners]);
+    // `myVotesVersion` re-triggers it on a vote so a freshly promoted/demoted
+    // proposal re-resolves (consuming the pinnedEdgeOverrideRef set in
+    // castProposalVote) and the modal + icon reflect the new winner status.
+  }, [map, pinnedLat, pinnedLng, resolveSelection, isHeatmapLoading, winners,
+      isStationNetwork, nearestProposalEdgeIndex, myVotesVersion]);
 
   // -------------------------------------------------------------------------
   // Tooltip content — hover
@@ -1660,7 +1985,6 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         pinnedName = edge[2] || resolveAddress(midLat, midLng, bumpGeocode);
         pinnedVoteTypes = decodeVoteTypes((data.edge_vote_types ?? [])[pinnedTarget.index], legend);
         pinnedVoteEdgeId = pinnedTarget.index;
-        pinnedPointLatLng = { lat: midLat, lng: midLng };
       }
     } else {
       const node = data.nodes[pinnedTarget.index];
@@ -1668,9 +1992,11 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         pinnedName = resolveAddress(node[0], node[1], bumpGeocode);
         pinnedVoteTypes = decodeVoteTypes((data.node_vote_types ?? [])[pinnedTarget.index], legend);
         pinnedVoteEdgeId = nodeAdjRef.current?.[pinnedTarget.index]?.[0] ?? null;
-        pinnedPointLatLng = { lat: node[0], lng: node[1] };
       }
     }
+    // Anchor + share-link coord come from the SAME helper the position effect
+    // uses, so the card's key and its on-screen anchor can never drift apart.
+    pinnedPointLatLng = targetLatLng(pinnedTarget, data);
     // Stations carry their name on the self-edge (index == node index).
     if (isStationNetwork) pinnedName = data.edges[pinnedTarget.index]?.[2] || pinnedName;
   }
@@ -1715,21 +2041,58 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   // Build indicator markers for the top-voted segment per vote type.
   // Position = edge midpoint. Hover/click sets the same hoverTarget the
   // map mousemove handler would, so the existing tooltip lights up.
-  // Cancel any in-flight spread and snap icons back to their edge midpoints.
-  const clearSpread = useCallback(() => {
+  // Drop the .votes-spreading transition class once nothing is fanned out —
+  // deferred so the snap-back of the last cluster still animates.
+  const scheduleSpreadClassClear = useCallback(() => {
+    const container = map.getContainer();
+    window.setTimeout(() => {
+      if (!lockedSpreadRef.current && !transientSpreadRef.current) {
+        container.classList.remove("votes-spreading");
+      }
+    }, SPREAD_ANIM_MS);
+  }, [map]);
+
+  // Collapse just the transient (hover-timer) spread, leaving any locked spread
+  // open. This is what the snap-back timer fires.
+  const collapseTransient = useCallback(() => {
     if (spreadTimeoutRef.current) {
       clearTimeout(spreadTimeoutRef.current);
       spreadTimeoutRef.current = null;
     }
-    spreadActiveRef.current = false;
-    setSpreadPositions(null);
-    // Leave the transition class on briefly so the snap-back animates too.
-    const container = map.getContainer();
-    window.setTimeout(
-      () => container.classList.remove("votes-spreading"),
-      SPREAD_ANIM_MS,
-    );
-  }, [map]);
+    transientSpreadRef.current = null;
+    setTransientSpread(null);
+    scheduleSpreadClassClear();
+  }, [scheduleSpreadClassClear]);
+
+  // Cancel every spread (locked and transient) and snap all icons back. Used on
+  // pan/zoom and on deselect.
+  const collapseAll = useCallback(() => {
+    if (spreadTimeoutRef.current) {
+      clearTimeout(spreadTimeoutRef.current);
+      spreadTimeoutRef.current = null;
+    }
+    lockedSpreadRef.current = null;
+    transientSpreadRef.current = null;
+    setLockedSpread(null);
+    setTransientSpread(null);
+    scheduleSpreadClassClear();
+  }, [scheduleSpreadClassClear]);
+  useEffect(() => { collapseAllRef.current = collapseAll; }, [collapseAll]);
+
+  // Panning or zooming collapses any open spread (including a locked, persisted
+  // one) — the fanned grid was laid out for a fixed screen anchor, so moving the
+  // map is the natural "I'm done with this cluster" gesture.
+  useEffect(() => {
+    const collapse = () => {
+      if (lockedSpreadRef.current || transientSpreadRef.current) collapseAll();
+    };
+    map.on("zoomstart", collapse);
+    map.on("dragstart", collapse);
+    return () => {
+      map.off("zoomstart", collapse);
+      map.off("dragstart", collapse);
+    };
+  }, [map, collapseAll]);
 
   // Edge index of the currently selected top proposal (if any), so its icon
   // can float above the others.
@@ -1748,13 +2111,20 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     map.getContainer().style.setProperty("--indicator-scale", String(scale));
   }, [currentZoom, map]);
 
+  // Touch devices have no hover and never fire a reliable `mouseout`, so an
+  // indicator's `mouseover`-driven hover card would stick after a tap (the
+  // map-level hover handler is likewise gated on this). Mirror that gate here.
+  const canHover = useMemo(() => window.matchMedia("(hover: hover)").matches, []);
+
   const indicatorMarkers = useMemo(() => {
     const topology = topologyRef.current;
     if (!topology) return null;
 
     // Station networks: draw EVERY point as a permanent marker (a self-edge per
     // station), all sharing one icon — "as though they were top proposals". The
-    // legendIdx (== edge index) keys the marker. Streets: only the vote winners.
+    // legendIdx (== edge index) keys the marker. Streets: the vote winners. A
+    // winner that hosts a waypoint stays drawn (it's the fixed pin), just tinted
+    // + click-through (see the icon opts below).
     const source: VoteTypeWinner[] = isStationNetwork
       ? topology.edges.map((_, i) => ({ legendIdx: i, label: stationLabel, edgeIdx: i, count: 0 }))
       : winners;
@@ -1780,24 +2150,32 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       midLng: number;
     }>;
 
-    // (Re)start the snap-back countdown. Called when a cluster fans out and
-    // again each time a fanned-out icon is hovered, so the spread stays open
-    // while you're picking through it and only collapses once you move away.
+    // The snap-back countdown governs only the transient spread: it's paused
+    // while the cursor is over one of its fanned-out icons and (re)started when
+    // it leaves, so that cluster stays open as long as you hover it and collapses
+    // once you move away. The locked spread has no timer.
     const armSpreadTimer = () => {
       if (spreadTimeoutRef.current) clearTimeout(spreadTimeoutRef.current);
-      spreadTimeoutRef.current = window.setTimeout(clearSpread, SPREAD_DURATION_MS);
+      spreadTimeoutRef.current = window.setTimeout(collapseTransient, SPREAD_DURATION_MS);
+    };
+    const pauseSpreadTimer = () => {
+      if (spreadTimeoutRef.current) {
+        clearTimeout(spreadTimeoutRef.current);
+        spreadTimeoutRef.current = null;
+      }
     };
 
     // Fan a cluster of icons out into a centered grid of cells around their
-    // shared anchor point, then schedule a snap-back. Each icon's overridden
-    // position is stored by legendIdx for the render below to pick up.
+    // shared anchor point as the TRANSIENT spread, then schedule a snap-back.
+    // This replaces any prior transient spread but leaves a locked one open, so
+    // a second fanout coexists with a selected (locked) first one.
     const spreadCluster = (
       members: typeof placed,
       anchor: L.Point,
     ) => {
       const cols = Math.ceil(Math.sqrt(members.length));
       const rows = Math.ceil(members.length / cols);
-      const next = new Map<number, [number, number]>();
+      const next: SpreadMap = new Map();
       members.forEach((m, i) => {
         const col = i % cols;
         const row = Math.floor(i / cols);
@@ -1811,8 +2189,8 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       });
 
       map.getContainer().classList.add("votes-spreading");
-      spreadActiveRef.current = true;
-      setSpreadPositions(next);
+      transientSpreadRef.current = next;
+      setTransientSpread(next);
       armSpreadTimer();
     };
 
@@ -1821,13 +2199,35 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       const posLat = override ? override[0] : midLat;
       const posLng = override ? override[1] : midLng;
 
-      // The selected proposal gets a fresh, highlighted icon (never cached —
-      // only one is selected at a time and the memo rebuilds when the selection
-      // changes). All others use the shared per-label cache.
-      const isSelected = w.edgeIdx === selectedEdgeIdx;
+      // This proposal's role in the route, if any. A linked proposal is the FIXED
+      // visual for its kite waypoint: tinted by role (start=teal, end=red,
+      // mid=white/black ring) and — on street maps — click-through (`passthrough`,
+      // interactive:false) so the kite RouteMarker underneath takes the drag/click.
+      // Stations keep their indicator interactive (it IS the selection).
+      const role: "start" | "end" | "mid" | null =
+        w.edgeIdx === startEdgeIdx ? "start"
+        : w.edgeIdx === endEdgeIdx ? "end"
+        : midEdgeSet.has(w.edgeIdx) ? "mid"
+        : null;
+      // A proposal the route merely passes through (not a waypoint): highlight it
+      // and make it click-through, like a waypoint pin — but it stays out of the
+      // sequence (no [x], not addable). Click-through lets the path beneath it be
+      // dragged, which spawns a real mid.
+      const onPath = role === null && onPathEdgeSet.has(w.edgeIdx);
+      const passthrough = (role !== null || onPath) && !isStationNetwork;
+      const tint: "start" | "end" | null =
+        role === "start" ? "start" : role === "end" ? "end" : null;
+      // White/black ring: a mid waypoint's pin, an on-path proposal, the drag's
+      // drop-target affordance, or the pinned selection. (Same `is-selected`.)
+      const isSelected =
+        role === "mid" || onPath || w.edgeIdx === dropTargetEdgeIdx || w.edgeIdx === selectedEdgeIdx;
+      const isSpread = !!override;
+      // Selected/tinted/linked/spread icons are built fresh (a handful at a time,
+      // the memo rebuilds on change); the rest use the shared per-label cache.
+      // Spread icons drop the locating divot (their grid cell isn't the real spot).
       let icon: L.DivIcon;
-      if (isSelected) {
-        icon = makeVoteTypeIcon(w.label, theme.suggestions, true);
+      if (isSelected || tint || isSpread || passthrough) {
+        icon = makeVoteTypeIcon(w.label, theme.suggestions, { selected: isSelected, tint, square: isSpread, passthrough });
       } else {
         icon = iconCacheRef.current.get(w.label) ?? makeVoteTypeIcon(w.label, theme.suggestions);
         iconCacheRef.current.set(w.label, icon);
@@ -1839,8 +2239,13 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         // from this edge being a winner, so the markup matches a segment hover.
         // overIndicatorRef tells the map hover handler to yield (hierarchy #1).
         overIndicatorRef.current = true;
-        // While fanned out, hovering an icon restarts the snap-back countdown.
-        if (spreadActiveRef.current) armSpreadTimer();
+        // Hovering an icon of the transient cluster pauses its snap-back timer.
+        if (transientSpreadRef.current?.has(w.legendIdx)) pauseSpreadTimer();
+        // The hover card is a pointer-only affordance. On touch there's no
+        // mouseout to clear it, so a tap would leave it stuck and resurface it
+        // once the pinned point moves off this edge. The pinned modal is the
+        // selection UI on touch, so skip the hover card entirely there.
+        if (!canHover) return;
         const target: HoverTarget = { kind: "edge", index: w.edgeIdx };
         const iconPt = map.latLngToContainerPoint([posLat, posLng]);
         const rect = map.getContainer().getBoundingClientRect();
@@ -1855,11 +2260,26 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         hoverTargetRef.current = null;
         setHoverTarget(null);
         redrawHoverHighlightRef.current();
+        // Leaving a transient-cluster icon (re)starts its snap-back countdown.
+        // The locked cluster has no timer, so its icons don't trigger one.
+        if (transientSpreadRef.current?.has(w.legendIdx)) armSpreadTimer();
       };
 
       const handleClick = () => {
-        // When icons are already fanned out, a click selects normally.
-        if (!spreadActiveRef.current) {
+        // Station networks: the selected station is its own indicator (not a
+        // RouteMarker), so clicking the already-selected one de-selects it —
+        // matching the click-to-remove behavior proposals get on street maps.
+        if (isStationNetwork && w.edgeIdx === selectedEdgeIdx) {
+          onRemoveSelectedRef.current?.();
+          return;
+        }
+
+        // Run cluster detection for any icon that isn't part of the current
+        // spread (an icon with no override). This covers both the first click
+        // and clicking a *different* crowded cluster while one is already open
+        // — the latter should re-explode the new cluster, not just collapse the
+        // old one. Clicking a fanned-out icon (override set) selects normally.
+        if (!override) {
           const selfPt = map.latLngToContainerPoint([midLat, midLng]);
           const cluster = placed.filter(({ midLat: la, midLng: ln }) => {
             const p = map.latLngToContainerPoint([la, ln]);
@@ -1867,14 +2287,32 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
             const dy = p.y - selfPt.y;
             return dx * dx + dy * dy <= CLUSTER_RADIUS_PX * CLUSTER_RADIUS_PX;
           });
-          // Crowded: swallow this click and fan the cluster out instead.
+          // Crowded: swallow this click and fan the cluster out as the transient
+          // spread. A locked (selected) cluster stays open alongside it, so a
+          // second fanout coexists with the first until you pick a box here.
           if (cluster.length > 1) {
             spreadCluster(cluster, selfPt);
             return;
           }
         }
 
-        clearSpread();
+        // Selecting a fanned-out box promotes its cluster to the locked spread
+        // (which persists) and collapses whatever else was open: picking in the
+        // transient cluster locks it and drops the previously locked one; picking
+        // again within the locked cluster just drops any open transient. Clicking
+        // a non-fanned lone icon collapses everything.
+        if (override) {
+          const promoted = transientSpreadRef.current?.has(w.legendIdx)
+            ? transientSpreadRef.current
+            : lockedSpreadRef.current;
+          pauseSpreadTimer();
+          lockedSpreadRef.current = promoted ?? null;
+          transientSpreadRef.current = null;
+          setLockedSpread(promoted ?? null);
+          setTransientSpread(null);
+        } else {
+          collapseAll();
+        }
         activateIndicator();
         pinnedEdgeOverrideRef.current = w.edgeIdx;
         // Smart default: selecting a top proposal makes its vote type the active
@@ -1892,7 +2330,10 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
           key={w.legendIdx}
           position={[posLat, posLng]}
           icon={icon}
-          zIndexOffset={w.edgeIdx === selectedEdgeIdx ? 2000 : 1000}
+          // Fanned-out icons (those with a spread override) lift above all
+          // other markers so the exploded cluster reads as one group on top.
+          zIndexOffset={override ? 3000 : w.edgeIdx === selectedEdgeIdx ? 2000 : 1000}
+          interactive={!passthrough}
           onActivate={activateIndicator}
           onDeactivate={deactivateIndicator}
           onClick={handleClick}
@@ -1901,8 +2342,9 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     });
     // isStationNetwork/stationLabel select the marker source; isHeatmapLoading
     // re-runs once topology+votes arrive so stations appear even with zero votes.
-  }, [winners, currentZoom, map, spreadPositions, clearSpread, selectedEdgeIdx,
-      isStationNetwork, stationLabel, isHeatmapLoading]);
+  }, [winners, currentZoom, map, spreadPositions, collapseAll, collapseTransient,
+      selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,
+      isStationNetwork, stationLabel, isHeatmapLoading, canHover]);
 
   // Cast a directional vote on a single proposal (edge, vote type) through the
   // SAME unified path the top-bar route cast uses. castVotes() handles the
@@ -1912,6 +2354,12 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     edgeId: number | null, label: string, newDir: VoteDirection,
   ) => {
     if (edgeId == null || !label) return;
+    // A vote can promote this edge into (or out of) the top proposals. Pin the
+    // selection to the voted edge so the reconciliation (which re-runs on the
+    // myVotesVersion bump below) resolves to it exactly — rather than snapping by
+    // geometry, which can miss the now-winner edge — so the modal flips to/from
+    // "Top Proposal" and the freshly-promoted icon shows selected.
+    pinnedEdgeOverrideRef.current = edgeId;
     castVotes({ mode: themeMode, edgeIds: [edgeId], label, direction: newDir })
       .finally(() => setMyVotesVersion((v) => v + 1));
     setMyVotesVersion((v) => v + 1);
@@ -1945,6 +2393,12 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       {indicatorMarkers}
       {showPinned && pinnedScreenPos && createPortal(
         <ProposalCard
+          // Key by the selected feature's identity (kind + index), stable across
+          // pan/zoom and click jitter. Selecting a DIFFERENT feature remounts the
+          // card fresh — always expanded, never inheriting the previous
+          // selection's minimized state — while re-clicking the SAME feature
+          // keeps the existing card in place.
+          key={pinnedTarget ? `${pinnedTarget.kind}:${pinnedTarget.index}` : "pinned"}
           winner={isStationNetwork ? null : pinnedWinner}
           screenX={pinnedScreenPos.x}
           screenY={pinnedScreenPos.y}
@@ -2022,6 +2476,20 @@ function LinkIcon() {
   );
 }
 
+/** Expand glyph — two diagonal corner brackets (top-right + bottom-left),
+ *  straight and square-capped to match the app's CheckIcon aesthetic, but light
+ *  enough to read as a subtle affordance. Inherits color via currentColor. */
+function ExpandIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="square" strokeLinejoin="miter" aria-hidden="true"
+      style={{ display: "block" }}>
+      <path d="M14 4 H20 V10" />
+      <path d="M10 20 H4 V14" />
+    </svg>
+  );
+}
+
 interface ProposalCardProps {
   winner: VoteTypeWinner | null;
   screenX: number;
@@ -2059,6 +2527,10 @@ function ProposalCard({
   interactive = false, edgeId = null, mode = "", myVotesVersion, shareUrl = null, voteTypes, onVote, onRemove, onHoverChange, registerEl,
 }: ProposalCardProps) {
   const [copied, setCopied] = useState(false);
+  // Interactive cards can collapse to a small pill (icon + label + expand) so a
+  // pinned proposal stops covering the map on small screens. Hover cards never
+  // minimize (they're transient and already dismiss on mouse-out).
+  const [minimized, setMinimized] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const icon = winner ? iconForLabel(winner.label, voteTypes) : null;
   void myVotesVersion; // read so the card re-renders when my votes change
@@ -2102,7 +2574,7 @@ function ProposalCard({
       prev.originX === next.originX && prev.originY === next.originY
         ? prev : next
     );
-  }, [screenX, screenY, rows]);
+  }, [screenX, screenY, rows, minimized]);
 
   // Stop Leaflet from treating clicks/drags on the card as map interactions:
   // this keeps the modal from being cleared (a map click) and lets the user
@@ -2169,7 +2641,7 @@ function ProposalCard({
   return (
     <div
       ref={(el) => { cardRef.current = el; registerEl?.(el); }}
-      className={`graph-indicator-modal graph-proposal-card${interactive ? " is-interactive" : " is-hover"}`}
+      className={`graph-indicator-modal graph-proposal-card${interactive ? " is-interactive" : " is-hover"}${minimized ? " is-minimized" : ""}`}
       style={{
         left: pos?.left ?? screenX,
         top: pos?.top ?? screenY,
@@ -2181,70 +2653,91 @@ function ProposalCard({
       onMouseEnter={onHoverChange ? () => { reportedHoverRef.current = true; onHoverChange(true); } : undefined}
       onMouseLeave={onHoverChange ? () => { reportedHoverRef.current = false; onHoverChange(false); } : undefined}
     >
-      {winner && (
-        <div className="graph-indicator-modal-header">
-          <span className="graph-indicator-modal-glyph">
-            {icon ? (
-              <img className="graph-indicator-modal-icon" src={iconSrc(icon)} alt="" />
-            ) : (
-              <span
-                className="graph-indicator-modal-icon"
-                dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(winner.label, 22) }}
-              />
-            )}
-          </span>
-          <div className="graph-indicator-modal-headtext">
-            <div className="graph-indicator-modal-eyebrow">Top Proposal</div>
-            <div className="graph-indicator-modal-label">{winner.label}</div>
-          </div>
-        </div>
-      )}
-      {interactive && (shareUrl || onRemove) && (
-        <div className="graph-proposal-tools">
-          {shareUrl && (
-            <button
-              type="button"
-              className="graph-proposal-tool"
-              title={copied ? "Link copied!" : "Copy link"}
-              aria-label="Copy link to this proposal"
-              onClick={handleCopy}
-            >
-              {copied ? <CheckIcon size={13} /> : <LinkIcon />}
-            </button>
-          )}
-          {onRemove && (
-            <button
-              type="button"
-              className="graph-proposal-tool graph-proposal-close"
-              title="Remove"
-              aria-label="Remove this point"
-              onClick={() => onRemove()}
-            >✕</button>
-          )}
-        </div>
-      )}
-      <div className="graph-indicator-modal-body">
-        {name && <div className="graph-tooltip-name">{name}</div>}
-        <div className="graph-tooltip-meta">
-          {rows.length > 0
-            ? `${rows.length} proposal${rows.length !== 1 ? "s" : ""}`
-            : "no proposals yet"}
-        </div>
-        {rows.length > 0 && (
-          <div className="graph-proposal-rows" style={voteColumnWidths(rows)}>
-            {rows.map((row) => (
-              <div className="graph-proposal-row" key={row.label}>
-                <span className="graph-proposal-row-label">{row.label}</span>
-                <span className="graph-vote" role="group" aria-label={`${row.label} votes`}>
-                  {tally(row, -1)}
-                  <span className="graph-vote-net" title="net votes (up − down)">{row.up - row.down}</span>
-                  {tally(row, 1)}
-                </span>
+      {interactive && minimized ? (
+        <button
+          type="button"
+          className="graph-proposal-restore"
+          title="Expand proposal"
+          aria-label="Expand proposal"
+          onClick={() => setMinimized(false)}
+        >
+          <ExpandIcon size={14} />
+        </button>
+      ) : (
+        <>
+          {winner && (
+            <div className="graph-indicator-modal-header">
+              <span className="graph-indicator-modal-glyph">
+                {icon ? (
+                  <img className="graph-indicator-modal-icon" src={iconSrc(icon)} alt="" />
+                ) : (
+                  <span
+                    className="graph-indicator-modal-icon"
+                    dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(winner.label, 22) }}
+                  />
+                )}
+              </span>
+              <div className="graph-indicator-modal-headtext">
+                <div className="graph-indicator-modal-eyebrow">Top Proposal</div>
+                <div className="graph-indicator-modal-label">{winner.label}</div>
               </div>
-            ))}
+            </div>
+          )}
+          {interactive && (
+            <div className="graph-proposal-tools">
+              {shareUrl && (
+                <button
+                  type="button"
+                  className="graph-proposal-tool"
+                  title={copied ? "Link copied!" : "Copy link"}
+                  aria-label="Copy link to this proposal"
+                  onClick={handleCopy}
+                >
+                  {copied ? <CheckIcon size={13} /> : <LinkIcon />}
+                </button>
+              )}
+              <button
+                type="button"
+                className="graph-proposal-tool graph-proposal-minimize"
+                title="Minimize"
+                aria-label="Minimize this proposal"
+                onClick={() => setMinimized(true)}
+              >–</button>
+              {onRemove && (
+                <button
+                  type="button"
+                  className="graph-proposal-tool graph-proposal-close"
+                  title="Remove"
+                  aria-label="Remove this point"
+                  onClick={() => onRemove()}
+                >✕</button>
+              )}
+            </div>
+          )}
+          <div className="graph-indicator-modal-body">
+            {name && <div className="graph-tooltip-name">{name}</div>}
+            <div className="graph-tooltip-meta">
+              {rows.length > 0
+                ? `${rows.length} proposal${rows.length !== 1 ? "s" : ""}`
+                : "no proposals yet"}
+            </div>
+            {rows.length > 0 && (
+              <div className="graph-proposal-rows" style={voteColumnWidths(rows)}>
+                {rows.map((row) => (
+                  <div className="graph-proposal-row" key={row.label}>
+                    <span className="graph-proposal-row-label">{row.label}</span>
+                    <span className="graph-vote" role="group" aria-label={`${row.label} votes`}>
+                      {tally(row, -1)}
+                      <span className="graph-vote-net" title="net votes (up − down)">{row.up - row.down}</span>
+                      {tally(row, 1)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }

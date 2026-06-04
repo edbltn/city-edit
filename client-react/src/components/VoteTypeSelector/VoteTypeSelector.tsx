@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect, useRef, memo } from "react";
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, memo } from "react";
 import { useRoute, useTheme, useMap } from "../../context";
 import { getSuggestionsForTheme } from "../../constants/voteTypes";
+import { mapVoteTypesForPointType } from "../../map/runtime";
 import { iconSrc, iconForLabel } from "../../themes";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import { CheckIcon } from "../CheckIcon";
@@ -14,6 +15,9 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  // Upper bound for the (left-anchored) dropdown so it grows to the viewport's
+  // right edge then ellipsizes, never overflowing. Measured from the box's left.
+  const [dropdownMaxWidth, setDropdownMaxWidth] = useState<number>();
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const inputValueRef = useRef("");
@@ -22,7 +26,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
 
   // Prefer the resolved map's server-provided vote-type list; fall back to theme.
   const suggestions = map?.voteTypes?.length
-    ? map.voteTypes.filter((s) => s.pointType === pointType)
+    ? mapVoteTypesForPointType(map, pointType)
     : getSuggestionsForTheme(theme, pointType);
 
   const inputLower = inputValue.trim().toLowerCase();
@@ -48,9 +52,22 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
   const allowCustom = map ? map.allowSuggestions : true;
   const showCustomOption = allowCustom && inputLower !== "" && !hasExactMatch;
 
-  // When suggestions are off and the map offers exactly one vote type for this
-  // point type, there's nothing to choose — show a frozen chip, not a dropdown.
-  const frozenLabel = !allowCustom && suggestions.length === 1 ? suggestions[0].label : null;
+  // When suggestions are off and there's a single choice, there's nothing to
+  // pick — show a frozen chip, not a dropdown. "Single choice" covers two cases:
+  //   1. the map authored exactly one vote type overall, or
+  //   2. the pointType-filtered list happens to have one entry.
+  // Case 1 must ignore pointType: a route-only single type is filtered out of
+  // `suggestions` while in point mode (before both endpoints are set), which
+  // previously left the field unlocked until a full route was drawn. Keying the
+  // lock off the map's full list keeps it frozen in every mode.
+  const mapVoteTypes = map?.voteTypes ?? [];
+  const frozenLabel = !allowCustom
+    ? mapVoteTypes.length === 1
+      ? mapVoteTypes[0].label
+      : suggestions.length === 1
+        ? suggestions[0].label
+        : null
+    : null;
 
   const options = [
     ...filteredSuggestions.map((s) => ({
@@ -73,6 +90,23 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
   useEffect(() => {
     setHighlightedIndex(0);
   }, [inputValue]);
+
+  // Cap the dropdown at the viewport's right edge: its CSS width is `max-content`
+  // (grows with the longest label), so without a cap a long custom suggestion
+  // could run off-screen. Measure once on open and on resize — the box itself is
+  // fixed width, so its left edge doesn't move while the dropdown is open.
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    const update = () => {
+      const el = containerRef.current;
+      if (!el) return;
+      const { left } = el.getBoundingClientRect();
+      setDropdownMaxWidth(Math.max(240, Math.round(window.innerWidth - left - 8)));
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [isOpen]);
 
   const selectOption = useCallback(
     (label: string) => {
@@ -240,7 +274,10 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
       </div>
 
       {isOpen && options.length > 0 && (
-        <div className="vote-type-dropdown">
+        <div
+          className="vote-type-dropdown"
+          style={dropdownMaxWidth ? { maxWidth: dropdownMaxWidth } : undefined}
+        >
           {options.map((option, index) => {
             const isHighlighted = index === highlightedIndex;
             const isSelected = option.label === voteType;

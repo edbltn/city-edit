@@ -1,12 +1,19 @@
 /* Searchable map (mode) switcher — builds on the base .mode-* styles in
-   globals.css, adding a search field, a scrollable list, subtitle + vote count. */
+   globals.css, adding a search field, a scrollable list, subtitle + vote count.
+
+   Font size: every text bit here (search field, option subtitle, vote count,
+   empty state) reads `--control-font-size` — the single topbar knob that each
+   breakpoint resizes in globals.css. Do NOT reach for the static `--font-size-*`
+   scale tokens: those never change at breakpoints, so they'd stay frozen while
+   the rest of the control shrinks on mobile (a vote count larger than the label
+   it sits beside). One knob, no separate path. */
 
 .mode-search {
   width: 100%;
   box-sizing: border-box;
   padding: var(--space-2) var(--space-3);
   font-family: var(--font-main);
-  font-size: var(--font-size-xs);
+  font-size: var(--control-font-size);
   color: var(--ink);
   background: rgba(212, 212, 212, 0.04);
   border: none;
@@ -42,7 +49,7 @@
 }
 
 .mode-sub {
-  font-size: var(--font-size-2xs);
+  font-size: var(--control-font-size);
   opacity: 0.5;
   white-space: nowrap;
   overflow: hidden;
@@ -50,7 +57,7 @@
 }
 
 .mode-votes {
-  font-size: var(--font-size-2xs);
+  font-size: var(--control-font-size);
   opacity: 0.55;
   margin-left: var(--space-2);
   font-variant-numeric: tabular-nums;
@@ -62,7 +69,7 @@
 
 .mode-empty {
   padding: var(--space-3);
-  font-size: var(--font-size-2xs);
+  font-size: var(--control-font-size);
   opacity: 0.5;
   text-align: center;
 }

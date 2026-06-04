@@ -14,7 +14,7 @@ function closestPointOnPath(
   map: L.Map,
   coordinates: [number, number][],
   latlng: L.LatLng,
-  thresholdPx: number = 40
+  thresholdPx: number = 24
 ): LatLng | null {
   if (coordinates.length === 0) return null;
   if (coordinates.length === 1) {

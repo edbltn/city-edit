@@ -10,7 +10,10 @@
   border-bottom: 1px solid var(--color-start);
   background: transparent;
   font-family: var(--font-main);
-  font-size: var(--font-size-xs);
+  /* Shared topbar field token (see globals.css :root). The matching autocomplete
+     results use the same token, so input + dropdown resize together on mobile —
+     do NOT reintroduce a per-breakpoint px font-size here; it will drift. */
+  font-size: var(--control-font-size-compact);
   color: var(--ink);
   outline: none;
   box-sizing: border-box;
@@ -36,10 +39,6 @@
     width: 160px;
   }
 
-  .address-search-input {
-    font-size: 11px;
-  }
-
   .address-search .autocomplete-results {
     min-width: 240px;
   }
@@ -48,9 +47,5 @@
 @media (max-width: 400px) {
   .address-search {
     width: 130px;
-  }
-
-  .address-search-input {
-    font-size: 10px;
   }
 }

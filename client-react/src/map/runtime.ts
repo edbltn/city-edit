@@ -49,6 +49,22 @@ export function getCurrentMap(): MapConfig | null {
   return current;
 }
 
+/**
+ * A map's vote types applicable to a given point type. Station networks
+ * (e.g. ebikes) only ever vote on fixed points, yet their vote types may be
+ * authored as either "route" or "point", so they ignore the pointType filter —
+ * every vote type applies. Street maps filter to the matching pointType.
+ */
+export function mapVoteTypesForPointType(
+  cfg: MapConfig | null,
+  pointType: "route" | "point"
+): MapVoteType[] {
+  if (!cfg || !cfg.voteTypes?.length) return [];
+  const isStationNetwork = (cfg.network ?? "streets") !== "streets";
+  if (isStationNetwork) return cfg.voteTypes;
+  return cfg.voteTypes.filter((s) => s.pointType === pointType);
+}
+
 export function getMapSlug(): string {
   return current?.slug || CONFIG.mapSlug || "";
 }
@@ -112,6 +128,17 @@ export function applyMap(cfg: MapConfig): void {
   current = cfg;
   CONFIG.mapSlug = cfg.slug;
   if (cfg.city) applyCityConfig(cfg.city);
+  // Station networks (ebikes) are Manhattan-clustered, so tighten the votable
+  // region — and with it the boundary scrim and pan limits — from all-NYC down
+  // to Manhattan. applyCityConfig must run first; this overrides its bounds.
+  if (cfg.network && cfg.network !== "streets") {
+    const { sw, ne } = CONFIG.stationNetworkBounds;
+    CONFIG.mappedBounds = { sw: { ...sw }, ne: { ...ne } };
+    CONFIG.nycBounds = {
+      sw: { lat: sw.lat - 0.05, lon: sw.lon - 0.08 },
+      ne: { lat: ne.lat + 0.05, lon: ne.lon + 0.08 },
+    };
+  }
   if (typeof document !== "undefined" && cfg.name) {
     document.title = `${cfg.name} — City Edit`;
   }
