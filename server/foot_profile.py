@@ -29,8 +29,14 @@ _ROUTABLE_AMENITY = frozenset({"parking", "parking_entrance"})
 _ROUTABLE_MAN_MADE = frozenset({"pier"})
 _ROUTABLE_LEISURE = frozenset({"track"})
 
-# foot.lua `route_speeds` — ferries are walkable.
-_ROUTABLE_ROUTE = frozenset({"ferry"})
+# foot.lua `route_speeds` — DELIBERATELY EMPTY: ferries are disabled (see foot.lua).
+# A ferry leg is a long straight edge over open water with no real walkable path,
+# which lets routes jump the water and breaks the client's on-path midpoint-drag
+# hit test (a long thin band that fires from clicks far off the visual route). With
+# route_speeds empty in foot.lua, OSRM no longer routes route=ferry ways, so the
+# votable topology must drop them too or it would carry edges OSRM never routes.
+# KEEP IN SYNC with osrm/foot.lua (route_speeds).
+_ROUTABLE_ROUTE = frozenset()
 
 # foot.lua access tables + hierarchy (check `foot`, then `access`).
 _ACCESS_WHITELIST = frozenset({"yes", "foot", "permissive", "designated"})

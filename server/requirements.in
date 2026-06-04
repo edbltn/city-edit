@@ -6,9 +6,9 @@ redis
 gevent
 gunicorn
 python-dotenv
-osmnx
 networkx
-rustworkx
+numpy
+scipy
 osmium
 scikit-learn
 h3

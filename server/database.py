@@ -231,7 +231,8 @@ def init_db():
                     device_id VARCHAR(16) NOT NULL,
                     ip_hash VARCHAR(16),
                     direction SMALLINT NOT NULL DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT NOW()
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
                 )
             """)
             _migrate_edge_votes(cursor)
@@ -239,6 +240,11 @@ def init_db():
             # rebuild (edge_id indices shift) via resnap_votes_for_map().
             cursor.execute("ALTER TABLE edge_votes ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION")
             cursor.execute("ALTER TABLE edge_votes ADD COLUMN IF NOT EXISTS lon DOUBLE PRECISION")
+            # updated_at = last time this device (re)voted the edge; the LRU key
+            # for the per-IP cap's eviction (evict_lru_devices_for_edges). Backfill
+            # legacy rows from created_at so seeded data keeps its original order.
+            cursor.execute("ALTER TABLE edge_votes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
+            cursor.execute("UPDATE edge_votes SET updated_at = created_at WHERE updated_at IS NULL")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_edge ON edge_votes(edge_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_vt ON edge_votes(vote_type_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_map ON edge_votes(map_slug)")
@@ -461,7 +467,8 @@ def record_edge_votes(
                    DO UPDATE SET direction = EXCLUDED.direction,
                                  ip_hash = EXCLUDED.ip_hash,
                                  lat = COALESCE(EXCLUDED.lat, edge_votes.lat),
-                                 lon = COALESCE(EXCLUDED.lon, edge_votes.lon)""",
+                                 lon = COALESCE(EXCLUDED.lon, edge_votes.lon),
+                                 updated_at = NOW()""",
                 data,
             )
             logger.info(f"[DB] Recorded {len(data)} edge votes for '{map_slug}' (dir={dir_val})")
@@ -579,6 +586,48 @@ def count_devices_per_ip_for_edges(
             return {edge_id: cnt for edge_id, cnt in cursor.fetchall()}
     except Exception as e:
         logger.error(f"[DB] Failed to count devices per ip: {e}")
+        return {}
+
+
+def evict_lru_devices_for_edges(
+    map_slug: str, edge_ids: list[int], vt_id: int, ip_hash: str,
+    new_device_id: str,
+) -> dict[int, int]:
+    """Transfer one capped vote per edge from this IP's least-recently-active
+    device to `new_device_id`, returning {edge_id: direction} for the rows moved.
+
+    The per-IP cap bounds how many distinct devices an IP may hold on an
+    edge+type. Once at the cap, a fresh device doesn't add a new vote (which
+    would let one IP inflate a total without limit) — instead it takes over the
+    oldest device's existing vote. Only the owner (device_id) and updated_at
+    change: the direction, count, and migration anchor are untouched, so the
+    total never moves. The caller guarantees `new_device_id` holds no row on
+    these edges yet, so the ownership move can't collide with the identity key.
+    """
+    if not DATABASE_URL or not edge_ids or not ip_hash:
+        return {}
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                """WITH lru AS (
+                       SELECT DISTINCT ON (edge_id) id, edge_id
+                       FROM edge_votes
+                       WHERE map_slug = %s AND vote_type_id = %s AND ip_hash = %s
+                         AND edge_id = ANY(%s) AND device_id <> %s
+                       ORDER BY edge_id, updated_at ASC NULLS FIRST, id ASC
+                   )
+                   UPDATE edge_votes ev
+                   SET device_id = %s, updated_at = NOW()
+                   FROM lru
+                   WHERE ev.id = lru.id
+                   RETURNING ev.edge_id, ev.direction""",
+                (map_slug, vt_id, ip_hash, list(edge_ids), new_device_id,
+                 new_device_id),
+            )
+            return {int(edge_id): int(direction)
+                    for edge_id, direction in cursor.fetchall()}
+    except Exception as e:
+        logger.error(f"[DB] LRU eviction failed: {e}")
         return {}
 
 

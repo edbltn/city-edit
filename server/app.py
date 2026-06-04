@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_sock import Sock
 from itsdangerous import URLSafeTimedSerializer, BadSignature
@@ -28,7 +28,7 @@ from graph_registry import GraphRegistry, OsrmRegistry, STATION_NETWORKS
 from database import (
     init_db, get_cursor, record_edge_votes, delete_edge_votes,
     get_voter_edge_direction, get_voter_edge_directions,
-    count_devices_per_ip_for_edges,
+    count_devices_per_ip_for_edges, evict_lru_devices_for_edges,
     seed_presets, list_maps, get_map, get_map_by_subdomain, slug_available,
     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,
     promote_vote_types, fetch_voted_vote_type_labels,
@@ -63,7 +63,12 @@ ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 # device_ids and re-vote the same edge — while a threshold > 1 still lets a few
 # genuine people behind one NAT/router each vote. Imports key ip_hash per-ride
 # (ip_from_voter), so they're unique on both axes and never trip this.
-MAX_DEVICES_PER_IP_PER_EDGE = int(os.environ.get("MAX_DEVICES_PER_IP_PER_EDGE", "3"))
+#
+# Past the cap a fresh device doesn't add a vote (which would let one IP inflate
+# a total without bound) — it takes over the IP's least-recently-active device
+# vote on that edge (evict_lru_devices_for_edges), so the voter's own state
+# registers the vote while the total stays put.
+MAX_DEVICES_PER_IP_PER_EDGE = int(os.environ.get("MAX_DEVICES_PER_IP_PER_EDGE", "10"))
 
 
 def _admin_authorized() -> bool:
@@ -89,8 +94,8 @@ except redis.ConnectionError as e:
 # All four cities (nyc, sf, chicago, dc) plus the station networks stay resident
 # (no cross-city reload latency). This fits comfortably under 16Gi now that
 # python_router drops the heavy networkx graph after load (compact arrays instead)
-# and rustworkx is built only on the rare OSRM-fallback path. DC's graph is small
-# (~SF size); station networks are tiny (tens of nodes).
+# and carries no routing graph at all — OSRM serves every route. DC's graph is
+# small (~SF size); station networks are tiny (tens of nodes).
 graph_registry = GraphRegistry(redis_client=redis_client, max_loaded=4 + len(STATION_NETWORKS))
 osrm_registry = OsrmRegistry()
 
@@ -706,19 +711,25 @@ def calculate_route():
 
     try:
         waypoints_tuples = [(wp[0], wp[1]) for wp in waypoints]
+        logger.info(
+            f"[ROUTE] {rmap.slug}: start={start} end={end} "
+            f"waypoints={len(waypoints_tuples)} -> OSRM"
+        )
         route = rmap.osrm.calculate_route(
             start=(start[0], start[1]), end=(end[0], end[1]),
             mode="walk", waypoints=waypoints_tuples,
         )
 
+        # OSRM is the ONLY router. The Python/Dijkstra fallback is intentionally
+        # unlinked: a failed OSRM route surfaces as a 404 (the client then draws a
+        # straight connector for that one segment) instead of being silently masked
+        # by a second routing engine with different snapping/topology. Masking is
+        # exactly what hid the proposal-midwaypoint routing failures.
         if "error" in route:
-            logger.info("[ROUTE] OSRM failed, falling back to Python router")
-            route = rmap.graph.provider.calculate_route(
-                start=(start[0], start[1]), end=(end[0], end[1]),
-                mode="walk", waypoints=waypoints_tuples,
+            logger.warning(
+                f"[ROUTE] {rmap.slug}: OSRM could not route this request "
+                f"({route.get('error')}) — returning 404 (no Python fallback)"
             )
-
-        if "error" in route:
             return jsonify(route), 404
 
         from desire_path_voting import extract_all_segments
@@ -828,14 +839,14 @@ def cast_vote():
         with _proposal_vote_lock:
             reversed_any = False
             changed: list[int] = []
-            capped: list[int] = []
+            at_cap: list[int] = []  # fresh device, IP at cap → LRU takeover below
             for eid in edge_ids:
                 prev = get_voter_edge_direction(slug, eid, vt_id, device_id)
                 if prev == direction:
                     continue
                 if (prev == 0 and direction != 0
                         and ip_device_counts.get(eid, 0) >= MAX_DEVICES_PER_IP_PER_EDGE):
-                    capped.append(eid)
+                    at_cap.append(eid)
                     continue
                 vote_store.apply_directional(
                     redis_client, slug, eid, mode_int, vt_id, direction, prev
@@ -844,9 +855,23 @@ def cast_vote():
                 if prev in (vote_store.UP, vote_store.DOWN) and direction != 0:
                     reversed_any = True
 
+            # At the cap, take over the IP's least-recently-active device vote
+            # rather than declining: ownership moves to this device (so the
+            # voter's button reflects their vote) but the direction/count are
+            # untouched (the total doesn't move). {edge_id: direction now owned}.
+            evicted = evict_lru_devices_for_edges(
+                slug, at_cap, vt_id, ip_hash, device_id
+            ) if at_cap else {}
+            # Anything still at cap with no device to take over is genuinely
+            # declined; the client rolls its optimistic vote back.
+            capped = [e for e in at_cap if e not in evicted]
+
+            if evicted:
+                logger.info(f"[VOTE:{slug}] LRU takeover on {len(evicted)} edge(s) for "
+                            f"ip={ip_hash[:8]}… (>= {MAX_DEVICES_PER_IP_PER_EDGE} devices)")
             if capped:
                 logger.info(f"[VOTE:{slug}] capped {len(capped)} edge(s) for "
-                            f"ip={ip_hash[:8]}… (>= {MAX_DEVICES_PER_IP_PER_EDGE} devices)")
+                            f"ip={ip_hash[:8]}… (no device to take over)")
             logger.info(f"[VOTE:{slug}] dir={direction} changed={len(changed)} "
                         f"vt={vt_id} ({vt_label!r}) ip={ip_hash[:8]}…")
 
@@ -875,6 +900,7 @@ def cast_vote():
         return jsonify({
             "success": True, "edge_ids": edge_ids, "changed": changed,
             "capped": capped, "direction": direction, "reversed": reversed_any,
+            "evicted": {str(eid): d for eid, d in evicted.items()},
         })
 
     except Exception as e:
@@ -1175,6 +1201,65 @@ def serve_tiles(filename):
     response.headers["Cache-Control"] = "public, max-age=604800"
     response.headers["Access-Control-Allow-Origin"] = "*"
     return response
+
+
+# ── Map preview images ───────────────────────────────────────────────────────
+# Previews are captured daily into a private GCS bucket (project enforces Public
+# Access Prevention, so objects can't be made public). nginx proxies /previews/
+# here; we stream the object using the Cloud Run service account's metadata
+# token. On any miss we return 404 so nginx falls back to the build-time baked
+# copy under /var/www/html/previews.
+PREVIEW_BUCKET = os.environ.get("PREVIEW_BUCKET", "")
+_METADATA_TOKEN_URL = (
+    "http://metadata.google.internal/computeMetadata/v1/"
+    "instance/service-accounts/default/token"
+)
+_gcs_token = {"value": "", "expires_at": 0.0}
+
+
+def _gcs_access_token() -> str | None:
+    """Cached GCP access token from the metadata server (refreshed 5min early)."""
+    now = time.time()
+    if _gcs_token["value"] and now < _gcs_token["expires_at"]:
+        return _gcs_token["value"]
+    try:
+        r = requests.get(
+            _METADATA_TOKEN_URL,
+            headers={"Metadata-Flavor": "Google"},
+            timeout=5,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except (requests.RequestException, ValueError) as e:
+        logger.warning("Could not fetch GCS access token: %s", e)
+        return None
+    _gcs_token["value"] = data["access_token"]
+    _gcs_token["expires_at"] = now + int(data.get("expires_in", 3600)) - 300
+    return _gcs_token["value"]
+
+
+@app.route("/previews/<path:name>")
+def serve_preview(name):
+    """Stream a map preview PNG from the private GCS bucket (auth via the Cloud
+    Run SA token). 404 on any miss so nginx serves the baked copy instead."""
+    if not PREVIEW_BUCKET:
+        return "", 404
+    token = _gcs_access_token()
+    if not token:
+        return "", 404
+    url = f"https://storage.googleapis.com/{PREVIEW_BUCKET}/{name}"
+    try:
+        r = requests.get(
+            url, headers={"Authorization": f"Bearer {token}"}, timeout=10
+        )
+    except requests.RequestException as e:
+        logger.warning("Preview fetch failed for %s: %s", name, e)
+        return "", 404
+    if r.status_code != 200:
+        return "", 404
+    resp = Response(r.content, mimetype=r.headers.get("Content-Type", "image/png"))
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
 
 
 @app.route("/api/graph-version", methods=["GET"])

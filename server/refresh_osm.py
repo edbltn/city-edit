@@ -2,9 +2,10 @@
 """
 Per-city OSM walk-graph builder + weekly refresh.
 
-Builds the rustworkx walk graph (via osmnx) for a given city into its own data
-directory: osm_data/<city>/walk_graph.pkl + metadata.json. OSRM routing datasets
-are built separately by the per-city OSRM containers (see docker-compose.yml).
+Builds the networkx walk graph (via pyosmium, from the same PBF + foot filter as
+OSRM) for a given city into its own data directory: osm_data/<city>/walk_graph.pkl
++ metadata.json. OSRM routing datasets are built separately by the per-city OSRM
+containers (see docker-compose.yml).
 
 Usage:
     python refresh_osm.py                      # build the default city (nyc) if missing

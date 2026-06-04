@@ -119,8 +119,13 @@ function setup()
       }
     },
 
+    -- Ferries intentionally DISABLED: a ferry leg is a single long straight edge
+    -- across open water with no real walkable path, which (a) lets routes "jump"
+    -- the water and (b) creates a long thin on-path hit band that mis-fires the
+    -- midpoint drag from clicks far off the visual route. Empty route_speeds means
+    -- WayHandlers.ferries assigns no speed, so route=ferry ways aren't routed.
+    -- KEEP IN SYNC with server/foot_profile.py (_ROUTABLE_ROUTE).
     route_speeds = {
-      ferry = 5
     },
 
     bridge_speeds = {
