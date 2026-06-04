@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import struct
 import threading
 from collections import OrderedDict
 
@@ -72,6 +73,8 @@ class CityGraph:
         self.node_pair_to_edge: dict = {}
         self.topology_json: str | None = None
         self.topology_etag: str | None = None
+        # Compact binary topology (built lazily; see topology_binary).
+        self.topology_bin: bytes | None = None
         # Lazily-built cKDTree over edge midpoints, used by the vote migration to
         # re-snap many anchors at once (kept off the hot load path / common case).
         self._edge_mid_tree: cKDTree | None = None
@@ -141,6 +144,32 @@ class CityGraph:
             f"[GRAPH] '{self.city.id}:{self.network}' loaded: {len(nodes)} nodes, "
             f"{len(edges)} edges, topology {len(topology_json) / (1024 * 1024):.1f} MB"
         )
+
+    def topology_binary(self) -> bytes:
+        """Compact little-endian binary topology — the mobile-safe wire format.
+
+        Layout: 12-byte header [magic 'GTB1', uint32 nNodes, uint32 nEdges], then
+        nNodes×2 int32 (lat, lon as degrees×1e7, ~1cm precision), then nEdges×2
+        uint32 (from_idx, to_idx). Edge names are omitted (the client reverse-
+        geocodes street tooltips instead). This exists so a phone decodes an
+        ArrayBuffer rather than JSON.parse-ing the ~150MB NYC topology string,
+        which OOM-crashes mobile Safari. Built once per load and cached; ~37MB raw
+        → ~16MB gzipped by nginx, so it clears Cloud Run's 32MB response cap. The
+        edges array index is the canonical edge id (matches /api/graph-votes)."""
+        self.ensure_loaded()
+        if self.topology_bin is None:
+            nodes, edges = self.nodes, self.edges
+            coords = np.fromiter(
+                (round(v * 1e7) for nd in nodes for v in (nd[0], nd[1])),
+                dtype="<i4", count=2 * len(nodes),
+            )
+            ends = np.fromiter(
+                (v for e in edges for v in (e[0], e[1])),
+                dtype="<u4", count=2 * len(edges),
+            )
+            header = struct.pack("<4sII", b"GTB1", len(nodes), len(edges))
+            self.topology_bin = header + coords.tobytes() + ends.tobytes()
+        return self.topology_bin
 
     def snap_point_to_edge(self, lat: float, lon: float) -> list[int]:
         """Snap a lat/lon point to the nearest graph edge via closest node."""

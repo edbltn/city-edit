@@ -1,0 +1,28 @@
+# Overlay build — for code-only deploys (no graph-builder change).
+#
+# Reuses the CURRENT app image's baked per-city graphs, PMTiles, and Python venv,
+# overlaying only the updated server code, built client, and nginx config. This
+# keeps edge ids identical to what's already deployed (so stored votes stay
+# aligned — no resnap needed) and builds in minutes instead of rebuilding every
+# city graph. Use the regular Dockerfile when the graph builder itself changes.
+#
+# _BASE_IMAGE must be the exact (digest-pinned) image currently serving prod.
+
+FROM node:20-alpine AS client-builder
+WORKDIR /app
+COPY client-react/package.json client-react/package-lock.json ./
+RUN npm ci
+COPY client-react/ ./
+RUN npm run build
+
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+WORKDIR /app
+
+# Updated backend + fixed station data (graphs/pmtiles/venv come from the base).
+COPY server/*.py ./
+COPY server/data/ ./data/
+
+# Rebuilt client + updated nginx config.
+COPY --from=client-builder /app/dist /var/www/html/
+COPY deploy/nginx-cloudrun.conf /etc/nginx/nginx.conf

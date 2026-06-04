@@ -155,3 +155,48 @@ export function passcodeHeaders(slug?: string): Record<string, string> {
   const token = s ? getPasscodeToken(s) : null;
   return token ? { "X-Map-Passcode": token } : {};
 }
+
+/**
+ * Read and strip a `?passcode=…` query param. Returns the raw passcode (or null).
+ * Lets a shareable link auto-unlock a gated map — e.g.
+ * https://ebikes.cityedit.org/?passcode=go-electric. We strip it from the address
+ * bar immediately (via replaceState) so it isn't bookmarked, re-shared, or left
+ * to re-trigger; the value is then exchanged for a token via authWithPasscode.
+ */
+export function takePasscodeParam(): string | null {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const pc = params.get("passcode");
+  if (!pc) return null;
+  params.delete("passcode");
+  const qs = params.toString();
+  const url = window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
+  try {
+    window.history.replaceState(null, "", url);
+  } catch {
+    /* ignore */
+  }
+  return pc;
+}
+
+/**
+ * Exchange a raw passcode for a session token and store it (same endpoint the
+ * PasscodeGate uses). Returns true on success so the caller can re-fetch the
+ * now-unlocked config. Never throws — a bad passcode just leaves the map locked.
+ */
+export async function authWithPasscode(slug: string, passcode: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${CONFIG.apiUrl}/maps/${encodeURIComponent(slug)}/auth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passcode: passcode.trim() }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (!data?.token) return false;
+    setPasscodeToken(slug, data.token);
+    return true;
+  } catch {
+    return false;
+  }
+}

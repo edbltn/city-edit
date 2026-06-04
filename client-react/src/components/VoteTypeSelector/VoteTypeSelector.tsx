@@ -172,13 +172,17 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
   // type and renders the colorized suggestion glyph instead.
   const displayIcon = voteType ? iconForLabel(voteType, map?.voteTypes) : null;
 
-  // Frozen state: a single, fixed vote type — render a static chip (no input,
-  // no chevron, no dropdown). The actual vote type defaults to it via
-  // getDefaultVoteTypeForTheme, so casting still works.
-  if (frozenLabel) {
-    const frozenIcon = iconForLabel(frozenLabel, map?.voteTypes);
-    return (
-      <div className="vote-type-selector vote-type-frozen" title={frozenLabel}>
+  // A single, fixed vote type renders a static chip (no input/chevron/dropdown);
+  // the vote type defaults to it via getDefaultVoteTypeForTheme, so casting works.
+  const frozenIcon = frozenLabel ? iconForLabel(frozenLabel, map?.voteTypes) : null;
+
+  return (
+    <div
+      ref={containerRef}
+      className={`vote-type-selector ${frozenLabel ? "vote-type-frozen" : isOpen ? "active" : ""}`}
+      title={frozenLabel ?? undefined}
+    >
+      {frozenLabel ? (
         <div className="vote-type-control">
           {frozenIcon ? (
             <img className="vote-type-icon-img" src={iconSrc(frozenIcon)} alt="" />
@@ -190,15 +194,8 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
           )}
           <span className="vote-type-display-text">{frozenLabel}</span>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      ref={containerRef}
-      className={`vote-type-selector ${isOpen ? "active" : ""}`}
-    >
+      ) : (
+      <>
       <div className="vote-type-control">
         <input
           ref={inputRef}
@@ -282,6 +279,8 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
             );
           })}
         </div>
+      )}
+      </>
       )}
     </div>
   );

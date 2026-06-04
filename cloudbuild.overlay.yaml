@@ -1,0 +1,26 @@
+# Fast code-only deploy: overlay updated code/client/nginx onto the CURRENT app
+# image (reusing its baked graphs → no edge-id shift, no vote resnap). Pass the
+# digest-pinned base via _BASE_IMAGE. See Dockerfile.overlay.
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'BASE_IMAGE=${_BASE_IMAGE}'
+      - '-f'
+      - 'Dockerfile.overlay'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest']
+
+timeout: '1800s'
+
+substitutions:
+  _REGION: us-central1
+  _BASE_IMAGE: ''
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'

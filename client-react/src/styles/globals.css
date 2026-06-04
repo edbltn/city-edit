@@ -1475,7 +1475,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 
 .vote-type-indicator:hover {
   border-color: var(--ink);
-  transform: scale(1.1);
+  transform: scale(calc(var(--indicator-scale, 1) * 1.1));
 }
 
 /* The currently selected (pinned) top proposal: a double border (inner border +
@@ -1485,7 +1485,9 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .vote-type-indicator.is-selected {
   border-color: var(--selected-ring, #fff);
   box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px var(--selected-ring, #fff);
-  transform: scale(1.1);
+  /* Keep the zoom-driven shrink, just bump it up a touch so the active icon
+     still pops, instead of overriding back to full size. */
+  transform: scale(calc(var(--indicator-scale, 1) * 1.1));
 }
 
 [data-basemap="light"] .vote-type-indicator.is-selected {

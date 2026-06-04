@@ -36,10 +36,10 @@ export const TopBar = memo(function TopBar() {
 
   // Station networks (e.g. ebikes) vote on a single point, so there's no end
   // tool — treat them as point-only regardless of the theme's input mode.
+  // Point-only maps (point input mode, or a station network like ebikes) vote on
+  // a single location with no route, so the whole start/end legend is hidden.
   const isStationNetwork = (getCurrentMap()?.network ?? "streets") !== "streets";
   const isPointOnly = theme.inputMode === "point" || isStationNetwork;
-  // Point-only maps have a single location, not a route start, so don't say "Start".
-  const locationLabel = isPointOnly ? "Location" : theme.locationLabel;
 
   const isLoading = isCalculating || isCalculatingSplit;
 
@@ -125,79 +125,77 @@ export const TopBar = memo(function TopBar() {
       </div>
 
       <div className="topbar-content">
-        <div className="topbar-legend">
-          {typingField === "start" ? (
-            <div className={`${startToolClass.join(" ")} typing`}>
-              <span className="legend-icon-slot">
-                <span className="legend-char-start">◆</span>
-              </span>
-              <span className="legend-label">{locationLabel}</span>
-              <AddressSearch
-                onSelect={(coords, address) => handleAddressSelect("start", coords, address)}
-                onClose={handleTypingClose}
-                placeholder="Search address..."
-                accentColor="var(--color-start)"
-              />
-            </div>
-          ) : (
-            <button
-              type="button"
-              className={startToolClass.join(" ")}
-              onClick={handleStartClick}
-              disabled={isPointOnly}
-              aria-pressed={!isPointOnly && activeTool === "start"}
-            >
-              <span className="legend-icon-slot">
-                <span className="legend-char-start">◆</span>
-              </span>
-              <span className="legend-label">{locationLabel}</span>
-              <span className={startCoordsClass.join(" ")}>
-                {formatLocation(start) || startPlaceholder}
-              </span>
-            </button>
-          )}
+        {/* Point-only maps vote on a single clicked location — no start/end
+            route legend at all (covers desktop and mobile). */}
+        {!isPointOnly && (
+          <div className="topbar-legend">
+            {typingField === "start" ? (
+              <div className={`${startToolClass.join(" ")} typing`}>
+                <span className="legend-icon-slot">
+                  <span className="legend-char-start">◆</span>
+                </span>
+                <span className="legend-label">{theme.locationLabel}</span>
+                <AddressSearch
+                  onSelect={(coords, address) => handleAddressSelect("start", coords, address)}
+                  onClose={handleTypingClose}
+                  placeholder="Search address..."
+                  accentColor="var(--color-start)"
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                className={startToolClass.join(" ")}
+                onClick={handleStartClick}
+                aria-pressed={activeTool === "start"}
+              >
+                <span className="legend-icon-slot">
+                  <span className="legend-char-start">◆</span>
+                </span>
+                <span className="legend-label">{theme.locationLabel}</span>
+                <span className={startCoordsClass.join(" ")}>
+                  {formatLocation(start) || startPlaceholder}
+                </span>
+              </button>
+            )}
 
-          {!isPointOnly && (
             <div className="legend-item">
               <span className="legend-icon-slot">
                 <span className="legend-char-selection">◻</span>
               </span>
               <span>Selection</span>
             </div>
-          )}
 
-          {typingField === "end" ? (
-            <div className={`${endToolClass.join(" ")} typing`}>
-              <span className="legend-icon-slot">
-                <span className="legend-char-end">◆</span>
-              </span>
-              <span className="legend-label">End</span>
-              <AddressSearch
-                onSelect={(coords, address) => handleAddressSelect("end", coords, address)}
-                onClose={handleTypingClose}
-                placeholder="Search address..."
-                accentColor="var(--color-end)"
-              />
-            </div>
-          ) : (
-            <button
-              type="button"
-              className={[...endToolClass, isPointOnly ? "hidden-reserve" : ""].join(" ")}
-              onClick={handleEndClick}
-              aria-pressed={activeTool === "end"}
-              tabIndex={isPointOnly ? -1 : undefined}
-            >
-              <span className="legend-icon-slot">
-                <span className="legend-char-end">◆</span>
-              </span>
-              <span className="legend-label">End</span>
-              <span className={endCoordsClass.join(" ")}>
-                {formatLocation(end) || endPlaceholder}
-              </span>
-            </button>
-          )}
+            {typingField === "end" ? (
+              <div className={`${endToolClass.join(" ")} typing`}>
+                <span className="legend-icon-slot">
+                  <span className="legend-char-end">◆</span>
+                </span>
+                <span className="legend-label">End</span>
+                <AddressSearch
+                  onSelect={(coords, address) => handleAddressSelect("end", coords, address)}
+                  onClose={handleTypingClose}
+                  placeholder="Search address..."
+                  accentColor="var(--color-end)"
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                className={endToolClass.join(" ")}
+                onClick={handleEndClick}
+                aria-pressed={activeTool === "end"}
+              >
+                <span className="legend-icon-slot">
+                  <span className="legend-char-end">◆</span>
+                </span>
+                <span className="legend-label">End</span>
+                <span className={endCoordsClass.join(" ")}>
+                  {formatLocation(end) || endPlaceholder}
+                </span>
+              </button>
+            )}
 
-          {!isPointOnly && (
             <div className="legend-item legend-item-heatmap">
               <span className="legend-icon-slot">
                 {isHeatmapLoading ? (
@@ -208,8 +206,8 @@ export const TopBar = memo(function TopBar() {
               </span>
               <span>{isHeatmapLoading ? "Loading…" : "Votes"}</span>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         <div className={`topbar-actions${start.coords ? " has-selection" : ""}`}>
           <div className="mode-switcher-group">

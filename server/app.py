@@ -1200,6 +1200,24 @@ def graph_topology():
     if rmap.graph.topology_json is None:
         return jsonify({"error": "Graph not loaded"}), 500
 
+    # Binary topology (?format=bin): a compact ArrayBuffer the client decodes
+    # without JSON.parse-ing the ~150MB string (which OOM-crashes mobile Safari).
+    # Its ETag is distinct from the JSON one so an intermediary never crosses them.
+    if request.args.get("format") == "bin":
+        bin_etag = (rmap.graph.topology_etag or '"x"')[:-1] + '-bin"'
+        if request.headers.get("If-None-Match") == bin_etag:
+            resp = app.response_class(status=304)
+            resp.headers["ETag"] = bin_etag
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+        resp = app.response_class(
+            response=rmap.graph.topology_binary(), status=200,
+            mimetype="application/octet-stream",
+        )
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        resp.headers["ETag"] = bin_etag
+        return resp
+
     etag = rmap.graph.topology_etag
     if request.headers.get("If-None-Match") == etag:
         resp = app.response_class(status=304)

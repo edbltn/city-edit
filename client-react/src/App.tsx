@@ -9,6 +9,7 @@ import { useRoute } from "./context";
 import { isLandingHost, subdomainRedirectUrl } from "./themes";
 import {
   resolveMapConfig, fetchMapConfig, applyMap, detectMapSlugFromUrl,
+  takePasscodeParam, authWithPasscode,
   type MapConfig,
 } from "./map/runtime";
 
@@ -52,9 +53,17 @@ function MapApp() {
           return;
         }
       }
-      // Locked map but we already hold a token (returning visitor / subdomain
-      // load that couldn't send it): retry by slug, which carries the header.
+      // Locked map: a shareable ?passcode=… link auto-unlocks it (consumed AFTER
+      // the subdomain redirect above, so the redirect carries the param to the
+      // canonical host). Otherwise we may already hold a token (returning visitor
+      // / subdomain load that couldn't send it). Either way, retry by slug, which
+      // carries the header.
       if (resolved?.locked && resolved.slug) {
+        const urlPasscode = takePasscodeParam();
+        if (urlPasscode) {
+          await authWithPasscode(resolved.slug, urlPasscode);
+          if (cancelled) return;
+        }
         const unlocked = await fetchMapConfig(resolved.slug);
         if (cancelled) return;
         if (unlocked && !unlocked.locked) resolved = unlocked;

@@ -14,6 +14,7 @@ const STORE = "graph";
 const DB_VERSION = 1;
 
 const TOPOLOGY_KEY = "topology";
+const TOPOLOGY_BIN_KEY = "topology-bin";
 const votesKey = (mode: string) => `votes:${mode}`;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -85,6 +86,27 @@ export async function setCachedTopology<T>(
   data: T,
 ): Promise<void> {
   await idbSet(TOPOLOGY_KEY, { version, data } satisfies CachedTopology<T>);
+}
+
+/**
+ * Binary topology cache. We persist the raw ArrayBuffer (a few tens of MB) rather
+ * than the decoded node/edge arrays: structured-cloning millions of small arrays
+ * into IndexedDB is itself a memory spike on mobile, while an ArrayBuffer clones
+ * cheaply. On load it's decoded back into node/edge arrays (see decodeTopologyBin).
+ */
+export async function getCachedTopologyBin(
+  version: string,
+): Promise<ArrayBuffer | undefined> {
+  const entry = await idbGet<{ version: string; data: ArrayBuffer }>(TOPOLOGY_BIN_KEY);
+  if (entry && entry.version === version) return entry.data;
+  return undefined;
+}
+
+export async function setCachedTopologyBin(
+  version: string,
+  data: ArrayBuffer,
+): Promise<void> {
+  await idbSet(TOPOLOGY_BIN_KEY, { version, data });
 }
 
 interface CachedVotes<T> {

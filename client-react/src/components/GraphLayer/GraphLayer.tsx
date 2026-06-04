@@ -29,6 +29,8 @@ import { iconForLabel, iconSrc, mapStyleForTheme } from "../../themes";
 import {
   getCachedTopology,
   setCachedTopology,
+  getCachedTopologyBin,
+  setCachedTopologyBin,
   getCachedVotes,
   setCachedVotes,
 } from "../../utils/graphCache";
@@ -85,6 +87,15 @@ function arrayMax(arr: number[]): number {
   }
   return max;
 }
+
+// Floor for the heat normalization denominator. Brightness is
+// log(votes+1)/log(scale+1); using a map's own max as `scale` makes a quiet map
+// (small max) blow out — log() pushes its 1–2-vote edges to near-full heat, so
+// e.g. SF (max ~18) lit up almost every edge while NYC (max ~400) stayed mostly
+// cool. Flooring the denominator at this many votes means a low-traffic map is
+// measured against a fixed scale and renders proportionally cooler, while a
+// busy map past the floor still uses its own (larger) max for full dynamic range.
+const HEAT_FULL_SCALE = 50;
 
 // ---------------------------------------------------------------------------
 // Heatmap color stops — flame cross-section
@@ -405,6 +416,31 @@ function projectOntoEdge(
 // ---------------------------------------------------------------------------
 // Node adjacency builder — used to derive node votes from edges
 // ---------------------------------------------------------------------------
+
+/**
+ * Decode the binary topology (server graph_registry.topology_binary) into the same
+ * {nodes, edges} shape the JSON path yields — WITHOUT JSON.parse-ing a ~150MB
+ * string, the allocation that OOM-crashes mobile Safari on the NYC graph. Layout:
+ * 12-byte header [magic, uint32 nNodes, uint32 nEdges], then nNodes×2 int32
+ * (lat, lon ×1e7), then nEdges×2 uint32 (from_idx, to_idx). Edge names are dropped
+ * (street tooltips reverse-geocode instead); the edges index is the canonical edge id.
+ */
+function decodeTopologyBin(buf: ArrayBuffer): Pick<GraphData, "nodes" | "edges"> {
+  const head = new Uint32Array(buf, 0, 3); // [magic, nNodes, nEdges]
+  const nNodes = head[1];
+  const nEdges = head[2];
+  const coords = new Int32Array(buf, 12, nNodes * 2);
+  const ends = new Uint32Array(buf, 12 + nNodes * 8, nEdges * 2);
+  const nodes: [number, number][] = new Array(nNodes);
+  for (let i = 0; i < nNodes; i++) {
+    nodes[i] = [coords[2 * i] / 1e7, coords[2 * i + 1] / 1e7];
+  }
+  const edges: [number, number, string][] = new Array(nEdges);
+  for (let i = 0; i < nEdges; i++) {
+    edges[i] = [ends[2 * i], ends[2 * i + 1], ""];
+  }
+  return { nodes, edges };
+}
 
 function buildNodeAdj(topology: Pick<GraphData, "nodes" | "edges">): number[][] {
   const adj: number[][] = new Array(topology.nodes.length);
@@ -857,18 +893,43 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
           // Version probe failed — fall back to a direct topology fetch.
         }
 
+        // Station networks (tiny, names matter) use the JSON topology; large
+        // street graphs use the binary topology so a phone never JSON.parse-es a
+        // ~150MB string (the OOM that crashed mobile Safari on the NYC graph).
         if (version) {
-          const cached = await getCachedTopology<GraphData>(version);
-          if (cached) {
-            topology = cached;
-            usedCachedTopology = true;
+          if (isStationNetwork) {
+            const cached = await getCachedTopology<GraphData>(version);
+            if (cached) { topology = cached; usedCachedTopology = true; }
+          } else {
+            const buf = await getCachedTopologyBin(version);
+            if (buf) { topology = decodeTopologyBin(buf) as GraphData; usedCachedTopology = true; }
           }
         }
         if (!topology) {
-          const r = await fetch(withMap(`${CONFIG.apiUrl}/graph-topology`), { headers: passcodeHeaders() });
-          if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
-          topology = await r.json();
-          if (version && topology) setCachedTopology(version, topology);
+          if (isStationNetwork) {
+            const r = await fetch(withMap(`${CONFIG.apiUrl}/graph-topology`), { headers: passcodeHeaders() });
+            if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
+            topology = await r.json();
+            if (version && topology) setCachedTopology(version, topology);
+          } else {
+            try {
+              const r = await fetch(
+                withMap(`${CONFIG.apiUrl}/graph-topology?format=bin`),
+                { headers: passcodeHeaders() },
+              );
+              if (!r.ok) throw new Error(`Binary topology fetch failed: ${r.status}`);
+              const buf = await r.arrayBuffer();
+              topology = decodeTopologyBin(buf) as GraphData;
+              if (version) setCachedTopologyBin(version, buf);
+            } catch (binErr) {
+              // Older server without the binary endpoint — fall back to JSON.
+              console.warn("Binary topology unavailable, using JSON:", binErr);
+              const r = await fetch(withMap(`${CONFIG.apiUrl}/graph-topology`), { headers: passcodeHeaders() });
+              if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
+              topology = await r.json();
+              if (version && topology) setCachedTopology(version, topology);
+            }
+          }
         }
       } catch (error) {
         console.error("Failed to load graph topology:", error);
@@ -1123,7 +1184,8 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       maxVotesRef.current = Math.max(1, arrayMax(edgeVotes));
       maxVotesRevRef.current = lastRevRef.current;
     }
-    const maxVotes = maxVotesRef.current;
+    // Floor the scale so low-traffic maps don't saturate (see HEAT_FULL_SCALE).
+    const maxVotes = Math.max(maxVotesRef.current, HEAT_FULL_SCALE);
 
     const bounds = map.getBounds();
     const zoom = map.getZoom();
@@ -1674,11 +1736,15 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   const selectedEdgeIdx =
     pinnedTarget?.kind === "edge" ? pinnedTarget.index : null;
 
-  // Indicators show at every zoom; ease them a touch smaller as you zoom in so
-  // they don't dominate the street detail. Driven via a CSS var on the map
-  // container (read by .vote-type-indicator) so zooming never rebuilds icons.
+  // Indicators show at every zoom; ease them smaller at BOTH extremes — as you
+  // zoom IN so they don't dominate street detail, and as you zoom OUT so a dense
+  // field of them doesn't blanket the city. Full size only around the mid zooms
+  // (~14–15). Driven via a CSS var on the map container (read by
+  // .vote-type-indicator) so zooming never rebuilds icons.
   useEffect(() => {
-    const scale = Math.max(0.55, Math.min(1, 1 - (currentZoom - 15) * 0.1));
+    const zoomedIn = Math.max(0, currentZoom - 15) * 0.1;
+    const zoomedOut = Math.max(0, 14 - currentZoom) * 0.1;
+    const scale = Math.max(0.5, Math.min(1, 1 - zoomedIn - zoomedOut));
     map.getContainer().style.setProperty("--indicator-scale", String(scale));
   }, [currentZoom, map]);
 
