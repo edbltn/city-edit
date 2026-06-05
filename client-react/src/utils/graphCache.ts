@@ -11,7 +11,13 @@
 
 const DB_NAME = "desire-path-cache";
 const STORE = "graph";
-const DB_VERSION = 1;
+// v2: a pre-v2 client could persist topology bytes that came from a STALE browser
+// HTTP-cache entry (old edge ids, served because /graph-topology was cached with
+// max-age=86400 under a version-independent URL) keyed by the NEW graph version —
+// poisoning the cache so the heatmap paints against wrong edge ids and crashes
+// mobile Safari. Bumping the version clears the store so those devices re-fetch
+// fresh (now version-busted; see GraphLayer topology fetch).
+const DB_VERSION = 2;
 
 const TOPOLOGY_KEY = "topology";
 const TOPOLOGY_BIN_KEY = "topology-bin";
@@ -28,9 +34,12 @@ function openDb(): Promise<IDBDatabase> {
     }
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(STORE)) {
-        req.result.createObjectStore(STORE);
-      }
+      const db = req.result;
+      // Drop any prior store on upgrade: a pre-v2 client may have persisted
+      // topology bytes from a stale HTTP-cache response under the current
+      // version key. Clearing forces a fresh, version-busted re-fetch.
+      if (db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE);
+      db.createObjectStore(STORE);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);

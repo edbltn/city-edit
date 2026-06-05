@@ -1154,6 +1154,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           // Version probe failed — fall back to a direct topology fetch.
         }
 
+        // Cache-bust the topology URL by graph version. /graph-topology is served
+        // with max-age=86400, so after a deploy that renumbers edge ids the browser
+        // HTTP cache would otherwise serve a STALE topology under the same URL —
+        // which, paired with fresh (new-edge-id) votes, mismatches and crashes
+        // mobile Safari. A version-scoped URL guarantees a fresh fetch on change
+        // while still caching repeat loads of the same version.
+        const withVersion = (url: string) =>
+          version ? url + (url.includes("?") ? "&" : "?") + "v=" + encodeURIComponent(version) : url;
+
         // Station networks (tiny, names matter) use the JSON topology; large
         // street graphs use the binary topology so a phone never JSON.parse-es a
         // ~150MB string (the OOM that crashed mobile Safari on the NYC graph).
@@ -1168,14 +1177,14 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         }
         if (!topology) {
           if (isStationNetwork) {
-            const r = await fetch(withMap(`${CONFIG.apiUrl}/graph-topology`), { headers: passcodeHeaders() });
+            const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), { headers: passcodeHeaders() });
             if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
             topology = await r.json();
             if (version && topology) setCachedTopology(version, topology);
           } else {
             try {
               const r = await fetch(
-                withMap(`${CONFIG.apiUrl}/graph-topology?format=bin`),
+                withVersion(withMap(`${CONFIG.apiUrl}/graph-topology?format=bin`)),
                 { headers: passcodeHeaders() },
               );
               if (!r.ok) throw new Error(`Binary topology fetch failed: ${r.status}`);
@@ -1185,7 +1194,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             } catch (binErr) {
               // Older server without the binary endpoint — fall back to JSON.
               console.warn("Binary topology unavailable, using JSON:", binErr);
-              const r = await fetch(withMap(`${CONFIG.apiUrl}/graph-topology`), { headers: passcodeHeaders() });
+              const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), { headers: passcodeHeaders() });
               if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
               topology = await r.json();
               if (version && topology) setCachedTopology(version, topology);
