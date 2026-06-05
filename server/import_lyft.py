@@ -415,8 +415,15 @@ async def route_and_vote(session, api_base, start, end, stats, voter_id=None,
 
 
 async def run_async(rides: pd.DataFrame, api_base: str, concurrency: int,
-                    map_slug=None, vote_mode_override=None, vote_type=DEFAULT_VOTE_TYPE):
-    """Process rides in batches, checking health between batches."""
+                    map_slug=None, vote_mode_override=None, vote_type=DEFAULT_VOTE_TYPE,
+                    no_restart=False):
+    """Process rides in batches, checking health between batches.
+
+    `no_restart` disables the local Docker-restart recovery path (it cycles the
+    whole `docker compose` stack — including OSRM/postgres — which is destructive
+    when the backend is run some other way, e.g. host gunicorn). When set, a local
+    backend is treated like a remote one: wait for it to recover, never restart.
+    """
     stats = Stats(len(rides))
     batch_size = 20
 
@@ -433,7 +440,7 @@ async def run_async(rides: pd.DataFrame, api_base: str, concurrency: int,
     while i < len(ride_list):
         if not health_check(api_base):
             log(f"Backend unhealthy before batch starting at ride {i}.")
-            if is_local:
+            if is_local and not no_restart:
                 if restarts >= max_restarts:
                     log(f"Exceeded max restarts ({max_restarts}). Aborting.")
                     break
@@ -468,7 +475,7 @@ async def run_async(rides: pd.DataFrame, api_base: str, concurrency: int,
 
         if stats.consecutive_failures >= batch_size:
             log(f"Entire batch of {batch_size} failed consecutively. Backend likely crashed.")
-            if is_local:
+            if is_local and not no_restart:
                 if restarts >= max_restarts:
                     log(f"Exceeded max restarts ({max_restarts}). Aborting.")
                     break
@@ -562,6 +569,7 @@ def main():
     stats = asyncio.run(run_async(
         rides, args.api_base, args.concurrency,
         map_slug=args.map_slug, vote_mode_override=vote_mode, vote_type=args.vote_type,
+        no_restart=args.no_restart,
     ))
     elapsed = time.time() - t0
 

@@ -1,0 +1,8 @@
+# Local-dev only: publish the dockerized merged-OSRM on host :5000 so the
+# host-run Flask (OSRM_URL=http://localhost:5000 in server/.env) can route.
+# The base compose intentionally keeps OSRM internal; this override restores the
+# host port mapping that local host-Flask dev relies on.
+services:
+  osrm:
+    ports:
+      - "5000:5000"
