@@ -22,3 +22,14 @@ export function installTouchHoverGuard() {
   // wins and hover stays off on touch.
   document.addEventListener("mousemove", () => root.classList.remove(HOVER_OFF));
 }
+
+/**
+ * True from a click/tap until the next real cursor move — the same window the
+ * `hover-off` class gates CSS `:hover` behind. JS-driven hover affordances (the
+ * proposal hover card) read this so a tap doesn't pop/strand a card: on desktop
+ * the next mousemove clears it almost immediately (a brief, intended beat); on
+ * touch no mousemove follows, so it stays suppressed until the next interaction.
+ */
+export function isHoverSuppressed(): boolean {
+  return document.documentElement.classList.contains(HOVER_OFF);
+}

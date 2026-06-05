@@ -180,13 +180,14 @@ interface DesirePathLayerProps {
   geometry: RouteGeometry;
   segmentIndex?: number;
   onSegmentDrag?: (segmentIndex: number, position: LatLng) => void;
+  onTap?: (position: LatLng) => void;
   onPathHoverChange?: (isHovering: boolean) => void;
 }
 
-export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, onPathHoverChange }: DesirePathLayerProps) {
+export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, onTap, onPathHoverChange }: DesirePathLayerProps) {
   const map = useMap();
   const { isDraggingRef, hoverLatLng, handleStart, handleHoverMove, handleHoverOut } =
-    usePathDrag({ map, geometry, segmentIndex, onSegmentDrag });
+    usePathDrag({ map, geometry, segmentIndex, onSegmentDrag, onTap });
 
   // Force SVG renderer for visual layer so SVG filters work (map uses Canvas globally)
   const svgRenderer = useMemo(() => L.svg({ pane: "desirePathPane" }), []);
@@ -272,13 +273,14 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, onP
 interface SplitDesirePathLayerProps {
   splitPath: SplitDesirePath;
   onSegmentDrag?: (segmentIndex: number, position: LatLng) => void;
+  onTap?: (position: LatLng) => void;
   onPathHoverChange?: (isHovering: boolean) => void;
 }
 
-export function SplitDesirePathLayer({ splitPath, onSegmentDrag, onPathHoverChange }: SplitDesirePathLayerProps) {
+export function SplitDesirePathLayer({ splitPath, onSegmentDrag, onTap, onPathHoverChange }: SplitDesirePathLayerProps) {
   const map = useMap();
   const { isDraggingRef, hoverLatLng, handleStart, handleHoverMove, handleHoverOut } =
-    usePathDrag({ map, geometry: splitPath.geometry, segmentIndex: splitPath.segmentIndex, onSegmentDrag });
+    usePathDrag({ map, geometry: splitPath.geometry, segmentIndex: splitPath.segmentIndex, onSegmentDrag, onTap });
 
   // Force SVG renderer for visual layer so SVG filters work (map uses Canvas globally)
   const svgRenderer = useMemo(() => L.svg({ pane: "desirePathPane" }), []);

@@ -353,6 +353,17 @@ export function MapView() {
     onClearSuppress: clearSuppressClick,
   });
 
+  // GraphLayer publishes its cluster-exploder here. A tap on the path first tries
+  // to fan out a stack of proposals at that spot (no side effect yet); only if
+  // there's nothing to fan does the tap fall through to the map-click (restart).
+  const clusterExploderRef = useRef<
+    ((latlng: LatLng) => boolean) | null
+  >(null);
+  const handlePathTap = useCallback((latlng: LatLng) => {
+    if (clusterExploderRef.current?.(latlng)) return;
+    handleMapClick(latlng);
+  }, [handleMapClick]);
+
   const handleOutOfBounds = useCallback(() => {
     setError("That's outside this map — drop your pins inside the highlighted area.");
   }, [setError]);
@@ -400,6 +411,7 @@ export function MapView() {
         hoverProposalPoint={hoverProposalPoint}
         onWaypointMatch={setWaypointMatch}
         onIndicatorClick={handleIndicatorClick}
+        clusterExploderRef={clusterExploderRef}
         onRemoveSelected={clearStart}
         suppressHover={isHoveringPath || markerHoverCount > 0}
         pathEdgeIds={pathEdgeIds}
@@ -437,6 +449,7 @@ export function MapView() {
           geometry={routeData.geometry}
           segmentIndex={0}
           onSegmentDrag={insertWaypointAtSegment}
+          onTap={handlePathTap}
           onPathHoverChange={setIsHoveringPath}
         />
       )}
@@ -448,8 +461,8 @@ export function MapView() {
             key={splitPath.id}
             splitPath={splitPath}
             onSegmentDrag={insertWaypointAtSegment}
+            onTap={handlePathTap}
             onPathHoverChange={setIsHoveringPath}
-
           />
         );
       })}

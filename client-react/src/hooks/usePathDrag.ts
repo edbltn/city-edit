@@ -1,6 +1,7 @@
 import { useCallback, useRef, useEffect, useState } from "react";
 import L from "leaflet";
 import { useGhostPin, useGraphSnap } from "../context";
+import { isTap } from "../utils/gesture";
 import type { RouteGeometry, LatLng } from "../types";
 
 
@@ -55,6 +56,11 @@ interface UsePathDragOptions {
   geometry: RouteGeometry;
   segmentIndex: number;
   onSegmentDrag?: (segmentIndex: number, position: LatLng) => void;
+  /** Quick press-and-release (tap) on the path — the time-based counterpart to a
+   *  drag (which inserts a mid). The host restarts the route from here (clear +
+   *  new start); on a passthrough on-path proposal this is its tap side effect.
+   *  See the TOP-PROPOSAL INTERACTION MODEL comment in GraphLayer.tsx. */
+  onTap?: (position: LatLng) => void;
 }
 
 interface UsePathDragResult {
@@ -78,12 +84,17 @@ export function usePathDrag({
   geometry,
   segmentIndex,
   onSegmentDrag,
+  onTap,
 }: UsePathDragOptions): UsePathDragResult {
   const { startDrag, updateDrag, endDrag } = useGhostPin();
   const { snapToGraph, setDragging } = useGraphSnap();
   const isDraggingRef = useRef(false);
   const dragOriginRef = useRef<L.LatLng | null>(null);
   const dragTrailRef = useRef<L.Polyline | null>(null);
+  // When the press began (Date.now), so release can tell a tap (quick → restart)
+  // from a drag (held → insert a mid) via the shared TAP_MAX_MS convention. The
+  // polyline isn't a Leaflet draggable, so timing is the only signal we get.
+  const pressStartRef = useRef(0);
   const [hoverLatLng, setHoverLatLng] = useState<L.LatLng | null>(null);
 
   // Get position from mouse or touch event
@@ -126,7 +137,7 @@ export function usePathDrag({
   // Global end handler - convert screen position to lat/lng and call callback
   const handleGlobalEnd = useCallback(
     (e: MouseEvent | TouchEvent) => {
-      if (isDraggingRef.current && onSegmentDrag) {
+      if (isDraggingRef.current) {
         const pos = getEventPosition(e);
         const container = map.getContainer();
         const rect = container.getBoundingClientRect();
@@ -136,7 +147,15 @@ export function usePathDrag({
         // Snap to nearest graph node/edge
         const snapped = snapToGraph(map, latLng.lat, latLng.lng);
         const finalPos = snapped ?? { lat: latLng.lat, lng: latLng.lng };
-        onSegmentDrag(segmentIndex, finalPos);
+        // Quick release → a tap on the path → restart the route from here.
+        // A held press → a drag → insert a mid at the drop point. (A long press
+        // that never moved still reads as a drag and drops a mid where pressed —
+        // a "pin here" — which is safer than a stray route-clear.)
+        if (isTap(pressStartRef.current)) {
+          onTap?.(finalPos);
+        } else {
+          onSegmentDrag?.(segmentIndex, finalPos);
+        }
       }
 
       // Cleanup
@@ -155,7 +174,7 @@ export function usePathDrag({
       document.removeEventListener("touchend", handleGlobalEnd);
       document.removeEventListener("touchcancel", handleGlobalEnd);
     },
-    [map, segmentIndex, onSegmentDrag, endDrag, handleGlobalMove, getEventPosition, snapToGraph]
+    [map, segmentIndex, onSegmentDrag, onTap, endDrag, handleGlobalMove, getEventPosition, snapToGraph]
   );
 
   // Start drag on mousedown/touchstart
@@ -175,6 +194,7 @@ export function usePathDrag({
       // Ghost starts at the raw grab point (unsnapped); snapped is the
       // underlying edge/node used for the trail + drop.
       const pos = getEventPosition(e.originalEvent);
+      pressStartRef.current = Date.now();
       const snapped = snapToGraph(map, e.latlng.lat, e.latlng.lng);
 
       startDrag(pos, snapped);
@@ -258,6 +278,7 @@ export function usePathDrag({
 
         const snapped = snapToGraph(map, latlng.lat, latlng.lng);
         const pos = { x: touch.clientX, y: touch.clientY };
+        pressStartRef.current = Date.now();
 
         // Ghost follows the finger (unsnapped); snapped is the underlying drop.
         startDrag(pos, snapped);

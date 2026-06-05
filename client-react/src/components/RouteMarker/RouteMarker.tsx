@@ -6,14 +6,12 @@ import { isWithinMappedBounds } from "../../utils/bounds";
 import { kiteIcon } from "../../utils/kiteIcon";
 import { useGraphSnap, useTheme } from "../../context";
 import { mapStyleForTheme } from "../../themes";
+import { isTap } from "../../utils/gesture";
 import type { LatLng } from "../../types";
 
 // Minimum distance (in degrees) to consider a drag as intentional movement
 // ~1 meter at NYC latitude - very small to avoid false negatives
 const MIN_DRAG_DISTANCE = 0.00001;
-
-// Max time (ms) between touchstart and touchend to consider it a tap
-const TAP_TIMEOUT = 300;
 
 interface RouteMarkerProps {
   position: LatLng;
@@ -129,9 +127,8 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
         wasDragged.current = false;
       },
       touchend: () => {
-        // If touch was quick and no drag occurred, treat as tap
-        const elapsed = Date.now() - touchStartTime.current;
-        if (elapsed < TAP_TIMEOUT && !wasDragged.current) {
+        // A quick release with no drag is a tap (shared timing convention).
+        if (isTap(touchStartTime.current) && !wasDragged.current) {
           (onTap ?? onDelete)?.();
         }
       },

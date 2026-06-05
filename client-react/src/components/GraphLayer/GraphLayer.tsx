@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useLayoutEffect, useRef, useCallback, useState, useMemo } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, MutableRefObject } from "react";
 import { useMap, Marker } from "react-leaflet";
 import { createPortal } from "react-dom";
 import L from "leaflet";
@@ -37,6 +37,7 @@ import {
 import { getVote, reconcileEdge, setVoteTypeMap, type VoteDirection } from "../../utils/voteStore";
 import { castVotes } from "../../utils/castVote";
 import { getVoterId } from "../../utils/voterIdentity";
+import { isHoverSuppressed } from "../../utils/touchHover";
 import { buildSelectionUrl, copyToClipboard } from "../../utils/shareLink";
 import { CheckIcon } from "../CheckIcon";
 
@@ -500,7 +501,7 @@ function IndicatorMarker({
   icon: L.DivIcon;
   zIndexOffset: number;
   /** When false the marker is a passive visual (no events) — used for a linked
-   *  proposal so the kite waypoint underneath takes the drag/click. */
+   *  or on-path proposal so the path/kite underneath takes the drag/click. */
   interactive?: boolean;
   onActivate: () => void;
   onDeactivate: () => void;
@@ -571,6 +572,13 @@ interface GraphLayerProps {
    *  edge midpoint of the indicator's segment. Hosts use this to place a
    *  start point at that location so the segment becomes selected. */
   onIndicatorClick?: (latlng: { lat: number; lng: number }) => void;
+  /** GraphLayer writes a function here that, given a tapped point, fans out a
+   *  crowded proposal cluster at that spot and returns true (consuming the tap).
+   *  Returns false if there's nothing to fan out, so the host runs its tap action.
+   *  Lets a path tap explode a stack of stacked proposals before any side effect. */
+  clusterExploderRef?: MutableRefObject<
+    ((latlng: { lat: number; lng: number }) => boolean) | null
+  >;
   /** Removes the currently-selected point. Wired to the same handler as the
    *  start marker's delete so the modal's X is functionally identical. */
   onRemoveSelected?: () => void;
@@ -584,7 +592,7 @@ interface GraphLayerProps {
   pathEdgeIds?: number[] | null;
 }
 
-export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, hoverProposalPoint = null, onWaypointMatch, onIndicatorClick, onRemoveSelected, suppressHover = false, pathEdgeIds = null }: GraphLayerProps) {
+export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, hoverProposalPoint = null, onWaypointMatch, onIndicatorClick, clusterExploderRef, onRemoveSelected, suppressHover = false, pathEdgeIds = null }: GraphLayerProps) {
   const map = useMap();
   const { subscribeToDelta } = useWebSocketContext();
   const { setSnapFn, setResolveVoteEdgeId, setCurrentSnap, isDraggingRef: graphDraggingRef } = useGraphSnap();
@@ -1688,7 +1696,29 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
         })();
         if (overModalRef.current || overModalBox || suppressHoverRef.current) {
-          if (hoverTargetRef.current) {
+          // Over the route path we'd normally blank the card — but an on-path top
+          // proposal is passthrough (the path takes its pointer), so it can't show
+          // its own card. If the cursor resolves to a top-proposal edge here, show
+          // that card anyway (this is how hovering an auto-selected proposal lights
+          // up). The post-click guard still suppresses it for a beat after a tap.
+          let proposalTarget: HoverTarget | null = null;
+          if (suppressHoverRef.current && !overModalRef.current && !overModalBox
+              && !graphDraggingRef.current && !isHoverSuppressed()) {
+            const sel = resolveSelectionRef.current(e.latlng.lat, e.latlng.lng);
+            if (sel?.target?.kind === "edge"
+                && winnersRef.current.some((w) => w.edgeIdx === sel.target.index)) {
+              proposalTarget = sel.target;
+            }
+          }
+          if (proposalTarget) {
+            const prev = hoverTargetRef.current;
+            if (!prev || prev.kind !== "edge" || prev.index !== proposalTarget.index) {
+              hoverTargetRef.current = proposalTarget;
+              setHoverTarget(proposalTarget);
+              redrawHoverHighlightRef.current();
+            }
+            setTooltipPos({ x: e.originalEvent.clientX, y: e.originalEvent.clientY });
+          } else if (hoverTargetRef.current) {
             hoverTargetRef.current = null;
             setHoverTarget(null);
             redrawHoverHighlightRef.current();
@@ -2131,15 +2161,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // map-level hover handler is likewise gated on this). Mirror that gate here.
   const canHover = useMemo(() => window.matchMedia("(hover: hover)").matches, []);
 
+  // Tracks that the matched-waypoint hover effect (below) owns the current card,
+  // so releasing that hover only clears its own card.
+  const bannerFromWaypointRef = useRef(false);
+
   // Hovering a matched waypoint's kite (its proposal indicator is passthrough)
   // lights that proposal's hover card — the same one the indicator's own
   // `mouseover` would. We set overIndicatorRef so the map mousemove yields
   // (hierarchy #1) instead of clearing the card as the cursor drifts. bannerRef
   // tracks that WE own the card, so releasing the hover only clears our own.
-  const bannerFromWaypointRef = useRef(false);
+  // isHoverSuppressed() gates it through the shared "tap turns hover off" guard.
   useEffect(() => {
     if (!canHover) return;
     const p = hoverProposalPoint;
+    if (isHoverSuppressed()) return;
     if (!p) {
       if (!bannerFromWaypointRef.current) return;
       bannerFromWaypointRef.current = false;
@@ -2164,6 +2199,43 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     redrawHoverHighlightRef.current();
   }, [hoverProposalPoint, proposalMatchFor, matchThresholdM, canHover, map]);
 
+  // ===========================================================================
+  // TOP-PROPOSAL INTERACTION MODEL  (read this before touching the markers)
+  // ===========================================================================
+  // A top proposal is the winning edge for a vote type, drawn as an icon. The
+  // SAME icon serves three roles depending on the route, and each role hands the
+  // pointer to a different piece — so the gesture is always handled by exactly
+  // one thing, with no double-handling:
+  //
+  //   1. BROWSE  (no route through it). Interactive. Hover → its card. Click →
+  //      select it + start a route from it. Crowded → fan the cluster out.
+  //      Handled HERE (IndicatorMarker.onClick → handleClick).
+  //
+  //   2. ON-PATH (the route passes through it, but it isn't a waypoint —
+  //      `onPathEdgeSet`). PASSTHROUGH (pointer-events:none) so the route polyline
+  //      underneath owns the gesture: drag it → ghost mid + dotted trail → insert
+  //      a mid (drop it back on the proposal and the mid links to it = "upgrade");
+  //      tap it → restart from here. Both come from usePathDrag (tap vs drag), NOT
+  //      from this file. Its hover card comes from the map-mousemove override (a
+  //      passthrough icon can't fire its own mouseover).
+  //
+  //   3. MATCHED (a start/end/mid waypoint sits on it — `waypointMatch`).
+  //      PASSTHROUGH; the kite RouteMarker the host renders underneath is the
+  //      handle: click → restart, drag → move the waypoint, [x] → remove. Its
+  //      hover card comes from `hoverProposalPoint` (the kite reports its hover).
+  //
+  // Cross-cutting rules:
+  //   - Tap vs drag is TIME-based everywhere (utils/gesture.ts, TAP_MAX_MS), so a
+  //     marker tap (RouteMarker) and a path tap (usePathDrag) feel identical.
+  //   - A crowded stack fans out BEFORE any side effect: browse clicks do it in
+  //     handleClick; path taps do it via `clusterExploderRef` (see MapView), then
+  //     the picked fanned icon (interactive while spread) runs its action.
+  //   - Hover cards honor isHoverSuppressed() (the shared `hover-off` guard) so a
+  //     tap never strands a card; mobile additionally has no `canHover`.
+  //   - Edge case: an instant client-side route split must inherit the segment's
+  //     edge ids (RouteContext.insertWaypointAtSegment), or the on-path highlight
+  //     AND the vote target both vanish.
+  // ===========================================================================
   const indicatorMarkers = useMemo(() => {
     const topology = topologyRef.current;
     if (!topology) return null;
@@ -2242,6 +2314,33 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       armSpreadTimer();
     };
 
+    // Let a path tap fan out a crowded proposal stack at the tapped point before
+    // any side effect runs (so you can pick one from the spread). Returns true
+    // when it consumed the tap. Nothing to fan (no cluster, or a spread is already
+    // open) → false, and the host proceeds with its tap action.
+    if (clusterExploderRef) {
+      clusterExploderRef.current = (latlng) => {
+        if (transientSpreadRef.current || lockedSpreadRef.current) return false;
+        const tapPt = map.latLngToContainerPoint([latlng.lat, latlng.lng]);
+        let anchor: L.Point | null = null;
+        let nearestSq = Infinity;
+        for (const m of placed) {
+          const p = map.latLngToContainerPoint([m.midLat, m.midLng]);
+          const d = (p.x - tapPt.x) ** 2 + (p.y - tapPt.y) ** 2;
+          if (d < nearestSq) { nearestSq = d; anchor = p; }
+        }
+        if (!anchor || nearestSq > CLUSTER_RADIUS_PX * CLUSTER_RADIUS_PX) return false;
+        const cluster = placed.filter((m) => {
+          const p = map.latLngToContainerPoint([m.midLat, m.midLng]);
+          return (p.x - anchor!.x) ** 2 + (p.y - anchor!.y) ** 2
+            <= CLUSTER_RADIUS_PX * CLUSTER_RADIUS_PX;
+        });
+        if (cluster.length <= 1) return false;
+        spreadCluster(cluster, anchor);
+        return true;
+      };
+    }
+
     return placed.map(({ w, midLat, midLng }) => {
       const override = spreadPositions?.get(w.legendIdx);
       const posLat = override ? override[0] : midLat;
@@ -2258,14 +2357,14 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         : midEdgeSet.has(w.edgeIdx) ? "mid"
         : null;
       // A proposal the route merely passes through (not a waypoint): highlight it
-      // but keep it a live indicator. Hovering shows its card; a plain click
-      // restarts the path from it (clear + new start) like any indicator — NOT an
-      // upgrade. To upgrade it to a real mid you drag the path through it (grab the
-      // path beside the icon); the dropped waypoint then links to this proposal.
-      // (Only linked waypoints — role — go passthrough, so their kite underneath
-      // takes the drag/click.)
+      // and make it click-through, like a waypoint pin — but it stays out of the
+      // sequence (no [x], not addable). Click-through lets the path beneath it be
+      // dragged (a drag pulls out a ghost mid with a dotted trail; dropping it
+      // back on the proposal upgrades it), while a plain tap on the path restarts.
+      // A fanned-out icon (spread override) sits off the path at its grid cell, so
+      // it can't be click-through — it must take its own click to be pickable.
       const onPath = role === null && onPathEdgeSet.has(w.edgeIdx);
-      const passthrough = role !== null && !isStationNetwork;
+      const passthrough = (role !== null || onPath) && !isStationNetwork && !override;
       const tint: "start" | "end" | null =
         role === "start" ? "start" : role === "end" ? "end" : null;
       // White/black ring: a mid waypoint's pin, an on-path proposal, the drag's
@@ -2296,7 +2395,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         // mouseout to clear it, so a tap would leave it stuck and resurface it
         // once the pinned point moves off this edge. The pinned modal is the
         // selection UI on touch, so skip the hover card entirely there.
-        if (!canHover) return;
+        // isHoverSuppressed() likewise hides it for a beat after any tap/click
+        // (the shared `hover-off` guard), so a tap doesn't strand a card.
+        if (!canHover || isHoverSuppressed()) return;
         const target: HoverTarget = { kind: "edge", index: w.edgeIdx };
         const iconPt = map.latLngToContainerPoint([posLat, posLng]);
         const rect = map.getContainer().getBoundingClientRect();
