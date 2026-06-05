@@ -237,6 +237,21 @@ export function MapView() {
   // fed to GraphLayer so it can light that proposal's hover card — the indicator
   // is passthrough (its kite takes the pointer), so it can't do so itself.
   const [hoverProposalPoint, setHoverProposalPoint] = useState<LatLng | null>(null);
+  // GraphLayer publishes its cluster-exploder here (fan a crowded proposal stack
+  // out at a tapped point, returning true when it consumed the tap). Every
+  // proposal tap — on the path (handlePathTap) AND on a matched waypoint's kite
+  // (handleProposalRestart) — routes through it so a stack always explodes first.
+  const clusterExploderRef = useRef<((latlng: LatLng) => boolean) | null>(null);
+  // Per-edge fanned-out positions from GraphLayer's spread, so a matched
+  // proposal's [x] follows its indicator out into the cluster grid.
+  const [proposalSpread, setProposalSpread] = useState<Map<number, [number, number]> | null>(null);
+  const spreadPosFor = useCallback(
+    (edgeIdx: number | null | undefined, fallback: LatLng): [number, number] => {
+      const sp = edgeIdx != null ? proposalSpread?.get(edgeIdx) : undefined;
+      return sp ?? [fallback.lat, fallback.lng];
+    },
+    [proposalSpread]
+  );
   // Live dragged-waypoint position, fed to GraphLayer to light the drop-target
   // proposal. rAF-coalesced so a 60fps drag re-renders at most once per frame.
   const [dragPoint, setDragPoint] = useState<LatLng | null>(null);
@@ -301,6 +316,10 @@ export function MapView() {
 
   // Indicator click follows the same tool logic as a normal map click.
   const handleIndicatorClick = useCallback((latlng: LatLng) => {
+    // Drop any stale "skip next click" from an upgrade drag, so the click that
+    // selects this proposal — and the next one after it — both register (bug
+    // where a drag's trailing click landed on a marker, never consuming it).
+    clearSuppressClick();
     clearSplitPaths();
     if (activeTool === "end" && start.coords) {
       placeEnd(latlng);
@@ -309,15 +328,20 @@ export function MapView() {
       if (start.coords || end.coords) clearPoints();
       placeStart(latlng);
     }
-  }, [activeTool, start.coords, end.coords, clearPoints, clearSplitPaths, placeStart, placeEnd, setActiveTool]);
+  }, [activeTool, start.coords, end.coords, clearPoints, clearSplitPaths, placeStart, placeEnd, setActiveTool, clearSuppressClick]);
 
-  // Clicking a top-proposal waypoint (start/end/mid) restarts the path from it:
-  // it becomes the new start and the rest of the path is cleared — like clicking
-  // any point on the map. Removal from the sequence moves to the indicator's [x].
+  // Tapping a top-proposal waypoint (start/end/mid). A crowded stack fans out
+  // first (no side effect) — the SAME exploder a path tap uses, so matched
+  // proposals disambiguate exactly like on-path ones. Otherwise it restarts the
+  // path from here: this becomes the new start, the rest clears. clearSuppressClick
+  // drops any stale "skip next click" left by the drag that upgraded this mid (its
+  // trailing click landed on the kite, not the map, so it was never consumed).
   const handleProposalRestart = useCallback((latlng: LatLng) => {
+    clearSuppressClick();
+    if (clusterExploderRef.current?.(latlng)) return;
     clearPoints();
     placeStart(latlng);
-  }, [clearPoints, placeStart]);
+  }, [clearPoints, placeStart, clearSuppressClick]);
 
   // A real route exists (start AND end on a street map). Gates the proposal [x]
   // remove-boxes and the click-to-restart behavior to route mode — not a lone
@@ -353,12 +377,9 @@ export function MapView() {
     onClearSuppress: clearSuppressClick,
   });
 
-  // GraphLayer publishes its cluster-exploder here. A tap on the path first tries
-  // to fan out a stack of proposals at that spot (no side effect yet); only if
-  // there's nothing to fan does the tap fall through to the map-click (restart).
-  const clusterExploderRef = useRef<
-    ((latlng: LatLng) => boolean) | null
-  >(null);
+  // A tap on the path: fan out a proposal stack at that spot if there is one (no
+  // side effect yet), else fall through to the map-click (restart). Mirrors
+  // handleProposalRestart for the matched-kite path — same exploder, same rule.
   const handlePathTap = useCallback((latlng: LatLng) => {
     if (clusterExploderRef.current?.(latlng)) return;
     handleMapClick(latlng);
@@ -412,6 +433,7 @@ export function MapView() {
         onWaypointMatch={setWaypointMatch}
         onIndicatorClick={handleIndicatorClick}
         clusterExploderRef={clusterExploderRef}
+        onSpreadChange={setProposalSpread}
         onRemoveSelected={clearStart}
         suppressHover={isHoveringPath || markerHoverCount > 0}
         pathEdgeIds={pathEdgeIds}
@@ -504,12 +526,13 @@ export function MapView() {
       ))}
 
       {/* Remove-from-route [x] for each mid that sits on a top proposal (route
-          mode only). Reuses removeGhostWaypoint — the old sequence-removal path. */}
+          mode only). Reuses removeGhostWaypoint — the old sequence-removal path.
+          Follows the proposal out into the cluster grid when it's fanned out. */}
       {isRouteMode && ghostWaypoints.map((wp, index) => (
         waypointMatch.mids[index] != null ? (
           <Marker
             key={`mid-x-${ghostWaypointIds[index] ?? index}`}
-            position={[wp.lat, wp.lng]}
+            position={spreadPosFor(waypointMatch.mids[index]?.edgeIdx, wp)}
             icon={proposalXIconMid}
             zIndexOffset={4000}
             eventHandlers={{ click: () => removeGhostWaypoint(index) }}
@@ -558,7 +581,7 @@ export function MapView() {
 
       {isRouteMode && waypointMatch.start != null && start.coords && (
         <Marker
-          position={[start.coords.lat, start.coords.lng]}
+          position={spreadPosFor(waypointMatch.start?.edgeIdx, start.coords)}
           icon={proposalXIconStart}
           zIndexOffset={4000}
           eventHandlers={{ click: () => clearStart() }}
@@ -590,7 +613,7 @@ export function MapView() {
 
       {isRouteMode && waypointMatch.end != null && end.coords && (
         <Marker
-          position={[end.coords.lat, end.coords.lng]}
+          position={spreadPosFor(waypointMatch.end?.edgeIdx, end.coords)}
           icon={proposalXIconEnd}
           zIndexOffset={4000}
           eventHandlers={{ click: () => clearEnd() }}

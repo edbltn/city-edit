@@ -579,6 +579,10 @@ interface GraphLayerProps {
   clusterExploderRef?: MutableRefObject<
     ((latlng: { lat: number; lng: number }) => boolean) | null
   >;
+  /** Fires the current fanned-out cluster as an edge-index → [lat,lng] map (or
+   *  null when nothing is spread), so the host can move a matched proposal's [x]
+   *  out into the grid with its indicator. */
+  onSpreadChange?: (spread: Map<number, [number, number]> | null) => void;
   /** Removes the currently-selected point. Wired to the same handler as the
    *  start marker's delete so the modal's X is functionally identical. */
   onRemoveSelected?: () => void;
@@ -592,7 +596,7 @@ interface GraphLayerProps {
   pathEdgeIds?: number[] | null;
 }
 
-export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, hoverProposalPoint = null, onWaypointMatch, onIndicatorClick, clusterExploderRef, onRemoveSelected, suppressHover = false, pathEdgeIds = null }: GraphLayerProps) {
+export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, hoverProposalPoint = null, onWaypointMatch, onIndicatorClick, clusterExploderRef, onSpreadChange, onRemoveSelected, suppressHover = false, pathEdgeIds = null }: GraphLayerProps) {
   const map = useMap();
   const { subscribeToDelta } = useWebSocketContext();
   const { setSnapFn, setResolveVoteEdgeId, setCurrentSnap, isDraggingRef: graphDraggingRef } = useGraphSnap();
@@ -818,6 +822,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     if (transientSpread) for (const [k, v] of transientSpread) merged.set(k, v);
     return merged;
   }, [lockedSpread, transientSpread]);
+
+  // Re-key the spread by EDGE index (it's keyed by legendIdx) and publish it, so
+  // the host can move a matched proposal's [x] out with its fanned indicator.
+  const onSpreadChangeRef = useRef(onSpreadChange);
+  useEffect(() => { onSpreadChangeRef.current = onSpreadChange; }, [onSpreadChange]);
+  useEffect(() => {
+    if (!spreadPositions) { onSpreadChangeRef.current?.(null); return; }
+    const byEdge = new Map<number, [number, number]>();
+    for (const w of winnersRef.current) {
+      const pos = spreadPositions.get(w.legendIdx);
+      if (pos) byEdge.set(w.edgeIdx, pos);
+    }
+    onSpreadChangeRef.current?.(byEdge);
+  }, [spreadPositions]);
 
   // Random tiebreak salt — stable for this page load, different next time.
   // Used so that equal-count proposals don't always favor the same labels.
