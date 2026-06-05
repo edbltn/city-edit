@@ -521,12 +521,24 @@ export function RouteProvider({ children }: { children: ReactNode }) {
           ? [...splitDesirePaths]
           : [];
 
+        // The two halves inherit the source segment's edge ids so the route's
+        // edge coverage survives an instant client-side split. The geometry is
+        // unchanged, so the union of both halves equals the source — keep them
+        // all on the first half (every consumer flattens the per-segment ids:
+        // currentEdgeIds for the vote target and MapView's pathEdgeIds for the
+        // "proposals the path passes through" highlight). Leaving them empty
+        // dropped both — de-selecting the other on-path proposals when one was
+        // upgraded, and emptying the vote target after a drag-split.
+        const sourceEdgeIds = splitDesirePaths.length > 0
+          ? (splitDesirePaths[segmentIndex]?.edgeIds ?? [])
+          : (routeEdgeIds ?? []);
+
         const firstHalf: SplitDesirePath = {
           id: `split-${segmentIndex}`,
           segmentIndex,
           geometry: firstGeom,
           segments: segmentsFromGeometry(firstGeom),
-          edgeIds: [],
+          edgeIds: sourceEdgeIds,
         };
         const secondHalf: SplitDesirePath = {
           id: `split-${segmentIndex + 1}`,
@@ -580,7 +592,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         setIsCalculatingSplit(false);
       }
     }
-  }, [start.coords, end.coords, ghostWaypointIds, splitDesirePaths, routeData, calculateAllSegments]);
+  }, [start.coords, end.coords, ghostWaypointIds, splitDesirePaths, routeData, routeEdgeIds, calculateAllSegments]);
 
   // ============================================
   // Update ghost waypoint position (drag existing waypoint)

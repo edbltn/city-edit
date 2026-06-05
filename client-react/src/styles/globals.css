@@ -1491,6 +1491,15 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .proposal-x-hit:hover {
   background: color-mix(in srgb, var(--ink) 10%, var(--paper));
 }
+/* Touch devices: enlarge the [x] so it's a comfortable tap target (the desktop
+   13px box is tuned for a pointer). */
+@media (pointer: coarse) {
+  .proposal-x-hit {
+    width: 20px;
+    height: 20px;
+    font-size: 13px;
+  }
+}
 
 /* The indicator is one atomic SVG pin (square + downward tail) with the themed
    icon overlaid on the square region. The pin shape, the tail, and both borders

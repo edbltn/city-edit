@@ -233,6 +233,10 @@ export function MapView() {
     end: ProposalMatch | null;
     mids: (ProposalMatch | null)[];
   }>({ start: null, end: null, mids: [] });
+  // The matched waypoint (start/end/mid on a proposal) the cursor is hovering,
+  // fed to GraphLayer so it can light that proposal's hover card — the indicator
+  // is passthrough (its kite takes the pointer), so it can't do so itself.
+  const [hoverProposalPoint, setHoverProposalPoint] = useState<LatLng | null>(null);
   // Live dragged-waypoint position, fed to GraphLayer to light the drop-target
   // proposal. rAF-coalesced so a 60fps drag re-renders at most once per frame.
   const [dragPoint, setDragPoint] = useState<LatLng | null>(null);
@@ -393,6 +397,7 @@ export function MapView() {
         endPoint={end.coords}
         ghostWaypoints={ghostWaypoints}
         dragPoint={dragPoint}
+        hoverProposalPoint={hoverProposalPoint}
         onWaypointMatch={setWaypointMatch}
         onIndicatorClick={handleIndicatorClick}
         onRemoveSelected={clearStart}
@@ -477,7 +482,11 @@ export function MapView() {
           // On a proposal: tapping restarts the path from here ([x] removes it).
           onTap={waypointMatch.mids[index] != null ? () => handleProposalRestart(wp) : undefined}
           onOutOfBounds={handleOutOfBounds}
-          onHoverChange={handleMarkerHover}
+          onHoverChange={(h) => {
+            handleMarkerHover(h);
+            // On a proposal, surface that proposal's hover card while the kite is hovered.
+            if (waypointMatch.mids[index] != null) setHoverProposalPoint(h ? wp : null);
+          }}
         />
       ))}
 
@@ -527,7 +536,10 @@ export function MapView() {
           onTap={isRouteMode && waypointMatch.start != null && start.coords
             ? () => handleProposalRestart(start.coords!) : undefined}
           onOutOfBounds={handleOutOfBounds}
-          onHoverChange={handleMarkerHover}
+          onHoverChange={(h) => {
+            handleMarkerHover(h);
+            if (waypointMatch.start != null && start.coords) setHoverProposalPoint(h ? start.coords : null);
+          }}
         />
       )}
 
@@ -556,7 +568,10 @@ export function MapView() {
           onTap={waypointMatch.end != null && end.coords
             ? () => handleProposalRestart(end.coords!) : undefined}
           onOutOfBounds={handleOutOfBounds}
-          onHoverChange={handleMarkerHover}
+          onHoverChange={(h) => {
+            handleMarkerHover(h);
+            if (waypointMatch.end != null && end.coords) setHoverProposalPoint(h ? end.coords : null);
+          }}
         />
       )}
 

@@ -552,6 +552,12 @@ interface GraphLayerProps {
    *  `drag` event, so it updates on desktop AND touch). Drives the white/black
    *  drop-target ring on the proposal the drop would link to. Null when idle. */
   dragPoint?: { lat: number; lng: number } | null;
+  /** Position of a matched waypoint (start/end/mid sitting on a proposal) the
+   *  cursor is currently hovering. That proposal's indicator is passthrough — its
+   *  kite RouteMarker takes the pointer — so it can't show its own hover card; the
+   *  host reports the hover here and we light the same card the indicator would.
+   *  Null when no matched waypoint is hovered. */
+  hoverProposalPoint?: { lat: number; lng: number } | null;
   /** Fires when the waypoint → proposal-edge matches change. Each entry is the
    *  matched proposal's edge index + label, or null when that waypoint isn't on a
    *  proposal. `mids` is parallel to `ghostWaypoints`. The host tints/hides the
@@ -578,7 +584,7 @@ interface GraphLayerProps {
   pathEdgeIds?: number[] | null;
 }
 
-export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, onWaypointMatch, onIndicatorClick, onRemoveSelected, suppressHover = false, pathEdgeIds = null }: GraphLayerProps) {
+export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, hoverProposalPoint = null, onWaypointMatch, onIndicatorClick, onRemoveSelected, suppressHover = false, pathEdgeIds = null }: GraphLayerProps) {
   const map = useMap();
   const { subscribeToDelta } = useWebSocketContext();
   const { setSnapFn, setResolveVoteEdgeId, setCurrentSnap, isDraggingRef: graphDraggingRef } = useGraphSnap();
@@ -2125,6 +2131,39 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // map-level hover handler is likewise gated on this). Mirror that gate here.
   const canHover = useMemo(() => window.matchMedia("(hover: hover)").matches, []);
 
+  // Hovering a matched waypoint's kite (its proposal indicator is passthrough)
+  // lights that proposal's hover card — the same one the indicator's own
+  // `mouseover` would. We set overIndicatorRef so the map mousemove yields
+  // (hierarchy #1) instead of clearing the card as the cursor drifts. bannerRef
+  // tracks that WE own the card, so releasing the hover only clears our own.
+  const bannerFromWaypointRef = useRef(false);
+  useEffect(() => {
+    if (!canHover) return;
+    const p = hoverProposalPoint;
+    if (!p) {
+      if (!bannerFromWaypointRef.current) return;
+      bannerFromWaypointRef.current = false;
+      overIndicatorRef.current = false;
+      if (hoverTargetRef.current) {
+        hoverTargetRef.current = null;
+        setHoverTarget(null);
+        redrawHoverHighlightRef.current();
+      }
+      return;
+    }
+    const match = proposalMatchFor(p.lat, p.lng, matchThresholdM);
+    if (!match) return;
+    bannerFromWaypointRef.current = true;
+    overIndicatorRef.current = true;
+    const iconPt = map.latLngToContainerPoint([p.lat, p.lng]);
+    const rect = map.getContainer().getBoundingClientRect();
+    setTooltipPos({ x: rect.left + iconPt.x, y: rect.top + iconPt.y });
+    const target: HoverTarget = { kind: "edge", index: match.edgeIdx };
+    hoverTargetRef.current = target;
+    setHoverTarget(target);
+    redrawHoverHighlightRef.current();
+  }, [hoverProposalPoint, proposalMatchFor, matchThresholdM, canHover, map]);
+
   const indicatorMarkers = useMemo(() => {
     const topology = topologyRef.current;
     if (!topology) return null;
@@ -2219,11 +2258,14 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         : midEdgeSet.has(w.edgeIdx) ? "mid"
         : null;
       // A proposal the route merely passes through (not a waypoint): highlight it
-      // and make it click-through, like a waypoint pin — but it stays out of the
-      // sequence (no [x], not addable). Click-through lets the path beneath it be
-      // dragged, which spawns a real mid.
+      // but keep it a live indicator. Hovering shows its card; a plain click
+      // restarts the path from it (clear + new start) like any indicator — NOT an
+      // upgrade. To upgrade it to a real mid you drag the path through it (grab the
+      // path beside the icon); the dropped waypoint then links to this proposal.
+      // (Only linked waypoints — role — go passthrough, so their kite underneath
+      // takes the drag/click.)
       const onPath = role === null && onPathEdgeSet.has(w.edgeIdx);
-      const passthrough = (role !== null || onPath) && !isStationNetwork;
+      const passthrough = role !== null && !isStationNetwork;
       const tint: "start" | "end" | null =
         role === "start" ? "start" : role === "end" ? "end" : null;
       // White/black ring: a mid waypoint's pin, an on-path proposal, the drag's
