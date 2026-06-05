@@ -387,10 +387,11 @@ resource "google_cloud_run_service" "app" {
           # Holds all 4 city walk graphs (nyc/sf/chicago/dc) + the tiny station
           # networks resident (GraphRegistry max_loaded=4+stations). python_router
           # keeps only compact numpy arrays after load (drops the heavy networkx
-          # graph); the rustworkx OSRM-fallback representation was removed entirely,
-          # so steady-state runs below the old ~5.9Gi. 8Gi is held through the
-          # ferry-removal deploy + the 589k-vote resnap (both memory-spiky);
-          # right-size down toward ~6Gi once monitoring confirms the new peak.
+          # graph); the rustworkx OSRM-fallback representation was removed entirely.
+          # Measured on the post-deploy revision: ~5.5Gi avg, ~6.0Gi peak — the
+          # dropped deps were mostly build/import-time, so resident memory did NOT
+          # fall much. Keep 8Gi: peak already touches 6Gi and the multi-graph warmup
+          # transient needs the headroom. Do NOT trim to 6Gi (would OOM on warmup).
           limits = {
             cpu    = "2"
             memory = "8Gi"
