@@ -10,7 +10,7 @@ import L from "leaflet";
 import { CONFIG } from "../../config";
 import { COLOR_START, COLOR_END } from "../../colors";
 import { mapStyleForTheme } from "../../themes";
-import { useRoute, useGhostPin, useTheme } from "../../context";
+import { useRoute, useGhostPin, useTheme, useHeatmap } from "../../context";
 import { useMapClick } from "../../hooks";
 import { kiteGhostIcon } from "../../utils/kiteIcon";
 import { setMapViewState, setMapInstance, getInitialMapView } from "../../utils/mapViewState";
@@ -20,6 +20,7 @@ import { DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
 import { WaypointConnectors } from "../WaypointConnectors";
 import { GhostPin } from "../GhostPin";
+import { NavHistoryControls } from "../NavHistoryControls/NavHistoryControls";
 import { GraphLayer } from "../GraphLayer/GraphLayer";
 import { BoundaryLayer } from "../BoundaryLayer";
 import { MapLibreBackground } from "../MapLibreBackground";
@@ -181,7 +182,9 @@ export function MapView() {
     routeEdgeIds,
     suppressNextClick,
     activeTool,
+    startReplaceArmed,
     setStartPoint,
+    setStartVoteEdgeId,
     setEndPoint,
     setActiveTool,
     clearStart,
@@ -217,6 +220,16 @@ export function MapView() {
 
   const { ghostState } = useGhostPin();
 
+  const { setMapReady } = useHeatmap();
+
+  // Backstop: if MapLibre's `load` never fires (e.g. it constructs but stalls),
+  // don't trap the user behind the loader forever — mark the base map ready
+  // after a generous timeout so the heatmap alone can dismiss the loader.
+  useEffect(() => {
+    const id = window.setTimeout(setMapReady, 15000);
+    return () => window.clearTimeout(id);
+  }, [setMapReady]);
+
   const [leafletMap, setLeafletMap] = useState<L.Map | null>(null);
   const [cursorLatLng, setCursorLatLng] = useState<LatLng | null>(null);
   const [isHoveringPath, setIsHoveringPath] = useState(false);
@@ -239,19 +252,9 @@ export function MapView() {
   const [hoverProposalPoint, setHoverProposalPoint] = useState<LatLng | null>(null);
   // GraphLayer publishes its cluster-exploder here (fan a crowded proposal stack
   // out at a tapped point, returning true when it consumed the tap). Every
-  // proposal tap — on the path (handlePathTap) AND on a matched waypoint's kite
+  // proposal tap — on the path (handleTap) AND on a matched waypoint's kite
   // (handleProposalRestart) — routes through it so a stack always explodes first.
   const clusterExploderRef = useRef<((latlng: LatLng) => boolean) | null>(null);
-  // Per-edge fanned-out positions from GraphLayer's spread, so a matched
-  // proposal's [x] follows its indicator out into the cluster grid.
-  const [proposalSpread, setProposalSpread] = useState<Map<number, [number, number]> | null>(null);
-  const spreadPosFor = useCallback(
-    (edgeIdx: number | null | undefined, fallback: LatLng): [number, number] => {
-      const sp = edgeIdx != null ? proposalSpread?.get(edgeIdx) : undefined;
-      return sp ?? [fallback.lat, fallback.lng];
-    },
-    [proposalSpread]
-  );
   // Live dragged-waypoint position, fed to GraphLayer to light the drop-target
   // proposal. rAF-coalesced so a 60fps drag re-renders at most once per frame.
   const [dragPoint, setDragPoint] = useState<LatLng | null>(null);
@@ -269,6 +272,20 @@ export function MapView() {
     if (dragRafRef.current) { cancelAnimationFrame(dragRafRef.current); dragRafRef.current = 0; }
     setDragPoint(null);
   }, []);
+  // The live drag position fed to GraphLayer (cluster-explode-on-drag + the
+  // drop-target ring). It's the kite drag's `dragPoint` OR — when the ghost pin is
+  // active (dragging the path to create a mid, and dragging a mid out of an
+  // exploded proposal both use the ghost pin) — the ghost's live position. Derived,
+  // not mirrored into state, so the two sources can't clobber each other.
+  const effectiveDragPoint = useMemo<LatLng | null>(() => {
+    if (ghostState.isDragging && ghostState.screenPosition && leafletMap) {
+      const { x, y } = ghostState.screenPosition;
+      const rect = leafletMap.getContainer().getBoundingClientRect();
+      const ll = leafletMap.containerPointToLatLng(L.point(x - rect.left, y - rect.top));
+      return { lat: ll.lat, lng: ll.lng };
+    }
+    return dragPoint;
+  }, [ghostState, leafletMap, dragPoint]);
   // Momentary placement-ghost suppression — one unified rule, no per-action wiring:
   // ANY click/tap hides the hover ghost, and the next hover (cursor move) re-shows
   // it. On desktop a move follows the click almost immediately, so the ghost
@@ -296,7 +313,9 @@ export function MapView() {
   }, []);
   // Thin wrappers kept so call sites (indicator click, map click) stay stable.
   // Suppression is handled globally by the click listener above, not here.
-  const placeStart = useCallback((ll: LatLng) => setStartPoint(ll), [setStartPoint]);
+  // voteEdgeId pins the vote to a specific proposal edge (see RoutePoint.voteEdgeId);
+  // a plain click/drag omits it and the start re-snaps its coordinate.
+  const placeStart = useCallback((ll: LatLng, voteEdgeId?: number) => setStartPoint(ll, undefined, voteEdgeId), [setStartPoint]);
   const placeEnd = useCallback((ll: LatLng) => setEndPoint(ll), [setEndPoint]);
   const handleMarkerHover = useCallback((hovering: boolean) => {
     setMarkerHoverCount((c) => Math.max(0, c + (hovering ? 1 : -1)));
@@ -315,7 +334,7 @@ export function MapView() {
   }, [clearDragPoint]);
 
   // Indicator click follows the same tool logic as a normal map click.
-  const handleIndicatorClick = useCallback((latlng: LatLng) => {
+  const handleIndicatorClick = useCallback((latlng: LatLng, voteEdgeId?: number) => {
     // Drop any stale "skip next click" from an upgrade drag, so the click that
     // selects this proposal — and the next one after it — both register (bug
     // where a drag's trailing click landed on a marker, never consuming it).
@@ -324,11 +343,14 @@ export function MapView() {
     if (activeTool === "end" && start.coords) {
       placeEnd(latlng);
       setActiveTool("start");
+    } else if (startReplaceArmed) {
+      // Armed from the legend: move the start onto this proposal, keep the route.
+      placeStart(latlng, voteEdgeId);
     } else {
       if (start.coords || end.coords) clearPoints();
-      placeStart(latlng);
+      placeStart(latlng, voteEdgeId);
     }
-  }, [activeTool, start.coords, end.coords, clearPoints, clearSplitPaths, placeStart, placeEnd, setActiveTool, clearSuppressClick]);
+  }, [activeTool, startReplaceArmed, start.coords, end.coords, clearPoints, clearSplitPaths, placeStart, placeEnd, setActiveTool, clearSuppressClick]);
 
   // Tapping a top-proposal waypoint (start/end/mid). A crowded stack fans out
   // first (no side effect) — the SAME exploder a path tap uses, so matched
@@ -343,30 +365,60 @@ export function MapView() {
     placeStart(latlng);
   }, [clearPoints, placeStart, clearSuppressClick]);
 
-  // A real route exists (start AND end on a street map). Gates the proposal [x]
-  // remove-boxes and the click-to-restart behavior to route mode — not a lone
-  // point and not station maps (where the indicator IS the selection).
+  // A real route exists (start AND end on a street map). Gates the click-to-restart
+  // behavior to route mode — not a lone point and not station maps (where the
+  // indicator IS the selection). GraphLayer applies the same gate to the [×] badge.
   const isRouteMode = !!start.coords && !!end.coords && !isStationNetwork;
 
-  // Tiny [x] affordance pinned to a selected proposal's top-right corner. Default
-  // Leaflet div-icon box is reset away in globals.css (.proposal-x-icon). The box
-  // border matches the proposal's selection-ring color by role (start=teal,
-  // end=red, mid=ink), so the [x] reads as part of that highlighted icon.
-  const makeProposalXIcon = (role: "start" | "end" | "mid") =>
-    L.divIcon({
-      className: "proposal-x-icon",
-      html: `<span class="proposal-x-hit proposal-x-hit--${role}" aria-label="Remove from route">×</span>`,
-      iconSize: [13, 13],
-      iconAnchor: [-9, 40],
-    });
-  const proposalXIconStart = useMemo(() => makeProposalXIcon("start"), []);
-  const proposalXIconEnd = useMemo(() => makeProposalXIcon("end"), []);
-  const proposalXIconMid = useMemo(() => makeProposalXIcon("mid"), []);
+  // Resolve the [×] badge baked into a matched proposal's indicator (GraphLayer)
+  // to the right removal: the badge stamps the proposal's edge, and waypointMatch
+  // tells us which waypoint sits on that edge. One handler for all three roles —
+  // the badge rides inside the icon, so there's no per-role marker to wire.
+  const removeProposalAtEdge = useCallback((edgeIdx: number) => {
+    if (waypointMatch.start?.edgeIdx === edgeIdx) { clearStart(); return; }
+    if (waypointMatch.end?.edgeIdx === edgeIdx) { clearEnd(); return; }
+    const midIdx = waypointMatch.mids.findIndex((m) => m?.edgeIdx === edgeIdx);
+    if (midIdx >= 0) removeGhostWaypoint(midIdx);
+  }, [waypointMatch, clearStart, clearEnd, removeGhostWaypoint]);
+
+  // Drop from a drag started on an exploded on-route proposal (GraphLayer renders
+  // the ghost + dotted trail). Route by what the edge IS — same outcome as dragging
+  // the non-exploded proposal: a matched start/end/mid MOVES that waypoint to the
+  // drop; an on-path proposal inserts a NEW mid at the segment its `origin` lies on.
+  const onProposalDrop = useCallback((edgeIdx: number, origin: LatLng, drop: LatLng) => {
+    if (waypointMatch.start?.edgeIdx === edgeIdx) { setStartPoint(drop); return; }
+    if (waypointMatch.end?.edgeIdx === edgeIdx) { setEndPoint(drop); return; }
+    const midIdx = waypointMatch.mids.findIndex((m) => m?.edgeIdx === edgeIdx);
+    if (midIdx >= 0) { updateGhostWaypoint(midIdx, drop); return; }
+
+    // On-path (not a waypoint): insert a NEW mid into whichever route segment the
+    // origin lies on, then insertWaypointAtSegment splits/reroutes like a path drag.
+    const map = leafletMap;
+    if (!map) return;
+    const segs: { idx: number; coords: [number, number][] }[] =
+      splitDesirePaths.length > 0
+        ? splitDesirePaths.map((sp) => ({ idx: sp.segmentIndex, coords: sp.geometry.coordinates }))
+        : (routeData?.geometry ? [{ idx: 0, coords: routeData.geometry.coordinates }] : []);
+    if (segs.length === 0) return;
+    const p = map.latLngToContainerPoint([origin.lat, origin.lng]);
+    let bestIdx = segs[0].idx;
+    let bestD = Infinity;
+    for (const s of segs) {
+      for (let i = 0; i < s.coords.length - 1; i++) {
+        const a = map.latLngToContainerPoint([s.coords[i][1], s.coords[i][0]]);
+        const b = map.latLngToContainerPoint([s.coords[i + 1][1], s.coords[i + 1][0]]);
+        const d = L.LineUtil.pointToSegmentDistance(p, a, b);
+        if (d < bestD) { bestD = d; bestIdx = s.idx; }
+      }
+    }
+    insertWaypointAtSegment(bestIdx, drop);
+  }, [waypointMatch, setStartPoint, setEndPoint, updateGhostWaypoint, leafletMap, splitDesirePaths, routeData, insertWaypointAtSegment]);
 
   const { handleMapClick } = useMapClick({
     state: { start, end },
     inputMode,
     activeTool,
+    startReplaceArmed,
     onUpdateStart: placeStart,
     onUpdateEnd: placeEnd,
     onSetActiveTool: setActiveTool,
@@ -377,10 +429,12 @@ export function MapView() {
     onClearSuppress: clearSuppressClick,
   });
 
-  // A tap on the path: fan out a proposal stack at that spot if there is one (no
-  // side effect yet), else fall through to the map-click (restart). Mirrors
-  // handleProposalRestart for the matched-kite path — same exploder, same rule.
-  const handlePathTap = useCallback((latlng: LatLng) => {
+  // Any tap on the map or path: fan out a proposal stack at that spot if there is
+  // one and CONSUME the tap (so exploding a cluster never also places/moves a
+  // start), else fall through to the normal map-click. Used for path taps AND the
+  // bare-map click, so a click anywhere over a cluster explodes rather than
+  // selecting whichever icon sits on top. Mirrors handleProposalRestart (kite).
+  const handleTap = useCallback((latlng: LatLng) => {
     if (clusterExploderRef.current?.(latlng)) return;
     handleMapClick(latlng);
   }, [handleMapClick]);
@@ -406,7 +460,7 @@ export function MapView() {
   return (
     <>
     {/* MapLibre GL JS background — renders base map + graph from PMTiles */}
-    <MapLibreBackground leafletMap={leafletMap} mapStyle={mapStyle} />
+    <MapLibreBackground leafletMap={leafletMap} mapStyle={mapStyle} onReady={setMapReady} />
 
     <MapContainer
       center={[initialMapView.lat, initialMapView.lng]}
@@ -428,19 +482,21 @@ export function MapView() {
         startPoint={start.coords}
         endPoint={end.coords}
         ghostWaypoints={ghostWaypoints}
-        dragPoint={dragPoint}
+        dragPoint={effectiveDragPoint}
         hoverProposalPoint={hoverProposalPoint}
         onWaypointMatch={setWaypointMatch}
+        onPinnedResolve={setStartVoteEdgeId}
         onIndicatorClick={handleIndicatorClick}
         clusterExploderRef={clusterExploderRef}
-        onSpreadChange={setProposalSpread}
+        onRemoveProposal={removeProposalAtEdge}
+        onProposalDrop={onProposalDrop}
         onRemoveSelected={clearStart}
         suppressHover={isHoveringPath || markerHoverCount > 0}
         pathEdgeIds={pathEdgeIds}
       />
       <MapDragCursor />
       <CursorTracker onMove={handleCursorMove} />
-      <MapClickHandler onMapClick={handleMapClick} />
+      <MapClickHandler onMapClick={handleTap} />
       <SnapMarker
         cursorLatLng={cursorLatLng}
         activeTool={activeTool}
@@ -471,7 +527,7 @@ export function MapView() {
           geometry={routeData.geometry}
           segmentIndex={0}
           onSegmentDrag={insertWaypointAtSegment}
-          onTap={handlePathTap}
+          onTap={handleTap}
           onPathHoverChange={setIsHoveringPath}
         />
       )}
@@ -483,7 +539,7 @@ export function MapView() {
             key={splitPath.id}
             splitPath={splitPath}
             onSegmentDrag={insertWaypointAtSegment}
-            onTap={handlePathTap}
+            onTap={handleTap}
             onPathHoverChange={setIsHoveringPath}
           />
         );
@@ -525,20 +581,10 @@ export function MapView() {
         />
       ))}
 
-      {/* Remove-from-route [x] for each mid that sits on a top proposal (route
-          mode only). Reuses removeGhostWaypoint — the old sequence-removal path.
-          Follows the proposal out into the cluster grid when it's fanned out. */}
-      {isRouteMode && ghostWaypoints.map((wp, index) => (
-        waypointMatch.mids[index] != null ? (
-          <Marker
-            key={`mid-x-${ghostWaypointIds[index] ?? index}`}
-            position={spreadPosFor(waypointMatch.mids[index]?.edgeIdx, wp)}
-            icon={proposalXIconMid}
-            zIndexOffset={4000}
-            eventHandlers={{ click: () => removeGhostWaypoint(index) }}
-          />
-        ) : null
-      ))}
+      {/* The remove-from-route [×] for a matched mid is baked into its proposal
+          indicator (GraphLayer's `removeEdge` badge), so it scales and fans out
+          with the icon and needs no marker here. Removal routes through
+          `removeProposalAtEdge` → removeGhostWaypoint. */}
 
       {/* Waypoint markers */}
       {waypoints.map((wp, index) => (
@@ -579,15 +625,6 @@ export function MapView() {
         />
       )}
 
-      {isRouteMode && waypointMatch.start != null && start.coords && (
-        <Marker
-          position={spreadPosFor(waypointMatch.start?.edgeIdx, start.coords)}
-          icon={proposalXIconStart}
-          zIndexOffset={4000}
-          eventHandlers={{ click: () => clearStart() }}
-        />
-      )}
-
       {/* End marker — same universal marker; the kite is hidden when the end sits
           on a proposal (the red-tinted indicator stands in). */}
       {end.coords && !isStationNetwork && (
@@ -610,19 +647,13 @@ export function MapView() {
           }}
         />
       )}
-
-      {isRouteMode && waypointMatch.end != null && end.coords && (
-        <Marker
-          position={spreadPosFor(waypointMatch.end?.edgeIdx, end.coords)}
-          icon={proposalXIconEnd}
-          zIndexOffset={4000}
-          eventHandlers={{ click: () => clearEnd() }}
-        />
-      )}
     </MapContainer>
 
     {/* Ghost pin rendered outside MapContainer for smooth 60fps positioning */}
     <GhostPin />
+
+    {/* Back / forward through the selection history (bottom-left) */}
+    <NavHistoryControls />
     </>
   );
 }

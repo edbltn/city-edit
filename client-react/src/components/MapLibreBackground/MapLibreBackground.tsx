@@ -86,9 +86,12 @@ interface MapLibreBackgroundProps {
   leafletMap: L.Map | null;
   /** Active map style — drives basemap tiles + background color */
   mapStyle: MapStyle;
+  /** Called once the base map has first loaded (or immediately if WebGL is
+   *  unavailable and the raster fallback takes over). Idempotent upstream. */
+  onReady?: () => void;
 }
 
-export function MapLibreBackground({ leafletMap, mapStyle }: MapLibreBackgroundProps) {
+export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBackgroundProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 
@@ -114,6 +117,9 @@ export function MapLibreBackground({ leafletMap, mapStyle }: MapLibreBackgroundP
         console.warn("MapLibre error (non-fatal):", e.error?.message ?? e);
       });
 
+      // Base map has rendered for the first time — let the loader dismiss.
+      map.on("load", () => onReady?.());
+
       mapRef.current = map;
 
       return () => {
@@ -122,10 +128,13 @@ export function MapLibreBackground({ leafletMap, mapStyle }: MapLibreBackgroundP
       };
     } catch (err) {
       console.warn("MapLibre GL JS unavailable (WebGL required):", err);
-      // Leaflet TileLayer provides the fallback base map
+      // Leaflet TileLayer provides the fallback base map — it's already
+      // mounting, so consider the base map ready.
+      onReady?.();
     }
     // mapStyle is resolved once at bootstrap and stable for the session.
-  }, [mapStyle]);
+    // onReady is a stable callback (useCallback) so it won't re-init the map.
+  }, [mapStyle, onReady]);
 
   // Sync camera from Leaflet
   useEffect(() => {

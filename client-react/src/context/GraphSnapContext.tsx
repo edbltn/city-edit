@@ -3,6 +3,7 @@ import type { LatLng } from "../types";
 
 type SnapFn = (map: L.Map, lat: number, lng: number) => LatLng | null;
 type ResolveEdgeFn = (lat: number, lng: number) => number | null;
+type ResolveTopLabelFn = (edgeIds: number[]) => string | null;
 
 interface GraphSnapContextValue {
   /** Register a snap function (called by GraphLayer) */
@@ -13,6 +14,12 @@ interface GraphSnapContextValue {
   setResolveVoteEdgeId: (fn: ResolveEdgeFn) => void;
   /** Resolve a lat/lng to the edge id a vote would land on (same path as hover/click). */
   resolveVoteEdgeId: (lat: number, lng: number) => number | null;
+  /** Register the path→top-vote-type resolver (called by GraphLayer). */
+  setResolveTopLabelForPath: (fn: ResolveTopLabelFn) => void;
+  /** The highest net-voted vote-type label across a set of path edges, or null —
+   *  used to pick a sensible default vote type when a deep link's requested type
+   *  isn't valid for the map. Reads live vote data held by GraphLayer. */
+  resolveTopLabelForPath: (edgeIds: number[]) => string | null;
   /** Current snap position — updated by GraphLayer on every mousemove.
    *  Read this during drag for zero-overhead snapping. */
   currentSnapRef: MutableRefObject<LatLng | null>;
@@ -28,6 +35,7 @@ const GraphSnapContext = createContext<GraphSnapContextValue | null>(null);
 export function GraphSnapProvider({ children }: { children: ReactNode }) {
   const snapFnRef = useRef<SnapFn | null>(null);
   const resolveEdgeFnRef = useRef<ResolveEdgeFn | null>(null);
+  const resolveTopLabelFnRef = useRef<ResolveTopLabelFn | null>(null);
   const currentSnapRef = useRef<LatLng | null>(null);
   const isDraggingRef = useRef(false);
 
@@ -47,6 +55,14 @@ export function GraphSnapProvider({ children }: { children: ReactNode }) {
     return resolveEdgeFnRef.current?.(lat, lng) ?? null;
   }, []);
 
+  const setResolveTopLabelForPath = useCallback((fn: ResolveTopLabelFn) => {
+    resolveTopLabelFnRef.current = fn;
+  }, []);
+
+  const resolveTopLabelForPath = useCallback((edgeIds: number[]): string | null => {
+    return resolveTopLabelFnRef.current?.(edgeIds) ?? null;
+  }, []);
+
   const setCurrentSnap = useCallback((pos: LatLng | null) => {
     currentSnapRef.current = pos;
   }, []);
@@ -56,7 +72,7 @@ export function GraphSnapProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <GraphSnapContext.Provider value={{ setSnapFn, snapToGraph, setResolveVoteEdgeId, resolveVoteEdgeId, currentSnapRef, setCurrentSnap, isDraggingRef, setDragging }}>
+    <GraphSnapContext.Provider value={{ setSnapFn, snapToGraph, setResolveVoteEdgeId, resolveVoteEdgeId, setResolveTopLabelForPath, resolveTopLabelForPath, currentSnapRef, setCurrentSnap, isDraggingRef, setDragging }}>
       {children}
     </GraphSnapContext.Provider>
   );

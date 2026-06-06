@@ -9,6 +9,7 @@
 
 import { CONFIG, applyCityConfig, type CityConfig } from "../config";
 import { detectSubdomain } from "../themes";
+import { MAP_STYLES } from "../mapStyles";
 
 export interface MapVoteType {
   label: string;
@@ -78,13 +79,27 @@ export function detectMapSlugFromUrl(): string | null {
   return params.get("map");
 }
 
+/**
+ * Preview override: `?style=<id>` swaps ONLY the visual style (heat ramp,
+ * basemap, marker outline) and leaves `mode` untouched, so a map's existing
+ * votes stay on screen while you compare themes. Unknown ids are ignored.
+ */
+function applyStyleOverride(cfg: MapConfig): MapConfig {
+  if (typeof window === "undefined") return cfg;
+  const override = new URLSearchParams(window.location.search).get("style");
+  if (override && Object.prototype.hasOwnProperty.call(MAP_STYLES, override)) {
+    return { ...cfg, style: override };
+  }
+  return cfg;
+}
+
 export async function fetchMapConfig(slug: string): Promise<MapConfig | null> {
   try {
     const res = await fetch(`${CONFIG.apiUrl}/maps/${encodeURIComponent(slug)}`, {
       headers: passcodeHeaders(slug),
     });
     if (!res.ok) return null;
-    return (await res.json()) as MapConfig;
+    return applyStyleOverride((await res.json()) as MapConfig);
   } catch {
     return null;
   }
@@ -95,7 +110,7 @@ export async function fetchMapConfigBySubdomain(subdomain: string): Promise<MapC
   try {
     const res = await fetch(`${CONFIG.apiUrl}/maps/by-subdomain/${encodeURIComponent(subdomain)}`);
     if (!res.ok) return null;
-    return (await res.json()) as MapConfig;
+    return applyStyleOverride((await res.json()) as MapConfig);
   } catch {
     return null;
   }

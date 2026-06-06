@@ -16,6 +16,14 @@ export interface VoteTypeIconOptions {
    *  a linked waypoint: it's a fixed visual, and the kite RouteMarker underneath
    *  receives the drag/click. */
   passthrough?: boolean;
+  /** Render a remove [×] badge pinned to the icon's top-right corner — shown when
+   *  this proposal IS a route waypoint (start/end/mid). It lives INSIDE the icon,
+   *  so it scales with `--indicator-scale`, follows the icon when the cluster
+   *  fans out, and stays centered on the corner with zero parallel positioning.
+   *  The edge id is stamped (`data-x-edge`) so one delegated click handler can
+   *  resolve which waypoint to remove. Stays clickable even when `passthrough`
+   *  (the badge is pointer-events:auto; the rest of the icon is not). */
+  removeEdge?: number | null;
 }
 
 // The pin is one atomic SVG shape (square + downward tail), drawn in a 34×42
@@ -67,6 +75,13 @@ export function makeVoteTypeIcon(
 
   const shape = opts.square ? SQUARE_PATH : OUTER_PATH;
   const innerShape = opts.square ? INNER_SQUARE_PATH : INNER_PATH;
+  // Remove badge: a sibling of the pin/icon inside the scaled .vote-type-indicator,
+  // so CSS pins it to the square's top-right corner (SVG 31,3) and it inherits the
+  // icon's scale + fanned-out position. data-x-edge lets the delegated handler in
+  // GraphLayer resolve which waypoint to drop.
+  const removeBadge = opts.removeEdge != null
+    ? `<span class="vote-type-indicator-x" data-x-edge="${opts.removeEdge}" role="button" aria-label="Remove from route">×</span>`
+    : "";
   const html =
     `<div class="${cls.join(" ")}">` +
       `<svg class="vote-type-indicator-pin" viewBox="0 0 ${SVG_W} ${SVG_H}" width="${SVG_W}" height="${SVG_H}">` +
@@ -75,6 +90,7 @@ export function makeVoteTypeIcon(
         `<path class="vote-type-indicator-inner" d="${innerShape}" />` +
       `</svg>` +
       `<div class="vote-type-indicator-iconwrap">${glyph}</div>` +
+      removeBadge +
     `</div>`;
 
   return L.divIcon({

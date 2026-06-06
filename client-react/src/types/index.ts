@@ -13,6 +13,14 @@ export interface RoutePoint {
   coords: LatLng | null;
   timestamp: number | null;
   address?: string | null;
+  /** The exact graph edge this point votes on, when it was chosen by selecting a
+   *  specific edge (a top-proposal indicator) rather than dropped at a bare
+   *  coordinate. The banner's Cast buttons vote on THIS edge instead of
+   *  re-snapping the coordinate — which is how the banner and the in-map
+   *  proposal modal stay on the same edge (re-snapping a midpoint can land on a
+   *  neighbouring edge/node, and then the two disagree forever). Absent for plain
+   *  map clicks, drags, and address searches, which re-snap the coordinate. */
+  voteEdgeId?: number | null;
 }
 
 export interface RouteGeometry {

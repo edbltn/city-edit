@@ -116,14 +116,15 @@ if DATABASE_URL:
 class ResolvedMap:
     """A map plus its resolved city, loaded graph, OSRM router, and policy."""
 
-    __slots__ = ("slug", "city", "network", "graph", "osrm", "allow_suggestions",
-                 "requires_passcode", "vote_type_labels")
+    __slots__ = ("slug", "city", "network", "mode", "graph", "osrm",
+                 "allow_suggestions", "requires_passcode", "vote_type_labels")
 
-    def __init__(self, slug, city, network, graph, osrm, allow_suggestions,
+    def __init__(self, slug, city, network, mode, graph, osrm, allow_suggestions,
                  requires_passcode, vote_type_labels):
         self.slug = slug
         self.city = city
         self.network = network
+        self.mode = mode
         self.graph = graph
         self.osrm = osrm
         self.allow_suggestions = allow_suggestions
@@ -143,6 +144,7 @@ def resolve_map(slug: str | None) -> ResolvedMap:
     if m:
         city = get_city(m["cityId"]) or get_city(DEFAULT_CITY_ID)
         network = m.get("network") or "streets"
+        mode = m.get("mode") or "walk"
         vote_types = m.get("voteTypes") or []
         labels = {vt.get("label") for vt in vote_types if vt.get("label")}
         allow_suggestions = m.get("allowSuggestions", True)
@@ -150,6 +152,7 @@ def resolve_map(slug: str | None) -> ResolvedMap:
     else:
         city = get_city(slug) or get_city(DEFAULT_CITY_ID)
         network = "streets"
+        mode = "walk"
         labels = set()
         allow_suggestions = True
         requires_passcode = False
@@ -157,7 +160,7 @@ def resolve_map(slug: str | None) -> ResolvedMap:
     graph = graph_registry.get(city, network)
     # Station networks aren't routable (no OSRM dataset); only streets need a router.
     osrm = osrm_registry.get(city) if network not in STATION_NETWORKS else None
-    return ResolvedMap(slug, city, network, graph, osrm, allow_suggestions,
+    return ResolvedMap(slug, city, network, mode, graph, osrm, allow_suggestions,
                        requires_passcode, labels)
 
 
@@ -260,6 +263,17 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
         return cached["body"]
 
     rmap.graph.ensure_loaded()
+
+    # The heatmap serves ONLY from Redis; Postgres is the durable copy that the
+    # startup replay (_populate_redis) loads into Redis. If that replay never ran
+    # or this map's hash is empty for any reason, the heatmap would be blank even
+    # though the votes are safely in Postgres (and the map card's vote count, read
+    # straight from Postgres, would still show them — the exact divergence this
+    # guards against). Reconcile on demand the first time we'd serve an empty hash.
+    if redis_client.hlen(vote_store.hash_key(rmap.slug)) == 0:
+        if _hydrate_map_redis(rmap.slug, rmap.mode):
+            rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+
     votes = vote_store.read_all(redis_client, rmap.slug)
     mode_filter = vote_store.mode_to_int(mode) if mode else None
     arrays = vote_store.build_arrays(
@@ -272,6 +286,58 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
 
     _vote_cache[cache_key] = {"rev": rev, "body": body}
     return body
+
+
+def _write_vote_fields(slug: str, fields: list[tuple[int, int]]) -> None:
+    """HSET a batch of (redis_field, count) into a map's Redis hash, pipelined.
+
+    HSET writes ABSOLUTE counts, so this re-asserts the Postgres-authoritative
+    state (the vote path commits to Postgres synchronously before touching Redis)
+    rather than incrementing — safe to re-run."""
+    h = vote_store.hash_key(slug)
+    pipe = redis_client.pipeline()
+    for i, (field, cnt) in enumerate(fields):
+        pipe.hset(h, str(field), cnt)
+        if (i + 1) % 5000 == 0:
+            pipe.execute()
+            pipe = redis_client.pipeline()
+    pipe.execute()
+
+
+def _hydrate_map_redis(slug: str, mode: str) -> int:
+    """Lazily replay ONE map's Postgres edge_votes into its (empty) Redis hash.
+
+    The on-demand counterpart to _populate_redis, called when the heatmap would
+    otherwise serve a blank map because its Redis hash is empty. Keyed by the
+    map's `mode` so the fields land in the same namespace the client reads under
+    (themeMode == map.mode). Single-flighted via a short Redis lock so concurrent
+    first-requests don't stampede the same replay. Bumps the revision so other
+    workers' in-memory vote caches invalidate and pick up the now-full hash.
+    Returns the number of fields written (0 if the DB has none or another request
+    is already hydrating)."""
+    if not DATABASE_URL:
+        return 0
+    # Single-flight: the loser serves this one request from the (briefly still
+    # empty) hash and self-heals on its next cache miss.
+    if not redis_client.set(f"hydrate_lock:{slug}", "1", nx=True, ex=120):
+        return 0
+    try:
+        rows = database.aggregate_votes_for_replay(slug)
+        if not rows:
+            return 0
+        mode_int = vote_store.mode_to_int(mode)
+        fields = [(vote_store.redis_field(edge_id, mode_int, vt_id, direction), cnt)
+                  for (_slug, edge_id, vt_id, direction, cnt) in rows]
+        _write_vote_fields(slug, fields)
+        redis_client.incr(vote_store.revision_key(slug))
+        logger.info(f"[HYDRATE] Replayed {len(fields)} fields into "
+                    f"{vote_store.hash_key(slug)} from Postgres (Redis was empty)")
+        return len(fields)
+    except Exception as e:
+        logger.warning(f"[HYDRATE] Failed for '{slug}': {e}")
+        return 0
+    finally:
+        redis_client.delete(f"hydrate_lock:{slug}")
 
 
 def _populate_redis():
@@ -300,13 +366,7 @@ def _populate_redis():
         h = vote_store.hash_key(slug)
         if redis_client.hlen(h) >= len(fields):
             continue
-        pipe = redis_client.pipeline()
-        for i, (field, cnt) in enumerate(fields):
-            pipe.hset(h, str(field), cnt)
-            if (i + 1) % 5000 == 0:
-                pipe.execute()
-                pipe = redis_client.pipeline()
-        pipe.execute()
+        _write_vote_fields(slug, fields)
         logger.info(f"[POPULATE] Loaded {len(fields)} fields into {h}")
 
 
@@ -434,12 +494,16 @@ def health():
 
 @app.route("/api/cities", methods=["GET"])
 def cities_list():
-    return jsonify({"cities": [c.to_public() for c in all_cities()]})
+    resp = jsonify({"cities": [c.to_public() for c in all_cities()]})
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
 
 
 @app.route("/api/vote-type-lists", methods=["GET"])
 def vote_type_lists():
-    return jsonify({"lists": list_vote_type_lists()})
+    resp = jsonify({"lists": list_vote_type_lists()})
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
 
 
 @app.route("/api/maps", methods=["GET"])
@@ -450,7 +514,11 @@ def maps_list():
         city = get_city(m["cityId"])
         if city:
             m["city"] = city.to_public()
-    return jsonify({"maps": maps})
+    # Short public cache: this gatekeeps every cold page load (it hit Postgres
+    # uncached on each one); the map list changes rarely, so 60s is safe.
+    resp = jsonify({"maps": maps})
+    resp.headers["Cache-Control"] = "public, max-age=60"
+    return resp
 
 
 def _map_response(m: dict):
@@ -465,7 +533,15 @@ def _map_response(m: dict):
         lbl for lbl in fetch_voted_vote_type_labels(m["slug"])
         if lbl not in default_labels
     ]
-    return jsonify(m)
+    resp = jsonify(m)
+    # This is the prod page-load entry point (resolved per load by slug/subdomain)
+    # and was uncached. A passcode map only reaches here once unlocked, so keep its
+    # config out of shared caches — per-browser only.
+    if m.get("requiresPasscode"):
+        resp.headers["Cache-Control"] = "private, max-age=30"
+    else:
+        resp.headers["Cache-Control"] = "public, max-age=60"
+    return resp
 
 
 def _locked_stub(slug: str):

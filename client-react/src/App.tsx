@@ -5,7 +5,7 @@ import {
 } from "./context";
 import { TopBar, MapView, ErrorToast, Landing } from "./components";
 import { PasscodeGate } from "./components/PasscodeGate/PasscodeGate";
-import { useRoute } from "./context";
+import { useRoute, useHeatmap } from "./context";
 import { isLandingHost, subdomainRedirectUrl } from "./themes";
 import {
   resolveMapConfig, fetchMapConfig, applyMap, detectMapSlugFromUrl,
@@ -13,8 +13,28 @@ import {
   type MapConfig,
 } from "./map/runtime";
 
+/** Full-screen "Loading..." splash with the ASCII (| / - \) spinner. */
+function FullScreenLoader() {
+  const year = new Date().getFullYear();
+  return (
+    <div className="map-bootstrap">
+      <span className="spinner map-bootstrap-spinner" aria-hidden />
+      <div className="map-bootstrap-label">Loading...</div>
+      <footer className="map-bootstrap-footer">
+        <span>© {year} City Edit. All rights reserved.</span>
+        <a href="https://sphericalharmonics.org/" className="map-bootstrap-footer-link">
+          sphericalharmonics.org
+        </a>
+      </footer>
+    </div>
+  );
+}
+
 function AppContent() {
   const { error, clearError } = useRoute();
+  // Keep the splash up until BOTH the base map and the vote heatmap have first
+  // painted, so the map is never revealed half-loaded (slow on mobile).
+  const { isInitialLoading } = useHeatmap();
 
   return (
     <div id="app">
@@ -24,6 +44,7 @@ function AppContent() {
       </main>
       <ErrorToast message={error} onDismiss={clearError} />
       <PasscodeGate />
+      {isInitialLoading && <FullScreenLoader />}
     </div>
   );
 }
@@ -87,12 +108,7 @@ function MapApp() {
   }, []);
 
   if (cfg === undefined) {
-    return (
-      <div className="map-bootstrap">
-        <div className="map-bootstrap-spinner" aria-hidden />
-        <div className="map-bootstrap-label">Loading map…</div>
-      </div>
-    );
+    return <FullScreenLoader />;
   }
 
   if (cfg?.locked) {

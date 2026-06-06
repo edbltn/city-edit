@@ -13,6 +13,9 @@ interface UseMapClickOptions {
   state: MapClickState;
   inputMode: InputMode;
   activeTool: ActiveTool;
+  /** When true, a start-tool click MOVES the start in place (keeps the end +
+   *  waypoints) instead of wiping the path. Armed from the legend; one-shot. */
+  startReplaceArmed: boolean;
   onUpdateStart: (coords: LatLng) => void;
   onUpdateEnd: (coords: LatLng) => void;
   onSetActiveTool: (tool: ActiveTool) => void;
@@ -48,6 +51,7 @@ export function useMapClick({
   state,
   inputMode,
   activeTool,
+  startReplaceArmed,
   onUpdateStart,
   onUpdateEnd,
   onSetActiveTool,
@@ -77,16 +81,25 @@ export function useMapClick({
         return;
       }
 
-      onClearGhostWaypoints();
-
       if (activeTool === "start") {
-        // Replace start, wiping any existing route
+        // Start armed for an in-place move (from the legend): drop the start on
+        // the new spot but keep the end + waypoints, so the route just re-routes
+        // from here. setStartPoint consumes the one-shot arm; the main calc
+        // effect recomputes the path (and any split segments through the mids).
+        if (startReplaceArmed) {
+          onUpdateStart(latlng);
+          return;
+        }
+        // Default sticky start: replace start, wiping any existing route.
+        onClearGhostWaypoints();
         if (state.start.coords || state.end.coords) {
           onClearPoints();
         }
         onUpdateStart(latlng);
         return;
       }
+
+      onClearGhostWaypoints();
 
       // activeTool === "end"
       if (!state.start.coords) {
@@ -103,6 +116,7 @@ export function useMapClick({
       state.end.coords,
       inputMode,
       activeTool,
+      startReplaceArmed,
       onUpdateStart,
       onUpdateEnd,
       onSetActiveTool,

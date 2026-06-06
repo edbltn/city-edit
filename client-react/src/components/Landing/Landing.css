@@ -278,10 +278,6 @@
   opacity: 0.5;
 }
 
-.landing-footer-sep {
-  opacity: 0.5;
-}
-
 .landing-footer-link {
   color: var(--ink);
   text-decoration: none;

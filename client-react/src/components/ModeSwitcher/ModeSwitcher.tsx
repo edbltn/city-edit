@@ -19,12 +19,32 @@ interface MapItem {
   city?: { name: string };
 }
 
+const SPINNER_FRAMES = ["/", "-", "\\", "|"];
+
+function AsciiSpinner() {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(
+      () => setFrame((f) => (f + 1) % SPINNER_FRAMES.length),
+      120
+    );
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <div className="mode-loading">
+      <span className="mode-spinner" aria-hidden>{SPINNER_FRAMES[frame]}</span>
+      <span>Loading…</span>
+    </div>
+  );
+}
+
 export const ModeSwitcher = memo(function ModeSwitcher() {
   const current = useTheme();
   const { start, end } = useRoute();
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [maps, setMaps] = useState<MapItem[]>([]);
+  const [loaded, setLoaded] = useState(false);
   // Explicit width for the (left-anchored) dropdown: wide enough to show the
   // longest map row in full, capped at the viewport's right edge (then rows
   // ellipsize). Measured in JS because the dropdown's `.mode-options` is a
@@ -41,7 +61,8 @@ export const ModeSwitcher = memo(function ModeSwitcher() {
     fetch(`${CONFIG.apiUrl}/maps`)
       .then((r) => r.json())
       .then((d) => setMaps(d.maps || []))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoaded(true));
   }, []);
 
   // Close on outside click.
@@ -128,7 +149,13 @@ export const ModeSwitcher = memo(function ModeSwitcher() {
       <button
         type="button"
         className="mode-btn"
-        onClick={() => setIsOpen(!isOpen)}
+        onMouseDown={(e) => {
+          // Open on press, not release, so the menu appears the instant the
+          // button goes down. preventDefault stops the button from stealing
+          // focus, which would otherwise race the outside-click close handler.
+          e.preventDefault();
+          setIsOpen((open) => !open);
+        }}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
       >
@@ -153,7 +180,8 @@ export const ModeSwitcher = memo(function ModeSwitcher() {
           autoComplete="off"
         />
         <div className="mode-options">
-          {visible.map((m) => {
+          {!loaded && <AsciiSpinner />}
+          {loaded && visible.map((m) => {
             const isCurrent = m.slug === currentSlug;
             return (
               <a
@@ -173,7 +201,7 @@ export const ModeSwitcher = memo(function ModeSwitcher() {
               </a>
             );
           })}
-          {visible.length === 0 && <div className="mode-empty">No maps found</div>}
+          {loaded && visible.length === 0 && <div className="mode-empty">No maps found</div>}
         </div>
       </div>
     </div>

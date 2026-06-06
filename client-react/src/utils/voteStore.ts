@@ -135,11 +135,47 @@ function migrateKnownLabels() {
   if (changed) {
     persistById();
     persistByLabel();
+    notify();
   }
 }
 
 function labelKey(mode: string, edgeId: number, label: string): string {
   return `${mode}|${edgeId}|${label}`;
+}
+
+// ── change notification ────────────────────────────────────────────────────────
+// This store is module-level mutable state shared by every vote view: the
+// top-bar banner's +/- buttons, the proposal modal's +/- rows, and the heatmap.
+// They ALL must re-read after ANY mutation, no matter which one triggered it —
+// or their views silently drift apart. (The bug this fixes: un-clicking [+] in
+// the modal left the banner's [+] stuck "cast", because the modal bumped its own
+// re-render counter and the banner never heard about it.)
+//
+// So mutations are the single source of change too: each bumps `version` and
+// notifies subscribers. React views subscribe via useVotesVersion()
+// (useSyncExternalStore) and re-render together. DO NOT reintroduce per-consumer
+// vote "version" counters — that is exactly what drifts. Read the version from
+// the hook wherever you call getVote()/coverage().
+
+let version = 0;
+const listeners = new Set<() => void>();
+
+function notify() {
+  version += 1;
+  for (const fn of listeners) fn();
+}
+
+/** Subscribe to any vote change; returns an unsubscribe fn. For useSyncExternalStore. */
+export function subscribeVotes(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/** Monotonic version, bumped on every mutation. Stable snapshot for useSyncExternalStore. */
+export function getVotesVersion(): number {
+  return version;
 }
 
 // ── public API ───────────────────────────────────────────────────────────────
@@ -154,6 +190,36 @@ export function getVote(mode: string, edgeId: number, label: string): VoteDirect
   return loadByLabel().get(labelKey(mode, edgeId, label)) ?? 0;
 }
 
+/**
+ * Mutate one entry WITHOUT persisting or notifying. Returns true if the stored
+ * direction actually changed. The public setters below batch persist + a single
+ * notify() around one or more writes, so a multi-edge cast re-renders views once
+ * rather than once per edge.
+ */
+function writeVote(
+  mode: string,
+  edgeId: number,
+  label: string,
+  direction: VoteDirection | 0,
+): boolean {
+  if (!label) return false;
+  const vtId = labelToId.get(label);
+  if (vtId !== undefined) {
+    const ids = loadById();
+    const k = packVoteKey(edgeId, modeToInt(mode), vtId);
+    const prev = ids.get(k) ?? 0;
+    if (direction === 0) ids.delete(k);
+    else ids.set(k, direction);
+    return direction !== prev;
+  }
+  const lbl = loadByLabel();
+  const k = labelKey(mode, edgeId, label);
+  const prev = lbl.get(k) ?? 0;
+  if (direction === 0) lbl.delete(k);
+  else lbl.set(k, direction);
+  return direction !== prev;
+}
+
 /** Set (direction 1/-1) or clear (0) the local vote for one (mode, edge, type). */
 export function setVote(
   mode: string,
@@ -161,20 +227,10 @@ export function setVote(
   label: string,
   direction: VoteDirection | 0,
 ) {
-  if (!label) return;
-  const vtId = labelToId.get(label);
-  if (vtId !== undefined) {
-    const ids = loadById();
-    const k = packVoteKey(edgeId, modeToInt(mode), vtId);
-    if (direction === 0) ids.delete(k);
-    else ids.set(k, direction);
+  if (writeVote(mode, edgeId, label, direction)) {
     persistById();
-  } else {
-    const lbl = loadByLabel();
-    const k = labelKey(mode, edgeId, label);
-    if (direction === 0) lbl.delete(k);
-    else lbl.set(k, direction);
     persistByLabel();
+    notify();
   }
 }
 
@@ -185,7 +241,15 @@ export function setVotes(
   label: string,
   direction: VoteDirection | 0,
 ) {
-  for (const eid of edgeIds) setVote(mode, eid, label, direction);
+  let changed = false;
+  for (const eid of edgeIds) {
+    changed = writeVote(mode, eid, label, direction) || changed;
+  }
+  if (changed) {
+    persistById();
+    persistByLabel();
+    notify();
+  }
 }
 
 /**
@@ -221,8 +285,14 @@ export function reconcileEdge(
   edgeId: number,
   serverLabels: Record<string, number>,
 ) {
+  let changed = false;
   for (const [label, dir] of Object.entries(serverLabels)) {
-    if (dir === 1 || dir === -1) setVote(mode, edgeId, label, dir);
+    if (dir === 1 || dir === -1) changed = writeVote(mode, edgeId, label, dir) || changed;
+  }
+  if (changed) {
+    persistById();
+    persistByLabel();
+    notify();
   }
 }
 
@@ -239,4 +309,5 @@ export function _resetVoteStore() {
       // ignore
     }
   }
+  notify();
 }

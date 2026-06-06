@@ -15,7 +15,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 ENV PYTHONUNBUFFERED=1
 
-RUN apt-get update && apt-get install -y nginx supervisor curl && rm -rf /var/lib/apt/lists/*
+# brotli modules: ~15-20% smaller than gzip on the big topology/JSON payloads.
+RUN apt-get update && apt-get install -y \
+    nginx libnginx-mod-http-brotli-filter libnginx-mod-http-brotli-static \
+    supervisor curl \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY server/requirements.txt .
 RUN uv pip install --system --no-cache -r requirements.txt gunicorn

@@ -23,11 +23,11 @@ export const TopBar = memo(function TopBar() {
     isCalculatingSplit,
     routeData,
     splitDesirePaths,
-    isVoting,
     pointType,
     activeTool,
     isDirectionCast,
     setActiveTool,
+    armStartReplace,
     setStartPoint,
     setEndPoint,
     clearPoints,
@@ -51,9 +51,11 @@ export const TopBar = memo(function TopBar() {
 
   const handleStartClick = useCallback(() => {
     if (isPointOnly) return;
-    setActiveTool("start");
+    // Arm an in-place move: the next map click relocates the start and keeps the
+    // existing end + waypoints (instead of the default click-to-restart wipe).
+    armStartReplace();
     setTypingField("start");
-  }, [isPointOnly, setActiveTool]);
+  }, [isPointOnly, armStartReplace]);
 
   const handleEndClick = useCallback(() => {
     setActiveTool("end");
@@ -243,7 +245,6 @@ export const TopBar = memo(function TopBar() {
                 type="button"
                 className={`btn-cast btn-cast-down${isDirectionCast(-1) ? " is-cast" : ""}`}
                 onClick={() => castVote(-1)}
-                disabled={isVoting}
                 aria-pressed={isDirectionCast(-1)}
                 title={isDirectionCast(-1) ? "Remove your vote against" : "Vote against"}
                 tabIndex={canVote && !isLoading ? undefined : -1}
@@ -254,7 +255,6 @@ export const TopBar = memo(function TopBar() {
                 type="button"
                 className={`btn-cast btn-cast-up${isDirectionCast(1) ? " is-cast" : ""}`}
                 onClick={() => castVote(1)}
-                disabled={isVoting}
                 aria-pressed={isDirectionCast(1)}
                 title={isDirectionCast(1) ? "Remove your vote for" : "Vote for"}
                 tabIndex={canVote && !isLoading ? undefined : -1}
@@ -266,7 +266,6 @@ export const TopBar = memo(function TopBar() {
             <button
               className={`btn-header btn-clear ${start.coords && !isLoading ? "" : "hidden-reserve"}`}
               onClick={clearPoints}
-              disabled={isVoting}
               tabIndex={start.coords && !isLoading ? undefined : -1}
             >
               Clear

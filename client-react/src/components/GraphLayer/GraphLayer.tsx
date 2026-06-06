@@ -17,13 +17,14 @@ import { createPortal } from "react-dom";
 import L from "leaflet";
 import Flatbush from "flatbush";
 import { CONFIG } from "../../config";
+import { COLOR_START, COLOR_END } from "../../colors";
 import { withMap, getMapSlug, passcodeHeaders, getCurrentMap } from "../../map/runtime";
 import { useWebSocketContext } from "../../context/WebSocketContext";
-import { useGraphSnap, useTheme, useHeatmap } from "../../context";
+import { useGraphSnap, useTheme, useHeatmap, useGhostPin } from "../../context";
 import type { GraphData, ProposalMatch } from "../../types";
 import { makeVoteTypeIcon } from "./voteTypeIcon";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
-import { selectTopProposals, type VoteTypeWinner } from "./topProposals";
+import { selectTopProposals, topLabelForEdges, type VoteTypeWinner } from "./topProposals";
 import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts } from "./voteApply";
 import { iconForLabel, iconSrc, mapStyleForTheme } from "../../themes";
 import {
@@ -36,6 +37,7 @@ import {
 } from "../../utils/graphCache";
 import { getVote, reconcileEdge, setVoteTypeMap, type VoteDirection } from "../../utils/voteStore";
 import { castVotes } from "../../utils/castVote";
+import { useVotesVersion } from "../../utils/useVotesVersion";
 import { getVoterId } from "../../utils/voterIdentity";
 import { isHoverSuppressed } from "../../utils/touchHover";
 import { buildSelectionUrl, copyToClipboard } from "../../utils/shareLink";
@@ -223,9 +225,9 @@ function decodeVoteTypes(
 }
 
 // Cap on how many top-proposal indicators show on the map. Each surviving
-// EDGE consumes one slot (winners are deduped per edge first), so the 10 most
-// net-voted segments survive — not one per vote type.
-const TOP_PROPOSAL_LIMIT = 10;
+// EDGE consumes one slot (winners are deduped per edge first), so the 20 most
+// net-voted segments survive — drawn from the top few edges per vote type.
+const TOP_PROPOSAL_LIMIT = 20;
 
 // "Spread to grid" interaction for crowded indicators. When a top-proposal
 // icon is clicked and other icons sit within CLUSTER_RADIUS_PX of it on screen,
@@ -236,6 +238,19 @@ const CLUSTER_RADIUS_PX = 26; // screen distance that counts as "clustered"
 const SPREAD_CELL_PX = 38;    // grid cell pitch when fanned out
 const SPREAD_DURATION_MS = 2200;
 const SPREAD_ANIM_MS = 280;   // keep in sync with the CSS transition
+
+// Movement (px²) before a press on an exploded proposal becomes a mid-drag rather
+// than a tap (which selects). Mirrors the path-drag's tap-vs-drag intent.
+const MID_DRAG_THRESHOLD_SQ = 16; // (4px)²
+// Dotted rubber-band for the mid being dragged out of a proposal — matches the
+// path-drag and waypoint-drag trails (usePathDrag / RouteMarker).
+const MID_DRAG_TRAIL_STYLE: L.PolylineOptions = {
+  color: "#999999",
+  weight: 2,
+  opacity: 0.6,
+  dashArray: "1, 4",
+  lineCap: "round",
+};
 
 // Number of bbox-nearest candidates to retrieve from the spatial index.
 // 20 is enough for Manhattan-scale edges (~200m max length); the closest
@@ -495,7 +510,7 @@ function buildNodeAdj(topology: Pick<GraphData, "nodes" | "edges">): number[][] 
  * mirroring the same guard RouteMarker uses for its hover counter.
  */
 function IndicatorMarker({
-  position, icon, zIndexOffset, interactive = true, onActivate, onDeactivate, onClick,
+  position, icon, zIndexOffset, interactive = true, onActivate, onDeactivate, onClick, onMidDragDown,
 }: {
   position: [number, number];
   icon: L.DivIcon;
@@ -506,6 +521,12 @@ function IndicatorMarker({
   onActivate: () => void;
   onDeactivate: () => void;
   onClick: () => void;
+  /** When set, a press on the icon can become a "drag a new mid out of this
+   *  proposal" gesture (exploded on-route proposals only). Wired through Leaflet's
+   *  OWN marker mousedown (not a native DOM listener) so it survives setIcon —
+   *  Leaflet re-binds marker events when the icon element is recreated, whereas a
+   *  listener pinned to a specific element would be left on a stale node. */
+  onMidDragDown?: (e: L.LeafletMouseEvent) => void;
 }) {
   const hoveredRef = useRef(false);
   const onDeactivateRef = useRef(onDeactivate);
@@ -516,6 +537,7 @@ function IndicatorMarker({
       onDeactivateRef.current();
     }
   }, []);
+
   return (
     <Marker
       position={position}
@@ -526,6 +548,7 @@ function IndicatorMarker({
         mouseover: () => { hoveredRef.current = true; onActivate(); },
         mouseout: () => { hoveredRef.current = false; onDeactivate(); },
         click: onClick,
+        ...(onMidDragDown ? { mousedown: onMidDragDown } : {}),
       }}
     />
   );
@@ -570,8 +593,10 @@ interface GraphLayerProps {
   }) => void;
   /** Called when a user clicks/taps a top-proposal indicator. Receives the
    *  edge midpoint of the indicator's segment. Hosts use this to place a
-   *  start point at that location so the segment becomes selected. */
-  onIndicatorClick?: (latlng: { lat: number; lng: number }) => void;
+   *  start point at that location so the segment becomes selected. `voteEdgeId`
+   *  is the exact edge the modal votes on — pass it through so the banner votes
+   *  on the same edge instead of re-snapping the midpoint (which can diverge). */
+  onIndicatorClick?: (latlng: { lat: number; lng: number }, voteEdgeId?: number) => void;
   /** GraphLayer writes a function here that, given a tapped point, fans out a
    *  crowded proposal cluster at that spot and returns true (consuming the tap).
    *  Returns false if there's nothing to fan out, so the host runs its tap action.
@@ -579,10 +604,11 @@ interface GraphLayerProps {
   clusterExploderRef?: MutableRefObject<
     ((latlng: { lat: number; lng: number }) => boolean) | null
   >;
-  /** Fires the current fanned-out cluster as an edge-index → [lat,lng] map (or
-   *  null when nothing is spread), so the host can move a matched proposal's [x]
-   *  out into the grid with its indicator. */
-  onSpreadChange?: (spread: Map<number, [number, number]> | null) => void;
+  /** Removes the route waypoint (start/end/mid) that sits on the given proposal
+   *  edge. Fired by the [×] badge baked into a matched proposal's indicator (the
+   *  badge lives inside the icon, so it needs no position plumbing). The host
+   *  resolves edge → which waypoint from its current match set. */
+  onRemoveProposal?: (edgeIdx: number) => void;
   /** Removes the currently-selected point. Wired to the same handler as the
    *  start marker's delete so the modal's X is functionally identical. */
   onRemoveSelected?: () => void;
@@ -594,12 +620,29 @@ interface GraphLayerProps {
    *  segments when there are mids). Used to highlight (not add) the top proposals
    *  the path passes through, matched by undirected node-pair. */
   pathEdgeIds?: number[] | null;
+  /** Drop handler for a drag started on an exploded on-route proposal. `edgeIdx`
+   *  is the proposal's edge, `origin` its real point on the path (the dotted-line
+   *  anchor), `drop` the snapped release point. The host routes by what the edge
+   *  IS: a matched start/end/mid waypoint MOVES that waypoint to `drop`; an on-path
+   *  proposal (not a waypoint) inserts a NEW mid at the segment `origin` sits on. */
+  onProposalDrop?: (edgeIdx: number, origin: { lat: number; lng: number }, drop: { lat: number; lng: number }) => void;
+  /** Fires with the edge the pinned modal would vote on (after override / sticky /
+   *  deep-link reconciliation) whenever it resolves. The host pins it onto the
+   *  selected point's `voteEdgeId` so the top-bar banner votes on EXACTLY the edge
+   *  the modal does — a deep link or a click that lands near (not on) a proposal
+   *  otherwise re-snaps geometrically in the banner and diverges from the card. */
+  onPinnedResolve?: (voteEdgeId: number | null) => void;
 }
 
-export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, hoverProposalPoint = null, onWaypointMatch, onIndicatorClick, clusterExploderRef, onSpreadChange, onRemoveSelected, suppressHover = false, pathEdgeIds = null }: GraphLayerProps) {
+export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, hoverProposalPoint = null, onWaypointMatch, onIndicatorClick, clusterExploderRef, onRemoveProposal, onRemoveSelected, suppressHover = false, pathEdgeIds = null, onProposalDrop, onPinnedResolve }: GraphLayerProps) {
   const map = useMap();
   const { subscribeToDelta } = useWebSocketContext();
-  const { setSnapFn, setResolveVoteEdgeId, setCurrentSnap, isDraggingRef: graphDraggingRef } = useGraphSnap();
+  const { setSnapFn, setResolveVoteEdgeId, setResolveTopLabelForPath, setCurrentSnap, isDraggingRef: graphDraggingRef, snapToGraph, setDragging } = useGraphSnap();
+  // Ghost-pin drag (the dotted-trail + ghost-kite mechanism the path-drag uses).
+  // Reused so dragging a NEW mid out of an exploded on-route proposal renders the
+  // same ghost the path-drag does, and so the host's ghost→dragPoint mirror lights
+  // cluster-explode + drop-target for it too.
+  const { startDrag: startGhostDrag, updateDrag: updateGhostDrag, endDrag: endGhostDrag } = useGhostPin();
   const { setHeatmapLoaded, isHeatmapLoading } = useHeatmap();
   const theme = useTheme();
   const themeMode = theme.mode;
@@ -747,6 +790,21 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     });
   }, [setResolveVoteEdgeId]);
 
+  // Register the path→top-vote-type resolver: the highest net-voted label across a
+  // set of edges. RouteContext uses it to pick a sensible default vote type when a
+  // deep link's requested type isn't valid for the map. Reads the live vote data.
+  useEffect(() => {
+    setResolveTopLabelForPath((edgeIds: number[]) => {
+      const data = graphDataRef.current;
+      if (!data) return null;
+      return topLabelForEdges(
+        data.vote_type_legend ?? [],
+        data.edge_vote_types ?? [],
+        edgeIds
+      );
+    });
+  }, [setResolveTopLabelForPath]);
+
   // Hover state
   const [hoverTarget, setHoverTarget] = useState<HoverTarget | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -776,6 +834,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // pinnedPoint effect uses it directly instead of re-running hitTest
   // (which can snap to a neighboring edge).
   const pinnedEdgeOverrideRef = useRef<number | null>(null);
+  // Locks the resolved PROPOSAL edge to the current pinned coords. The resolve
+  // effect re-runs on every vote (votesVersion) and when winners arrive, but a
+  // point that has settled on a proposal must keep that exact edge — a vote can
+  // reshuffle the spaced `winners` list so geometric reconciliation drifts to a
+  // neighbour. Reset when the point moves (new coords) or an override repins.
+  const pinnedLockRef = useRef<{ lat: number; lng: number; edgeIdx: number } | null>(null);
 
   // Increments when a geocode resolves, forcing tooltip re-render
   const [geocodeVersion, setGeocodeVersion] = useState(0);
@@ -788,9 +852,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const [graphVoteVersion, setGraphVoteVersion] = useState(0);
   void graphVoteVersion; // read so decode memos/winners re-render in lockstep
 
-  // Increments when the user's own votes change, forcing the proposal modal to
-  // re-evaluate +/- button state (myVotes lives outside React state).
-  const [myVotesVersion, setMyVotesVersion] = useState(0);
+  // Increments on any vote change (this map's proposal modal, the top-bar
+  // banner, or server reconciliation) so the pinned-selection resolve effect
+  // re-runs and the modal re-evaluates +/- state. The store is the single
+  // signal — see useVotesVersion.
+  const votesVersion = useVotesVersion();
 
   // Vote-type indicator markers — top-voted segment per vote type
   const [winners, setWinners] = useState<VoteTypeWinner[]>([]);
@@ -801,7 +867,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // once: a LOCKED spread (one of its boxes is selected, so it persists with no
   // snap-back until the selection clears) and a TRANSIENT spread (the most
   // recently opened cluster, which lives on a hover/snap-back timer). Each maps
-  // a winner's legendIdx -> overridden [lat, lng]; the render uses the union.
+  // a winner's EDGE index -> overridden [lat, lng]; the render uses the union.
+  // (Edge, not legendIdx: a vote type can win on several edges — top-N-per-type —
+  // so legendIdx is no longer unique per icon, but edgeIdx always is.)
   // Selecting a box in the transient spread promotes it to locked and collapses
   // the old locked one. Refs mirror the state for synchronous reads in handlers.
   type SpreadMap = Map<number, [number, number]>;
@@ -813,7 +881,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // collapseAll is defined far below; this ref lets earlier effects call it.
   const collapseAllRef = useRef<() => void>(() => {});
 
-  // Union of both spreads, keyed by legendIdx — the per-icon position override
+  // Union of both spreads, keyed by edge index — the per-icon position override
   // the render reads. Null when nothing is fanned out.
   const spreadPositions = useMemo<SpreadMap | null>(() => {
     if (!lockedSpread && !transientSpread) return null;
@@ -823,19 +891,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     return merged;
   }, [lockedSpread, transientSpread]);
 
-  // Re-key the spread by EDGE index (it's keyed by legendIdx) and publish it, so
-  // the host can move a matched proposal's [x] out with its fanned indicator.
-  const onSpreadChangeRef = useRef(onSpreadChange);
-  useEffect(() => { onSpreadChangeRef.current = onSpreadChange; }, [onSpreadChange]);
-  useEffect(() => {
-    if (!spreadPositions) { onSpreadChangeRef.current?.(null); return; }
-    const byEdge = new Map<number, [number, number]>();
-    for (const w of winnersRef.current) {
-      const pos = spreadPositions.get(w.legendIdx);
-      if (pos) byEdge.set(w.edgeIdx, pos);
-    }
-    onSpreadChangeRef.current?.(byEdge);
-  }, [spreadPositions]);
+  // Mirror the spread (edgeIdx → fanned-out [lat,lng]) into a ref so the
+  // hot-path hit-test (proposalIconAt, run on every drag mousemove) can read the
+  // CURRENT display position of an icon — its fanned-out cell when spread, its
+  // real midpoint otherwise — without re-creating the callback on every fan-out.
+  const spreadPositionsRef = useRef(spreadPositions);
+  useEffect(() => { spreadPositionsRef.current = spreadPositions; }, [spreadPositions]);
 
   // Random tiebreak salt — stable for this page load, different next time.
   // Used so that equal-count proposals don't always favor the same labels.
@@ -882,6 +943,34 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const onRemoveSelectedRef = useRef(onRemoveSelected);
   useEffect(() => { onRemoveSelectedRef.current = onRemoveSelected; }, [onRemoveSelected]);
 
+  const onRemoveProposalRef = useRef(onRemoveProposal);
+  useEffect(() => { onRemoveProposalRef.current = onRemoveProposal; }, [onRemoveProposal]);
+
+  // One delegated handler for every proposal's [×] badge, in CAPTURE phase on the
+  // map container so it pre-empts both Leaflet's map click and the indicator
+  // marker's own click (which would otherwise also restart/select). The badge is
+  // pointer-events:auto inside an icon that may be pointer-events:none, so without
+  // this stop the clickthrough trap (see modal_clickthrough memory) would fire the
+  // map click. data-x-edge tells us which proposal's waypoint to drop.
+  useEffect(() => {
+    const container = map.getContainer();
+    const onCaptureClick = (e: MouseEvent) => {
+      const badge = (e.target as HTMLElement | null)?.closest?.(".vote-type-indicator-x");
+      if (!badge) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const edge = Number(badge.getAttribute("data-x-edge"));
+      if (Number.isFinite(edge)) onRemoveProposalRef.current?.(edge);
+    };
+    container.addEventListener("click", onCaptureClick, true);
+    return () => container.removeEventListener("click", onCaptureClick, true);
+  }, [map]);
+
+  // A real route (start AND end) on a street map. Gates the proposal [×] remove
+  // badge — a lone point (no end) keeps tap-to-delete on its kite, and station
+  // maps select via the indicator itself, so neither shows a badge.
+  const isRouteMode = !!startPoint && !!endPoint && !isStationNetwork;
+
   // Nearest "top proposal" edge to a point, by edge-midpoint distance, within a
   // threshold (meters). The candidate set is what actually renders an indicator:
   // every station self-edge on a station network (all stations ARE top proposals),
@@ -911,6 +1000,33 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     }
     return best !== null && bestDist <= thresholdM ? best : null;
   }, [winners, isStationNetwork]);
+
+  // The incident edge that owns a node's STRONGEST proposal (the max net across
+  // all adjacent edges and vote types), or null if the intersection has no
+  // proposals. A node modal MERGES its incident edges' proposals for display
+  // (the server derives node_vote_types as the per-type max over adjacencies —
+  // see rederiveNodes), but a vote can only land on ONE edge. Voting from a node
+  // modal therefore hit an arbitrary incident edge (nodeAdj[0]) and the view
+  // then snapped onto it. The pinned resolver upgrades a node to this edge so the
+  // selection is edge-based from the start — votable, optimistic-updatable, and
+  // stable on a vote. The strongest proposal is exactly node_vote_types[0], the
+  // label a node's share link encodes as `vt`, so the upgrade honours the link.
+  const strongestProposalEdgeForNode = useCallback((nodeIdx: number): number | null => {
+    const g = graphDataRef.current;
+    const adj = nodeAdjRef.current?.[nodeIdx];
+    if (!g?.edge_vote_types || !adj) return null;
+    let bestEdge: number | null = null;
+    let bestNet = 0; // net ≤ 0 is not a proposal, so only positive nets qualify
+    for (const eid of adj) {
+      const pairs = g.edge_vote_types[eid];
+      if (!pairs) continue;
+      for (const [, up, down] of pairs) {
+        const net = up - down;
+        if (net > bestNet) { bestNet = net; bestEdge = eid; }
+      }
+    }
+    return bestEdge;
+  }, []);
 
   // Match the start/end waypoints to a coincident proposal so its icon can be
   // tinted (teal start / red end) and the host can hide the generic marker.
@@ -1018,15 +1134,21 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   }, [startLat, startLng, endLat, endLng, pathEdgeIds, winners, startEdgeIdx, endEdgeIdx, midEdgeSet, isStationNetwork, isHeatmapLoading]);
 
   // Pixel hit-test: is a screen point over a top-proposal ICON? Tests the icon's
-  // on-screen box (tip at the midpoint, body above). Returns the proposal's edge
-  // + exact midpoint. Pixel-based (not meters) so dropping/hovering ON the icon
-  // body links regardless of zoom — a small meters threshold missed the icon at
-  // most zooms. Street maps only.
+  // on-screen box (tip at the DISPLAY position, body above). Pixel-based (not
+  // meters) so dropping/hovering ON the icon body links regardless of zoom — a
+  // small meters threshold missed the icon at most zooms. Street maps only.
+  //
+  // The box is tested at the icon's DISPLAY position — its fanned-out cell when
+  // the cluster is spread, its real midpoint otherwise — so a drag snaps onto an
+  // EXPLODED icon exactly where it's drawn (no separate code path for spread
+  // icons). The returned lat/lng is always the REAL edge midpoint, so the dropped
+  // waypoint links to the proposal's edge, not its temporary grid cell.
   const ICON_HALF_W = 21, ICON_TOP_PX = 40, ICON_BOTTOM_PX = 10;
   const proposalIconAt = useCallback((pt: L.Point): { edgeIdx: number; lat: number; lng: number } | null => {
     if (isStationNetwork) return null;
     const g = graphDataRef.current;
     if (!g) return null;
+    const spread = spreadPositionsRef.current;
     let best: { edgeIdx: number; lat: number; lng: number } | null = null;
     let bestD = Infinity;
     for (const w of winnersRef.current) {
@@ -1035,7 +1157,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       const a = g.nodes[edge[0]], b = g.nodes[edge[1]];
       if (!a || !b) continue;
       const lat = (a[0] + b[0]) / 2, lng = (a[1] + b[1]) / 2;
-      const mp = map.latLngToContainerPoint([lat, lng]);
+      // Hit-test at where the icon is actually drawn; snap to the real midpoint.
+      const override = spread?.get(w.edgeIdx);
+      const mp = map.latLngToContainerPoint(override ? [override[0], override[1]] : [lat, lng]);
       if (pt.x < mp.x - ICON_HALF_W || pt.x > mp.x + ICON_HALF_W
           || pt.y < mp.y - ICON_TOP_PX || pt.y > mp.y + ICON_BOTTOM_PX) continue;
       const dx = pt.x - mp.x, dy = pt.y - (mp.y - 18);
@@ -1063,6 +1187,95 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     () => (dragPoint ? proposalIconAt(map.latLngToContainerPoint([dragPoint.lat, dragPoint.lng]))?.edgeIdx ?? null : null),
     [dragPoint, proposalIconAt, map]
   );
+
+  // A waypoint drag whose live position hovers over a crowded proposal cluster
+  // fans it out — the SAME exploder a tap uses — so you can drop onto a specific
+  // icon instead of blindly hitting whichever sits on top. The exploder no-ops
+  // once a spread is open (and when not over a cluster), so firing it on every
+  // drag frame is cheap. clusterExploderRef.current is assigned during the
+  // indicatorMarkers render above, so it's set by the time this effect runs.
+  useEffect(() => {
+    if (!dragPoint) return;
+    clusterExploderRef?.current?.(dragPoint);
+  }, [dragPoint, clusterExploderRef]);
+
+  const onProposalDropRef = useRef(onProposalDrop);
+  useEffect(() => { onProposalDropRef.current = onProposalDrop; }, [onProposalDrop]);
+
+  // Set true for the duration of (and just after) a mid-drag out of a proposal,
+  // so the trailing click the press generates doesn't ALSO select/restart. Reset
+  // on the next macrotask, after that click has been swallowed.
+  const proposalMidDraggedRef = useRef(false);
+
+  // Drag a NEW mid out of an exploded on-route proposal. The proposal ICON stays
+  // put (this runs a manual pointer drag, not a Leaflet marker drag, so the marker
+  // never moves); a dotted trail anchors at the proposal's real point (`anchor`)
+  // while a ghost kite follows the cursor — the same affordance as dragging the
+  // path. Started from Leaflet's marker `mousedown`, which we STOP so the press
+  // doesn't reach the map's pan drag (that's why the exploded icon used to just
+  // pan). The move/up cycle is global Pointer Events (mouse + touch). A press that
+  // never crosses the move threshold stays a tap (the icon's click selects).
+  const beginProposalMidDrag = useCallback((
+    anchor: { lat: number; lng: number }, edgeIdx: number, color: string, e: L.LeafletMouseEvent,
+  ) => {
+    const oe = e.originalEvent as MouseEvent & Partial<TouchEvent>;
+    if (oe.button != null && oe.button > 0) return; // primary button only
+    // Stop the map from starting a pan on this press, and stop the gesture from
+    // bubbling — this is the fix for "exploded icon drag just pans the map."
+    L.DomEvent.stop(e.originalEvent);
+    const touch = oe.touches?.[0];
+    const startX = touch ? touch.clientX : oe.clientX;
+    const startY = touch ? touch.clientY : oe.clientY;
+    let dragging = false;
+    let trail: L.Polyline | null = null;
+    const cursorLatLng = (cx: number, cy: number) => {
+      const rect = map.getContainer().getBoundingClientRect();
+      return map.containerPointToLatLng(L.point(cx - rect.left, cy - rect.top));
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      if (!dragging) {
+        const dx = ev.clientX - startX, dy = ev.clientY - startY;
+        if (dx * dx + dy * dy < MID_DRAG_THRESHOLD_SQ) return;
+        dragging = true;
+        proposalMidDraggedRef.current = true;
+        map.dragging.disable();
+        setDragging(true);
+        startGhostDrag({ x: ev.clientX, y: ev.clientY }, null, color);
+        trail = L.polyline(
+          [[anchor.lat, anchor.lng], [anchor.lat, anchor.lng]],
+          MID_DRAG_TRAIL_STYLE,
+        ).addTo(map);
+      }
+      const cur = cursorLatLng(ev.clientX, ev.clientY);
+      const snapped = snapToGraph(map, cur.lat, cur.lng);
+      const end = snapped ?? { lat: cur.lat, lng: cur.lng };
+      trail?.setLatLngs([[anchor.lat, anchor.lng], [end.lat, end.lng]]);
+      updateGhostDrag({ x: ev.clientX, y: ev.clientY }, snapped);
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+      if (!dragging) return; // a tap — let the icon's click select as usual
+      const cur = cursorLatLng(ev.clientX, ev.clientY);
+      const snapped = snapToGraph(map, cur.lat, cur.lng);
+      const drop = snapped ?? { lat: cur.lat, lng: cur.lng };
+      trail?.remove();
+      endGhostDrag();
+      setDragging(false);
+      map.dragging.enable();
+      onProposalDropRef.current?.(edgeIdx, anchor, drop);
+      // Swallow the click this press emits (handleClick checks the ref), then clear
+      // on the next macrotask — after that click has fired.
+      window.setTimeout(() => { proposalMidDraggedRef.current = false; }, 0);
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+  }, [map, snapToGraph, setDragging, startGhostDrag, updateGhostDrag, endGhostDrag]);
 
   // Reset icon cache + winners when theme switches (different vote namespace)
   useEffect(() => {
@@ -1591,36 +1804,57 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     ctx.globalCompositeOperation = mapStyle.heatComposite;
     const heat = mapStyle.heat;
 
+    // Sample the ramp by an edge's OWN intensity so hue encodes vote count:
+    // low-traffic edges are cool (halo), hot corridors warm (peak). Both the
+    // glow and the core take this single per-edge color — critical under the
+    // dark themes' additive (`lighter`) blend, where a fixed cool halo drawn
+    // for every edge would accumulate and wash the whole map to one hue.
+    // Stops mirror heatGradientCss (mapStyles.ts) so the legend matches the map.
+    const parseRgb = (s: string): [number, number, number] => {
+      const m = s.match(/\d+/g);
+      return m ? [Number(m[0]), Number(m[1]), Number(m[2])] : [0, 0, 0];
+    };
+    const rampStops: { pos: number; rgb: [number, number, number] }[] = [
+      { pos: 0, rgb: parseRgb(heat.halo) },
+      { pos: 0.4, rgb: parseRgb(heat.warm) },
+      { pos: 0.75, rgb: parseRgb(heat.hot) },
+      { pos: 1, rgb: parseRgb(heat.peak) },
+    ];
+    const sampleRamp = (t: number): string => {
+      let hi = 1;
+      while (hi < rampStops.length - 1 && t > rampStops[hi].pos) hi++;
+      const lo = rampStops[hi - 1];
+      const up = rampStops[hi];
+      const span = up.pos - lo.pos || 1;
+      const f = Math.min(1, Math.max(0, (t - lo.pos) / span));
+      const r = Math.round(lo.rgb[0] + (up.rgb[0] - lo.rgb[0]) * f);
+      const g = Math.round(lo.rgb[1] + (up.rgb[1] - lo.rgb[1]) * f);
+      const b = Math.round(lo.rgb[2] + (up.rgb[2] - lo.rgb[2]) * f);
+      return `rgb(${r}, ${g}, ${b})`;
+    };
+
     for (const i of voted) {
       const norm = Math.log((edgeVotes[i] ?? 0) + 1) / Math.log(maxVotes + 1);
+      const color = sampleRamp(norm);
 
-      // Pass 1 — wide outer halo (low alpha, broad falloff).
-      // Approximates Gaussian halo via stroke width + low opacity.
+      // Pass 1 — wide outer halo (low alpha, broad falloff). Same hue as the
+      // core so a hot edge glows warm and a cold edge glows cool.
       ctx.lineWidth = (2 + norm * 8) * zoomScale;
-      ctx.globalAlpha = 0.025 + norm * 0.06;
-      ctx.strokeStyle = heat.halo;
+      ctx.globalAlpha = 0.03 + norm * 0.05;
+      ctx.strokeStyle = color;
       drawSeg(i);
 
-      // Pass 2 — "heat" mid stroke (the dominant color).
-      ctx.lineWidth = (1 + norm * 2) * zoomScale;
-      ctx.globalAlpha = 0.08 + norm * 0.20;
-      ctx.strokeStyle = heat.warm;
+      // Pass 2 — the core stroke (the dominant, readable color).
+      ctx.lineWidth = (0.8 + norm * 2) * zoomScale;
+      ctx.globalAlpha = 0.10 + norm * 0.22;
+      ctx.strokeStyle = color;
       drawSeg(i);
 
-      // Pass 3 — hot core (kicks in past ~mid intensity).
-      if (norm > 0.2) {
-        const t = (norm - 0.2) / 0.8;
-        ctx.lineWidth = (0.6 + t * 1.0) * zoomScale;
-        ctx.globalAlpha = 0.10 + t * 0.30;
-        ctx.strokeStyle = heat.hot;
-        drawSeg(i);
-      }
-
-      // Pass 4 — bright peak (only the hottest edges).
+      // Pass 3 — bright peak accent on only the hottest edges, for extra punch.
       if (norm > 0.7) {
         const t = (norm - 0.7) / 0.3;
-        ctx.lineWidth = Math.max(0.3, 0.4 * zoomScale);
-        ctx.globalAlpha = 0.30 * t;
+        ctx.lineWidth = Math.max(0.3, 0.5 * zoomScale);
+        ctx.globalAlpha = 0.18 * t;
         ctx.strokeStyle = heat.peak;
         drawSeg(i);
       }
@@ -1886,10 +2120,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       // deleted back down to one point (it would resolve to the old end's edge —
       // a phantom ring + modal on the wrong proposal).
       pinnedEdgeOverrideRef.current = null;
+      pinnedLockRef.current = null;
       redrawHoverHighlightRef.current();
-      // Deselecting (modal "X" / "Clear", which null the pinned point) also
-      // collapses any open spread. (collapseAll via ref — declared below.)
-      if (lockedSpreadRef.current || transientSpreadRef.current) collapseAllRef.current();
       return;
     }
 
@@ -1902,6 +2134,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     pinnedEdgeOverrideRef.current = null;
     let target = sel?.target ?? null;
 
+    // Drop the edge-lock the moment the point itself moves (a click/drag sets new
+    // coords); a re-run at the SAME coords (vote tick / winners load) keeps it.
+    const lock = pinnedLockRef.current;
+    if (lock && (lock.lat !== pinnedLat || lock.lng !== pinnedLng)) {
+      pinnedLockRef.current = null;
+    }
+
     // Deep-link reconciliation: a shared link encodes only a lat/lng (the
     // proposal's edge midpoint), so without the click-time pinnedEdgeOverrideRef
     // a top proposal can resolve to a node (short edges at low zoom), the
@@ -1912,11 +2151,31 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // cleanly catches it without hijacking unrelated links). The candidate set
     // includes every station on a station network, where each station IS a top
     // proposal even with no net-positive votes (so it isn't in `winners`).
+    //
+    // Skip entirely when an override was set: an indicator click and the
+    // re-pin in castProposalVote both name an EXACT edge to keep selected. A
+    // vote can momentarily drop that edge out of the spaced `winners` list, so
+    // without this guard isProposalTarget reads false and reconciliation re-snaps
+    // the modal onto a neighbouring winner — the selection appears to jump to a
+    // different proposal the instant you vote.
     const isProposalTarget = target?.kind === "edge"
       && (isStationNetwork || winners.some((w) => w.edgeIdx === target!.index));
-    if (!isProposalTarget) {
+    if (!hadOverride && !isProposalTarget) {
       const snapped = nearestProposalEdgeIndex(pinnedLat, pinnedLng, 8);
       if (snapped !== null) target = { kind: "edge", index: snapped };
+    }
+
+    // Node → proposal-edge upgrade. A node modal merges the proposals of every
+    // incident edge, but a vote lands on one edge — so selecting an intersection
+    // (a map click that snaps to a node, or a deep link whose slat/slng IS a
+    // node's coords) voted an arbitrary incident edge and then collapsed onto it.
+    // Resolve a node that has proposals to the edge owning its strongest one, so
+    // the selection is an edge throughout. Bare intersections (no proposals) stay
+    // a node — their modal is just an unvotable "no proposals yet" preview.
+    let didNodeUpgrade = false;
+    if (target?.kind === "node") {
+      const up = strongestProposalEdgeForNode(target.index);
+      if (up !== null) { target = { kind: "edge", index: up }; didNodeUpgrade = true; }
     }
 
     // Sticky reselection: each map click re-places the start waypoint (= the
@@ -1942,7 +2201,27 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       }
     }
 
+    // Keep a locked proposal edge across same-coords re-runs (vote ticks). An
+    // override (indicator click / castProposalVote repin) always wins, and the
+    // lock only holds a still-valid edge — so a deep-link's first geometric
+    // resolve can still UPGRADE to its proposal once winners arrive (no lock
+    // yet), but after that the selection never drifts to a neighbour on a vote.
+    const lockNow = pinnedLockRef.current;
+    if (!hadOverride && lockNow && graphDataRef.current?.edges[lockNow.edgeIdx]
+        && (target?.kind !== "edge" || target.index !== lockNow.edgeIdx)) {
+      target = { kind: "edge", index: lockNow.edgeIdx };
+    }
+
     pinnedTargetRef.current = target;
+    // Lock once settled on a proposal edge (override pin, a winner, or a node
+    // upgraded to its strongest proposal edge), so subsequent vote-driven
+    // re-resolves hold this exact edge. A node-upgrade target may not be a spaced
+    // `winner`, so include it explicitly — else a vote tick could re-snap it.
+    if (target?.kind === "edge"
+        && (hadOverride || isStationNetwork || didNodeUpgrade
+            || winners.some((w) => w.edgeIdx === target!.index))) {
+      pinnedLockRef.current = { lat: pinnedLat, lng: pinnedLng, edgeIdx: target.index };
+    }
     redrawHoverHighlightRef.current();
 
     // Anchor the modal to the resolved target's geometry (edge midpoint / node)
@@ -1983,11 +2262,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // so a cold deep-link (point set before the graph arrives) still resolves.
     // `winners` re-triggers it so a deep-linked top proposal reconciles to its
     // winner edge once the winners list arrives (votes load after the graph).
-    // `myVotesVersion` re-triggers it on a vote so a freshly promoted/demoted
+    // `votesVersion` re-triggers it on a vote so a freshly promoted/demoted
     // proposal re-resolves (consuming the pinnedEdgeOverrideRef set in
     // castProposalVote) and the modal + icon reflect the new winner status.
   }, [map, pinnedLat, pinnedLng, resolveSelection, isHeatmapLoading, winners,
-      isStationNetwork, nearestProposalEdgeIndex, myVotesVersion]);
+      isStationNetwork, nearestProposalEdgeIndex, strongestProposalEdgeForNode, votesVersion]);
+
+  // Collapse any open spread when the selection is CLEARED (modal "X" / "Clear").
+  // Keyed only on the pinned point, so it fires on the transition to null — NOT on
+  // every re-run of the resolve effect above (which also runs on votesVersion /
+  // winners). Bundling it there collapsed a freshly-fanned cluster on the next
+  // vote tick while you were still browsing it (pinnedPoint null = no selection),
+  // which read as "the icons jump back to one point instead of fanning out."
+  useEffect(() => {
+    if (pinnedLat !== null && pinnedLng !== null) return;
+    if (lockedSpreadRef.current || transientSpreadRef.current) collapseAllRef.current();
+  }, [pinnedLat, pinnedLng]);
 
   // -------------------------------------------------------------------------
   // Tooltip content — hover
@@ -2063,6 +2353,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // Stations carry their name on the self-edge (index == node index).
     if (isStationNetwork) pinnedName = data.edges[pinnedTarget.index]?.[2] || pinnedName;
   }
+
+  // Publish the resolved vote edge back to the host so the selected point's
+  // voteEdgeId equals the modal's target. Only when it actually resolves (never
+  // push null — a momentary unresolved frame would clobber a freshly-set edge);
+  // clearing the selection nulls the point on the host side anyway.
+  const onPinnedResolveRef = useRef(onPinnedResolve);
+  useEffect(() => { onPinnedResolveRef.current = onPinnedResolve; }, [onPinnedResolve]);
+  useEffect(() => {
+    if (pinnedVoteEdgeId != null) onPinnedResolveRef.current?.(pinnedVoteEdgeId);
+  }, [pinnedVoteEdgeId]);
 
   // -------------------------------------------------------------------------
   // Render
@@ -2237,10 +2537,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   //      from this file. Its hover card comes from the map-mousemove override (a
   //      passthrough icon can't fire its own mouseover).
   //
+  //      back on the proposal upgrades it). A drag can land on a FANNED-OUT icon
+  //      too: proposalIconAt hit-tests at each icon's display position (its grid
+  //      cell when spread) and snaps to the real edge midpoint, so exploded icons
+  //      are drop targets exactly like settled ones — no separate path.
+  //
   //   3. MATCHED (a start/end/mid waypoint sits on it — `waypointMatch`).
   //      PASSTHROUGH; the kite RouteMarker the host renders underneath is the
-  //      handle: click → restart, drag → move the waypoint, [x] → remove. Its
-  //      hover card comes from `hoverProposalPoint` (the kite reports its hover).
+  //      handle: click → restart, drag → move the waypoint. Removal is the [×]
+  //      badge baked into the icon (`removeEdge`), which the delegated capture
+  //      handler turns into `onRemoveProposal` — same in the settled and exploded
+  //      states, since the badge rides inside the icon. Its hover card comes from
+  //      `hoverProposalPoint` (the kite reports its hover).
   //
   // Cross-cutting rules:
   //   - Tap vs drag is TIME-based everywhere (utils/gesture.ts, TAP_MAX_MS), so a
@@ -2304,16 +2612,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     };
 
     // Fan a cluster of icons out into a centered grid of cells around their
-    // shared anchor point as the TRANSIENT spread, then schedule a snap-back.
-    // This replaces any prior transient spread but leaves a locked one open, so
-    // a second fanout coexists with a selected (locked) first one.
+    // shared anchor point, MERGING into the TRANSIENT spread (so more than one
+    // cluster can be fanned out at once — each new fanout adds to the open set
+    // rather than replacing it), then (re)schedule the shared snap-back.
     const spreadCluster = (
       members: typeof placed,
       anchor: L.Point,
     ) => {
       const cols = Math.ceil(Math.sqrt(members.length));
       const rows = Math.ceil(members.length / cols);
-      const next: SpreadMap = new Map();
+      const next: SpreadMap = new Map(transientSpreadRef.current ?? []);
       members.forEach((m, i) => {
         const col = i % cols;
         const row = Math.floor(i / cols);
@@ -2323,7 +2631,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           anchor.x + offsetX,
           anchor.y + offsetY,
         ]);
-        next.set(m.w.legendIdx, [ll.lat, ll.lng]);
+        next.set(m.w.edgeIdx, [ll.lat, ll.lng]);
       });
 
       map.getContainer().classList.add("votes-spreading");
@@ -2332,13 +2640,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       armSpreadTimer();
     };
 
-    // Let a path tap fan out a crowded proposal stack at the tapped point before
-    // any side effect runs (so you can pick one from the spread). Returns true
-    // when it consumed the tap. Nothing to fan (no cluster, or a spread is already
-    // open) → false, and the host proceeds with its tap action.
+    // A point's "is there a crowded proposal stack here?" gate, shared by taps
+    // (path/kite) and the drag-hover effect. Returns true when the point sits over
+    // a cluster of 2+ proposal icons — which both EXPLODES the stack (when nothing
+    // is fanned yet) and CONSUMES the gesture. Consuming is the key: a tap over a
+    // cluster must NEVER fall through to placing/moving a start — picking one
+    // proposal happens only by tapping a fanned-out icon. Returns false only when
+    // there's no crowded cluster here, so the host runs its normal tap action
+    // (e.g. place a start on empty map / a lone proposal).
     if (clusterExploderRef) {
       clusterExploderRef.current = (latlng) => {
-        if (transientSpreadRef.current || lockedSpreadRef.current) return false;
         const tapPt = map.latLngToContainerPoint([latlng.lat, latlng.lng]);
         let anchor: L.Point | null = null;
         let nearestSq = Infinity;
@@ -2354,13 +2665,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             <= CLUSTER_RADIUS_PX * CLUSTER_RADIUS_PX;
         });
         if (cluster.length <= 1) return false;
-        spreadCluster(cluster, anchor);
+        // Explode this cluster UNLESS it's already fanned out (any member already
+        // in a spread) — so a second/third cluster fans alongside the first, but a
+        // drag calling this every frame doesn't re-fan the one it's already over.
+        const alreadyOpen = cluster.some((m) =>
+          transientSpreadRef.current?.has(m.w.edgeIdx) || lockedSpreadRef.current?.has(m.w.edgeIdx));
+        if (!alreadyOpen) spreadCluster(cluster, anchor);
         return true;
       };
     }
 
     return placed.map(({ w, midLat, midLng }) => {
-      const override = spreadPositions?.get(w.legendIdx);
+      const override = spreadPositions?.get(w.edgeIdx);
       const posLat = override ? override[0] : midLat;
       const posLng = override ? override[1] : midLng;
 
@@ -2390,12 +2706,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       const isSelected =
         role === "mid" || onPath || w.edgeIdx === dropTargetEdgeIdx || w.edgeIdx === selectedEdgeIdx;
       const isSpread = !!override;
-      // Selected/tinted/linked/spread icons are built fresh (a handful at a time,
-      // the memo rebuilds on change); the rest use the shared per-label cache.
-      // Spread icons drop the locating divot (their grid cell isn't the real spot).
+      // A matched waypoint (start/end/mid) in route mode carries a remove [×]
+      // badge baked into its icon — pinned to the corner, so it scales and fans
+      // out WITH the icon, with no separate marker. Clicking it drops the
+      // waypoint via the delegated handler above. Same in both the normal and
+      // exploded states (the badge is part of the icon, not a parallel overlay).
+      const removeEdge = role !== null && isRouteMode ? w.edgeIdx : null;
+      // Selected/tinted/linked/spread/removable icons are built fresh (a handful
+      // at a time, the memo rebuilds on change); the rest use the shared per-label
+      // cache. Spread icons drop the locating divot (the grid cell isn't the real
+      // spot); removable icons can't be cached (the badge stamps an edge id).
       let icon: L.DivIcon;
-      if (isSelected || tint || isSpread || passthrough) {
-        icon = makeVoteTypeIcon(w.label, theme.suggestions, { selected: isSelected, tint, square: isSpread, passthrough });
+      if (isSelected || tint || isSpread || passthrough || removeEdge !== null) {
+        icon = makeVoteTypeIcon(w.label, theme.suggestions, { selected: isSelected, tint, square: isSpread, passthrough, removeEdge });
       } else {
         icon = iconCacheRef.current.get(w.label) ?? makeVoteTypeIcon(w.label, theme.suggestions);
         iconCacheRef.current.set(w.label, icon);
@@ -2408,7 +2731,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         // overIndicatorRef tells the map hover handler to yield (hierarchy #1).
         overIndicatorRef.current = true;
         // Hovering an icon of the transient cluster pauses its snap-back timer.
-        if (transientSpreadRef.current?.has(w.legendIdx)) pauseSpreadTimer();
+        if (transientSpreadRef.current?.has(w.edgeIdx)) pauseSpreadTimer();
         // The hover card is a pointer-only affordance. On touch there's no
         // mouseout to clear it, so a tap would leave it stuck and resurface it
         // once the pinned point moves off this edge. The pinned modal is the
@@ -2432,10 +2755,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         redrawHoverHighlightRef.current();
         // Leaving a transient-cluster icon (re)starts its snap-back countdown.
         // The locked cluster has no timer, so its icons don't trigger one.
-        if (transientSpreadRef.current?.has(w.legendIdx)) armSpreadTimer();
+        if (transientSpreadRef.current?.has(w.edgeIdx)) armSpreadTimer();
       };
 
       const handleClick = () => {
+        // A press that turned into a mid-drag emits a trailing click — swallow it
+        // so dragging a mid out of this proposal doesn't ALSO re-select it.
+        if (proposalMidDraggedRef.current) return;
         // Station networks: the selected station is its own indicator (not a
         // RouteMarker), so clicking the already-selected one de-selects it —
         // matching the click-to-remove behavior proposals get on street maps.
@@ -2466,19 +2792,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           }
         }
 
-        // Selecting a fanned-out box promotes its cluster to the locked spread
-        // (which persists) and collapses whatever else was open: picking in the
-        // transient cluster locks it and drops the previously locked one; picking
-        // again within the locked cluster just drops any open transient. Clicking
-        // a non-fanned lone icon collapses everything.
+        // Selecting a fanned-out box promotes the open transient sets into the
+        // locked spread, MERGING with any already-locked sets — so every fanned-out
+        // cluster persists together once you pick from any of them. Clicking a
+        // non-fanned lone icon collapses everything.
         if (override) {
-          const promoted = transientSpreadRef.current?.has(w.legendIdx)
-            ? transientSpreadRef.current
-            : lockedSpreadRef.current;
+          const merged: SpreadMap = new Map(lockedSpreadRef.current ?? []);
+          if (transientSpreadRef.current) {
+            for (const [k, v] of transientSpreadRef.current) merged.set(k, v);
+          }
           pauseSpreadTimer();
-          lockedSpreadRef.current = promoted ?? null;
+          lockedSpreadRef.current = merged;
           transientSpreadRef.current = null;
-          setLockedSpread(promoted ?? null);
+          setLockedSpread(merged);
           setTransientSpread(null);
         } else {
           collapseAll();
@@ -2492,21 +2818,56 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         }));
         // Lock the start point to the icon's true edge midpoint, not its
         // temporary fanned-out grid cell — the spread offset is display-only.
-        onIndicatorClickRef.current?.({ lat: midLat, lng: midLng });
+        // Pass w.edgeIdx so the banner votes on this exact proposal edge (the
+        // same one the modal pins via pinnedEdgeOverrideRef), not whatever the
+        // midpoint re-snaps to.
+        onIndicatorClickRef.current?.({ lat: midLat, lng: midLng }, w.edgeIdx);
       };
 
       return (
         <IndicatorMarker
-          key={w.legendIdx}
+          key={w.edgeIdx}
           position={[posLat, posLng]}
           icon={icon}
-          // Fanned-out icons (those with a spread override) lift above all
-          // other markers so the exploded cluster reads as one group on top.
-          zIndexOffset={override ? 3000 : w.edgeIdx === selectedEdgeIdx ? 2000 : 1000}
+          // Stacking order, highest first:
+          //   3000  fanned-out (spread override) — the exploded cluster reads as
+          //         one group on top of everything else.
+          //   2500  a MATCHED waypoint (start/end/mid). It carries the [×] badge,
+          //         so it must sit above any overlapping non-matched sibling — else
+          //         when two proposals stack and the lower one is the waypoint, the
+          //         upper icon conceals its badge.
+          //   2000  the selected (open-modal) proposal.
+          //   1000  everything else.
+          zIndexOffset={
+            override ? 3000
+            : role !== null ? 2500
+            : w.edgeIdx === selectedEdgeIdx ? 2000
+            : 1000
+          }
           interactive={!passthrough}
           onActivate={activateIndicator}
           onDeactivate={deactivateIndicator}
           onClick={handleClick}
+          // Exploded + ON THE ROUTE (a matched start/end/mid OR an on-path
+          // proposal) + a route exists → the icon doubles as a handle to drag a NEW
+          // mid out of it (the icon stays put; a ghost + dotted trail anchored at the
+          // real midpoint follow the cursor). This mirrors the NON-exploded case,
+          // where the passthrough icon lets the press fall through to the path and
+          // start the same mid-drag — an exploded icon is displaced off the path, so
+          // it must start that drag itself instead of falling through (and stop the
+          // press from reaching the map's pan). A plain tap still selects via onClick.
+          onMidDragDown={
+            override && (role !== null || onPath) && isRouteMode
+              ? (e) => beginProposalMidDrag(
+                  { lat: midLat, lng: midLng },
+                  w.edgeIdx,
+                  // Ghost color matches the waypoint being moved: teal start, red
+                  // end; a mid / on-path drag uses the selection color (a new mid).
+                  role === "start" ? COLOR_START : role === "end" ? COLOR_END : mapStyle.selection,
+                  e,
+                )
+              : undefined
+          }
         />
       );
     });
@@ -2514,7 +2875,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // re-runs once topology+votes arrive so stations appear even with zero votes.
   }, [winners, currentZoom, map, spreadPositions, collapseAll, collapseTransient,
       selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,
-      isStationNetwork, stationLabel, isHeatmapLoading, canHover]);
+      isRouteMode, beginProposalMidDrag, mapStyle.selection, isStationNetwork, stationLabel, isHeatmapLoading, canHover]);
 
   // Cast a directional vote on a single proposal (edge, vote type) through the
   // SAME unified path the top-bar route cast uses. castVotes() handles the
@@ -2525,14 +2886,14 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   ) => {
     if (edgeId == null || !label) return;
     // A vote can promote this edge into (or out of) the top proposals. Pin the
-    // selection to the voted edge so the reconciliation (which re-runs on the
-    // myVotesVersion bump below) resolves to it exactly — rather than snapping by
-    // geometry, which can miss the now-winner edge — so the modal flips to/from
-    // "Top Proposal" and the freshly-promoted icon shows selected.
+    // selection to the voted edge so the reconciliation (which re-runs when
+    // castVotes bumps votesVersion via the store) resolves to it exactly —
+    // rather than snapping by geometry, which can miss the now-winner edge — so
+    // the modal flips to/from "Top Proposal" and the freshly-promoted icon shows
+    // selected. The optimistic store write fires synchronously inside castVotes,
+    // so the version bump (and re-resolve) happen immediately, not on settle.
     pinnedEdgeOverrideRef.current = edgeId;
-    castVotes({ mode: themeMode, edgeIds: [edgeId], label, direction: newDir })
-      .finally(() => setMyVotesVersion((v) => v + 1));
-    setMyVotesVersion((v) => v + 1);
+    castVotes({ mode: themeMode, edgeIds: [edgeId], label, direction: newDir });
   }, [themeMode]);
 
   // Reconcile local "my votes" against the server when a proposal modal opens
@@ -2549,10 +2910,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       .then((j) => {
         if (cancelled || !j?.votes) return;
         const labels = j.votes[String(pinnedVoteEdgeId)];
-        if (labels) {
-          reconcileEdge(themeMode, pinnedVoteEdgeId, labels);
-          setMyVotesVersion((v) => v + 1);
-        }
+        // reconcileEdge bumps votesVersion itself when the server's truth
+        // differs from local, which re-runs the resolve effect + re-renders the
+        // modal. No manual bump.
+        if (labels) reconcileEdge(themeMode, pinnedVoteEdgeId, labels);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -2578,7 +2939,6 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           edgeId={pinnedVoteEdgeId}
           mode={themeMode}
           voteTypes={theme.suggestions}
-          myVotesVersion={myVotesVersion}
           shareUrl={pinnedPointLatLng
             ? buildSelectionUrl(pinnedPointLatLng, pinnedWinner?.label ?? pinnedVoteTypes[0]?.label)
             : null}
@@ -2669,7 +3029,6 @@ interface ProposalCardProps {
   interactive?: boolean;
   edgeId?: number | null;
   mode?: string;
-  myVotesVersion?: number;
   shareUrl?: string | null;
   /** The active map's vote types, so the header icon resolves a custom vote-type
    *  set's own icon (matching markers and the selector) instead of falling back
@@ -2694,7 +3053,7 @@ type CardPos = {
 
 function ProposalCard({
   winner, screenX, screenY, name, rows,
-  interactive = false, edgeId = null, mode = "", myVotesVersion, shareUrl = null, voteTypes, onVote, onRemove, onHoverChange, registerEl,
+  interactive = false, edgeId = null, mode = "", shareUrl = null, voteTypes, onVote, onRemove, onHoverChange, registerEl,
 }: ProposalCardProps) {
   const [copied, setCopied] = useState(false);
   // Interactive cards can collapse to a small pill (icon + label + expand) so a
@@ -2703,7 +3062,10 @@ function ProposalCard({
   const [minimized, setMinimized] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const icon = winner ? iconForLabel(winner.label, voteTypes) : null;
-  void myVotesVersion; // read so the card re-renders when my votes change
+  // Subscribe to the vote store so the +/- rows (which read getVote() below)
+  // re-render whenever ANY vote changes — including the same edge being voted
+  // from the top-bar banner. The value itself is unused; the subscription is.
+  void useVotesVersion();
 
   // Anchor the card to the point and flip it into whichever quadrant has room,
   // then clamp so an oversized card never clips a viewport edge. Measured from
@@ -2824,14 +3186,18 @@ function ProposalCard({
       onMouseLeave={onHoverChange ? () => { reportedHoverRef.current = false; onHoverChange(false); } : undefined}
     >
       {interactive && minimized ? (
+        // The maximize control mirrors the ✕ (graph-proposal-close): the same
+        // boxed graph-proposal-tool — identical size, border, and hover. The
+        // collapsed card shrink-wraps it, so the maximize reads as the same
+        // control the ✕ is, just standing alone where the card was.
         <button
           type="button"
-          className="graph-proposal-restore"
+          className="graph-proposal-tool graph-proposal-restore"
           title="Expand proposal"
           aria-label="Expand proposal"
           onClick={() => setMinimized(false)}
         >
-          <ExpandIcon size={14} />
+          <ExpandIcon size={13} />
         </button>
       ) : (
         <>

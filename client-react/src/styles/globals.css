@@ -85,20 +85,26 @@
   --hover-bg: rgba(212, 212, 212, 0.06);
   --hover-bg-strong: rgba(212, 212, 212, 0.12);
 
-  /* Start/end markers — constant across themes */
+  /* Start/end markers — constant across themes. Must mirror COLOR_START /
+     COLOR_END in colors.ts (the kite markers render from those) so UI swatches
+     like the legend match the on-map waypoints. */
   --color-start: #00C4D4;
-  --color-end: #E05A60;
+  --color-end: #DC343B;
   --color-start-light: rgba(0, 196, 212, 0.15);
+
+  /* Waypoint marker outline — a contrast ring that separates the kite from the
+     heatmap glow. Dark on dark basemaps; overridden to light below. */
+  --marker-outline: rgba(0, 0, 0, 0.72);
 
   /* Per-map (set by ThemeContext; fallbacks for pre-JS / landing) */
   --accent: #E0A23A;
   --on-accent: #0d0d0d;
   --selection: #ffffff;
   --heat-gradient: linear-gradient(to right,
-    rgb(140, 78, 24),
-    rgb(214, 142, 42) 40%,
-    rgb(245, 200, 96) 75%,
-    rgb(255, 242, 212)
+    rgb(96, 56, 120),
+    rgb(196, 96, 56) 40%,
+    rgb(232, 154, 54) 75%,
+    rgb(250, 214, 120)
   );
 }
 
@@ -111,6 +117,7 @@
   --hover-bg-strong: rgba(40, 40, 35, 0.1);
   --on-accent: #ffffff;
   --selection: #1f2a1c;
+  --marker-outline: rgba(255, 255, 255, 0.95);
 }
 
 
@@ -144,6 +151,7 @@ body {
 .map-bootstrap {
   position: fixed;
   inset: 0;
+  z-index: 5000; /* above the map + its controls while it loads behind us */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -154,32 +162,45 @@ body {
   font-family: var(--font-main);
 }
 
+/* ASCII (| / - \) spinner, sized up to match the splash. */
 .map-bootstrap-spinner {
-  width: 30px;
-  height: 30px;
-  border: 2px solid var(--hairline);
-  border-top-color: var(--color-start);
-  border-radius: 50%;
-  animation: map-bootstrap-spin 0.8s linear infinite;
+  font-size: 28px;
+  line-height: 1;
+  color: var(--color-start);
 }
 
 .map-bootstrap-label {
   font-size: var(--font-size-sm);
   letter-spacing: 0.08em;
-  text-transform: lowercase;
   opacity: 0.7;
 }
 
-@keyframes map-bootstrap-spin {
-  to {
-    transform: rotate(360deg);
-  }
+/* Copyright footer, pinned to the bottom of the splash (mirrors the landing
+   page footer). */
+.map-bootstrap-footer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  text-align: center;
+  font-size: var(--font-size-xs);
+  opacity: 0.5;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .map-bootstrap-spinner {
-    animation-duration: 2s;
-  }
+.map-bootstrap-footer-link {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.map-bootstrap-footer-link:hover {
+  border-bottom-color: var(--ink);
 }
 
 
@@ -523,17 +544,20 @@ body {
   font-family: var(--font-main);
 }
 
-/* ASCII legend chars */
+/* ASCII legend chars. brightness(0.9) mirrors the dim on the on-map kite
+   markers (.ascii-marker) so the legend reads as the same color. */
 .legend-char-start {
   color: var(--color-start);
   font-size: 14px;
   line-height: 1;
+  filter: brightness(0.9);
 }
 
 .legend-char-end {
   color: var(--color-end);
   font-size: 14px;
   line-height: 1;
+  filter: brightness(0.9);
 }
 
 .legend-char-route {
@@ -548,6 +572,7 @@ body {
   font-size: 12px;
   line-height: 1;
   opacity: 0.8;
+  filter: brightness(0.9);
 }
 
 .legend-heat-swatch {
@@ -787,6 +812,46 @@ body {
   padding: 2px 6px !important;
 }
 
+/* Selection history (back / forward) — bottom-left, mirroring the zoom control. */
+.nav-history {
+  position: absolute;
+  left: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 1000;
+  display: flex;
+  border: 1px solid var(--hairline);
+  background: var(--paper);
+}
+
+.nav-history-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--ink);
+  background: var(--paper);
+  border: none;
+  border-right: 1px solid var(--hairline);
+  cursor: pointer;
+}
+
+.nav-history-btn:last-child {
+  border-right: none;
+}
+
+.nav-history-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+
+.nav-history-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .leaflet-control-attribution a {
   color: var(--ink) !important;
 }
@@ -848,11 +913,21 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   align-items: center;
   line-height: 1;
   pointer-events: none;
+  /* Knock the marker color back slightly so it reads as a marker, not a hotspot,
+     against the heatmap glow. The outline ring (below) does the separating. */
+  filter: brightness(0.9);
 }
 
 .ascii-kite {
   font-size: 22px;
   line-height: 1;
+  /* Contrast ring around the glyph (dark on dark themes, light on light). The
+     four offsets approximate a uniform 1px outline. */
+  text-shadow:
+    0 1px 0 var(--marker-outline),
+    0 -1px 0 var(--marker-outline),
+    1px 0 0 var(--marker-outline),
+    -1px 0 0 var(--marker-outline);
 }
 
 .ascii-stem {
@@ -861,6 +936,20 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   background: currentColor;
   margin-top: -4px;
   opacity: 0.7;
+  /* Match the kite's contrast ring on the sides + bottom only — a top edge would
+     draw a line in the gap below the diamond and visually sever the two. */
+  box-shadow:
+    -1px 0 0 var(--marker-outline),
+    1px 0 0 var(--marker-outline),
+    0 1px 0 var(--marker-outline);
+}
+
+/* Touch devices: a chunkier stem so the marker stays legible at arm's length. */
+@media (pointer: coarse) {
+  .ascii-stem {
+    width: 3px;
+    height: 13px;
+  }
 }
 
 .waypoint-marker-container {
@@ -1457,22 +1546,31 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   pointer-events: none !important;
 }
 
-/* Tiny [x] pinned to a selected proposal's top-right — removes it from the route
-   sequence (tapping the proposal itself restarts the path). Reset Leaflet's
-   default white div-icon box; the glyph below is the only visible/clickable bit. */
-.proposal-x-icon {
-  background: transparent !important;
-  border: none !important;
-}
-.proposal-x-hit {
+/* Remove [×] badge — lives INSIDE the proposal indicator (a sibling of the pin),
+   so it scales with the icon, follows it when the cluster fans out, and stays
+   pinned to (and centered on) the square's top-right corner with no separate
+   marker or position bookkeeping. Shown only when the proposal is a route
+   waypoint (start/end/mid); tapping it drops that waypoint. The rest of the icon
+   may be pointer-events:none (a linked waypoint's kite takes those events), but
+   this badge is always clickable. The click is consumed by a delegated handler
+   in GraphLayer (data-x-edge → remove), so it never also restarts/selects. */
+.vote-type-indicator-x {
+  position: absolute;
+  /* Centered on the square's top-right corner — SVG (31,3) in the 34×42 pin.
+     Sits inside the scaled .vote-type-indicator, so it tracks every scale
+     (zoom shrink, hover, selected) and stays glued to the corner. */
+  left: 31px;
+  top: 3px;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 13px;
   height: 13px;
-  /* Border inherits the matched proposal's selection-ring color; the role
-     modifier classes below set --x-ring (teal start / red end / mid uses --ink,
-     the global equivalent of the white/black selected ring). */
+  /* Border inherits the matched proposal's selection-ring color via --x-ring,
+     set by the is-start / is-end role classes below (mid is plain is-selected,
+     so --x-ring falls back to --ink — the white/black selected ring). */
   border: 1px solid var(--x-ring, var(--ink));
   border-radius: var(--radius-sm);
   background: var(--paper);
@@ -1483,18 +1581,17 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   cursor: pointer;
   pointer-events: auto;
 }
-.proposal-x-hit--start { --x-ring: var(--color-start); }
-.proposal-x-hit--end { --x-ring: var(--color-end); }
-.proposal-x-hit--mid { --x-ring: var(--ink); }
-/* Hover tint must stay OPAQUE — the box sits directly on the map, so the
+.vote-type-indicator.is-start { --x-ring: var(--color-start); }
+.vote-type-indicator.is-end { --x-ring: var(--color-end); }
+/* Hover tint must stay OPAQUE — the badge sits directly on the map, so the
    translucent --hover-bg would make it see-through. Blend ink into paper. */
-.proposal-x-hit:hover {
+.vote-type-indicator-x:hover {
   background: color-mix(in srgb, var(--ink) 10%, var(--paper));
 }
-/* Touch devices: enlarge the [x] so it's a comfortable tap target (the desktop
+/* Touch devices: enlarge the [×] so it's a comfortable tap target (the desktop
    13px box is tuned for a pointer). */
 @media (pointer: coarse) {
-  .proposal-x-hit {
+  .vote-type-indicator-x {
     width: 20px;
     height: 20px;
     font-size: 13px;
@@ -1918,30 +2015,20 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
   padding-right: 80px;
 }
 
-/* Minimized state — the whole card collapses to a small boxed button holding
-   only the expand glyph, so a pinned selection stops covering the map. The
-   glyph inherits --ink (dark on light themes, light on dark ones). */
+/* Minimized state — the card shrink-wraps a single maximize control so a pinned
+   selection stops covering the map. The maximize button is the SAME boxed
+   graph-proposal-tool the ✕ is (size, hairline border, hover), so we drop the
+   card's own border here — the button's box is the only frame — while keeping the
+   paper fill so the glyph and the (translucent) hover stay legible over the map. */
 .graph-proposal-card.is-minimized {
+  display: flex;
   min-width: 0;
   padding: 0;
+  border: none;
+  background: var(--paper);
 }
-
-.graph-proposal-restore {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  cursor: pointer;
-}
-
-.graph-proposal-restore:hover {
-  background: var(--hover-bg);
-}
+/* graph-proposal-restore is now just a semantic hook; its look comes entirely
+   from graph-proposal-tool, matching graph-proposal-close (the ✕). */
 
 .graph-tooltip.tooltip-flipped {
   /* When near right edge: position to the left of cursor */

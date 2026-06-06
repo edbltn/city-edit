@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
-  getVote, setVote, setVotes, coverage, reconcileEdge, setVoteTypeMap, _resetVoteStore,
+  getVote, setVote, setVotes, coverage, reconcileEdge, setVoteTypeMap,
+  subscribeVotes, getVotesVersion, _resetVoteStore,
 } from "./voteStore";
 
 const MODE = "walkways";
@@ -67,6 +68,60 @@ describe("voteStore — coverage (multi-select availability)", () => {
     expect(cov.unvoted).toHaveLength(0);
     expect(cov.opposite).toHaveLength(0);
     expect(cov.atTarget).toEqual([1, 2, 3]);
+  });
+});
+
+// The whole point of the store: ONE change signal that every view shares. This
+// is what keeps the top-bar banner and the proposal modal from drifting (the
+// sync bug). If a mutation stops notifying, these break — not a real component.
+describe("voteStore — change notification (the sync contract)", () => {
+  it("notifies subscribers and bumps the version on a real change", () => {
+    setVoteTypeMap(TYPES);
+    const listener = vi.fn();
+    const unsubscribe = subscribeVotes(listener);
+    const v0 = getVotesVersion();
+
+    setVote(MODE, 5, "Add bike lane", 1);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(getVotesVersion()).toBe(v0 + 1);
+
+    unsubscribe();
+    setVote(MODE, 5, "Add bike lane", -1);
+    expect(listener).toHaveBeenCalledTimes(1); // no longer subscribed
+  });
+
+  it("does NOT notify when a write changes nothing (stable snapshot)", () => {
+    setVoteTypeMap(TYPES);
+    setVote(MODE, 5, "Add bike lane", 1);
+    const listener = vi.fn();
+    subscribeVotes(listener);
+    const v0 = getVotesVersion();
+
+    setVote(MODE, 5, "Add bike lane", 1); // same direction → no-op
+    expect(listener).not.toHaveBeenCalled();
+    expect(getVotesVersion()).toBe(v0);
+  });
+
+  it("notifies once for a multi-edge batch, not once per edge", () => {
+    setVoteTypeMap(TYPES);
+    const listener = vi.fn();
+    subscribeVotes(listener);
+
+    setVotes(MODE, [1, 2, 3], "Add trees", 1);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("notifies on reconcileEdge only when the server's truth differs", () => {
+    setVoteTypeMap(TYPES);
+    setVote(MODE, 9, "Add bike lane", 1);
+    const listener = vi.fn();
+    subscribeVotes(listener);
+
+    reconcileEdge(MODE, 9, { "Add bike lane": 1 }); // matches local → no-op
+    expect(listener).not.toHaveBeenCalled();
+
+    reconcileEdge(MODE, 9, { "Add bike lane": -1 }); // differs → notify
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });
 

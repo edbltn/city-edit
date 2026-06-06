@@ -16,8 +16,9 @@ export function GhostPin() {
       className="ghost-pin-overlay"
       style={{ transform: `translate(${x}px, ${y}px)` }}
     >
-      {/* Matches the hover ghost and placed waypoint: selection color, full size. */}
-      <div className="ascii-marker ghost-pin" style={{ color: selection }}>
+      {/* Matches the hover ghost and placed waypoint: selection color by default,
+          or the drag's own color (teal/red when moving a start/end proposal). */}
+      <div className="ascii-marker ghost-pin" style={{ color: ghostState.color ?? selection }}>
         <span className="ascii-kite">◆</span>
         <span className="ascii-stem"></span>
       </div>

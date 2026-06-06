@@ -62,11 +62,13 @@ const DARK_WARM: Omit<MapStyle, "id"> = {
   tileUrl: TILE_DARK,
   tileAttribution: CARTO_ATTRIBUTION,
   tileMaxZoom: 21,
+  // Hue runs purple → red-orange → amber → gold so intensity reads as a color
+  // shift, not just brightness. Peak is gold (not near-white) to keep glow tame.
   heat: {
-    halo: "rgb(140, 78, 24)",
-    warm: "rgb(214, 142, 42)",
-    hot: "rgb(245, 200, 96)",
-    peak: "rgb(255, 242, 212)",
+    halo: "rgb(96, 56, 120)",
+    warm: "rgb(196, 96, 56)",
+    hot: "rgb(232, 154, 54)",
+    peak: "rgb(250, 214, 120)",
   },
   heatBlend: "screen",
   heatComposite: "lighter",
@@ -112,54 +114,62 @@ function lightStyle(id: string, accent: string, heat: HeatRamp): MapStyle {
 export const MAP_STYLES: Record<string, MapStyle> = {
   // Bikes — dark basemap, bright bike-lane green. Additive blending lets the
   // green stack toward a hot lime/white core at busy intersections.
+  // Hue runs blue-teal → green → yellow-green → gold so hotspots glow warm
+  // against a cool low-traffic field.
   bikepaths: darkStyle("bikepaths", "#2BE06B", {
-    halo: "rgb(16, 110, 46)",
-    warm: "rgb(38, 190, 92)",
-    hot: "rgb(150, 245, 130)",
-    peak: "rgb(225, 255, 215)",
+    halo: "rgb(20, 88, 124)",
+    warm: "rgb(36, 168, 96)",
+    hot: "rgb(146, 210, 70)",
+    peak: "rgb(244, 206, 96)",
   }),
 
   // Walkways — dark basemap, warm yellow-brown orange.
   walkways: { id: "walkways", ...DARK_WARM },
 
   // Transit & mobility — dark basemap, signal blue that glows like a transit map.
+  // Hue runs indigo → blue → cyan → mint so intensity climbs the cool spectrum.
   transit: darkStyle("transit", "#3B8EE0", {
-    halo: "rgb(24, 70, 140)",
-    warm: "rgb(48, 122, 214)",
-    hot: "rgb(110, 184, 245)",
-    peak: "rgb(212, 234, 255)",
+    halo: "rgb(60, 44, 132)",
+    warm: "rgb(50, 118, 206)",
+    hot: "rgb(58, 192, 196)",
+    peak: "rgb(176, 240, 206)",
   }),
 
   // Waterfront & blue infrastructure — dark basemap, harbor teal/cyan.
+  // Hue runs deep blue → teal → green → pale yellow so hotspots warm up.
   waterfront: darkStyle("waterfront", "#22C9C9", {
-    halo: "rgb(16, 110, 116)",
-    warm: "rgb(38, 178, 184)",
-    hot: "rgb(120, 228, 232)",
-    peak: "rgb(212, 252, 252)",
+    halo: "rgb(28, 72, 142)",
+    warm: "rgb(34, 168, 174)",
+    hot: "rgb(118, 214, 128)",
+    peak: "rgb(228, 232, 140)",
   }),
 
   // Trees / parks & greening — light basemap, leaf green.
+  // Light basemap (multiply): pale chartreuse → green → emerald → deep blue, so
+  // intensity both darkens and shifts hue toward blue.
   trees: lightStyle("trees", "#5FA052", {
-    halo: "rgb(198, 224, 188)",
-    warm: "rgb(132, 190, 104)",
-    hot: "rgb(78, 150, 58)",
-    peak: "rgb(40, 102, 34)",
+    halo: "rgb(206, 222, 152)",
+    warm: "rgb(122, 182, 84)",
+    hot: "rgb(44, 138, 98)",
+    peak: "rgb(22, 74, 112)",
   }),
 
   // Streets & public space — light basemap, terracotta (brick / paving).
+  // Light basemap (multiply): pale sand → terracotta → brick red → deep plum.
   terracotta: lightStyle("terracotta", "#C0674A", {
-    halo: "rgb(234, 208, 198)",
-    warm: "rgb(206, 146, 122)",
-    hot: "rgb(178, 94, 68)",
-    peak: "rgb(120, 56, 38)",
+    halo: "rgb(238, 214, 176)",
+    warm: "rgb(208, 138, 90)",
+    hot: "rgb(176, 72, 70)",
+    peak: "rgb(92, 32, 82)",
   }),
 
   // Culture & community — light basemap, plum/violet.
+  // Light basemap (multiply): pale rose → orchid → violet → indigo.
   plum: lightStyle("plum", "#8E5AA8", {
-    halo: "rgb(224, 210, 234)",
-    warm: "rgb(178, 140, 200)",
-    hot: "rgb(132, 86, 168)",
-    peak: "rgb(78, 44, 110)",
+    halo: "rgb(234, 202, 204)",
+    warm: "rgb(182, 122, 184)",
+    hot: "rgb(120, 72, 162)",
+    peak: "rgb(52, 40, 112)",
   }),
 
   // Neutral default for user-created maps without a preset style.
