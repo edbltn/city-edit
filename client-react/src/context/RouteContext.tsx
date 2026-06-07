@@ -330,9 +330,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const cursorRef = useRef(0);
   const [cursor, setCursor] = useState(0);
   const [historyLen, setHistoryLen] = useState(1);
-  // rAF-debounced commit: a single user gesture (a click → its cascade of state
-  // updates) settles into ONE history entry — the final selection of that frame.
-  const historyRafRef = useRef(0);
+  // Task-debounced commit (setTimeout, deliberately NOT requestAnimationFrame): a
+  // single user gesture (a click → its synchronous cascade of state updates)
+  // settles into ONE history entry. rAF is paint-driven — it pauses for
+  // background/occluded tabs and never fires in a display-less headless browser —
+  // which would silently drop history entries (the back/forward control then never
+  // appears). A macrotask fires regardless of rendering.
+  const historyCommitRef = useRef(0);
 
   const {
     isCalculating,
@@ -360,9 +364,9 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // Selection plumbing
   // ============================================
   const scheduleHistoryCommit = useCallback(() => {
-    if (historyRafRef.current) return;
+    if (historyCommitRef.current) return;
     const run = () => {
-      historyRafRef.current = 0;
+      historyCommitRef.current = 0;
       const sel = selectionRef.current;
       const hist = historyRef.current;
       const idx = cursorRef.current;
@@ -374,10 +378,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       setCursor(cursorRef.current);
       setHistoryLen(truncated.length);
     };
-    historyRafRef.current =
-      typeof requestAnimationFrame !== "undefined"
-        ? requestAnimationFrame(run)
-        : (setTimeout(run, 0) as unknown as number);
+    historyCommitRef.current = setTimeout(run, 0) as unknown as number;
   }, []);
 
   /** Commit a new selection: update state + refs, and (unless history:false)
