@@ -143,3 +143,23 @@ export async function setCachedVotes<T>(
 ): Promise<void> {
   await idbSet(votesKey(mode), { version, data } satisfies CachedVotes<T>);
 }
+
+/**
+ * Wipe every persisted graph entry (topology + binary topology + all vote
+ * snapshots). Used as the recovery path when a topology/vote mismatch is
+ * detected or a render crashes: a poisoned cache must not survive into the next
+ * load, or the crash repeats ("a problem repeatedly occurred"). Best-effort.
+ */
+export async function clearGraphCache(): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // Nothing more we can do — the caller still reloads/refetches fresh.
+  }
+}

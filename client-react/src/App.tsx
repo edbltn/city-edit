@@ -3,7 +3,7 @@ import {
   RouteProvider, WebSocketProvider, GhostPinProvider, GraphSnapProvider,
   ThemeProvider, MapProvider, HeatmapProvider,
 } from "./context";
-import { TopBar, MapView, ErrorToast, Landing } from "./components";
+import { TopBar, MapView, ErrorToast, Landing, ErrorBoundary } from "./components";
 import { PasscodeGate } from "./components/PasscodeGate/PasscodeGate";
 import { useRoute, useHeatmap } from "./context";
 import { isLandingHost, subdomainRedirectUrl } from "./themes";
@@ -40,7 +40,11 @@ function AppContent() {
     <div id="app">
       <TopBar />
       <main id="map">
-        <MapView />
+        {/* A render crash here is almost always a poisoned graph cache; the
+            boundary clears it and reloads once instead of looping forever. */}
+        <ErrorBoundary>
+          <MapView />
+        </ErrorBoundary>
       </main>
       <ErrorToast message={error} onDismiss={clearError} />
       <PasscodeGate />

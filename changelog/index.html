@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>City Edit — Change log</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --accent: #b4541e;
+    --hairline: rgba(0,0,0,0.10);
+    --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 56px 24px 96px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 32px; margin: 8px 0 24px; border-bottom: 2px solid var(--ink); padding-bottom: 16px; }
+  a.entry { display: block; text-decoration: none; color: inherit; background: #fff;
+    border: 1px solid var(--hairline); border-radius: 14px; padding: 20px 22px; margin: 14px 0; }
+  a.entry:hover { border-color: var(--accent); }
+  .entry h2 { font-family: var(--font-ed); font-size: 21px; margin: 0 0 6px; }
+  .entry .date { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .entry p { margin: 8px 0 0; color: #33312b; font-size: 15px; line-height: 1.55; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">City Edit</div>
+  <h1>Change log</h1>
+
+  <a class="entry" href="./2026-06-14-caching-concurrency-zoom.html">
+    <div class="date">2026-06-14</div>
+    <h2>Backend caching + concurrency, and the zoom overhaul</h2>
+    <p>Fixed the stale-cache crash that looped mobile Safari on heatmap load (NYC e-bikes),
+    made the backend safe under multiple tenants and more than one Flask instance, and reworked
+    the heatmap so it scales smoothly on zoom instead of disappearing.</p>
+  </a>
+</div>
+</body>
+</html>

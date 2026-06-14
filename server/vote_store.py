@@ -17,10 +17,57 @@ edge_id space is its own city graph, so isolating by slug avoids cross-map
 collisions.
 """
 
+import contextlib
 import json
 import logging
+import os
+import time
 
 logger = logging.getLogger(__name__)
+
+
+# ── Cross-instance voter lock ──────────────────────────────────────────────
+
+@contextlib.contextmanager
+def voter_lock(redis_client, slug: str, device_id: str,
+               timeout: float = 5.0, ttl: int = 10):
+    """Serialize one voter's read-modify-write on a map ACROSS Flask instances.
+
+    The app's per-process threading.Lock only orders votes within a single
+    worker; run more than one worker/instance and two near-simultaneous votes
+    from the same voter can each read the same prior direction and double-apply
+    (inflating the count, or leaving a stuck toggle). A short Redis SET-NX lock
+    keyed by (slug, device_id) closes that race fleet-wide.
+
+    Best effort: the lock auto-expires (ttl) so a crashed holder can't wedge a
+    voter, and if Redis is unavailable we proceed anyway (the per-process lock
+    still holds) — a vote must never hang on the limiter. Yields True when the
+    cross-instance lock was actually held, False when we fell open."""
+    key = f"votelock:{slug}:{device_id}"
+    token = os.urandom(8).hex()
+    acquired = False
+    try:
+        deadline = time.monotonic() + timeout
+        while True:
+            if redis_client.set(key, token, nx=True, ex=ttl):
+                acquired = True
+                break
+            if time.monotonic() >= deadline:
+                break  # contended past the timeout — fall open, don't block
+            time.sleep(0.02)  # gevent-patched: yields the hub
+    except Exception as e:
+        logger.warning(f"[VOTELOCK] acquire failed for {key}: {e}")
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                # Delete only if the value is still our token, so we never clear
+                # a lock another instance acquired after ours expired.
+                if redis_client.get(key) == token:
+                    redis_client.delete(key)
+            except Exception:
+                pass
 
 
 def hash_key(slug: str) -> str:

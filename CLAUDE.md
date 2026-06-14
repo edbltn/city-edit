@@ -1,11 +1,30 @@
 # Project Architecture
 
+## 🚧 In progress (2026-06-14): Caching + concurrency + zoom overhaul
+
+Active workstream (full report with diffs: `changelog/2026-06-14-caching-concurrency-zoom.html`, index at `changelog/index.html`):
+1. **Stale-cache heatmap crash** — the app crashed on heatmap load (mobile Safari "a problem repeatedly occurred", esp. NYC ebikes). Fixing via defense-in-depth: server stamps topology dimensions onto `/api/graph-votes` so the client can detect a topology/vote mismatch; client validates lengths + the binary topology header; a new React error boundary clears the poisoned IndexedDB cache and reloads once to break the crash loop.
+2. **Concurrency / >1 Flask instance** — the single gevent worker head-of-line-blocked under concurrent tenants and the in-memory vote cache grew unbounded. Fixing via a bounded LRU vote cache, correct mode-scoped invalidation, single-flight on the expensive vote-array build, and a cross-instance Redis vote lock so horizontal scaling is safe.
+3. **Zoom overhaul** — the heatmap canvas cleared on `zoomstart` and only repainted on `zoomend`, so it vanished mid-zoom. Now it rides Leaflet's zoom animation (CSS-transition transform like `L.Canvas`) and scales smoothly instead of disappearing.
+
 ## Claude Instructions
 
 - **Python dependencies**: ALWAYS install and manage Python packages with `uv pip` — never bare `pip`, `pip3`, `python -m pip`, `poetry`, `conda`, or `easy_install`. Add a package by editing `requirements.in`, recompile with `uv pip compile requirements.in -o requirements.txt`, then `uv pip install -r requirements.txt`. For one-off installs use `uv pip install <pkg>`. This applies everywhere: local venvs, scripts, and Dockerfiles.
 - **gcloud commands**: Run gcloud commands directly (e.g. `gcloud builds submit`, `gcloud run services logs read`, etc.) without asking the user.
 - **docker commands**: Run docker commands directly (e.g. `docker compose up --build -d`, `docker compose logs`, etc.) without asking the user.
 - **Browser testing**: I have a browser AI helper that can report on status. When you need me to test something, ask questions that this AI can answer (descriptions of screenshots, UI changes that need verification, functionality checks, error messages visible on screen).
+
+### Change logs (always produce one for substantial work)
+
+- Write an **HTML change-log report** under `changelog/` (one file per workstream, e.g. `changelog/<date>-<topic>.html`, linked from `changelog/index.html`). Capture the diff and generate it with a small Python builder (see `changelog/build_report.py`): write the diff to `changelog/changes.diff` (`git diff … > changelog/changes.diff`), then run the builder.
+- **For EVERY diff in the report, include a hierarchical "where does this block sit" context diagram** — a recursively-summarized map at four zoom levels: **System** (which of City Edit's components — nginx · Flask API · OSRM · Redis · React/Leaflet client — the file belongs to, shown as highlighted pills) → **Module** (the subsystem + a one-line summary) → **File** (a one-line summary + LOC) → a **file map** (the file's top-level sections as a focus+context minimap, with the changed sections highlighted and the rest dimmed) → the ordered **changed blocks**. This data lives in `FILE_CONTEXT` in `build_report.py`; add an entry per changed file.
+- After finishing, **link the report** in the response so I can open it.
+
+### Local preview (redeploy on each change)
+
+- On each change, **redeploy to local dev and give me the link `http://localhost:3000/`** (Vite). The stack is: **Redis** on `:6379`, host **Flask** on `:5001` (`cd server && ./env/bin/python app.py`; for a fast restart use `SKIP_PREWARM=1` — graphs load lazily on first request), and **Vite** on `:3000` (`cd client-react && npm run dev`) which proxies `/api` + `/ws` to `:5001`.
+- Vite hot-reloads client edits; **restart Flask** after any `server/*.py` change (it doesn't auto-reload). If a long-running dev server wedges (e.g. `EPERM` reading `index.html` from a stale sandbox), kill and relaunch it via `nohup … &`.
+- Map URLs are `http://localhost:3000/m/<slug>` (e.g. `/m/nyc-walkways` for the streets heatmap, `/m/e-bikes-3` for a public e-bikes station map). Verify the redeploy took: `curl -s localhost:5001/api/graph-votes?map=<slug>&mode=<mode>` and confirm the expected fields.
 
 ## Overview
 

@@ -34,6 +34,7 @@ import {
   setCachedTopologyBin,
   getCachedVotes,
   setCachedVotes,
+  clearGraphCache,
 } from "../../utils/graphCache";
 import { getVote, reconcileEdge, setVoteTypeMap, type VoteDirection } from "../../utils/voteStore";
 import { castVotes } from "../../utils/castVote";
@@ -278,6 +279,13 @@ function buildEdgeIndex(data: Pick<GraphData, "nodes" | "edges">): Flatbush | nu
     const [fromIdx, toIdx] = data.edges[i];
     const fromNode = data.nodes[fromIdx];
     const toNode = data.nodes[toIdx];
+    // A malformed/stale topology can reference a node index that doesn't exist.
+    // Index a degenerate (0,0) box for it instead of dereferencing undefined —
+    // Flatbush requires exactly edges.length adds, so we can't skip the entry.
+    if (!fromNode || !toNode) {
+      idx.add(0, 0, 0, 0);
+      continue;
+    }
     const minLng = Math.min(fromNode[1], toNode[1]);
     const maxLng = Math.max(fromNode[1], toNode[1]);
     const minLat = Math.min(fromNode[0], toNode[0]);
@@ -469,10 +477,31 @@ function targetLatLng(
  * (lat, lon ×1e7), then nEdges×2 uint32 (from_idx, to_idx). Edge names are dropped
  * (street tooltips reverse-geocode instead); the edges index is the canonical edge id.
  */
+// 'GTB1' little-endian as a uint32 (G=0x47, T=0x54, B=0x42, '1'=0x31).
+const TOPOLOGY_BIN_MAGIC = 0x31425447;
+
 function decodeTopologyBin(buf: ArrayBuffer): Pick<GraphData, "nodes" | "edges"> {
+  // Validate the header BEFORE allocating. A stale/truncated/corrupt cached blob
+  // (or a non-binary error body that slipped through) would otherwise be read as
+  // garbage nNodes/nEdges — allocating multi-GB arrays that OOM-crash the tab, or
+  // building edges that reference nonexistent nodes (the downstream crash). On any
+  // inconsistency we throw, and callers fall back to a fresh fetch / JSON.
+  if (buf.byteLength < 12) {
+    throw new Error(`topology blob too small (${buf.byteLength} bytes)`);
+  }
   const head = new Uint32Array(buf, 0, 3); // [magic, nNodes, nEdges]
+  if (head[0] !== TOPOLOGY_BIN_MAGIC) {
+    throw new Error(`bad topology magic 0x${head[0].toString(16)}`);
+  }
   const nNodes = head[1];
   const nEdges = head[2];
+  const expected = 12 + nNodes * 8 + nEdges * 8;
+  if (buf.byteLength !== expected) {
+    throw new Error(
+      `topology size mismatch: ${buf.byteLength} bytes, expected ${expected} ` +
+        `(nNodes=${nNodes}, nEdges=${nEdges})`,
+    );
+  }
   const coords = new Int32Array(buf, 12, nNodes * 2);
   const ends = new Uint32Array(buf, 12 + nNodes * 8, nEdges * 2);
   const nodes: [number, number][] = new Array(nNodes);
@@ -481,9 +510,32 @@ function decodeTopologyBin(buf: ArrayBuffer): Pick<GraphData, "nodes" | "edges">
   }
   const edges: [number, number, string][] = new Array(nEdges);
   for (let i = 0; i < nEdges; i++) {
-    edges[i] = [ends[2 * i], ends[2 * i + 1], ""];
+    // Clamp out-of-range node indices to 0 rather than leaving a dangling ref
+    // that crashes buildEdgeIndex/redraw — a degenerate self-edge is harmless.
+    const a = ends[2 * i] < nNodes ? ends[2 * i] : 0;
+    const b = ends[2 * i + 1] < nNodes ? ends[2 * i + 1] : 0;
+    edges[i] = [a, b, ""];
   }
   return { nodes, edges };
+}
+
+/**
+ * True when a vote payload is indexed against the SAME topology we hold. Vote
+ * arrays are sized to the server's current graph; the server stamps n_edges /
+ * n_nodes onto the payload so the client can reject votes that don't line up
+ * with its (possibly day-old cached) topology — painting a mismatch is what
+ * indexed past the array ends and crashed mobile Safari. Falls back to the
+ * edge_votes length when the dimensions aren't present (older server).
+ */
+function votesMatchTopology(
+  voteData: { n_edges?: number; n_nodes?: number; edge_votes?: unknown[] },
+  topology: Pick<GraphData, "nodes" | "edges"> | null,
+): boolean {
+  if (!topology) return false;
+  const nEdges = voteData.n_edges ?? voteData.edge_votes?.length;
+  if (nEdges != null && nEdges !== topology.edges.length) return false;
+  if (voteData.n_nodes != null && voteData.n_nodes !== topology.nodes.length) return false;
+  return true;
 }
 
 function buildNodeAdj(topology: Pick<GraphData, "nodes" | "edges">): number[][] {
@@ -668,6 +720,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const nodeIndexRef = useRef<Flatbush | null>(null);
   const redrawTimeoutRef = useRef<number | null>(null);
   const isZoomingRef = useRef(false);
+  // The map state the heatmap bitmap was last painted at: the zoom, and the
+  // lat/lng sitting at the canvas's top-left corner (container point 0,0). The
+  // zoom-animation handler uses these to scale + translate the EXISTING bitmap to
+  // the target zoom, so the heatmap rides Leaflet's zoom animation instead of
+  // being cleared and repainted only at the end (which made it vanish mid-zoom).
+  const drawStateRef = useRef<{ zoom: number; nw: L.LatLng } | null>(null);
 
   // Per-zoom projection cache for node layer-points. Leaflet layer-points are
   // stable across pans at a fixed zoom (panning only translates the map pane),
@@ -1286,7 +1344,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // Initialize canvases once
   useEffect(() => {
     const canvas = document.createElement("canvas");
-    canvas.className = "graph-layer";
+    // `leaflet-zoom-animated` opts the canvas into Leaflet's zoom-animation CSS
+    // transition (transform-origin: 0 0; transition: transform …): when the
+    // zoomanim handler sets the target transform, the browser tweens the existing
+    // bitmap smoothly to the new zoom instead of it disappearing until zoomend.
+    canvas.className = "graph-layer leaflet-zoom-animated";
     canvas.style.position = "absolute";
     canvas.style.top = "0";
     canvas.style.left = "0";
@@ -1298,7 +1360,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     canvas.style.mixBlendMode = mapStyle.heatBlend;
 
     const hoverCanvas = document.createElement("canvas");
-    hoverCanvas.className = "graph-layer-hover";
+    hoverCanvas.className = "graph-layer-hover leaflet-zoom-animated";
     hoverCanvas.style.position = "absolute";
     hoverCanvas.style.top = "0";
     hoverCanvas.style.left = "0";
@@ -1331,6 +1393,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       const response = await fetch(url, { cache: "no-store", headers: passcodeHeaders() });
       if (!response.ok) throw new Error(`Vote fetch failed: ${response.status}`);
       const voteData = await response.json();
+      // If the graph was rebuilt mid-session, these votes no longer line up with
+      // our topology. Don't paint the mismatch (it would crash); leave the current
+      // heatmap and let the next full page load reconcile against fresh topology.
+      if (!votesMatchTopology(voteData, topologyRef.current)) {
+        console.warn("Skipping vote refresh: topology/vote dimension mismatch");
+        return;
+      }
       graphDataRef.current = { ...topologyRef.current!, ...voteData };
       lastRevRef.current = voteData.rev ?? 0;
       // Teach the vote store this map's label→id map so packed lookups resolve.
@@ -1391,6 +1460,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       let topology: GraphData | null = null;
       let version: string | null = null;
       let usedCachedTopology = false;
+      // Assigned inside the try below; the step-3 stale-topology guard reuses it.
+      let fetchFreshTopology: ((forceReload?: boolean) => Promise<GraphData | null>) | null = null;
       try {
         try {
           const vr = await fetch(withMap(`${CONFIG.apiUrl}/graph-version`), { headers: passcodeHeaders() });
@@ -1408,43 +1479,66 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         const withVersion = (url: string) =>
           version ? url + (url.includes("?") ? "&" : "?") + "v=" + encodeURIComponent(version) : url;
 
-        // Station networks (tiny, names matter) use the JSON topology; large
-        // street graphs use the binary topology so a phone never JSON.parse-es a
-        // ~150MB string (the OOM that crashed mobile Safari on the NYC graph).
+        // Fetch the topology from the NETWORK (not IndexedDB). `forceReload` adds
+        // cache:"reload" so the browser HTTP cache is bypassed too — used by the
+        // stale-topology recovery path in step 3, where even the version-busted
+        // URL may have been served stale from Safari's HTTP cache.
+        const fetchTopologyFromNetwork = async (forceReload = false): Promise<GraphData | null> => {
+          const init: RequestInit = forceReload
+            ? { headers: passcodeHeaders(), cache: "reload" }
+            : { headers: passcodeHeaders() };
+          // Station networks (tiny, names matter) use the JSON topology; large
+          // street graphs use the binary topology so a phone never JSON.parse-es a
+          // ~150MB string (the OOM that crashed mobile Safari on the NYC graph).
+          if (isStationNetwork) {
+            const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), init);
+            if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
+            const t = await r.json();
+            if (version && t) setCachedTopology(version, t);
+            return t;
+          }
+          try {
+            const r = await fetch(
+              withVersion(withMap(`${CONFIG.apiUrl}/graph-topology?format=bin`)),
+              init,
+            );
+            if (!r.ok) throw new Error(`Binary topology fetch failed: ${r.status}`);
+            const buf = await r.arrayBuffer();
+            const t = decodeTopologyBin(buf) as GraphData;
+            if (version) setCachedTopologyBin(version, buf);
+            return t;
+          } catch (binErr) {
+            // Older server without the binary endpoint — fall back to JSON.
+            console.warn("Binary topology unavailable, using JSON:", binErr);
+            const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), init);
+            if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
+            const t = await r.json();
+            if (version && t) setCachedTopology(version, t);
+            return t;
+          }
+        };
+        fetchFreshTopology = fetchTopologyFromNetwork;
+
         if (version) {
           if (isStationNetwork) {
             const cached = await getCachedTopology<GraphData>(version);
             if (cached) { topology = cached; usedCachedTopology = true; }
           } else {
             const buf = await getCachedTopologyBin(version);
-            if (buf) { topology = decodeTopologyBin(buf) as GraphData; usedCachedTopology = true; }
+            // Decode can throw on a corrupt/truncated cached blob — ignore the
+            // cache and fall through to a fresh network fetch rather than aborting.
+            if (buf) {
+              try {
+                topology = decodeTopologyBin(buf) as GraphData;
+                usedCachedTopology = true;
+              } catch (decodeErr) {
+                console.warn("Cached binary topology was corrupt, refetching:", decodeErr);
+              }
+            }
           }
         }
         if (!topology) {
-          if (isStationNetwork) {
-            const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), { headers: passcodeHeaders() });
-            if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
-            topology = await r.json();
-            if (version && topology) setCachedTopology(version, topology);
-          } else {
-            try {
-              const r = await fetch(
-                withVersion(withMap(`${CONFIG.apiUrl}/graph-topology?format=bin`)),
-                { headers: passcodeHeaders() },
-              );
-              if (!r.ok) throw new Error(`Binary topology fetch failed: ${r.status}`);
-              const buf = await r.arrayBuffer();
-              topology = decodeTopologyBin(buf) as GraphData;
-              if (version) setCachedTopologyBin(version, buf);
-            } catch (binErr) {
-              // Older server without the binary endpoint — fall back to JSON.
-              console.warn("Binary topology unavailable, using JSON:", binErr);
-              const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), { headers: passcodeHeaders() });
-              if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
-              topology = await r.json();
-              if (version && topology) setCachedTopology(version, topology);
-            }
-          }
+          topology = await fetchTopologyFromNetwork();
         }
       } catch (error) {
         console.error("Failed to load graph topology:", error);
@@ -1484,6 +1578,39 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);
         const voteData = await r.json();
         if (cancelled) return;
+
+        // Stale-topology guard. The vote arrays are indexed against the server's
+        // CURRENT graph. If our topology (often from the day-long cache) has a
+        // different node/edge count, painting these votes indexes past the array
+        // ends — the mobile-Safari crash. Refetch the topology fresh (bypassing
+        // both the IndexedDB and HTTP caches), rebuild the indices, and only apply
+        // the votes once they line up. If still mismatched, drop the persisted
+        // caches and bail rather than paint a crash.
+        if (!votesMatchTopology(voteData, topologyRef.current)) {
+          console.warn("Topology/vote mismatch — refetching fresh topology", {
+            topoEdges: topologyRef.current?.edges.length,
+            voteEdges: voteData.n_edges ?? voteData.edge_votes?.length,
+          });
+          let fresh: GraphData | null = null;
+          try {
+            fresh = fetchFreshTopology ? await fetchFreshTopology(true) : null;
+          } catch (refetchErr) {
+            console.error("Fresh topology refetch failed:", refetchErr);
+          }
+          if (cancelled) return;
+          if (fresh && votesMatchTopology(voteData, fresh)) {
+            topology = fresh;
+            topologyRef.current = fresh;
+            edgeIndexRef.current = buildEdgeIndex(fresh);
+            nodeIndexRef.current = buildNodeIndex(fresh);
+            nodeAdjRef.current = buildNodeAdj(fresh);
+          } else {
+            await clearGraphCache();
+            setHeatmapLoaded();
+            return;
+          }
+        }
+
         graphDataRef.current = { ...topologyRef.current!, ...voteData };
         lastRevRef.current = voteData.rev ?? 0;
         setVoteTypeMap(voteData.vote_types);
@@ -1863,6 +1990,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     ctx.globalCompositeOperation = "source-over";
     ctx.globalAlpha = 1.0;
 
+    // Record the map state this bitmap was painted at, so a subsequent zoom
+    // animation can scale/translate the existing pixels to the target zoom.
+    drawStateRef.current = { zoom, nw: map.containerPointToLatLng([0, 0]) };
+
     redrawHoverHighlightRef.current();
   }, [map, mapStyle.heat, mapStyle.heatComposite, mapStyle.selection]);
 
@@ -1879,18 +2010,48 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   useEffect(() => {
     const handleZoomStart = () => {
       isZoomingRef.current = true;
-      const ctx = ctxRef.current;
-      const canvas = canvasRef.current;
-      if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // NOTE: we intentionally DON'T clear the heatmap canvas here anymore. The
+      // existing bitmap stays up and gets scaled by handleZoomAnim so the heatmap
+      // visibly zooms with the map instead of vanishing until zoomend. Only the
+      // transient hover highlight is dropped (it would be wrong mid-zoom anyway).
       const hoverCtx = hoverCtxRef.current;
       const hoverCanvas = hoverCanvasRef.current;
       if (hoverCanvas && hoverCtx) hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
       hoverTargetRef.current = null;
       setHoverTarget(null);
     };
+
+    // Ride Leaflet's zoom animation: set the canvas transform to where its
+    // top-left corner lands at the target zoom, scaled by the zoom ratio. Because
+    // the canvas carries the `leaflet-zoom-animated` class, the mapPane's
+    // `leaflet-zoom-anim` state makes the browser TRANSITION this transform — the
+    // same mechanism L.Canvas/tile layers use — so the heatmap glides + scales
+    // into the new zoom. zoomend then repaints crisply at the new resolution.
+    const handleZoomAnim = (e: L.ZoomAnimEvent) => {
+      const canvas = canvasRef.current;
+      const draw = drawStateRef.current;
+      if (!canvas || !draw) return;
+      // getZoomScale(toZoom, fromZoom) = 2^(toZoom - fromZoom): how much the
+      // painted bitmap must grow/shrink to match the target zoom.
+      const scale = map.getZoomScale(e.zoom, draw.zoom);
+      // Where the bitmap's top-left geographic corner sits in the target frame.
+      // _latLngToNewLayerPoint is the internal Leaflet helper L.Canvas itself uses
+      // for this; it's not in the public typings, so reach it through a cast.
+      const offset = (
+        map as unknown as {
+          _latLngToNewLayerPoint(latlng: L.LatLng, zoom: number, center: L.LatLng): L.Point;
+        }
+      )._latLngToNewLayerPoint(draw.nw, e.zoom, e.center);
+      L.DomUtil.setTransform(canvas, offset, scale);
+      const hoverCanvas = hoverCanvasRef.current;
+      if (hoverCanvas) L.DomUtil.setTransform(hoverCanvas, offset, scale);
+    };
+
     const handleZoomEnd = () => {
       isZoomingRef.current = false;
       setCurrentZoom(map.getZoom());
+      // redraw() runs setPosition (resetting the scale transform) then repaints
+      // the bitmap at the new zoom's native resolution and line widths.
       scheduleRedrawRef.current();
     };
     const handleMoveEnd = () => {
@@ -1900,11 +2061,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const handleResize = () => scheduleRedrawRef.current();
 
     map.on("zoomstart", handleZoomStart);
+    map.on("zoomanim", handleZoomAnim);
     map.on("zoomend", handleZoomEnd);
     map.on("moveend", handleMoveEnd);
     map.on("resize", handleResize);
     return () => {
       map.off("zoomstart", handleZoomStart);
+      map.off("zoomanim", handleZoomAnim);
       map.off("zoomend", handleZoomEnd);
       map.off("moveend", handleMoveEnd);
       map.off("resize", handleResize);

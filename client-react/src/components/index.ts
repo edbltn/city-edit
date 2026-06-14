@@ -9,3 +9,4 @@ export { VoteTypeSelector } from "./VoteTypeSelector";
 export { Landing } from "./Landing";
 export { BoundaryLayer } from "./BoundaryLayer";
 export { ModeSwitcher } from "./ModeSwitcher";
+export { ErrorBoundary } from "./ErrorBoundary/ErrorBoundary";

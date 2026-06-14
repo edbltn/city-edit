@@ -6,6 +6,7 @@ import sys
 import time
 import hashlib
 import threading
+from collections import OrderedDict
 from functools import lru_cache
 
 import redis
@@ -242,11 +243,73 @@ def _locked_response():
 
 # ── Per-map vote response cache ───────────────────────────────────────────
 
-_vote_cache: dict[str, dict] = {}
+# Bounded LRU of built /api/graph-votes bodies, keyed by "<slug>:<mode>". This
+# used to be an unbounded dict: every (map, mode) ever requested kept its full
+# JSON body resident forever, so a multi-tenant server with many maps leaked
+# memory until the worker OOM-crashed (exactly the "more than one tenant → crash"
+# symptom). The cap evicts the least-recently-served body so memory stays flat
+# regardless of how many maps exist. Access is guarded by _vote_cache_lock since
+# several greenlets/requests touch it concurrently.
+_VOTE_CACHE_MAX = int(os.environ.get("VOTE_CACHE_MAX", "64"))
+_vote_cache: "OrderedDict[str, dict]" = OrderedDict()
+_vote_cache_lock = threading.Lock()
+
+# Per-cache-key single-flight locks. Building the vote arrays for a big map (NYC
+# streets: ~2M edges, pure-Python) takes seconds and pins the GIL, freezing the
+# single gevent worker. Without single-flight, N concurrent first-requests for
+# the same map each rebuild the same body in series — head-of-line blocking that
+# stacks into the multi-tenant stall/crash. One builder per key; the rest wait on
+# its result.
+_build_locks: dict[str, threading.Lock] = {}
+_build_locks_guard = threading.Lock()
 
 # Serializes the read-modify-write of a voter's per-proposal direction so a
-# rapid +/− toggle can't read a stale prior direction (see /api/vote).
+# rapid +/− toggle can't read a stale prior direction (see /api/vote). This is a
+# PER-PROCESS lock; across Flask instances/workers the Redis lock in cast_vote
+# (vote_store.voter_lock) provides the cross-instance guarantee.
 _proposal_vote_lock = threading.Lock()
+
+
+def _vote_cache_get(cache_key: str, rev: int) -> str | None:
+    """Return a cached body for this key+revision, marking it most-recently-used."""
+    with _vote_cache_lock:
+        cached = _vote_cache.get(cache_key)
+        if cached and cached["rev"] == rev:
+            _vote_cache.move_to_end(cache_key)
+            return cached["body"]
+    return None
+
+
+def _vote_cache_put(cache_key: str, rev: int, body: str) -> None:
+    """Store a built body, evicting the least-recently-used entry past the cap."""
+    with _vote_cache_lock:
+        _vote_cache[cache_key] = {"rev": rev, "body": body}
+        _vote_cache.move_to_end(cache_key)
+        while len(_vote_cache) > _VOTE_CACHE_MAX:
+            _vote_cache.popitem(last=False)
+
+
+def _invalidate_vote_cache(slug: str) -> None:
+    """Drop every cached body for a map — the bare slug AND each "<slug>:<mode>".
+
+    The cache is keyed per mode ("<slug>:<mode>"), but writes only know the slug,
+    so a plain `pop(slug)` left the mode-scoped bodies stale. (The revision check
+    in _build_graph_votes_body still kept responses CORRECT, but the stale entries
+    lingered in memory and forced an extra rebuild.) Clearing all of a slug's
+    variants makes invalidation actually free the right entries."""
+    prefix = f"{slug}:"
+    with _vote_cache_lock:
+        for key in [k for k in _vote_cache if k == slug or k.startswith(prefix)]:
+            _vote_cache.pop(key, None)
+
+
+def _build_lock_for(cache_key: str) -> threading.Lock:
+    with _build_locks_guard:
+        lock = _build_locks.get(cache_key)
+        if lock is None:
+            lock = threading.Lock()
+            _build_locks[cache_key] = lock
+        return lock
 
 
 def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
@@ -258,10 +321,22 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
     """
     rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
     cache_key = f"{rmap.slug}:{mode}" if mode else rmap.slug
-    cached = _vote_cache.get(cache_key)
-    if cached and cached["rev"] == rev:
-        return cached["body"]
+    hit = _vote_cache_get(cache_key, rev)
+    if hit is not None:
+        return hit
 
+    # Single-flight: one greenlet builds; concurrent callers wait, then take the
+    # freshly-cached result instead of rebuilding the same arrays in series.
+    with _build_lock_for(cache_key):
+        hit = _vote_cache_get(cache_key, rev)
+        if hit is not None:
+            return hit
+        return _build_graph_votes_body_locked(rmap, mode, rev, cache_key)
+
+
+def _build_graph_votes_body_locked(
+    rmap: ResolvedMap, mode: str | None, rev: int, cache_key: str,
+) -> str:
     rmap.graph.ensure_loaded()
 
     # The heatmap serves ONLY from Redis; Postgres is the durable copy that the
@@ -282,9 +357,18 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
     )
     arrays["rev"] = rev
     arrays["vote_types"] = {str(k): v for k, v in vote_store.all_vote_types().items()}
+    # Stamp the topology this body is indexed against. The vote arrays are sized
+    # to the CURRENT graph; the client may still hold a STALE cached topology (the
+    # /api/graph-topology response is cached for a day). Carrying the dimensions
+    # and the topology etag lets the client detect a mismatch and refuse to paint
+    # votes against the wrong topology — the root of the mobile-Safari crash —
+    # rather than indexing past the end of its node/edge arrays.
+    arrays["n_edges"] = len(rmap.graph.edges)
+    arrays["n_nodes"] = len(rmap.graph.nodes)
+    arrays["topology_version"] = rmap.graph.topology_etag
     body = json.dumps(arrays)
 
-    _vote_cache[cache_key] = {"rev": rev, "body": body}
+    _vote_cache_put(cache_key, rev, body)
     return body
 
 
@@ -441,7 +525,7 @@ def _start_delta_listener():
             channel = msg["channel"]
             slug = channel.split(":", 1)[1] if ":" in channel else None
             if slug:
-                _vote_cache.pop(slug, None)
+                _invalidate_vote_cache(slug)
 
     t = threading.Thread(target=listener, daemon=True, name="delta-listener")
     t.start()
@@ -912,7 +996,10 @@ def cast_vote():
             slug, edge_ids, vt_id, ip_hash, device_id
         ) if direction != 0 else {}
 
-        with _proposal_vote_lock:
+        # voter_lock serializes this voter's read-modify-write ACROSS instances
+        # (Redis); _proposal_vote_lock serializes it within THIS process. Together
+        # they hold whether the app runs one worker or a horizontally-scaled fleet.
+        with vote_store.voter_lock(redis_client, slug, device_id), _proposal_vote_lock:
             reversed_any = False
             changed: list[int] = []
             at_cap: list[int] = []  # fresh device, IP at cap → LRU takeover below
@@ -971,7 +1058,7 @@ def cast_vote():
                     direction=direction or vote_store.UP, reversed_vote=reversed_any,
                     vt_counts=vt_counts,
                 )
-                _vote_cache.pop(slug, None)
+                _invalidate_vote_cache(slug)
 
         return jsonify({
             "success": True, "edge_ids": edge_ids, "changed": changed,
@@ -1005,7 +1092,7 @@ def _resnap_city_maps(city_id: str) -> None:
             mode_int = vote_store.mode_to_int(m.get("mode", "walk"))
             labels = [vt["label"] for vt in (m.get("voteTypes") or []) if vt.get("label")]
             vote_migration.migrate_map(cg, redis_client, slug, mode_int, labels)
-            _vote_cache.pop(slug, None)
+            _invalidate_vote_cache(slug)
         except Exception as e:
             logger.error(f"[RESNAP:{slug}] failed: {e}")
 

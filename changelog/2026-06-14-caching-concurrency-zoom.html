@@ -1,0 +1,1358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backend caching + concurrency, and the zoom overhaul — 2026-06-14</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Backend caching + concurrency, and the zoom overhaul</h1>
+    <div class="dateline">2026-06-14 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#crash">1</a>
+<a href="#concurrency">2</a>
+<a href="#zoom">3</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Three fixes in one pass: the stale-cache crash that loops mobile Safari on heatmap load,
+  the concurrency limits that broke the app under multiple tenants, and the heatmap that vanished mid-zoom.</p>
+
+  
+    <section class="card" id="crash">
+      <div class="tag">Backend + Frontend</div>
+      <h2>1 · Stale-cache crash on heatmap load</h2>
+      <h3>Symptom</h3>
+      <p>On mobile (iOS Safari) the app showed <em>“a problem repeatedly occurred”</em> on heatmap load — reproduced on the NYC e-bikes (station-network) map. That message is Safari’s crash-reload loop: the page throws, Safari reloads, it throws again.</p>
+      <h3>Root cause</h3>
+      <ul><li>The heatmap is painted by indexing per-edge / per-node vote arrays returned by <code>/api/graph-votes</code> against the graph <strong>topology</strong> the client holds. Topology is cached aggressively (IndexedDB + a day-long HTTP <code>max-age</code>); votes refresh every few seconds.</li>
+<li>When the two disagree on dimensions — a stale cached topology with a different node/edge count than the fresh votes (after a graph rebuild, or when the version probe fails so the cache-busting URL is skipped) — the render indexes <strong>past the end</strong> of the arrays, or the binary topology decoder allocates garbage from a corrupt blob. Either throws, and there was <strong>no error boundary</strong>, so the whole React tree died → Safari loop.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Server stamps the topology dimensions onto the votes</strong> (<code>n_edges</code>, <code>n_nodes</code>, <code>topology_version</code>) so the client can detect a mismatch instead of trusting that the arrays line up. (<code>server/app.py</code> · <code>_build_graph_votes_body_locked</code>)</li>
+<li><strong>Client validates before painting.</strong> <code>votesMatchTopology()</code> compares the stamped dimensions to the held topology; on mismatch it refetches the topology fresh — bypassing both the IndexedDB and the HTTP cache (<code>cache:&nbsp;"reload"</code>) — rebuilds the indices, and only then applies the votes. If it still can’t reconcile, it clears the persisted cache and bails rather than paint a crash.</li>
+<li><strong>Hardened the binary topology decoder.</strong> <code>decodeTopologyBin()</code> now validates the <code>GTB1</code> magic + the exact byte length <em>before</em> allocating, and clamps out-of-range node indices — a corrupt/truncated cached blob throws cleanly and falls back to a fresh fetch instead of OOM-ing the tab. <code>buildEdgeIndex()</code> no longer dereferences a missing node.</li>
+<li><strong>Added a React error boundary</strong> around the map. The first render crash in a session clears the (usually poisoned) graph cache and reloads <em>once</em>; a second crash shows a manual “Reload the map” fallback instead of looping. This is the definitive backstop for “a problem repeatedly occurred”, whatever the trigger.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/app.py — stamp n_edges / n_nodes / topology_version onto the votes body</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx — votesMatchTopology, fresh-topology refetch, decoder + edge-index hardening</li>
+<li>client-react/src/utils/graphCache.ts — clearGraphCache()</li>
+<li>client-react/src/components/ErrorBoundary/ErrorBoundary.tsx (+ .css) — recovery boundary</li>
+<li>client-react/src/App.tsx — wrap &lt;MapView&gt; in the boundary</li></ul>
+    </section>
+    
+
+    <section class="card" id="concurrency">
+      <div class="tag">Backend</div>
+      <h2>2 · Concurrency — safe under >1 instance / many tenants</h2>
+      <h3>Symptom</h3>
+      <p>The app crashed when more than one tenant used it at once, and couldn’t safely scale past a single Flask instance.</p>
+      <h3>Root cause</h3>
+      <ul><li>Production runs a <strong>single gevent gunicorn worker</strong> (the NYC graph is too big to duplicate across workers). gevent greenlets don’t preempt on CPU, so the seconds-long, pure-Python build of the vote arrays (~2M NYC edges) <strong>froze the whole worker</strong> — concurrent tenants’ requests (and the health probe) stalled behind it. Worse, N concurrent first-requests for the same map each rebuilt the same body in series (head-of-line blocking).</li>
+<li>The in-memory <code>_vote_cache</code> was an <strong>unbounded dict</strong>: every (map, mode) ever requested kept its full JSON body resident forever — a steady memory leak that OOM-crashes a multi-tenant server with many maps. Its invalidation also only popped the bare slug, never the per-mode <code>&lt;slug&gt;:&lt;mode&gt;</code> keys it actually stored.</li>
+<li>The voter read-modify-write was guarded only by a <strong>per-process</strong> <code>threading.Lock</code> — meaningless across instances/workers, so two near-simultaneous votes from one voter could double-apply.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Bounded LRU vote cache.</strong> <code>_vote_cache</code> is now a capped <code>OrderedDict</code> (<code>VOTE_CACHE_MAX</code>, default 64) guarded by a lock — memory stays flat no matter how many tenant maps exist.</li>
+<li><strong>Correct, mode-aware invalidation.</strong> <code>_invalidate_vote_cache(slug)</code> drops the bare slug <em>and</em> every <code>&lt;slug&gt;:&lt;mode&gt;</code> variant; wired into the vote path, the pub/sub delta listener, and the graph-reload re-snap.</li>
+<li><strong>Single-flight on the expensive build.</strong> A per-cache-key lock means one greenlet builds the arrays while the rest wait and take the result — killing the head-of-line stampede that stalled the worker under concurrent tenants.</li>
+<li><strong>Cross-instance voter lock.</strong> <code>vote_store.voter_lock()</code> is a short Redis <code>SET NX</code> lock keyed by (slug, device) that serializes a voter’s read-modify-write <em>fleet-wide</em>; it auto-expires and fails open so a vote never hangs on Redis. Combined with the bounded shared-state design, this is what makes running more than one instance safe.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/app.py — bounded LRU + _vote_cache_get/put, _invalidate_vote_cache, _build_lock_for single-flight, voter_lock wiring</li>
+<li>server/vote_store.py — voter_lock() cross-instance Redis lock</li></ul>
+    </section>
+    
+
+    <section class="card" id="zoom">
+      <div class="tag">Frontend</div>
+      <h2>3 · Zoom overhaul — heatmap scales instead of vanishing</h2>
+      <h3>Symptom</h3>
+      <p>The heatmap disappeared while zooming and only snapped back after the zoom finished.</p>
+      <h3>Root cause</h3>
+      <ul><li>The heatmap is a hand-managed <code>&lt;canvas&gt;</code> in a custom Leaflet pane. On <code>zoomstart</code> the canvas was <strong>cleared</strong>, and it was only repainted on <code>zoomend</code> — so for the whole ~250&nbsp;ms zoom animation it was blank. Unlike Leaflet’s own tile / canvas renderers, it never rode the zoom animation’s transform.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Stopped clearing the heatmap canvas on <code>zoomstart</code> — the existing bitmap stays up.</li>
+<li>Gave both canvases the <code>leaflet-zoom-animated</code> class so Leaflet’s zoom-animation CSS transition applies to their <code>transform</code>.</li>
+<li>Added a <code>zoomanim</code> handler that sets each canvas’s transform to where its top-left geographic corner lands at the target zoom, scaled by the zoom ratio (<code>getZoomScale</code> + <code>_latLngToNewLayerPoint</code> — the exact mechanism <code>L.Canvas</code> uses). The browser tweens it, so the heatmap glides and scales with the map. <code>zoomend</code> then repaints crisply at the new resolution and line widths.</li>
+<li>The draw state (zoom + top-left lat/lng) is recorded at the end of every paint so the animation transform is always anchored to the right geography.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx — drawStateRef, leaflet-zoom-animated class, handleZoomAnim, zoomstart no longer clears the heatmap</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Backend: <code>python -m py_compile app.py vote_store.py</code> — clean.</li>
+<li>Backend: <code>pytest tests/unit/test_hydration.py tests/unit/test_vote_counts.py</code> — 10 passed (these exercise the vote cache + build path).</li>
+<li>Frontend: <code>tsc -b &amp;&amp; vite build</code> — clean production build.</li>
+<li>Frontend: <code>vitest run</code> — 101 passed.</li>
+<li>Frontend: <code>eslint</code> on the changed files — 0 errors (4 pre-existing exhaustive-deps warnings on mount-once effects).</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open the NYC e-bikes map on a phone (or iOS Simulator Safari). It should load the station heatmap without the “a problem repeatedly occurred” loop. To simulate a poisoned cache, in devtools set IndexedDB <code>desire-path-cache</code> to garbage — the error boundary should clear it and recover on one reload.</li>
+<li>Zoom in and out (scroll, pinch, and the +/- control). The heatmap should scale smoothly <em>with</em> the map, not blink out and reappear.</li>
+<li>Cast a few votes from two browsers/devices at once on the same map — counts should stay correct (no double-count), and the heatmap should update for both.</li>
+<li>Hit <code>/api/graph-votes?map=&lt;slug&gt;&amp;mode=&lt;mode&gt;</code> and confirm the JSON now includes <code>n_edges</code>, <code>n_nodes</code>, and <code>topology_version</code>.</li>
+<li>Leave the app open across many maps/modes for a while and watch the worker’s memory — it should stay flat (bounded vote cache) rather than climbing.</li>
+<li>Optionally bump the deploy to more than one Cloud Run instance and load-test concurrent voting; the Redis voter lock keeps the read-modify-write correct across instances.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">CLAUDE.md</span>
+            <span class="stat"><span class="d-add">+19</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · repo root</span>
+        <span class="ctx-sum">the project’s agent + architecture instructions</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">CLAUDE.md</span>
+        <span class="ctx-sum">agent instructions, architecture overview, runbooks</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">In-progress note</span><span class="ol-sum">this workstream summary</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Changelog + dev-server conventions</span><span class="ol-sum">standing instructions added this turn</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Architecture / runbooks</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>In-progress workstream note (links the changelog)</li><li>New standing instructions: changelog diagrams + redeploy to localhost:3000</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/CLAUDE.md b/CLAUDE.md</span>
+<span class="d-meta">index dcdd26f..b1487a2 100644</span>
+<span class="d-meta">--- a/CLAUDE.md</span>
+<span class="d-meta">+++ b/CLAUDE.md</span>
+<span class="d-hunk">@@ -1,5 +1,12 @@</span>
+<span class="d-ctx"> # Project Architecture</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+## 🚧 In progress (2026-06-14): Caching + concurrency + zoom overhaul</span>
+<span class="d-add">+</span>
+<span class="d-add">+Active workstream (full report with diffs: `changelog/2026-06-14-caching-concurrency-zoom.html`, index at `changelog/index.html`):</span>
+<span class="d-add">+1. **Stale-cache heatmap crash** — the app crashed on heatmap load (mobile Safari &quot;a problem repeatedly occurred&quot;, esp. NYC ebikes). Fixing via defense-in-depth: server stamps topology dimensions onto `/api/graph-votes` so the client can detect a topology/vote mismatch; client validates lengths + the binary topology header; a new React error boundary clears the poisoned IndexedDB cache and reloads once to break the crash loop.</span>
+<span class="d-add">+2. **Concurrency / &gt;1 Flask instance** — the single gevent worker head-of-line-blocked under concurrent tenants and the in-memory vote cache grew unbounded. Fixing via a bounded LRU vote cache, correct mode-scoped invalidation, single-flight on the expensive vote-array build, and a cross-instance Redis vote lock so horizontal scaling is safe.</span>
+<span class="d-add">+3. **Zoom overhaul** — the heatmap canvas cleared on `zoomstart` and only repainted on `zoomend`, so it vanished mid-zoom. Now it rides Leaflet&#x27;s zoom animation (CSS-transition transform like `L.Canvas`) and scales smoothly instead of disappearing.</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> ## Claude Instructions</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> - **Python dependencies**: ALWAYS install and manage Python packages with `uv pip` — never bare `pip`, `pip3`, `python -m pip`, `poetry`, `conda`, or `easy_install`. Add a package by editing `requirements.in`, recompile with `uv pip compile requirements.in -o requirements.txt`, then `uv pip install -r requirements.txt`. For one-off installs use `uv pip install &lt;pkg&gt;`. This applies everywhere: local venvs, scripts, and Dockerfiles.</span>
+<span class="d-hunk">@@ -7,6 +14,18 @@</span>
+<span class="d-ctx"> - **docker commands**: Run docker commands directly (e.g. `docker compose up --build -d`, `docker compose logs`, etc.) without asking the user.</span>
+<span class="d-ctx"> - **Browser testing**: I have a browser AI helper that can report on status. When you need me to test something, ask questions that this AI can answer (descriptions of screenshots, UI changes that need verification, functionality checks, error messages visible on screen).</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+### Change logs (always produce one for substantial work)</span>
+<span class="d-add">+</span>
+<span class="d-add">+- Write an **HTML change-log report** under `changelog/` (one file per workstream, e.g. `changelog/&lt;date&gt;-&lt;topic&gt;.html`, linked from `changelog/index.html`). Capture the diff and generate it with a small Python builder (see `changelog/build_report.py`): write the diff to `changelog/changes.diff` (`git diff … &gt; changelog/changes.diff`), then run the builder.</span>
+<span class="d-add">+- **For EVERY diff in the report, include a hierarchical &quot;where does this block sit&quot; context diagram** — a recursively-summarized map at four zoom levels: **System** (which of City Edit&#x27;s components — nginx · Flask API · OSRM · Redis · React/Leaflet client — the file belongs to, shown as highlighted pills) → **Module** (the subsystem + a one-line summary) → **File** (a one-line summary + LOC) → a **file map** (the file&#x27;s top-level sections as a focus+context minimap, with the changed sections highlighted and the rest dimmed) → the ordered **changed blocks**. This data lives in `FILE_CONTEXT` in `build_report.py`; add an entry per changed file.</span>
+<span class="d-add">+- After finishing, **link the report** in the response so I can open it.</span>
+<span class="d-add">+</span>
+<span class="d-add">+### Local preview (redeploy on each change)</span>
+<span class="d-add">+</span>
+<span class="d-add">+- On each change, **redeploy to local dev and give me the link `http://localhost:3000/`** (Vite). The stack is: **Redis** on `:6379`, host **Flask** on `:5001` (`cd server &amp;&amp; ./env/bin/python app.py`; for a fast restart use `SKIP_PREWARM=1` — graphs load lazily on first request), and **Vite** on `:3000` (`cd client-react &amp;&amp; npm run dev`) which proxies `/api` + `/ws` to `:5001`.</span>
+<span class="d-add">+- Vite hot-reloads client edits; **restart Flask** after any `server/*.py` change (it doesn&#x27;t auto-reload). If a long-running dev server wedges (e.g. `EPERM` reading `index.html` from a stale sandbox), kill and relaunch it via `nohup … &amp;`.</span>
+<span class="d-add">+- Map URLs are `http://localhost:3000/m/&lt;slug&gt;` (e.g. `/m/nyc-walkways` for the streets heatmap, `/m/e-bikes-3` for a public e-bikes station map). Verify the redeploy took: `curl -s localhost:5001/api/graph-votes?map=&lt;slug&gt;&amp;mode=&lt;mode&gt;` and confirm the expected fields.</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> ## Overview</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> City Edit is a crowdsourced map showing how people actually travel through a city. Users submit their commute routes, which are aggregated and visualized as a heatmap overlay.</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/App.tsx</span>
+            <span class="stat"><span class="d-add">+6</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · src/</span>
+        <span class="ctx-sum">app root: providers, map bootstrap, the #app shell</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">App.tsx</span>
+        <span class="ctx-sum">app root — resolves the map, then mounts the map subtree</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">FullScreenLoader</span><span class="ol-sum">the ASCII-spinner splash</span></li><li class="changed"><span class="ol-label">AppContent</span><span class="ol-sum">shell: TopBar, &lt;main&gt; map, toasts — now wraps MapView in ErrorBoundary</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">MapApp / providers</span><span class="ol-sum">resolve map config, provider tree</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>import ErrorBoundary</li><li>wrap &lt;MapView /&gt; in &lt;ErrorBoundary&gt;</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/App.tsx b/client-react/src/App.tsx</span>
+<span class="d-meta">index 4337ddc..8e2bd62 100644</span>
+<span class="d-meta">--- a/client-react/src/App.tsx</span>
+<span class="d-meta">+++ b/client-react/src/App.tsx</span>
+<span class="d-hunk">@@ -3,7 +3,7 @@ import {</span>
+<span class="d-ctx">   RouteProvider, WebSocketProvider, GhostPinProvider, GraphSnapProvider,</span>
+<span class="d-ctx">   ThemeProvider, MapProvider, HeatmapProvider,</span>
+<span class="d-ctx"> } from &quot;./context&quot;;</span>
+<span class="d-del">-import { TopBar, MapView, ErrorToast, Landing } from &quot;./components&quot;;</span>
+<span class="d-add">+import { TopBar, MapView, ErrorToast, Landing, ErrorBoundary } from &quot;./components&quot;;</span>
+<span class="d-ctx"> import { PasscodeGate } from &quot;./components/PasscodeGate/PasscodeGate&quot;;</span>
+<span class="d-ctx"> import { useRoute, useHeatmap } from &quot;./context&quot;;</span>
+<span class="d-ctx"> import { isLandingHost, subdomainRedirectUrl } from &quot;./themes&quot;;</span>
+<span class="d-hunk">@@ -40,7 +40,11 @@ function AppContent() {</span>
+<span class="d-ctx">     &lt;div id=&quot;app&quot;&gt;</span>
+<span class="d-ctx">       &lt;TopBar /&gt;</span>
+<span class="d-ctx">       &lt;main id=&quot;map&quot;&gt;</span>
+<span class="d-del">-        &lt;MapView /&gt;</span>
+<span class="d-add">+        {/* A render crash here is almost always a poisoned graph cache; the</span>
+<span class="d-add">+            boundary clears it and reloads once instead of looping forever. */}</span>
+<span class="d-add">+        &lt;ErrorBoundary&gt;</span>
+<span class="d-add">+          &lt;MapView /&gt;</span>
+<span class="d-add">+        &lt;/ErrorBoundary&gt;</span>
+<span class="d-ctx">       &lt;/main&gt;</span>
+<span class="d-ctx">       &lt;ErrorToast message={error} onDismiss={clearError} /&gt;</span>
+<span class="d-ctx">       &lt;PasscodeGate /&gt;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/ErrorBoundary/ErrorBoundary.css</span>
+            <span class="stat"><span class="d-add">+44</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/ErrorBoundary</span>
+        <span class="ctx-sum">NEW — styles for the fallback card</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">ErrorBoundary.css</span>
+        <span class="ctx-sum">NEW FILE — full-screen centered fallback, editorial paper/ink palette</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">.error-boundary*</span><span class="ol-sum">overlay, card, title, body, button</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>New stylesheet for the fallback UI.</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/ErrorBoundary/ErrorBoundary.css b/client-react/src/components/ErrorBoundary/ErrorBoundary.css</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..a19f69b</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/ErrorBoundary/ErrorBoundary.css</span>
+<span class="d-hunk">@@ -0,0 +1,44 @@</span>
+<span class="d-add">+.error-boundary {</span>
+<span class="d-add">+  position: fixed;</span>
+<span class="d-add">+  inset: 0;</span>
+<span class="d-add">+  z-index: 10000;</span>
+<span class="d-add">+  display: flex;</span>
+<span class="d-add">+  align-items: center;</span>
+<span class="d-add">+  justify-content: center;</span>
+<span class="d-add">+  padding: 24px;</span>
+<span class="d-add">+  background: var(--paper, #fbfbf8);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.error-boundary-card {</span>
+<span class="d-add">+  max-width: 420px;</span>
+<span class="d-add">+  text-align: center;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.error-boundary-title {</span>
+<span class="d-add">+  margin: 0 0 12px;</span>
+<span class="d-add">+  font-size: 22px;</span>
+<span class="d-add">+  font-weight: 600;</span>
+<span class="d-add">+  color: var(--ink, #111);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.error-boundary-body {</span>
+<span class="d-add">+  margin: 0 0 20px;</span>
+<span class="d-add">+  font-size: 15px;</span>
+<span class="d-add">+  line-height: 1.5;</span>
+<span class="d-add">+  color: var(--ink, #111);</span>
+<span class="d-add">+  opacity: 0.75;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.error-boundary-button {</span>
+<span class="d-add">+  padding: 10px 20px;</span>
+<span class="d-add">+  font-size: 15px;</span>
+<span class="d-add">+  color: var(--paper, #fbfbf8);</span>
+<span class="d-add">+  background: var(--ink, #111);</span>
+<span class="d-add">+  border: none;</span>
+<span class="d-add">+  border-radius: 8px;</span>
+<span class="d-add">+  cursor: pointer;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.error-boundary-button:hover {</span>
+<span class="d-add">+  opacity: 0.9;</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/ErrorBoundary/ErrorBoundary.tsx</span>
+            <span class="stat"><span class="d-add">+100</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/ErrorBoundary</span>
+        <span class="ctx-sum">NEW — render-crash recovery boundary around the map</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">ErrorBoundary.tsx</span>
+        <span class="ctx-sum">NEW FILE — class boundary: clear the graph cache + reload once, then a manual fallback</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">getDerivedStateFromError</span><span class="ol-sum">flip to the crashed state</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">componentDidMount</span><span class="ol-sum">clear the recovery flag after ~12s of health</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">componentDidCatch</span><span class="ol-sum">first crash → clear cache + reload once; second → manual fallback</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">render</span><span class="ol-sum">fallback card with a Reload button</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Whole file is new — the safety net for “a problem repeatedly occurred”.</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/ErrorBoundary/ErrorBoundary.tsx b/client-react/src/components/ErrorBoundary/ErrorBoundary.tsx</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..b85e8f3</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/ErrorBoundary/ErrorBoundary.tsx</span>
+<span class="d-hunk">@@ -0,0 +1,100 @@</span>
+<span class="d-add">+import { Component, type ErrorInfo, type ReactNode } from &quot;react&quot;;</span>
+<span class="d-add">+import { clearGraphCache } from &quot;../../utils/graphCache&quot;;</span>
+<span class="d-add">+import &quot;./ErrorBoundary.css&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+// One automatic recovery per browsing session. A render crash is most often a</span>
+<span class="d-add">+// poisoned graph cache (a stale/mismatched topology painted against fresh</span>
+<span class="d-add">+// votes), so the first crash clears that cache and reloads ONCE. The flag stops</span>
+<span class="d-add">+// a genuinely-reproducible crash from reload-looping (&quot;a problem repeatedly</span>
+<span class="d-add">+// occurred&quot;) — the second time we show a manual fallback instead.</span>
+<span class="d-add">+const RECOVERY_FLAG = &quot;graph-cache-recovery-attempted&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+interface Props {</span>
+<span class="d-add">+  children: ReactNode;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+interface State {</span>
+<span class="d-add">+  crashed: boolean;</span>
+<span class="d-add">+  recovering: boolean;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+export class ErrorBoundary extends Component&lt;Props, State&gt; {</span>
+<span class="d-add">+  state: State = { crashed: false, recovering: false };</span>
+<span class="d-add">+  private healthyTimer: number | undefined;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  static getDerivedStateFromError(): Partial&lt;State&gt; {</span>
+<span class="d-add">+    return { crashed: true };</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  componentDidMount(): void {</span>
+<span class="d-add">+    // Survived ~12s without crashing → consider the session healthy and clear the</span>
+<span class="d-add">+    // recovery flag, so a much-later, unrelated crash can still auto-recover once.</span>
+<span class="d-add">+    this.healthyTimer = window.setTimeout(() =&gt; {</span>
+<span class="d-add">+      try {</span>
+<span class="d-add">+        sessionStorage.removeItem(RECOVERY_FLAG);</span>
+<span class="d-add">+      } catch {</span>
+<span class="d-add">+        // sessionStorage may be unavailable (private mode) — ignore.</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }, 12000);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  componentWillUnmount(): void {</span>
+<span class="d-add">+    if (this.healthyTimer) window.clearTimeout(this.healthyTimer);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  componentDidCatch(error: Error, info: ErrorInfo): void {</span>
+<span class="d-add">+    console.error(&quot;Render crash caught by ErrorBoundary:&quot;, error, info.componentStack);</span>
+<span class="d-add">+</span>
+<span class="d-add">+    let alreadyTried = false;</span>
+<span class="d-add">+    try {</span>
+<span class="d-add">+      alreadyTried = sessionStorage.getItem(RECOVERY_FLAG) === &quot;1&quot;;</span>
+<span class="d-add">+      sessionStorage.setItem(RECOVERY_FLAG, &quot;1&quot;);</span>
+<span class="d-add">+    } catch {</span>
+<span class="d-add">+      // No sessionStorage → fall through to a single best-effort reload.</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if (alreadyTried) {</span>
+<span class="d-add">+      // Second crash this session — don&#x27;t loop. Show the manual fallback.</span>
+<span class="d-add">+      this.setState({ recovering: false });</span>
+<span class="d-add">+      return;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+</span>
+<span class="d-add">+    // First crash — wipe the persisted graph cache (the usual culprit) and reload</span>
+<span class="d-add">+    // fresh. Reload only after the clear resolves so the next load starts clean.</span>
+<span class="d-add">+    this.setState({ recovering: true });</span>
+<span class="d-add">+    clearGraphCache().finally(() =&gt; {</span>
+<span class="d-add">+      window.location.reload();</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  private handleManualReload = (): void =&gt; {</span>
+<span class="d-add">+    try {</span>
+<span class="d-add">+      sessionStorage.removeItem(RECOVERY_FLAG);</span>
+<span class="d-add">+    } catch {</span>
+<span class="d-add">+      // ignore</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    clearGraphCache().finally(() =&gt; window.location.reload());</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  render(): ReactNode {</span>
+<span class="d-add">+    if (!this.state.crashed) return this.props.children;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    return (</span>
+<span class="d-add">+      &lt;div className=&quot;error-boundary&quot;&gt;</span>
+<span class="d-add">+        &lt;div className=&quot;error-boundary-card&quot;&gt;</span>
+<span class="d-add">+          &lt;h1 className=&quot;error-boundary-title&quot;&gt;Something went wrong&lt;/h1&gt;</span>
+<span class="d-add">+          &lt;p className=&quot;error-boundary-body&quot;&gt;</span>
+<span class="d-add">+            {this.state.recovering</span>
+<span class="d-add">+              ? &quot;Refreshing the map with a clean cache…&quot;</span>
+<span class="d-add">+              : &quot;The map hit an unexpected error. Reloading with a cleared cache usually fixes it.&quot;}</span>
+<span class="d-add">+          &lt;/p&gt;</span>
+<span class="d-add">+          {!this.state.recovering &amp;&amp; (</span>
+<span class="d-add">+            &lt;button className=&quot;error-boundary-button&quot; onClick={this.handleManualReload}&gt;</span>
+<span class="d-add">+              Reload the map</span>
+<span class="d-add">+            &lt;/button&gt;</span>
+<span class="d-add">+          )}</span>
+<span class="d-add">+        &lt;/div&gt;</span>
+<span class="d-add">+      &lt;/div&gt;</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+197</span> / <span class="d-del">-34</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">the canvas heatmap + topology loader + proposal-marker renderer — the heart of the map</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~3340 LOC — one big component: load topology+votes, paint the heat canvas, hit-test, render proposals</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Module helpers</span><span class="ol-sum">decodeTopologyBin, buildEdgeIndex, votesMatchTopology, buildNodeAdj</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Component state &amp; refs</span><span class="ol-sum">canvas / topology / graphData refs, projCacheRef, drawStateRef</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Canvas init</span><span class="ol-sum">create heat + hover canvases, attach to graphPane, leaflet-zoom-animated</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Topology + vote loading</span><span class="ol-sum">version → IndexedDB cache → network fetch → reconcile dims → paint</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">redraw — heat passes</span><span class="ol-sum">viewport-culled multi-pass canvas paint; captures draw-state</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Map event handlers (pan / zoom)</span><span class="ol-sum">zoomanim transform; zoomstart no longer clears the heatmap</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Hover / hit-testing</span><span class="ol-sum">nearest-edge snap, tooltips, pinned cards</span></li><li class="dim"><span class="ol-label">Indicator markers</span><span class="ol-sum">vote winners / station markers / cluster fan-out</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>decodeTopologyBin — validate GTB1 magic + byte length before allocating; clamp bad node indices</li><li>buildEdgeIndex — index a degenerate box instead of dereferencing a missing node</li><li>votesMatchTopology() — NEW dimension guard</li><li>drawStateRef — records {zoom, top-left latlng} each paint</li><li>canvas init — add `leaflet-zoom-animated` to both canvases</li><li>load effect — fetchTopologyFromNetwork(forceReload) + stale-topology refetch on mismatch</li><li>fetchVotes — skip applying a mid-session dimension mismatch</li><li>redraw — capture drawStateRef at end of paint</li><li>zoom handlers — handleZoomAnim (transform) + don&#x27;t clear heat on zoomstart</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 23d82d1..69a141f 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -34,6 +34,7 @@ import {</span>
+<span class="d-ctx">   setCachedTopologyBin,</span>
+<span class="d-ctx">   getCachedVotes,</span>
+<span class="d-ctx">   setCachedVotes,</span>
+<span class="d-add">+  clearGraphCache,</span>
+<span class="d-ctx"> } from &quot;../../utils/graphCache&quot;;</span>
+<span class="d-ctx"> import { getVote, reconcileEdge, setVoteTypeMap, type VoteDirection } from &quot;../../utils/voteStore&quot;;</span>
+<span class="d-ctx"> import { castVotes } from &quot;../../utils/castVote&quot;;</span>
+<span class="d-hunk">@@ -278,6 +279,13 @@ function buildEdgeIndex(data: Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt;): Flatbush | nu</span>
+<span class="d-ctx">     const [fromIdx, toIdx] = data.edges[i];</span>
+<span class="d-ctx">     const fromNode = data.nodes[fromIdx];</span>
+<span class="d-ctx">     const toNode = data.nodes[toIdx];</span>
+<span class="d-add">+    // A malformed/stale topology can reference a node index that doesn&#x27;t exist.</span>
+<span class="d-add">+    // Index a degenerate (0,0) box for it instead of dereferencing undefined —</span>
+<span class="d-add">+    // Flatbush requires exactly edges.length adds, so we can&#x27;t skip the entry.</span>
+<span class="d-add">+    if (!fromNode || !toNode) {</span>
+<span class="d-add">+      idx.add(0, 0, 0, 0);</span>
+<span class="d-add">+      continue;</span>
+<span class="d-add">+    }</span>
+<span class="d-ctx">     const minLng = Math.min(fromNode[1], toNode[1]);</span>
+<span class="d-ctx">     const maxLng = Math.max(fromNode[1], toNode[1]);</span>
+<span class="d-ctx">     const minLat = Math.min(fromNode[0], toNode[0]);</span>
+<span class="d-hunk">@@ -469,10 +477,31 @@ function targetLatLng(</span>
+<span class="d-ctx">  * (lat, lon ×1e7), then nEdges×2 uint32 (from_idx, to_idx). Edge names are dropped</span>
+<span class="d-ctx">  * (street tooltips reverse-geocode instead); the edges index is the canonical edge id.</span>
+<span class="d-ctx">  */</span>
+<span class="d-add">+// &#x27;GTB1&#x27; little-endian as a uint32 (G=0x47, T=0x54, B=0x42, &#x27;1&#x27;=0x31).</span>
+<span class="d-add">+const TOPOLOGY_BIN_MAGIC = 0x31425447;</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> function decodeTopologyBin(buf: ArrayBuffer): Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt; {</span>
+<span class="d-add">+  // Validate the header BEFORE allocating. A stale/truncated/corrupt cached blob</span>
+<span class="d-add">+  // (or a non-binary error body that slipped through) would otherwise be read as</span>
+<span class="d-add">+  // garbage nNodes/nEdges — allocating multi-GB arrays that OOM-crash the tab, or</span>
+<span class="d-add">+  // building edges that reference nonexistent nodes (the downstream crash). On any</span>
+<span class="d-add">+  // inconsistency we throw, and callers fall back to a fresh fetch / JSON.</span>
+<span class="d-add">+  if (buf.byteLength &lt; 12) {</span>
+<span class="d-add">+    throw new Error(`topology blob too small (${buf.byteLength} bytes)`);</span>
+<span class="d-add">+  }</span>
+<span class="d-ctx">   const head = new Uint32Array(buf, 0, 3); // [magic, nNodes, nEdges]</span>
+<span class="d-add">+  if (head[0] !== TOPOLOGY_BIN_MAGIC) {</span>
+<span class="d-add">+    throw new Error(`bad topology magic 0x${head[0].toString(16)}`);</span>
+<span class="d-add">+  }</span>
+<span class="d-ctx">   const nNodes = head[1];</span>
+<span class="d-ctx">   const nEdges = head[2];</span>
+<span class="d-add">+  const expected = 12 + nNodes * 8 + nEdges * 8;</span>
+<span class="d-add">+  if (buf.byteLength !== expected) {</span>
+<span class="d-add">+    throw new Error(</span>
+<span class="d-add">+      `topology size mismatch: ${buf.byteLength} bytes, expected ${expected} ` +</span>
+<span class="d-add">+        `(nNodes=${nNodes}, nEdges=${nEdges})`,</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+  }</span>
+<span class="d-ctx">   const coords = new Int32Array(buf, 12, nNodes * 2);</span>
+<span class="d-ctx">   const ends = new Uint32Array(buf, 12 + nNodes * 8, nEdges * 2);</span>
+<span class="d-ctx">   const nodes: [number, number][] = new Array(nNodes);</span>
+<span class="d-hunk">@@ -481,11 +510,34 @@ function decodeTopologyBin(buf: ArrayBuffer): Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt;</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx">   const edges: [number, number, string][] = new Array(nEdges);</span>
+<span class="d-ctx">   for (let i = 0; i &lt; nEdges; i++) {</span>
+<span class="d-del">-    edges[i] = [ends[2 * i], ends[2 * i + 1], &quot;&quot;];</span>
+<span class="d-add">+    // Clamp out-of-range node indices to 0 rather than leaving a dangling ref</span>
+<span class="d-add">+    // that crashes buildEdgeIndex/redraw — a degenerate self-edge is harmless.</span>
+<span class="d-add">+    const a = ends[2 * i] &lt; nNodes ? ends[2 * i] : 0;</span>
+<span class="d-add">+    const b = ends[2 * i + 1] &lt; nNodes ? ends[2 * i + 1] : 0;</span>
+<span class="d-add">+    edges[i] = [a, b, &quot;&quot;];</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx">   return { nodes, edges };</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * True when a vote payload is indexed against the SAME topology we hold. Vote</span>
+<span class="d-add">+ * arrays are sized to the server&#x27;s current graph; the server stamps n_edges /</span>
+<span class="d-add">+ * n_nodes onto the payload so the client can reject votes that don&#x27;t line up</span>
+<span class="d-add">+ * with its (possibly day-old cached) topology — painting a mismatch is what</span>
+<span class="d-add">+ * indexed past the array ends and crashed mobile Safari. Falls back to the</span>
+<span class="d-add">+ * edge_votes length when the dimensions aren&#x27;t present (older server).</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+function votesMatchTopology(</span>
+<span class="d-add">+  voteData: { n_edges?: number; n_nodes?: number; edge_votes?: unknown[] },</span>
+<span class="d-add">+  topology: Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt; | null,</span>
+<span class="d-add">+): boolean {</span>
+<span class="d-add">+  if (!topology) return false;</span>
+<span class="d-add">+  const nEdges = voteData.n_edges ?? voteData.edge_votes?.length;</span>
+<span class="d-add">+  if (nEdges != null &amp;&amp; nEdges !== topology.edges.length) return false;</span>
+<span class="d-add">+  if (voteData.n_nodes != null &amp;&amp; voteData.n_nodes !== topology.nodes.length) return false;</span>
+<span class="d-add">+  return true;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> function buildNodeAdj(topology: Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt;): number[][] {</span>
+<span class="d-ctx">   const adj: number[][] = new Array(topology.nodes.length);</span>
+<span class="d-ctx">   for (let i = 0; i &lt; adj.length; i++) adj[i] = [];</span>
+<span class="d-hunk">@@ -668,6 +720,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   const nodeIndexRef = useRef&lt;Flatbush | null&gt;(null);</span>
+<span class="d-ctx">   const redrawTimeoutRef = useRef&lt;number | null&gt;(null);</span>
+<span class="d-ctx">   const isZoomingRef = useRef(false);</span>
+<span class="d-add">+  // The map state the heatmap bitmap was last painted at: the zoom, and the</span>
+<span class="d-add">+  // lat/lng sitting at the canvas&#x27;s top-left corner (container point 0,0). The</span>
+<span class="d-add">+  // zoom-animation handler uses these to scale + translate the EXISTING bitmap to</span>
+<span class="d-add">+  // the target zoom, so the heatmap rides Leaflet&#x27;s zoom animation instead of</span>
+<span class="d-add">+  // being cleared and repainted only at the end (which made it vanish mid-zoom).</span>
+<span class="d-add">+  const drawStateRef = useRef&lt;{ zoom: number; nw: L.LatLng } | null&gt;(null);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Per-zoom projection cache for node layer-points. Leaflet layer-points are</span>
+<span class="d-ctx">   // stable across pans at a fixed zoom (panning only translates the map pane),</span>
+<span class="d-hunk">@@ -1286,7 +1344,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // Initialize canvases once</span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-ctx">     const canvas = document.createElement(&quot;canvas&quot;);</span>
+<span class="d-del">-    canvas.className = &quot;graph-layer&quot;;</span>
+<span class="d-add">+    // `leaflet-zoom-animated` opts the canvas into Leaflet&#x27;s zoom-animation CSS</span>
+<span class="d-add">+    // transition (transform-origin: 0 0; transition: transform …): when the</span>
+<span class="d-add">+    // zoomanim handler sets the target transform, the browser tweens the existing</span>
+<span class="d-add">+    // bitmap smoothly to the new zoom instead of it disappearing until zoomend.</span>
+<span class="d-add">+    canvas.className = &quot;graph-layer leaflet-zoom-animated&quot;;</span>
+<span class="d-ctx">     canvas.style.position = &quot;absolute&quot;;</span>
+<span class="d-ctx">     canvas.style.top = &quot;0&quot;;</span>
+<span class="d-ctx">     canvas.style.left = &quot;0&quot;;</span>
+<span class="d-hunk">@@ -1298,7 +1360,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     canvas.style.mixBlendMode = mapStyle.heatBlend;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     const hoverCanvas = document.createElement(&quot;canvas&quot;);</span>
+<span class="d-del">-    hoverCanvas.className = &quot;graph-layer-hover&quot;;</span>
+<span class="d-add">+    hoverCanvas.className = &quot;graph-layer-hover leaflet-zoom-animated&quot;;</span>
+<span class="d-ctx">     hoverCanvas.style.position = &quot;absolute&quot;;</span>
+<span class="d-ctx">     hoverCanvas.style.top = &quot;0&quot;;</span>
+<span class="d-ctx">     hoverCanvas.style.left = &quot;0&quot;;</span>
+<span class="d-hunk">@@ -1331,6 +1393,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       const response = await fetch(url, { cache: &quot;no-store&quot;, headers: passcodeHeaders() });</span>
+<span class="d-ctx">       if (!response.ok) throw new Error(`Vote fetch failed: ${response.status}`);</span>
+<span class="d-ctx">       const voteData = await response.json();</span>
+<span class="d-add">+      // If the graph was rebuilt mid-session, these votes no longer line up with</span>
+<span class="d-add">+      // our topology. Don&#x27;t paint the mismatch (it would crash); leave the current</span>
+<span class="d-add">+      // heatmap and let the next full page load reconcile against fresh topology.</span>
+<span class="d-add">+      if (!votesMatchTopology(voteData, topologyRef.current)) {</span>
+<span class="d-add">+        console.warn(&quot;Skipping vote refresh: topology/vote dimension mismatch&quot;);</span>
+<span class="d-add">+        return;</span>
+<span class="d-add">+      }</span>
+<span class="d-ctx">       graphDataRef.current = { ...topologyRef.current!, ...voteData };</span>
+<span class="d-ctx">       lastRevRef.current = voteData.rev ?? 0;</span>
+<span class="d-ctx">       // Teach the vote store this map&#x27;s label→id map so packed lookups resolve.</span>
+<span class="d-hunk">@@ -1391,6 +1460,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       let topology: GraphData | null = null;</span>
+<span class="d-ctx">       let version: string | null = null;</span>
+<span class="d-ctx">       let usedCachedTopology = false;</span>
+<span class="d-add">+      // Assigned inside the try below; the step-3 stale-topology guard reuses it.</span>
+<span class="d-add">+      let fetchFreshTopology: ((forceReload?: boolean) =&gt; Promise&lt;GraphData | null&gt;) | null = null;</span>
+<span class="d-ctx">       try {</span>
+<span class="d-ctx">         try {</span>
+<span class="d-ctx">           const vr = await fetch(withMap(`${CONFIG.apiUrl}/graph-version`), { headers: passcodeHeaders() });</span>
+<span class="d-hunk">@@ -1408,43 +1479,66 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         const withVersion = (url: string) =&gt;</span>
+<span class="d-ctx">           version ? url + (url.includes(&quot;?&quot;) ? &quot;&amp;&quot; : &quot;?&quot;) + &quot;v=&quot; + encodeURIComponent(version) : url;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-        // Station networks (tiny, names matter) use the JSON topology; large</span>
+<span class="d-del">-        // street graphs use the binary topology so a phone never JSON.parse-es a</span>
+<span class="d-del">-        // ~150MB string (the OOM that crashed mobile Safari on the NYC graph).</span>
+<span class="d-add">+        // Fetch the topology from the NETWORK (not IndexedDB). `forceReload` adds</span>
+<span class="d-add">+        // cache:&quot;reload&quot; so the browser HTTP cache is bypassed too — used by the</span>
+<span class="d-add">+        // stale-topology recovery path in step 3, where even the version-busted</span>
+<span class="d-add">+        // URL may have been served stale from Safari&#x27;s HTTP cache.</span>
+<span class="d-add">+        const fetchTopologyFromNetwork = async (forceReload = false): Promise&lt;GraphData | null&gt; =&gt; {</span>
+<span class="d-add">+          const init: RequestInit = forceReload</span>
+<span class="d-add">+            ? { headers: passcodeHeaders(), cache: &quot;reload&quot; }</span>
+<span class="d-add">+            : { headers: passcodeHeaders() };</span>
+<span class="d-add">+          // Station networks (tiny, names matter) use the JSON topology; large</span>
+<span class="d-add">+          // street graphs use the binary topology so a phone never JSON.parse-es a</span>
+<span class="d-add">+          // ~150MB string (the OOM that crashed mobile Safari on the NYC graph).</span>
+<span class="d-add">+          if (isStationNetwork) {</span>
+<span class="d-add">+            const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), init);</span>
+<span class="d-add">+            if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);</span>
+<span class="d-add">+            const t = await r.json();</span>
+<span class="d-add">+            if (version &amp;&amp; t) setCachedTopology(version, t);</span>
+<span class="d-add">+            return t;</span>
+<span class="d-add">+          }</span>
+<span class="d-add">+          try {</span>
+<span class="d-add">+            const r = await fetch(</span>
+<span class="d-add">+              withVersion(withMap(`${CONFIG.apiUrl}/graph-topology?format=bin`)),</span>
+<span class="d-add">+              init,</span>
+<span class="d-add">+            );</span>
+<span class="d-add">+            if (!r.ok) throw new Error(`Binary topology fetch failed: ${r.status}`);</span>
+<span class="d-add">+            const buf = await r.arrayBuffer();</span>
+<span class="d-add">+            const t = decodeTopologyBin(buf) as GraphData;</span>
+<span class="d-add">+            if (version) setCachedTopologyBin(version, buf);</span>
+<span class="d-add">+            return t;</span>
+<span class="d-add">+          } catch (binErr) {</span>
+<span class="d-add">+            // Older server without the binary endpoint — fall back to JSON.</span>
+<span class="d-add">+            console.warn(&quot;Binary topology unavailable, using JSON:&quot;, binErr);</span>
+<span class="d-add">+            const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), init);</span>
+<span class="d-add">+            if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);</span>
+<span class="d-add">+            const t = await r.json();</span>
+<span class="d-add">+            if (version &amp;&amp; t) setCachedTopology(version, t);</span>
+<span class="d-add">+            return t;</span>
+<span class="d-add">+          }</span>
+<span class="d-add">+        };</span>
+<span class="d-add">+        fetchFreshTopology = fetchTopologyFromNetwork;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">         if (version) {</span>
+<span class="d-ctx">           if (isStationNetwork) {</span>
+<span class="d-ctx">             const cached = await getCachedTopology&lt;GraphData&gt;(version);</span>
+<span class="d-ctx">             if (cached) { topology = cached; usedCachedTopology = true; }</span>
+<span class="d-ctx">           } else {</span>
+<span class="d-ctx">             const buf = await getCachedTopologyBin(version);</span>
+<span class="d-del">-            if (buf) { topology = decodeTopologyBin(buf) as GraphData; usedCachedTopology = true; }</span>
+<span class="d-add">+            // Decode can throw on a corrupt/truncated cached blob — ignore the</span>
+<span class="d-add">+            // cache and fall through to a fresh network fetch rather than aborting.</span>
+<span class="d-add">+            if (buf) {</span>
+<span class="d-add">+              try {</span>
+<span class="d-add">+                topology = decodeTopologyBin(buf) as GraphData;</span>
+<span class="d-add">+                usedCachedTopology = true;</span>
+<span class="d-add">+              } catch (decodeErr) {</span>
+<span class="d-add">+                console.warn(&quot;Cached binary topology was corrupt, refetching:&quot;, decodeErr);</span>
+<span class="d-add">+              }</span>
+<span class="d-add">+            }</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx">         if (!topology) {</span>
+<span class="d-del">-          if (isStationNetwork) {</span>
+<span class="d-del">-            const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), { headers: passcodeHeaders() });</span>
+<span class="d-del">-            if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);</span>
+<span class="d-del">-            topology = await r.json();</span>
+<span class="d-del">-            if (version &amp;&amp; topology) setCachedTopology(version, topology);</span>
+<span class="d-del">-          } else {</span>
+<span class="d-del">-            try {</span>
+<span class="d-del">-              const r = await fetch(</span>
+<span class="d-del">-                withVersion(withMap(`${CONFIG.apiUrl}/graph-topology?format=bin`)),</span>
+<span class="d-del">-                { headers: passcodeHeaders() },</span>
+<span class="d-del">-              );</span>
+<span class="d-del">-              if (!r.ok) throw new Error(`Binary topology fetch failed: ${r.status}`);</span>
+<span class="d-del">-              const buf = await r.arrayBuffer();</span>
+<span class="d-del">-              topology = decodeTopologyBin(buf) as GraphData;</span>
+<span class="d-del">-              if (version) setCachedTopologyBin(version, buf);</span>
+<span class="d-del">-            } catch (binErr) {</span>
+<span class="d-del">-              // Older server without the binary endpoint — fall back to JSON.</span>
+<span class="d-del">-              console.warn(&quot;Binary topology unavailable, using JSON:&quot;, binErr);</span>
+<span class="d-del">-              const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), { headers: passcodeHeaders() });</span>
+<span class="d-del">-              if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);</span>
+<span class="d-del">-              topology = await r.json();</span>
+<span class="d-del">-              if (version &amp;&amp; topology) setCachedTopology(version, topology);</span>
+<span class="d-del">-            }</span>
+<span class="d-del">-          }</span>
+<span class="d-add">+          topology = await fetchTopologyFromNetwork();</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx">       } catch (error) {</span>
+<span class="d-ctx">         console.error(&quot;Failed to load graph topology:&quot;, error);</span>
+<span class="d-hunk">@@ -1484,6 +1578,39 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);</span>
+<span class="d-ctx">         const voteData = await r.json();</span>
+<span class="d-ctx">         if (cancelled) return;</span>
+<span class="d-add">+</span>
+<span class="d-add">+        // Stale-topology guard. The vote arrays are indexed against the server&#x27;s</span>
+<span class="d-add">+        // CURRENT graph. If our topology (often from the day-long cache) has a</span>
+<span class="d-add">+        // different node/edge count, painting these votes indexes past the array</span>
+<span class="d-add">+        // ends — the mobile-Safari crash. Refetch the topology fresh (bypassing</span>
+<span class="d-add">+        // both the IndexedDB and HTTP caches), rebuild the indices, and only apply</span>
+<span class="d-add">+        // the votes once they line up. If still mismatched, drop the persisted</span>
+<span class="d-add">+        // caches and bail rather than paint a crash.</span>
+<span class="d-add">+        if (!votesMatchTopology(voteData, topologyRef.current)) {</span>
+<span class="d-add">+          console.warn(&quot;Topology/vote mismatch — refetching fresh topology&quot;, {</span>
+<span class="d-add">+            topoEdges: topologyRef.current?.edges.length,</span>
+<span class="d-add">+            voteEdges: voteData.n_edges ?? voteData.edge_votes?.length,</span>
+<span class="d-add">+          });</span>
+<span class="d-add">+          let fresh: GraphData | null = null;</span>
+<span class="d-add">+          try {</span>
+<span class="d-add">+            fresh = fetchFreshTopology ? await fetchFreshTopology(true) : null;</span>
+<span class="d-add">+          } catch (refetchErr) {</span>
+<span class="d-add">+            console.error(&quot;Fresh topology refetch failed:&quot;, refetchErr);</span>
+<span class="d-add">+          }</span>
+<span class="d-add">+          if (cancelled) return;</span>
+<span class="d-add">+          if (fresh &amp;&amp; votesMatchTopology(voteData, fresh)) {</span>
+<span class="d-add">+            topology = fresh;</span>
+<span class="d-add">+            topologyRef.current = fresh;</span>
+<span class="d-add">+            edgeIndexRef.current = buildEdgeIndex(fresh);</span>
+<span class="d-add">+            nodeIndexRef.current = buildNodeIndex(fresh);</span>
+<span class="d-add">+            nodeAdjRef.current = buildNodeAdj(fresh);</span>
+<span class="d-add">+          } else {</span>
+<span class="d-add">+            await clearGraphCache();</span>
+<span class="d-add">+            setHeatmapLoaded();</span>
+<span class="d-add">+            return;</span>
+<span class="d-add">+          }</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+</span>
+<span class="d-ctx">         graphDataRef.current = { ...topologyRef.current!, ...voteData };</span>
+<span class="d-ctx">         lastRevRef.current = voteData.rev ?? 0;</span>
+<span class="d-ctx">         setVoteTypeMap(voteData.vote_types);</span>
+<span class="d-hunk">@@ -1863,6 +1990,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     ctx.globalCompositeOperation = &quot;source-over&quot;;</span>
+<span class="d-ctx">     ctx.globalAlpha = 1.0;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    // Record the map state this bitmap was painted at, so a subsequent zoom</span>
+<span class="d-add">+    // animation can scale/translate the existing pixels to the target zoom.</span>
+<span class="d-add">+    drawStateRef.current = { zoom, nw: map.containerPointToLatLng([0, 0]) };</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     redrawHoverHighlightRef.current();</span>
+<span class="d-ctx">   }, [map, mapStyle.heat, mapStyle.heatComposite, mapStyle.selection]);</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1879,18 +2010,48 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-ctx">     const handleZoomStart = () =&gt; {</span>
+<span class="d-ctx">       isZoomingRef.current = true;</span>
+<span class="d-del">-      const ctx = ctxRef.current;</span>
+<span class="d-del">-      const canvas = canvasRef.current;</span>
+<span class="d-del">-      if (canvas &amp;&amp; ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);</span>
+<span class="d-add">+      // NOTE: we intentionally DON&#x27;T clear the heatmap canvas here anymore. The</span>
+<span class="d-add">+      // existing bitmap stays up and gets scaled by handleZoomAnim so the heatmap</span>
+<span class="d-add">+      // visibly zooms with the map instead of vanishing until zoomend. Only the</span>
+<span class="d-add">+      // transient hover highlight is dropped (it would be wrong mid-zoom anyway).</span>
+<span class="d-ctx">       const hoverCtx = hoverCtxRef.current;</span>
+<span class="d-ctx">       const hoverCanvas = hoverCanvasRef.current;</span>
+<span class="d-ctx">       if (hoverCanvas &amp;&amp; hoverCtx) hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);</span>
+<span class="d-ctx">       hoverTargetRef.current = null;</span>
+<span class="d-ctx">       setHoverTarget(null);</span>
+<span class="d-ctx">     };</span>
+<span class="d-add">+</span>
+<span class="d-add">+    // Ride Leaflet&#x27;s zoom animation: set the canvas transform to where its</span>
+<span class="d-add">+    // top-left corner lands at the target zoom, scaled by the zoom ratio. Because</span>
+<span class="d-add">+    // the canvas carries the `leaflet-zoom-animated` class, the mapPane&#x27;s</span>
+<span class="d-add">+    // `leaflet-zoom-anim` state makes the browser TRANSITION this transform — the</span>
+<span class="d-add">+    // same mechanism L.Canvas/tile layers use — so the heatmap glides + scales</span>
+<span class="d-add">+    // into the new zoom. zoomend then repaints crisply at the new resolution.</span>
+<span class="d-add">+    const handleZoomAnim = (e: L.ZoomAnimEvent) =&gt; {</span>
+<span class="d-add">+      const canvas = canvasRef.current;</span>
+<span class="d-add">+      const draw = drawStateRef.current;</span>
+<span class="d-add">+      if (!canvas || !draw) return;</span>
+<span class="d-add">+      // getZoomScale(toZoom, fromZoom) = 2^(toZoom - fromZoom): how much the</span>
+<span class="d-add">+      // painted bitmap must grow/shrink to match the target zoom.</span>
+<span class="d-add">+      const scale = map.getZoomScale(e.zoom, draw.zoom);</span>
+<span class="d-add">+      // Where the bitmap&#x27;s top-left geographic corner sits in the target frame.</span>
+<span class="d-add">+      // _latLngToNewLayerPoint is the internal Leaflet helper L.Canvas itself uses</span>
+<span class="d-add">+      // for this; it&#x27;s not in the public typings, so reach it through a cast.</span>
+<span class="d-add">+      const offset = (</span>
+<span class="d-add">+        map as unknown as {</span>
+<span class="d-add">+          _latLngToNewLayerPoint(latlng: L.LatLng, zoom: number, center: L.LatLng): L.Point;</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+      )._latLngToNewLayerPoint(draw.nw, e.zoom, e.center);</span>
+<span class="d-add">+      L.DomUtil.setTransform(canvas, offset, scale);</span>
+<span class="d-add">+      const hoverCanvas = hoverCanvasRef.current;</span>
+<span class="d-add">+      if (hoverCanvas) L.DomUtil.setTransform(hoverCanvas, offset, scale);</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     const handleZoomEnd = () =&gt; {</span>
+<span class="d-ctx">       isZoomingRef.current = false;</span>
+<span class="d-ctx">       setCurrentZoom(map.getZoom());</span>
+<span class="d-add">+      // redraw() runs setPosition (resetting the scale transform) then repaints</span>
+<span class="d-add">+      // the bitmap at the new zoom&#x27;s native resolution and line widths.</span>
+<span class="d-ctx">       scheduleRedrawRef.current();</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx">     const handleMoveEnd = () =&gt; {</span>
+<span class="d-hunk">@@ -1900,11 +2061,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     const handleResize = () =&gt; scheduleRedrawRef.current();</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     map.on(&quot;zoomstart&quot;, handleZoomStart);</span>
+<span class="d-add">+    map.on(&quot;zoomanim&quot;, handleZoomAnim);</span>
+<span class="d-ctx">     map.on(&quot;zoomend&quot;, handleZoomEnd);</span>
+<span class="d-ctx">     map.on(&quot;moveend&quot;, handleMoveEnd);</span>
+<span class="d-ctx">     map.on(&quot;resize&quot;, handleResize);</span>
+<span class="d-ctx">     return () =&gt; {</span>
+<span class="d-ctx">       map.off(&quot;zoomstart&quot;, handleZoomStart);</span>
+<span class="d-add">+      map.off(&quot;zoomanim&quot;, handleZoomAnim);</span>
+<span class="d-ctx">       map.off(&quot;zoomend&quot;, handleZoomEnd);</span>
+<span class="d-ctx">       map.off(&quot;moveend&quot;, handleMoveEnd);</span>
+<span class="d-ctx">       map.off(&quot;resize&quot;, handleResize);</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/index.ts</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/</span>
+        <span class="ctx-sum">barrel re-exporting the component public surface</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">index.ts</span>
+        <span class="ctx-sum">~12 LOC — barrel exports</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">exports</span><span class="ol-sum">TopBar, MapView, …, + ErrorBoundary</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>export { ErrorBoundary } from &quot;./ErrorBoundary/ErrorBoundary&quot;</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/index.ts b/client-react/src/components/index.ts</span>
+<span class="d-meta">index afce8da..c32fc81 100644</span>
+<span class="d-meta">--- a/client-react/src/components/index.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/index.ts</span>
+<span class="d-hunk">@@ -9,3 +9,4 @@ export { VoteTypeSelector } from &quot;./VoteTypeSelector&quot;;</span>
+<span class="d-ctx"> export { Landing } from &quot;./Landing&quot;;</span>
+<span class="d-ctx"> export { BoundaryLayer } from &quot;./BoundaryLayer&quot;;</span>
+<span class="d-ctx"> export { ModeSwitcher } from &quot;./ModeSwitcher&quot;;</span>
+<span class="d-add">+export { ErrorBoundary } from &quot;./ErrorBoundary/ErrorBoundary&quot;;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/graphCache.ts</span>
+            <span class="stat"><span class="d-add">+20</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · utils/</span>
+        <span class="ctx-sum">IndexedDB persistence for topology + vote arrays, keyed by graph version</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">graphCache.ts</span>
+        <span class="ctx-sum">~175 LOC — get/set cached topology (JSON + binary) and votes; version-busting</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">DB open / upgrade</span><span class="ol-sum">desire-path-cache, DB_VERSION=2 clears stale store</span></li><li class="dim"><span class="ol-label">idbGet / idbSet</span><span class="ol-sum">best-effort key/value helpers</span></li><li class="dim"><span class="ol-label">Topology cache</span><span class="ol-sum">getCachedTopology / Bin + setters</span></li><li class="dim"><span class="ol-label">Votes cache</span><span class="ol-sum">getCachedVotes / setCachedVotes (version-scoped)</span></li><li class="changed"><span class="ol-label">clearGraphCache</span><span class="ol-sum">NEW — wipe every entry; recovery path for a poisoned cache</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>clearGraphCache() — clears the object store so a poisoned cache can&#x27;t survive a reload</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/graphCache.ts b/client-react/src/utils/graphCache.ts</span>
+<span class="d-meta">index 00bc2e4..387768f 100644</span>
+<span class="d-meta">--- a/client-react/src/utils/graphCache.ts</span>
+<span class="d-meta">+++ b/client-react/src/utils/graphCache.ts</span>
+<span class="d-hunk">@@ -143,3 +143,23 @@ export async function setCachedVotes&lt;T&gt;(</span>
+<span class="d-ctx"> ): Promise&lt;void&gt; {</span>
+<span class="d-ctx">   await idbSet(votesKey(mode), { version, data } satisfies CachedVotes&lt;T&gt;);</span>
+<span class="d-ctx"> }</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Wipe every persisted graph entry (topology + binary topology + all vote</span>
+<span class="d-add">+ * snapshots). Used as the recovery path when a topology/vote mismatch is</span>
+<span class="d-add">+ * detected or a render crashes: a poisoned cache must not survive into the next</span>
+<span class="d-add">+ * load, or the crash repeats (&quot;a problem repeatedly occurred&quot;). Best-effort.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export async function clearGraphCache(): Promise&lt;void&gt; {</span>
+<span class="d-add">+  try {</span>
+<span class="d-add">+    const db = await openDb();</span>
+<span class="d-add">+    await new Promise&lt;void&gt;((resolve, reject) =&gt; {</span>
+<span class="d-add">+      const tx = db.transaction(STORE, &quot;readwrite&quot;);</span>
+<span class="d-add">+      tx.objectStore(STORE).clear();</span>
+<span class="d-add">+      tx.oncomplete = () =&gt; resolve();</span>
+<span class="d-add">+      tx.onerror = () =&gt; reject(tx.error);</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+  } catch {</span>
+<span class="d-add">+    // Nothing more we can do — the caller still reloads/refetches fresh.</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+98</span> / <span class="d-del">-11</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask backend · server/</span>
+        <span class="ctx-sum">HTTP + WebSocket routes, the per-map vote cache, graph + OSRM registries, startup warmup</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~1660 LOC — every API/WS route plus the vote-response cache and city registries</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Flask / Redis / registries setup</span><span class="ol-sum">app, CORS, sock, redis client, GraphRegistry</span></li><li class="dim"><span class="ol-label">Map resolution — resolve_map</span><span class="ol-sum">slug → city / graph / OSRM / policy</span></li><li class="dim"><span class="ol-label">Passcode gate</span><span class="ol-sum">private-map token check + lockout</span></li><li class="changed"><span class="ol-label">Per-map vote response cache</span><span class="ol-sum">bounded LRU · single-flight build · mode-aware invalidation · stamps topology dims</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Startup warmup + pub-sub listeners</span><span class="ol-sum">Postgres→Redis replay; delta listener invalidates cache</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Vote API — /api/vote</span><span class="ol-sum">directional voting; now wraps the read-modify-write in a cross-instance Redis lock</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Graph data APIs</span><span class="ol-sum">/api/graph-topology, /api/graph-votes, /api/graph-version</span></li><li class="dim"><span class="ol-label">Admin APIs</span><span class="ol-sum">subdomain, refresh-osm, stats</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>import OrderedDict</li><li>Bounded-LRU _vote_cache + _vote_cache_get/put + _invalidate_vote_cache + single-flight _build_lock_for</li><li>_build_graph_votes_body → single-flight wrapper + _build_graph_votes_body_locked (stamps n_edges / n_nodes / topology_version)</li><li>pub-sub delta listener + _resnap_city_maps → _invalidate_vote_cache (was pop(slug))</li><li>cast_vote → with vote_store.voter_lock(…), _proposal_vote_lock</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index a05e016..7aae40a 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -6,6 +6,7 @@ import sys</span>
+<span class="d-ctx"> import time</span>
+<span class="d-ctx"> import hashlib</span>
+<span class="d-ctx"> import threading</span>
+<span class="d-add">+from collections import OrderedDict</span>
+<span class="d-ctx"> from functools import lru_cache</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> import redis</span>
+<span class="d-hunk">@@ -242,13 +243,75 @@ def _locked_response():</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # ── Per-map vote response cache ───────────────────────────────────────────</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-_vote_cache: dict[str, dict] = {}</span>
+<span class="d-add">+# Bounded LRU of built /api/graph-votes bodies, keyed by &quot;&lt;slug&gt;:&lt;mode&gt;&quot;. This</span>
+<span class="d-add">+# used to be an unbounded dict: every (map, mode) ever requested kept its full</span>
+<span class="d-add">+# JSON body resident forever, so a multi-tenant server with many maps leaked</span>
+<span class="d-add">+# memory until the worker OOM-crashed (exactly the &quot;more than one tenant → crash&quot;</span>
+<span class="d-add">+# symptom). The cap evicts the least-recently-served body so memory stays flat</span>
+<span class="d-add">+# regardless of how many maps exist. Access is guarded by _vote_cache_lock since</span>
+<span class="d-add">+# several greenlets/requests touch it concurrently.</span>
+<span class="d-add">+_VOTE_CACHE_MAX = int(os.environ.get(&quot;VOTE_CACHE_MAX&quot;, &quot;64&quot;))</span>
+<span class="d-add">+_vote_cache: &quot;OrderedDict[str, dict]&quot; = OrderedDict()</span>
+<span class="d-add">+_vote_cache_lock = threading.Lock()</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Per-cache-key single-flight locks. Building the vote arrays for a big map (NYC</span>
+<span class="d-add">+# streets: ~2M edges, pure-Python) takes seconds and pins the GIL, freezing the</span>
+<span class="d-add">+# single gevent worker. Without single-flight, N concurrent first-requests for</span>
+<span class="d-add">+# the same map each rebuild the same body in series — head-of-line blocking that</span>
+<span class="d-add">+# stacks into the multi-tenant stall/crash. One builder per key; the rest wait on</span>
+<span class="d-add">+# its result.</span>
+<span class="d-add">+_build_locks: dict[str, threading.Lock] = {}</span>
+<span class="d-add">+_build_locks_guard = threading.Lock()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Serializes the read-modify-write of a voter&#x27;s per-proposal direction so a</span>
+<span class="d-del">-# rapid +/− toggle can&#x27;t read a stale prior direction (see /api/vote).</span>
+<span class="d-add">+# rapid +/− toggle can&#x27;t read a stale prior direction (see /api/vote). This is a</span>
+<span class="d-add">+# PER-PROCESS lock; across Flask instances/workers the Redis lock in cast_vote</span>
+<span class="d-add">+# (vote_store.voter_lock) provides the cross-instance guarantee.</span>
+<span class="d-ctx"> _proposal_vote_lock = threading.Lock()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+def _vote_cache_get(cache_key: str, rev: int) -&gt; str | None:</span>
+<span class="d-add">+    &quot;&quot;&quot;Return a cached body for this key+revision, marking it most-recently-used.&quot;&quot;&quot;</span>
+<span class="d-add">+    with _vote_cache_lock:</span>
+<span class="d-add">+        cached = _vote_cache.get(cache_key)</span>
+<span class="d-add">+        if cached and cached[&quot;rev&quot;] == rev:</span>
+<span class="d-add">+            _vote_cache.move_to_end(cache_key)</span>
+<span class="d-add">+            return cached[&quot;body&quot;]</span>
+<span class="d-add">+    return None</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _vote_cache_put(cache_key: str, rev: int, body: str) -&gt; None:</span>
+<span class="d-add">+    &quot;&quot;&quot;Store a built body, evicting the least-recently-used entry past the cap.&quot;&quot;&quot;</span>
+<span class="d-add">+    with _vote_cache_lock:</span>
+<span class="d-add">+        _vote_cache[cache_key] = {&quot;rev&quot;: rev, &quot;body&quot;: body}</span>
+<span class="d-add">+        _vote_cache.move_to_end(cache_key)</span>
+<span class="d-add">+        while len(_vote_cache) &gt; _VOTE_CACHE_MAX:</span>
+<span class="d-add">+            _vote_cache.popitem(last=False)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _invalidate_vote_cache(slug: str) -&gt; None:</span>
+<span class="d-add">+    &quot;&quot;&quot;Drop every cached body for a map — the bare slug AND each &quot;&lt;slug&gt;:&lt;mode&gt;&quot;.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    The cache is keyed per mode (&quot;&lt;slug&gt;:&lt;mode&gt;&quot;), but writes only know the slug,</span>
+<span class="d-add">+    so a plain `pop(slug)` left the mode-scoped bodies stale. (The revision check</span>
+<span class="d-add">+    in _build_graph_votes_body still kept responses CORRECT, but the stale entries</span>
+<span class="d-add">+    lingered in memory and forced an extra rebuild.) Clearing all of a slug&#x27;s</span>
+<span class="d-add">+    variants makes invalidation actually free the right entries.&quot;&quot;&quot;</span>
+<span class="d-add">+    prefix = f&quot;{slug}:&quot;</span>
+<span class="d-add">+    with _vote_cache_lock:</span>
+<span class="d-add">+        for key in [k for k in _vote_cache if k == slug or k.startswith(prefix)]:</span>
+<span class="d-add">+            _vote_cache.pop(key, None)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _build_lock_for(cache_key: str) -&gt; threading.Lock:</span>
+<span class="d-add">+    with _build_locks_guard:</span>
+<span class="d-add">+        lock = _build_locks.get(cache_key)</span>
+<span class="d-add">+        if lock is None:</span>
+<span class="d-add">+            lock = threading.Lock()</span>
+<span class="d-add">+            _build_locks[cache_key] = lock</span>
+<span class="d-add">+        return lock</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -&gt; str:</span>
+<span class="d-ctx">     &quot;&quot;&quot;Build the /api/graph-votes JSON for one map+mode, cached by its revision.</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -258,10 +321,22 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -&gt; str:</span>
+<span class="d-ctx">     &quot;&quot;&quot;</span>
+<span class="d-ctx">     rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)</span>
+<span class="d-ctx">     cache_key = f&quot;{rmap.slug}:{mode}&quot; if mode else rmap.slug</span>
+<span class="d-del">-    cached = _vote_cache.get(cache_key)</span>
+<span class="d-del">-    if cached and cached[&quot;rev&quot;] == rev:</span>
+<span class="d-del">-        return cached[&quot;body&quot;]</span>
+<span class="d-del">-</span>
+<span class="d-add">+    hit = _vote_cache_get(cache_key, rev)</span>
+<span class="d-add">+    if hit is not None:</span>
+<span class="d-add">+        return hit</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # Single-flight: one greenlet builds; concurrent callers wait, then take the</span>
+<span class="d-add">+    # freshly-cached result instead of rebuilding the same arrays in series.</span>
+<span class="d-add">+    with _build_lock_for(cache_key):</span>
+<span class="d-add">+        hit = _vote_cache_get(cache_key, rev)</span>
+<span class="d-add">+        if hit is not None:</span>
+<span class="d-add">+            return hit</span>
+<span class="d-add">+        return _build_graph_votes_body_locked(rmap, mode, rev, cache_key)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _build_graph_votes_body_locked(</span>
+<span class="d-add">+    rmap: ResolvedMap, mode: str | None, rev: int, cache_key: str,</span>
+<span class="d-add">+) -&gt; str:</span>
+<span class="d-ctx">     rmap.graph.ensure_loaded()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # The heatmap serves ONLY from Redis; Postgres is the durable copy that the</span>
+<span class="d-hunk">@@ -282,9 +357,18 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -&gt; str:</span>
+<span class="d-ctx">     )</span>
+<span class="d-ctx">     arrays[&quot;rev&quot;] = rev</span>
+<span class="d-ctx">     arrays[&quot;vote_types&quot;] = {str(k): v for k, v in vote_store.all_vote_types().items()}</span>
+<span class="d-add">+    # Stamp the topology this body is indexed against. The vote arrays are sized</span>
+<span class="d-add">+    # to the CURRENT graph; the client may still hold a STALE cached topology (the</span>
+<span class="d-add">+    # /api/graph-topology response is cached for a day). Carrying the dimensions</span>
+<span class="d-add">+    # and the topology etag lets the client detect a mismatch and refuse to paint</span>
+<span class="d-add">+    # votes against the wrong topology — the root of the mobile-Safari crash —</span>
+<span class="d-add">+    # rather than indexing past the end of its node/edge arrays.</span>
+<span class="d-add">+    arrays[&quot;n_edges&quot;] = len(rmap.graph.edges)</span>
+<span class="d-add">+    arrays[&quot;n_nodes&quot;] = len(rmap.graph.nodes)</span>
+<span class="d-add">+    arrays[&quot;topology_version&quot;] = rmap.graph.topology_etag</span>
+<span class="d-ctx">     body = json.dumps(arrays)</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    _vote_cache[cache_key] = {&quot;rev&quot;: rev, &quot;body&quot;: body}</span>
+<span class="d-add">+    _vote_cache_put(cache_key, rev, body)</span>
+<span class="d-ctx">     return body</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -441,7 +525,7 @@ def _start_delta_listener():</span>
+<span class="d-ctx">             channel = msg[&quot;channel&quot;]</span>
+<span class="d-ctx">             slug = channel.split(&quot;:&quot;, 1)[1] if &quot;:&quot; in channel else None</span>
+<span class="d-ctx">             if slug:</span>
+<span class="d-del">-                _vote_cache.pop(slug, None)</span>
+<span class="d-add">+                _invalidate_vote_cache(slug)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     t = threading.Thread(target=listener, daemon=True, name=&quot;delta-listener&quot;)</span>
+<span class="d-ctx">     t.start()</span>
+<span class="d-hunk">@@ -912,7 +996,10 @@ def cast_vote():</span>
+<span class="d-ctx">             slug, edge_ids, vt_id, ip_hash, device_id</span>
+<span class="d-ctx">         ) if direction != 0 else {}</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-        with _proposal_vote_lock:</span>
+<span class="d-add">+        # voter_lock serializes this voter&#x27;s read-modify-write ACROSS instances</span>
+<span class="d-add">+        # (Redis); _proposal_vote_lock serializes it within THIS process. Together</span>
+<span class="d-add">+        # they hold whether the app runs one worker or a horizontally-scaled fleet.</span>
+<span class="d-add">+        with vote_store.voter_lock(redis_client, slug, device_id), _proposal_vote_lock:</span>
+<span class="d-ctx">             reversed_any = False</span>
+<span class="d-ctx">             changed: list[int] = []</span>
+<span class="d-ctx">             at_cap: list[int] = []  # fresh device, IP at cap → LRU takeover below</span>
+<span class="d-hunk">@@ -971,7 +1058,7 @@ def cast_vote():</span>
+<span class="d-ctx">                     direction=direction or vote_store.UP, reversed_vote=reversed_any,</span>
+<span class="d-ctx">                     vt_counts=vt_counts,</span>
+<span class="d-ctx">                 )</span>
+<span class="d-del">-                _vote_cache.pop(slug, None)</span>
+<span class="d-add">+                _invalidate_vote_cache(slug)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         return jsonify({</span>
+<span class="d-ctx">             &quot;success&quot;: True, &quot;edge_ids&quot;: edge_ids, &quot;changed&quot;: changed,</span>
+<span class="d-hunk">@@ -1005,7 +1092,7 @@ def _resnap_city_maps(city_id: str) -&gt; None:</span>
+<span class="d-ctx">             mode_int = vote_store.mode_to_int(m.get(&quot;mode&quot;, &quot;walk&quot;))</span>
+<span class="d-ctx">             labels = [vt[&quot;label&quot;] for vt in (m.get(&quot;voteTypes&quot;) or []) if vt.get(&quot;label&quot;)]</span>
+<span class="d-ctx">             vote_migration.migrate_map(cg, redis_client, slug, mode_int, labels)</span>
+<span class="d-del">-            _vote_cache.pop(slug, None)</span>
+<span class="d-add">+            _invalidate_vote_cache(slug)</span>
+<span class="d-ctx">         except Exception as e:</span>
+<span class="d-ctx">             logger.error(f&quot;[RESNAP:{slug}] failed: {e}&quot;)</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/vote_store.py</span>
+            <span class="stat"><span class="d-add">+47</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask backend · server/</span>
+        <span class="ctx-sum">the Redis vote-cache layer: bit-packed fields, read/write path, derived arrays</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">vote_store.py</span>
+        <span class="ctx-sum">~390 LOC — packs votes into Redis fields, builds the heatmap arrays, vote-type cache</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Cross-instance voter lock</span><span class="ol-sum">NEW — Redis SET-NX lock per (slug, device) serializing a voter fleet-wide</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Keys / mode enum</span><span class="ol-sum">hash_key, channel_key, revision_key, MODE_IDS</span></li><li class="dim"><span class="ol-label">Vote-type cache</span><span class="ol-sum">label↔id cache backed by Postgres</span></li><li class="dim"><span class="ol-label">Bit packing</span><span class="ol-sum">pack / unpack / redis_field (45-bit field)</span></li><li class="dim"><span class="ol-label">Write path</span><span class="ol-sum">apply_directional, publish_delta</span></li><li class="dim"><span class="ol-label">Read path</span><span class="ol-sum">read_all, read_edge_vt_counts, build_arrays</span></li><li class="dim"><span class="ol-label">Coordinate → edge mapping</span><span class="ol-sum">coords_to_edge_ids, osm_nodes_to_edge_ids</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>import contextlib / os / time</li><li>voter_lock() — @contextmanager Redis SET-NX lock, auto-expiring, fails open</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/vote_store.py b/server/vote_store.py</span>
+<span class="d-meta">index f139cb1..e93837d 100644</span>
+<span class="d-meta">--- a/server/vote_store.py</span>
+<span class="d-meta">+++ b/server/vote_store.py</span>
+<span class="d-hunk">@@ -17,12 +17,59 @@ edge_id space is its own city graph, so isolating by slug avoids cross-map</span>
+<span class="d-ctx"> collisions.</span>
+<span class="d-ctx"> &quot;&quot;&quot;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+import contextlib</span>
+<span class="d-ctx"> import json</span>
+<span class="d-ctx"> import logging</span>
+<span class="d-add">+import os</span>
+<span class="d-add">+import time</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> logger = logging.getLogger(__name__)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# ── Cross-instance voter lock ──────────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+@contextlib.contextmanager</span>
+<span class="d-add">+def voter_lock(redis_client, slug: str, device_id: str,</span>
+<span class="d-add">+               timeout: float = 5.0, ttl: int = 10):</span>
+<span class="d-add">+    &quot;&quot;&quot;Serialize one voter&#x27;s read-modify-write on a map ACROSS Flask instances.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    The app&#x27;s per-process threading.Lock only orders votes within a single</span>
+<span class="d-add">+    worker; run more than one worker/instance and two near-simultaneous votes</span>
+<span class="d-add">+    from the same voter can each read the same prior direction and double-apply</span>
+<span class="d-add">+    (inflating the count, or leaving a stuck toggle). A short Redis SET-NX lock</span>
+<span class="d-add">+    keyed by (slug, device_id) closes that race fleet-wide.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Best effort: the lock auto-expires (ttl) so a crashed holder can&#x27;t wedge a</span>
+<span class="d-add">+    voter, and if Redis is unavailable we proceed anyway (the per-process lock</span>
+<span class="d-add">+    still holds) — a vote must never hang on the limiter. Yields True when the</span>
+<span class="d-add">+    cross-instance lock was actually held, False when we fell open.&quot;&quot;&quot;</span>
+<span class="d-add">+    key = f&quot;votelock:{slug}:{device_id}&quot;</span>
+<span class="d-add">+    token = os.urandom(8).hex()</span>
+<span class="d-add">+    acquired = False</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        deadline = time.monotonic() + timeout</span>
+<span class="d-add">+        while True:</span>
+<span class="d-add">+            if redis_client.set(key, token, nx=True, ex=ttl):</span>
+<span class="d-add">+                acquired = True</span>
+<span class="d-add">+                break</span>
+<span class="d-add">+            if time.monotonic() &gt;= deadline:</span>
+<span class="d-add">+                break  # contended past the timeout — fall open, don&#x27;t block</span>
+<span class="d-add">+            time.sleep(0.02)  # gevent-patched: yields the hub</span>
+<span class="d-add">+    except Exception as e:</span>
+<span class="d-add">+        logger.warning(f&quot;[VOTELOCK] acquire failed for {key}: {e}&quot;)</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        yield acquired</span>
+<span class="d-add">+    finally:</span>
+<span class="d-add">+        if acquired:</span>
+<span class="d-add">+            try:</span>
+<span class="d-add">+                # Delete only if the value is still our token, so we never clear</span>
+<span class="d-add">+                # a lock another instance acquired after ours expired.</span>
+<span class="d-add">+                if redis_client.get(key) == token:</span>
+<span class="d-add">+                    redis_client.delete(key)</span>
+<span class="d-add">+            except Exception:</span>
+<span class="d-add">+                pass</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> def hash_key(slug: str) -&gt; str:</span>
+<span class="d-ctx">     return f&quot;ev:{slug}&quot;</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

@@ -417,7 +417,14 @@ resource "google_cloud_run_service" "app" {
     metadata {
       annotations = {
         "autoscaling.knative.dev/minScale"        = "1"
-        "autoscaling.knative.dev/maxScale"        = "2"
+        # Horizontal scaling is now SAFE across instances: the voter
+        # read-modify-write is serialized fleet-wide by a Redis SET-NX lock
+        # (vote_store.voter_lock), and each instance's vote-response cache is a
+        # bounded, shared-nothing LRU (Redis holds the authoritative votes). So
+        # the autoscaler may spill to additional instances under concurrent load
+        # instead of head-of-line-blocking on the single gevent worker. Added
+        # instances are 8Gi/2CPU each and only run under load (minScale stays 1).
+        "autoscaling.knative.dev/maxScale"        = "4"
         # Extra CPU during startup so imports + _populate_redis + the background
         # graph prewarm finish quickly (we run at only 2 vCPU steady-state).
         "run.googleapis.com/startup-cpu-boost"    = "true"
