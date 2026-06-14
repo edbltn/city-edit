@@ -519,6 +519,15 @@ resource "google_cloud_run_domain_mapping" "custom" {
     route_name = google_cloud_run_service.app.name
   }
 
+  # certificate_mode defaults to AUTOMATIC, but a mapping created outside
+  # terraform and later imported (e.g. ebikes.cityedit.org, originally made via
+  # gcloud) reads it back empty — so terraform would REPLACE the live mapping
+  # (a brief ebikes outage + cert re-provision) just to set a field it already
+  # effectively has. Ignore it so the imported mapping plans as a no-op.
+  lifecycle {
+    ignore_changes = [spec[0].certificate_mode]
+  }
+
   depends_on = [google_cloud_run_service.app]
 }
 
