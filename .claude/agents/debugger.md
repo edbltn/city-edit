@@ -22,10 +22,10 @@ Redis connection errors:
 - Verify REDIS_HOST in .env
 - Check if Redis is running
 
-ORS API failures:
-- Verify ORS_API_KEY in .env
-- Check API rate limits
-- Test: `curl "https://api.openrouteservice.org/v2/health"`
+Routing (OSRM) failures:
+- Verify the OSRM service is reachable (`OSRM_URL`, default `http://localhost:5000`)
+- Falls back to the in-process Python/Dijkstra router (`python_router.py`) if OSRM is down
+- Test: `curl "$OSRM_URL/route/v1/driving/-74.0,40.7;-73.99,40.75?overview=false"`
 
 WebSocket disconnects:
 - Check nginx proxy configuration

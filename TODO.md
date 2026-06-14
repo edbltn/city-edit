@@ -1,77 +1,63 @@
-# City Edit - TODO
+# City Edit — TODO
 
-## Current Status (2026-01-05)
+## Current Status
 
-The app is deployed and working at https://demo.sphericalharmonics.org
+Deployed and live at <https://cityedit.org>. Pushes to `main` auto-deploy via
+Cloud Build.
 
-## Recent Changes
+## Recently Resolved
 
-- Fixed favicon to use 💠 emoji
-- Renamed title to "City Edit"
-- Auto-detect prod/dev environment for API/WS URLs in client config
-- Added Redis connection logging to confirm cloud vs local
-- Avoid ferries for all modes (bike, walk, drive)
-- Improved responsive layout for mobile
+These were once open items and are now in place:
 
-## Known Issues
+- **Health check** — `GET /health` (`server/app.py`).
+- **Production Flask server** — gunicorn with the gevent worker, under
+  supervisord (`deploy/supervisord.conf`); the dev server is local-only.
+- **CI/CD** — `.github/workflows/deploy.yml` deploys on push to `main`.
+- **Secrets in Secret Manager** — `DATABASE_URL`, `SECRET_KEY`, and `ADMIN_TOKEN`
+  are managed as `google_secret_manager_secret` resources in `terraform/`, so
+  they persist across deploys (Cloud Build uses `services update`, which keeps
+  existing env vars). The old "env vars reset on every deploy" problem — which
+  hinged on the now-removed `ORS_API_KEY` — no longer applies.
 
-### Environment Variables Reset on Deploy
-Cloud Build creates new revisions that don't inherit env vars. After each deploy:
-
-```bash
-gcloud run services update desire-path-mapper-prod \
-  --region=us-central1 \
-  --project=google-mpf-ywspom2sxeey \
-  --set-env-vars="REDIS_HOST=10.63.107.3,REDIS_PORT=6379,ORS_API_KEY=<key>"
-```
-
-**Important**: ORS_API_KEY must have NO trailing newline or it causes HTTP header errors.
-
-## Future Improvements
-
-### High Priority
-- [ ] Store env vars in Terraform/Secret Manager so they persist across deploys
-- [ ] Add proper cache headers to nginx config
-
-### Features
-- [ ] Show route distance/duration in UI
-- [ ] Add "reverse route" button
-- [ ] Remember last route in localStorage
-- [ ] Share route via URL
+## Open
 
 ### Infrastructure
-- [ ] Set up GitHub Actions for CI/CD
-- [ ] Add health check endpoint
-- [ ] Add proper gunicorn/uwsgi for production Flask
+
+- [ ] Add proper cache headers to the nginx config for static assets.
+- [ ] Plan Redis HA — it's a single point of failure carrying both vote counts
+      and pub/sub (see [docs/flask-considerations.md](docs/flask-considerations.md)).
+
+### Features
+
+- [ ] Show route distance / duration in the UI.
+- [ ] Add a "reverse route" button.
+- [ ] Remember the last route in `localStorage`.
+- [ ] Share a route via URL (selection sharing already exists for points/vote
+      type — see [docs/url-routing.md](docs/url-routing.md)).
 
 ## Quick Reference
 
-### Local Development
+### Local development
+
 ```bash
 redis-server --daemonize yes
-cd server && source env/bin/activate && python app.py
-cd client-react && npm run dev
-# Open http://localhost:3000
+cd server && source env/bin/activate && python app.py   # http://localhost:5001
+cd client-react && npm run dev                          # http://localhost:3000
 ```
 
 ### Deploy
+
 ```bash
 gcloud builds submit --config=cloudbuild.yaml --project=google-mpf-ywspom2sxeey
 ```
 
-### View Logs
+### View logs
+
 ```bash
-gcloud logging read \
-  "resource.type=cloud_run_revision AND resource.labels.service_name=desire-path-mapper-prod" \
-  --project=google-mpf-ywspom2sxeey \
-  --limit=30 \
-  --format="table(timestamp,textPayload)"
+gcloud run services logs read desire-path-mapper \
+  --project=google-mpf-ywspom2sxeey --region=us-central1 --limit=50
 ```
 
-### Check Env Vars
-```bash
-gcloud run services describe desire-path-mapper-prod \
-  --region=us-central1 \
-  --project=google-mpf-ywspom2sxeey \
-  --format="yaml(spec.template.spec.containers[0].env)"
-```
+> The Cloud Run service is named `desire-path-mapper` (a legacy resource ID), not
+> `cityedit`. See [docs/README.md](docs/README.md#naming-canon).
+</content>

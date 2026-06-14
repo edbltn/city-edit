@@ -57,7 +57,7 @@ make loadtest-prod USERS=25 RATE=5 TIME=3m           # headless
 
 # Or directly, against any deployed URL (note: wss is derived from https):
 locust -f loadtest/locustfile.py \
-    --host https://desire-path-mapper-katze52zaq-uc.a.run.app \
+    --host https://cityedit.org \
     --users 25 --spawn-rate 5 --headless --run-time 3m
 ```
 

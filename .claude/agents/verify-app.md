@@ -12,7 +12,7 @@ Verification steps:
 2. Check Flask starts without errors: `cd server && python -c "from app import app"`
 3. Verify React app builds: `cd client-react && npm run build`
 4. Check for Python syntax errors
-5. Verify .env exists with required variables (ORS_API_KEY, REDIS_HOST)
+5. Verify .env exists with required variables (REDIS_HOST; DATABASE_URL for durable votes)
 
 Report format:
 - Redis: OK/FAIL

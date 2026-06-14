@@ -1,44 +1,39 @@
 # GCP Deployment Guide
 
+How City Edit runs on Google Cloud, how to deploy a change, and how to map a
+custom domain.
+
+> **Naming:** the product is *City Edit* (cityedit.org), but the GCP resources
+> keep their original `desire-path-*` IDs. The Cloud Run app service is
+> `desire-path-mapper` — **not** `desire-path-mapper-prod`. See the
+> [naming canon](README.md#naming-canon).
+
 ## Overview
 
-The app runs on Google Cloud Platform using:
-- **Cloud Run**: Serves the Flask API + static files in a single container
-- **Memorystore Redis**: Managed Redis 7.0 instance (1GB)
-- **Artifact Registry**: Docker image storage
-- **Cloud Build**: CI/CD pipeline for building and deploying
+| Component | Resource | Purpose |
+|-----------|----------|---------|
+| Cloud Run | `desire-path-mapper` | The app: nginx + gunicorn (Flask) in one container, serving the API, WebSocket, and the static SPA. |
+| Cloud Run | `desire-path-osrm` | Self-hosted OSRM routing engine (one dataset per supported city). |
+| Memorystore Redis | `desire-path-prod` | Vote counts + real-time pub/sub. Reached over the `redis-connector` VPC connector. |
+| Cloud SQL Postgres | `desire-path-votes-prod` | Durable vote rows. |
+| Artifact Registry | `desire-path-mapper` | Holds the `app` and `osrm` Docker images. |
+| Cloud Build | `cloudbuild.yaml` | Builds + pushes both images and updates both services. |
+| Secret Manager | `database_url`, `secret_key`, `admin_token` | App secrets injected as env vars. |
 
-Live URL: `https://desire-path-mapper-prod-906562157830.us-central1.run.app`
-Custom domain (pending): `https://demo.sphericalharmonics.org`
-
-## Current Status
-
-### Working
-- Cloud Run service deployed and public
-- Artifact Registry configured
-- Cloud Build permissions configured via Terraform
-- Static files (HTML, CSS, JS) serving correctly
-
-### Pending
-- **Domain verification**: Need to verify `sphericalharmonics.org` ownership at [Google Webmaster Central](https://www.google.com/webmasters/verification/verification)
-- **Redis connection**: Cloud Run needs VPC connector to reach Memorystore Redis
-
-### Recent Fixes
-- **Dockerfile**: Changed `COPY server/app.py .` to `COPY server/*.py .` (was missing roam_cache, tiles, desire_path_voting modules)
-- **Dockerfile**: Changed `location /ws` to `location = /ws` (exact match to prevent `/ws.js` routing to Flask)
-- **Added `.gcloudignore`**: Excludes node_modules, google-cloud-sdk, etc. from Cloud Build uploads
-
-## Prerequisites
-
-- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.0
-- [Google Cloud CLI](https://cloud.google.com/sdk/docs/install)
-- Docker Desktop (optional, Cloud Build handles builds)
+Live domains (mapped in `terraform/main.tf` via `custom_domains`): `cityedit.org`
+plus `bikepaths`, `trees`, `walkways`, `ebikes`, and `demo` subdomains.
 
 ## Project Configuration
 
 - **Project ID**: `google-mpf-ywspom2sxeey`
 - **Region**: `us-central1`
 - **Environment**: `prod`
+
+## Prerequisites
+
+- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.0
+- [Google Cloud CLI](https://cloud.google.com/sdk/docs/install)
+- Docker Desktop (optional — Cloud Build handles builds)
 
 ## Authentication
 
@@ -50,200 +45,173 @@ gcloud config set project google-mpf-ywspom2sxeey
 
 ## Deploying Changes
 
-### Option 1: Cloud Build (Recommended)
+### Option 1 — Cloud Build (recommended)
 
-Build, push, and deploy in one command:
+Builds both images (osrm, app), pushes them, and updates both Cloud Run
+services in one command:
 
 ```bash
 gcloud builds submit --config=cloudbuild.yaml --project=google-mpf-ywspom2sxeey
 ```
 
-### Option 2: Manual Docker Build
+Pushes to `main` run this automatically via `.github/workflows/deploy.yml`.
+
+### Option 2 — Manual Docker build
 
 ```bash
-# Build for Cloud Run (linux/amd64 required for M-series Macs)
+# Build for Cloud Run (linux/amd64 required on M-series Macs)
 docker build --platform linux/amd64 \
   -t us-central1-docker.pkg.dev/google-mpf-ywspom2sxeey/desire-path-mapper/app:latest .
 
-# Push to Artifact Registry
 docker push us-central1-docker.pkg.dev/google-mpf-ywspom2sxeey/desire-path-mapper/app:latest
 
-# Deploy via Terraform
 cd terraform && terraform apply
 ```
 
-### Option 3: Quick Update (no Terraform)
+### Option 3 — Quick image swap (no Terraform)
 
 ```bash
-gcloud run services update desire-path-mapper-prod \
+gcloud run services update desire-path-mapper \
   --region=us-central1 \
   --project=google-mpf-ywspom2sxeey \
   --image=us-central1-docker.pkg.dev/google-mpf-ywspom2sxeey/desire-path-mapper/app:latest
 ```
 
-## Environment Variables
+## Environment & Secrets
 
-Set the ORS API key:
+App secrets are managed in Secret Manager and wired into the Cloud Run service by
+Terraform, so they persist across deploys (Cloud Build uses `services update`,
+which preserves existing env vars):
 
-```bash
-gcloud run services update desire-path-mapper-prod \
-  --set-env-vars="ORS_API_KEY=your-key-here" \
-  --region=us-central1 \
-  --project=google-mpf-ywspom2sxeey
-```
+| Secret / env | Purpose |
+|--------------|---------|
+| `DATABASE_URL` | Cloud SQL Postgres connection (durable votes). |
+| `SECRET_KEY` | Signing key for map-passcode tokens — must be stable across instances. |
+| `ADMIN_TOKEN` | Guards admin endpoints (e.g. assigning vanity subdomains). |
+| `REDIS_HOST` / `REDIS_PORT` | Memorystore Redis (set from the Terraform output). |
+| `OSRM_URL` | URL of the `desire-path-osrm` service (set from its status URL). |
+| `SKIP_WARMUP` | Skip graph warmup on boot for faster startup. |
 
-## Custom Domain Setup
+There is **no routing API key** — routing is self-hosted OSRM.
 
-### Step 1: Verify Domain Ownership
+## Custom Domains
 
-Before mapping a custom domain, verify ownership at Google Webmaster Central:
+Domains are declared in the `custom_domains` variable in `terraform/main.tf` and
+mapped with one `google_cloud_run_domain_mapping` per entry. To add one:
 
-1. Go to: https://www.google.com/webmasters/verification/verification?domain=sphericalharmonics.org
-2. Add a TXT record to your DNS as instructed
-3. Click "Verify"
+1. **Add the domain** to `custom_domains` and `terraform apply` (creates the
+   mapping + managed cert).
+2. **Add DNS** at the registrar — a `CNAME` to `ghs.googlehosted.com.` for each
+   subdomain (or an `A`/`AAAA` set for the apex), as printed by:
 
-### Step 2: Add DNS Record (Namecheap)
+   ```bash
+   terraform output domain_mapping_dns
+   ```
 
-In Namecheap: **Domain List > sphericalharmonics.org > Advanced DNS**
+3. **Verify domain ownership** (one-time per registrable domain) at
+   [Google Webmaster Central](https://www.google.com/webmasters/verification/verification)
+   if Cloud Run reports the domain isn't verified.
 
-| Type | Host | Value | TTL |
-|------|------|-------|-----|
-| CNAME | demo | ghs.googlehosted.com. | Automatic |
+SSL is auto-provisioned once DNS propagates (5–30 minutes). Note that *attaching
+a map to a subdomain* (e.g. `bikepaths.cityedit.org` → a slug) is a separate,
+data-only step — see [url-routing.md](url-routing.md).
 
-### Step 3: Apply Terraform
-
-```bash
-cd terraform
-terraform apply
-```
-
-This creates the `google_cloud_run_domain_mapping.custom` resource.
-
-### Step 4: Verify
-
-```bash
-# Check DNS propagation
-dig demo.sphericalharmonics.org CNAME
-
-# Check mapping status
-gcloud run domain-mappings describe \
-  --domain=demo.sphericalharmonics.org \
-  --region=us-central1 \
-  --project=google-mpf-ywspom2sxeey
-```
-
-SSL is auto-provisioned once DNS propagates (5-30 minutes).
-
-## Infrastructure from Scratch
+## Infrastructure From Scratch
 
 ```bash
 cd terraform
+cp terraform.tfvars.example terraform.tfvars   # set project_id, etc.
 terraform init
 terraform apply
 ```
 
-This creates:
-- Artifact Registry repository
-- Memorystore Redis instance (has `prevent_destroy = true`)
-- Cloud Run service with public access
-- Cloud Build API + IAM permissions
-- Custom domain mapping
+This provisions Artifact Registry, Memorystore Redis (`prevent_destroy = true`),
+Cloud SQL Postgres, the VPC connector, both Cloud Run services, Cloud Build IAM,
+Secret Manager secrets, and the custom domain mappings.
+
+> Build and push the `app` and `osrm` images (Option 1 or 2) **before** the first
+> `terraform apply` — the services reference images that must already exist.
 
 ## Terraform Outputs
 
 ```bash
-terraform output service_url       # App URL
-terraform output redis_host        # Redis internal IP
-terraform output registry_url      # Where to push Docker images
-terraform output custom_domain     # Custom domain name
-terraform output domain_mapping_dns # DNS records to add
+terraform output service_url          # app URL
+terraform output redis_host           # Redis internal IP
+terraform output database_instance    # Cloud SQL instance
+terraform output database_private_ip  # Cloud SQL private IP
+terraform output registry_url         # where to push images
+terraform output custom_domains       # mapped domains
+terraform output domain_mapping_dns   # DNS records to add, keyed by domain
 ```
 
-## IAM Permissions Required
+## IAM Permissions
 
-Your GCP account needs:
-- `roles/cloudbuild.builds.editor` - Submit Cloud Build jobs
-- `roles/run.admin` - Manage Cloud Run services
-- `roles/artifactregistry.writer` - Push Docker images
+The deploying account needs:
 
-Or just grant Owner:
+- `roles/cloudbuild.builds.editor` — submit Cloud Build jobs
+- `roles/run.admin` — manage Cloud Run services
+- `roles/artifactregistry.writer` — push images
+
+Or grant Owner:
+
 ```bash
 gcloud projects add-iam-policy-binding google-mpf-ywspom2sxeey \
-  --member="user:eric@sphericalharmonics.org" \
+  --member="user:YOUR_EMAIL" \
   --role="roles/owner"
 ```
 
-Cloud Build service account permissions are managed by Terraform.
+Cloud Build's own service-account permissions are managed by Terraform.
 
-## Organization Policy
+To allow public access (`allUsers`), the org policy
+`iam.allowedPolicyMemberDomains` must permit it (override to "Off" for this
+project in the Org Policies console).
 
-To allow public access (`allUsers`), the organization policy for `iam.allowedPolicyMemberDomains` must be disabled:
+## Container Layout
 
-1. Go to: https://console.cloud.google.com/iam-admin/orgpolicies/iam-allowedPolicyMemberDomains?project=google-mpf-ywspom2sxeey
-2. Click "Manage Policy"
-3. Select "Override parent's policy"
-4. Set "Policy enforcement" to "Off"
-5. Save
+The `app` image (`Dockerfile`) is a multi-stage build: a `node:20` stage builds
+the client, then a `python:3.13-slim` stage runs supervisord →
 
-## Architecture
+- **nginx** on `:8080` (Cloud Run's port) — serves the SPA from `/var/www/html`,
+  proxies `/api`, `/ws` (exact match), and `/tiles` to Flask, and aliases
+  PMTiles straight from disk. Config: `deploy/nginx-cloudrun.conf`.
+- **gunicorn** on `127.0.0.1:5001` — `--worker-class gevent --workers 1`, long
+  timeouts for graph warmup. Config: `deploy/supervisord.conf`.
 
-The Dockerfile creates a single container running:
-- **nginx** on port 8080 (Cloud Run's expected port)
-  - Serves static files from `/usr/share/nginx/html`
-  - Proxies `/api/` to Flask
-  - Proxies `/ws` (exact match) to Flask for WebSocket
-- **Flask** on localhost:5001
-
-This differs from local Docker Compose which uses separate containers.
-
-## Troubleshooting
-
-### "ModuleNotFoundError: No module named 'roam_cache'"
-The Dockerfile wasn't copying all Python files. Fixed by changing to `COPY server/*.py .`
-
-### "/ws.js returns 502"
-Nginx `location /ws` was matching `/ws.js`. Fixed by using `location = /ws` for exact match.
-
-### "Uploading 25k files to Cloud Build"
-Missing `.gcloudignore`. Created one to exclude node_modules, google-cloud-sdk, etc.
-
-### "PERMISSION_DENIED on gcloud builds submit"
-Grant yourself Cloud Build permissions:
-```bash
-gcloud projects add-iam-policy-binding google-mpf-ywspom2sxeey \
-  --member="user:eric@sphericalharmonics.org" \
-  --role="roles/cloudbuild.builds.editor"
-```
-
-### "Caller is not authorized to administer the domain"
-Verify domain ownership at Google Webmaster Central before mapping custom domains.
-
-### "Image not found"
-Build and push the image before running `terraform apply`.
-
-### "allUsers not permitted"
-Update the organization policy (see above).
-
-### ARM architecture error
-Use `--platform linux/amd64` when building on M-series Macs, or use Cloud Build.
-
-## File Locations
-
-| File | Purpose |
-|------|---------|
-| `Dockerfile` | Cloud Run container (nginx + Flask) |
-| `cloudbuild.yaml` | Cloud Build pipeline definition |
-| `.gcloudignore` | Files to exclude from Cloud Build uploads |
-| `terraform/main.tf` | Infrastructure definition |
-| `terraform/terraform.tfvars` | Project config (not in git) |
-| `server/Dockerfile` | Local development container |
+This differs from local `docker compose`, which runs separate containers.
 
 ## Viewing Logs
 
 ```bash
+gcloud run services logs read desire-path-mapper \
+  --project=google-mpf-ywspom2sxeey --region=us-central1 --limit=50
+
+# Or the structured log reader:
 gcloud logging read \
-  "resource.type=cloud_run_revision AND resource.labels.service_name=desire-path-mapper-prod" \
-  --project=google-mpf-ywspom2sxeey \
-  --limit=30 \
+  "resource.type=cloud_run_revision AND resource.labels.service_name=desire-path-mapper" \
+  --project=google-mpf-ywspom2sxeey --limit=30 \
   --format="table(timestamp,severity,textPayload)"
 ```
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---------|-------------|
+| `PERMISSION_DENIED` on `gcloud builds submit` | Grant yourself `roles/cloudbuild.builds.editor` (see IAM above). |
+| "Caller is not authorized to administer the domain" | Verify domain ownership at Google Webmaster Central before mapping. |
+| "Image not found" on `terraform apply` | Build and push the `app`/`osrm` images first. |
+| ARM architecture error | Build with `--platform linux/amd64` on M-series Macs, or use Cloud Build. |
+| "allUsers not permitted" | Update the `iam.allowedPolicyMemberDomains` org policy (see IAM above). |
+| Uploading tens of thousands of files to Cloud Build | Ensure `.gcloudignore` excludes `node_modules`, the SDK, data dirs, etc. |
+
+## File Reference
+
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | Cloud Run `app` container (nginx + gunicorn). |
+| `osrm/` | The `desire-path-osrm` container + city datasets. |
+| `cloudbuild.yaml` | Build + deploy pipeline for both services. |
+| `.gcloudignore` | Files excluded from Cloud Build uploads. |
+| `terraform/main.tf` | All infrastructure. |
+| `terraform/terraform.tfvars` | Project config (gitignored). |
+| `deploy/nginx-cloudrun.conf`, `deploy/supervisord.conf` | In-container process config. |
+</content>

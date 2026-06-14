@@ -1,5 +1,10 @@
 # Vote-to-Heatmap Pipeline: Complete System Documentation
 
+> ⚠️ **Archived — superseded.** This describes the old segment/node vote model
+> (`cast_desire_path_votes`, the `segment_votes`/`node_votes` Redis hashes,
+> `desire_path_voting.py`), which has been removed. Line numbers are stale.
+> The current model is in [../voting-architecture.md](../voting-architecture.md).
+
 ## Overview
 
 The system has **two parallel paths** for getting votes onto the heatmap:

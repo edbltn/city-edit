@@ -1,5 +1,10 @@
 # Roam: Multi-Modal Routing Engine
 
+> ⚠️ **Archived — never built.** This is a design spec for a routing engine that
+> was never implemented (no `roam_router.py`, no `/api/routes/roam`). The shipped
+> router is OSRM-per-city with a Python/Dijkstra fallback at `POST /api/routes`.
+> See [README.md](README.md) and [../voting-architecture.md](../voting-architecture.md).
+
 **Roam** ("Freedom to Roam") is a custom multi-modal routing algorithm that treats the city as unified traversable public space.
 
 ---
