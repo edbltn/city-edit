@@ -73,3 +73,6 @@ server/osm_data/
 loadtest/env/
 loadtest/sf_run*
 loadtest/*.log
+
+# streetscape_blocks generated data (regenerable, too big for git)
+server/streetscape_blocks/output/
