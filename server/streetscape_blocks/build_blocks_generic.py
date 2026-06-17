@@ -38,10 +38,14 @@ WIDTH_SCALE = float(os.environ.get("WIDTH_SCALE", "1.0"))
 # Voronoi partition behaves identically — only the ROW surface differs.
 TILE, MARGIN, SEED_SPACING, MIN_AREA = 1500.0, 400.0, 6.0, 60.0
 
-# Per-class ROW *half-width* in metres (buffer radius around the centerline). A
-# residential ROW (curb-to-curb + both sidewalks) is ~16 m wide -> ~8 m radius.
-# Tuned to maximise per-segment IoU vs the NYC planimetric blocks; scaled by
-# WIDTH_SCALE for sweeps. Unknown classes fall back to DEFAULT_HALF_WIDTH.
+# Per-class ROW *half-width* in metres (buffer radius around the centerline).
+# Tuned against Brook's NYC planimetric blocks (compare_blocks.py): these match
+# Brook's ROW *area* (area-ratio median 1.00, IoU median 0.84 over ~82k shared
+# segments). NOTE: a pure area/(2·length) calibration UNDER-shoots (area ratio
+# 0.90, IoU 0.82) because the Voronoi assigns intersection flare to segments, so
+# the effective mid-block width must run a touch wider than area/length implies.
+# Road classes are universal, so these NYC-tuned widths are reused for every city.
+# Scaled by WIDTH_SCALE for sweeps; unknown classes fall back to DEFAULT.
 HALF_WIDTH = {
     "motorway": 18.0, "motorway_link": 12.0, "trunk": 16.0, "trunk_link": 11.0,
     "primary": 14.0, "primary_link": 10.0, "secondary": 11.0, "secondary_link": 9.0,
