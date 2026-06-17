@@ -1613,7 +1613,19 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
      keeping the tip pinned on the exact location. */
   transform: scale(var(--indicator-scale, 1));
   transform-origin: 17px 36px;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, filter 0.15s ease;
+  /* Heat glow — a colored halo scaled by `--heat` (0–1, set inline per proposal
+     by makeVoteTypeIcon), in `--heat-color` sampled from the map's heat ramp. At
+     heat 0 the radius is 0 and the color transparent → no glow (the plain pin).
+     A hotter proposal both spreads wider and burns brighter, so it pops against
+     the dimmed heat field. Two stacked shadows give the hottest pins a tighter
+     bright core plus a soft outer bloom. */
+  --heat: 0;
+  filter:
+    drop-shadow(0 0 calc(var(--heat) * 5px)
+      color-mix(in srgb, var(--heat-color, transparent) calc(var(--heat) * 90%), transparent))
+    drop-shadow(0 0 calc(var(--heat) * 12px)
+      color-mix(in srgb, var(--heat-color, transparent) calc(var(--heat) * 55%), transparent));
 }
 
 .vote-type-indicator-pin {
@@ -1623,10 +1635,12 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   overflow: visible;
 }
 .vote-type-indicator-fill { fill: var(--paper); }
-/* Outer outline (square + tail). Idle = thin hairline; pin states thicken it. */
+/* Outer outline (square + tail). Idle = thin hairline; pin states thicken it.
+   Heat burns the hairline toward the ramp color by `--heat`, so a hot pin gets a
+   warm-colored edge while a cold one stays a neutral hairline. */
 .vote-type-indicator-outer {
   fill: none;
-  stroke: var(--hairline);
+  stroke: color-mix(in srgb, var(--heat-color, transparent) calc(var(--heat, 0) * 100%), var(--hairline));
   stroke-width: 1.5;
   transition: stroke 0.15s ease, stroke-width 0.15s ease;
 }

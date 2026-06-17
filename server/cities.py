@@ -126,6 +126,20 @@ CITIES: dict[str, City] = {
         pbf_url="https://download.bbbike.org/osm/bbbike/WashingtonDC/WashingtonDC.osm.pbf",
         osrm_service="osrm-dc",
     ),
+    "philly": City(
+        id="philly",
+        name="Philadelphia",
+        # City limits: elongated NE-SW (Navy Yard in the south up to Somerton in
+        # the far northeast). Box sized to enclose the whole city.
+        bbox=(39.867, -75.280, 40.138, -74.956),
+        # Center on the bbox midpoint so the votable area opens centered.
+        center=(40.003, -75.118),
+        default_zoom=12,
+        min_zoom=11,
+        max_zoom=21,
+        pbf_url="https://download.bbbike.org/osm/bbbike/Philadelphia/Philadelphia.osm.pbf",
+        osrm_service="osrm-philly",
+    ),
 }
 
 

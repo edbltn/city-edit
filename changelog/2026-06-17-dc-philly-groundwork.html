@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expansion groundwork — Philadelphia (and finishing D.C.) — 2026-06-17</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Expansion groundwork — Philadelphia (and finishing D.C.)</h1>
+    <div class="dateline">2026-06-17 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#registry">1</a>
+<a href="#presets">2</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Groundwork for launching in Washington, D.C. and Philadelphia. D.C. was already
+  registered; this pass adds Philadelphia end-to-end (city registry, merged-OSRM clip, built walk graph)
+  and seeds preset maps so both cities are reachable out-of-the-box. Purely additive backend/data —
+  deliberately disjoint from the in-flight block-level voting pipeline (<code>server/streetscape_blocks/</code>).</p>
+
+  
+    <section class="card" id="registry">
+      <div class="tag">Backend · config</div>
+      <h2>1 · Register Philadelphia as a city</h2>
+      <h3>Context</h3>
+      <p>We want to launch in D.C. and Philadelphia. D.C. was already wired into the city registry; Philadelphia was entirely absent, so it couldn’t be selected when proposing a map, OSRM didn’t route it, and no graph existed for it.</p>
+      <h3>How it works</h3>
+      <ul><li>A <em>city</em> in City Edit is data-driven from <code>server/cities.py</code> (bbox + center + zooms + the source PBF + the OSRM service). The client city dropdown auto-populates from <code>/api/cities</code>, so adding a city is purely a backend/data step — no client changes.</li>
+<li>Two collaborating definitions must agree on the bbox: <code>cities.py</code> (<code>south,west,north,east</code>) drives the votable walk-graph build and the map view, while <code>osrm/build-merged.sh</code> (<code>west,south,east,north</code> for osmium) clips the city into the single merged OSRM extract that serves every city from one instance.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Added Philadelphia to <code>CITIES</code></strong> in <code>server/cities.py</code> — bbox <code>(39.867, -75.280, 40.138, -74.956)</code> enclosing the elongated NE–SW city limits (Navy Yard up to Somerton), center on the bbox midpoint so the map opens centered, zooms matching the other mid-size cities, the bbbike Philadelphia PBF, and <code>osrm_service="osrm-philly"</code>.</li>
+<li><strong>Added the matching <code>philly</code> line to <code>osrm/build-merged.sh</code></strong> (osmium <code>west,south,east,north</code> order) with the bbbike primary + geofabrik <code>pennsylvania-latest</code> fallback URL, so the next merged-OSRM build routes Philadelphia.</li>
+<li><strong>Built the Philadelphia walk graph</strong> locally with <code>refresh_osm.py --city philly --force</code> → <code>osm_data/philly/walk_graph.pkl</code> (504,998 nodes / 1,177,436 edges, 107&nbsp;MB — between SF and Chicago in size).</li>
+<li><strong>Derived <code>GraphRegistry(max_loaded=…)</code> from <code>len(CITIES)</code></strong> instead of the hard-coded <code>4</code>, so the resident-graph budget tracks the registry automatically and never silently under-provisions when the next city is added.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/cities.py — add the philly City to CITIES</li>
+<li>osrm/build-merged.sh — add the philly clip line (+ refresh the stale city-list comment)</li>
+<li>server/app.py — max_loaded = len(CITIES) + len(STATION_NETWORKS) (was 4 + …)</li></ul>
+    </section>
+    
+
+    <section class="card" id="presets">
+      <div class="tag">Backend · seed data</div>
+      <h2>2 · Make D.C. and Philly reachable out-of-the-box</h2>
+      <h3>Context</h3>
+      <p>Registering a city only makes it <em>selectable</em> in Propose-a-Map. A city has no actual maps until a <code>maps</code> row exists, so D.C. and Philly had nowhere to land — you couldn’t open <code>/m/&lt;slug&gt;</code> for either.</p>
+      <h3>How it works</h3>
+      <ul><li>Maps are DB rows. <code>seed_presets()</code> runs at startup (idempotent upsert) and seeds the canonical preset vote-type lists plus the preset maps from <code>server/presets.py</code> <code>PRESET_MAPS</code> — which until now held only the three NYC maps (Bikes / Trees / Walkways).</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Added six preset maps</strong> to <code>PRESET_MAPS</code> — <code>dc-bikes / dc-trees / dc-walkways</code> and <code>philly-bikes / philly-trees / philly-walkways</code> — reusing the existing <code>bikes / trees / walkways</code> vote-type lists, for parity with NYC.</li>
+<li><strong>Launched subdomain-less</strong> (<code>subdomain: None</code>): the NYC presets keep their vanity <code>bikepaths./trees./walkways.</code> hosts, but the new cities are reached at <code>/m/&lt;slug&gt;</code> until DNS/TLS is added — the <code>subdomain</code> column is nullable and the seed upsert handles <code>None</code> cleanly.</li>
+<li><strong>Refreshed the stale “Preset NYC maps” comment</strong> to describe the general case.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/presets.py — six dc-*/philly-* PRESET_MAPS entries (+ comment)</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li><code>python -c 'import cities, presets'</code> — both import; <code>CITIES</code> is <code>['nyc','sf','chicago','dc','philly']</code>; every <code>PRESET_MAPS</code> entry’s <code>city_id</code> and <code>list_key</code> resolves.</li>
+<li><code>bash -n osrm/build-merged.sh</code> — syntax clean.</li>
+<li><code>refresh_osm.py --city philly --force</code> — built <code>osm_data/philly/walk_graph.pkl</code> (504,998 nodes / 1,177,436 edges).</li>
+<li>Booted host Flask and hit <code>GET /api/cities</code> — returns all five cities including <code>dc</code> and <code>philly</code> with correct bounds/center/tilesPath.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Bring up local Postgres (Docker daemon was down this session: <code>docker compose up -d postgres</code>), restart Flask, and confirm the boot log shows <code>seed_presets</code> succeed (no “Failed to seed presets”).</li>
+<li>Open <code>http://localhost:3000/m/philly-walkways</code> and <code>/m/dc-walkways</code> — the map should center on the right city and the votable street network should render.</li>
+<li>Curl <code>localhost:5001/api/graph-votes?map=philly-walkways&amp;mode=walkways</code> and confirm it returns vote arrays sized to the Philly topology (no length mismatch).</li>
+<li>Cast a vote on a Philly street and confirm it persists + paints (exercises OSRM node-id → edge mapping for the new city).</li>
+<li>For prod: run <code>gcloud builds submit</code> so the merged OSRM image picks up Philadelphia, then let the boot warmup build the <code>philly</code> graph on-demand (see the resnap-on-deploy runbook).</li>
+<li>Decide whether D.C./Philly want vanity subdomains; if so, add DNS/TLS and set the <code>subdomain</code> via the admin endpoint.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">osrm/build-merged.sh</span>
+            <span class="stat"><span class="d-add">+4</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill on">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">OSRM build · osrm/</span>
+        <span class="ctx-sum">produces the single merged .osm.pbf that one OSRM instance uses to route every city</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build-merged.sh</span>
+        <span class="ctx-sum">~73 LOC — download → clip each city to its bbox → osmium-merge into combined.osm.pbf</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Header / rationale comment</span><span class="ol-sum">why one merged extract serves all cities</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">CITIES array — nyc / sf / chicago / dc</span><span class="ol-sum">name|primary|fallback|bbox lines</span></li><li class="changed"><span class="ol-label">CITIES array — philly</span><span class="ol-sum">NEW — bbbike + geofabrik-PA fallback, osmium bbox order</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">download_pbf — retries across primary/fallback</span><span class="ol-sum">resilient wget loop</span></li><li class="dim"><span class="ol-label">clip loop + osmium merge</span><span class="ol-sum">extract per bbox, merge to combined.osm.pbf</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>philly clip line — bbbike primary + geofabrik pennsylvania-latest fallback, bbox -75.280,39.867,-74.956,40.138</li><li>header comment — &quot;NYC, SF, and Chicago&quot; → &quot;every supported city (see the CITIES list below)&quot;</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/osrm/build-merged.sh b/osrm/build-merged.sh</span>
+<span class="d-meta">index ab6b561..d71eccc 100644</span>
+<span class="d-meta">--- a/osrm/build-merged.sh</span>
+<span class="d-meta">+++ b/osrm/build-merged.sh</span>
+<span class="d-hunk">@@ -2,8 +2,9 @@</span>
+<span class="d-ctx"> # Produce a SINGLE merged .osm.pbf covering every supported city.</span>
+<span class="d-ctx"> #</span>
+<span class="d-ctx"> # OSRM doesn&#x27;t care that the cities are geographically far apart — coordinates</span>
+<span class="d-del">-# are global — so one routed instance can serve NYC, SF, and Chicago from one</span>
+<span class="d-del">-# combined extract. We clip each source PBF to its city bbox first (NYC ships as</span>
+<span class="d-add">+# are global — so one routed instance can serve every supported city (see the</span>
+<span class="d-add">+# CITIES list below) from one combined extract. We clip each source PBF to its</span>
+<span class="d-add">+# city bbox first (NYC ships as</span>
+<span class="d-ctx"> # the whole NY-state extract; clipping keeps the merged file small), then</span>
+<span class="d-ctx"> # osmium-merge into one combined.osm.pbf. The OSRM extract/partition/customize</span>
+<span class="d-ctx"> # runs in the next Docker stage (the osrm-backend image already ships those tools</span>
+<span class="d-hunk">@@ -25,6 +26,7 @@ CITIES=(</span>
+<span class="d-ctx">   &quot;sf|https://download.bbbike.org/osm/bbbike/SanFrancisco/SanFrancisco.osm.pbf|https://download.geofabrik.de/north-america/us/california-latest.osm.pbf|-122.516,37.700,-122.354,37.832&quot;</span>
+<span class="d-ctx">   &quot;chicago|https://download.bbbike.org/osm/bbbike/Chicago/Chicago.osm.pbf|https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf|-87.75,41.78,-87.58,42.02&quot;</span>
+<span class="d-ctx">   &quot;dc|https://download.bbbike.org/osm/bbbike/WashingtonDC/WashingtonDC.osm.pbf|https://download.geofabrik.de/north-america/us/district-of-columbia-latest.osm.pbf|-77.12,38.79,-76.91,39.00&quot;</span>
+<span class="d-add">+  &quot;philly|https://download.bbbike.org/osm/bbbike/Philadelphia/Philadelphia.osm.pbf|https://download.geofabrik.de/north-america/us/pennsylvania-latest.osm.pbf|-75.280,39.867,-74.956,40.138&quot;</span>
+<span class="d-ctx"> )</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Download with retries across the primary then fallback URL. A bare `wget` under</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+5</span> / <span class="d-del">-5</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask backend · server/</span>
+        <span class="ctx-sum">HTTP + WebSocket routes, the per-map vote cache, graph + OSRM registries, startup warmup</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~1640 LOC — every API/WS route plus the registries and the boot warmup</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Imports + setup</span><span class="ol-sum">cities, registries, redis client</span></li><li class="changed"><span class="ol-label">GraphRegistry construction</span><span class="ol-sum">max_loaded budget — now derived from len(CITIES)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Map resolution / passcode / vote cache</span><span class="ol-sum">resolve_map + bounded LRU vote cache</span></li><li class="changed"><span class="ol-label">Startup warmup</span><span class="ol-sum">preload every city&#x27;s graph + vote body; docstring no longer says &quot;four&quot;</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Vote / graph / admin APIs</span><span class="ol-sum">/api/vote, /api/graph-*, admin</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>GraphRegistry(max_loaded=len(CITIES) + len(STATION_NETWORKS)) — was 4 + len(STATION_NETWORKS)</li><li>warmup docstring — &quot;All four cities&quot; / &quot;max_loaded=4&quot; → len(CITIES)-relative wording</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index 7aae40a..d9406b2 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -26,6 +26,7 @@ import vote_migration</span>
+<span class="d-ctx"> import database</span>
+<span class="d-ctx"> from cities import CITIES, DEFAULT_CITY_ID, get_city, all_cities</span>
+<span class="d-ctx"> from graph_registry import GraphRegistry, OsrmRegistry, STATION_NETWORKS</span>
+<span class="d-add">+from osrm_router import extract_all_segments</span>
+<span class="d-ctx"> from database import (</span>
+<span class="d-ctx">     init_db, get_cursor, record_edge_votes, delete_edge_votes,</span>
+<span class="d-ctx">     get_voter_edge_direction, get_voter_edge_directions,</span>
+<span class="d-hunk">@@ -97,7 +98,7 @@ except redis.ConnectionError as e:</span>
+<span class="d-ctx"> # python_router drops the heavy networkx graph after load (compact arrays instead)</span>
+<span class="d-ctx"> # and carries no routing graph at all — OSRM serves every route. DC&#x27;s graph is</span>
+<span class="d-ctx"> # small (~SF size); station networks are tiny (tens of nodes).</span>
+<span class="d-del">-graph_registry = GraphRegistry(redis_client=redis_client, max_loaded=4 + len(STATION_NETWORKS))</span>
+<span class="d-add">+graph_registry = GraphRegistry(redis_client=redis_client, max_loaded=len(CITIES) + len(STATION_NETWORKS))</span>
+<span class="d-ctx"> osrm_registry = OsrmRegistry()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # ── Database + vote types ──────────────────────────────────────────────────</span>
+<span class="d-hunk">@@ -458,9 +459,9 @@ def _prewarm():</span>
+<span class="d-ctx">     &quot;&quot;&quot;Preload every map&#x27;s graph + vote cache so no map cold-loads on first hit.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     Loads each city&#x27;s walk graph (the slow part — NYC ~60-120s) and builds each</span>
+<span class="d-del">-    map&#x27;s vote body in a background thread. All four cities fit resident now that</span>
+<span class="d-del">-    python_router frees networkx after load (max_loaded=4), so warming everything</span>
+<span class="d-del">-    no longer risks the 16Gi OOM that the all-resident set used to cause.&quot;&quot;&quot;</span>
+<span class="d-add">+    map&#x27;s vote body in a background thread. Every city fits resident now that</span>
+<span class="d-add">+    python_router frees networkx after load (max_loaded=len(CITIES)), so warming</span>
+<span class="d-add">+    everything no longer risks the 16Gi OOM that the all-resident set used to cause.&quot;&quot;&quot;</span>
+<span class="d-ctx">     try:</span>
+<span class="d-ctx">         warmed = 0</span>
+<span class="d-ctx">         for m in list_maps():</span>
+<span class="d-hunk">@@ -892,7 +893,6 @@ def calculate_route():</span>
+<span class="d-ctx">             )</span>
+<span class="d-ctx">             return jsonify(route), 404</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-        from desire_path_voting import extract_all_segments</span>
+<span class="d-ctx">         segments = extract_all_segments(route.get(&quot;geometry&quot;))</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         # Map OSRM route → graph edge IDs for fast voting + optimistic updates.</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/cities.py</span>
+            <span class="stat"><span class="d-add">+14</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill on">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask backend · server/</span>
+        <span class="ctx-sum">the curated city registry: bbox, default view, OSRM endpoint, on-disk graph/tiles paths</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">cities.py</span>
+        <span class="ctx-sum">~150 LOC — the City dataclass + the CITIES registry every map references by id</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Per-city OSRM host helper</span><span class="ol-sum">_env_osrm_host — OSRM_HOST_&lt;CITY&gt; override</span></li><li class="dim"><span class="ol-label">City dataclass</span><span class="ol-sum">bbox/center/zooms + data_dir, osrm_host, geocode_bbox, to_public</span></li><li class="dim"><span class="ol-label">CITIES registry — nyc / sf / chicago / dc</span><span class="ol-sum">the existing four cities</span></li><li class="changed"><span class="ol-label">CITIES registry — philly</span><span class="ol-sum">NEW — Philadelphia bbox + center + bbbike PBF + osrm-philly</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Lookups</span><span class="ol-sum">get_city, all_cities</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>philly City entry — bbox (39.867,-75.280,40.138,-74.956), center (40.003,-75.118), bbbike Philadelphia PBF, osrm-philly</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/cities.py b/server/cities.py</span>
+<span class="d-meta">index 603fb39..250aec9 100644</span>
+<span class="d-meta">--- a/server/cities.py</span>
+<span class="d-meta">+++ b/server/cities.py</span>
+<span class="d-hunk">@@ -126,6 +126,20 @@ CITIES: dict[str, City] = {</span>
+<span class="d-ctx">         pbf_url=&quot;https://download.bbbike.org/osm/bbbike/WashingtonDC/WashingtonDC.osm.pbf&quot;,</span>
+<span class="d-ctx">         osrm_service=&quot;osrm-dc&quot;,</span>
+<span class="d-ctx">     ),</span>
+<span class="d-add">+    &quot;philly&quot;: City(</span>
+<span class="d-add">+        id=&quot;philly&quot;,</span>
+<span class="d-add">+        name=&quot;Philadelphia&quot;,</span>
+<span class="d-add">+        # City limits: elongated NE-SW (Navy Yard in the south up to Somerton in</span>
+<span class="d-add">+        # the far northeast). Box sized to enclose the whole city.</span>
+<span class="d-add">+        bbox=(39.867, -75.280, 40.138, -74.956),</span>
+<span class="d-add">+        # Center on the bbox midpoint so the votable area opens centered.</span>
+<span class="d-add">+        center=(40.003, -75.118),</span>
+<span class="d-add">+        default_zoom=12,</span>
+<span class="d-add">+        min_zoom=11,</span>
+<span class="d-add">+        max_zoom=21,</span>
+<span class="d-add">+        pbf_url=&quot;https://download.bbbike.org/osm/bbbike/Philadelphia/Philadelphia.osm.pbf&quot;,</span>
+<span class="d-add">+        osrm_service=&quot;osrm-philly&quot;,</span>
+<span class="d-add">+    ),</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/presets.py</span>
+            <span class="stat"><span class="d-add">+25</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask backend · server/</span>
+        <span class="ctx-sum">canonical preset vote-type lists + the preset maps seeded at startup</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">presets.py</span>
+        <span class="ctx-sum">~117 LOC — PRESET_LISTS (bikes/trees/walkways) + PRESET_MAPS seed rows</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">PRESET_LISTS</span><span class="ol-sum">the three canonical vote-type lists</span></li><li class="changed"><span class="ol-label">PRESET_MAPS — header comment</span><span class="ol-sum">now describes the general (non-NYC) case</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">PRESET_MAPS — nyc-*</span><span class="ol-sum">the three existing NYC maps (keep vanity subdomains)</span></li><li class="changed"><span class="ol-label">PRESET_MAPS — dc-* / philly-*</span><span class="ol-sum">NEW — six subdomain-less maps for the new cities</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>PRESET_MAPS header comment generalized beyond NYC</li><li>dc-bikes / dc-trees / dc-walkways — subdomain: None</li><li>philly-bikes / philly-trees / philly-walkways — subdomain: None</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/presets.py b/server/presets.py</span>
+<span class="d-meta">index e475667..dd21ccd 100644</span>
+<span class="d-meta">--- a/server/presets.py</span>
+<span class="d-meta">+++ b/server/presets.py</span>
+<span class="d-hunk">@@ -79,8 +79,9 @@ PRESET_LISTS: dict[str, dict] = {</span>
+<span class="d-ctx">     },</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# Preset NYC maps seeded at startup. slug → (name, city_id, list key, subdomain).</span>
+<span class="d-del">-# `subdomain` preserves the existing bikepaths./trees./walkways. routing.</span>
+<span class="d-add">+# Preset maps seeded at startup. slug → (name, city_id, list key, subdomain).</span>
+<span class="d-add">+# `subdomain` preserves the existing NYC bikepaths./trees./walkways. routing; new</span>
+<span class="d-add">+# cities launch subdomain-less (reachable at /m/&lt;slug&gt;) until DNS/TLS is added.</span>
+<span class="d-ctx"> PRESET_MAPS: list[dict] = [</span>
+<span class="d-ctx">     {&quot;slug&quot;: &quot;nyc-bikes&quot;, &quot;name&quot;: &quot;NYC Bikes&quot;, &quot;city_id&quot;: &quot;nyc&quot;,</span>
+<span class="d-ctx">      &quot;list_key&quot;: &quot;bikes&quot;, &quot;subdomain&quot;: &quot;bikepaths&quot;,</span>
+<span class="d-hunk">@@ -91,4 +92,26 @@ PRESET_MAPS: list[dict] = [</span>
+<span class="d-ctx">     {&quot;slug&quot;: &quot;nyc-walkways&quot;, &quot;name&quot;: &quot;NYC Walkways&quot;, &quot;city_id&quot;: &quot;nyc&quot;,</span>
+<span class="d-ctx">      &quot;list_key&quot;: &quot;walkways&quot;, &quot;subdomain&quot;: &quot;walkways&quot;,</span>
+<span class="d-ctx">      &quot;subtitle&quot;: &quot;A more walkable New York City&quot;},</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # Washington, D.C. — no vanity subdomains yet (reach via /m/&lt;slug&gt;).</span>
+<span class="d-add">+    {&quot;slug&quot;: &quot;dc-bikes&quot;, &quot;name&quot;: &quot;D.C. Bikes&quot;, &quot;city_id&quot;: &quot;dc&quot;,</span>
+<span class="d-add">+     &quot;list_key&quot;: &quot;bikes&quot;, &quot;subdomain&quot;: None,</span>
+<span class="d-add">+     &quot;subtitle&quot;: &quot;Better cycling in Washington, D.C.&quot;},</span>
+<span class="d-add">+    {&quot;slug&quot;: &quot;dc-trees&quot;, &quot;name&quot;: &quot;D.C. Trees&quot;, &quot;city_id&quot;: &quot;dc&quot;,</span>
+<span class="d-add">+     &quot;list_key&quot;: &quot;trees&quot;, &quot;subdomain&quot;: None,</span>
+<span class="d-add">+     &quot;subtitle&quot;: &quot;A greener Washington, D.C.&quot;},</span>
+<span class="d-add">+    {&quot;slug&quot;: &quot;dc-walkways&quot;, &quot;name&quot;: &quot;D.C. Walkways&quot;, &quot;city_id&quot;: &quot;dc&quot;,</span>
+<span class="d-add">+     &quot;list_key&quot;: &quot;walkways&quot;, &quot;subdomain&quot;: None,</span>
+<span class="d-add">+     &quot;subtitle&quot;: &quot;A more walkable Washington, D.C.&quot;},</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # Philadelphia — no vanity subdomains yet (reach via /m/&lt;slug&gt;).</span>
+<span class="d-add">+    {&quot;slug&quot;: &quot;philly-bikes&quot;, &quot;name&quot;: &quot;Philly Bikes&quot;, &quot;city_id&quot;: &quot;philly&quot;,</span>
+<span class="d-add">+     &quot;list_key&quot;: &quot;bikes&quot;, &quot;subdomain&quot;: None,</span>
+<span class="d-add">+     &quot;subtitle&quot;: &quot;Better cycling in Philadelphia&quot;},</span>
+<span class="d-add">+    {&quot;slug&quot;: &quot;philly-trees&quot;, &quot;name&quot;: &quot;Philly Trees&quot;, &quot;city_id&quot;: &quot;philly&quot;,</span>
+<span class="d-add">+     &quot;list_key&quot;: &quot;trees&quot;, &quot;subdomain&quot;: None,</span>
+<span class="d-add">+     &quot;subtitle&quot;: &quot;A greener Philadelphia&quot;},</span>
+<span class="d-add">+    {&quot;slug&quot;: &quot;philly-walkways&quot;, &quot;name&quot;: &quot;Philly Walkways&quot;, &quot;city_id&quot;: &quot;philly&quot;,</span>
+<span class="d-add">+     &quot;list_key&quot;: &quot;walkways&quot;, &quot;subdomain&quot;: None,</span>
+<span class="d-add">+     &quot;subtitle&quot;: &quot;A more walkable Philadelphia&quot;},</span>
+<span class="d-ctx"> ]</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_dc_philly_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_dc_philly_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

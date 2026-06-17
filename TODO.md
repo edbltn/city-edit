@@ -47,6 +47,9 @@ cd client-react && npm run dev                          # http://localhost:3000
 
 ### Deploy
 
+> **⚠️ Always back up the prod DB locally first** — see
+> [docs/gcp-deployment.md#database-access--backups](docs/gcp-deployment.md#database-access--backups).
+
 ```bash
 gcloud builds submit --config=cloudbuild.yaml --project=google-mpf-ywspom2sxeey
 ```

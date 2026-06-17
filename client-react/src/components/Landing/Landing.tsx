@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   THEME_ORDER, iconSrc, isApexHost, subdomainHref, presetForMap, symbolForMap, type Theme,
 } from "../../themes";
@@ -65,11 +65,44 @@ function fallbackCards(): DisplayCard[] {
 // fetch never flashes a misleading partial list of presets.
 const SKELETON_COUNT = 5;
 
+const SEARCH_PLACEHOLDER = "Search maps by city or vote type…";
+
 export function Landing() {
   const [cards, setCards] = useState<DisplayCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [proposeOpen, setProposeOpen] = useState(false);
+
+  // Reveal the full placeholder via a native tooltip only when it's actually
+  // clipped. The placeholder isn't a measurable DOM node, so measure its text
+  // against the input's available width (re-checked on resize).
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [searchTitle, setSearchTitle] = useState("");
+
+  useEffect(() => {
+    const input = searchRef.current;
+    if (!input) return;
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const measure = () => {
+      if (!ctx) return;
+      const style = getComputedStyle(input);
+      const available =
+        input.clientWidth -
+        (parseFloat(style.paddingLeft) || 0) -
+        (parseFloat(style.paddingRight) || 0);
+      ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const textWidth = ctx.measureText(SEARCH_PLACEHOLDER).width;
+      setSearchTitle(textWidth > available ? SEARCH_PLACEHOLDER : "");
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(input);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     document.title = "City Edit — Pick a map";
@@ -121,11 +154,13 @@ export function Landing() {
             <line x1="11" y1="11" x2="15" y2="15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
           <input
+            ref={searchRef}
             className="landing-search"
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search maps by city or vote type…"
+            placeholder={SEARCH_PLACEHOLDER}
+            title={query ? "" : searchTitle}
             aria-label="Search maps"
             spellCheck={false}
             autoComplete="off"

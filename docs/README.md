@@ -10,7 +10,7 @@ Index and conventions for everything under `docs/`. Start here.
 | [url-routing.md](url-routing.md) | How the SPA resolves *which map* to show (slug / subdomain / apex), how links are built, and how an admin adds a vanity subdomain. |
 | [flask-considerations.md](flask-considerations.md) | Backend architecture notes for the real-time vote broadcast path and running across multiple Flask servers. |
 | [testing.md](testing.md) | The test taxonomy — (backend, frontend) × (unit, integration, E2E) — and how to run each. |
-| [gcp-deployment.md](gcp-deployment.md) | Deploying to Google Cloud (Cloud Run + Memorystore + Artifact Registry + Cloud Build) and mapping custom domains. |
+| [gcp-deployment.md](gcp-deployment.md) | Deploying to Google Cloud (Cloud Run + Memorystore + Artifact Registry + Cloud Build), mapping custom domains, and reaching/backing up prod Postgres. |
 | [archive/](archive/) | Historical design docs that no longer match the code. See [archive/README.md](archive/README.md). |
 
 The frontend and load test have their own local READMEs: [`client-react/README.md`](../client-react/README.md) and [`loadtest/README.md`](../loadtest/README.md). The top-level [`README.md`](../README.md) is the project front door (quickstart + architecture).

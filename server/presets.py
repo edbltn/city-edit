@@ -79,8 +79,9 @@ PRESET_LISTS: dict[str, dict] = {
     },
 }
 
-# Preset NYC maps seeded at startup. slug → (name, city_id, list key, subdomain).
-# `subdomain` preserves the existing bikepaths./trees./walkways. routing.
+# Preset maps seeded at startup. slug → (name, city_id, list key, subdomain).
+# `subdomain` preserves the existing NYC bikepaths./trees./walkways. routing; new
+# cities launch subdomain-less (reachable at /m/<slug>) until DNS/TLS is added.
 PRESET_MAPS: list[dict] = [
     {"slug": "nyc-bikes", "name": "NYC Bikes", "city_id": "nyc",
      "list_key": "bikes", "subdomain": "bikepaths",
@@ -91,4 +92,26 @@ PRESET_MAPS: list[dict] = [
     {"slug": "nyc-walkways", "name": "NYC Walkways", "city_id": "nyc",
      "list_key": "walkways", "subdomain": "walkways",
      "subtitle": "A more walkable New York City"},
+
+    # Washington, D.C. — no vanity subdomains yet (reach via /m/<slug>).
+    {"slug": "dc-bikes", "name": "D.C. Bikes", "city_id": "dc",
+     "list_key": "bikes", "subdomain": None,
+     "subtitle": "Better cycling in Washington, D.C."},
+    {"slug": "dc-trees", "name": "D.C. Trees", "city_id": "dc",
+     "list_key": "trees", "subdomain": None,
+     "subtitle": "A greener Washington, D.C."},
+    {"slug": "dc-walkways", "name": "D.C. Walkways", "city_id": "dc",
+     "list_key": "walkways", "subdomain": None,
+     "subtitle": "A more walkable Washington, D.C."},
+
+    # Philadelphia — no vanity subdomains yet (reach via /m/<slug>).
+    {"slug": "philly-bikes", "name": "Philly Bikes", "city_id": "philly",
+     "list_key": "bikes", "subdomain": None,
+     "subtitle": "Better cycling in Philadelphia"},
+    {"slug": "philly-trees", "name": "Philly Trees", "city_id": "philly",
+     "list_key": "trees", "subdomain": None,
+     "subtitle": "A greener Philadelphia"},
+    {"slug": "philly-walkways", "name": "Philly Walkways", "city_id": "philly",
+     "list_key": "walkways", "subdomain": None,
+     "subtitle": "A more walkable Philadelphia"},
 ]

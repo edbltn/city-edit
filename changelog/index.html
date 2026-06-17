@@ -29,6 +29,24 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-06-17-remove-ferry-edges.html">
+    <div class="date">2026-06-17</div>
+    <h2>Removing ferry edges from routing and the display graph</h2>
+    <p>Ferry ways tagged <code>foot=yes</code> (Staten Island Ferry, Governors Island, NYC Ferry…)
+    were slipping past the "ferries disabled" foot profile via an access fallback shared by OSRM and
+    its Python mirror — so routes jumped open water and ferry lines lingered in the hover graph. Added
+    an explicit <code>route=ferry</code> cutoff to both, rebuilt every graph + the OSRM dataset, and
+    added a reverse-coverage check that keeps the two graphs consistent.</p>
+  </a>
+
+  <a class="entry" href="./2026-06-17-dc-philly-groundwork.html">
+    <div class="date">2026-06-17</div>
+    <h2>Expansion groundwork — Philadelphia (and finishing D.C.)</h2>
+    <p>Registered Philadelphia end-to-end (city registry, merged-OSRM clip, and a freshly built
+    505K-node walk graph), derived the resident-graph budget from the registry, and seeded preset
+    Bikes/Trees/Walkways maps so both D.C. and Philly are reachable out-of-the-box.</p>
+  </a>
+
   <a class="entry" href="./2026-06-14-caching-concurrency-zoom.html">
     <div class="date">2026-06-14</div>
     <h2>Backend caching + concurrency, and the zoom overhaul</h2>

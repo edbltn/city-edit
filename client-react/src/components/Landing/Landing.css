@@ -85,6 +85,7 @@
   background: rgba(212, 212, 212, 0.04);
   border: 1px solid var(--hairline);
   border-radius: 0;
+  text-overflow: ellipsis;
 }
 
 .landing-search::placeholder {

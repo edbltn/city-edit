@@ -45,6 +45,21 @@ gcloud config set project google-mpf-ywspom2sxeey
 
 ## Deploying Changes
 
+> ## ⚠️ ALWAYS back up the prod DB locally before deploying.
+>
+> Every deploy — no exceptions. Take a fresh local snapshot of Cloud SQL
+> (`desire-path-votes-prod`) **before** you run any deploy command below, so a
+> bad migration or resnap can be rolled back. See
+> [Making a snapshot](#making-a-snapshot); snapshots live in
+> `~/city-edit-prod-backups/<UTC-timestamp>/`, never in the repo.
+>
+> ```bash
+> # 0. BACKUP FIRST — open the tunnel, then snapshot (see "Database Access & Backups")
+> DIR=~/city-edit-prod-backups/$(date -u +%Y%m%d-%H%M%S)
+> mkdir -p "$DIR" && pg_dump "$PROD_DB_URL" -Fc -f "$DIR/prod-full.dump"
+> # …only then deploy.
+> ```
+
 ### Option 1 — Cloud Build (recommended)
 
 Builds both images (osrm, app), pushes them, and updates both Cloud Run
@@ -93,6 +108,81 @@ which preserves existing env vars):
 | `SKIP_WARMUP` | Skip graph warmup on boot for faster startup. |
 
 There is **no routing API key** — routing is self-hosted OSRM.
+
+## Database Access & Backups
+
+### Reaching prod Postgres (IAP tunnel)
+
+Cloud SQL (`desire-path-votes-prod`) has no public IP. Reach it through the
+`bastion-prod` VM over IAP, binding the tunnel to **local port 5433**.
+
+> **⚠️ Use 5433, never 5432.** Local dev's own Postgres lives on `localhost:5432`
+> (`server/.env` `DATABASE_URL`). A tunnel on `5432` shadows it, so a host-run
+> Flask or `psql` silently connects to **prod**. Keep prod on 5433 and never
+> repoint `server/.env` at it — pass the prod URL inline for the one command
+> that needs it, then kill the tunnel.
+
+```bash
+# Terminal A — open the tunnel (prod → local 5433)
+gcloud compute ssh bastion-prod --zone=us-central1-a \
+  --project=google-mpf-ywspom2sxeey --tunnel-through-iap \
+  --ssh-flag="-N" --ssh-flag="-L 5433:10.39.0.3:5432"
+
+# Terminal B — connect with prod creds via localhost:5433
+PROD_DB_URL="$(gcloud secrets versions access latest --secret=database-url-prod \
+  --project=google-mpf-ywspom2sxeey | sed -E 's#@[^/]+/#@localhost:5433/#')"
+psql "$PROD_DB_URL"
+```
+
+### Where backups live
+
+Manual prod snapshots are stored **outside the repo**, on the operator's machine
+at `~/city-edit-prod-backups/<UTC-timestamp>/` (e.g. `20260603-192923/`). They
+hold real vote data, so they are intentionally not committed — the repo's
+`.gitignore` also drops loose `*.dump` files. Each snapshot directory contains:
+
+| File | What it is |
+|------|------------|
+| `prod-full.dump` | `pg_dump -Fc` custom-format dump of the whole DB — restore with `pg_restore`. |
+| `prod-full.sql.gz` | Same dump as gzipped plain SQL, for `psql`-based restore or eyeballing. |
+| `edge_votes.csv`, `maps.csv`, `vote_types.csv` | Per-table CSV exports (the load-bearing vote tables) for quick inspection or partial reload. |
+| `edge_votes.postbackfill.csv` | A second `edge_votes` export taken *after* a backfill/migration step, when one was run. |
+| `SHA256SUMS.txt` | Checksums of every file above, for integrity verification. |
+
+### Making a snapshot
+
+With the tunnel open (above), from a fresh timestamped directory:
+
+```bash
+DIR=~/city-edit-prod-backups/$(date -u +%Y%m%d-%H%M%S)
+mkdir -p "$DIR" && cd "$DIR"
+
+# Full dumps (custom + plain SQL)
+pg_dump "$PROD_DB_URL" -Fc -f prod-full.dump
+pg_dump "$PROD_DB_URL" | gzip > prod-full.sql.gz
+
+# Per-table CSV exports
+for t in maps vote_types edge_votes; do
+  psql "$PROD_DB_URL" -c "\copy $t TO '$DIR/$t.csv' WITH CSV HEADER"
+done
+
+shasum -a 256 * > SHA256SUMS.txt
+```
+
+### Restoring
+
+Verify integrity first, then restore into a target DB. **Never restore into prod
+casually** — `pg_restore --clean` drops existing objects. The safe path is to
+restore into **local dev** (`localhost:5432`, the `votes` database):
+
+```bash
+cd ~/city-edit-prod-backups/<timestamp>
+shasum -a 256 -c SHA256SUMS.txt          # confirm files are intact
+
+# Restore the full dump into local dev's votes DB
+pg_restore --clean --if-exists --no-owner \
+  -d "postgresql://app:devpassword@localhost:5432/votes" prod-full.dump
+```
 
 ## Custom Domains
 

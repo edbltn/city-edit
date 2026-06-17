@@ -126,6 +126,9 @@ The app runs on Cloud Run (Flask + OSRM), Memorystore Redis, Cloud SQL Postgres,
 and Artifact Registry, built by Cloud Build. Full guide:
 [docs/gcp-deployment.md](docs/gcp-deployment.md).
 
+> **⚠️ Always back up the prod DB locally before deploying** — every time, no
+> exceptions. See [Database Access & Backups](docs/gcp-deployment.md#database-access--backups).
+
 ```bash
 # Build and deploy from the repo root
 gcloud builds submit --config=cloudbuild.yaml --project=google-mpf-ywspom2sxeey

@@ -26,6 +26,7 @@ import vote_migration
 import database
 from cities import CITIES, DEFAULT_CITY_ID, get_city, all_cities
 from graph_registry import GraphRegistry, OsrmRegistry, STATION_NETWORKS
+from osrm_router import extract_all_segments
 from database import (
     init_db, get_cursor, record_edge_votes, delete_edge_votes,
     get_voter_edge_direction, get_voter_edge_directions,
@@ -97,7 +98,7 @@ except redis.ConnectionError as e:
 # python_router drops the heavy networkx graph after load (compact arrays instead)
 # and carries no routing graph at all — OSRM serves every route. DC's graph is
 # small (~SF size); station networks are tiny (tens of nodes).
-graph_registry = GraphRegistry(redis_client=redis_client, max_loaded=4 + len(STATION_NETWORKS))
+graph_registry = GraphRegistry(redis_client=redis_client, max_loaded=len(CITIES) + len(STATION_NETWORKS))
 osrm_registry = OsrmRegistry()
 
 # ── Database + vote types ──────────────────────────────────────────────────
@@ -458,9 +459,9 @@ def _prewarm():
     """Preload every map's graph + vote cache so no map cold-loads on first hit.
 
     Loads each city's walk graph (the slow part — NYC ~60-120s) and builds each
-    map's vote body in a background thread. All four cities fit resident now that
-    python_router frees networkx after load (max_loaded=4), so warming everything
-    no longer risks the 16Gi OOM that the all-resident set used to cause."""
+    map's vote body in a background thread. Every city fits resident now that
+    python_router frees networkx after load (max_loaded=len(CITIES)), so warming
+    everything no longer risks the 16Gi OOM that the all-resident set used to cause."""
     try:
         warmed = 0
         for m in list_maps():
@@ -892,7 +893,6 @@ def calculate_route():
             )
             return jsonify(route), 404
 
-        from desire_path_voting import extract_all_segments
         segments = extract_all_segments(route.get("geometry"))
 
         # Map OSRM route → graph edge IDs for fast voting + optimistic updates.

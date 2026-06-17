@@ -143,3 +143,22 @@ class OsrmRouter(RouterInterface):
             "osm_node_ids": osm_node_ids,
             "_cache_hit": False,
         }
+
+
+def extract_all_segments(geometry: dict) -> list[list]:
+    """Split an OSRM route geometry into consecutive coordinate-pair segments.
+
+    Args:
+        geometry: Route geometry with ``coordinates`` [[lon, lat], ...].
+
+    Returns:
+        List of ``[coord1, coord2]`` segments (empty if fewer than 2 coords).
+    """
+    if not geometry:
+        return []
+
+    coords = geometry.get("coordinates", [])
+    if len(coords) < 2:
+        return []
+
+    return [[coords[i], coords[i + 1]] for i in range(len(coords) - 1)]

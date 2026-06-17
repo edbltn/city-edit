@@ -24,6 +24,15 @@ export interface VoteTypeIconOptions {
    *  resolve which waypoint to remove. Stays clickable even when `passthrough`
    *  (the badge is pointer-events:auto; the rest of the icon is not). */
   removeEdge?: number | null;
+  /** "Heat" of this proposal, 0–1, normalized against the hottest visible
+   *  proposal's vote count. Drives a colored glow + border tint via CSS (the
+   *  `--heat` / `--heat-color` custom properties below), so a top proposal looks
+   *  as hot as the votes behind it. 0 (or omitted) renders the plain pin. */
+  heat?: number;
+  /** The glow/tint color for `heat`, sampled from the active map's heat ramp at
+   *  the same intensity the canvas heatmap uses — so a pin matches the hue the
+   *  heat field would paint under it. Ignored when `heat` is falsy. */
+  heatColor?: string;
 }
 
 // The pin is one atomic SVG shape (square + downward tail), drawn in a 34×42
@@ -82,8 +91,16 @@ export function makeVoteTypeIcon(
   const removeBadge = opts.removeEdge != null
     ? `<span class="vote-type-indicator-x" data-x-edge="${opts.removeEdge}" role="button" aria-label="Remove from route">×</span>`
     : "";
+  // Heat: hand the glow intensity + color to CSS as custom properties on the
+  // scaled .vote-type-indicator. CSS color-mixes the border and a drop-shadow
+  // glow by `--heat`, so a hotter proposal both glows brighter and burns its
+  // outline toward the ramp color. Omitted entirely at heat 0 → the plain pin.
+  const heat = opts.heat && opts.heatColor ? opts.heat : 0;
+  const heatStyle = heat > 0
+    ? ` style="--heat:${heat.toFixed(3)};--heat-color:${opts.heatColor}"`
+    : "";
   const html =
-    `<div class="${cls.join(" ")}">` +
+    `<div class="${cls.join(" ")}"${heatStyle}>` +
       `<svg class="vote-type-indicator-pin" viewBox="0 0 ${SVG_W} ${SVG_H}" width="${SVG_W}" height="${SVG_H}">` +
         `<path class="vote-type-indicator-fill" d="${shape}" />` +
         `<path class="vote-type-indicator-outer" d="${shape}" />` +

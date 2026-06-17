@@ -11,6 +11,7 @@ Active workstream (full report with diffs: `changelog/2026-06-14-caching-concurr
 
 - **Python dependencies**: ALWAYS install and manage Python packages with `uv pip` — never bare `pip`, `pip3`, `python -m pip`, `poetry`, `conda`, or `easy_install`. Add a package by editing `requirements.in`, recompile with `uv pip compile requirements.in -o requirements.txt`, then `uv pip install -r requirements.txt`. For one-off installs use `uv pip install <pkg>`. This applies everywhere: local venvs, scripts, and Dockerfiles.
 - **gcloud commands**: Run gcloud commands directly (e.g. `gcloud builds submit`, `gcloud run services logs read`, etc.) without asking the user.
+- **ALWAYS back up the prod DB locally before deploying** — every deploy, no exceptions. Take a fresh `pg_dump` snapshot of `desire-path-votes-prod` into `~/city-edit-prod-backups/<UTC-timestamp>/` *before* running any deploy command (Cloud Build, `terraform apply`, or `gcloud run services update`). Procedure: [docs/gcp-deployment.md#database-access--backups](docs/gcp-deployment.md#database-access--backups).
 - **docker commands**: Run docker commands directly (e.g. `docker compose up --build -d`, `docker compose logs`, etc.) without asking the user.
 - **Browser testing**: I have a browser AI helper that can report on status. When you need me to test something, ask questions that this AI can answer (descriptions of screenshots, UI changes that need verification, functionality checks, error messages visible on screen).
 
@@ -124,7 +125,7 @@ cd client-react && npm run dev
 
 ## Connecting to the Prod Database
 
-Prod Postgres is Cloud SQL `desire-path-votes-prod` (private IP `10.39.0.3:5432`), reached via IAP through the `bastion-prod` VM. Creds are in Secret Manager (`database-url-prod`).
+Prod Postgres is Cloud SQL `desire-path-votes-prod` (private IP `10.39.0.3:5432`), reached via IAP through the `bastion-prod` VM. Creds are in Secret Manager (`database-url-prod`). Backup/restore of prod data — and where snapshots live (`~/city-edit-prod-backups/`) — is documented in [docs/gcp-deployment.md](docs/gcp-deployment.md#database-access--backups).
 
 **⚠️ Bind the tunnel to local port 5433, never 5432.** Local dev's own DB lives on `localhost:5432` (`server/.env` `DATABASE_URL` and the `docker-compose.yml` postgres port). A tunnel on `5432` shadows it, so host-run Flask silently connects to **prod**. Keep prod on 5433; never repoint `server/.env` at prod — pass the prod URL inline for the one command that needs it, and kill the tunnel when done.
 

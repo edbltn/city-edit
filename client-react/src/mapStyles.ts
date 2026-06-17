@@ -217,3 +217,45 @@ export function maplibreRasterTiles(style: MapStyle): string[] {
 export function heatGradientCss(heat: HeatRamp): string {
   return `linear-gradient(to right, ${heat.halo}, ${heat.warm} 40%, ${heat.hot} 75%, ${heat.peak})`;
 }
+
+// A heat ramp expanded to positioned RGB stops, ready for interpolation. The
+// stop positions (0 / 0.4 / 0.75 / 1) mirror heatGradientCss so the legend, the
+// canvas heatmap, and the proposal pins all read the same color at a given
+// intensity. Built once per style and sampled many times.
+export interface HeatRampStop {
+  pos: number;
+  rgb: [number, number, number];
+}
+
+function parseRgb(s: string): [number, number, number] {
+  const m = s.match(/\d+/g);
+  return m ? [Number(m[0]), Number(m[1]), Number(m[2])] : [0, 0, 0];
+}
+
+/** Expand a HeatRamp into the positioned stops `sampleHeatRamp` interpolates. */
+export function buildHeatRampStops(heat: HeatRamp): HeatRampStop[] {
+  return [
+    { pos: 0, rgb: parseRgb(heat.halo) },
+    { pos: 0.4, rgb: parseRgb(heat.warm) },
+    { pos: 0.75, rgb: parseRgb(heat.hot) },
+    { pos: 1, rgb: parseRgb(heat.peak) },
+  ];
+}
+
+/**
+ * Linearly interpolate the ramp at intensity `t` (0–1, clamped) and return an
+ * `rgb(...)` string. Shared by the canvas heatmap and the top-proposal pins so a
+ * pin glows the same hue the heatmap would paint at that vote count.
+ */
+export function sampleHeatRamp(stops: HeatRampStop[], t: number): string {
+  let hi = 1;
+  while (hi < stops.length - 1 && t > stops[hi].pos) hi++;
+  const lo = stops[hi - 1];
+  const up = stops[hi];
+  const span = up.pos - lo.pos || 1;
+  const f = Math.min(1, Math.max(0, (t - lo.pos) / span));
+  const r = Math.round(lo.rgb[0] + (up.rgb[0] - lo.rgb[0]) * f);
+  const g = Math.round(lo.rgb[1] + (up.rgb[1] - lo.rgb[1]) * f);
+  const b = Math.round(lo.rgb[2] + (up.rgb[2] - lo.rgb[2]) * f);
+  return `rgb(${r}, ${g}, ${b})`;
+}

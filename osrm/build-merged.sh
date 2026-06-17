@@ -2,8 +2,9 @@
 # Produce a SINGLE merged .osm.pbf covering every supported city.
 #
 # OSRM doesn't care that the cities are geographically far apart — coordinates
-# are global — so one routed instance can serve NYC, SF, and Chicago from one
-# combined extract. We clip each source PBF to its city bbox first (NYC ships as
+# are global — so one routed instance can serve every supported city (see the
+# CITIES list below) from one combined extract. We clip each source PBF to its
+# city bbox first (NYC ships as
 # the whole NY-state extract; clipping keeps the merged file small), then
 # osmium-merge into one combined.osm.pbf. The OSRM extract/partition/customize
 # runs in the next Docker stage (the osrm-backend image already ships those tools
@@ -25,6 +26,7 @@ CITIES=(
   "sf|https://download.bbbike.org/osm/bbbike/SanFrancisco/SanFrancisco.osm.pbf|https://download.geofabrik.de/north-america/us/california-latest.osm.pbf|-122.516,37.700,-122.354,37.832"
   "chicago|https://download.bbbike.org/osm/bbbike/Chicago/Chicago.osm.pbf|https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf|-87.75,41.78,-87.58,42.02"
   "dc|https://download.bbbike.org/osm/bbbike/WashingtonDC/WashingtonDC.osm.pbf|https://download.geofabrik.de/north-america/us/district-of-columbia-latest.osm.pbf|-77.12,38.79,-76.91,39.00"
+  "philly|https://download.bbbike.org/osm/bbbike/Philadelphia/Philadelphia.osm.pbf|https://download.geofabrik.de/north-america/us/pennsylvania-latest.osm.pbf|-75.280,39.867,-74.956,40.138"
 )
 
 # Download with retries across the primary then fallback URL. A bare `wget` under
