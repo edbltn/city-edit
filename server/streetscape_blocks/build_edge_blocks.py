@@ -80,8 +80,10 @@ def main():
 
     edge_block = np.full(n_edges, -1, dtype=np.int32)
 
-    # 1) Containment: polygon that contains the midpoint (vectorized).
-    in_idx, tree_idx = tree.query(pts, predicate="contains")
+    # 1) Containment: polygon that contains the midpoint (vectorized). shapely's
+    # STRtree applies the predicate as input.predicate(tree_geom), so a point is
+    # "within" the polygon (NOT polygon "contains" point, which would be false).
+    in_idx, tree_idx = tree.query(pts, predicate="within")
     # If a midpoint is in multiple blocks (shared boundary), first wins.
     seen = np.zeros(n_edges, dtype=bool)
     for pi, ti in zip(in_idx, tree_idx):
