@@ -32,11 +32,19 @@ _ROUTABLE_LEISURE = frozenset({"track"})
 # foot.lua `route_speeds` — DELIBERATELY EMPTY: ferries are disabled (see foot.lua).
 # A ferry leg is a long straight edge over open water with no real walkable path,
 # which lets routes jump the water and breaks the client's on-path midpoint-drag
-# hit test (a long thin band that fires from clicks far off the visual route). With
-# route_speeds empty in foot.lua, OSRM no longer routes route=ferry ways, so the
-# votable topology must drop them too or it would carry edges OSRM never routes.
-# KEEP IN SYNC with osrm/foot.lua (route_speeds).
+# hit test (a long thin band that fires from clicks far off the visual route).
+#
+# An empty _ROUTABLE_ROUTE is NOT enough on its own: it only keeps route=ferry out
+# of _has_routable_category. A ferry tagged foot=yes (e.g. the Staten Island Ferry)
+# would still pass via the `access in _ACCESS_WHITELIST` fallback at the end of
+# way_is_foot_routable — mirroring exactly how OSRM's WayHandlers.speed admitted it
+# until the route=ferry abort in foot.lua's process_way. So way_is_foot_routable
+# rejects route=ferry explicitly (see _ROUTE_BLACKLIST). KEEP IN SYNC with osrm/foot.lua.
 _ROUTABLE_ROUTE = frozenset()
+
+# route values that are never foot-routable, regardless of access tags. Mirrors the
+# `data.route == 'ferry'` abort in foot.lua process_way.
+_ROUTE_BLACKLIST = frozenset({"ferry"})
 
 # foot.lua access tables + hierarchy (check `foot`, then `access`).
 _ACCESS_WHITELIST = frozenset({"yes", "foot", "permissive", "designated"})
@@ -88,6 +96,9 @@ def way_is_foot_routable(tags: dict) -> bool:
     `tags` is a plain {key: value} dict of the way's OSM tags.
     """
     if not any(k in tags for k in _PREFETCH_KEYS):
+        return False
+    # Hard cutoff for ferries before the access fallback below (see _ROUTE_BLACKLIST).
+    if tags.get("route") in _ROUTE_BLACKLIST:
         return False
     access = _access_value(tags)
     if access in _ACCESS_BLACKLIST:

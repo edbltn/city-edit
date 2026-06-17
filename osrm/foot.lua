@@ -122,9 +122,15 @@ function setup()
     -- Ferries intentionally DISABLED: a ferry leg is a single long straight edge
     -- across open water with no real walkable path, which (a) lets routes "jump"
     -- the water and (b) creates a long thin on-path hit band that mis-fires the
-    -- midpoint drag from clicks far off the visual route. Empty route_speeds means
-    -- WayHandlers.ferries assigns no speed, so route=ferry ways aren't routed.
-    -- KEEP IN SYNC with server/foot_profile.py (_ROUTABLE_ROUTE).
+    -- midpoint drag from clicks far off the visual route.
+    --
+    -- NOTE: an empty route_speeds is NOT sufficient on its own. It only stops
+    -- WayHandlers.ferries from assigning a *ferry* speed; a route=ferry way tagged
+    -- foot=yes (e.g. the Staten Island Ferry) still falls through to
+    -- WayHandlers.speed, whose access fallback gives any access-whitelisted way
+    -- default_speed — so OSRM would route it as a normal walkway. The hard cutoff
+    -- is the `data.route == 'ferry'` abort in process_way below.
+    -- KEEP IN SYNC with server/foot_profile.py (route=ferry reject in way_is_foot_routable).
     route_speeds = {
     },
 
@@ -206,6 +212,14 @@ function process_way(profile, way, result)
   -- of the prefetched tags to be present, ie. the data table
   -- cannot be empty
   if next(data) == nil then     -- is the data table empty?
+    return
+  end
+
+  -- Hard cutoff for ferries: never routable for foot (see route_speeds note above).
+  -- Must come before the handlers, because WayHandlers.speed's access fallback would
+  -- otherwise give a route=ferry foot=yes way default_speed. KEEP IN SYNC with
+  -- server/foot_profile.py (route=ferry reject in way_is_foot_routable).
+  if data.route == 'ferry' then
     return
   end
 

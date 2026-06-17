@@ -30,6 +30,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--city", default="sf")
     ap.add_argument("-n", "--num", type=int, default=500, help="route samples")
+    ap.add_argument("--reverse-edges", type=int, default=0,
+                    help="also run the REVERSE check: sample this many topology edges and "
+                         "confirm OSRM will actually traverse each (catches edges the "
+                         "topology carries but OSRM refuses to route — e.g. ferries).")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--osrm-url", default=os.environ.get("OSRM_URL"))
     ap.add_argument("--osrm-host", default=os.environ.get("OSRM_HOST", "localhost"))
@@ -111,6 +115,67 @@ def main():
             print(f"  {100*frac:.1f}%  {a} -> {b}  {ids}")
     else:
         print("\nno node misses 🎉")
+
+    if args.reverse_edges:
+        run_reverse_check(data, osrm, rng, args.reverse_edges)
+
+
+def _edge_len_m(a, b):
+    """Great-circle length of a topology edge between [lat, lon] endpoints."""
+    import math
+    (lat1, lon1), (lat2, lon2) = a, b
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi, dlmb = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    h = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
+    return 6371008.8 * 2 * math.asin(math.sqrt(h))
+
+
+def run_reverse_check(data, osrm, rng, num):
+    """REVERSE coverage: confirm OSRM will traverse the edges the topology carries.
+
+    The forward check proves topology ⊇ OSRM (every routed node maps to a topology
+    edge). This proves the other direction is sane: a topology edge between two
+    adjacent OSM nodes should be routable by OSRM at roughly its own length. An edge
+    OSRM refuses (NoRoute) or only reaches via a huge detour is one the topology has
+    but OSRM won't route — exactly the ferry class of bug (a route=ferry edge over
+    open water). Reported as 'orphan' edges; a clean build should have ~0.
+    """
+    nodes = data["nodes"]
+    pairs = list(data["node_pair_to_edge"].keys())
+    if not pairs:
+        print("\n[reverse] no edges to sample")
+        return
+
+    print(f"\n========== REVERSE CHECK ({num} edges) ==========")
+    orphans = []
+    checked = 0
+    for _ in range(num):
+        gi_from, gi_to = pairs[rng.randrange(len(pairs))]
+        a, b = nodes[gi_from], nodes[gi_to]
+        straight = _edge_len_m(a, b)
+        if straight < 1.0:
+            continue
+        checked += 1
+        res = osrm.calculate_route((a[0], a[1]), (b[0], b[1]), "walk")
+        if "error" in res:
+            orphans.append((straight, None, a, b))
+            continue
+        dist = res.get("distance")
+        # Adjacent nodes: OSRM should reach b within a small multiple of the edge's
+        # own length. A ferry edge is long + OSRM now refuses it, so it lands here.
+        if dist is None or dist > max(4 * straight, straight + 300):
+            orphans.append((straight, dist, a, b))
+
+    print(f"edges checked:           {checked}")
+    print(f"orphan edges (OSRM won't traverse): {len(orphans)}/{checked} "
+          f"({100*len(orphans)/max(checked,1):.2f}%)")
+    if orphans:
+        orphans.sort(reverse=True, key=lambda o: o[0])
+        print("\nlongest orphan edges (edge_len_m, osrm_dist_m, start, end):")
+        for straight, dist, a, b in orphans[:8]:
+            print(f"  {straight:8.0f}m  osrm={('NoRoute' if dist is None else f'{dist:.0f}m'):>10}  {a} -> {b}")
+    else:
+        print("no orphan edges 🎉  (topology and OSRM agree both directions)")
 
 
 if __name__ == "__main__":
