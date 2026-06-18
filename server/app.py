@@ -23,6 +23,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 import vote_store
 import vote_migration
+import block_votes
 import database
 from cities import CITIES, DEFAULT_CITY_ID, get_city, all_cities
 from graph_registry import GraphRegistry, OsrmRegistry, STATION_NETWORKS
@@ -367,6 +368,23 @@ def _build_graph_votes_body_locked(
     arrays["n_edges"] = len(rmap.graph.edges)
     arrays["n_nodes"] = len(rmap.graph.nodes)
     arrays["topology_version"] = rmap.graph.topology_etag
+
+    # Block layer: when this map has an edge→block mapping, also project the
+    # deduped per-block votes (the client renders blocks as the primary heat;
+    # maps without a mapping just omit these and fall back to the edge heatmap).
+    if rmap.graph.edge_block_id is not None:
+        block_mode = vote_store.mode_to_int(mode or rmap.mode)
+        # bd:/bagg: are derived state; rebuild from Postgres if cold while edge
+        # votes exist (first request after a deploy, evicted keys, a resnap).
+        if (redis_client.exists(block_votes.bagg_key(rmap.slug, block_mode)) == 0
+                and redis_client.hlen(vote_store.hash_key(rmap.slug)) > 0):
+            block_votes.rebuild_from_db(
+                redis_client, rmap.slug, block_mode, rmap.graph.edge_block_id,
+                database.fetch_edge_vote_devices(rmap.slug))
+        arrays.update(block_votes.build_block_arrays(
+            redis_client, rmap.slug, block_mode, rmap.graph.n_blocks))
+        arrays["blocks_version"] = rmap.graph.blocks_version
+
     body = json.dumps(arrays)
 
     _vote_cache_put(cache_key, rev, body)
@@ -999,6 +1017,7 @@ def cast_vote():
         # voter_lock serializes this voter's read-modify-write ACROSS instances
         # (Redis); _proposal_vote_lock serializes it within THIS process. Together
         # they hold whether the app runs one worker or a horizontally-scaled fleet.
+        ebid = rmap.graph.edge_block_id  # None unless this map has a block layer
         with vote_store.voter_lock(redis_client, slug, device_id), _proposal_vote_lock:
             reversed_any = False
             changed: list[int] = []
@@ -1014,6 +1033,14 @@ def cast_vote():
                 vote_store.apply_directional(
                     redis_client, slug, eid, mode_int, vt_id, direction, prev
                 )
+                # Mirror onto the edge's block (deduped per device); no-op without
+                # a block layer or for edges outside any block.
+                if ebid is not None and 0 <= eid < len(ebid):
+                    b = int(ebid[eid])
+                    if b >= 0:
+                        block_votes.apply_block_delta(
+                            redis_client, slug, mode_int, b, vt_id,
+                            direction, prev, device_id)
                 changed.append(eid)
                 if prev in (vote_store.UP, vote_store.DOWN) and direction != 0:
                     reversed_any = True
@@ -1639,4 +1666,5 @@ def admin_stats():
 # ═══════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=os.environ.get("FLASK_DEBUG") == "1")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5001")),
+            debug=os.environ.get("FLASK_DEBUG") == "1")
