@@ -10,17 +10,48 @@ import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { CONFIG } from "../../config";
-import { DESIRE_PATH } from "../../colors";
 import { maplibreRasterTiles, type MapStyle } from "../../mapStyles";
 
 // Register PMTiles protocol once at module level
 const protocol = new Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 
+// Block-vote payload broadcast by GraphLayer (which owns the /api/graph-votes
+// fetch). MapLibreBackground colors the block fills from it via feature-state.
+export interface BlockVotesDetail {
+  blockVotes: number[]; // net deduped votes per block_id
+  max: number;          // normalization ceiling (floored so quiet maps don't saturate)
+}
+export const BLOCK_VOTES_EVENT = "city-edit:block-votes";
+
+/** fill-color / fill-opacity expressions driven by feature-state "heat" ∈ [0,1].
+ *  At heat 0 the block is fully transparent (no votes → invisible); it ramps up
+ *  through the active style's heat colors. Blocks ARE the heat display, so there
+ *  is no baseline edge layer (edges show only on Leaflet hover/selection). */
+function blockFillPaint(heat: MapStyle["heat"]): maplibregl.FillLayerSpecification["paint"] {
+  const h = ["coalesce", ["feature-state", "heat"], 0] as const;
+  return {
+    "fill-color": [
+      "interpolate", ["linear"], h,
+      0.0, heat.halo,
+      0.4, heat.warm,
+      0.7, heat.hot,
+      1.0, heat.peak,
+    ],
+    "fill-opacity": [
+      "interpolate", ["linear"], h,
+      0.0, 0.0,
+      0.001, 0.28,
+      1.0, 0.72,
+    ],
+  };
+}
+
 function buildStyle(
   graphTilesUrl: string,
+  blockTilesUrl: string,
   tiles: string[],
-  background: string,
+  mapStyle: MapStyle,
 ): maplibregl.StyleSpecification {
   return {
     version: 8,
@@ -34,10 +65,11 @@ function buildStyle(
         attribution:
           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
       },
-      // Graph overlay from PMTiles
-      graph: {
+      // Block polygons from PMTiles (one per street segment / merged foot path).
+      blocks: {
         type: "vector",
-        url: `pmtiles://${graphTilesUrl}`,
+        url: `pmtiles://${blockTilesUrl}`,
+        promoteId: "block_id",
       },
     },
     layers: [
@@ -45,7 +77,7 @@ function buildStyle(
       {
         id: "background",
         type: "background",
-        paint: { "background-color": background },
+        paint: { "background-color": mapStyle.base },
       },
       // Base map raster tiles
       {
@@ -55,26 +87,13 @@ function buildStyle(
         minzoom: 0,
         maxzoom: 19,
       },
-      // Graph edges — baseline (0 votes)
+      // Block heat — the primary vote display, colored from feature-state.
       {
-        id: "graph-edges",
-        type: "line",
-        source: "graph",
-        "source-layer": "edges",
-        paint: {
-          "line-color": DESIRE_PATH.stroke,
-          "line-width": [
-            "interpolate", ["linear"], ["zoom"],
-            12, 0.3,
-            14, 0.5,
-            16, 0.8,
-          ],
-          "line-opacity": 0.12,
-        },
-        layout: {
-          "line-cap": "round",
-          "line-join": "round",
-        },
+        id: "block-heat",
+        type: "fill",
+        source: "blocks",
+        "source-layer": "blocks",
+        paint: blockFillPaint(mapStyle.heat),
       },
     ],
     glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
@@ -104,8 +123,9 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         container: containerRef.current,
         style: buildStyle(
           CONFIG.graphTilesUrl,
+          CONFIG.blockTilesUrl,
           maplibreRasterTiles(mapStyle),
-          mapStyle.base,
+          mapStyle,
         ),
         center: [CONFIG.initialView.lon, CONFIG.initialView.lat],
         zoom: CONFIG.initialView.zoom,
@@ -162,6 +182,46 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
       leafletMap.off("move", syncCamera);
     };
   }, [leafletMap]);
+
+  // Color the block fills from GraphLayer's block-vote broadcasts via
+  // feature-state. Heat is log-normalized (like the old edge heatmap) so a quiet
+  // map's 1–2 votes don't saturate. The latest payload is retained so it applies
+  // even if it arrives before the block source has loaded.
+  useEffect(() => {
+    const latest = { current: null as BlockVotesDetail | null };
+
+    const apply = () => {
+      const ml = mapRef.current;
+      const detail = latest.current;
+      if (!ml || !detail || !ml.getSource("blocks")) return;
+      const { blockVotes, max } = detail;
+      const denom = Math.log(Math.max(1, max) + 1);
+      // Clear prior states, then set only the blocks that have votes (sparse).
+      ml.removeFeatureState({ source: "blocks", sourceLayer: "blocks" });
+      for (let id = 0; id < blockVotes.length; id++) {
+        const v = blockVotes[id];
+        if (v > 0) {
+          ml.setFeatureState(
+            { source: "blocks", sourceLayer: "blocks", id },
+            { heat: Math.log(v + 1) / denom },
+          );
+        }
+      }
+    };
+
+    const onVotes = (e: Event) => {
+      latest.current = (e as CustomEvent<BlockVotesDetail>).detail;
+      apply();
+    };
+    window.addEventListener(BLOCK_VOTES_EVENT, onVotes);
+    // Re-apply whenever the block source (re)loads tiles.
+    const ml = mapRef.current;
+    ml?.on("sourcedata", apply);
+    return () => {
+      window.removeEventListener(BLOCK_VOTES_EVENT, onVotes);
+      ml?.off("sourcedata", apply);
+    };
+  }, []);
 
   return (
     <div

@@ -67,6 +67,13 @@ export const CONFIG = {
     ? "http://localhost:5001/api/tiles/nyc/graph.pmtiles"
     : "/api/tiles/nyc/graph.pmtiles",
 
+  // Block polygons (one per street segment) — the primary heat display when a
+  // city has them. Same per-city tiles dir as the graph; availability is
+  // detected from the /api/graph-votes response carrying block_votes.
+  blockTilesUrl: isLocalDev
+    ? "http://localhost:5001/api/tiles/nyc/blocks.pmtiles"
+    : "/api/tiles/nyc/blocks.pmtiles",
+
   // Leaflet behaviors
   preferCanvas: true,
 
@@ -106,5 +113,7 @@ export function applyCityConfig(city: CityConfig): void {
   CONFIG.maxZoom = maxZoom;
   if (tilesPath) {
     CONFIG.graphTilesUrl = isLocalDev ? `http://localhost:5001${tilesPath}` : tilesPath;
+    const blocksPath = tilesPath.replace("graph.pmtiles", "blocks.pmtiles");
+    CONFIG.blockTilesUrl = isLocalDev ? `http://localhost:5001${blocksPath}` : blocksPath;
   }
 }
