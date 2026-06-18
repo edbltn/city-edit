@@ -517,6 +517,25 @@ def aggregate_votes_for_replay(map_slug: Optional[str] = None) -> list[tuple[str
         return []
 
 
+def fetch_edge_vote_devices(map_slug: str) -> list[tuple[int, int, int, str]]:
+    """Device-level edge votes for one map: (edge_id, vote_type_id, direction,
+    device_id). Unlike aggregate_votes_for_replay (which discards identity), this
+    keeps device_id so block_votes.rebuild_from_db can reconstruct the per-block
+    dedup. One row per stored vote (already unique per edge/type/device)."""
+    if not DATABASE_URL:
+        return []
+    try:
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT edge_id, vote_type_id, direction, device_id
+                FROM edge_votes WHERE map_slug = %s
+            """, (map_slug,))
+            return cursor.fetchall()
+    except Exception as e:
+        logger.error(f"[DB] Failed to fetch edge vote devices for '{map_slug}': {e}")
+        return []
+
+
 # ── Vote migration (graph rebuild → re-snap anchors to current edge ids) ─────
 
 def resnap_edge_votes(map_slug: str, pairs: list[tuple[int, int]]) -> dict:

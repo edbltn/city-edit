@@ -79,6 +79,14 @@ class CityGraph:
         # re-snap many anchors at once (kept off the hot load path / common case).
         self._edge_mid_tree: cKDTree | None = None
 
+        # Optional block layer: edge_block_id[edge_id] → block_id (−1 unmapped),
+        # loaded from osm_data/<city>/edge_blocks_<network>.npy when present and
+        # built against THIS topology. None ⇒ the map falls back to the edge
+        # heatmap. blocks_version stamps the response for the client stale-guard.
+        self.edge_block_id = None
+        self.n_blocks: int = 0
+        self.blocks_version: str | None = None
+
     def ensure_loaded(self):
         if self._loaded:
             return
@@ -139,11 +147,52 @@ class CityGraph:
         self.topology_etag = topology_etag
         self._edge_mid_tree = None  # rebuilt lazily for the new edge set
         self._loaded = True
+        self._load_edge_blocks()
 
         logger.info(
             f"[GRAPH] '{self.city.id}:{self.network}' loaded: {len(nodes)} nodes, "
             f"{len(edges)} edges, topology {len(topology_json) / (1024 * 1024):.1f} MB"
+            + (f", {self.n_blocks} blocks" if self.has_blocks else "")
         )
+
+    def _load_edge_blocks(self):
+        """Load the edge→block mapping for this network if present + current.
+
+        Validates the mapping's stamped topology_etag against the just-loaded
+        graph so a mapping left over from a previous graph build is ignored (the
+        map then serves the edge heatmap) rather than mis-coloring blocks against
+        the wrong edge ids. Built by streetscape_blocks/build_edge_blocks.py."""
+        self.edge_block_id = None
+        self.n_blocks = 0
+        self.blocks_version = None
+        base = os.path.join(os.path.dirname(__file__), self.city.data_dir)
+        npy = os.path.join(base, f"edge_blocks_{self.network}.npy")
+        meta_path = os.path.join(base, f"edge_blocks_{self.network}.json")
+        if not (os.path.exists(npy) and os.path.exists(meta_path)):
+            return
+        try:
+            meta = json.load(open(meta_path))
+            if meta.get("topology_etag") != self.topology_etag:
+                logger.warning(
+                    f"[GRAPH] edge_blocks for '{self.city.id}:{self.network}' stamped "
+                    f"{meta.get('topology_etag')} != live {self.topology_etag}; "
+                    "ignoring (serving edge heatmap)")
+                return
+            arr = np.load(npy)
+            if len(arr) != len(self.edges):
+                logger.warning(f"[GRAPH] edge_blocks length {len(arr)} != "
+                               f"{len(self.edges)} edges; ignoring")
+                return
+            self.edge_block_id = arr
+            self.n_blocks = int(meta.get("n_blocks", int(arr.max()) + 1 if len(arr) else 0))
+            self.blocks_version = meta.get("blocks_sha256")
+        except Exception as e:
+            logger.warning(f"[GRAPH] failed to load edge_blocks "
+                           f"'{self.city.id}:{self.network}': {e}")
+
+    @property
+    def has_blocks(self) -> bool:
+        return self.edge_block_id is not None
 
     def topology_binary(self) -> bytes:
         """Compact little-endian binary topology — the mobile-safe wire format.
