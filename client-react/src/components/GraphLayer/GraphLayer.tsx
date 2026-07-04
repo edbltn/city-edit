@@ -20,30 +20,38 @@ import { CONFIG } from "../../config";
 import { COLOR_START, COLOR_END } from "../../colors";
 import { withMap, getMapSlug, passcodeHeaders, getCurrentMap } from "../../map/runtime";
 import { useWebSocketContext } from "../../context/WebSocketContext";
-import { useGraphSnap, useTheme, useHeatmap, useGhostPin } from "../../context";
+import { useGraphSnap, useTheme, useHeatmap, useGhostPin, useRoute } from "../../context";
 import type { GraphData, ProposalMatch } from "../../types";
-import { BLOCK_VOTES_EVENT, type BlockVotesDetail } from "../MapLibreBackground/MapLibreBackground";
+import {
+  BLOCK_VOTES_EVENT, BLOCK_SELECT_EVENT,
+  type BlockVotesDetail, type BlockSelectDetail,
+} from "../MapLibreBackground/MapLibreBackground";
 import { makeVoteTypeIcon } from "./voteTypeIcon";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import { selectTopProposals, topLabelForEdges, type VoteTypeWinner } from "./topProposals";
 import {
-  parseRouteProposals, routeBlockEdges, isRouteCovered, type RouteProposal,
+  computeRouteProposals, routeBlockEdges, isRouteCovered, type RouteProposal,
 } from "./routeProposals";
 import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts } from "./voteApply";
 import {
   COORD_SCALE,
   type GraphTopology,
   type NodeAdj,
+  type BlockIndex,
   nodeLat,
   nodeLon,
   edgeFrom,
   edgeTo,
   edgeName,
   topologyFromJson,
+  decodeTopologyBin,
   buildNodeAdj,
+  buildBlockIndex,
+  touchedBlockKeys,
   adjEdgesOf,
   adjFirst,
 } from "./graphTopology";
+import { materializeBlocks, selectionVoteRows } from "../../utils/blockSelection";
 import { iconForLabel, iconSrc, mapStyleForTheme } from "../../themes";
 import { buildHeatRampStops, sampleHeatRamp } from "../../mapStyles";
 import {
@@ -55,8 +63,10 @@ import {
   setCachedVotes,
   clearGraphCache,
 } from "../../utils/graphCache";
-import { getVote, reconcileEdge, setVoteTypeMap, type VoteDirection } from "../../utils/voteStore";
-import { castVotes } from "../../utils/castVote";
+import {
+  blockCoverage, reconcileEdge, setVoteTypeMap, type VoteDirection,
+} from "../../utils/voteStore";
+import { castVotes, voteButtonState } from "../../utils/castVote";
 import { useVotesVersion } from "../../utils/useVotesVersion";
 import { getVoterId } from "../../utils/voterIdentity";
 import { isHoverSuppressed } from "../../utils/touchHover";
@@ -283,6 +293,11 @@ const MID_DRAG_TRAIL_STYLE: L.PolylineOptions = {
 // segment is always among the top few bbox-nearest in practice.
 const INDEX_NEIGHBOR_K = 20;
 
+// Cap on how many block edges the modal-open /my-votes reconcile requests. A
+// merged foot-component block can hold thousands of edges — the URL (and the
+// server scan) must stay bounded; coverage of a huge block degrades gracefully.
+const MY_VOTES_EDGE_CAP = 500;
+
 /** Build a flatbush spatial index of node points. Done once per graph. */
 function buildNodeIndex(data: GraphTopology): Flatbush | null {
   const n = data.nNodes;
@@ -502,50 +517,8 @@ function targetLatLng(
 // Node adjacency builder — used to derive node votes from edges
 // ---------------------------------------------------------------------------
 
-/**
- * Decode the binary topology (server graph_registry.topology_binary) into the
- * mobile-safe typed-array GraphTopology — coords/ends are zero-copy views onto
- * the blob, so the NYC graph stays near its ~35MB wire size instead of expanding
- * to ~500MB of boxed JS tuples (the allocation that OOM-crashed mobile Safari).
- * Layout: 12-byte header [magic, uint32 nNodes, uint32 nEdges], then nNodes×2
- * int32 (lat, lon ×1e7), then nEdges×2 uint32 (from_idx, to_idx). Edge names are
- * dropped (street tooltips reverse-geocode instead); the edge index is the id.
- */
-// 'GTB1' little-endian as a uint32 (G=0x47, T=0x54, B=0x42, '1'=0x31).
-const TOPOLOGY_BIN_MAGIC = 0x31425447;
-
-function decodeTopologyBin(buf: ArrayBuffer): GraphTopology {
-  // Validate the header BEFORE creating views. A stale/truncated/corrupt cached
-  // blob (or a non-binary error body that slipped through) would otherwise be
-  // read as garbage nNodes/nEdges — views that index out of bounds, or edges
-  // referencing nonexistent nodes (the downstream crash). On any inconsistency
-  // we throw, and callers fall back to a fresh fetch / JSON.
-  if (buf.byteLength < 12) {
-    throw new Error(`topology blob too small (${buf.byteLength} bytes)`);
-  }
-  const head = new Uint32Array(buf, 0, 3); // [magic, nNodes, nEdges]
-  if (head[0] !== TOPOLOGY_BIN_MAGIC) {
-    throw new Error(`bad topology magic 0x${head[0].toString(16)}`);
-  }
-  const nNodes = head[1];
-  const nEdges = head[2];
-  const expected = 12 + nNodes * 8 + nEdges * 8;
-  if (buf.byteLength !== expected) {
-    throw new Error(
-      `topology size mismatch: ${buf.byteLength} bytes, expected ${expected} ` +
-        `(nNodes=${nNodes}, nEdges=${nEdges})`,
-    );
-  }
-  const coords = new Int32Array(buf, 12, nNodes * 2);
-  const ends = new Uint32Array(buf, 12 + nNodes * 8, nEdges * 2);
-  // Clamp out-of-range node indices to 0 in place rather than leaving a dangling
-  // ref that reads NaN coords in buildEdgeIndex/redraw — a degenerate self-edge
-  // is harmless. Mutating the view also sanitizes the blob we cache.
-  for (let i = 0; i < ends.length; i++) {
-    if (ends[i] >= nNodes) ends[i] = 0;
-  }
-  return { nNodes, nEdges, coords, ends };
-}
+// The binary topology decoder (GTB1 + GTB2) lives in graphTopology.ts
+// (decodeTopologyBin) — shared with the pure route-proposal/block logic.
 
 /**
  * True when a vote payload is indexed against the SAME topology we hold. Vote
@@ -712,6 +685,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const map = useMap();
   const { subscribeToDelta } = useWebSocketContext();
   const { setSnapFn, setResolveVoteEdgeId, setResolveTopLabelForPath, setCurrentSnap, isDraggingRef: graphDraggingRef, snapToGraph, setDragging } = useGraphSnap();
+  const { setBlockMaterializer } = useRoute();
   // Ghost-pin drag (the dotted-trail + ghost-kite mechanism the path-drag uses).
   // Reused so dragging a NEW mid out of an exploded on-route proposal renders the
   // same ghost the path-drag does, and so the host's ghost→dragPoint mirror lights
@@ -777,6 +751,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // Node adjacency list — node index → [edge indices]. Built once from topology,
   // used to derive node votes from edge totals (max of adjacent edges).
   const nodeAdjRef = useRef<NodeAdj | null>(null);
+
+  // Block layer (docs/three-layer-model.md §2): block → edge-ids CSR index and
+  // whether the loaded topology carries an edge→block mapping (GTB2 blob). Both
+  // set alongside nodeAdj on topology load; null/false = singleton-block maps.
+  const blockIndexRef = useRef<BlockIndex | null>(null);
+  const hasBlocksRef = useRef(false);
 
   // Last-seen revision for gap detection
   const lastRevRef = useRef(0);
@@ -889,6 +869,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     });
   }, [setResolveTopLabelForPath]);
 
+  // Register the selection→blocks materializer so RouteContext's cast + pressed
+  // state use the same block semantics as the in-map modal. The closure reads
+  // the topology/index refs, so it's a singleton-[e] fallback until the graph
+  // loads and on maps without block artifacts — identical to today's behavior.
+  useEffect(() => {
+    setBlockMaterializer((edgeIds: number[]) => {
+      const topo = topologyRef.current;
+      if (!topo) return edgeIds.map((e) => [e]);
+      return materializeBlocks(topo, blockIndexRef.current, edgeIds);
+    });
+    return () => setBlockMaterializer(null);
+  }, [setBlockMaterializer]);
+
   // Hover state
   const [hoverTarget, setHoverTarget] = useState<HoverTarget | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -955,6 +948,47 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // The edge set a hovered route diamond highlights — all of its blocks' edges.
   const routeHighlightEdgesRef = useRef<number[] | null>(null);
   const [currentZoom, setCurrentZoom] = useState<number>(() => map.getZoom());
+
+  // ── Block highlight (docs §2.4) ────────────────────────────────────────────
+  // Selecting or hovering any node/edge/proposal lights the covering block
+  // polygons: broadcast the touched REAL block ids to the MapLibre block-select
+  // layer. The per-edge highlight canvas stays as the anchor-edge emphasis.
+  // Selection = the route's path edges when a route exists, else the pinned
+  // target's vote edge; hover (edge/node/route diamond) rides on top,
+  // transiently. Maps without blocks broadcast an empty set.
+  const pathEdgeIdsRef = useRef(pathEdgeIds);
+  useEffect(() => { pathEdgeIdsRef.current = pathEdgeIds; }, [pathEdgeIds]);
+  const lastBlockSelectKeyRef = useRef<string | null>(null);
+  const dispatchBlockSelect = useCallback(() => {
+    const topo = topologyRef.current;
+    if (!topo) return;
+    let blockIds: number[] = [];
+    if (hasBlocksRef.current) {
+      const edgeIds: number[] = [];
+      const pushTarget = (t: HoverTarget | null) => {
+        if (!t) return;
+        const e = t.kind === "edge" ? t.index : adjFirst(nodeAdjRef.current, t.index);
+        if (e != null) edgeIds.push(e);
+      };
+      const path = pathEdgeIdsRef.current;
+      if (path && path.length > 0) {
+        for (const e of path) edgeIds.push(e);
+      } else {
+        pushTarget(pinnedTargetRef.current);
+      }
+      pushTarget(hoverTargetRef.current);
+      const routeEdges = routeHighlightEdgesRef.current;
+      if (routeEdges) for (const e of routeEdges) edgeIds.push(e);
+      blockIds = touchedBlockKeys(topo, edgeIds).filter((k) => k >= 0);
+    }
+    const key = blockIds.join(",");
+    if (lastBlockSelectKeyRef.current === key) return;
+    lastBlockSelectKeyRef.current = key;
+    const detail: BlockSelectDetail = { blockIds };
+    window.dispatchEvent(new CustomEvent(BLOCK_SELECT_EVENT, { detail }));
+  }, []);
+  const dispatchBlockSelectRef = useRef(dispatchBlockSelect);
+  useEffect(() => { dispatchBlockSelectRef.current = dispatchBlockSelect; }, [dispatchBlockSelect]);
   const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
 
   // "Fan out crowded icons into a grid" state. Only ONE cluster is ever fanned
@@ -1444,6 +1478,54 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     };
   }, [map, mapStyle.heatBlend]);
 
+  // Block layer (when the map has one): broadcast the deduped block votes to the
+  // MapLibre fill layer and switch the canvas edge-heatmap off — blocks are the
+  // primary heat, edges show only on hover/selection. No-blocks maps keep the
+  // per-edge canvas heatmap exactly as before.
+  const broadcastBlockVotes = useCallback((voteData: Partial<GraphData>) => {
+    const blockVotes = voteData.block_votes;
+    blocksActiveRef.current = Array.isArray(blockVotes) && blockVotes.length > 0;
+    if (!blocksActiveRef.current) return;
+    const detail: BlockVotesDetail = {
+      blockVotes: blockVotes!,
+      max: Math.max(HEAT_FULL_SCALE, arrayMax(blockVotes!)),
+    };
+    window.dispatchEvent(new CustomEvent(BLOCK_VOTES_EVENT, { detail }));
+  }, []);
+
+  // Route proposals are DERIVED state — a pure, deterministic function of
+  // (topology, vote state) computed locally (docs/three-layer-model.md §3), so
+  // they track every vote in real time with no server round-trip.
+  const recomputeRouteProposals = useCallback(() => {
+    const topo = topologyRef.current;
+    const adj = nodeAdjRef.current;
+    const data = graphDataRef.current;
+    if (!topo || !adj || !data?.edge_vote_types) return;
+    const next = computeRouteProposals(topo, adj, data);
+    // Clustering is deterministic, so an unchanged vote state yields an
+    // identical list — keep the previous array to avoid remounting diamonds.
+    setRouteProposals((prev) =>
+      prev.length === next.length
+        && prev.every((p, i) => p.id === next[i].id && p.score === next[i].score)
+        ? prev : next);
+  }, []);
+
+  const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);
+  useEffect(() => { recomputeRouteProposalsRef.current = recomputeRouteProposals; }, [recomputeRouteProposals]);
+
+  // Coalesce bursts of votes into one recompute (the clustering walks the full
+  // edge set per vote type, and the corridors only shift after several votes).
+  const routeRecomputeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRouteProposalsRecompute = useCallback(() => {
+    if (routeRecomputeTimerRef.current) return;
+    routeRecomputeTimerRef.current = setTimeout(() => {
+      routeRecomputeTimerRef.current = null;
+      recomputeRouteProposalsRef.current();
+    }, 800);
+  }, []);
+  const scheduleRouteProposalsRecomputeRef = useRef(scheduleRouteProposalsRecompute);
+  useEffect(() => { scheduleRouteProposalsRecomputeRef.current = scheduleRouteProposalsRecompute; }, [scheduleRouteProposalsRecompute]);
+
   // Full vote fetch — used on initial load and revision-gap recovery.
   const fetchVotes = useCallback(async () => {
     if (!topologyRef.current) return;
@@ -1463,6 +1545,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       lastRevRef.current = voteData.rev ?? 0;
       // Teach the vote store this map's label→id map so packed lookups resolve.
       setVoteTypeMap(voteData.vote_types);
+      broadcastBlockVotes(voteData);
 
       // Replay any deltas that arrived while the fetch was in flight
       const pending = pendingDeltasRef.current;
@@ -1475,47 +1558,14 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       }
 
       refreshGraphDisplayRef.current();
+      scheduleRouteProposalsRecomputeRef.current();
     } catch (error) {
       console.error("Failed to fetch graph votes:", error);
     }
-  }, [themeMode]);
+  }, [themeMode, broadcastBlockVotes]);
 
   const fetchVotesRef = useRef(fetchVotes);
   useEffect(() => { fetchVotesRef.current = fetchVotes; }, [fetchVotes]);
-
-  // Route-proposal fetch — runs alongside the vote fetch and on each vote signal.
-  // Guarded against a topology mismatch (the proposal edge ids are indexed to the
-  // server's current graph, same as the vote arrays).
-  const fetchRouteProposals = useCallback(async () => {
-    const topo = topologyRef.current;
-    if (!topo) return;
-    try {
-      const url = `${CONFIG.apiUrl}/route-proposals?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`;
-      const response = await fetch(url, { headers: passcodeHeaders() });
-      if (!response.ok) throw new Error(`Route-proposal fetch failed: ${response.status}`);
-      const body = await response.json();
-      if (body?.n_edges != null && body.n_edges !== topo.nEdges) return; // stale topology
-      setRouteProposals(parseRouteProposals(body));
-    } catch (error) {
-      console.error("Failed to fetch route proposals:", error);
-    }
-  }, [themeMode]);
-
-  const fetchRouteProposalsRef = useRef(fetchRouteProposals);
-  useEffect(() => { fetchRouteProposalsRef.current = fetchRouteProposals; }, [fetchRouteProposals]);
-
-  // Coalesce bursts of votes into one refetch (the diamonds don't need per-vote
-  // immediacy and the corridor only shifts after several votes land).
-  const routeRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduleRouteProposalsRefetch = useCallback(() => {
-    if (routeRefetchTimerRef.current) return;
-    routeRefetchTimerRef.current = setTimeout(() => {
-      routeRefetchTimerRef.current = null;
-      fetchRouteProposalsRef.current();
-    }, 800);
-  }, []);
-  const scheduleRouteProposalsRefetchRef = useRef(scheduleRouteProposalsRefetch);
-  useEffect(() => { scheduleRouteProposalsRefetchRef.current = scheduleRouteProposalsRefetch; }, [scheduleRouteProposalsRefetch]);
 
   // Shared helper: increment edge votes, update vote-type breakdowns, re-derive
   // affected node votes. Used by both WebSocket deltas and optimistic updates.
@@ -1569,8 +1619,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         // which, paired with fresh (new-edge-id) votes, mismatches and crashes
         // mobile Safari. A version-scoped URL guarantees a fresh fetch on change
         // while still caching repeat loads of the same version.
-        const withVersion = (url: string) =>
-          version ? url + (url.includes("?") ? "&" : "?") + "v=" + encodeURIComponent(version) : url;
+        const withVersion = (url: string, v: string | null = version) =>
+          v ? url + (url.includes("?") ? "&" : "?") + "v=" + encodeURIComponent(v) : url;
+
+        // The binary blob's format is versioned SEPARATELY from the topology
+        // content: adding the edge_block_id section (GTB2) didn't change the
+        // node/edge content, so /graph-version still reports the same etag.
+        // Suffix the blob's cache key + URL buster with the format tag —
+        // mirroring the server's "-bin2" ETag — or a client holding the old
+        // GTB1 blob under the same version would pin it (in IndexedDB AND the
+        // day-long HTTP cache) and never receive the block mapping.
+        const binVersion = version ? `${version}-bin2` : null;
 
         // Fetch the topology from the NETWORK (not IndexedDB). `forceReload` adds
         // cache:"reload" so the browser HTTP cache is bypassed too — used by the
@@ -1594,13 +1653,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           }
           try {
             const r = await fetch(
-              withVersion(withMap(`${CONFIG.apiUrl}/graph-topology?format=bin`)),
+              withVersion(withMap(`${CONFIG.apiUrl}/graph-topology?format=bin`), binVersion),
               init,
             );
             if (!r.ok) throw new Error(`Binary topology fetch failed: ${r.status}`);
             const buf = await r.arrayBuffer();
             const t = decodeTopologyBin(buf);
-            if (version) setCachedTopologyBin(version, buf);
+            if (binVersion) setCachedTopologyBin(binVersion, buf);
             return t;
           } catch (binErr) {
             // Older server without the binary endpoint — fall back to JSON.
@@ -1619,7 +1678,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             const cached = await getCachedTopology<GraphTopology>(version);
             if (cached) { topology = cached; usedCachedTopology = true; }
           } else {
-            const buf = await getCachedTopologyBin(version);
+            const buf = await getCachedTopologyBin(binVersion!);
             // Decode can throw on a corrupt/truncated cached blob — ignore the
             // cache and fall through to a fresh network fetch rather than aborting.
             if (buf) {
@@ -1646,6 +1705,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       edgeIndexRef.current = buildEdgeIndex(topology);
       nodeIndexRef.current = buildNodeIndex(topology);
       nodeAdjRef.current = buildNodeAdj(topology);
+      blockIndexRef.current = buildBlockIndex(topology);
+      hasBlocksRef.current = !!topology.edgeBlockId;
       scheduleRedrawRef.current();
 
       // 2. Paint immediately from cached votes (same graph version only) so the
@@ -1658,6 +1719,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           graphDataRef.current = { ...topology, ...cachedVotes };
           lastRevRef.current = cachedVotes.rev ?? 0;
           setVoteTypeMap(cachedVotes.vote_types);
+          broadcastBlockVotes(cachedVotes);
           refreshGraphDisplayRef.current();
           setHeatmapLoaded();
         }
@@ -1699,6 +1761,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             edgeIndexRef.current = buildEdgeIndex(fresh);
             nodeIndexRef.current = buildNodeIndex(fresh);
             nodeAdjRef.current = buildNodeAdj(fresh);
+            blockIndexRef.current = buildBlockIndex(fresh);
+            hasBlocksRef.current = !!fresh.edgeBlockId;
           } else {
             await clearGraphCache();
             setHeatmapLoaded();
@@ -1710,19 +1774,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         lastRevRef.current = voteData.rev ?? 0;
         setVoteTypeMap(voteData.vote_types);
         if (version) setCachedVotes(getMapSlug() || themeMode, version, voteData);
-
-        // Block layer (when the map has one): broadcast deduped block votes to
-        // the MapLibre fill layer, and switch the canvas edge-heatmap off — blocks
-        // are the primary heat, edges show only on hover/selection.
-        const blockVotes = voteData.block_votes as number[] | undefined;
-        blocksActiveRef.current = Array.isArray(blockVotes) && blockVotes.length > 0;
-        if (blocksActiveRef.current) {
-          const detail: BlockVotesDetail = {
-            blockVotes: blockVotes!,
-            max: Math.max(HEAT_FULL_SCALE, arrayMax(blockVotes!)),
-          };
-          window.dispatchEvent(new CustomEvent(BLOCK_VOTES_EVENT, { detail }));
-        }
+        broadcastBlockVotes(voteData);
 
         // Replay any deltas that arrived while waiting for the fetch
         const pending = pendingDeltasRef.current;
@@ -1736,18 +1788,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
         refreshGraphDisplayRef.current();
         setHeatmapLoaded();
-        fetchRouteProposalsRef.current();
+        recomputeRouteProposalsRef.current();
       } catch (error) {
         console.error("Failed to fetch graph votes:", error);
       }
     })();
     return () => { cancelled = true; };
-  }, [applyDeltaToGraphData, setHeatmapLoaded]);
+  }, [applyDeltaToGraphData, setHeatmapLoaded, broadcastBlockVotes]);
 
-  // Re-fetch route proposals when the vote namespace (theme mode) switches. On
+  // Recompute route proposals when the vote namespace (theme mode) switches. On
   // first mount topology isn't loaded yet so this no-ops; the post-vote call in
-  // the loader above does the initial fetch.
-  useEffect(() => { fetchRouteProposalsRef.current(); }, [themeMode]);
+  // the loader above does the initial compute.
+  useEffect(() => { recomputeRouteProposalsRef.current(); }, [themeMode]);
 
   // Subscribe to WebSocket deltas — apply each directly to the vote arrays.
   // If a revision gap is detected, do a full refetch to recover.
@@ -1777,7 +1829,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
       applyDeltaToGraphData(delta);
       refreshGraphDisplayRef.current();
-      scheduleRouteProposalsRefetchRef.current();
+      scheduleRouteProposalsRecomputeRef.current();
     });
     return unsubscribe;
   }, [subscribeToDelta, themeMode, applyDeltaToGraphData]);
@@ -1801,7 +1853,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
       applyMyVoteChange(data, adj, detail.edgeIds, detail.label, detail.prevDir, detail.newDir);
       refreshGraphDisplayRef.current();
-      scheduleRouteProposalsRefetchRef.current();
+      scheduleRouteProposalsRecomputeRef.current();
     };
     window.addEventListener("optimistic-vote", handler);
     return () => window.removeEventListener("optimistic-vote", handler);
@@ -2571,12 +2623,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         const midLng = (nodeLon(data, fromIdx) + nodeLon(data, toIdx)) / 2;
 
         tooltipName = edgeName(data, hoverTarget.index) || resolveAddress(midLat, midLng, bumpGeocode);
-        hoverVoteTypes = decodeVoteTypes((data.edge_vote_types ?? [])[hoverTarget.index], legend);
+        // Block grain (docs §2.4): the card sums the deduped per-block counts
+        // over the hovered edge's block; per-edge rows when blocks are absent.
+        hoverVoteTypes = selectionVoteRows(data, [hoverTarget.index])
+          ?? decodeVoteTypes((data.edge_vote_types ?? [])[hoverTarget.index], legend);
       }
     } else {
       if (hoverTarget.index < data.nNodes) {
         tooltipName = resolveAddress(nodeLat(data, hoverTarget.index), nodeLon(data, hoverTarget.index), bumpGeocode);
-        hoverVoteTypes = decodeVoteTypes((data.node_vote_types ?? [])[hoverTarget.index], legend);
+        // A node belongs to its adjFirst edge's block (docs §2.1).
+        const hoverNodeEdge = adjFirst(nodeAdjRef.current, hoverTarget.index);
+        hoverVoteTypes = (hoverNodeEdge != null ? selectionVoteRows(data, [hoverNodeEdge]) : null)
+          ?? decodeVoteTypes((data.node_vote_types ?? [])[hoverTarget.index], legend);
       }
     }
     // A station carries its name on its self-edge (index == node index); use it
@@ -2604,14 +2662,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         const midLat = (nodeLat(data, fromIdx) + nodeLat(data, toIdx)) / 2;
         const midLng = (nodeLon(data, fromIdx) + nodeLon(data, toIdx)) / 2;
         pinnedName = edgeName(data, pinnedTarget.index) || resolveAddress(midLat, midLng, bumpGeocode);
-        pinnedVoteTypes = decodeVoteTypes((data.edge_vote_types ?? [])[pinnedTarget.index], legend);
+        // Block grain (docs §2.4): sum the deduped per-block counts over the
+        // selection's touched block(s); per-edge rows when blocks are absent.
+        pinnedVoteTypes = selectionVoteRows(data, [pinnedTarget.index])
+          ?? decodeVoteTypes((data.edge_vote_types ?? [])[pinnedTarget.index], legend);
         pinnedVoteEdgeId = pinnedTarget.index;
       }
     } else {
       if (pinnedTarget.index < data.nNodes) {
         pinnedName = resolveAddress(nodeLat(data, pinnedTarget.index), nodeLon(data, pinnedTarget.index), bumpGeocode);
-        pinnedVoteTypes = decodeVoteTypes((data.node_vote_types ?? [])[pinnedTarget.index], legend);
         pinnedVoteEdgeId = adjFirst(nodeAdjRef.current, pinnedTarget.index);
+        // A node belongs to its vote edge's block (docs §2.1 adjFirst rule).
+        pinnedVoteTypes = (pinnedVoteEdgeId != null ? selectionVoteRows(data, [pinnedVoteEdgeId]) : null)
+          ?? decodeVoteTypes((data.node_vote_types ?? [])[pinnedTarget.index], legend);
       }
     }
     // Anchor + share-link coord come from the SAME helper the position effect
@@ -2630,6 +2693,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   useEffect(() => {
     if (pinnedVoteEdgeId != null) onPinnedResolveRef.current?.(pinnedVoteEdgeId);
   }, [pinnedVoteEdgeId]);
+
+  // Broadcast the covering blocks whenever the selection or hover changes.
+  // pathEdgeIds covers the route selection, pinnedVoteEdgeId the pinned point
+  // (incl. node→edge upgrades), hoverTarget the transient hover;
+  // graphVoteVersion re-fires once topology+votes arrive so a deep link's
+  // pre-load selection still lights up. Route-diamond hover (refs only, no
+  // re-render) calls the dispatcher directly from activate/deactivate.
+  useEffect(() => {
+    dispatchBlockSelectRef.current();
+  }, [pathEdgeIds, pinnedVoteEdgeId, hoverTarget, graphVoteVersion]);
 
   // -------------------------------------------------------------------------
   // Render
@@ -3157,27 +3230,47 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // selected. The optimistic store write fires synchronously inside castVotes,
     // so the version bump (and re-resolve) happen immediately, not on settle.
     pinnedEdgeOverrideRef.current = edgeId;
-    castVotes({ mode: themeMode, edgeIds: [edgeId], label, direction: newDir });
+    const topo = topologyRef.current;
+    castVotes({
+      mode: themeMode, edgeIds: [edgeId], label, direction: newDir,
+      // Block-scoped semantics (docs §4): the plan/unvote spans the touched
+      // block; omitted (pre-topology) castVotes falls back to singletons.
+      blocks: topo ? materializeBlocks(topo, blockIndexRef.current, [edgeId]) : undefined,
+    });
   }, [themeMode]);
 
   // Reconcile local "my votes" against the server when a proposal modal opens
   // (authoritative across devices). Keyed on the pinned edge so it refetches
-  // whenever the selection changes.
+  // whenever the selection changes. Requested at BLOCK breadth — every edge of
+  // the selection's touched block(s), capped to keep the URL sane — so
+  // blockCoverage sees votes this device cast on sibling edges from another
+  // session, not just the pinned edge.
   useEffect(() => {
     if (pinnedVoteEdgeId == null) return;
     let cancelled = false;
+    const topo = topologyRef.current;
+    let edgeIds: number[] = [pinnedVoteEdgeId];
+    if (topo) {
+      const rest = materializeBlocks(topo, blockIndexRef.current, [pinnedVoteEdgeId])
+        .flatMap((b) => Array.from(b))
+        .filter((e) => e !== pinnedVoteEdgeId)
+        .slice(0, MY_VOTES_EDGE_CAP - 1);
+      edgeIds = [pinnedVoteEdgeId, ...rest];
+    }
     const url = `${CONFIG.apiUrl}/my-votes?map=${encodeURIComponent(getMapSlug())}`
-      + `&mode=${encodeURIComponent(themeMode)}&edge_ids=${pinnedVoteEdgeId}`
+      + `&mode=${encodeURIComponent(themeMode)}&edge_ids=${edgeIds.join(",")}`
       + `&voter_id=${encodeURIComponent(getVoterId())}`;
     fetch(url)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (cancelled || !j?.votes) return;
-        const labels = j.votes[String(pinnedVoteEdgeId)];
-        // reconcileEdge bumps votesVersion itself when the server's truth
-        // differs from local, which re-runs the resolve effect + re-renders the
-        // modal. No manual bump.
-        if (labels) reconcileEdge(themeMode, pinnedVoteEdgeId, labels);
+        // Apply the FULL response in one pass — it's authoritative my-vote
+        // state for every edge it covers. reconcileEdge only persists/notifies
+        // (bumping votesVersion, which re-renders the modal) on actual change.
+        const votes = j.votes as Record<string, Record<string, number>>;
+        for (const [eid, labels] of Object.entries(votes)) {
+          reconcileEdge(themeMode, Number(eid), labels);
+        }
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -3213,10 +3306,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       const activate = () => {
         routeHighlightEdgesRef.current = routeBlockEdges(p);
         redrawHoverHighlightRef.current();
+        dispatchBlockSelectRef.current();
       };
       const deactivate = () => {
         routeHighlightEdgesRef.current = null;
         redrawHoverHighlightRef.current();
+        dispatchBlockSelectRef.current();
       };
 
       return (
@@ -3252,6 +3347,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           rows={pinnedVoteTypes}
           interactive
           edgeId={pinnedVoteEdgeId}
+          blocks={pinnedVoteEdgeId != null && topologyRef.current
+            ? materializeBlocks(topologyRef.current, blockIndexRef.current, [pinnedVoteEdgeId])
+            : null}
           mode={themeMode}
           voteTypes={theme.suggestions}
           shareUrl={pinnedPointLatLng
@@ -3343,6 +3441,10 @@ interface ProposalCardProps {
   rows: VoteTypeRow[];
   interactive?: boolean;
   edgeId?: number | null;
+  /** The selection's touched blocks as materialized edge lists (docs §4.1) —
+   *  drives the ± buttons' active/unvote state. Null/absent falls back to the
+   *  edge-as-singleton block, i.e. the pre-blocks behavior. */
+  blocks?: ArrayLike<number>[] | null;
   mode?: string;
   shareUrl?: string | null;
   /** The active map's vote types, so the header icon resolves a custom vote-type
@@ -3368,7 +3470,7 @@ type CardPos = {
 
 function ProposalCard({
   winner, screenX, screenY, name, rows,
-  interactive = false, edgeId = null, mode = "", shareUrl = null, voteTypes, onVote, onRemove, onHoverChange, registerEl,
+  interactive = false, edgeId = null, blocks = null, mode = "", shareUrl = null, voteTypes, onVote, onRemove, onHoverChange, registerEl,
 }: ProposalCardProps) {
   const [copied, setCopied] = useState(false);
   // Interactive cards can collapse to a small pill (icon + label + expand) so a
@@ -3469,15 +3571,23 @@ function ProposalCard({
     if (!interactive) {
       return <span className={cls}>{inner}</span>;
     }
-    const myVote = edgeId != null ? getVote(mode, edgeId, row.label) : 0;
-    const pressed = myVote === dir;
+    // Tri-state per docs §4.1: "active" (pressed, unvote affordance) only when
+    // EVERY touched block already holds my vote in this direction; partial
+    // coverage renders neutral (pressing still clears-then-casts).
+    const pressed = edgeId != null
+      && voteButtonState(
+        blockCoverage(mode, blocks && blocks.length > 0 ? blocks : [[edgeId]], row.label),
+        dir,
+      ) === "active";
     return (
       <button
         type="button"
         className={`${cls} is-btn${pressed ? " is-mine" : ""}`}
         disabled={edgeId == null}
         aria-pressed={pressed}
-        title={pressed ? "Remove your vote" : dir === -1 ? "Downvote" : "Upvote"}
+        title={pressed
+          ? "Remove your votes across this block"
+          : dir === -1 ? "Downvote" : "Upvote"}
         onClick={() => onVote?.(edgeId, row.label, dir)}
       >
         {inner}

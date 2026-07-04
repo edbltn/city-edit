@@ -109,12 +109,22 @@ export interface GraphData {
   coords: Int32Array; // 2·nNodes int32, [lat,lon] scaled by 1e7
   ends: Uint32Array; // 2·nEdges uint32, [fromIdx,toIdx] per edge
   edgeNames?: string[]; // station networks only; street graphs omit names
+  edgeBlockId?: Int32Array; // per-edge block id (GTB2 topologies); -1 = unmapped
+  nBlocks?: number;
   node_votes?: number[];
   edge_votes?: number[];
   vote_type_legend?: string[];
   // Per-edge / per-node vote-type breakdown: [legendIdx, up, down][]
   edge_vote_types?: [number, number, number][][];
   node_vote_types?: [number, number, number][][];
+  // Block layer (docs/three-layer-model.md §2.4) — deduped per-block counts:
+  // block_votes[b] = net (up − down); block_vote_types[b] = [legendIdx, up,
+  // down][] indexing block_vote_type_legend (its own legend, not vote_type_legend).
+  block_votes?: number[];
+  block_vote_types?: [number, number, number][][];
+  block_vote_type_legend?: string[];
+  n_blocks?: number;
+  blocks_version?: string;
   rev?: number;
   vote_types?: Record<string, string>;
 }

@@ -24,6 +24,14 @@ export interface BlockVotesDetail {
 }
 export const BLOCK_VOTES_EVENT = "city-edit:block-votes";
 
+// Block-selection payload broadcast by GraphLayer whenever the selection/hover
+// changes: the real block ids covering the selected/hovered edges. Rendered as
+// feature-state { selected } on the block-select layers (docs §2.4 highlight).
+export interface BlockSelectDetail {
+  blockIds: number[];
+}
+export const BLOCK_SELECT_EVENT = "city-edit:block-select";
+
 /** fill-color / fill-opacity expressions driven by feature-state "heat" ∈ [0,1].
  *  At heat 0 the block is fully transparent (no votes → invisible); it ramps up
  *  through the active style's heat colors. Blocks ARE the heat display, so there
@@ -94,6 +102,35 @@ function buildStyle(
         source: "blocks",
         "source-layer": "blocks",
         paint: blockFillPaint(mapStyle.heat),
+      },
+      // Block selection — feature-state { selected } lights the block polygons
+      // covering the current selection/hover: a subtle translucent fill plus a
+      // 2px casing in the style's selection token (white on dark, near-black on
+      // light), so it reads as selection over the heat in both themes.
+      {
+        id: "block-select",
+        type: "fill",
+        source: "blocks",
+        "source-layer": "blocks",
+        paint: {
+          "fill-color": mapStyle.selection,
+          "fill-opacity": [
+            "case", ["boolean", ["feature-state", "selected"], false], 0.14, 0,
+          ],
+        },
+      },
+      {
+        id: "block-select-casing",
+        type: "line",
+        source: "blocks",
+        "source-layer": "blocks",
+        paint: {
+          "line-color": mapStyle.selection,
+          "line-width": 2,
+          "line-opacity": [
+            "case", ["boolean", ["feature-state", "selected"], false], 0.85, 0,
+          ],
+        },
       },
     ],
     glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
@@ -185,40 +222,76 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
 
   // Color the block fills from GraphLayer's block-vote broadcasts via
   // feature-state. Heat is log-normalized (like the old edge heatmap) so a quiet
-  // map's 1–2 votes don't saturate. The latest payload is retained so it applies
-  // even if it arrives before the block source has loaded.
+  // map's 1–2 votes don't saturate. The latest payloads (votes + selection) are
+  // retained so they apply even if they arrive before the block source loads.
   useEffect(() => {
     const latest = { current: null as BlockVotesDetail | null };
+    // Block ids currently holding feature-state { selected: true }.
+    const selected = { current: [] as number[] };
+
+    const featureOf = (id: number) => ({ source: "blocks", sourceLayer: "blocks", id });
+
+    const applySelected = () => {
+      const ml = mapRef.current;
+      if (!ml || !ml.getSource("blocks")) return;
+      for (const id of selected.current) {
+        ml.setFeatureState(featureOf(id), { selected: true });
+      }
+    };
 
     const apply = () => {
       const ml = mapRef.current;
       const detail = latest.current;
-      if (!ml || !detail || !ml.getSource("blocks")) return;
+      if (!ml || !ml.getSource("blocks")) return;
+      if (!detail) {
+        applySelected();
+        return;
+      }
       const { blockVotes, max } = detail;
       const denom = Math.log(Math.max(1, max) + 1);
       // Clear prior states, then set only the blocks that have votes (sparse).
+      // The wholesale clear drops the `selected` key too — re-apply it after.
       ml.removeFeatureState({ source: "blocks", sourceLayer: "blocks" });
       for (let id = 0; id < blockVotes.length; id++) {
         const v = blockVotes[id];
         if (v > 0) {
-          ml.setFeatureState(
-            { source: "blocks", sourceLayer: "blocks", id },
-            { heat: Math.log(v + 1) / denom },
-          );
+          ml.setFeatureState(featureOf(id), { heat: Math.log(v + 1) / denom });
         }
       }
+      applySelected();
     };
 
     const onVotes = (e: Event) => {
       latest.current = (e as CustomEvent<BlockVotesDetail>).detail;
       apply();
     };
+
+    // Selection updates are incremental per-key writes ({ selected: false } on
+    // the blocks leaving, true on the ones entering) — never removeFeatureState,
+    // which would also drop the heat key set above.
+    const onSelect = (e: Event) => {
+      const next = (e as CustomEvent<BlockSelectDetail>).detail.blockIds;
+      const ml = mapRef.current;
+      if (ml && ml.getSource("blocks")) {
+        const nextSet = new Set(next);
+        for (const id of selected.current) {
+          if (!nextSet.has(id)) ml.setFeatureState(featureOf(id), { selected: false });
+        }
+        for (const id of next) {
+          ml.setFeatureState(featureOf(id), { selected: true });
+        }
+      }
+      selected.current = next;
+    };
+
     window.addEventListener(BLOCK_VOTES_EVENT, onVotes);
+    window.addEventListener(BLOCK_SELECT_EVENT, onSelect);
     // Re-apply whenever the block source (re)loads tiles.
     const ml = mapRef.current;
     ml?.on("sourcedata", apply);
     return () => {
       window.removeEventListener(BLOCK_VOTES_EVENT, onVotes);
+      window.removeEventListener(BLOCK_SELECT_EVENT, onSelect);
       ml?.off("sourcedata", apply);
     };
   }, []);

@@ -12,9 +12,9 @@ import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { CONFIG } from "../config";
 import { getMapSlug, getCurrentMap, mapVoteTypesForPointType } from "../map/runtime";
 import { getDefaultVoteTypeForTheme } from "../constants/voteTypes";
-import { coverage, type VoteDirection } from "../utils/voteStore";
+import { blockCoverage, type VoteDirection } from "../utils/voteStore";
 import { useVotesVersion } from "../utils/useVotesVersion";
-import { castVotes } from "../utils/castVote";
+import { castVotes, voteButtonState } from "../utils/castVote";
 import { useTheme } from "./ThemeContext";
 import { useGraphSnap } from "./GraphSnapContext";
 import type { Selection } from "../selection/types";
@@ -144,6 +144,10 @@ const LOCAL_SPLIT_THRESHOLD_METERS = 30;
 
 export type ActiveTool = "start" | "end";
 
+/** Selection edges → the touched blocks' materialized edge lists (docs
+ *  three-layer-model §4). Registered by GraphLayer, which owns the topology. */
+export type BlockMaterializer = (edgeIds: number[]) => ArrayLike<number>[];
+
 interface RouteContextValue {
   start: RoutePoint;
   end: RoutePoint;
@@ -159,6 +163,10 @@ interface RouteContextValue {
   /** True when the current target is fully voted in `voteDirection` (so casting
    *  again removes it — the control is a reversible toggle, never disabled). */
   isDirectionCast: (dir: VoteDirection) => boolean;
+  /** Register (or clear, with null) the selection→blocks materializer. Set by
+   *  GraphLayer once topology loads; casts and pressed-state fall back to
+   *  singleton [edge] blocks until then. */
+  setBlockMaterializer: (fn: BlockMaterializer | null) => void;
   ghostWaypoints: LatLng[];
   ghostWaypointIds: string[];
   splitDesirePaths: SplitDesirePath[];
@@ -295,6 +303,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
 
   const setVoteDirection = useCallback((dir: VoteDirection) => {
     setVoteDirectionState(dir);
+  }, []);
+
+  // GraphLayer registers topology access here (it owns the graph + block index);
+  // this context has none of its own. Null / unregistered → singleton fallback.
+  const blockMaterializerRef = useRef<BlockMaterializer | null>(null);
+  const setBlockMaterializer = useCallback((fn: BlockMaterializer | null) => {
+    blockMaterializerRef.current = fn;
   }, []);
 
   const setActiveTool = useCallback((tool: ActiveTool) => {
@@ -1002,17 +1017,24 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       edgeIds: edges,
       label: effectiveVoteType,
       direction: dir,
+      // Blocks of the selection (castVotes falls back to singletons when the
+      // materializer isn't registered yet — pre-topology, or no block layer).
+      blocks: blockMaterializerRef.current?.(edges),
     });
   }, [currentEdgeIds, effectiveVoteType, voteDirection, theme.mode]);
 
-  // Coverage of the current target for a (voteType, direction): which edges are
-  // already at that direction. Drives button state + the "already cast" badge.
+  // Block coverage of the current target for a (voteType, direction): pressed
+  // ("active") iff EVERY touched block already holds my vote in that direction
+  // (docs three-layer-model §4.1) — the same rule the in-map modal buttons use.
   const isDirectionCast = useCallback(
     (dir: VoteDirection) => {
       void votesVersion; // recompute after each cast (from anywhere)
       if (currentEdgeIds.length === 0 || !effectiveVoteType) return false;
-      const cov = coverage(theme.mode, currentEdgeIds, effectiveVoteType, dir);
-      return cov.unvoted.length === 0 && cov.opposite.length === 0 && cov.atTarget.length > 0;
+      const blocks =
+        blockMaterializerRef.current?.(currentEdgeIds)
+        ?? currentEdgeIds.map((e) => [e]);
+      const cov = blockCoverage(theme.mode, blocks, effectiveVoteType);
+      return voteButtonState(cov, dir) === "active";
     },
     [votesVersion, currentEdgeIds, effectiveVoteType, theme.mode]
   );
@@ -1108,6 +1130,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       voteDirection,
       setVoteDirection,
       isDirectionCast,
+      setBlockMaterializer,
       ghostWaypoints,
       ghostWaypointIds,
       splitDesirePaths,
@@ -1156,6 +1179,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       voteDirection,
       setVoteDirection,
       isDirectionCast,
+      setBlockMaterializer,
       ghostWaypoints,
       ghostWaypointIds,
       splitDesirePaths,
