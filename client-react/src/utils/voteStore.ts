@@ -275,6 +275,65 @@ export function coverage(
   return { atTarget, opposite, unvoted };
 }
 
+// ── Block coverage (docs/three-layer-model.md §4.1) ──────────────────────────
+// Blocks are the interaction grain: a block "holds" a direction when I hold
+// ≥1 edge-vote of that (type, direction) inside it. This store stays free of
+// topology imports — callers materialize each touched block's edge list (via
+// graphTopology's blockIndex, or `[e]` singletons) and pass them in.
+
+export type CoverageLevel = "all" | "some" | "none";
+
+export interface BlockCoverage {
+  up: CoverageLevel;
+  down: CoverageLevel;
+}
+
+/**
+ * Per-direction coverage of `blocks` for (mode, label): `all` when every block
+ * holds the direction, `some` when at least one does, `none` otherwise.
+ */
+export function blockCoverage(
+  mode: string,
+  blocks: ArrayLike<number>[],
+  label: string,
+): BlockCoverage {
+  let upBlocks = 0;
+  let downBlocks = 0;
+  for (const block of blocks) {
+    let hasUp = false;
+    let hasDown = false;
+    for (let i = 0; i < block.length; i++) {
+      const v = getVote(mode, block[i], label);
+      if (v === 1) hasUp = true;
+      else if (v === -1) hasDown = true;
+      if (hasUp && hasDown) break;
+    }
+    if (hasUp) upBlocks++;
+    if (hasDown) downBlocks++;
+  }
+  const level = (n: number): CoverageLevel =>
+    blocks.length > 0 && n === blocks.length ? "all" : n > 0 ? "some" : "none";
+  return { up: level(upBlocks), down: level(downBlocks) };
+}
+
+/** Every edge in `blocks` where I currently hold a `label` vote (either direction). */
+export function myVotesInBlocks(
+  mode: string,
+  blocks: ArrayLike<number>[],
+  label: string,
+): Map<number, VoteDirection> {
+  const mine = new Map<number, VoteDirection>();
+  for (const block of blocks) {
+    for (let i = 0; i < block.length; i++) {
+      const eid = block[i];
+      if (mine.has(eid)) continue;
+      const v = getVote(mode, eid, label);
+      if (v !== 0) mine.set(eid, v);
+    }
+  }
+  return mine;
+}
+
 /**
  * Reconcile against authoritative server state for one edge. `serverLabels`
  * maps label → direction; the server wins for the labels it reports. Local-only

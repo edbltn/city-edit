@@ -1,17 +1,27 @@
 // ==========================================================================
-// The single vote-cast path
+// The single vote-cast path — block-scoped clear-then-cast
 // ==========================================================================
 // Both the top-bar route cast and the in-map proposal +/- buttons call
-// castVotes(). It is coverage-aware (only touches edges whose state actually
-// changes), reversible (clicking the direction you already hold removes the
-// vote), optimistic (instant heatmap update via the `optimistic-vote` event
-// that GraphLayer applies), and self-healing (rolls back on failure; the
-// server's authoritative vtCounts SET reconciles the rest).
+// castVotes(). Semantics per docs/three-layer-model.md §4: coverage is computed
+// over the selection's TOUCHED BLOCKS (edge-as-singleton fallback when no block
+// artifacts exist). Pressing an already-active direction unvotes the whole
+// touched-block set; anything else clears my same-type votes across those
+// blocks and casts on exactly the selection edges. Optimistic (instant heatmap
+// update via the `optimistic-vote` event GraphLayer applies) and self-healing
+// (rolls back on failure; the server's authoritative deltas + `cleared`
+// response reconcile the rest).
 
 import { CONFIG } from "../config";
 import { getMapSlug, getPasscodeToken } from "../map/runtime";
 import { getVoterId } from "./voterIdentity";
-import { coverage, setVotes, type VoteDirection } from "./voteStore";
+import {
+  blockCoverage,
+  getVote,
+  myVotesInBlocks,
+  setVotes,
+  type BlockCoverage,
+  type VoteDirection,
+} from "./voteStore";
 
 /** Detail of the `optimistic-vote` window event GraphLayer listens for. */
 export interface OptimisticVoteDetail {
@@ -24,9 +34,9 @@ export interface OptimisticVoteDetail {
 
 export interface CastResult {
   ok: boolean;
-  /** The direction actually applied: the request direction, or 0 if toggled off. */
+  /** The direction actually applied: the request direction, or 0 if unvoting. */
   targetDir: VoteDirection | 0;
-  /** Edges whose state changed (sent to the server). Empty if nothing to do. */
+  /** Edges whose state changed (cast + cleared). Empty if nothing to do. */
   changedEdges: number[];
 }
 
@@ -36,45 +46,60 @@ export interface TransitionGroup {
   newDir: number;
 }
 
-export interface VotePlan {
-  /** Direction actually applied: the request direction, or 0 when toggling off. */
+export interface BlockVotePlan {
+  /** Direction actually applied: the request direction, or 0 when unvoting. */
   targetDir: VoteDirection | 0;
-  /** Edge transitions to apply (already excludes no-op edges). */
-  groups: TransitionGroup[];
-  /** Flattened edges that change (sent to the server). */
-  changedEdges: number[];
+  /** Selection edges to set to targetDir (fresh casts + reversals; excludes
+   *  edges already at targetDir — those are no-ops). */
+  castEdges: number[];
+  /** My existing same-type votes (in the touched blocks) to remove: everything
+   *  on an unvote, everything outside the selection on a cast. */
+  clearEdges: number[];
 }
 
 /**
- * Decide what a cast should do given current coverage — the pure heart of the
- * multi-select rule, extracted so it can be unit-tested without network/DOM:
- *   - edges already at `direction` are left untouched (no-op),
- *   - unvoted edges get the vote,
- *   - edges holding the opposite are reversed,
- *   - if EVERY edge already holds `direction`, the whole cast toggles OFF.
+ * Decide what a press should do — the pure heart of the block-scoped rule
+ * (docs §4.1–4.2), extracted so it can be unit-tested without network/DOM.
+ * `blocks` is the materialized touched-block edge lists; pass
+ * `edgeIds.map((e) => [e])` for the no-blocks singleton fallback.
+ *
+ *   - coverage(direction) === 'all' → UNVOTE: clear every one of my `label`
+ *     votes across the touched blocks, cast nothing (wire direction 0).
+ *   - else → CLEAR-THEN-CAST: cast `direction` on the selection edges (edges
+ *     already there are no-ops; opposites are reversals, NOT clears), and clear
+ *     my `label` votes on touched-block edges outside the selection.
  */
-export function planVoteChange(
-  mode: string,
-  edgeIds: number[],
-  label: string,
-  direction: VoteDirection,
-): VotePlan {
-  const cov = coverage(mode, edgeIds, label, direction);
+export function planBlockVote(params: {
+  mode: string;
+  edgeIds: number[];
+  label: string;
+  direction: VoteDirection;
+  blocks: ArrayLike<number>[];
+}): BlockVotePlan {
+  const { mode, edgeIds, label, direction, blocks } = params;
+  const cov = blockCoverage(mode, blocks, label);
+  const mine = myVotesInBlocks(mode, blocks, label);
 
-  let targetDir: VoteDirection | 0;
-  let groups: TransitionGroup[];
-  if (cov.unvoted.length === 0 && cov.opposite.length === 0) {
-    targetDir = 0; // everything already at target → toggle off (remove)
-    groups = [{ edges: cov.atTarget, prevDir: direction, newDir: 0 }];
-  } else {
-    targetDir = direction;
-    groups = [
-      { edges: cov.unvoted, prevDir: 0, newDir: direction },
-      { edges: cov.opposite, prevDir: -direction, newDir: direction },
-    ];
+  const active = (direction === 1 ? cov.up : cov.down) === "all";
+  if (active) {
+    return {
+      targetDir: 0,
+      castEdges: [],
+      clearEdges: [...mine.keys()].sort((a, b) => a - b),
+    };
   }
-  groups = groups.filter((g) => g.edges.length > 0);
-  return { targetDir, groups, changedEdges: groups.flatMap((g) => g.edges) };
+  const selection = new Set(edgeIds);
+  return {
+    targetDir: direction,
+    castEdges: edgeIds.filter((e) => getVote(mode, e, label) !== direction),
+    clearEdges: [...mine.keys()].filter((e) => !selection.has(e)).sort((a, b) => a - b),
+  };
+}
+
+/** Button render state for a direction (docs §4.1): active iff every touched
+ *  block already holds my vote in that direction (pressing = unvote). */
+export function voteButtonState(coverage: BlockCoverage, dir: VoteDirection): "active" | "neutral" {
+  return (dir === 1 ? coverage.up : coverage.down) === "all" ? "active" : "neutral";
 }
 
 function dispatchOptimistic(detail: OptimisticVoteDetail) {
@@ -82,19 +107,41 @@ function dispatchOptimistic(detail: OptimisticVoteDetail) {
   window.dispatchEvent(new CustomEvent("optimistic-vote", { detail }));
 }
 
+/** Group edges by their CURRENT stored direction so each optimistic event (and
+ *  its rollback) carries an accurate prevDir snapshot. */
+function groupByPrevDir(
+  mode: string,
+  edgeIds: number[],
+  label: string,
+  newDir: number,
+): TransitionGroup[] {
+  const byPrev = new Map<number, number[]>();
+  for (const e of edgeIds) {
+    const prev = getVote(mode, e, label);
+    if (prev === newDir) continue; // no-op — nothing to apply or roll back
+    let bucket = byPrev.get(prev);
+    if (!bucket) byPrev.set(prev, (bucket = []));
+    bucket.push(e);
+  }
+  return [...byPrev.entries()].map(([prevDir, edges]) => ({ edges, prevDir, newDir }));
+}
+
 /**
- * Cast `direction` for `label` across `edgeIds`.
+ * Cast `direction` for `label` across `edgeIds` (the selection), with block
+ * semantics from `blocks` (the touched blocks' materialized edge lists; omitted
+ * → per-edge singleton blocks, identical to the old per-edge behavior).
  *
- * Multi-select semantics (the key invariant): edges you've ALREADY voted in
- * this direction are left untouched; unvoted edges get the vote; edges holding
- * the OPPOSITE are reversed. If every edge already holds this direction, the
- * cast toggles OFF (removes your votes).
+ * The POST always carries the ORIGINAL selection edges + the resolved direction
+ * (0 = unvote); the server expands selection → touched blocks itself and
+ * reports any extra edges it unvoted in `cleared`, which we fold back into the
+ * local store (counts self-heal via the authoritative delta broadcast).
  */
 export async function castVotes(params: {
   mode: string;
   edgeIds: number[];
   label: string;
   direction: VoteDirection;
+  blocks?: ArrayLike<number>[];
 }): Promise<CastResult> {
   const { mode, label, direction } = params;
   const edges = [...new Set(params.edgeIds)].filter((e) => e != null);
@@ -102,7 +149,18 @@ export async function castVotes(params: {
     return { ok: false, targetDir: direction, changedEdges: [] };
   }
 
-  const { targetDir, groups, changedEdges } = planVoteChange(mode, edges, label, direction);
+  const blocks = params.blocks ?? edges.map((e) => [e]);
+  const { targetDir, castEdges, clearEdges } = planBlockVote({
+    mode, edgeIds: edges, label, direction, blocks,
+  });
+
+  // Optimistic transitions: clears (prev → 0) then casts (prev → targetDir),
+  // grouped by prevDir so rollback can restore the exact prior state.
+  const groups = [
+    ...groupByPrevDir(mode, clearEdges, label, 0),
+    ...groupByPrevDir(mode, castEdges, label, targetDir),
+  ];
+  const changedEdges = groups.flatMap((g) => g.edges);
   if (changedEdges.length === 0) {
     return { ok: true, targetDir, changedEdges: [] };
   }
@@ -120,7 +178,7 @@ export async function castVotes(params: {
       mode,
       vote_type: label,
       direction: targetDir,
-      edge_ids: changedEdges,
+      edge_ids: edges, // the selection — the server expands to blocks itself
       voter_id: getVoterId(),
     };
     const token = getPasscodeToken(slug);
@@ -165,6 +223,16 @@ export async function castVotes(params: {
       for (const e of edges) {
         setVotes(mode, [e], label, evicted[String(e)] as VoteDirection | 0);
       }
+    }
+
+    // The server expanded the selection to its touched blocks and reports every
+    // edge it unvoted beyond the selection in `cleared`. Our optimistic plan
+    // usually predicted these, but the server is authoritative (another tab may
+    // hold votes this store never saw) — fold them in. Counts self-heal via the
+    // authoritative [up, down] delta broadcast, so no optimistic event here.
+    const cleared: number[] = Array.isArray(result?.cleared) ? result.cleared : [];
+    if (cleared.length > 0) {
+      setVotes(mode, cleared, label, 0);
     }
 
     return { ok: true, targetDir, changedEdges: changedEdges.filter((e) => !declined.has(e)) };

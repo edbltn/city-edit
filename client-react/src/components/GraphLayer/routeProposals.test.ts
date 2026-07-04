@@ -6,8 +6,18 @@ import {
   isRouteCovered,
   dropPointsCoveredByRoutes,
   chooseAnchorOrder,
+  computeRouteProposals,
+  dedupeRoutes,
+  MIN_ROUTE_SCORE,
+  MIN_ROUTE_EDGES,
   type RouteProposal,
+  type RouteProposalOptions,
 } from "./routeProposals";
+import {
+  topologyFromJson,
+  buildNodeAdj,
+  type GraphTopology,
+} from "./graphTopology";
 import type { LatLng } from "../../types";
 
 const ll = (lat: number, lng: number): LatLng => ({ lat, lng });
@@ -115,7 +125,6 @@ describe("chooseAnchorOrder (ghost-waypoint forcing)", () => {
     // Put the existing start on the far side so B-first is shorter.
     const farStart = ll(0, 20);
     // farStart(20)→A(0)→B(10)→end(15): 20+10+5=35 ; farStart→B→A→end: 10+10+15=35? tune:
-    const end2 = ll(0, 12);
     // farStart(20)→A(0)→B(10)→end(12): 20+10+2 = 32
     // farStart(20)→B(10)→A(0)→end(12): 10+10+12 = 32 → make B-first clearly shorter:
     const end3 = ll(0, 8);
@@ -126,5 +135,285 @@ describe("chooseAnchorOrder (ghost-waypoint forcing)", () => {
 
   it("defaults to [a, b] when there is no existing route to order against", () => {
     expect(chooseAnchorOrder([], A, B, durationOf)).toEqual([A, B]);
+  });
+});
+
+// ==========================================================================
+// computeRouteProposals — deterministic client-side clustering
+// (port of server/tests/unit/test_route_proposals.py, adapted to the
+//  MIN_ROUTE_SCORE / MIN_ROUTE_EDGES activity gates)
+// ==========================================================================
+
+const BIKE = 0;
+const TREE = 1;
+const LEGEND = ["Bike lane", "Tree"];
+
+type Evt = [number, number, number][][];
+
+/** `evt([[BIKE, 5, 1]], [[TREE, 3, 0]], …)` → edge_vote_types (per edge). */
+const evt = (...perEdge: [number, number, number][][]): Evt => perEdge;
+
+function makeTopo(edges: [number, number][], blockIds?: number[]): GraphTopology {
+  const nNodes = 1 + Math.max(...edges.flat());
+  const nodes: [number, number][] = Array.from(
+    { length: nNodes },
+    (_, i) => [40.7, -74.0 + 0.001 * i],
+  );
+  const topo = topologyFromJson({ nodes, edges: edges.map(([u, v]) => [u, v, ""]) });
+  if (blockIds) {
+    topo.edgeBlockId = Int32Array.from(blockIds);
+    topo.nBlocks = Math.max(...blockIds) + 1;
+  }
+  return topo;
+}
+
+function compute(
+  edges: [number, number][],
+  voteTypes: Evt,
+  opts: RouteProposalOptions = {},
+  blockIds?: number[],
+): RouteProposal[] {
+  const topo = makeTopo(edges, blockIds);
+  return computeRouteProposals(topo, buildNodeAdj(topo), {
+    edge_vote_types: voteTypes,
+    vote_type_legend: LEGEND,
+  }, opts);
+}
+
+function bareRoute(over: Partial<RouteProposal>): RouteProposal {
+  return {
+    id: "x", label: "Bike lane", legendIdx: BIKE, score: 0,
+    edgeIds: [], blocks: [], blockEdgeIds: [], anchors: [0, 0],
+    anchorCoords: [ll(0, 0), ll(0, 0)],
+    ...over,
+  };
+}
+
+describe("computeRouteProposals — net weighting + MIN_NET", () => {
+  it("uses net (up − down) support and drops non-positive edges", () => {
+    // Nets: edge0 = 5, edge1 = 4, edge2 = 1 − 4 = -3 (excluded).
+    const ps = compute(
+      [[0, 1], [1, 2], [2, 3]],
+      evt([[BIKE, 5, 0]], [[BIKE, 4, 0]], [[BIKE, 1, 4]]),
+    );
+    expect(ps).toHaveLength(1);
+    expect(new Set(ps[0].edgeIds)).toEqual(new Set([0, 1]));
+    expect(ps[0].score).toBe(9);
+  });
+
+  it("returns nothing when no edge has positive net", () => {
+    expect(compute([[0, 1], [1, 2]], evt([[BIKE, 0, 0]], [[BIKE, 1, 5]]))).toEqual([]);
+  });
+});
+
+describe("computeRouteProposals — heaviest simple path", () => {
+  it("matches brute force on a tiny graph (exact search)", () => {
+    const edges: [number, number][] = [[0, 1], [1, 2], [2, 3], [0, 2]];
+    const nets = [3, 3, 10, 1];
+    const ps = compute(edges, evt(
+      [[BIKE, 3, 0]], [[BIKE, 3, 0]], [[BIKE, 10, 0]], [[BIKE, 1, 0]],
+    ));
+    // Brute force the heaviest simple path over the same weighted edges.
+    const adj = new Map<number, [number, number][]>();
+    edges.forEach(([u, v], i) => {
+      adj.set(u, [...(adj.get(u) ?? []), [v, i]]);
+      adj.set(v, [...(adj.get(v) ?? []), [u, i]]);
+    });
+    let best = 0;
+    const dfs = (node: number, seen: Set<number>, w: number) => {
+      best = Math.max(best, w);
+      for (const [nxt, eid] of adj.get(node) ?? []) {
+        if (!seen.has(nxt)) dfs(nxt, new Set(seen).add(nxt), w + nets[eid]);
+      }
+    };
+    for (const start of adj.keys()) dfs(start, new Set([start]), 0);
+    expect(ps[0].score).toBe(best); // 16 = 0-1-2-3
+  });
+
+  it("returns a simple contiguous path (no repeated nodes, real edges only)", () => {
+    const edges: [number, number][] = [[0, 1], [1, 2], [2, 3], [2, 4]];
+    const p = compute(edges, evt(
+      [[BIKE, 10, 0]], [[BIKE, 10, 0]], [[BIKE, 10, 0]], [[BIKE, 10, 0]],
+    ))[0];
+    // The Y-fork forces a choice: 3 path-eligible edges meet at node 2 but a
+    // simple path can use at most 2 of them.
+    expect(p.edgeIds.length).toBe(3);
+    const edgeSet = new Set(p.edgeIds);
+    expect(edgeSet.has(2) && edgeSet.has(3)).toBe(false);
+  });
+});
+
+describe("computeRouteProposals — peeling separates parallel corridors", () => {
+  it("peels two corridors crossing at one intersection out of one component", () => {
+    // X crossing at node 4: hot arms 0-4-1 (10+10), warm arms 2-4-3 (5+5).
+    const ps = compute(
+      [[0, 4], [4, 1], [2, 4], [4, 3]],
+      evt([[BIKE, 10, 0]], [[BIKE, 10, 0]], [[BIKE, 5, 0]], [[BIKE, 5, 0]]),
+    );
+    expect(ps).toHaveLength(2);
+    expect(new Set(ps[0].edgeIds)).toEqual(new Set([0, 1]));
+    expect(ps[0].score).toBe(20);
+    expect(new Set(ps[1].edgeIds)).toEqual(new Set([2, 3]));
+    expect(ps[1].score).toBe(10);
+  });
+
+  it("drops weak residue below the dominance fraction", () => {
+    // Hot corridor 0-1-2 (score 40) + a weak crossing spur 3-1-4 (score 4 <
+    // 0.25 × 40) — the spur is peel-eligible but under the dominance cut.
+    const ps = compute(
+      [[0, 1], [1, 2], [3, 1], [1, 4]],
+      evt([[BIKE, 20, 0]], [[BIKE, 20, 0]], [[BIKE, 2, 0]], [[BIKE, 2, 0]]),
+    );
+    expect(ps).toHaveLength(1);
+    expect(new Set(ps[0].edgeIds)).toEqual(new Set([0, 1]));
+  });
+});
+
+describe("computeRouteProposals — per-type independence", () => {
+  it("labels each corridor by its own type; types never mix in one route", () => {
+    const ps = compute(
+      [[0, 1], [1, 2], [10, 11], [11, 12]],
+      evt([[BIKE, 9, 0]], [[BIKE, 8, 0]], [[TREE, 7, 0]], [[TREE, 6, 0]]),
+    );
+    const byLabel = new Map(ps.map((p) => [p.label, p]));
+    expect(new Set(byLabel.keys())).toEqual(new Set(["Bike lane", "Tree"]));
+    expect(new Set(byLabel.get("Bike lane")!.edgeIds)).toEqual(new Set([0, 1]));
+    expect(new Set(byLabel.get("Tree")!.edgeIds)).toEqual(new Set([2, 3]));
+    expect(byLabel.get("Bike lane")!.legendIdx).toBe(BIKE);
+  });
+
+  it("a bike and a tree corridor may ride the SAME street (no cross-type dedupe)", () => {
+    const ps = compute(
+      [[0, 1], [1, 2]],
+      evt([[BIKE, 9, 0], [TREE, 7, 0]], [[BIKE, 8, 0], [TREE, 6, 0]]),
+    );
+    expect(ps).toHaveLength(2);
+    expect(new Set(ps.map((p) => p.legendIdx))).toEqual(new Set([BIKE, TREE]));
+  });
+});
+
+describe("dedupeRoutes — same-type Jaccard / containment", () => {
+  it("collapses high-overlap same-type routes to the stronger", () => {
+    const a = bareRoute({ id: "a", score: 30, edgeIds: [0, 1, 2] });
+    const b = bareRoute({ id: "b", score: 10, edgeIds: [0, 1] });
+    expect(dedupeRoutes([a, b]).map((p) => p.score)).toEqual([30]);
+  });
+
+  it("keeps crossing routes (low overlap is not a duplicate)", () => {
+    const a = bareRoute({ id: "a", score: 20, edgeIds: [0, 1] });
+    const b = bareRoute({ id: "b", score: 18, edgeIds: [2, 3] });
+    expect(dedupeRoutes([a, b])).toHaveLength(2);
+  });
+
+  it("drops a subset route regardless of Jaccard (containment)", () => {
+    const a = bareRoute({ id: "a", score: 30, edgeIds: [0, 1, 2, 3, 4, 5] });
+    const b = bareRoute({ id: "b", score: 12, edgeIds: [1, 2] }); // jaccard 2/6 < 0.5
+    expect(dedupeRoutes([a, b]).map((p) => p.id)).toEqual(["a"]);
+  });
+
+  it("never dedupes across vote types", () => {
+    const a = bareRoute({ id: "a", score: 20, edgeIds: [0, 1], legendIdx: BIKE });
+    const b = bareRoute({ id: "b", score: 18, edgeIds: [0, 1], legendIdx: TREE });
+    expect(dedupeRoutes([a, b])).toHaveLength(2);
+  });
+});
+
+describe("computeRouteProposals — block grouping", () => {
+  it("groups path edges into blocks and casts the whole block union", () => {
+    // Edges 0 and 1 are the two directions of ONE street segment → one block.
+    const ps = compute(
+      [[0, 1], [1, 0], [1, 2]],
+      evt([[BIKE, 9, 0]], [[BIKE, 9, 0]], [[BIKE, 8, 0]]),
+      {},
+      [0, 0, 1],
+    );
+    expect(ps).toHaveLength(1);
+    const blockSets = ps[0].blocks.map((b) => new Set(b));
+    expect(blockSets).toContainEqual(new Set([0, 1]));
+    expect(blockSets).toContainEqual(new Set([2]));
+    expect(ps[0].blocks).toHaveLength(2);
+    expect(new Set(ps[0].blockEdgeIds)).toEqual(new Set([0, 1, 2]));
+  });
+
+  it("falls back to edge-as-singleton blocks without artifacts", () => {
+    const ps = compute([[0, 1], [1, 2]], evt([[BIKE, 9, 0]], [[BIKE, 8, 0]]));
+    expect(ps[0].blocks.map((b) => [...b].sort())).toEqual(
+      expect.arrayContaining([[0], [1]]),
+    );
+    expect(ps[0].blocks).toHaveLength(2);
+  });
+
+  it("treats -1 (unmapped) edges as singletons inside a mapped city", () => {
+    const ps = compute(
+      [[0, 1], [1, 2]],
+      evt([[BIKE, 9, 0]], [[BIKE, 8, 0]]),
+      {},
+      [3, -1],
+    );
+    const blockSets = ps[0].blocks.map((b) => new Set(b));
+    expect(blockSets).toContainEqual(new Set([0]));
+    expect(blockSets).toContainEqual(new Set([1]));
+  });
+});
+
+describe("computeRouteProposals — activity gates", () => {
+  it("drops single-edge paths (MIN_ROUTE_EDGES)", () => {
+    expect(MIN_ROUTE_EDGES).toBe(2);
+    expect(compute([[0, 1]], evt([[BIKE, 50, 0]]))).toEqual([]);
+  });
+
+  it("drops paths scoring under MIN_ROUTE_SCORE", () => {
+    expect(MIN_ROUTE_SCORE).toBe(3);
+    expect(compute([[0, 1], [1, 2]], evt([[BIKE, 1, 0]], [[BIKE, 1, 0]]))).toEqual([]);
+    // …but exactly at the threshold survives.
+    const ps = compute([[0, 1], [1, 2]], evt([[BIKE, 2, 0]], [[BIKE, 1, 0]]));
+    expect(ps).toHaveLength(1);
+    expect(ps[0].score).toBe(3);
+  });
+});
+
+describe("computeRouteProposals — ranking, cap, anchors", () => {
+  it("ranks by score desc and caps at the limit", () => {
+    const ps = compute(
+      [[0, 1], [1, 2], [3, 4], [4, 5], [6, 7], [7, 8]],
+      evt(
+        [[BIKE, 15, 0]], [[BIKE, 15, 0]],
+        [[BIKE, 10, 0]], [[BIKE, 10, 0]],
+        [[BIKE, 5, 0]], [[BIKE, 5, 0]],
+      ),
+      { limit: 2 },
+    );
+    expect(ps.map((p) => p.score)).toEqual([30, 20]);
+  });
+
+  it("anchors are the path terminals with their node coordinates", () => {
+    const p = compute([[0, 1], [1, 2]], evt([[BIKE, 9, 0]], [[BIKE, 8, 0]]))[0];
+    expect(new Set(p.anchors)).toEqual(new Set([0, 2]));
+    const [a, b] = p.anchors;
+    expect(p.anchorCoords[0].lat).toBeCloseTo(40.7, 6);
+    expect(p.anchorCoords[0].lng).toBeCloseTo(-74.0 + 0.001 * a, 6);
+    expect(p.anchorCoords[1].lng).toBeCloseTo(-74.0 + 0.001 * b, 6);
+  });
+});
+
+describe("computeRouteProposals — determinism", () => {
+  const EDGES: [number, number][] = [
+    [0, 1], [1, 2], [2, 3], [0, 2], [3, 4], [10, 11], [11, 12], [2, 12],
+  ];
+  const VOTES = evt(
+    [[BIKE, 5, 0], [TREE, 2, 0]], [[BIKE, 4, 1]], [[BIKE, 7, 0]], [[BIKE, 2, 0]],
+    [[BIKE, 3, 0]], [[TREE, 6, 0]], [[TREE, 5, 0]], [[TREE, 2, 0]],
+  );
+
+  it("two runs over freshly built inputs are deep-equal (ids and order)", () => {
+    const run = () => compute(EDGES, VOTES);
+    expect(JSON.parse(JSON.stringify(run()))).toEqual(JSON.parse(JSON.stringify(run())));
+  });
+
+  it("ids are content-derived: same path ⇒ same id across topological rebuilds", () => {
+    const a = compute(EDGES, VOTES);
+    const b = compute(EDGES, VOTES);
+    expect(a.map((p) => p.id)).toEqual(b.map((p) => p.id));
+    expect(a.every((p) => /^[0-9a-f]{8}$/.test(p.id))).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
-  getVote, setVote, setVotes, coverage, reconcileEdge, setVoteTypeMap,
-  subscribeVotes, getVotesVersion, _resetVoteStore,
+  getVote, setVote, setVotes, coverage, blockCoverage, myVotesInBlocks,
+  reconcileEdge, setVoteTypeMap, subscribeVotes, getVotesVersion, _resetVoteStore,
 } from "./voteStore";
 
 const MODE = "walkways";
@@ -122,6 +122,74 @@ describe("voteStore — change notification (the sync contract)", () => {
 
     reconcileEdge(MODE, 9, { "Add bike lane": -1 }); // differs → notify
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("voteStore — blockCoverage (block-scoped button state)", () => {
+  const label = "Add bike lane";
+
+  beforeEach(() => {
+    setVoteTypeMap(TYPES);
+  });
+
+  it("is none/none with no votes anywhere", () => {
+    expect(blockCoverage(MODE, [[1], [2]], label)).toEqual({ up: "none", down: "none" });
+  });
+
+  it("is all when every block holds the direction on ≥1 edge", () => {
+    setVote(MODE, 1, label, 1);
+    setVote(MODE, 5, label, 1); // block [4, 5] held via edge 5 only
+    expect(blockCoverage(MODE, [[1], [4, 5]], label)).toEqual({ up: "all", down: "none" });
+  });
+
+  it("is some when only a strict subset of blocks holds the direction", () => {
+    setVote(MODE, 1, label, 1);
+    expect(blockCoverage(MODE, [[1], [2]], label)).toEqual({ up: "some", down: "none" });
+  });
+
+  it("tracks the two directions independently across blocks", () => {
+    setVote(MODE, 1, label, 1);
+    setVote(MODE, 2, label, -1);
+    expect(blockCoverage(MODE, [[1], [2]], label)).toEqual({ up: "some", down: "some" });
+    setVote(MODE, 3, label, -1);
+    expect(blockCoverage(MODE, [[1, 3], [2]], label)).toEqual({ up: "some", down: "all" });
+  });
+
+  it("scopes coverage to the given blocks and vote type", () => {
+    setVote(MODE, 9, label, 1); // outside every block
+    setVote(MODE, 1, "Add trees", 1); // other type
+    expect(blockCoverage(MODE, [[1], [2]], label)).toEqual({ up: "none", down: "none" });
+  });
+
+  it("is none/none for an empty block list (never 'all')", () => {
+    expect(blockCoverage(MODE, [], label)).toEqual({ up: "none", down: "none" });
+  });
+});
+
+describe("voteStore — myVotesInBlocks", () => {
+  const label = "Add bike lane";
+
+  beforeEach(() => {
+    setVoteTypeMap(TYPES);
+  });
+
+  it("returns every voted edge in the blocks with its direction", () => {
+    setVote(MODE, 1, label, 1);
+    setVote(MODE, 5, label, -1);
+    setVote(MODE, 9, label, 1); // outside the blocks — excluded
+    setVote(MODE, 2, "Add trees", 1); // other type — excluded
+    const mine = myVotesInBlocks(MODE, [[1, 2], [4, 5]], label);
+    expect(mine).toEqual(new Map([[1, 1], [5, -1]]));
+  });
+
+  it("dedupes an edge shared by two blocks", () => {
+    setVote(MODE, 3, label, 1);
+    const mine = myVotesInBlocks(MODE, [[3], [3, 4]], label);
+    expect([...mine.entries()]).toEqual([[3, 1]]);
+  });
+
+  it("is empty when I hold no votes in the blocks", () => {
+    expect(myVotesInBlocks(MODE, [[1], [2]], label).size).toBe(0);
   });
 });
 
