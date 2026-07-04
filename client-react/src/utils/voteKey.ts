@@ -8,22 +8,29 @@
 // compares and the parity is test-enforced (voteKey.test.ts ↔
 // server/tests/unit/test_vote_codec.py).
 //
-//   bit  [44]      direction    (0 = up, 1 = down)  — only on Redis count fields
-//   bits [43..28]  vote_type_id (16 bits, <= 65535)
+//   bit  [52]      direction    (0 = up, 1 = down)  — only on Redis count fields
+//   bits [51..28]  vote_type_id (24 bits — the global SERIAL exceeded 16 bits,
+//                                which used to overflow into the direction bit;
+//                                widened 2026-07 in lockstep with the server)
 //   bits [27..24]  mode         (4 bits — the map's mode)
 //   bits [23..0]   edge_id      (24 bits, <= ~16M edges)
 //
 // NOTE: the packed value exceeds 2^32, and JS bitwise operators are 32-bit, so
-// this codec uses arithmetic (* / %), never << / >>.
+// this codec uses arithmetic (* / %), never << / >>. Bit 52 keeps the full key
+// under Number.MAX_SAFE_INTEGER. Direction-less keys with vt < 65536 are
+// byte-identical to the old layout, so persisted client stores need no
+// migration.
 
 const EDGE_BITS = 24;
 const MODE_BITS = 4;
+const VT_BITS = 24;
 
 const EDGE_SPAN = 2 ** EDGE_BITS; // 16,777,216
 const MODE_SPAN = 2 ** MODE_BITS; // 16
+const VT_SPAN = 2 ** VT_BITS; // 16,777,216
 const MODE_SHIFT = EDGE_SPAN; // mode occupies the next 4 bits above edge_id
 const VT_SHIFT = EDGE_SPAN * MODE_SPAN; // 2^28 — vote_type_id above mode
-const DIR_SHIFT = 2 ** 44; // direction bit (only on Redis fields)
+const DIR_SHIFT = 2 ** 52; // direction bit (only on Redis fields)
 
 // Mode enum — MUST match server/vote_store.py MODE_IDS.
 export const MODE_IDS: Record<string, number> = {
@@ -55,7 +62,7 @@ export function unpackVoteKey(key: number): {
 } {
   const edgeId = key % EDGE_SPAN;
   const modeInt = Math.floor(key / MODE_SHIFT) % MODE_SPAN;
-  const voteTypeId = Math.floor(key / VT_SHIFT) % (1 << 16);
+  const voteTypeId = Math.floor(key / VT_SHIFT) % VT_SPAN;
   return { edgeId, modeInt, voteTypeId };
 }
 

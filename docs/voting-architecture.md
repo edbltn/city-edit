@@ -23,14 +23,21 @@ This is the Postgres unique key (`edge_votes_identity_key`) and the only dedup k
 ## 2. The codec (one bit layout, both sides)
 
 A vote field is packed into a single integer, identical in Python and TypeScript.
-45 bits, fits `Number.MAX_SAFE_INTEGER` (2^53) and Redis hash field strings.
+53 bits — the full `Number.MAX_SAFE_INTEGER` budget — and Redis hash field strings.
 
 ```
-bit  [44]      direction    (0 = up, 1 = down)   ← only on Redis count fields
-bits [43..28]  vote_type_id (16 bits, ≤ 65 535)
+bit  [52]      direction    (0 = up, 1 = down)   ← only on Redis count fields
+bits [51..28]  vote_type_id (24 bits, ≤ ~16.7 M)
 bits [27..24]  mode         (4 bits — the map's mode; constant per map hash)
 bits [23..0]   edge_id      (24 bits, ≤ 16 M edges)
 ```
+
+> vt was 16 bits (direction at bit 44) until 2026-07: `vote_types.id` is a
+> global SERIAL that bulk imports pushed past 65 535, and the overflowing id
+> bit landed on the direction bit — recording those votes as downvotes.
+> Widening moved the down fields, so a deploy of this layout must flush the
+> `ev:*` and `bagg:*` Redis keys and let them rehydrate from Postgres
+> (up fields and client localStorage keys with vt < 65 536 are unchanged).
 
 - `pack(edge_id, mode, vt_id)` — the **direction-less identity** (bits 0–43). Used as
   the client "have I voted" store key (value = direction) and the Redis-field base.

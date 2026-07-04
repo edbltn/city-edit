@@ -40,13 +40,15 @@ def bagg_key(slug: str, mode: int) -> str:
     return f"bagg:{slug}:{mode}"
 
 
-# packed aggregate field: block_id [0..23] | vt_id [24..39] | dir [40]
+# packed aggregate field: block_id [0..23] | vt_id [24..47] | dir [48]
+# (vt widened to 24 bits alongside vote_store's codec — the global vote_types
+# SERIAL exceeds 16 bits; server-internal, never crosses the wire packed)
 def pack_block_field(block_id: int, vt_id: int, dbit: int) -> int:
-    return (dbit << 40) | (vt_id << 24) | block_id
+    return (dbit << 48) | (vt_id << 24) | block_id
 
 
 def unpack_block_field(key: int) -> tuple[int, int, int]:
-    return (key & 0xFF_FFFF, (key >> 24) & 0xFFFF, (key >> 40) & 0x1)
+    return (key & 0xFF_FFFF, (key >> 24) & 0xFF_FFFF, (key >> 48) & 0x1)
 
 
 # ── Write path (incremental, called inside the voter lock) ──────────────────

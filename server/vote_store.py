@@ -5,11 +5,11 @@ This is purely the Redis cache representation — Postgres stores the canonical
 votes as natural columns (see database.edge_votes: map_slug, edge_id,
 vote_type_id, device_id, ip_hash, direction).
 
-Redis field layout (45 bits, fits JS Number.MAX_SAFE_INTEGER):
+Redis field layout (53 bits, fits JS Number.MAX_SAFE_INTEGER):
   bits [23..0]   edge_id      (24 bits, up to 16M edges)
   bits [27..24]  mode         (4 bits — the map's mode; constant per map hash)
-  bits [43..28]  vote_type_id (16 bits, up to 65K vote types)
-  bit  [44]      direction    (0 = upvote, 1 = downvote)
+  bits [51..28]  vote_type_id (24 bits — the global SERIAL exceeds 16 bits)
+  bit  [52]      direction    (0 = upvote, 1 = downvote)
 
 Redis is namespaced per map: hash "ev:<slug>", channel "vote_deltas:<slug>",
 revision "vote_rev:<slug>" — field = str(redis_field), value = count. Each map's
@@ -143,8 +143,25 @@ def all_vote_types() -> dict[int, str]:
 
 
 # ── Bit packing ────────────────────────────────────────────────────────────
+# Layout (53 bits — the full Number.MAX_SAFE_INTEGER budget; the client codec
+# in client-react/src/utils/voteKey.ts mirrors it bit-for-bit):
+#
+#   bit  [52]      direction    (0 = up, 1 = down) — only on Redis count fields
+#   bits [51..28]  vote_type_id (24 bits, <= ~16.7M)
+#   bits [27..24]  mode         (4 bits)
+#   bits [23..0]   edge_id      (24 bits)
+#
+# vt was 16 bits (direction at bit 44) until 2026-07: vote_types is a global
+# SERIAL that bulk imports pushed past 65535, and the overflowing id bit landed
+# exactly on the direction bit — silently recording every such vote as a
+# downvote. Widening moves the down fields, so ev:/bagg: hashes must be flushed
+# and rehydrated from Postgres when this ships (up fields and client
+# localStorage keys with vt < 65536 are byte-identical, no client migration).
 
-DIR_BIT = 44  # direction bit position in the Redis field key
+DIR_BIT = 52  # direction bit position in the Redis field key
+
+EDGE_BITS = 24
+VT_BITS = 24
 
 # Vote directions (API/app layer): +1 = up, -1 = down, 0 = no vote
 UP = 1
@@ -153,6 +170,10 @@ DOWN = -1
 
 def pack(edge_id: int, mode: int, vt_id: int) -> int:
     """Direction-less proposal key — the base of the Redis field (no direction bit)."""
+    if not 0 <= edge_id < (1 << EDGE_BITS):
+        raise ValueError(f"edge_id {edge_id} exceeds {EDGE_BITS}-bit field")
+    if not 0 <= vt_id < (1 << VT_BITS):
+        raise ValueError(f"vote_type_id {vt_id} exceeds {VT_BITS}-bit field")
     return (vt_id << 28) | (mode << 24) | edge_id
 
 
@@ -172,7 +193,7 @@ def unpack(key: int) -> tuple[int, int, int, int]:
     return (
         key & 0xFF_FFFF,
         (key >> 24) & 0xF,
-        (key >> 28) & 0xFFFF,
+        (key >> 28) & 0xFF_FFFF,
         (key >> DIR_BIT) & 0x1,
     )
 
