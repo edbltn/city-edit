@@ -24,7 +24,6 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import vote_store
 import vote_semantics
 import vote_migration
-import route_proposals
 import block_votes
 import database
 from cities import CITIES, DEFAULT_CITY_ID, get_city, all_cities
@@ -1559,114 +1558,6 @@ def graph_votes():
     try:
         body = _build_graph_votes_body(rmap, mode)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    resp = app.response_class(response=body, status=200, mimetype="application/json")
-    resp.headers["Cache-Control"] = "public, max-age=5"
-    resp.headers["ETag"] = etag
-    return resp
-
-
-# --------------------------------------------------------------------------
-# Route-based top proposals (per-type Leiden corridors → heaviest simple path)
-# --------------------------------------------------------------------------
-# Pull-based, exactly like /api/graph-votes: the client refetches on the same
-# vote-delta signal. Two caches: a revision-keyed body cache (skip recompute when
-# votes are unchanged) and a per-topology RouteProposalEngine (per-type cache so
-# a fresh revision only recomputes the engine, not the graph build). See
-# server/route_proposals.py and docs/vote-system-design.md §2.
-_route_proposals_cache: dict[str, tuple[int, str]] = {}
-_route_proposals_engines: dict[str, tuple[str | None, route_proposals.RouteProposalEngine]] = {}
-_route_proposals_guard = threading.Lock()
-
-
-def _build_route_proposals_body(rmap: ResolvedMap, mode: str | None) -> str:
-    rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
-    cache_key = f"{rmap.slug}:{mode or 'all'}"
-
-    with _route_proposals_guard:
-        hit = _route_proposals_cache.get(cache_key)
-    if hit is not None and hit[0] == rev:
-        return hit[1]
-
-    # Single-flight: concurrent callers wait, then take the freshly-cached body.
-    with _build_lock_for("rp:" + cache_key):
-        with _route_proposals_guard:
-            hit = _route_proposals_cache.get(cache_key)
-        if hit is not None and hit[0] == rev:
-            return hit[1]
-        return _build_route_proposals_locked(rmap, mode, rev, cache_key)
-
-
-def _build_route_proposals_locked(
-    rmap: ResolvedMap, mode: str | None, rev: int, cache_key: str,
-) -> str:
-    rmap.graph.ensure_loaded()
-    if redis_client.hlen(vote_store.hash_key(rmap.slug)) == 0:
-        if _hydrate_map_redis(rmap.slug, rmap.mode):
-            rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
-
-    votes = vote_store.read_all(redis_client, rmap.slug)
-    mode_filter = vote_store.mode_to_int(mode) if mode else None
-    arrays = vote_store.build_arrays(
-        votes, len(rmap.graph.edges), len(rmap.graph.nodes), rmap.graph.node_adj,
-        mode_filter=mode_filter,
-    )
-
-    # Reuse the engine across revisions while the topology is unchanged; rebuild
-    # it when the graph (hence edge ids / block map) changes.
-    etag = rmap.graph.topology_etag
-    cached_engine = _route_proposals_engines.get(cache_key)
-    if cached_engine is None or cached_engine[0] != etag:
-        engine = route_proposals.RouteProposalEngine(
-            edges=[(e[0], e[1]) for e in rmap.graph.edges],
-            node_coords=rmap.graph.nodes,
-            edge_block_id=getattr(rmap.graph, "edge_block_id", None),
-        )
-        _route_proposals_engines[cache_key] = (etag, engine)
-    else:
-        engine = cached_engine[1]
-
-    proposals = engine.recompute(arrays["edge_vote_types"], arrays["vote_type_legend"])
-    body = json.dumps({
-        "proposals": [p.to_dict() for p in proposals],
-        "rev": rev,
-        "n_edges": len(rmap.graph.edges),
-        "n_nodes": len(rmap.graph.nodes),
-        "topology_version": etag,
-        "blocks_version": getattr(rmap.graph, "blocks_version", None),
-    })
-    with _route_proposals_guard:
-        _route_proposals_cache[cache_key] = (rev, body)
-    return body
-
-
-@app.route("/api/route-proposals", methods=["GET"])
-def route_proposals_endpoint():
-    """Return route-based top proposals (corridors) for a map+mode.
-
-    Same revision/ETag/cache cadence as /api/graph-votes; the client refetches on
-    the existing vote-delta signal. Each proposal is a simple path expressed in
-    block units, with `block_edge_ids` (the voting set) and two anchor endpoints.
-    """
-    rmap = resolve_map(request.args.get("map"))
-    if _locked(rmap):
-        return _locked_response()
-    rmap.graph.ensure_loaded()
-
-    mode = request.args.get("mode") or None
-    rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
-    etag = f'"rp-{rmap.slug}-{mode or "all"}-{rev}"'
-    if request.headers.get("If-None-Match") == etag:
-        resp = app.response_class(status=304)
-        resp.headers["ETag"] = etag
-        resp.headers["Cache-Control"] = "public, max-age=5"
-        return resp
-
-    try:
-        body = _build_route_proposals_body(rmap, mode)
-    except Exception as e:
-        logger.exception("[ROUTE-PROPOSALS] build failed")
         return jsonify({"error": str(e)}), 500
 
     resp = app.response_class(response=body, status=200, mimetype="application/json")
