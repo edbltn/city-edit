@@ -1143,6 +1143,11 @@ def _resnap_city_maps(city_id: str) -> None:
             mode_int = vote_store.mode_to_int(m.get("mode", "walk"))
             labels = [vt["label"] for vt in (m.get("voteTypes") or []) if vt.get("label")]
             vote_migration.migrate_map(cg, redis_client, slug, mode_int, labels)
+            # Re-snapped edge ids invalidate the derived block state (bd:/bagg:
+            # are keyed by edge→block of the OLD graph). Purge it; the next
+            # /api/graph-votes build lazily rebuilds from Postgres (§2.6).
+            if cg.edge_block_id is not None:
+                block_votes.clear(redis_client, slug, mode_int)
             _invalidate_vote_cache(slug)
         except Exception as e:
             logger.error(f"[RESNAP:{slug}] failed: {e}")
