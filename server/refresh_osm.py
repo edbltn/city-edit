@@ -22,6 +22,7 @@ import sys
 import json
 import logging
 import argparse
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -191,12 +192,23 @@ def main():
     parser.add_argument("--all", action="store_true", help="Build every registered city")
     parser.add_argument("--force", action="store_true", help="Force rebuild even if present")
     parser.add_argument("--check", action="store_true", help="Report status without changes")
+    parser.add_argument("--blocks", action="store_true",
+                        help="After the graph, build the Layer-2 blocks + edge→block "
+                             "bake (streetscape_blocks/build_city_blocks.sh; needs the "
+                             "geo venv). A rebuilt graph gets a new topology_etag, which "
+                             "invalidates any prior bake — pass this on every rebuild of "
+                             "a city that shows blocks.")
     args = parser.parse_args()
 
     targets = list(CITIES) if args.all else [args.region or args.city]
 
     try:
         results = [build_city(t, force=args.force, check_only=args.check) for t in targets]
+        if args.blocks and not args.check:
+            script = Path(__file__).parent / "streetscape_blocks" / "build_city_blocks.sh"
+            for t in targets:
+                logger.info(f"[{t}] building Layer-2 blocks (docs/three-layer-model.md §2.2)")
+                subprocess.run([str(script), t], check=True)
         print(json.dumps(results if args.all else results[0], indent=2))
     except Exception as e:
         logger.error(f"Build failed: {e}")
