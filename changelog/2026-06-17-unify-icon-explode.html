@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unifying the icon-explode model — one cluster fanned out at a time — 2026-06-17</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Unifying the icon-explode model — one cluster fanned out at a time</h1>
+    <div class="dateline">2026-06-17 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#model">1</a>
+<a href="#oneatatime">2</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Crowded proposal icons fan out (“explode”) into a grid so you can pick one from a stack.
+  The state behind that was two overlapping maps merged on every render — built to keep several clusters open
+  at once. This collapses them into a single spread (plus a lock flag), routes all cluster detection through one
+  helper, and makes a fresh fanout <strong>replace</strong> the open one — so only one icon set is ever
+  exploded at a time.</p>
+
+  
+    <section class="card" id="model">
+      <div class="tag">React / Leaflet client</div>
+      <h2>1 · Collapse the two-map spread state into one</h2>
+      <h3>Symptom</h3>
+      <p>Crowded proposal icons “explode” (fan out into a grid) so you can pick one from a stack. The old model kept <strong>two</strong> overlapping spread maps — a <code>lockedSpread</code> and a <code>transientSpread</code> — that were merged into a union on every render, deliberately so that <em>several</em> clusters could sit fanned out at once. That made the desired behavior (“only one cluster open at a time”) impossible and spread the bookkeeping across two pieces of state, two refs, a union <code>useMemo</code>, and a mirror effect.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>lockedSpread</code> (a box was selected → persists, no timer) and <code>transientSpread</code> (hover/tap → snap-back timer) only ever differed in <em>whether a timer was running</em>. Their position maps were identical in structure, and the render only ever read their <strong>union</strong> (<code>spreadPositions</code>). The two-map split existed solely to allow multiple simultaneous fanouts.</li>
+<li>Because both <code>spreadCluster</code> and the locked-promotion path <em>merged</em> into the existing maps (<code>new Map(transientSpreadRef.current ?? [])</code>, then merge transient into locked), exploding a second cluster added to the open set rather than replacing it.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Replaced <code>lockedSpread</code> + <code>transientSpread</code> (state) and their two refs with a single <code>spread</code> state, one <code>spreadRef</code>, and a boolean <code>spreadLockedRef</code> — “locked” is now just a flag on the one open spread, not a separate map. The union <code>useMemo</code> and its mirror effect are gone.</li>
+<li>Added one <code>applySpread(next)</code> helper that sets the state and mirrors the ref in lockstep (the hot-path hit-test <code>proposalIconAt</code> reads the ref every drag frame), so no call site can update one and forget the other.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx — spread state → single map + lock flag + applySpread()</li></ul>
+    </section>
+    
+
+    <section class="card" id="oneatatime">
+      <div class="tag">React / Leaflet client</div>
+      <h2>2 · One cluster fanned out at a time + DRY cluster detection</h2>
+      <h3>Symptom</h3>
+      <p>Requested behavior: exploding one icon set should <strong>un-explode any other</strong> — only one set fanned out at once. Separately, the “is there a crowded stack here?” distance test was copy-pasted in three places (the path/drag exploder, the browse-click handler, and once inline for the anchor cluster), each re-deriving the same radius math.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>spreadCluster</code> merged into the open transient spread, and selecting a box merged transient into locked — so a second fanout coexisted with the first by design.</li>
+<li>Three sites filtered <code>placed</code> by <code>CLUSTER_RADIUS_PX</code> with their own copy of the squared-distance loop.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Replace, don’t merge.</strong> <code>spreadCluster</code> now builds a fresh <code>new Map()</code> and calls <code>applySpread(next)</code>, so fanning out any cluster automatically collapses whatever was open. Exploding set B un-explodes set A for free.</li>
+<li><strong>Selecting a box just flips the lock.</strong> Picking a fanned-out icon sets <code>spreadLockedRef.current = true</code> and cancels the timer (the position map is unchanged, so no re-render) instead of rebuilding a merged locked map. A lone, non-fanned icon calls <code>collapseSpread()</code>.</li>
+<li><strong>One cluster-detection helper.</strong> Extracted <code>clusterAround(anchor)</code> — the 2+ icons within <code>CLUSTER_RADIUS_PX</code> of a screen point — and routed both the path/drag exploder and the browse-click handler through it.</li>
+<li><strong>One collapse path.</strong> <code>collapseTransient</code> + <code>collapseAll</code> collapsed into a single <code>collapseSpread()</code> (clear timer → unlock → clear spread → schedule class clear) shared by the snap-back timer, pan/zoom, and deselect; <code>clearSpreadTimer()</code> replaces the duplicated <code>pauseSpreadTimer</code>.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx — spreadCluster replaces; clusterAround(); collapseSpread()/clearSpreadTimer()</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li><code>npx tsc --noEmit</code> — clean (no type errors).</li>
+<li><code>npx eslint src/components/GraphLayer/GraphLayer.tsx</code> — only the 4 pre-existing exhaustive-deps warnings; no new ones (the new deps <code>spread</code>, <code>collapseSpread</code>, <code>clearSpreadTimer</code>, <code>applySpread</code> are all listed).</li>
+<li><code>grep</code> confirms zero remaining references to <code>lockedSpread</code>, <code>transientSpread</code>, <code>spreadPositions</code>, <code>collapseAll</code>, <code>collapseTransient</code>, <code>pauseSpreadTimer</code>.</li>
+<li>Client-only change — Vite hot-reloads it; no Flask restart needed.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-walkways</code> at a zoom where several proposal icons stack, and tap a crowded stack — it should fan out into a grid.</li>
+<li>With one cluster fanned out, tap a <em>different</em> crowded stack — the first should snap back as the second fans out (only one open at a time).</li>
+<li>Tap one of the fanned boxes — it should select (start a route / open the modal) and the spread should stay put (locked, no snap-back) until you pan, zoom, or clear the selection.</li>
+<li>Let a fanned cluster sit untouched — it should snap back after ~2.2s; hovering one of its icons should pause that countdown.</li>
+<li>Drag a waypoint over a crowded stack — it should fan out so you can drop on a specific icon, and dragging onto a different stack should re-fan the new one.</li>
+<li>On a station map (<code>/m/e-bikes-3</code>) confirm station markers still select/deselect normally (no spread there).</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Green is added, red removed.</p>
+    
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+127</span> / <span class="d-del">-147</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">the Leaflet overlay that draws the vote heatmap, the street/topology graph, and the per-vote-type “top proposal” icons (with their explode/fan-out interaction)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~3400 LOC — one big component; the change touches only the icon-spread (“explode”) state and handlers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">hooks, refs &amp; heatmap drawing</span><span class="ol-sum">canvas overlay, topology, votes, zoom — untouched</span></li><li class="changed"><span class="ol-label">spread state + applySpread()</span><span class="ol-sum">single spread map + spreadLockedRef (was locked/transient union)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">proposalIconAt (drag hit-test)</span><span class="ol-sum">reads spreadRef for each icon’s display position</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">selection-clear effect</span><span class="ol-sum">collapse the spread when the selection is cleared</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">collapseSpread / clearSpreadTimer / pan-zoom</span><span class="ol-sum">one collapse path + timer cancel (was collapseAll + collapseTransient)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">indicatorMarkers useMemo</span><span class="ol-sum">builds the icon markers — hosts the explode logic</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">└ clusterAround / spreadCluster / armSpreadTimer</span><span class="ol-sum">NEW shared helper + replace-not-merge fanout</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">└ clusterExploderRef (path/drag entry)</span><span class="ol-sum">tap/drag over a stack → fan out; now via clusterAround</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">└ handleClick / activate / deactivate</span><span class="ol-sum">browse click fans or locks; hover pauses/arms the timer</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">tooltip + vote-cast plumbing</span><span class="ol-sum">hover card content, castProposalVote — untouched</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>spread state: lockedSpread+transientSpread (+union useMemo +mirror effect) → single spread + spreadRef + spreadLockedRef + applySpread()</li><li>proposalIconAt: spreadPositionsRef.current → spreadRef.current</li><li>selection-clear effect: collapseAllRef → collapseSpreadRef</li><li>scheduleSpreadClassClear / clearSpreadTimer / collapseSpread (was collapseTransient + collapseAll); pan-zoom uses collapseSpread</li><li>armSpreadTimer + NEW clusterAround(); spreadCluster builds a fresh map (replace, not merge)</li><li>clusterExploderRef: uses clusterAround; alreadyOpen checks the single spreadRef</li><li>override lookup spread?.get; activate/deactivate gate timer on !locked &amp;&amp; spreadRef.has</li><li>handleClick: clusterAround for detection; pick a box → lock flag; lone icon → collapseSpread; deps array updated</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 69a141f..4d53ab5 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -27,6 +27,7 @@ import { suggestionGlyphForLabel } from &quot;../../utils/suggestionIcon&quot;;</span>
+<span class="d-ctx"> import { selectTopProposals, topLabelForEdges, type VoteTypeWinner } from &quot;./topProposals&quot;;</span>
+<span class="d-ctx"> import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts } from &quot;./voteApply&quot;;</span>
+<span class="d-ctx"> import { iconForLabel, iconSrc, mapStyleForTheme } from &quot;../../themes&quot;;</span>
+<span class="d-add">+import { buildHeatRampStops, sampleHeatRamp } from &quot;../../mapStyles&quot;;</span>
+<span class="d-ctx"> import {</span>
+<span class="d-ctx">   getCachedTopology,</span>
+<span class="d-ctx">   setCachedTopology,</span>
+<span class="d-hunk">@@ -110,6 +111,12 @@ const HEAT_FULL_SCALE = 50;</span>
+<span class="d-ctx"> // styles blend additively (`lighter`/`screen`) for Strava-style intersection</span>
+<span class="d-ctx"> // brightening; the light style blends via `multiply` so heat darkens the map.</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+// Slightly hold the heatmap back so the top-proposal pins read as the brightest</span>
+<span class="d-add">+// thing on the map. Applied as canvas element opacity (atop the blend mode), so</span>
+<span class="d-add">+// it dims the whole heat field — and its faint zero-vote network skeleton —</span>
+<span class="d-add">+// uniformly without touching per-edge intensity math.</span>
+<span class="d-add">+const HEATMAP_OPACITY = &quot;0.72&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> // ---------------------------------------------------------------------------</span>
+<span class="d-ctx"> // Reverse-geocode cache (module-level, survives re-renders)</span>
+<span class="d-ctx"> // ---------------------------------------------------------------------------</span>
+<span class="d-hunk">@@ -921,40 +928,34 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   const [currentZoom, setCurrentZoom] = useState&lt;number&gt;(() =&gt; map.getZoom());</span>
+<span class="d-ctx">   const iconCacheRef = useRef&lt;Map&lt;string, L.DivIcon&gt;&gt;(new Map());</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // &quot;Fan out crowded icons into a grid&quot; state. Two clusters can be fanned at</span>
+<span class="d-del">-  // once: a LOCKED spread (one of its boxes is selected, so it persists with no</span>
+<span class="d-del">-  // snap-back until the selection clears) and a TRANSIENT spread (the most</span>
+<span class="d-del">-  // recently opened cluster, which lives on a hover/snap-back timer). Each maps</span>
+<span class="d-del">-  // a winner&#x27;s EDGE index -&gt; overridden [lat, lng]; the render uses the union.</span>
+<span class="d-del">-  // (Edge, not legendIdx: a vote type can win on several edges — top-N-per-type —</span>
+<span class="d-del">-  // so legendIdx is no longer unique per icon, but edgeIdx always is.)</span>
+<span class="d-del">-  // Selecting a box in the transient spread promotes it to locked and collapses</span>
+<span class="d-del">-  // the old locked one. Refs mirror the state for synchronous reads in handlers.</span>
+<span class="d-add">+  // &quot;Fan out crowded icons into a grid&quot; state. Only ONE cluster is ever fanned</span>
+<span class="d-add">+  // out at a time — exploding a new cluster replaces (collapses) whatever was</span>
+<span class="d-add">+  // open. The map keys a winner&#x27;s EDGE index -&gt; overridden [lat, lng] and the</span>
+<span class="d-add">+  // render reads it as a per-icon position override. (Edge, not legendIdx: a vote</span>
+<span class="d-add">+  // type can win on several edges — top-N-per-type — so legendIdx is no longer</span>
+<span class="d-add">+  // unique per icon, but edgeIdx always is.)</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  // A spread starts TRANSIENT — a hover/snap-back timer collapses it. Picking one</span>
+<span class="d-add">+  // of its boxes LOCKS it (`spreadLockedRef`), so it persists with no timer until</span>
+<span class="d-add">+  // the selection clears or the map pans/zooms. Locked vs transient is the ONLY</span>
+<span class="d-add">+  // difference between the two; the position map is identical, so the lock is just</span>
+<span class="d-add">+  // a ref flag. Refs mirror the state for synchronous reads in handlers.</span>
+<span class="d-ctx">   type SpreadMap = Map&lt;number, [number, number]&gt;;</span>
+<span class="d-del">-  const [lockedSpread, setLockedSpread] = useState&lt;SpreadMap | null&gt;(null);</span>
+<span class="d-del">-  const [transientSpread, setTransientSpread] = useState&lt;SpreadMap | null&gt;(null);</span>
+<span class="d-del">-  const lockedSpreadRef = useRef&lt;SpreadMap | null&gt;(null);</span>
+<span class="d-del">-  const transientSpreadRef = useRef&lt;SpreadMap | null&gt;(null);</span>
+<span class="d-add">+  const [spread, setSpread] = useState&lt;SpreadMap | null&gt;(null);</span>
+<span class="d-add">+  const spreadRef = useRef&lt;SpreadMap | null&gt;(null);</span>
+<span class="d-add">+  const spreadLockedRef = useRef(false);</span>
+<span class="d-ctx">   const spreadTimeoutRef = useRef&lt;number | null&gt;(null);</span>
+<span class="d-del">-  // collapseAll is defined far below; this ref lets earlier effects call it.</span>
+<span class="d-del">-  const collapseAllRef = useRef&lt;() =&gt; void&gt;(() =&gt; {});</span>
+<span class="d-del">-</span>
+<span class="d-del">-  // Union of both spreads, keyed by edge index — the per-icon position override</span>
+<span class="d-del">-  // the render reads. Null when nothing is fanned out.</span>
+<span class="d-del">-  const spreadPositions = useMemo&lt;SpreadMap | null&gt;(() =&gt; {</span>
+<span class="d-del">-    if (!lockedSpread &amp;&amp; !transientSpread) return null;</span>
+<span class="d-del">-    const merged: SpreadMap = new Map();</span>
+<span class="d-del">-    if (lockedSpread) for (const [k, v] of lockedSpread) merged.set(k, v);</span>
+<span class="d-del">-    if (transientSpread) for (const [k, v] of transientSpread) merged.set(k, v);</span>
+<span class="d-del">-    return merged;</span>
+<span class="d-del">-  }, [lockedSpread, transientSpread]);</span>
+<span class="d-del">-</span>
+<span class="d-del">-  // Mirror the spread (edgeIdx → fanned-out [lat,lng]) into a ref so the</span>
+<span class="d-del">-  // hot-path hit-test (proposalIconAt, run on every drag mousemove) can read the</span>
+<span class="d-del">-  // CURRENT display position of an icon — its fanned-out cell when spread, its</span>
+<span class="d-del">-  // real midpoint otherwise — without re-creating the callback on every fan-out.</span>
+<span class="d-del">-  const spreadPositionsRef = useRef(spreadPositions);</span>
+<span class="d-del">-  useEffect(() =&gt; { spreadPositionsRef.current = spreadPositions; }, [spreadPositions]);</span>
+<span class="d-add">+  // collapseSpread is defined far below; this ref lets earlier effects call it.</span>
+<span class="d-add">+  const collapseSpreadRef = useRef&lt;() =&gt; void&gt;(() =&gt; {});</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Set (or clear, with null) the open spread, mirroring it into the ref the</span>
+<span class="d-add">+  // hot-path hit-test reads — proposalIconAt runs on every drag mousemove and</span>
+<span class="d-add">+  // needs each icon&#x27;s CURRENT display position: its fanned-out cell when spread,</span>
+<span class="d-add">+  // its real midpoint otherwise.</span>
+<span class="d-add">+  const applySpread = useCallback((next: SpreadMap | null) =&gt; {</span>
+<span class="d-add">+    spreadRef.current = next;</span>
+<span class="d-add">+    setSpread(next);</span>
+<span class="d-add">+  }, []);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Random tiebreak salt — stable for this page load, different next time.</span>
+<span class="d-ctx">   // Used so that equal-count proposals don&#x27;t always favor the same labels.</span>
+<span class="d-hunk">@@ -1206,7 +1207,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     if (isStationNetwork) return null;</span>
+<span class="d-ctx">     const g = graphDataRef.current;</span>
+<span class="d-ctx">     if (!g) return null;</span>
+<span class="d-del">-    const spread = spreadPositionsRef.current;</span>
+<span class="d-add">+    const spread = spreadRef.current;</span>
+<span class="d-ctx">     let best: { edgeIdx: number; lat: number; lng: number } | null = null;</span>
+<span class="d-ctx">     let bestD = Infinity;</span>
+<span class="d-ctx">     for (const w of winnersRef.current) {</span>
+<span class="d-hunk">@@ -1358,6 +1359,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     // heat accumulates; `multiply` darkens a light basemap.</span>
+<span class="d-ctx">     canvas.style.filter = &quot;blur(0.6px)&quot;;</span>
+<span class="d-ctx">     canvas.style.mixBlendMode = mapStyle.heatBlend;</span>
+<span class="d-add">+    canvas.style.opacity = HEATMAP_OPACITY;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     const hoverCanvas = document.createElement(&quot;canvas&quot;);</span>
+<span class="d-ctx">     hoverCanvas.className = &quot;graph-layer-hover leaflet-zoom-animated&quot;;</span>
+<span class="d-hunk">@@ -1937,28 +1939,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     // dark themes&#x27; additive (`lighter`) blend, where a fixed cool halo drawn</span>
+<span class="d-ctx">     // for every edge would accumulate and wash the whole map to one hue.</span>
+<span class="d-ctx">     // Stops mirror heatGradientCss (mapStyles.ts) so the legend matches the map.</span>
+<span class="d-del">-    const parseRgb = (s: string): [number, number, number] =&gt; {</span>
+<span class="d-del">-      const m = s.match(/\d+/g);</span>
+<span class="d-del">-      return m ? [Number(m[0]), Number(m[1]), Number(m[2])] : [0, 0, 0];</span>
+<span class="d-del">-    };</span>
+<span class="d-del">-    const rampStops: { pos: number; rgb: [number, number, number] }[] = [</span>
+<span class="d-del">-      { pos: 0, rgb: parseRgb(heat.halo) },</span>
+<span class="d-del">-      { pos: 0.4, rgb: parseRgb(heat.warm) },</span>
+<span class="d-del">-      { pos: 0.75, rgb: parseRgb(heat.hot) },</span>
+<span class="d-del">-      { pos: 1, rgb: parseRgb(heat.peak) },</span>
+<span class="d-del">-    ];</span>
+<span class="d-del">-    const sampleRamp = (t: number): string =&gt; {</span>
+<span class="d-del">-      let hi = 1;</span>
+<span class="d-del">-      while (hi &lt; rampStops.length - 1 &amp;&amp; t &gt; rampStops[hi].pos) hi++;</span>
+<span class="d-del">-      const lo = rampStops[hi - 1];</span>
+<span class="d-del">-      const up = rampStops[hi];</span>
+<span class="d-del">-      const span = up.pos - lo.pos || 1;</span>
+<span class="d-del">-      const f = Math.min(1, Math.max(0, (t - lo.pos) / span));</span>
+<span class="d-del">-      const r = Math.round(lo.rgb[0] + (up.rgb[0] - lo.rgb[0]) * f);</span>
+<span class="d-del">-      const g = Math.round(lo.rgb[1] + (up.rgb[1] - lo.rgb[1]) * f);</span>
+<span class="d-del">-      const b = Math.round(lo.rgb[2] + (up.rgb[2] - lo.rgb[2]) * f);</span>
+<span class="d-del">-      return `rgb(${r}, ${g}, ${b})`;</span>
+<span class="d-del">-    };</span>
+<span class="d-add">+    // The same ramp feeds the top-proposal pins (see indicatorMarkers), so a pin</span>
+<span class="d-add">+    // glows the exact hue the heatmap paints at its vote count.</span>
+<span class="d-add">+    const rampStops = buildHeatRampStops(heat);</span>
+<span class="d-add">+    const sampleRamp = (t: number): string =&gt; sampleHeatRamp(rampStops, t);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     for (const i of voted) {</span>
+<span class="d-ctx">       const norm = Math.log((edgeVotes[i] ?? 0) + 1) / Math.log(maxVotes + 1);</span>
+<span class="d-hunk">@@ -2439,7 +2423,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // which read as &quot;the icons jump back to one point instead of fanning out.&quot;</span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-ctx">     if (pinnedLat !== null &amp;&amp; pinnedLng !== null) return;</span>
+<span class="d-del">-    if (lockedSpreadRef.current || transientSpreadRef.current) collapseAllRef.current();</span>
+<span class="d-add">+    if (spreadRef.current) collapseSpreadRef.current();</span>
+<span class="d-ctx">   }, [pinnedLat, pinnedLng]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // -------------------------------------------------------------------------</span>
+<span class="d-hunk">@@ -2572,45 +2556,34 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   const scheduleSpreadClassClear = useCallback(() =&gt; {</span>
+<span class="d-ctx">     const container = map.getContainer();</span>
+<span class="d-ctx">     window.setTimeout(() =&gt; {</span>
+<span class="d-del">-      if (!lockedSpreadRef.current &amp;&amp; !transientSpreadRef.current) {</span>
+<span class="d-del">-        container.classList.remove(&quot;votes-spreading&quot;);</span>
+<span class="d-del">-      }</span>
+<span class="d-add">+      if (!spreadRef.current) container.classList.remove(&quot;votes-spreading&quot;);</span>
+<span class="d-ctx">     }, SPREAD_ANIM_MS);</span>
+<span class="d-ctx">   }, [map]);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // Collapse just the transient (hover-timer) spread, leaving any locked spread</span>
+<span class="d-del">-  // open. This is what the snap-back timer fires.</span>
+<span class="d-del">-  const collapseTransient = useCallback(() =&gt; {</span>
+<span class="d-add">+  // Cancel the snap-back timer (no-op if none is armed).</span>
+<span class="d-add">+  const clearSpreadTimer = useCallback(() =&gt; {</span>
+<span class="d-ctx">     if (spreadTimeoutRef.current) {</span>
+<span class="d-ctx">       clearTimeout(spreadTimeoutRef.current);</span>
+<span class="d-ctx">       spreadTimeoutRef.current = null;</span>
+<span class="d-ctx">     }</span>
+<span class="d-del">-    transientSpreadRef.current = null;</span>
+<span class="d-del">-    setTransientSpread(null);</span>
+<span class="d-del">-    scheduleSpreadClassClear();</span>
+<span class="d-del">-  }, [scheduleSpreadClassClear]);</span>
+<span class="d-add">+  }, []);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // Cancel every spread (locked and transient) and snap all icons back. Used on</span>
+<span class="d-del">-  // pan/zoom and on deselect.</span>
+<span class="d-del">-  const collapseAll = useCallback(() =&gt; {</span>
+<span class="d-del">-    if (spreadTimeoutRef.current) {</span>
+<span class="d-del">-      clearTimeout(spreadTimeoutRef.current);</span>
+<span class="d-del">-      spreadTimeoutRef.current = null;</span>
+<span class="d-del">-    }</span>
+<span class="d-del">-    lockedSpreadRef.current = null;</span>
+<span class="d-del">-    transientSpreadRef.current = null;</span>
+<span class="d-del">-    setLockedSpread(null);</span>
+<span class="d-del">-    setTransientSpread(null);</span>
+<span class="d-add">+  // Collapse the open spread (locked or transient) and snap every icon back. The</span>
+<span class="d-add">+  // snap-back timer, pan/zoom, and deselect all funnel through here.</span>
+<span class="d-add">+  const collapseSpread = useCallback(() =&gt; {</span>
+<span class="d-add">+    clearSpreadTimer();</span>
+<span class="d-add">+    spreadLockedRef.current = false;</span>
+<span class="d-add">+    applySpread(null);</span>
+<span class="d-ctx">     scheduleSpreadClassClear();</span>
+<span class="d-del">-  }, [scheduleSpreadClassClear]);</span>
+<span class="d-del">-  useEffect(() =&gt; { collapseAllRef.current = collapseAll; }, [collapseAll]);</span>
+<span class="d-add">+  }, [clearSpreadTimer, applySpread, scheduleSpreadClassClear]);</span>
+<span class="d-add">+  useEffect(() =&gt; { collapseSpreadRef.current = collapseSpread; }, [collapseSpread]);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // Panning or zooming collapses any open spread (including a locked, persisted</span>
+<span class="d-add">+  // Panning or zooming collapses the open spread (including a locked, persisted</span>
+<span class="d-ctx">   // one) — the fanned grid was laid out for a fixed screen anchor, so moving the</span>
+<span class="d-ctx">   // map is the natural &quot;I&#x27;m done with this cluster&quot; gesture.</span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-ctx">     const collapse = () =&gt; {</span>
+<span class="d-del">-      if (lockedSpreadRef.current || transientSpreadRef.current) collapseAll();</span>
+<span class="d-add">+      if (spreadRef.current) collapseSpread();</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx">     map.on(&quot;zoomstart&quot;, collapse);</span>
+<span class="d-ctx">     map.on(&quot;dragstart&quot;, collapse);</span>
+<span class="d-hunk">@@ -2618,7 +2591,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       map.off(&quot;zoomstart&quot;, collapse);</span>
+<span class="d-ctx">       map.off(&quot;dragstart&quot;, collapse);</span>
+<span class="d-ctx">     };</span>
+<span class="d-del">-  }, [map, collapseAll]);</span>
+<span class="d-add">+  }, [map, collapseSpread]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Edge index of the currently selected top proposal (if any), so its icon</span>
+<span class="d-ctx">   // can float above the others.</span>
+<span class="d-hunk">@@ -2739,6 +2712,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       : winners;</span>
+<span class="d-ctx">     if (source.length === 0) return null;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    // Per-proposal &quot;heat&quot;: normalize each winner&#x27;s net votes against the hottest</span>
+<span class="d-add">+    // visible proposal (log scale, matching the canvas heatmap so a busy map</span>
+<span class="d-add">+    // doesn&#x27;t peg everything to max), then sample the map&#x27;s ramp at that</span>
+<span class="d-add">+    // intensity. The pin glows + tints to that color, as hot as its votes. The</span>
+<span class="d-add">+    // bucketed color keys the icon cache so equally-hot pins of a label still</span>
+<span class="d-add">+    // share one divIcon (and so a re-render doesn&#x27;t churn setIcon every frame).</span>
+<span class="d-add">+    const rampStops = buildHeatRampStops(mapStyle.heat);</span>
+<span class="d-add">+    const maxCount = source.reduce((m, w) =&gt; Math.max(m, w.count), 0);</span>
+<span class="d-add">+    const heatOf = (count: number): number =&gt;</span>
+<span class="d-add">+      maxCount &gt; 0 &amp;&amp; count &gt; 0</span>
+<span class="d-add">+        ? Math.log(count + 1) / Math.log(maxCount + 1)</span>
+<span class="d-add">+        : 0;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     // Resolve every marker to its edge-midpoint once up front so click handlers</span>
+<span class="d-ctx">     // can measure on-screen distance between icons for cluster detection.</span>
+<span class="d-ctx">     const placed = source</span>
+<span class="d-hunk">@@ -2759,32 +2745,36 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       midLng: number;</span>
+<span class="d-ctx">     }&gt;;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    // The snap-back countdown governs only the transient spread: it&#x27;s paused</span>
+<span class="d-del">-    // while the cursor is over one of its fanned-out icons and (re)started when</span>
+<span class="d-del">-    // it leaves, so that cluster stays open as long as you hover it and collapses</span>
+<span class="d-del">-    // once you move away. The locked spread has no timer.</span>
+<span class="d-add">+    // The snap-back countdown governs a TRANSIENT (not yet locked) spread: it&#x27;s</span>
+<span class="d-add">+    // paused while the cursor is over one of its fanned-out icons and (re)started</span>
+<span class="d-add">+    // when it leaves, so the cluster stays open as long as you hover it and</span>
+<span class="d-add">+    // collapses once you move away. A locked spread has no timer.</span>
+<span class="d-ctx">     const armSpreadTimer = () =&gt; {</span>
+<span class="d-del">-      if (spreadTimeoutRef.current) clearTimeout(spreadTimeoutRef.current);</span>
+<span class="d-del">-      spreadTimeoutRef.current = window.setTimeout(collapseTransient, SPREAD_DURATION_MS);</span>
+<span class="d-del">-    };</span>
+<span class="d-del">-    const pauseSpreadTimer = () =&gt; {</span>
+<span class="d-del">-      if (spreadTimeoutRef.current) {</span>
+<span class="d-del">-        clearTimeout(spreadTimeoutRef.current);</span>
+<span class="d-del">-        spreadTimeoutRef.current = null;</span>
+<span class="d-del">-      }</span>
+<span class="d-add">+      clearSpreadTimer();</span>
+<span class="d-add">+      spreadTimeoutRef.current = window.setTimeout(collapseSpread, SPREAD_DURATION_MS);</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    // Fan a cluster of icons out into a centered grid of cells around their</span>
+<span class="d-del">-    // shared anchor point, MERGING into the TRANSIENT spread (so more than one</span>
+<span class="d-del">-    // cluster can be fanned out at once — each new fanout adds to the open set</span>
+<span class="d-del">-    // rather than replacing it), then (re)schedule the shared snap-back.</span>
+<span class="d-add">+    // The crowded proposal cluster around a screen anchor: the 2+ icons within</span>
+<span class="d-add">+    // CLUSTER_RADIUS_PX of it. Shared by both explode entry points (browse click</span>
+<span class="d-add">+    // and path/drag tap), so cluster detection lives in exactly one place.</span>
+<span class="d-add">+    const clusterAround = (anchor: L.Point) =&gt;</span>
+<span class="d-add">+      placed.filter((m) =&gt; {</span>
+<span class="d-add">+        const p = map.latLngToContainerPoint([m.midLat, m.midLng]);</span>
+<span class="d-add">+        const dx = p.x - anchor.x, dy = p.y - anchor.y;</span>
+<span class="d-add">+        return dx * dx + dy * dy &lt;= CLUSTER_RADIUS_PX * CLUSTER_RADIUS_PX;</span>
+<span class="d-add">+      });</span>
+<span class="d-add">+</span>
+<span class="d-add">+    // Fan a cluster of icons out into a centered grid of cells around their shared</span>
+<span class="d-add">+    // anchor point, REPLACING any currently-open spread (only one cluster is</span>
+<span class="d-add">+    // fanned out at a time, so a fresh fanout collapses whatever was open), then</span>
+<span class="d-add">+    // schedule the snap-back. The new spread is transient until a box is picked.</span>
+<span class="d-ctx">     const spreadCluster = (</span>
+<span class="d-ctx">       members: typeof placed,</span>
+<span class="d-ctx">       anchor: L.Point,</span>
+<span class="d-ctx">     ) =&gt; {</span>
+<span class="d-ctx">       const cols = Math.ceil(Math.sqrt(members.length));</span>
+<span class="d-ctx">       const rows = Math.ceil(members.length / cols);</span>
+<span class="d-del">-      const next: SpreadMap = new Map(transientSpreadRef.current ?? []);</span>
+<span class="d-add">+      const next: SpreadMap = new Map();</span>
+<span class="d-ctx">       members.forEach((m, i) =&gt; {</span>
+<span class="d-ctx">         const col = i % cols;</span>
+<span class="d-ctx">         const row = Math.floor(i / cols);</span>
+<span class="d-hunk">@@ -2798,8 +2788,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       map.getContainer().classList.add(&quot;votes-spreading&quot;);</span>
+<span class="d-del">-      transientSpreadRef.current = next;</span>
+<span class="d-del">-      setTransientSpread(next);</span>
+<span class="d-add">+      spreadLockedRef.current = false;</span>
+<span class="d-add">+      applySpread(next);</span>
+<span class="d-ctx">       armSpreadTimer();</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -2822,24 +2812,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           if (d &lt; nearestSq) { nearestSq = d; anchor = p; }</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx">         if (!anchor || nearestSq &gt; CLUSTER_RADIUS_PX * CLUSTER_RADIUS_PX) return false;</span>
+<span class="d-del">-        const cluster = placed.filter((m) =&gt; {</span>
+<span class="d-del">-          const p = map.latLngToContainerPoint([m.midLat, m.midLng]);</span>
+<span class="d-del">-          return (p.x - anchor!.x) ** 2 + (p.y - anchor!.y) ** 2</span>
+<span class="d-del">-            &lt;= CLUSTER_RADIUS_PX * CLUSTER_RADIUS_PX;</span>
+<span class="d-del">-        });</span>
+<span class="d-add">+        const cluster = clusterAround(anchor);</span>
+<span class="d-ctx">         if (cluster.length &lt;= 1) return false;</span>
+<span class="d-del">-        // Explode this cluster UNLESS it&#x27;s already fanned out (any member already</span>
+<span class="d-del">-        // in a spread) — so a second/third cluster fans alongside the first, but a</span>
+<span class="d-del">-        // drag calling this every frame doesn&#x27;t re-fan the one it&#x27;s already over.</span>
+<span class="d-del">-        const alreadyOpen = cluster.some((m) =&gt;</span>
+<span class="d-del">-          transientSpreadRef.current?.has(m.w.edgeIdx) || lockedSpreadRef.current?.has(m.w.edgeIdx));</span>
+<span class="d-add">+        // Explode this cluster UNLESS it&#x27;s already the open one — so a drag calling</span>
+<span class="d-add">+        // this every frame doesn&#x27;t re-fan the cluster it&#x27;s already hovering.</span>
+<span class="d-add">+        const alreadyOpen = cluster.some((m) =&gt; spreadRef.current?.has(m.w.edgeIdx));</span>
+<span class="d-ctx">         if (!alreadyOpen) spreadCluster(cluster, anchor);</span>
+<span class="d-ctx">         return true;</span>
+<span class="d-ctx">       };</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     return placed.map(({ w, midLat, midLng }) =&gt; {</span>
+<span class="d-del">-      const override = spreadPositions?.get(w.edgeIdx);</span>
+<span class="d-add">+      const override = spread?.get(w.edgeIdx);</span>
+<span class="d-ctx">       const posLat = override ? override[0] : midLat;</span>
+<span class="d-ctx">       const posLng = override ? override[1] : midLng;</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -2879,12 +2863,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       // at a time, the memo rebuilds on change); the rest use the shared per-label</span>
+<span class="d-ctx">       // cache. Spread icons drop the locating divot (the grid cell isn&#x27;t the real</span>
+<span class="d-ctx">       // spot); removable icons can&#x27;t be cached (the badge stamps an edge id).</span>
+<span class="d-add">+      // Heat glow/tint, scaled by this proposal&#x27;s votes. A tinted role (start/end</span>
+<span class="d-add">+      // teal/red) owns the pin&#x27;s color, so skip heat there to avoid fighting it;</span>
+<span class="d-add">+      // otherwise even selected/on-path pins keep their warmth.</span>
+<span class="d-add">+      const heat = tint ? 0 : heatOf(w.count);</span>
+<span class="d-add">+      const heatColor = heat &gt; 0 ? sampleHeatRamp(rampStops, heat) : undefined;</span>
+<span class="d-add">+      const heatBucket = Math.round(heat * 12);</span>
+<span class="d-ctx">       let icon: L.DivIcon;</span>
+<span class="d-ctx">       if (isSelected || tint || isSpread || passthrough || removeEdge !== null) {</span>
+<span class="d-del">-        icon = makeVoteTypeIcon(w.label, theme.suggestions, { selected: isSelected, tint, square: isSpread, passthrough, removeEdge });</span>
+<span class="d-add">+        icon = makeVoteTypeIcon(w.label, theme.suggestions, { selected: isSelected, tint, square: isSpread, passthrough, removeEdge, heat, heatColor });</span>
+<span class="d-ctx">       } else {</span>
+<span class="d-del">-        icon = iconCacheRef.current.get(w.label) ?? makeVoteTypeIcon(w.label, theme.suggestions);</span>
+<span class="d-del">-        iconCacheRef.current.set(w.label, icon);</span>
+<span class="d-add">+        const cacheKey = `${w.label}|${heatBucket}`;</span>
+<span class="d-add">+        icon = iconCacheRef.current.get(cacheKey) ?? makeVoteTypeIcon(w.label, theme.suggestions, { heat, heatColor });</span>
+<span class="d-add">+        iconCacheRef.current.set(cacheKey, icon);</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       const activateIndicator = () =&gt; {</span>
+<span class="d-hunk">@@ -2893,8 +2884,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         // from this edge being a winner, so the markup matches a segment hover.</span>
+<span class="d-ctx">         // overIndicatorRef tells the map hover handler to yield (hierarchy #1).</span>
+<span class="d-ctx">         overIndicatorRef.current = true;</span>
+<span class="d-del">-        // Hovering an icon of the transient cluster pauses its snap-back timer.</span>
+<span class="d-del">-        if (transientSpreadRef.current?.has(w.edgeIdx)) pauseSpreadTimer();</span>
+<span class="d-add">+        // Hovering an icon of the open (transient) cluster pauses its snap-back</span>
+<span class="d-add">+        // timer; a locked cluster has no timer to pause.</span>
+<span class="d-add">+        if (!spreadLockedRef.current &amp;&amp; spreadRef.current?.has(w.edgeIdx)) clearSpreadTimer();</span>
+<span class="d-ctx">         // The hover card is a pointer-only affordance. On touch there&#x27;s no</span>
+<span class="d-ctx">         // mouseout to clear it, so a tap would leave it stuck and resurface it</span>
+<span class="d-ctx">         // once the pinned point moves off this edge. The pinned modal is the</span>
+<span class="d-hunk">@@ -2916,9 +2908,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         hoverTargetRef.current = null;</span>
+<span class="d-ctx">         setHoverTarget(null);</span>
+<span class="d-ctx">         redrawHoverHighlightRef.current();</span>
+<span class="d-del">-        // Leaving a transient-cluster icon (re)starts its snap-back countdown.</span>
+<span class="d-del">-        // The locked cluster has no timer, so its icons don&#x27;t trigger one.</span>
+<span class="d-del">-        if (transientSpreadRef.current?.has(w.edgeIdx)) armSpreadTimer();</span>
+<span class="d-add">+        // Leaving an open (transient) cluster icon (re)starts its snap-back</span>
+<span class="d-add">+        // countdown. A locked cluster has no timer, so its icons don&#x27;t trigger one.</span>
+<span class="d-add">+        if (!spreadLockedRef.current &amp;&amp; spreadRef.current?.has(w.edgeIdx)) armSpreadTimer();</span>
+<span class="d-ctx">       };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       const handleClick = () =&gt; {</span>
+<span class="d-hunk">@@ -2936,41 +2928,29 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         // Run cluster detection for any icon that isn&#x27;t part of the current</span>
+<span class="d-ctx">         // spread (an icon with no override). This covers both the first click</span>
+<span class="d-ctx">         // and clicking a *different* crowded cluster while one is already open</span>
+<span class="d-del">-        // — the latter should re-explode the new cluster, not just collapse the</span>
+<span class="d-del">-        // old one. Clicking a fanned-out icon (override set) selects normally.</span>
+<span class="d-add">+        // — the latter re-explodes the new cluster (collapsing the old one, since</span>
+<span class="d-add">+        // only one fans out at a time). Clicking a fanned-out icon (override set)</span>
+<span class="d-add">+        // selects normally.</span>
+<span class="d-ctx">         if (!override) {</span>
+<span class="d-ctx">           const selfPt = map.latLngToContainerPoint([midLat, midLng]);</span>
+<span class="d-del">-          const cluster = placed.filter(({ midLat: la, midLng: ln }) =&gt; {</span>
+<span class="d-del">-            const p = map.latLngToContainerPoint([la, ln]);</span>
+<span class="d-del">-            const dx = p.x - selfPt.x;</span>
+<span class="d-del">-            const dy = p.y - selfPt.y;</span>
+<span class="d-del">-            return dx * dx + dy * dy &lt;= CLUSTER_RADIUS_PX * CLUSTER_RADIUS_PX;</span>
+<span class="d-del">-          });</span>
+<span class="d-del">-          // Crowded: swallow this click and fan the cluster out as the transient</span>
+<span class="d-del">-          // spread. A locked (selected) cluster stays open alongside it, so a</span>
+<span class="d-del">-          // second fanout coexists with the first until you pick a box here.</span>
+<span class="d-add">+          const cluster = clusterAround(selfPt);</span>
+<span class="d-add">+          // Crowded: swallow this click and fan the cluster out, replacing any</span>
+<span class="d-add">+          // open spread.</span>
+<span class="d-ctx">           if (cluster.length &gt; 1) {</span>
+<span class="d-ctx">             spreadCluster(cluster, selfPt);</span>
+<span class="d-ctx">             return;</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-        // Selecting a fanned-out box promotes the open transient sets into the</span>
+<span class="d-del">-        // locked spread, MERGING with any already-locked sets — so every fanned-out</span>
+<span class="d-del">-        // cluster persists together once you pick from any of them. Clicking a</span>
+<span class="d-del">-        // non-fanned lone icon collapses everything.</span>
+<span class="d-add">+        // Picking a fanned-out box LOCKS the open spread (cancel its timer so it</span>
+<span class="d-add">+        // persists until deselect / pan / zoom). The position map is unchanged, so</span>
+<span class="d-add">+        // no re-render is needed — only the lock flag flips. A non-fanned lone icon</span>
+<span class="d-add">+        // collapses any open spread.</span>
+<span class="d-ctx">         if (override) {</span>
+<span class="d-del">-          const merged: SpreadMap = new Map(lockedSpreadRef.current ?? []);</span>
+<span class="d-del">-          if (transientSpreadRef.current) {</span>
+<span class="d-del">-            for (const [k, v] of transientSpreadRef.current) merged.set(k, v);</span>
+<span class="d-del">-          }</span>
+<span class="d-del">-          pauseSpreadTimer();</span>
+<span class="d-del">-          lockedSpreadRef.current = merged;</span>
+<span class="d-del">-          transientSpreadRef.current = null;</span>
+<span class="d-del">-          setLockedSpread(merged);</span>
+<span class="d-del">-          setTransientSpread(null);</span>
+<span class="d-add">+          clearSpreadTimer();</span>
+<span class="d-add">+          spreadLockedRef.current = true;</span>
+<span class="d-ctx">         } else {</span>
+<span class="d-del">-          collapseAll();</span>
+<span class="d-add">+          collapseSpread();</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx">         activateIndicator();</span>
+<span class="d-ctx">         pinnedEdgeOverrideRef.current = w.edgeIdx;</span>
+<span class="d-hunk">@@ -3036,9 +3016,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     });</span>
+<span class="d-ctx">     // isStationNetwork/stationLabel select the marker source; isHeatmapLoading</span>
+<span class="d-ctx">     // re-runs once topology+votes arrive so stations appear even with zero votes.</span>
+<span class="d-del">-  }, [winners, currentZoom, map, spreadPositions, collapseAll, collapseTransient,</span>
+<span class="d-add">+  }, [winners, currentZoom, map, spread, collapseSpread, clearSpreadTimer, applySpread,</span>
+<span class="d-ctx">       selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,</span>
+<span class="d-del">-      isRouteMode, beginProposalMidDrag, mapStyle.selection, isStationNetwork, stationLabel, isHeatmapLoading, canHover]);</span>
+<span class="d-add">+      isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, isStationNetwork, stationLabel, isHeatmapLoading, canHover]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Cast a directional vote on a single proposal (edge, vote type) through the</span>
+<span class="d-ctx">   // SAME unified path the top-bar route cast uses. castVotes() handles the</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_explode_report.py</code>.
+    Regenerate after further edits with <code>git diff client-react/src/components/GraphLayer/GraphLayer.tsx &gt; changelog/changes.diff &amp;&amp; python changelog/build_explode_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

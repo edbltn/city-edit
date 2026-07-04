@@ -11,8 +11,15 @@ import {
   type EdgePosition,
   type VoteTypeWinner,
 } from "./topProposals";
+import { topologyFromJson } from "./graphTopology";
 
 const SALT = 12345;
+
+// Build a typed-array topology from the legacy {nodes, edges} test shape.
+const topo = (
+  nodes: [number, number][],
+  edges: [number, number, string][],
+) => topologyFromJson({ nodes, edges });
 
 describe("computeVoteTypeWinners", () => {
   it("picks the edge with the highest net per vote type", () => {
@@ -138,10 +145,7 @@ describe("spaceOutWinners", () => {
 
 describe("edgeMidpointResolver", () => {
   it("returns the mean of an edge's two endpoint nodes", () => {
-    const data = {
-      nodes: [[40.70, -74.00], [40.72, -74.02]] as [number, number][],
-      edges: [[0, 1, ""]] as [number, number, string][],
-    };
+    const data = topo([[40.70, -74.00], [40.72, -74.02]], [[0, 1, ""]]);
     const mid = edgeMidpointResolver(data)(0)!;
     expect(mid[0]).toBeCloseTo(40.71, 6);
     expect(mid[1]).toBeCloseTo(-74.01, 6);
@@ -149,10 +153,10 @@ describe("edgeMidpointResolver", () => {
 
   it("returns null for missing edges, nodes, or null data", () => {
     expect(edgeMidpointResolver(null)(0)).toBeNull();
-    expect(edgeMidpointResolver({ nodes: [], edges: [] })(0)).toBeNull();
-    expect(
-      edgeMidpointResolver({ nodes: [[40.7, -74]], edges: [[0, 5, ""]] })(0)
-    ).toBeNull(); // node 5 absent
+    expect(edgeMidpointResolver(topo([], []))(0)).toBeNull();
+    // node 5 absent → clamped to 0; still resolves a (degenerate) midpoint, but
+    // the edge index itself is out of range here, so it's null.
+    expect(edgeMidpointResolver(topo([[40.7, -74]], []))(0)).toBeNull();
   });
 });
 
@@ -182,7 +186,7 @@ describe("selectTopProposals (full path)", () => {
     // Naive (per-type) logic with limit 2 would pick A and B (both edge 0),
     // dropping C. Correct: edge 0 collapses to one (A) + edge 1 (C).
     const out = selectTopProposals(
-      { vote_type_legend: legend, edge_vote_types: evt, nodes: [], edges: [] }, SALT, 2,
+      { vote_type_legend: legend, edge_vote_types: evt, ...topo([], []) }, SALT, 2,
     );
     expect(out.map((w) => w.edgeIdx).sort()).toEqual([0, 1]);
     expect(out.find((w) => w.edgeIdx === 0)!.label).toBe("A");
@@ -195,7 +199,7 @@ describe("selectTopProposals (full path)", () => {
       [[2, 1, 0]],            // edge 1: one winner
     ];
     const out = selectTopProposals(
-      { vote_type_legend: legend, edge_vote_types: evt, nodes: [], edges: [] }, SALT, 1,
+      { vote_type_legend: legend, edge_vote_types: evt, ...topo([], []) }, SALT, 1,
     );
     expect(out).toHaveLength(1);
     expect(out[0].edgeIdx).toBe(0);
@@ -218,7 +222,7 @@ describe("selectTopProposals (full path)", () => {
       [[0, 4, 0]], // edge 2: Bike net 4 (far → survives)
     ];
     const out = selectTopProposals(
-      { vote_type_legend: ["Bike"], edge_vote_types: evt, nodes, edges }, SALT, 10,
+      { vote_type_legend: ["Bike"], edge_vote_types: evt, ...topo(nodes, edges) }, SALT, 10,
     );
     expect(out.map((w) => w.edgeIdx).sort()).toEqual([0, 2]);
   });

@@ -15,6 +15,7 @@ import { useMapClick } from "../../hooks";
 import { kiteGhostIcon } from "../../utils/kiteIcon";
 import { setMapViewState, setMapInstance, getInitialMapView } from "../../utils/mapViewState";
 import { getCurrentMap } from "../../map/runtime";
+import { chooseAnchorOrder, type RouteProposal } from "../GraphLayer/routeProposals";
 import { RouteMarker } from "../RouteMarker";
 import { DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
@@ -352,6 +353,33 @@ export function MapView() {
     }
   }, [activeTool, startReplaceArmed, start.coords, end.coords, clearPoints, clearSplitPaths, placeStart, placeEnd, setActiveTool, clearSuppressClick]);
 
+  // Forcing the route through a ROUTE proposal (diamond). The corridor's two
+  // anchor endpoints become waypoints: with an existing route they're inserted
+  // as ghost mids in the faster order (start→A→B→end vs start→B→A→end); with no
+  // route yet they seed start + end. Either way the route now traverses — and
+  // thus selects — the corridor. Duration is approximated by equirectangular
+  // distance (monotonic with foot time at city scale), so we don't block on OSRM.
+  const handleRouteProposalClick = useCallback((p: RouteProposal) => {
+    clearSuppressClick();
+    clearSplitPaths();
+    const [a, b] = p.anchorCoords;
+    const durationOf = (x: LatLng, y: LatLng) => {
+      const meanLat = ((x.lat + y.lat) / 2) * (Math.PI / 180);
+      const dLat = (y.lat - x.lat) * (Math.PI / 180);
+      const dLng = (y.lng - x.lng) * (Math.PI / 180) * Math.cos(meanLat);
+      return Math.hypot(dLat, dLng); // proportional to meters; only the order matters
+    };
+    if (start.coords && end.coords && !isStationNetwork) {
+      const [first, second] = chooseAnchorOrder([start.coords, end.coords], a, b, durationOf);
+      insertWaypointAtSegment(0, first);
+      insertWaypointAtSegment(1, second);
+    } else {
+      clearPoints();
+      setStartPoint(a);
+      if (!isStationNetwork) setEndPoint(b);
+    }
+  }, [start.coords, end.coords, isStationNetwork, insertWaypointAtSegment, clearPoints, setStartPoint, setEndPoint, clearSuppressClick, clearSplitPaths]);
+
   // Tapping a top-proposal waypoint (start/end/mid). A crowded stack fans out
   // first (no side effect) — the SAME exploder a path tap uses, so matched
   // proposals disambiguate exactly like on-path ones. Otherwise it restarts the
@@ -487,6 +515,7 @@ export function MapView() {
         onWaypointMatch={setWaypointMatch}
         onPinnedResolve={setStartVoteEdgeId}
         onIndicatorClick={handleIndicatorClick}
+        onRouteProposalClick={handleRouteProposalClick}
         clusterExploderRef={clusterExploderRef}
         onRemoveProposal={removeProposalAtEdge}
         onProposalDrop={onProposalDrop}

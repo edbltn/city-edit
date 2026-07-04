@@ -7,6 +7,8 @@ gevent
 gunicorn
 python-dotenv
 networkx
+python-igraph
+leidenalg
 numpy
 scipy
 osmium

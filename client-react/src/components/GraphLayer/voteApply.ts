@@ -19,6 +19,7 @@
 // voteApply.test.ts.
 
 import type { GraphData } from "../../types";
+import { type NodeAdj, edgeFrom, edgeTo, adjEdgesOf } from "./graphTopology";
 
 type VoteData = GraphData;
 
@@ -37,7 +38,7 @@ function legendIndex(data: VoteData, vtLabel: string): number {
 /** Re-derive node totals + per-type breakdown for the affected nodes. */
 export function rederiveNodes(
   data: VoteData,
-  adj: number[][],
+  adj: NodeAdj,
   affected: Iterable<number>,
 ) {
   const edgeVotes = data.edge_votes ?? [];
@@ -46,8 +47,8 @@ export function rederiveNodes(
   const nodeVoteTypes = data.node_vote_types ?? [];
 
   for (const nid of affected) {
-    const nodeEdges = adj[nid];
-    if (!nodeEdges) continue;
+    if (nid >= adj.start.length - 1) continue;
+    const nodeEdges = adjEdgesOf(adj, nid);
     let best = 0;
     const merged = new Map<number, [number, number]>();
     for (const eid of nodeEdges) {
@@ -80,7 +81,7 @@ export function rederiveNodes(
  */
 export function applyMyVoteChange(
   data: VoteData,
-  adj: number[][],
+  adj: NodeAdj,
   edgeIds: number[],
   vtLabel: string,
   prevDir: number,
@@ -114,8 +115,7 @@ export function applyMyVoteChange(
     edgeVoteTypes[eid] = pairs.filter((t) => t[1] !== 0 || t[2] !== 0)
       .sort((a, b) => b[1] - b[2] - (a[1] - a[2]));
 
-    const edge = data.edges[eid];
-    if (edge) { affected.add(edge[0]); affected.add(edge[1]); }
+    if (eid < (data.nEdges ?? 0)) { affected.add(edgeFrom(data, eid)); affected.add(edgeTo(data, eid)); }
   }
 
   rederiveNodes(data, adj, affected);
@@ -127,7 +127,7 @@ export function applyMyVoteChange(
  */
 export function applyEdgeVoteChange(
   data: VoteData,
-  adj: number[][],
+  adj: NodeAdj,
   edgeIds: number[],
   vtLabel: string,
   dir: number = 1,
@@ -158,8 +158,7 @@ export function applyEdgeVoteChange(
       edgeVoteTypes[eid] = pairs;
     }
 
-    const edge = data.edges[eid];
-    if (edge) { affected.add(edge[0]); affected.add(edge[1]); }
+    if (eid < (data.nEdges ?? 0)) { affected.add(edgeFrom(data, eid)); affected.add(edgeTo(data, eid)); }
   }
 
   rederiveNodes(data, adj, affected);
@@ -173,7 +172,7 @@ export function applyEdgeVoteChange(
  */
 export function applyAuthoritativeCounts(
   data: VoteData,
-  adj: number[][],
+  adj: NodeAdj,
   vtLabel: string,
   vtCounts: Record<string, [number, number]>,
 ) {
@@ -201,8 +200,7 @@ export function applyAuthoritativeCounts(
 
     edgeVotes[eid] = (edgeVotes[eid] || 0) + (up - down - oldNet);
 
-    const edge = data.edges[eid];
-    if (edge) { affected.add(edge[0]); affected.add(edge[1]); }
+    if (eid < (data.nEdges ?? 0)) { affected.add(edgeFrom(data, eid)); affected.add(edgeTo(data, eid)); }
   }
 
   rederiveNodes(data, adj, affected);

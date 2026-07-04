@@ -17,7 +17,12 @@ const STORE = "graph";
 // poisoning the cache so the heatmap paints against wrong edge ids and crashes
 // mobile Safari. Bumping the version clears the store so those devices re-fetch
 // fresh (now version-busted; see GraphLayer topology fetch).
-const DB_VERSION = 2;
+// v3: the in-memory topology shape changed from boxed `{nodes,edges}` tuples to
+// flat typed arrays (coords/ends; see graphTopology.ts) to fit mobile Safari's
+// memory budget. A pre-v3 cached JSON topology (station networks) would lack
+// coords/ends and crash the accessors — bump to drop those entries. Binary
+// topology blobs are unaffected (decoded fresh each load), but clearing is cheap.
+const DB_VERSION = 3;
 
 const TOPOLOGY_KEY = "topology";
 const TOPOLOGY_BIN_KEY = "topology-bin";

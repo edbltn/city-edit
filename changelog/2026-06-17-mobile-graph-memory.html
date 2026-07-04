@@ -1,0 +1,1624 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The mobile-Safari heatmap crash was the graph's own memory — 2026-06-17</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; } li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff; background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline); border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff; background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>The mobile-Safari heatmap crash was the graph's own memory</h1>
+    <div class="dateline">2026-06-17 · branch <code>fix/unify-voting</code></div>
+  </header>
+  <nav class="toc"><a href="#diagnosis">1</a>
+<a href="#refactor">2</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+  <p class="lede">“A problem repeatedly occurred” on phones wasn’t the server, the subdomain routing, or vote-sync — it was the doubled NYC graph decoding to ~500&nbsp;MB of boxed JS on the device. Backing the topology with flat typed arrays drops that to ~71&nbsp;MB of off-heap buffers.</p>
+  
+    <section class="card" id="diagnosis">
+      <div class="tag">Investigation</div>
+      <h2>1 · What it actually was (and three things it wasn't)</h2>
+      <h3>Symptom</h3>
+      <p>On mobile, <code>bikepaths.cityedit.org</code> (and the other NYC street maps) showed <em>“a problem repeatedly occurred”</em> on load. <code>ebikes.cityedit.org</code> looked fine. Desktop looked fine.</p>
+      <h3>Root cause</h3>
+      <ul><li><strong>Not the subdomain.</strong> The same map fails identically on the apex (<code>cityedit.org?map=nyc-bikes</code>) and the subdomain; <code>subdomainRedirectUrl()</code> guards the canonical case, so there is no redirect loop. <code>ebikes</code> only looks healthy because <code>nyc-ebike-charging</code> is passcode-locked and never fetches topology.</li>
+<li><strong>Not the server.</strong> Real browsers send <code>Accept-Encoding</code>, so nginx brotli-compresses the topology/votes under Cloud Run’s 32&nbsp;MiB response cap and returns 200. (The 500s seen while probing were a <code>curl</code> artifact — no <code>Accept-Encoding</code> → uncompressed 34&nbsp;MB → over the cap.) Server-side OOM in the logs was load-induced by those probes, not the cause — and would hit desktop equally anyway.</li>
+<li><strong>It was client-side memory.</strong> The foot-aligned rebuild ~doubled the NYC graph to 3.3M edges / 1.3M nodes. The client decoded the compact 35&nbsp;MB binary blob into boxed JS tuples — <code>[lat,lon][]</code> + <code>[from,to,name][]</code> + a <code>number[][]</code> adjacency — which measures <strong>~497&nbsp;MB on the V8 object heap</strong> (more on Safari’s JSC). That exceeds mobile Safari’s per-tab budget → the WebContent process is jetsam-killed → reload → re-decode → killed again = the crash loop. Desktop has the RAM; <code>ebikes</code>’ station graph is tiny.</li>
+<li>The earlier defense-in-depth fix (<code>0c3ebec</code>) targeted stale-cache + concurrency, <em>not</em> the decoded-memory size — so it never addressed this, and its error boundary actually made the loop worse by reloading into a deterministic OOM.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Measured the boxed decode at <strong>497&nbsp;MB</strong> of object heap (Node/V8) against the real <code>nyc-bikes</code> topology blob, then re-measured the typed-array version at <strong>~71&nbsp;MB of ArrayBuffer-backed external memory</strong> and ~0 on the object heap.</li>
+<li>Confirmed end-to-end in a headless browser: the full NYC graph loads, decodes, builds indices + adjacency, fetches votes, and <strong>paints the heatmap with zero console errors</strong>.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>(investigation — no code in this section)</li></ul>
+    </section>
+    
+
+    <section class="card" id="refactor">
+      <div class="tag">Frontend</div>
+      <h2>2 · Typed-array topology — ~497 MB → ~71 MB</h2>
+      <h3>Symptom</h3>
+      <p>The in-memory graph representation, not the wire format, was the memory hog: the 35&nbsp;MB binary blob was expanded into hundreds of MB of boxed JS objects on every load.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>GraphData.nodes</code> / <code>.edges</code> were arrays of small JS tuples — each one a heap object with per-object overhead, ×4.6M of them. <code>buildNodeAdj</code> added a <code>number[][]</code> of 1.3M sub-arrays (~150&nbsp;MB more). All of it lived on the GC’d object heap.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>New <code>graphTopology.ts</code>:</strong> a flat <code>GraphTopology</code> (<code>coords: Int32Array</code>, <code>ends: Uint32Array</code>, optional <code>edgeNames</code> for tiny station nets) with module-level accessors (<code>nodeLat/nodeLon/edgeFrom/edgeTo/edgeName</code>). The binary decoder now returns these as <strong>zero-copy views onto the blob</strong> instead of boxing — so the topology stays near its wire size.</li>
+<li><strong>CSR adjacency.</strong> <code>buildNodeAdj</code> returns <code>{start, edges}</code> (two <code>Uint32Array</code>s, ~31&nbsp;MB) replacing the <code>number[][]</code>; <code>adjEdgesOf</code> hands callers a cheap subarray view and <code>adjFirst</code> the first incident edge.</li>
+<li><strong>Threaded through every consumer</strong> (compiler-driven — ~95 sites in <code>GraphLayer.tsx</code> plus <code>voteApply.ts</code>, <code>topProposals.ts</code>): hit-testing, snapping, the canvas redraw hot loop (reads the typed arrays directly), tooltips, proposal markers, and node-vote rederivation. Station networks (JSON topology) normalize through <code>topologyFromJson</code> into the same shape, keeping names.</li>
+<li><strong>Bumped the IndexedDB cache to v3</strong> so a pre-refactor (boxed-shape) cached station topology can’t survive into the accessor code and crash it.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/graphTopology.ts — NEW: typed-array topology + accessors + CSR adjacency</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx — decode returns views; all node/edge/adj reads via accessors; redraw uses typed arrays directly</li>
+<li>client-react/src/components/GraphLayer/voteApply.ts — NodeAdj (CSR) + edgeFrom/edgeTo</li>
+<li>client-react/src/components/GraphLayer/topProposals.ts — edgeMidpointResolver / selectTopProposals on GraphTopology</li>
+<li>client-react/src/types/index.ts — GraphData topology fields are now typed arrays</li>
+<li>client-react/src/utils/graphCache.ts — DB_VERSION 2 → 3</li>
+<li>client-react/src/components/GraphLayer/{voteApply,topProposals}.test.ts — fixtures build typed-array topologies</li></ul>
+    </section>
+    
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Diagnosis from prod: <code>gcloud logging</code> + header-varied <code>curl</code> proved the 500s were a no-Accept-Encoding artifact; real-browser headers return 200.</li>
+<li>Memory measured against the real <code>nyc-bikes</code> blob: boxed decode = <strong>497 MB</strong> object heap; typed-array decode + CSR = <strong>~71 MB external, ~0 object heap</strong>.</li>
+<li>Frontend: <code>tsc -b --noEmit</code> — clean (compiler enumerated every consumer site).</li>
+<li>Frontend: <code>vitest run</code> — 101 passed.</li>
+<li>Frontend: <code>npm run build</code> — clean production build.</li>
+<li>End-to-end: headless Chrome loaded <code>/m/nyc-bikes</code> (full 3.3M-edge graph) — heatmap painted, zero console errors, no topology/vote-mismatch warnings.</li></ul>
+  </section>
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>bikepaths.cityedit.org</code> (or <code>/m/nyc-bikes</code>) on a real phone / iOS Safari. The heatmap should load without the “a problem repeatedly occurred” loop.</li>
+<li>On the same phone, exercise hover/tap on edges and nodes, cast a vote, and check the pinned card + tooltips — accessors back all of these, so any off-by-one would show as a wrong snap/label.</li>
+<li>Confirm street tooltips still reverse-geocode (binary topology drops names) and station-map names still show (JSON topology keeps them).</li>
+<li>Watch the tab’s memory (Safari Web Inspector → Timelines) on load — it should sit far below the prior ~500 MB+ spike.</li>
+<li>Pan/zoom the heatmap and check the redraw still culls + paints correctly (the hot loop now reads the typed arrays directly).</li>
+<li>Because the IndexedDB cache bumped to v3, the first load re-fetches topology fresh; subsequent loads should hit the cache.</li></ul>
+  </section>
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+193</span> / <span class="d-del">-201</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span><span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span><span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">the canvas heatmap + topology loader + proposal-marker renderer</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span><span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~3430 LOC — one big component; ~95 sites rebound from boxed tuples to accessors</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Module helpers</span><span class="ol-sum">buildNodeIndex/EdgeIndex, hitTest, projectOntoEdge, decodeTopologyBin</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Component state &amp; refs</span><span class="ol-sum">topologyRef:GraphTopology, nodeAdjRef:NodeAdj</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">resolveSelection / proposals</span><span class="ol-sum">snap + nearest-proposal now via accessors</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Topology + vote loading</span><span class="ol-sum">decode → views; JSON → topologyFromJson; cache reads</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">redraw — heat passes</span><span class="ol-sum">hot loop reads coords/ends typed arrays directly</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Hover / pinned tooltips</span><span class="ol-sum">edge/node names via edgeName + accessors</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Indicator markers</span><span class="ol-sum">winner/station midpoints via accessors</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>import graphTopology accessors</li><li>decodeTopologyBin — return GraphTopology views (no boxing); clamp ends in place</li><li>buildNodeIndex/buildEdgeIndex — iterate coords/ends typed arrays</li><li>hitTest / projectOntoEdge / targetLatLng — accessor-based</li><li>topology refs + load flow → GraphTopology; topologyFromJson on JSON path</li><li>redraw projectNode/drawSeg — direct coords[]/ends[] reads</li><li>tooltip + marker placement — edgeFrom/edgeTo/edgeName/adjFirst</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 4d53ab5..3656317 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -26,6 +26,20 @@ import { makeVoteTypeIcon } from &quot;./voteTypeIcon&quot;;</span>
+<span class="d-ctx"> import { suggestionGlyphForLabel } from &quot;../../utils/suggestionIcon&quot;;</span>
+<span class="d-ctx"> import { selectTopProposals, topLabelForEdges, type VoteTypeWinner } from &quot;./topProposals&quot;;</span>
+<span class="d-ctx"> import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts } from &quot;./voteApply&quot;;</span>
+<span class="d-add">+import {</span>
+<span class="d-add">+  COORD_SCALE,</span>
+<span class="d-add">+  type GraphTopology,</span>
+<span class="d-add">+  type NodeAdj,</span>
+<span class="d-add">+  nodeLat,</span>
+<span class="d-add">+  nodeLon,</span>
+<span class="d-add">+  edgeFrom,</span>
+<span class="d-add">+  edgeTo,</span>
+<span class="d-add">+  edgeName,</span>
+<span class="d-add">+  topologyFromJson,</span>
+<span class="d-add">+  buildNodeAdj,</span>
+<span class="d-add">+  adjEdgesOf,</span>
+<span class="d-add">+  adjFirst,</span>
+<span class="d-add">+} from &quot;./graphTopology&quot;;</span>
+<span class="d-ctx"> import { iconForLabel, iconSrc, mapStyleForTheme } from &quot;../../themes&quot;;</span>
+<span class="d-ctx"> import { buildHeatRampStops, sampleHeatRamp } from &quot;../../mapStyles&quot;;</span>
+<span class="d-ctx"> import {</span>
+<span class="d-hunk">@@ -115,7 +129,7 @@ const HEAT_FULL_SCALE = 50;</span>
+<span class="d-ctx"> // thing on the map. Applied as canvas element opacity (atop the blend mode), so</span>
+<span class="d-ctx"> // it dims the whole heat field — and its faint zero-vote network skeleton —</span>
+<span class="d-ctx"> // uniformly without touching per-edge intensity math.</span>
+<span class="d-del">-const HEATMAP_OPACITY = &quot;0.72&quot;;</span>
+<span class="d-add">+const HEATMAP_OPACITY = &quot;0.55&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> // ---------------------------------------------------------------------------</span>
+<span class="d-ctx"> // Reverse-geocode cache (module-level, survives re-renders)</span>
+<span class="d-hunk">@@ -266,38 +280,45 @@ const MID_DRAG_TRAIL_STYLE: L.PolylineOptions = {</span>
+<span class="d-ctx"> const INDEX_NEIGHBOR_K = 20;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** Build a flatbush spatial index of node points. Done once per graph. */</span>
+<span class="d-del">-function buildNodeIndex(data: Pick&lt;GraphData, &quot;nodes&quot;&gt;): Flatbush | null {</span>
+<span class="d-del">-  if (data.nodes.length === 0) return null;</span>
+<span class="d-del">-  const idx = new Flatbush(data.nodes.length);</span>
+<span class="d-del">-  for (let i = 0; i &lt; data.nodes.length; i++) {</span>
+<span class="d-del">-    const node = data.nodes[i];</span>
+<span class="d-add">+function buildNodeIndex(data: GraphTopology): Flatbush | null {</span>
+<span class="d-add">+  const n = data.nNodes;</span>
+<span class="d-add">+  if (n === 0) return null;</span>
+<span class="d-add">+  const c = data.coords;</span>
+<span class="d-add">+  const idx = new Flatbush(n);</span>
+<span class="d-add">+  for (let i = 0; i &lt; n; i++) {</span>
+<span class="d-add">+    const lat = c[2 * i] / COORD_SCALE;</span>
+<span class="d-add">+    const lng = c[2 * i + 1] / COORD_SCALE;</span>
+<span class="d-ctx">     // Point bbox: min == max (lng,lat ordering matches the edge index)</span>
+<span class="d-del">-    idx.add(node[1], node[0], node[1], node[0]);</span>
+<span class="d-add">+    idx.add(lng, lat, lng, lat);</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx">   idx.finish();</span>
+<span class="d-ctx">   return idx;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** Build a flatbush spatial index of edge bounding boxes. Done once per graph. */</span>
+<span class="d-del">-function buildEdgeIndex(data: Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt;): Flatbush | null {</span>
+<span class="d-del">-  if (data.edges.length === 0) return null;</span>
+<span class="d-del">-  const idx = new Flatbush(data.edges.length);</span>
+<span class="d-del">-  for (let i = 0; i &lt; data.edges.length; i++) {</span>
+<span class="d-del">-    const [fromIdx, toIdx] = data.edges[i];</span>
+<span class="d-del">-    const fromNode = data.nodes[fromIdx];</span>
+<span class="d-del">-    const toNode = data.nodes[toIdx];</span>
+<span class="d-add">+function buildEdgeIndex(data: GraphTopology): Flatbush | null {</span>
+<span class="d-add">+  const n = data.nEdges;</span>
+<span class="d-add">+  if (n === 0) return null;</span>
+<span class="d-add">+  const c = data.coords;</span>
+<span class="d-add">+  const e = data.ends;</span>
+<span class="d-add">+  const nNodes = data.nNodes;</span>
+<span class="d-add">+  const idx = new Flatbush(n);</span>
+<span class="d-add">+  for (let i = 0; i &lt; n; i++) {</span>
+<span class="d-add">+    const fromIdx = e[2 * i];</span>
+<span class="d-add">+    const toIdx = e[2 * i + 1];</span>
+<span class="d-ctx">     // A malformed/stale topology can reference a node index that doesn&#x27;t exist.</span>
+<span class="d-del">-    // Index a degenerate (0,0) box for it instead of dereferencing undefined —</span>
+<span class="d-del">-    // Flatbush requires exactly edges.length adds, so we can&#x27;t skip the entry.</span>
+<span class="d-del">-    if (!fromNode || !toNode) {</span>
+<span class="d-add">+    // Index a degenerate (0,0) box for it instead of reading out of bounds —</span>
+<span class="d-add">+    // Flatbush requires exactly nEdges adds, so we can&#x27;t skip the entry.</span>
+<span class="d-add">+    if (fromIdx &gt;= nNodes || toIdx &gt;= nNodes) {</span>
+<span class="d-ctx">       idx.add(0, 0, 0, 0);</span>
+<span class="d-ctx">       continue;</span>
+<span class="d-ctx">     }</span>
+<span class="d-del">-    const minLng = Math.min(fromNode[1], toNode[1]);</span>
+<span class="d-del">-    const maxLng = Math.max(fromNode[1], toNode[1]);</span>
+<span class="d-del">-    const minLat = Math.min(fromNode[0], toNode[0]);</span>
+<span class="d-del">-    const maxLat = Math.max(fromNode[0], toNode[0]);</span>
+<span class="d-del">-    idx.add(minLng, minLat, maxLng, maxLat);</span>
+<span class="d-add">+    const fLat = c[2 * fromIdx] / COORD_SCALE, fLng = c[2 * fromIdx + 1] / COORD_SCALE;</span>
+<span class="d-add">+    const tLat = c[2 * toIdx] / COORD_SCALE, tLng = c[2 * toIdx + 1] / COORD_SCALE;</span>
+<span class="d-add">+    idx.add(</span>
+<span class="d-add">+      Math.min(fLng, tLng), Math.min(fLat, tLat),</span>
+<span class="d-add">+      Math.max(fLng, tLng), Math.max(fLat, tLat),</span>
+<span class="d-add">+    );</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx">   idx.finish();</span>
+<span class="d-ctx">   return idx;</span>
+<span class="d-hunk">@@ -320,12 +341,11 @@ function findNearestEdgeIndex(</span>
+<span class="d-ctx">   queryLng: number,</span>
+<span class="d-ctx">   queryLat: number</span>
+<span class="d-ctx"> ): number | null {</span>
+<span class="d-del">-  if (data.edges.length === 0) return null;</span>
+<span class="d-add">+  if (data.nEdges === 0) return null;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const checkEdge = (i: number, currentBestDist: number, currentBestIdx: number): [number, number] =&gt; {</span>
+<span class="d-del">-    const [fromIdx, toIdx] = data.edges[i];</span>
+<span class="d-del">-    const fromPt = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);</span>
+<span class="d-del">-    const toPt = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);</span>
+<span class="d-add">+    const fromPt = map.latLngToContainerPoint([nodeLat(data, edgeFrom(data, i)), nodeLon(data, edgeFrom(data, i))]);</span>
+<span class="d-add">+    const toPt = map.latLngToContainerPoint([nodeLat(data, edgeTo(data, i)), nodeLon(data, edgeTo(data, i))]);</span>
+<span class="d-ctx">     const dist = pointToSegmentDist(px, py, fromPt.x, fromPt.y, toPt.x, toPt.y);</span>
+<span class="d-ctx">     return dist &lt; currentBestDist ? [dist, i] : [currentBestDist, currentBestIdx];</span>
+<span class="d-ctx">   };</span>
+<span class="d-hunk">@@ -340,7 +360,7 @@ function findNearestEdgeIndex(</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">   } else {</span>
+<span class="d-ctx">     // Brief fallback while the index is being built</span>
+<span class="d-del">-    for (let i = 0; i &lt; data.edges.length; i++) {</span>
+<span class="d-add">+    for (let i = 0; i &lt; data.nEdges; i++) {</span>
+<span class="d-ctx">       [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">   }</span>
+<span class="d-hunk">@@ -370,8 +390,7 @@ function hitTest(</span>
+<span class="d-ctx">   let bestNodeDist = SNAP_NODE_PX;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const checkNode = (i: number) =&gt; {</span>
+<span class="d-del">-    const node = data.nodes[i];</span>
+<span class="d-del">-    const pt = map.latLngToContainerPoint([node[0], node[1]]);</span>
+<span class="d-add">+    const pt = map.latLngToContainerPoint([nodeLat(data, i), nodeLon(data, i)]);</span>
+<span class="d-ctx">     const dist = Math.sqrt((px - pt.x) ** 2 + (py - pt.y) ** 2);</span>
+<span class="d-ctx">     if (dist &lt; bestNodeDist) {</span>
+<span class="d-ctx">       bestNodeDist = dist;</span>
+<span class="d-hunk">@@ -383,12 +402,14 @@ function hitTest(</span>
+<span class="d-ctx">     const candidates = nodeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K);</span>
+<span class="d-ctx">     for (const i of candidates) checkNode(i);</span>
+<span class="d-ctx">   } else {</span>
+<span class="d-del">-    for (let i = 0; i &lt; data.nodes.length; i++) checkNode(i);</span>
+<span class="d-add">+    for (let i = 0; i &lt; data.nNodes; i++) checkNode(i);</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   if (bestNode !== null) {</span>
+<span class="d-del">-    const n = data.nodes[bestNode];</span>
+<span class="d-del">-    return { target: { kind: &quot;node&quot;, index: bestNode }, snapLat: n[0], snapLng: n[1] };</span>
+<span class="d-add">+    return {</span>
+<span class="d-add">+      target: { kind: &quot;node&quot;, index: bestNode },</span>
+<span class="d-add">+      snapLat: nodeLat(data, bestNode), snapLng: nodeLon(data, bestNode),</span>
+<span class="d-add">+    };</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // 2. Edges — project onto segment for snap position</span>
+<span class="d-hunk">@@ -396,9 +417,9 @@ function hitTest(</span>
+<span class="d-ctx">   let bestEdgeDist = SNAP_EDGE_PX;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const checkEdge = (i: number) =&gt; {</span>
+<span class="d-del">-    const [fromIdx, toIdx] = data.edges[i];</span>
+<span class="d-del">-    const fromPt = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);</span>
+<span class="d-del">-    const toPt = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);</span>
+<span class="d-add">+    const fromIdx = edgeFrom(data, i), toIdx = edgeTo(data, i);</span>
+<span class="d-add">+    const fromPt = map.latLngToContainerPoint([nodeLat(data, fromIdx), nodeLon(data, fromIdx)]);</span>
+<span class="d-add">+    const toPt = map.latLngToContainerPoint([nodeLat(data, toIdx), nodeLon(data, toIdx)]);</span>
+<span class="d-ctx">     const dist = pointToSegmentDist(px, py, fromPt.x, fromPt.y, toPt.x, toPt.y);</span>
+<span class="d-ctx">     if (dist &lt; bestEdgeDist) {</span>
+<span class="d-ctx">       bestEdgeDist = dist;</span>
+<span class="d-hunk">@@ -410,7 +431,7 @@ function hitTest(</span>
+<span class="d-ctx">     const candidates = edgeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K);</span>
+<span class="d-ctx">     for (const i of candidates) checkEdge(i);</span>
+<span class="d-ctx">   } else {</span>
+<span class="d-del">-    for (let i = 0; i &lt; data.edges.length; i++) checkEdge(i);</span>
+<span class="d-add">+    for (let i = 0; i &lt; data.nEdges; i++) checkEdge(i);</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   if (bestEdge !== null) {</span>
+<span class="d-hunk">@@ -427,21 +448,21 @@ function hitTest(</span>
+<span class="d-ctx">  * fallback so both produce a real snap position.</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> function projectOntoEdge(</span>
+<span class="d-del">-  data: Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt;,</span>
+<span class="d-add">+  data: GraphTopology,</span>
+<span class="d-ctx">   edgeIdx: number,</span>
+<span class="d-ctx">   lat: number, lng: number</span>
+<span class="d-ctx"> ): { lat: number; lng: number } {</span>
+<span class="d-del">-  const [fromIdx, toIdx] = data.edges[edgeIdx];</span>
+<span class="d-del">-  const fromNode = data.nodes[fromIdx];</span>
+<span class="d-del">-  const toNode = data.nodes[toIdx];</span>
+<span class="d-del">-  const dx = toNode[1] - fromNode[1];</span>
+<span class="d-del">-  const dy = toNode[0] - fromNode[0];</span>
+<span class="d-add">+  const fromIdx = edgeFrom(data, edgeIdx), toIdx = edgeTo(data, edgeIdx);</span>
+<span class="d-add">+  const fLat = nodeLat(data, fromIdx), fLng = nodeLon(data, fromIdx);</span>
+<span class="d-add">+  const tLat = nodeLat(data, toIdx), tLng = nodeLon(data, toIdx);</span>
+<span class="d-add">+  const dx = tLng - fLng;</span>
+<span class="d-add">+  const dy = tLat - fLat;</span>
+<span class="d-ctx">   const lenSq = dx * dx + dy * dy;</span>
+<span class="d-del">-  if (lenSq === 0) return { lat: fromNode[0], lng: fromNode[1] };</span>
+<span class="d-add">+  if (lenSq === 0) return { lat: fLat, lng: fLng };</span>
+<span class="d-ctx">   const t = Math.max(0, Math.min(1,</span>
+<span class="d-del">-    ((lng - fromNode[1]) * dx + (lat - fromNode[0]) * dy) / lenSq</span>
+<span class="d-add">+    ((lng - fLng) * dx + (lat - fLat) * dy) / lenSq</span>
+<span class="d-ctx">   ));</span>
+<span class="d-del">-  return { lat: fromNode[0] + t * dy, lng: fromNode[1] + t * dx };</span>
+<span class="d-add">+  return { lat: fLat + t * dy, lng: fLng + t * dx };</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /**</span>
+<span class="d-hunk">@@ -453,19 +474,20 @@ function projectOntoEdge(</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> function targetLatLng(</span>
+<span class="d-ctx">   target: HoverTarget | null,</span>
+<span class="d-del">-  data: Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt; | null</span>
+<span class="d-add">+  data: GraphTopology | null</span>
+<span class="d-ctx"> ): { lat: number; lng: number } | null {</span>
+<span class="d-ctx">   if (!target || !data) return null;</span>
+<span class="d-ctx">   if (target.kind === &quot;edge&quot;) {</span>
+<span class="d-del">-    const edge = data.edges[target.index];</span>
+<span class="d-del">-    if (!edge) return null;</span>
+<span class="d-del">-    const from = data.nodes[edge[0]];</span>
+<span class="d-del">-    const to = data.nodes[edge[1]];</span>
+<span class="d-del">-    if (!from || !to) return null;</span>
+<span class="d-del">-    return { lat: (from[0] + to[0]) / 2, lng: (from[1] + to[1]) / 2 };</span>
+<span class="d-add">+    if (target.index &gt;= data.nEdges) return null;</span>
+<span class="d-add">+    const from = edgeFrom(data, target.index), to = edgeTo(data, target.index);</span>
+<span class="d-add">+    if (from &gt;= data.nNodes || to &gt;= data.nNodes) return null;</span>
+<span class="d-add">+    return {</span>
+<span class="d-add">+      lat: (nodeLat(data, from) + nodeLat(data, to)) / 2,</span>
+<span class="d-add">+      lng: (nodeLon(data, from) + nodeLon(data, to)) / 2,</span>
+<span class="d-add">+    };</span>
+<span class="d-ctx">   }</span>
+<span class="d-del">-  const node = data.nodes[target.index];</span>
+<span class="d-del">-  return node ? { lat: node[0], lng: node[1] } : null;</span>
+<span class="d-add">+  if (target.index &gt;= data.nNodes) return null;</span>
+<span class="d-add">+  return { lat: nodeLat(data, target.index), lng: nodeLon(data, target.index) };</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> // ---------------------------------------------------------------------------</span>
+<span class="d-hunk">@@ -477,22 +499,23 @@ function targetLatLng(</span>
+<span class="d-ctx"> // ---------------------------------------------------------------------------</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /**</span>
+<span class="d-del">- * Decode the binary topology (server graph_registry.topology_binary) into the same</span>
+<span class="d-del">- * {nodes, edges} shape the JSON path yields — WITHOUT JSON.parse-ing a ~150MB</span>
+<span class="d-del">- * string, the allocation that OOM-crashes mobile Safari on the NYC graph. Layout:</span>
+<span class="d-del">- * 12-byte header [magic, uint32 nNodes, uint32 nEdges], then nNodes×2 int32</span>
+<span class="d-del">- * (lat, lon ×1e7), then nEdges×2 uint32 (from_idx, to_idx). Edge names are dropped</span>
+<span class="d-del">- * (street tooltips reverse-geocode instead); the edges index is the canonical edge id.</span>
+<span class="d-add">+ * Decode the binary topology (server graph_registry.topology_binary) into the</span>
+<span class="d-add">+ * mobile-safe typed-array GraphTopology — coords/ends are zero-copy views onto</span>
+<span class="d-add">+ * the blob, so the NYC graph stays near its ~35MB wire size instead of expanding</span>
+<span class="d-add">+ * to ~500MB of boxed JS tuples (the allocation that OOM-crashed mobile Safari).</span>
+<span class="d-add">+ * Layout: 12-byte header [magic, uint32 nNodes, uint32 nEdges], then nNodes×2</span>
+<span class="d-add">+ * int32 (lat, lon ×1e7), then nEdges×2 uint32 (from_idx, to_idx). Edge names are</span>
+<span class="d-add">+ * dropped (street tooltips reverse-geocode instead); the edge index is the id.</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> // &#x27;GTB1&#x27; little-endian as a uint32 (G=0x47, T=0x54, B=0x42, &#x27;1&#x27;=0x31).</span>
+<span class="d-ctx"> const TOPOLOGY_BIN_MAGIC = 0x31425447;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-function decodeTopologyBin(buf: ArrayBuffer): Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt; {</span>
+<span class="d-del">-  // Validate the header BEFORE allocating. A stale/truncated/corrupt cached blob</span>
+<span class="d-del">-  // (or a non-binary error body that slipped through) would otherwise be read as</span>
+<span class="d-del">-  // garbage nNodes/nEdges — allocating multi-GB arrays that OOM-crash the tab, or</span>
+<span class="d-del">-  // building edges that reference nonexistent nodes (the downstream crash). On any</span>
+<span class="d-del">-  // inconsistency we throw, and callers fall back to a fresh fetch / JSON.</span>
+<span class="d-add">+function decodeTopologyBin(buf: ArrayBuffer): GraphTopology {</span>
+<span class="d-add">+  // Validate the header BEFORE creating views. A stale/truncated/corrupt cached</span>
+<span class="d-add">+  // blob (or a non-binary error body that slipped through) would otherwise be</span>
+<span class="d-add">+  // read as garbage nNodes/nEdges — views that index out of bounds, or edges</span>
+<span class="d-add">+  // referencing nonexistent nodes (the downstream crash). On any inconsistency</span>
+<span class="d-add">+  // we throw, and callers fall back to a fresh fetch / JSON.</span>
+<span class="d-ctx">   if (buf.byteLength &lt; 12) {</span>
+<span class="d-ctx">     throw new Error(`topology blob too small (${buf.byteLength} bytes)`);</span>
+<span class="d-ctx">   }</span>
+<span class="d-hunk">@@ -511,19 +534,13 @@ function decodeTopologyBin(buf: ArrayBuffer): Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt;</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx">   const coords = new Int32Array(buf, 12, nNodes * 2);</span>
+<span class="d-ctx">   const ends = new Uint32Array(buf, 12 + nNodes * 8, nEdges * 2);</span>
+<span class="d-del">-  const nodes: [number, number][] = new Array(nNodes);</span>
+<span class="d-del">-  for (let i = 0; i &lt; nNodes; i++) {</span>
+<span class="d-del">-    nodes[i] = [coords[2 * i] / 1e7, coords[2 * i + 1] / 1e7];</span>
+<span class="d-del">-  }</span>
+<span class="d-del">-  const edges: [number, number, string][] = new Array(nEdges);</span>
+<span class="d-del">-  for (let i = 0; i &lt; nEdges; i++) {</span>
+<span class="d-del">-    // Clamp out-of-range node indices to 0 rather than leaving a dangling ref</span>
+<span class="d-del">-    // that crashes buildEdgeIndex/redraw — a degenerate self-edge is harmless.</span>
+<span class="d-del">-    const a = ends[2 * i] &lt; nNodes ? ends[2 * i] : 0;</span>
+<span class="d-del">-    const b = ends[2 * i + 1] &lt; nNodes ? ends[2 * i + 1] : 0;</span>
+<span class="d-del">-    edges[i] = [a, b, &quot;&quot;];</span>
+<span class="d-add">+  // Clamp out-of-range node indices to 0 in place rather than leaving a dangling</span>
+<span class="d-add">+  // ref that reads NaN coords in buildEdgeIndex/redraw — a degenerate self-edge</span>
+<span class="d-add">+  // is harmless. Mutating the view also sanitizes the blob we cache.</span>
+<span class="d-add">+  for (let i = 0; i &lt; ends.length; i++) {</span>
+<span class="d-add">+    if (ends[i] &gt;= nNodes) ends[i] = 0;</span>
+<span class="d-ctx">   }</span>
+<span class="d-del">-  return { nodes, edges };</span>
+<span class="d-add">+  return { nNodes, nEdges, coords, ends };</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /**</span>
+<span class="d-hunk">@@ -536,25 +553,15 @@ function decodeTopologyBin(buf: ArrayBuffer): Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt;</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> function votesMatchTopology(</span>
+<span class="d-ctx">   voteData: { n_edges?: number; n_nodes?: number; edge_votes?: unknown[] },</span>
+<span class="d-del">-  topology: Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt; | null,</span>
+<span class="d-add">+  topology: GraphTopology | null,</span>
+<span class="d-ctx"> ): boolean {</span>
+<span class="d-ctx">   if (!topology) return false;</span>
+<span class="d-ctx">   const nEdges = voteData.n_edges ?? voteData.edge_votes?.length;</span>
+<span class="d-del">-  if (nEdges != null &amp;&amp; nEdges !== topology.edges.length) return false;</span>
+<span class="d-del">-  if (voteData.n_nodes != null &amp;&amp; voteData.n_nodes !== topology.nodes.length) return false;</span>
+<span class="d-add">+  if (nEdges != null &amp;&amp; nEdges !== topology.nEdges) return false;</span>
+<span class="d-add">+  if (voteData.n_nodes != null &amp;&amp; voteData.n_nodes !== topology.nNodes) return false;</span>
+<span class="d-ctx">   return true;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-function buildNodeAdj(topology: Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt;): number[][] {</span>
+<span class="d-del">-  const adj: number[][] = new Array(topology.nodes.length);</span>
+<span class="d-del">-  for (let i = 0; i &lt; adj.length; i++) adj[i] = [];</span>
+<span class="d-del">-  for (let i = 0; i &lt; topology.edges.length; i++) {</span>
+<span class="d-del">-    adj[topology.edges[i][0]].push(i);</span>
+<span class="d-del">-    adj[topology.edges[i][1]].push(i);</span>
+<span class="d-del">-  }</span>
+<span class="d-del">-  return adj;</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-ctx"> // ---------------------------------------------------------------------------</span>
+<span class="d-ctx"> // Top-proposal indicator marker</span>
+<span class="d-ctx"> // ---------------------------------------------------------------------------</span>
+<span class="d-hunk">@@ -722,7 +729,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   const hoverCanvasRef = useRef&lt;HTMLCanvasElement | null&gt;(null);</span>
+<span class="d-ctx">   const hoverCtxRef = useRef&lt;CanvasRenderingContext2D | null&gt;(null);</span>
+<span class="d-ctx">   const graphDataRef = useRef&lt;GraphData | null&gt;(null);</span>
+<span class="d-del">-  const topologyRef = useRef&lt;Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt; | null&gt;(null);</span>
+<span class="d-add">+  const topologyRef = useRef&lt;GraphTopology | null&gt;(null);</span>
+<span class="d-ctx">   const edgeIndexRef = useRef&lt;Flatbush | null&gt;(null);</span>
+<span class="d-ctx">   const nodeIndexRef = useRef&lt;Flatbush | null&gt;(null);</span>
+<span class="d-ctx">   const redrawTimeoutRef = useRef&lt;number | null&gt;(null);</span>
+<span class="d-hunk">@@ -757,7 +764,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Node adjacency list — node index → [edge indices]. Built once from topology,</span>
+<span class="d-ctx">   // used to derive node votes from edge totals (max of adjacent edges).</span>
+<span class="d-del">-  const nodeAdjRef = useRef&lt;number[][] | null&gt;(null);</span>
+<span class="d-add">+  const nodeAdjRef = useRef&lt;NodeAdj | null&gt;(null);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Last-seen revision for gap detection</span>
+<span class="d-ctx">   const lastRevRef = useRef(0);</span>
+<span class="d-hunk">@@ -781,7 +788,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     lat: number, lng: number, overrideEdgeIdx?: number | null</span>
+<span class="d-ctx">   ): ResolvedSelection | null =&gt; {</span>
+<span class="d-ctx">     const data = graphDataRef.current;</span>
+<span class="d-del">-    if (!data?.edges?.length) return null;</span>
+<span class="d-add">+    if (!data?.nEdges) return null;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     // 1. Indicator override — select that edge directly.</span>
+<span class="d-ctx">     if (overrideEdgeIdx != null) {</span>
+<span class="d-hunk">@@ -802,7 +809,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     if (hit) {</span>
+<span class="d-ctx">       const voteEdgeId = hit.target.kind === &quot;edge&quot;</span>
+<span class="d-ctx">         ? hit.target.index</span>
+<span class="d-del">-        : nodeAdjRef.current?.[hit.target.index]?.[0] ?? null;</span>
+<span class="d-add">+        : adjFirst(nodeAdjRef.current, hit.target.index);</span>
+<span class="d-ctx">       return { target: hit.target, snapLat: hit.snapLat, snapLng: hit.snapLng, voteEdgeId };</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1041,19 +1048,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     const g = graphDataRef.current;</span>
+<span class="d-ctx">     if (!g) return null;</span>
+<span class="d-ctx">     const candidates = isStationNetwork</span>
+<span class="d-del">-      ? g.edges.map((_, i) =&gt; i)</span>
+<span class="d-add">+      ? Array.from({ length: g.nEdges }, (_, i) =&gt; i)</span>
+<span class="d-ctx">       : winners.map((w) =&gt; w.edgeIdx);</span>
+<span class="d-ctx">     let best: number | null = null;</span>
+<span class="d-ctx">     let bestDist = Infinity;</span>
+<span class="d-ctx">     for (const edgeIdx of candidates) {</span>
+<span class="d-del">-      const edge = g.edges[edgeIdx];</span>
+<span class="d-del">-      if (!edge) continue;</span>
+<span class="d-del">-      const [fromIdx, toIdx] = edge;</span>
+<span class="d-del">-      const fromNode = g.nodes[fromIdx];</span>
+<span class="d-del">-      const toNode = g.nodes[toIdx];</span>
+<span class="d-del">-      if (!fromNode || !toNode) continue;</span>
+<span class="d-del">-      const midLat = (fromNode[0] + toNode[0]) / 2;</span>
+<span class="d-del">-      const midLng = (fromNode[1] + toNode[1]) / 2;</span>
+<span class="d-add">+      if (edgeIdx &gt;= g.nEdges) continue;</span>
+<span class="d-add">+      const fromIdx = edgeFrom(g, edgeIdx), toIdx = edgeTo(g, edgeIdx);</span>
+<span class="d-add">+      const midLat = (nodeLat(g, fromIdx) + nodeLat(g, toIdx)) / 2;</span>
+<span class="d-add">+      const midLng = (nodeLon(g, fromIdx) + nodeLon(g, toIdx)) / 2;</span>
+<span class="d-ctx">       const dist = haversineMeters(lat, lng, midLat, midLng);</span>
+<span class="d-ctx">       if (dist &lt; bestDist) { bestDist = dist; best = edgeIdx; }</span>
+<span class="d-ctx">     }</span>
+<span class="d-hunk">@@ -1072,8 +1075,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // label a node&#x27;s share link encodes as `vt`, so the upgrade honours the link.</span>
+<span class="d-ctx">   const strongestProposalEdgeForNode = useCallback((nodeIdx: number): number | null =&gt; {</span>
+<span class="d-ctx">     const g = graphDataRef.current;</span>
+<span class="d-del">-    const adj = nodeAdjRef.current?.[nodeIdx];</span>
+<span class="d-del">-    if (!g?.edge_vote_types || !adj) return null;</span>
+<span class="d-add">+    const adjList = nodeAdjRef.current;</span>
+<span class="d-add">+    if (!g?.edge_vote_types || !adjList) return null;</span>
+<span class="d-add">+    const adj = adjEdgesOf(adjList, nodeIdx);</span>
+<span class="d-ctx">     let bestEdge: number | null = null;</span>
+<span class="d-ctx">     let bestNet = 0; // net ≤ 0 is not a proposal, so only positive nets qualify</span>
+<span class="d-ctx">     for (const eid of adj) {</span>
+<span class="d-hunk">@@ -1175,16 +1179,14 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     const pairKey = (a: number, b: number) =&gt; (a &lt; b ? `${a}|${b}` : `${b}|${a}`);</span>
+<span class="d-ctx">     const pathPairs = new Set&lt;string&gt;();</span>
+<span class="d-ctx">     for (const ei of pathEdgeIds) {</span>
+<span class="d-del">-      const e = g.edges[ei];</span>
+<span class="d-del">-      if (e) pathPairs.add(pairKey(e[0], e[1]));</span>
+<span class="d-add">+      if (ei &lt; g.nEdges) pathPairs.add(pairKey(edgeFrom(g, ei), edgeTo(g, ei)));</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     const next = new Set&lt;number&gt;();</span>
+<span class="d-ctx">     for (const w of winners) {</span>
+<span class="d-ctx">       // Skip proposals that ARE waypoints — `role` styles those.</span>
+<span class="d-ctx">       if (w.edgeIdx === startEdgeIdx || w.edgeIdx === endEdgeIdx || midEdgeSet.has(w.edgeIdx)) continue;</span>
+<span class="d-del">-      const e = g.edges[w.edgeIdx];</span>
+<span class="d-del">-      if (!e) continue;</span>
+<span class="d-del">-      if (pathPairs.has(pairKey(e[0], e[1]))) next.add(w.edgeIdx);</span>
+<span class="d-add">+      if (w.edgeIdx &gt;= g.nEdges) continue;</span>
+<span class="d-add">+      if (pathPairs.has(pairKey(edgeFrom(g, w.edgeIdx), edgeTo(g, w.edgeIdx)))) next.add(w.edgeIdx);</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     setOnPathEdgeSet((prev) =&gt; {</span>
+<span class="d-ctx">       if (prev.size === next.size &amp;&amp; [...next].every((x) =&gt; prev.has(x))) return prev;</span>
+<span class="d-hunk">@@ -1211,11 +1213,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     let best: { edgeIdx: number; lat: number; lng: number } | null = null;</span>
+<span class="d-ctx">     let bestD = Infinity;</span>
+<span class="d-ctx">     for (const w of winnersRef.current) {</span>
+<span class="d-del">-      const edge = g.edges[w.edgeIdx];</span>
+<span class="d-del">-      if (!edge) continue;</span>
+<span class="d-del">-      const a = g.nodes[edge[0]], b = g.nodes[edge[1]];</span>
+<span class="d-del">-      if (!a || !b) continue;</span>
+<span class="d-del">-      const lat = (a[0] + b[0]) / 2, lng = (a[1] + b[1]) / 2;</span>
+<span class="d-add">+      if (w.edgeIdx &gt;= g.nEdges) continue;</span>
+<span class="d-add">+      const fromIdx = edgeFrom(g, w.edgeIdx), toIdx = edgeTo(g, w.edgeIdx);</span>
+<span class="d-add">+      const lat = (nodeLat(g, fromIdx) + nodeLat(g, toIdx)) / 2;</span>
+<span class="d-add">+      const lng = (nodeLon(g, fromIdx) + nodeLon(g, toIdx)) / 2;</span>
+<span class="d-ctx">       // Hit-test at where the icon is actually drawn; snap to the real midpoint.</span>
+<span class="d-ctx">       const override = spread?.get(w.edgeIdx);</span>
+<span class="d-ctx">       const mp = map.latLngToContainerPoint(override ? [override[0], override[1]] : [lat, lng]);</span>
+<span class="d-hunk">@@ -1459,11 +1460,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     (async () =&gt; {</span>
+<span class="d-ctx">       // 1. Resolve the graph version, then load topology from IndexedDB when it</span>
+<span class="d-ctx">       //    matches — skipping the multi-MB download and JSON parse entirely.</span>
+<span class="d-del">-      let topology: GraphData | null = null;</span>
+<span class="d-add">+      let topology: GraphTopology | null = null;</span>
+<span class="d-ctx">       let version: string | null = null;</span>
+<span class="d-ctx">       let usedCachedTopology = false;</span>
+<span class="d-ctx">       // Assigned inside the try below; the step-3 stale-topology guard reuses it.</span>
+<span class="d-del">-      let fetchFreshTopology: ((forceReload?: boolean) =&gt; Promise&lt;GraphData | null&gt;) | null = null;</span>
+<span class="d-add">+      let fetchFreshTopology: ((forceReload?: boolean) =&gt; Promise&lt;GraphTopology | null&gt;) | null = null;</span>
+<span class="d-ctx">       try {</span>
+<span class="d-ctx">         try {</span>
+<span class="d-ctx">           const vr = await fetch(withMap(`${CONFIG.apiUrl}/graph-version`), { headers: passcodeHeaders() });</span>
+<span class="d-hunk">@@ -1485,18 +1486,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         // cache:&quot;reload&quot; so the browser HTTP cache is bypassed too — used by the</span>
+<span class="d-ctx">         // stale-topology recovery path in step 3, where even the version-busted</span>
+<span class="d-ctx">         // URL may have been served stale from Safari&#x27;s HTTP cache.</span>
+<span class="d-del">-        const fetchTopologyFromNetwork = async (forceReload = false): Promise&lt;GraphData | null&gt; =&gt; {</span>
+<span class="d-add">+        const fetchTopologyFromNetwork = async (forceReload = false): Promise&lt;GraphTopology | null&gt; =&gt; {</span>
+<span class="d-ctx">           const init: RequestInit = forceReload</span>
+<span class="d-ctx">             ? { headers: passcodeHeaders(), cache: &quot;reload&quot; }</span>
+<span class="d-ctx">             : { headers: passcodeHeaders() };</span>
+<span class="d-ctx">           // Station networks (tiny, names matter) use the JSON topology; large</span>
+<span class="d-ctx">           // street graphs use the binary topology so a phone never JSON.parse-es a</span>
+<span class="d-ctx">           // ~150MB string (the OOM that crashed mobile Safari on the NYC graph).</span>
+<span class="d-add">+          // Both are normalized to the flat typed-array GraphTopology so consumers</span>
+<span class="d-add">+          // (and the heatmap&#x27;s memory footprint) don&#x27;t depend on the wire format.</span>
+<span class="d-ctx">           if (isStationNetwork) {</span>
+<span class="d-ctx">             const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), init);</span>
+<span class="d-ctx">             if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);</span>
+<span class="d-del">-            const t = await r.json();</span>
+<span class="d-del">-            if (version &amp;&amp; t) setCachedTopology(version, t);</span>
+<span class="d-add">+            const t = topologyFromJson(await r.json());</span>
+<span class="d-add">+            if (version) setCachedTopology(version, t);</span>
+<span class="d-ctx">             return t;</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">           try {</span>
+<span class="d-hunk">@@ -1506,7 +1509,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">             );</span>
+<span class="d-ctx">             if (!r.ok) throw new Error(`Binary topology fetch failed: ${r.status}`);</span>
+<span class="d-ctx">             const buf = await r.arrayBuffer();</span>
+<span class="d-del">-            const t = decodeTopologyBin(buf) as GraphData;</span>
+<span class="d-add">+            const t = decodeTopologyBin(buf);</span>
+<span class="d-ctx">             if (version) setCachedTopologyBin(version, buf);</span>
+<span class="d-ctx">             return t;</span>
+<span class="d-ctx">           } catch (binErr) {</span>
+<span class="d-hunk">@@ -1514,8 +1517,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">             console.warn(&quot;Binary topology unavailable, using JSON:&quot;, binErr);</span>
+<span class="d-ctx">             const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), init);</span>
+<span class="d-ctx">             if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);</span>
+<span class="d-del">-            const t = await r.json();</span>
+<span class="d-del">-            if (version &amp;&amp; t) setCachedTopology(version, t);</span>
+<span class="d-add">+            const t = topologyFromJson(await r.json());</span>
+<span class="d-add">+            if (version) setCachedTopology(version, t);</span>
+<span class="d-ctx">             return t;</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">         };</span>
+<span class="d-hunk">@@ -1523,7 +1526,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         if (version) {</span>
+<span class="d-ctx">           if (isStationNetwork) {</span>
+<span class="d-del">-            const cached = await getCachedTopology&lt;GraphData&gt;(version);</span>
+<span class="d-add">+            const cached = await getCachedTopology&lt;GraphTopology&gt;(version);</span>
+<span class="d-ctx">             if (cached) { topology = cached; usedCachedTopology = true; }</span>
+<span class="d-ctx">           } else {</span>
+<span class="d-ctx">             const buf = await getCachedTopologyBin(version);</span>
+<span class="d-hunk">@@ -1531,7 +1534,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">             // cache and fall through to a fresh network fetch rather than aborting.</span>
+<span class="d-ctx">             if (buf) {</span>
+<span class="d-ctx">               try {</span>
+<span class="d-del">-                topology = decodeTopologyBin(buf) as GraphData;</span>
+<span class="d-add">+                topology = decodeTopologyBin(buf);</span>
+<span class="d-ctx">                 usedCachedTopology = true;</span>
+<span class="d-ctx">               } catch (decodeErr) {</span>
+<span class="d-ctx">                 console.warn(&quot;Cached binary topology was corrupt, refetching:&quot;, decodeErr);</span>
+<span class="d-hunk">@@ -1590,10 +1593,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         // caches and bail rather than paint a crash.</span>
+<span class="d-ctx">         if (!votesMatchTopology(voteData, topologyRef.current)) {</span>
+<span class="d-ctx">           console.warn(&quot;Topology/vote mismatch — refetching fresh topology&quot;, {</span>
+<span class="d-del">-            topoEdges: topologyRef.current?.edges.length,</span>
+<span class="d-add">+            topoEdges: topologyRef.current?.nEdges,</span>
+<span class="d-ctx">             voteEdges: voteData.n_edges ?? voteData.edge_votes?.length,</span>
+<span class="d-ctx">           });</span>
+<span class="d-del">-          let fresh: GraphData | null = null;</span>
+<span class="d-add">+          let fresh: GraphTopology | null = null;</span>
+<span class="d-ctx">           try {</span>
+<span class="d-ctx">             fresh = fetchFreshTopology ? await fetchFreshTopology(true) : null;</span>
+<span class="d-ctx">           } catch (refetchErr) {</span>
+<span class="d-hunk">@@ -1720,9 +1723,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     //   2. destination-out narrower stroke (carves the hole)</span>
+<span class="d-ctx">     //   3. Stroke narrower at low alpha (faint white interior)</span>
+<span class="d-ctx">     const drawNode = (nodeIndex: number, alpha: number) =&gt; {</span>
+<span class="d-del">-      const node = data.nodes[nodeIndex];</span>
+<span class="d-del">-      if (!node) return;</span>
+<span class="d-del">-      const pt = map.latLngToContainerPoint([node[0], node[1]]);</span>
+<span class="d-add">+      if (nodeIndex &gt;= data.nNodes) return;</span>
+<span class="d-add">+      const pt = map.latLngToContainerPoint([nodeLat(data, nodeIndex), nodeLon(data, nodeIndex)]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       hoverCtx.globalCompositeOperation = &quot;source-over&quot;;</span>
+<span class="d-ctx">       hoverCtx.globalAlpha = alpha;</span>
+<span class="d-hunk">@@ -1745,11 +1747,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     const drawEdge = (edgeIndex: number, alpha: number) =&gt; {</span>
+<span class="d-del">-      const edge = data.edges[edgeIndex];</span>
+<span class="d-del">-      if (!edge) return;</span>
+<span class="d-del">-      const [fromIdx, toIdx] = edge;</span>
+<span class="d-del">-      const fromScreen = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);</span>
+<span class="d-del">-      const toScreen = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);</span>
+<span class="d-add">+      if (edgeIndex &gt;= data.nEdges) return;</span>
+<span class="d-add">+      const fromIdx = edgeFrom(data, edgeIndex), toIdx = edgeTo(data, edgeIndex);</span>
+<span class="d-add">+      const fromScreen = map.latLngToContainerPoint([nodeLat(data, fromIdx), nodeLon(data, fromIdx)]);</span>
+<span class="d-add">+      const toScreen = map.latLngToContainerPoint([nodeLat(data, toIdx), nodeLon(data, toIdx)]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       const strokeLine = () =&gt; {</span>
+<span class="d-ctx">         hoverCtx.beginPath();</span>
+<span class="d-hunk">@@ -1815,10 +1816,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     L.DomUtil.setPosition(canvas, topLeft);</span>
+<span class="d-ctx">     ctx.clearRect(0, 0, canvas.width, canvas.height);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    if (!data.edges || !data.nodes) return;</span>
+<span class="d-add">+    if (!data.ends || !data.coords) return;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    const nodes = data.nodes;</span>
+<span class="d-del">-    const edges = data.edges;</span>
+<span class="d-add">+    const coords = data.coords;</span>
+<span class="d-add">+    const ends = data.ends;</span>
+<span class="d-ctx">     const edgeVotes = data.edge_votes ?? [];</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     // maxVotes is global (so colors stay consistent across the viewport) but</span>
+<span class="d-hunk">@@ -1847,7 +1848,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     const origin = map.getPixelOrigin();</span>
+<span class="d-ctx">     let proj = projCacheRef.current;</span>
+<span class="d-ctx">     if (!proj || proj.zoom !== zoom || proj.ox !== origin.x || proj.oy !== origin.y) {</span>
+<span class="d-del">-      const n = nodes.length;</span>
+<span class="d-add">+      const n = data.nNodes;</span>
+<span class="d-ctx">       proj = {</span>
+<span class="d-ctx">         zoom,</span>
+<span class="d-ctx">         ox: origin.x,</span>
+<span class="d-hunk">@@ -1865,15 +1866,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     const projectNode = (i: number) =&gt; {</span>
+<span class="d-ctx">       if (done[i]) return;</span>
+<span class="d-del">-      const p = map.latLngToLayerPoint([nodes[i][0], nodes[i][1]]);</span>
+<span class="d-add">+      const p = map.latLngToLayerPoint([coords[2 * i] / COORD_SCALE, coords[2 * i + 1] / COORD_SCALE]);</span>
+<span class="d-ctx">       xs[i] = p.x;</span>
+<span class="d-ctx">       ys[i] = p.y;</span>
+<span class="d-ctx">       done[i] = 1;</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     const drawSeg = (i: number) =&gt; {</span>
+<span class="d-del">-      const a = edges[i][0];</span>
+<span class="d-del">-      const b = edges[i][1];</span>
+<span class="d-add">+      const a = ends[2 * i];</span>
+<span class="d-add">+      const b = ends[2 * i + 1];</span>
+<span class="d-ctx">       projectNode(a);</span>
+<span class="d-ctx">       projectNode(b);</span>
+<span class="d-ctx">       ctx.beginPath();</span>
+<span class="d-hunk">@@ -1898,7 +1899,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           bounds.getNorth() + mLat,</span>
+<span class="d-ctx">         )</span>
+<span class="d-ctx">       : null;</span>
+<span class="d-del">-    const count = visible ? visible.length : edges.length;</span>
+<span class="d-add">+    const count = visible ? visible.length : data.nEdges;</span>
+<span class="d-ctx">     const edgeAt = (k: number): number =&gt; (visible ? visible[k] : k);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     // ----------------------------------------------------------------</span>
+<span class="d-hunk">@@ -2068,7 +2069,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       hoverRafRef.current = requestAnimationFrame(() =&gt; {</span>
+<span class="d-ctx">         hoverRafRef.current = null;</span>
+<span class="d-ctx">         const data = graphDataRef.current;</span>
+<span class="d-del">-        if (!data?.edges) {</span>
+<span class="d-add">+        if (!data?.nEdges) {</span>
+<span class="d-ctx">           if (hoverTargetRef.current) {</span>
+<span class="d-ctx">             hoverTargetRef.current = null;</span>
+<span class="d-ctx">             setHoverTarget(null);</span>
+<span class="d-hunk">@@ -2194,15 +2195,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">             if (candidates.length &gt; 0) nearestIdx = candidates[0];</span>
+<span class="d-ctx">           } else {</span>
+<span class="d-ctx">             let nearestDist = Infinity;</span>
+<span class="d-del">-            for (let i = 0; i &lt; data.nodes.length; i++) {</span>
+<span class="d-del">-              const n = data.nodes[i];</span>
+<span class="d-del">-              const d = (n[0] - e.latlng.lat) ** 2 + (n[1] - e.latlng.lng) ** 2;</span>
+<span class="d-add">+            for (let i = 0; i &lt; data.nNodes; i++) {</span>
+<span class="d-add">+              const d = (nodeLat(data, i) - e.latlng.lat) ** 2 + (nodeLon(data, i) - e.latlng.lng) ** 2;</span>
+<span class="d-ctx">               if (d &lt; nearestDist) { nearestDist = d; nearestIdx = i; }</span>
+<span class="d-ctx">             }</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">           if (nearestIdx &gt;= 0) {</span>
+<span class="d-del">-            const n = data.nodes[nearestIdx];</span>
+<span class="d-del">-            const snapPos = { lat: n[0], lng: n[1] };</span>
+<span class="d-add">+            const snapPos = { lat: nodeLat(data, nearestIdx), lng: nodeLon(data, nearestIdx) };</span>
+<span class="d-ctx">             onSnapRef.current?.(snapPos);</span>
+<span class="d-ctx">             setCurrentSnap(snapPos);</span>
+<span class="d-ctx">           } else {</span>
+<span class="d-hunk">@@ -2338,8 +2337,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       const gd = graphDataRef.current;</span>
+<span class="d-ctx">       const onFeature = gd &amp;&amp; (prevTarget.kind === &quot;edge&quot;</span>
+<span class="d-ctx">         ? projectOntoEdge(gd, prevTarget.index, pinnedLat, pinnedLng)</span>
+<span class="d-del">-        : (gd.nodes[prevTarget.index]</span>
+<span class="d-del">-            ? { lat: gd.nodes[prevTarget.index][0], lng: gd.nodes[prevTarget.index][1] }</span>
+<span class="d-add">+        : (prevTarget.index &lt; gd.nNodes</span>
+<span class="d-add">+            ? { lat: nodeLat(gd, prevTarget.index), lng: nodeLon(gd, prevTarget.index) }</span>
+<span class="d-ctx">             : null));</span>
+<span class="d-ctx">       if (onFeature) {</span>
+<span class="d-ctx">         const a = map.latLngToContainerPoint([onFeature.lat, onFeature.lng]);</span>
+<span class="d-hunk">@@ -2354,7 +2353,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     // resolve can still UPGRADE to its proposal once winners arrive (no lock</span>
+<span class="d-ctx">     // yet), but after that the selection never drifts to a neighbour on a vote.</span>
+<span class="d-ctx">     const lockNow = pinnedLockRef.current;</span>
+<span class="d-del">-    if (!hadOverride &amp;&amp; lockNow &amp;&amp; graphDataRef.current?.edges[lockNow.edgeIdx]</span>
+<span class="d-add">+    if (!hadOverride &amp;&amp; lockNow &amp;&amp; lockNow.edgeIdx &lt; (graphDataRef.current?.nEdges ?? 0)</span>
+<span class="d-ctx">         &amp;&amp; (target?.kind !== &quot;edge&quot; || target.index !== lockNow.edgeIdx)) {</span>
+<span class="d-ctx">       target = { kind: &quot;edge&quot;, index: lockNow.edgeIdx };</span>
+<span class="d-ctx">     }</span>
+<span class="d-hunk">@@ -2437,27 +2436,23 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   if (hoverTarget &amp;&amp; data) {</span>
+<span class="d-ctx">     if (hoverTarget.kind === &quot;edge&quot;) {</span>
+<span class="d-del">-      const edge = data.edges[hoverTarget.index];</span>
+<span class="d-del">-      if (edge) {</span>
+<span class="d-del">-        const [fromIdx, toIdx] = edge;</span>
+<span class="d-del">-        const fromNode = data.nodes[fromIdx];</span>
+<span class="d-del">-        const toNode = data.nodes[toIdx];</span>
+<span class="d-del">-        const midLat = (fromNode[0] + toNode[0]) / 2;</span>
+<span class="d-del">-        const midLng = (fromNode[1] + toNode[1]) / 2;</span>
+<span class="d-del">-</span>
+<span class="d-del">-        tooltipName = edge[2] || resolveAddress(midLat, midLng, bumpGeocode);</span>
+<span class="d-add">+      if (hoverTarget.index &lt; data.nEdges) {</span>
+<span class="d-add">+        const fromIdx = edgeFrom(data, hoverTarget.index), toIdx = edgeTo(data, hoverTarget.index);</span>
+<span class="d-add">+        const midLat = (nodeLat(data, fromIdx) + nodeLat(data, toIdx)) / 2;</span>
+<span class="d-add">+        const midLng = (nodeLon(data, fromIdx) + nodeLon(data, toIdx)) / 2;</span>
+<span class="d-add">+</span>
+<span class="d-add">+        tooltipName = edgeName(data, hoverTarget.index) || resolveAddress(midLat, midLng, bumpGeocode);</span>
+<span class="d-ctx">         hoverVoteTypes = decodeVoteTypes((data.edge_vote_types ?? [])[hoverTarget.index], legend);</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">     } else {</span>
+<span class="d-del">-      const node = data.nodes[hoverTarget.index];</span>
+<span class="d-del">-      if (node) {</span>
+<span class="d-del">-        tooltipName = resolveAddress(node[0], node[1], bumpGeocode);</span>
+<span class="d-add">+      if (hoverTarget.index &lt; data.nNodes) {</span>
+<span class="d-add">+        tooltipName = resolveAddress(nodeLat(data, hoverTarget.index), nodeLon(data, hoverTarget.index), bumpGeocode);</span>
+<span class="d-ctx">         hoverVoteTypes = decodeVoteTypes((data.node_vote_types ?? [])[hoverTarget.index], legend);</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     // A station carries its name on its self-edge (index == node index); use it</span>
+<span class="d-ctx">     // instead of a (disabled) reverse-geocode regardless of node/edge resolution.</span>
+<span class="d-del">-    if (isStationNetwork) tooltipName = data.edges[hoverTarget.index]?.[2] || tooltipName;</span>
+<span class="d-add">+    if (isStationNetwork) tooltipName = edgeName(data, hoverTarget.index) || tooltipName;</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // -------------------------------------------------------------------------</span>
+<span class="d-hunk">@@ -2475,30 +2470,26 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   if (showPinned) {</span>
+<span class="d-ctx">     if (pinnedTarget.kind === &quot;edge&quot;) {</span>
+<span class="d-del">-      const edge = data.edges[pinnedTarget.index];</span>
+<span class="d-del">-      if (edge) {</span>
+<span class="d-del">-        const [fromIdx, toIdx] = edge;</span>
+<span class="d-del">-        const fromNode = data.nodes[fromIdx];</span>
+<span class="d-del">-        const toNode = data.nodes[toIdx];</span>
+<span class="d-del">-        const midLat = (fromNode[0] + toNode[0]) / 2;</span>
+<span class="d-del">-        const midLng = (fromNode[1] + toNode[1]) / 2;</span>
+<span class="d-del">-        pinnedName = edge[2] || resolveAddress(midLat, midLng, bumpGeocode);</span>
+<span class="d-add">+      if (pinnedTarget.index &lt; data.nEdges) {</span>
+<span class="d-add">+        const fromIdx = edgeFrom(data, pinnedTarget.index), toIdx = edgeTo(data, pinnedTarget.index);</span>
+<span class="d-add">+        const midLat = (nodeLat(data, fromIdx) + nodeLat(data, toIdx)) / 2;</span>
+<span class="d-add">+        const midLng = (nodeLon(data, fromIdx) + nodeLon(data, toIdx)) / 2;</span>
+<span class="d-add">+        pinnedName = edgeName(data, pinnedTarget.index) || resolveAddress(midLat, midLng, bumpGeocode);</span>
+<span class="d-ctx">         pinnedVoteTypes = decodeVoteTypes((data.edge_vote_types ?? [])[pinnedTarget.index], legend);</span>
+<span class="d-ctx">         pinnedVoteEdgeId = pinnedTarget.index;</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">     } else {</span>
+<span class="d-del">-      const node = data.nodes[pinnedTarget.index];</span>
+<span class="d-del">-      if (node) {</span>
+<span class="d-del">-        pinnedName = resolveAddress(node[0], node[1], bumpGeocode);</span>
+<span class="d-add">+      if (pinnedTarget.index &lt; data.nNodes) {</span>
+<span class="d-add">+        pinnedName = resolveAddress(nodeLat(data, pinnedTarget.index), nodeLon(data, pinnedTarget.index), bumpGeocode);</span>
+<span class="d-ctx">         pinnedVoteTypes = decodeVoteTypes((data.node_vote_types ?? [])[pinnedTarget.index], legend);</span>
+<span class="d-del">-        pinnedVoteEdgeId = nodeAdjRef.current?.[pinnedTarget.index]?.[0] ?? null;</span>
+<span class="d-add">+        pinnedVoteEdgeId = adjFirst(nodeAdjRef.current, pinnedTarget.index);</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     // Anchor + share-link coord come from the SAME helper the position effect</span>
+<span class="d-ctx">     // uses, so the card&#x27;s key and its on-screen anchor can never drift apart.</span>
+<span class="d-ctx">     pinnedPointLatLng = targetLatLng(pinnedTarget, data);</span>
+<span class="d-ctx">     // Stations carry their name on the self-edge (index == node index).</span>
+<span class="d-del">-    if (isStationNetwork) pinnedName = data.edges[pinnedTarget.index]?.[2] || pinnedName;</span>
+<span class="d-add">+    if (isStationNetwork) pinnedName = edgeName(data, pinnedTarget.index) || pinnedName;</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Publish the resolved vote edge back to the host so the selected point&#x27;s</span>
+<span class="d-hunk">@@ -2708,7 +2699,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     // winner that hosts a waypoint stays drawn (it&#x27;s the fixed pin), just tinted</span>
+<span class="d-ctx">     // + click-through (see the icon opts below).</span>
+<span class="d-ctx">     const source: VoteTypeWinner[] = isStationNetwork</span>
+<span class="d-del">-      ? topology.edges.map((_, i) =&gt; ({ legendIdx: i, label: stationLabel, edgeIdx: i, count: 0 }))</span>
+<span class="d-add">+      ? Array.from({ length: topology.nEdges }, (_, i) =&gt; ({ legendIdx: i, label: stationLabel, edgeIdx: i, count: 0 }))</span>
+<span class="d-ctx">       : winners;</span>
+<span class="d-ctx">     if (source.length === 0) return null;</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -2729,14 +2720,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     // can measure on-screen distance between icons for cluster detection.</span>
+<span class="d-ctx">     const placed = source</span>
+<span class="d-ctx">       .map((w) =&gt; {</span>
+<span class="d-del">-        const edge = topology.edges[w.edgeIdx];</span>
+<span class="d-del">-        if (!edge) return null;</span>
+<span class="d-del">-        const [fromIdx, toIdx] = edge;</span>
+<span class="d-del">-        const fromNode = topology.nodes[fromIdx];</span>
+<span class="d-del">-        const toNode = topology.nodes[toIdx];</span>
+<span class="d-del">-        if (!fromNode || !toNode) return null;</span>
+<span class="d-del">-        const midLat = (fromNode[0] + toNode[0]) / 2;</span>
+<span class="d-del">-        const midLng = (fromNode[1] + toNode[1]) / 2;</span>
+<span class="d-add">+        if (w.edgeIdx &gt;= topology.nEdges) return null;</span>
+<span class="d-add">+        const fromIdx = edgeFrom(topology, w.edgeIdx), toIdx = edgeTo(topology, w.edgeIdx);</span>
+<span class="d-add">+        const midLat = (nodeLat(topology, fromIdx) + nodeLat(topology, toIdx)) / 2;</span>
+<span class="d-add">+        const midLng = (nodeLon(topology, fromIdx) + nodeLon(topology, toIdx)) / 2;</span>
+<span class="d-ctx">         return { w, midLat, midLng };</span>
+<span class="d-ctx">       })</span>
+<span class="d-ctx">       .filter(Boolean) as Array&lt;{</span>
+<span class="d-hunk">@@ -2972,20 +2959,25 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           key={w.edgeIdx}</span>
+<span class="d-ctx">           position={[posLat, posLng]}</span>
+<span class="d-ctx">           icon={icon}</span>
+<span class="d-del">-          // Stacking order, highest first:</span>
+<span class="d-del">-          //   3000  fanned-out (spread override) — the exploded cluster reads as</span>
+<span class="d-del">-          //         one group on top of everything else.</span>
+<span class="d-del">-          //   2500  a MATCHED waypoint (start/end/mid). It carries the [×] badge,</span>
+<span class="d-del">-          //         so it must sit above any overlapping non-matched sibling — else</span>
+<span class="d-del">-          //         when two proposals stack and the lower one is the waypoint, the</span>
+<span class="d-del">-          //         upper icon conceals its badge.</span>
+<span class="d-del">-          //   2000  the selected (open-modal) proposal.</span>
+<span class="d-del">-          //   1000  everything else.</span>
+<span class="d-add">+          // Stacking: a state BAND (far-apart bases) plus the proposal&#x27;s net</span>
+<span class="d-add">+          // votes as the in-band offset, so where pins overlap the more-supported</span>
+<span class="d-add">+          // one sits on top — but explode/waypoint/selected still lift a pin into</span>
+<span class="d-add">+          // a higher band regardless of votes. Bands are 100k apart and votes are</span>
+<span class="d-add">+          // capped at 50k, so the vote offset can never bleed one band into the</span>
+<span class="d-add">+          // next. Highest band first:</span>
+<span class="d-add">+          //   300000+  fanned-out (spread override) — the exploded cluster reads</span>
+<span class="d-add">+          //            as one group on top of everything else.</span>
+<span class="d-add">+          //   200000+  a MATCHED waypoint (start/end/mid). It carries the [×]</span>
+<span class="d-add">+          //            badge, so it must sit above any overlapping non-matched</span>
+<span class="d-add">+          //            sibling — else the upper icon conceals its badge.</span>
+<span class="d-add">+          //   100000+  the selected (open-modal) proposal.</span>
+<span class="d-add">+          //     1000+  everything else, ordered by votes.</span>
+<span class="d-ctx">           zIndexOffset={</span>
+<span class="d-del">-            override ? 3000</span>
+<span class="d-del">-            : role !== null ? 2500</span>
+<span class="d-del">-            : w.edgeIdx === selectedEdgeIdx ? 2000</span>
+<span class="d-del">-            : 1000</span>
+<span class="d-add">+            (override ? 300000</span>
+<span class="d-add">+             : role !== null ? 200000</span>
+<span class="d-add">+             : w.edgeIdx === selectedEdgeIdx ? 100000</span>
+<span class="d-add">+             : 1000)</span>
+<span class="d-add">+            + Math.min(50000, Math.max(0, w.count))</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">           interactive={!passthrough}</span>
+<span class="d-ctx">           onActivate={activateIndicator}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/topProposals.test.ts</span>
+            <span class="stat"><span class="d-add">+15</span> / <span class="d-del">-11</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span><span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span><span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">unit tests for proposal selection</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span><span class="ctx-v">topProposals.test.ts</span>
+        <span class="ctx-sum">fixtures + 26 tests</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">topo() helper</span><span class="ol-sum">build GraphTopology from the legacy {nodes,edges} shape</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>topo() helper; selectTopProposals fixtures spread ...topo(...)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/topProposals.test.ts b/client-react/src/components/GraphLayer/topProposals.test.ts</span>
+<span class="d-meta">index 9bf15ed..b497536 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/topProposals.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/topProposals.test.ts</span>
+<span class="d-hunk">@@ -11,9 +11,16 @@ import {</span>
+<span class="d-ctx">   type EdgePosition,</span>
+<span class="d-ctx">   type VoteTypeWinner,</span>
+<span class="d-ctx"> } from &quot;./topProposals&quot;;</span>
+<span class="d-add">+import { topologyFromJson } from &quot;./graphTopology&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> const SALT = 12345;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+// Build a typed-array topology from the legacy {nodes, edges} test shape.</span>
+<span class="d-add">+const topo = (</span>
+<span class="d-add">+  nodes: [number, number][],</span>
+<span class="d-add">+  edges: [number, number, string][],</span>
+<span class="d-add">+) =&gt; topologyFromJson({ nodes, edges });</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> describe(&quot;computeVoteTypeWinners&quot;, () =&gt; {</span>
+<span class="d-ctx">   it(&quot;picks the edge with the highest net per vote type&quot;, () =&gt; {</span>
+<span class="d-ctx">     const legend = [&quot;Bike lane&quot;, &quot;Tree&quot;];</span>
+<span class="d-hunk">@@ -138,10 +145,7 @@ describe(&quot;spaceOutWinners&quot;, () =&gt; {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> describe(&quot;edgeMidpointResolver&quot;, () =&gt; {</span>
+<span class="d-ctx">   it(&quot;returns the mean of an edge&#x27;s two endpoint nodes&quot;, () =&gt; {</span>
+<span class="d-del">-    const data = {</span>
+<span class="d-del">-      nodes: [[40.70, -74.00], [40.72, -74.02]] as [number, number][],</span>
+<span class="d-del">-      edges: [[0, 1, &quot;&quot;]] as [number, number, string][],</span>
+<span class="d-del">-    };</span>
+<span class="d-add">+    const data = topo([[40.70, -74.00], [40.72, -74.02]], [[0, 1, &quot;&quot;]]);</span>
+<span class="d-ctx">     const mid = edgeMidpointResolver(data)(0)!;</span>
+<span class="d-ctx">     expect(mid[0]).toBeCloseTo(40.71, 6);</span>
+<span class="d-ctx">     expect(mid[1]).toBeCloseTo(-74.01, 6);</span>
+<span class="d-hunk">@@ -149,10 +153,10 @@ describe(&quot;edgeMidpointResolver&quot;, () =&gt; {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   it(&quot;returns null for missing edges, nodes, or null data&quot;, () =&gt; {</span>
+<span class="d-ctx">     expect(edgeMidpointResolver(null)(0)).toBeNull();</span>
+<span class="d-del">-    expect(edgeMidpointResolver({ nodes: [], edges: [] })(0)).toBeNull();</span>
+<span class="d-del">-    expect(</span>
+<span class="d-del">-      edgeMidpointResolver({ nodes: [[40.7, -74]], edges: [[0, 5, &quot;&quot;]] })(0)</span>
+<span class="d-del">-    ).toBeNull(); // node 5 absent</span>
+<span class="d-add">+    expect(edgeMidpointResolver(topo([], []))(0)).toBeNull();</span>
+<span class="d-add">+    // node 5 absent → clamped to 0; still resolves a (degenerate) midpoint, but</span>
+<span class="d-add">+    // the edge index itself is out of range here, so it&#x27;s null.</span>
+<span class="d-add">+    expect(edgeMidpointResolver(topo([[40.7, -74]], []))(0)).toBeNull();</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -182,7 +186,7 @@ describe(&quot;selectTopProposals (full path)&quot;, () =&gt; {</span>
+<span class="d-ctx">     // Naive (per-type) logic with limit 2 would pick A and B (both edge 0),</span>
+<span class="d-ctx">     // dropping C. Correct: edge 0 collapses to one (A) + edge 1 (C).</span>
+<span class="d-ctx">     const out = selectTopProposals(</span>
+<span class="d-del">-      { vote_type_legend: legend, edge_vote_types: evt, nodes: [], edges: [] }, SALT, 2,</span>
+<span class="d-add">+      { vote_type_legend: legend, edge_vote_types: evt, ...topo([], []) }, SALT, 2,</span>
+<span class="d-ctx">     );</span>
+<span class="d-ctx">     expect(out.map((w) =&gt; w.edgeIdx).sort()).toEqual([0, 1]);</span>
+<span class="d-ctx">     expect(out.find((w) =&gt; w.edgeIdx === 0)!.label).toBe(&quot;A&quot;);</span>
+<span class="d-hunk">@@ -195,7 +199,7 @@ describe(&quot;selectTopProposals (full path)&quot;, () =&gt; {</span>
+<span class="d-ctx">       [[2, 1, 0]],            // edge 1: one winner</span>
+<span class="d-ctx">     ];</span>
+<span class="d-ctx">     const out = selectTopProposals(</span>
+<span class="d-del">-      { vote_type_legend: legend, edge_vote_types: evt, nodes: [], edges: [] }, SALT, 1,</span>
+<span class="d-add">+      { vote_type_legend: legend, edge_vote_types: evt, ...topo([], []) }, SALT, 1,</span>
+<span class="d-ctx">     );</span>
+<span class="d-ctx">     expect(out).toHaveLength(1);</span>
+<span class="d-ctx">     expect(out[0].edgeIdx).toBe(0);</span>
+<span class="d-hunk">@@ -218,7 +222,7 @@ describe(&quot;selectTopProposals (full path)&quot;, () =&gt; {</span>
+<span class="d-ctx">       [[0, 4, 0]], // edge 2: Bike net 4 (far → survives)</span>
+<span class="d-ctx">     ];</span>
+<span class="d-ctx">     const out = selectTopProposals(</span>
+<span class="d-del">-      { vote_type_legend: [&quot;Bike&quot;], edge_vote_types: evt, nodes, edges }, SALT, 10,</span>
+<span class="d-add">+      { vote_type_legend: [&quot;Bike&quot;], edge_vote_types: evt, ...topo(nodes, edges) }, SALT, 10,</span>
+<span class="d-ctx">     );</span>
+<span class="d-ctx">     expect(out.map((w) =&gt; w.edgeIdx).sort()).toEqual([0, 2]);</span>
+<span class="d-ctx">   });</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/topProposals.ts</span>
+            <span class="stat"><span class="d-add">+13</span> / <span class="d-del">-10</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span><span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span><span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">pure top-proposal selection (per-type winners → spacing → limit)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span><span class="ctx-v">topProposals.ts</span>
+        <span class="ctx-sum">~270 LOC — winner selection + edge-midpoint resolver</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">edgeMidpointResolver</span><span class="ol-sum">midpoint from GraphTopology accessors</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">selectTopProposals</span><span class="ol-sum">accepts Pick&lt;votes&gt; &amp; GraphTopology</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">winner/spacing helpers</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>import GraphTopology + accessors</li><li>edgeMidpointResolver(data:GraphTopology) — edgeFrom/edgeTo + nodeLat/nodeLon</li><li>selectTopProposals data type → &amp; GraphTopology</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/topProposals.ts b/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-meta">index ff857c2..a83daf4 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-hunk">@@ -22,6 +22,7 @@</span>
+<span class="d-ctx"> // — negligible even though selection re-runs on every incoming vote.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> import type { GraphData } from &quot;../../types&quot;;</span>
+<span class="d-add">+import { type GraphTopology, nodeLat, nodeLon, edgeFrom, edgeTo } from &quot;./graphTopology&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> export interface VoteTypeWinner {</span>
+<span class="d-ctx">   legendIdx: number;</span>
+<span class="d-hunk">@@ -163,19 +164,21 @@ function metersBetween(</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /**</span>
+<span class="d-del">- * Builds an `EdgePosition` from a GraphData-shaped `{ nodes, edges }`: an edge&#x27;s</span>
+<span class="d-del">- * midpoint is the mean of its two endpoint nodes.</span>
+<span class="d-add">+ * Builds an `EdgePosition` from a typed-array topology: an edge&#x27;s midpoint is</span>
+<span class="d-add">+ * the mean of its two endpoint nodes.</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> export function edgeMidpointResolver(</span>
+<span class="d-del">-  data: Pick&lt;GraphData, &quot;nodes&quot; | &quot;edges&quot;&gt; | null</span>
+<span class="d-add">+  data: GraphTopology | null</span>
+<span class="d-ctx"> ): EdgePosition {</span>
+<span class="d-ctx">   return (edgeIdx) =&gt; {</span>
+<span class="d-del">-    const edge = data?.edges?.[edgeIdx];</span>
+<span class="d-del">-    if (!edge) return null;</span>
+<span class="d-del">-    const from = data!.nodes?.[edge[0]];</span>
+<span class="d-del">-    const to = data!.nodes?.[edge[1]];</span>
+<span class="d-del">-    if (!from || !to) return null;</span>
+<span class="d-del">-    return [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2];</span>
+<span class="d-add">+    if (!data || edgeIdx &gt;= data.nEdges) return null;</span>
+<span class="d-add">+    const from = edgeFrom(data, edgeIdx);</span>
+<span class="d-add">+    const to = edgeTo(data, edgeIdx);</span>
+<span class="d-add">+    if (from &gt;= data.nNodes || to &gt;= data.nNodes) return null;</span>
+<span class="d-add">+    return [</span>
+<span class="d-add">+      (nodeLat(data, from) + nodeLat(data, to)) / 2,</span>
+<span class="d-add">+      (nodeLon(data, from) + nodeLon(data, to)) / 2,</span>
+<span class="d-add">+    ];</span>
+<span class="d-ctx">   };</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -251,7 +254,7 @@ export const TOP_PROPOSAL_MIN_SPACING_M = 300;</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> export function selectTopProposals(</span>
+<span class="d-ctx">   data:</span>
+<span class="d-del">-    | Pick&lt;GraphData, &quot;vote_type_legend&quot; | &quot;edge_vote_types&quot; | &quot;nodes&quot; | &quot;edges&quot;&gt;</span>
+<span class="d-add">+    | (Pick&lt;GraphData, &quot;vote_type_legend&quot; | &quot;edge_vote_types&quot;&gt; &amp; GraphTopology)</span>
+<span class="d-ctx">     | null,</span>
+<span class="d-ctx">   salt: number,</span>
+<span class="d-ctx">   limit: number,</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/voteApply.test.ts</span>
+            <span class="stat"><span class="d-add">+10</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span><span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span><span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">unit tests for vote application</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span><span class="ctx-v">voteApply.test.ts</span>
+        <span class="ctx-sum">fixtures + 12 tests</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">makeData / ADJ</span><span class="ol-sum">build typed-array topology + CSR adjacency</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>makeData via topologyFromJson; ADJ via buildNodeAdj</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/voteApply.test.ts b/client-react/src/components/GraphLayer/voteApply.test.ts</span>
+<span class="d-meta">index d2e2d74..97bdcc2 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/voteApply.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/voteApply.test.ts</span>
+<span class="d-hunk">@@ -1,12 +1,16 @@</span>
+<span class="d-ctx"> import { describe, it, expect } from &quot;vitest&quot;;</span>
+<span class="d-ctx"> import { applyEdgeVoteChange, applyAuthoritativeCounts, applyMyVoteChange } from &quot;./voteApply&quot;;</span>
+<span class="d-add">+import { topologyFromJson, buildNodeAdj } from &quot;./graphTopology&quot;;</span>
+<span class="d-ctx"> import type { GraphData } from &quot;../../types&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> // Minimal graph: 2 edges sharing node 1.  edge0 = (0,1), edge1 = (1,2)</span>
+<span class="d-ctx"> function makeData(): GraphData {</span>
+<span class="d-del">-  return {</span>
+<span class="d-add">+  const topo = topologyFromJson({</span>
+<span class="d-ctx">     nodes: [[0, 0], [0, 1], [0, 2]],</span>
+<span class="d-ctx">     edges: [[0, 1, &quot;&quot;], [1, 2, &quot;&quot;]],</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+  return {</span>
+<span class="d-add">+    ...topo,</span>
+<span class="d-ctx">     edge_votes: [0, 0],</span>
+<span class="d-ctx">     node_votes: [0, 0, 0],</span>
+<span class="d-ctx">     vote_type_legend: [],</span>
+<span class="d-hunk">@@ -14,7 +18,11 @@ function makeData(): GraphData {</span>
+<span class="d-ctx">     node_vote_types: [[], []],</span>
+<span class="d-ctx">   };</span>
+<span class="d-ctx"> }</span>
+<span class="d-del">-const ADJ = [[0], [0, 1], [1]];</span>
+<span class="d-add">+// CSR adjacency equivalent to [[0], [0, 1], [1]].</span>
+<span class="d-add">+const ADJ = buildNodeAdj(topologyFromJson({</span>
+<span class="d-add">+  nodes: [[0, 0], [0, 1], [0, 2]],</span>
+<span class="d-add">+  edges: [[0, 1, &quot;&quot;], [1, 2, &quot;&quot;]],</span>
+<span class="d-add">+}));</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> function row(data: GraphData, eid: number, label: string) {</span>
+<span class="d-ctx">   const li = (data.vote_type_legend ?? []).indexOf(label);</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/voteApply.ts</span>
+            <span class="stat"><span class="d-add">+10</span> / <span class="d-del">-12</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span><span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span><span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">pure vote-array mutation: edge/node counts + per-type breakdown</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span><span class="ctx-v">voteApply.ts</span>
+        <span class="ctx-sum">~210 LOC — optimistic + authoritative vote application, node rederivation</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">rederiveNodes</span><span class="ol-sum">now walks CSR adjacency via adjEdgesOf</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">applyMyVoteChange / applyEdgeVoteChange</span><span class="ol-sum">affected nodes via edgeFrom/edgeTo</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">applyAuthoritativeCounts</span><span class="ol-sum">same — accessor endpoints</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>import NodeAdj + edgeFrom/edgeTo/adjEdgesOf</li><li>rederiveNodes(adj:NodeAdj) — iterate adjEdgesOf(adj,nid)</li><li>affected.add(edgeFrom/edgeTo(data,eid)) in all three appliers</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/voteApply.ts b/client-react/src/components/GraphLayer/voteApply.ts</span>
+<span class="d-meta">index d6da8e6..3e13ba5 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/voteApply.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/voteApply.ts</span>
+<span class="d-hunk">@@ -19,6 +19,7 @@</span>
+<span class="d-ctx"> // voteApply.test.ts.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> import type { GraphData } from &quot;../../types&quot;;</span>
+<span class="d-add">+import { type NodeAdj, edgeFrom, edgeTo, adjEdgesOf } from &quot;./graphTopology&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> type VoteData = GraphData;</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -37,7 +38,7 @@ function legendIndex(data: VoteData, vtLabel: string): number {</span>
+<span class="d-ctx"> /** Re-derive node totals + per-type breakdown for the affected nodes. */</span>
+<span class="d-ctx"> export function rederiveNodes(</span>
+<span class="d-ctx">   data: VoteData,</span>
+<span class="d-del">-  adj: number[][],</span>
+<span class="d-add">+  adj: NodeAdj,</span>
+<span class="d-ctx">   affected: Iterable&lt;number&gt;,</span>
+<span class="d-ctx"> ) {</span>
+<span class="d-ctx">   const edgeVotes = data.edge_votes ?? [];</span>
+<span class="d-hunk">@@ -46,8 +47,8 @@ export function rederiveNodes(</span>
+<span class="d-ctx">   const nodeVoteTypes = data.node_vote_types ?? [];</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   for (const nid of affected) {</span>
+<span class="d-del">-    const nodeEdges = adj[nid];</span>
+<span class="d-del">-    if (!nodeEdges) continue;</span>
+<span class="d-add">+    if (nid &gt;= adj.start.length - 1) continue;</span>
+<span class="d-add">+    const nodeEdges = adjEdgesOf(adj, nid);</span>
+<span class="d-ctx">     let best = 0;</span>
+<span class="d-ctx">     const merged = new Map&lt;number, [number, number]&gt;();</span>
+<span class="d-ctx">     for (const eid of nodeEdges) {</span>
+<span class="d-hunk">@@ -80,7 +81,7 @@ export function rederiveNodes(</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> export function applyMyVoteChange(</span>
+<span class="d-ctx">   data: VoteData,</span>
+<span class="d-del">-  adj: number[][],</span>
+<span class="d-add">+  adj: NodeAdj,</span>
+<span class="d-ctx">   edgeIds: number[],</span>
+<span class="d-ctx">   vtLabel: string,</span>
+<span class="d-ctx">   prevDir: number,</span>
+<span class="d-hunk">@@ -114,8 +115,7 @@ export function applyMyVoteChange(</span>
+<span class="d-ctx">     edgeVoteTypes[eid] = pairs.filter((t) =&gt; t[1] !== 0 || t[2] !== 0)</span>
+<span class="d-ctx">       .sort((a, b) =&gt; b[1] - b[2] - (a[1] - a[2]));</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    const edge = data.edges[eid];</span>
+<span class="d-del">-    if (edge) { affected.add(edge[0]); affected.add(edge[1]); }</span>
+<span class="d-add">+    if (eid &lt; (data.nEdges ?? 0)) { affected.add(edgeFrom(data, eid)); affected.add(edgeTo(data, eid)); }</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   rederiveNodes(data, adj, affected);</span>
+<span class="d-hunk">@@ -127,7 +127,7 @@ export function applyMyVoteChange(</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> export function applyEdgeVoteChange(</span>
+<span class="d-ctx">   data: VoteData,</span>
+<span class="d-del">-  adj: number[][],</span>
+<span class="d-add">+  adj: NodeAdj,</span>
+<span class="d-ctx">   edgeIds: number[],</span>
+<span class="d-ctx">   vtLabel: string,</span>
+<span class="d-ctx">   dir: number = 1,</span>
+<span class="d-hunk">@@ -158,8 +158,7 @@ export function applyEdgeVoteChange(</span>
+<span class="d-ctx">       edgeVoteTypes[eid] = pairs;</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    const edge = data.edges[eid];</span>
+<span class="d-del">-    if (edge) { affected.add(edge[0]); affected.add(edge[1]); }</span>
+<span class="d-add">+    if (eid &lt; (data.nEdges ?? 0)) { affected.add(edgeFrom(data, eid)); affected.add(edgeTo(data, eid)); }</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   rederiveNodes(data, adj, affected);</span>
+<span class="d-hunk">@@ -173,7 +172,7 @@ export function applyEdgeVoteChange(</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> export function applyAuthoritativeCounts(</span>
+<span class="d-ctx">   data: VoteData,</span>
+<span class="d-del">-  adj: number[][],</span>
+<span class="d-add">+  adj: NodeAdj,</span>
+<span class="d-ctx">   vtLabel: string,</span>
+<span class="d-ctx">   vtCounts: Record&lt;string, [number, number]&gt;,</span>
+<span class="d-ctx"> ) {</span>
+<span class="d-hunk">@@ -201,8 +200,7 @@ export function applyAuthoritativeCounts(</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     edgeVotes[eid] = (edgeVotes[eid] || 0) + (up - down - oldNet);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    const edge = data.edges[eid];</span>
+<span class="d-del">-    if (edge) { affected.add(edge[0]); affected.add(edge[1]); }</span>
+<span class="d-add">+    if (eid &lt; (data.nEdges ?? 0)) { affected.add(edgeFrom(data, eid)); affected.add(edgeTo(data, eid)); }</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   rederiveNodes(data, adj, affected);</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/types/index.ts</span>
+            <span class="stat"><span class="d-add">+8</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span><span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span><span class="ctx-v">React client · types/</span>
+        <span class="ctx-sum">shared TypeScript interfaces</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span><span class="ctx-v">index.ts</span>
+        <span class="ctx-sum">GraphData and friends</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">GraphData</span><span class="ol-sum">topology fields now typed arrays (nNodes/nEdges/coords/ends)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">other interfaces</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>GraphData — replace nodes/edges tuples with nNodes/nEdges/coords/ends (+ optional edgeNames)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/types/index.ts b/client-react/src/types/index.ts</span>
+<span class="d-meta">index 6855fe7..aed513a 100644</span>
+<span class="d-meta">--- a/client-react/src/types/index.ts</span>
+<span class="d-meta">+++ b/client-react/src/types/index.ts</span>
+<span class="d-hunk">@@ -101,8 +101,14 @@ export interface WebSocketMessage {</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> export interface GraphData {</span>
+<span class="d-del">-  nodes: [number, number][];</span>
+<span class="d-del">-  edges: [number, number, string][];</span>
+<span class="d-add">+  // Topology as flat typed arrays (mobile memory; see graphTopology.ts). The</span>
+<span class="d-add">+  // NYC street graph is too large to box as [lat,lon][]/[from,to,name][] without</span>
+<span class="d-add">+  // OOM-crashing mobile Safari. Read via graphTopology accessors, not by index.</span>
+<span class="d-add">+  nNodes: number;</span>
+<span class="d-add">+  nEdges: number;</span>
+<span class="d-add">+  coords: Int32Array; // 2·nNodes int32, [lat,lon] scaled by 1e7</span>
+<span class="d-add">+  ends: Uint32Array; // 2·nEdges uint32, [fromIdx,toIdx] per edge</span>
+<span class="d-add">+  edgeNames?: string[]; // station networks only; street graphs omit names</span>
+<span class="d-ctx">   node_votes?: number[];</span>
+<span class="d-ctx">   edge_votes?: number[];</span>
+<span class="d-ctx">   vote_type_legend?: string[];</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/graphCache.ts</span>
+            <span class="stat"><span class="d-add">+6</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span><span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span><span class="ctx-v">React client · utils/</span>
+        <span class="ctx-sum">IndexedDB persistence for topology + vote arrays, keyed by graph version</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span><span class="ctx-v">graphCache.ts</span>
+        <span class="ctx-sum">~170 LOC — get/set cached topology (JSON + binary) and votes</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">DB open / upgrade</span><span class="ol-sum">DB_VERSION 2 → 3 clears the boxed-shape store</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">topology / votes cache</span><span class="ol-sum">unchanged API</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>DB_VERSION = 3 — drop any pre-refactor JSON topology whose shape lacks coords/ends</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/graphCache.ts b/client-react/src/utils/graphCache.ts</span>
+<span class="d-meta">index 387768f..f3c5c06 100644</span>
+<span class="d-meta">--- a/client-react/src/utils/graphCache.ts</span>
+<span class="d-meta">+++ b/client-react/src/utils/graphCache.ts</span>
+<span class="d-hunk">@@ -17,7 +17,12 @@ const STORE = &quot;graph&quot;;</span>
+<span class="d-ctx"> // poisoning the cache so the heatmap paints against wrong edge ids and crashes</span>
+<span class="d-ctx"> // mobile Safari. Bumping the version clears the store so those devices re-fetch</span>
+<span class="d-ctx"> // fresh (now version-busted; see GraphLayer topology fetch).</span>
+<span class="d-del">-const DB_VERSION = 2;</span>
+<span class="d-add">+// v3: the in-memory topology shape changed from boxed `{nodes,edges}` tuples to</span>
+<span class="d-add">+// flat typed arrays (coords/ends; see graphTopology.ts) to fit mobile Safari&#x27;s</span>
+<span class="d-add">+// memory budget. A pre-v3 cached JSON topology (station networks) would lack</span>
+<span class="d-add">+// coords/ends and crash the accessors — bump to drop those entries. Binary</span>
+<span class="d-add">+// topology blobs are unaffected (decoded fresh each load), but clearing is cheap.</span>
+<span class="d-add">+const DB_VERSION = 3;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> const TOPOLOGY_KEY = &quot;topology&quot;;</span>
+<span class="d-ctx"> const TOPOLOGY_BIN_KEY = &quot;topology-bin&quot;;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/graphTopology.ts</span>
+            <span class="stat"><span class="d-add">+130</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span><span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span><span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">NEW — the flat typed-array graph representation shared by the heatmap, snapping, and proposals</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span><span class="ctx-v">graphTopology.ts</span>
+        <span class="ctx-sum">NEW FILE — ~150 LOC: typed-array topology type, accessors, JSON normalizer, CSR adjacency</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">GraphTopology type</span><span class="ol-sum">coords:Int32Array, ends:Uint32Array, optional edgeNames</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Element accessors</span><span class="ol-sum">nodeLat/nodeLon/nodeLatLng/edgeFrom/edgeTo/edgeName</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">topologyFromJson</span><span class="ol-sum">convert the station-net JSON shape → typed arrays</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">NodeAdj (CSR) + buildNodeAdj</span><span class="ol-sum">two Uint32Arrays replacing number[][]</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">adjEdgesOf / adjFirst</span><span class="ol-sum">cheap subarray view + first incident edge</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>GraphTopology + COORD_SCALE — the mobile-safe representation</li><li>nodeLat/nodeLon/edgeFrom/edgeTo/edgeName accessors</li><li>topologyFromJson — clamp out-of-range nodes, keep names only if present</li><li>buildNodeAdj — 2-pass CSR build (degree count → prefix sum → scatter)</li><li>adjEdgesOf (subarray, no copy) + adjFirst</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/graphTopology.ts b/client-react/src/components/GraphLayer/graphTopology.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..56a4be6</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/graphTopology.ts</span>
+<span class="d-hunk">@@ -0,0 +1,130 @@</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// Graph topology — typed-array representation + accessors</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// The NYC street graph is ~1.3M nodes / ~3.3M edges. Held as boxed JS tuples</span>
+<span class="d-add">+// (`[lat,lon][]` + `[from,to,name][]`) it decoded to ~500MB of heap and a</span>
+<span class="d-add">+// `number[][]` adjacency added ~150MB more — over mobile Safari&#x27;s per-tab</span>
+<span class="d-add">+// budget, so the WebContent process was jetsam-killed on load and Safari showed</span>
+<span class="d-add">+// &quot;a problem repeatedly occurred&quot;. Backing the topology with flat typed arrays</span>
+<span class="d-add">+// (the same bytes the binary wire format already carries) keeps it near the</span>
+<span class="d-add">+// ~35MB blob size; accessors read coordinates/endpoints on demand.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// Coordinates are stored as integers scaled by 1e7 (~1cm precision), matching</span>
+<span class="d-add">+// the binary topology&#x27;s on-wire layout (see server graph_registry.topology_binary).</span>
+<span class="d-add">+</span>
+<span class="d-add">+export const COORD_SCALE = 1e7;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Flat, mobile-safe topology. `coords`/`ends` mirror the binary wire format. */</span>
+<span class="d-add">+export interface GraphTopology {</span>
+<span class="d-add">+  nNodes: number;</span>
+<span class="d-add">+  nEdges: number;</span>
+<span class="d-add">+  /** 2·nNodes int32s: [lat, lon] per node, each scaled by COORD_SCALE. */</span>
+<span class="d-add">+  coords: Int32Array;</span>
+<span class="d-add">+  /** 2·nEdges uint32s: [fromNodeIdx, toNodeIdx] per edge. */</span>
+<span class="d-add">+  ends: Uint32Array;</span>
+<span class="d-add">+  /** Per-edge street name, only for station (JSON) networks where names matter;</span>
+<span class="d-add">+   *  omitted for large street graphs (the client reverse-geocodes tooltips). */</span>
+<span class="d-add">+  edgeNames?: string[];</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ── Element accessors ───────────────────────────────────────────────────────</span>
+<span class="d-add">+// Hot loops (redraw, index build) should read `coords`/`ends` directly into a</span>
+<span class="d-add">+// local for speed; these are for the many cold call sites.</span>
+<span class="d-add">+</span>
+<span class="d-add">+export const nodeLat = (d: GraphTopology, i: number): number =&gt; d.coords[2 * i] / COORD_SCALE;</span>
+<span class="d-add">+export const nodeLon = (d: GraphTopology, i: number): number =&gt; d.coords[2 * i + 1] / COORD_SCALE;</span>
+<span class="d-add">+/** Node coordinate as a `[lat, lon]` tuple (allocates — avoid in tight loops). */</span>
+<span class="d-add">+export const nodeLatLng = (d: GraphTopology, i: number): [number, number] =&gt; [</span>
+<span class="d-add">+  d.coords[2 * i] / COORD_SCALE,</span>
+<span class="d-add">+  d.coords[2 * i + 1] / COORD_SCALE,</span>
+<span class="d-add">+];</span>
+<span class="d-add">+export const edgeFrom = (d: GraphTopology, i: number): number =&gt; d.ends[2 * i];</span>
+<span class="d-add">+export const edgeTo = (d: GraphTopology, i: number): number =&gt; d.ends[2 * i + 1];</span>
+<span class="d-add">+export const edgeName = (d: GraphTopology, i: number): string =&gt;</span>
+<span class="d-add">+  d.edgeNames ? d.edgeNames[i] ?? &quot;&quot; : &quot;&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ── Construction ──────────────────────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Build a topology from the JSON wire shape (`{nodes:[lat,lon][], edges:[from,</span>
+<span class="d-add">+ * to,name][]}`). Used only for tiny station networks; street graphs come in via</span>
+<span class="d-add">+ * the binary decoder, which produces the typed arrays directly without boxing.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function topologyFromJson(json: {</span>
+<span class="d-add">+  nodes: [number, number][];</span>
+<span class="d-add">+  edges: [number, number, string][];</span>
+<span class="d-add">+}): GraphTopology {</span>
+<span class="d-add">+  const nNodes = json.nodes.length;</span>
+<span class="d-add">+  const nEdges = json.edges.length;</span>
+<span class="d-add">+  const coords = new Int32Array(nNodes * 2);</span>
+<span class="d-add">+  for (let i = 0; i &lt; nNodes; i++) {</span>
+<span class="d-add">+    coords[2 * i] = Math.round(json.nodes[i][0] * COORD_SCALE);</span>
+<span class="d-add">+    coords[2 * i + 1] = Math.round(json.nodes[i][1] * COORD_SCALE);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  const ends = new Uint32Array(nEdges * 2);</span>
+<span class="d-add">+  const edgeNames: string[] = new Array(nEdges);</span>
+<span class="d-add">+  let anyName = false;</span>
+<span class="d-add">+  for (let i = 0; i &lt; nEdges; i++) {</span>
+<span class="d-add">+    const a = json.edges[i][0];</span>
+<span class="d-add">+    const b = json.edges[i][1];</span>
+<span class="d-add">+    ends[2 * i] = a &lt; nNodes ? a : 0;</span>
+<span class="d-add">+    ends[2 * i + 1] = b &lt; nNodes ? b : 0;</span>
+<span class="d-add">+    const name = json.edges[i][2] || &quot;&quot;;</span>
+<span class="d-add">+    edgeNames[i] = name;</span>
+<span class="d-add">+    if (name) anyName = true;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return { nNodes, nEdges, coords, ends, edgeNames: anyName ? edgeNames : undefined };</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ── Node adjacency (CSR) ────────────────────────────────────────────────────</span>
+<span class="d-add">+// Replaces the old `number[][]` (1.3M sub-array objects, ~150MB) with two flat</span>
+<span class="d-add">+// typed arrays: `start[nid]..start[nid+1]` slices `edges` into nid&#x27;s incident</span>
+<span class="d-add">+// edge ids. ~30MB for the NYC graph.</span>
+<span class="d-add">+</span>
+<span class="d-add">+export interface NodeAdj {</span>
+<span class="d-add">+  /** nNodes+1 offsets into `edges` (CSR row pointers). */</span>
+<span class="d-add">+  start: Uint32Array;</span>
+<span class="d-add">+  /** 2·nEdges edge ids, grouped by node. */</span>
+<span class="d-add">+  edges: Uint32Array;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Build the CSR adjacency: each edge contributes its id to both endpoints. */</span>
+<span class="d-add">+export function buildNodeAdj(d: GraphTopology): NodeAdj {</span>
+<span class="d-add">+  const { nNodes, nEdges, ends } = d;</span>
+<span class="d-add">+  const start = new Uint32Array(nNodes + 1);</span>
+<span class="d-add">+  // Pass 1: count incident edges per node (degree).</span>
+<span class="d-add">+  for (let i = 0; i &lt; nEdges; i++) {</span>
+<span class="d-add">+    start[ends[2 * i]]++;</span>
+<span class="d-add">+    start[ends[2 * i + 1]]++;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  // Prefix-sum the degrees into row-start offsets (start[nNodes] == 2·nEdges).</span>
+<span class="d-add">+  let acc = 0;</span>
+<span class="d-add">+  for (let n = 0; n &lt;= nNodes; n++) {</span>
+<span class="d-add">+    const deg = start[n];</span>
+<span class="d-add">+    start[n] = acc;</span>
+<span class="d-add">+    acc += deg;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  // Pass 2: scatter edge ids into their rows, advancing a per-node cursor.</span>
+<span class="d-add">+  const edges = new Uint32Array(acc);</span>
+<span class="d-add">+  const cursor = start.slice(0, nNodes);</span>
+<span class="d-add">+  for (let i = 0; i &lt; nEdges; i++) {</span>
+<span class="d-add">+    const a = ends[2 * i];</span>
+<span class="d-add">+    const b = ends[2 * i + 1];</span>
+<span class="d-add">+    edges[cursor[a]++] = i;</span>
+<span class="d-add">+    edges[cursor[b]++] = i;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return { start, edges };</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Edge ids incident to node `nid` as a cheap subarray view (no copy). */</span>
+<span class="d-add">+export function adjEdgesOf(adj: NodeAdj, nid: number): Uint32Array {</span>
+<span class="d-add">+  return adj.edges.subarray(adj.start[nid], adj.start[nid + 1]);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** First incident edge id for `nid`, or null when the node has no edges. */</span>
+<span class="d-add">+export function adjFirst(adj: NodeAdj | null, nid: number): number | null {</span>
+<span class="d-add">+  if (!adj) return null;</span>
+<span class="d-add">+  const s = adj.start[nid];</span>
+<span class="d-add">+  return s &lt; adj.start[nid + 1] ? adj.edges[s] : null;</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+  </section>
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report_mobile.py</code>.
+  </footer>
+</div>
+</body>
+</html>

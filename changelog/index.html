@@ -29,6 +29,27 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-06-17-mobile-graph-memory.html">
+    <div class="date">2026-06-17</div>
+    <h2>The mobile-Safari heatmap crash was the graph's own memory</h2>
+    <p>"A problem repeatedly occurred" on phones (bikepaths and the other NYC street maps) wasn't the server,
+    the subdomain routing, or vote-sync — those were ruled out one by one. The foot-aligned rebuild doubled
+    the NYC graph to 3.3M edges, and the client decoded its 35&nbsp;MB binary blob into ~497&nbsp;MB of boxed
+    JS tuples, over mobile Safari's per-tab budget. Backed the topology with flat typed arrays
+    (<code>coords</code>/<code>ends</code> + CSR adjacency) read through accessors — ~497&nbsp;MB → ~71&nbsp;MB,
+    off the object heap entirely.</p>
+  </a>
+
+  <a class="entry" href="./2026-06-17-unify-icon-explode.html">
+    <div class="date">2026-06-17</div>
+    <h2>Unifying the icon-explode model — one cluster fanned out at a time</h2>
+    <p>Crowded proposal icons fan out ("explode") into a grid so you can pick one from a stack. The state
+    behind it was two overlapping spread maps merged on every render — built to keep several clusters open
+    at once. Collapsed them into a single spread plus a lock flag, routed all cluster detection through one
+    <code>clusterAround()</code> helper and collapsing through one <code>collapseSpread()</code>, and made a
+    fresh fanout <em>replace</em> the open one — so exploding any icon set un-explodes the others.</p>
+  </a>
+
   <a class="entry" href="./2026-06-17-remove-ferry-edges.html">
     <div class="date">2026-06-17</div>
     <h2>Removing ferry edges from routing and the display graph</h2>

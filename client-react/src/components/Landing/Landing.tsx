@@ -73,11 +73,13 @@ export function Landing() {
   const [query, setQuery] = useState("");
   const [proposeOpen, setProposeOpen] = useState(false);
 
-  // Reveal the full placeholder via a native tooltip only when it's actually
-  // clipped. The placeholder isn't a measurable DOM node, so measure its text
-  // against the input's available width (re-checked on resize).
+  // Reveal the full placeholder via a custom tooltip only when it's actually
+  // clipped. A native `title` works but the browser delays it ~500ms; our
+  // tooltip (.landing-search-tip) appears near-instantly on hover. The
+  // placeholder isn't a measurable DOM node, so measure its text against the
+  // input's available width (re-checked on resize).
   const searchRef = useRef<HTMLInputElement>(null);
-  const [searchTitle, setSearchTitle] = useState("");
+  const [placeholderClipped, setPlaceholderClipped] = useState(false);
 
   useEffect(() => {
     const input = searchRef.current;
@@ -95,7 +97,7 @@ export function Landing() {
         (parseFloat(style.paddingRight) || 0);
       ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
       const textWidth = ctx.measureText(SEARCH_PLACEHOLDER).width;
-      setSearchTitle(textWidth > available ? SEARCH_PLACEHOLDER : "");
+      setPlaceholderClipped(textWidth > available);
     };
 
     measure();
@@ -160,7 +162,6 @@ export function Landing() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={SEARCH_PLACEHOLDER}
-            title={query ? "" : searchTitle}
             aria-label="Search maps"
             spellCheck={false}
             autoComplete="off"
@@ -174,6 +175,9 @@ export function Landing() {
             >
               ×
             </button>
+          )}
+          {placeholderClipped && !query && (
+            <div className="landing-search-tip" role="tooltip">{SEARCH_PLACEHOLDER}</div>
           )}
         </div>
       </div>

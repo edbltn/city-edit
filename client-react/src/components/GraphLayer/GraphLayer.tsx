@@ -25,7 +25,24 @@ import type { GraphData, ProposalMatch } from "../../types";
 import { makeVoteTypeIcon } from "./voteTypeIcon";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import { selectTopProposals, topLabelForEdges, type VoteTypeWinner } from "./topProposals";
+import {
+  parseRouteProposals, routeBlockEdges, isRouteCovered, type RouteProposal,
+} from "./routeProposals";
 import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts } from "./voteApply";
+import {
+  COORD_SCALE,
+  type GraphTopology,
+  type NodeAdj,
+  nodeLat,
+  nodeLon,
+  edgeFrom,
+  edgeTo,
+  edgeName,
+  topologyFromJson,
+  buildNodeAdj,
+  adjEdgesOf,
+  adjFirst,
+} from "./graphTopology";
 import { iconForLabel, iconSrc, mapStyleForTheme } from "../../themes";
 import { buildHeatRampStops, sampleHeatRamp } from "../../mapStyles";
 import {
@@ -115,7 +132,7 @@ const HEAT_FULL_SCALE = 50;
 // thing on the map. Applied as canvas element opacity (atop the blend mode), so
 // it dims the whole heat field — and its faint zero-vote network skeleton —
 // uniformly without touching per-edge intensity math.
-const HEATMAP_OPACITY = "0.72";
+const HEATMAP_OPACITY = "0.55";
 
 // ---------------------------------------------------------------------------
 // Reverse-geocode cache (module-level, survives re-renders)
@@ -266,38 +283,45 @@ const MID_DRAG_TRAIL_STYLE: L.PolylineOptions = {
 const INDEX_NEIGHBOR_K = 20;
 
 /** Build a flatbush spatial index of node points. Done once per graph. */
-function buildNodeIndex(data: Pick<GraphData, "nodes">): Flatbush | null {
-  if (data.nodes.length === 0) return null;
-  const idx = new Flatbush(data.nodes.length);
-  for (let i = 0; i < data.nodes.length; i++) {
-    const node = data.nodes[i];
+function buildNodeIndex(data: GraphTopology): Flatbush | null {
+  const n = data.nNodes;
+  if (n === 0) return null;
+  const c = data.coords;
+  const idx = new Flatbush(n);
+  for (let i = 0; i < n; i++) {
+    const lat = c[2 * i] / COORD_SCALE;
+    const lng = c[2 * i + 1] / COORD_SCALE;
     // Point bbox: min == max (lng,lat ordering matches the edge index)
-    idx.add(node[1], node[0], node[1], node[0]);
+    idx.add(lng, lat, lng, lat);
   }
   idx.finish();
   return idx;
 }
 
 /** Build a flatbush spatial index of edge bounding boxes. Done once per graph. */
-function buildEdgeIndex(data: Pick<GraphData, "nodes" | "edges">): Flatbush | null {
-  if (data.edges.length === 0) return null;
-  const idx = new Flatbush(data.edges.length);
-  for (let i = 0; i < data.edges.length; i++) {
-    const [fromIdx, toIdx] = data.edges[i];
-    const fromNode = data.nodes[fromIdx];
-    const toNode = data.nodes[toIdx];
+function buildEdgeIndex(data: GraphTopology): Flatbush | null {
+  const n = data.nEdges;
+  if (n === 0) return null;
+  const c = data.coords;
+  const e = data.ends;
+  const nNodes = data.nNodes;
+  const idx = new Flatbush(n);
+  for (let i = 0; i < n; i++) {
+    const fromIdx = e[2 * i];
+    const toIdx = e[2 * i + 1];
     // A malformed/stale topology can reference a node index that doesn't exist.
-    // Index a degenerate (0,0) box for it instead of dereferencing undefined —
-    // Flatbush requires exactly edges.length adds, so we can't skip the entry.
-    if (!fromNode || !toNode) {
+    // Index a degenerate (0,0) box for it instead of reading out of bounds —
+    // Flatbush requires exactly nEdges adds, so we can't skip the entry.
+    if (fromIdx >= nNodes || toIdx >= nNodes) {
       idx.add(0, 0, 0, 0);
       continue;
     }
-    const minLng = Math.min(fromNode[1], toNode[1]);
-    const maxLng = Math.max(fromNode[1], toNode[1]);
-    const minLat = Math.min(fromNode[0], toNode[0]);
-    const maxLat = Math.max(fromNode[0], toNode[0]);
-    idx.add(minLng, minLat, maxLng, maxLat);
+    const fLat = c[2 * fromIdx] / COORD_SCALE, fLng = c[2 * fromIdx + 1] / COORD_SCALE;
+    const tLat = c[2 * toIdx] / COORD_SCALE, tLng = c[2 * toIdx + 1] / COORD_SCALE;
+    idx.add(
+      Math.min(fLng, tLng), Math.min(fLat, tLat),
+      Math.max(fLng, tLng), Math.max(fLat, tLat),
+    );
   }
   idx.finish();
   return idx;
@@ -320,12 +344,11 @@ function findNearestEdgeIndex(
   queryLng: number,
   queryLat: number
 ): number | null {
-  if (data.edges.length === 0) return null;
+  if (data.nEdges === 0) return null;
 
   const checkEdge = (i: number, currentBestDist: number, currentBestIdx: number): [number, number] => {
-    const [fromIdx, toIdx] = data.edges[i];
-    const fromPt = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);
-    const toPt = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);
+    const fromPt = map.latLngToContainerPoint([nodeLat(data, edgeFrom(data, i)), nodeLon(data, edgeFrom(data, i))]);
+    const toPt = map.latLngToContainerPoint([nodeLat(data, edgeTo(data, i)), nodeLon(data, edgeTo(data, i))]);
     const dist = pointToSegmentDist(px, py, fromPt.x, fromPt.y, toPt.x, toPt.y);
     return dist < currentBestDist ? [dist, i] : [currentBestDist, currentBestIdx];
   };
@@ -340,7 +363,7 @@ function findNearestEdgeIndex(
     }
   } else {
     // Brief fallback while the index is being built
-    for (let i = 0; i < data.edges.length; i++) {
+    for (let i = 0; i < data.nEdges; i++) {
       [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);
     }
   }
@@ -370,8 +393,7 @@ function hitTest(
   let bestNodeDist = SNAP_NODE_PX;
 
   const checkNode = (i: number) => {
-    const node = data.nodes[i];
-    const pt = map.latLngToContainerPoint([node[0], node[1]]);
+    const pt = map.latLngToContainerPoint([nodeLat(data, i), nodeLon(data, i)]);
     const dist = Math.sqrt((px - pt.x) ** 2 + (py - pt.y) ** 2);
     if (dist < bestNodeDist) {
       bestNodeDist = dist;
@@ -383,12 +405,14 @@ function hitTest(
     const candidates = nodeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K);
     for (const i of candidates) checkNode(i);
   } else {
-    for (let i = 0; i < data.nodes.length; i++) checkNode(i);
+    for (let i = 0; i < data.nNodes; i++) checkNode(i);
   }
 
   if (bestNode !== null) {
-    const n = data.nodes[bestNode];
-    return { target: { kind: "node", index: bestNode }, snapLat: n[0], snapLng: n[1] };
+    return {
+      target: { kind: "node", index: bestNode },
+      snapLat: nodeLat(data, bestNode), snapLng: nodeLon(data, bestNode),
+    };
   }
 
   // 2. Edges — project onto segment for snap position
@@ -396,9 +420,9 @@ function hitTest(
   let bestEdgeDist = SNAP_EDGE_PX;
 
   const checkEdge = (i: number) => {
-    const [fromIdx, toIdx] = data.edges[i];
-    const fromPt = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);
-    const toPt = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);
+    const fromIdx = edgeFrom(data, i), toIdx = edgeTo(data, i);
+    const fromPt = map.latLngToContainerPoint([nodeLat(data, fromIdx), nodeLon(data, fromIdx)]);
+    const toPt = map.latLngToContainerPoint([nodeLat(data, toIdx), nodeLon(data, toIdx)]);
     const dist = pointToSegmentDist(px, py, fromPt.x, fromPt.y, toPt.x, toPt.y);
     if (dist < bestEdgeDist) {
       bestEdgeDist = dist;
@@ -410,7 +434,7 @@ function hitTest(
     const candidates = edgeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K);
     for (const i of candidates) checkEdge(i);
   } else {
-    for (let i = 0; i < data.edges.length; i++) checkEdge(i);
+    for (let i = 0; i < data.nEdges; i++) checkEdge(i);
   }
 
   if (bestEdge !== null) {
@@ -427,21 +451,21 @@ function hitTest(
  * fallback so both produce a real snap position.
  */
 function projectOntoEdge(
-  data: Pick<GraphData, "nodes" | "edges">,
+  data: GraphTopology,
   edgeIdx: number,
   lat: number, lng: number
 ): { lat: number; lng: number } {
-  const [fromIdx, toIdx] = data.edges[edgeIdx];
-  const fromNode = data.nodes[fromIdx];
-  const toNode = data.nodes[toIdx];
-  const dx = toNode[1] - fromNode[1];
-  const dy = toNode[0] - fromNode[0];
+  const fromIdx = edgeFrom(data, edgeIdx), toIdx = edgeTo(data, edgeIdx);
+  const fLat = nodeLat(data, fromIdx), fLng = nodeLon(data, fromIdx);
+  const tLat = nodeLat(data, toIdx), tLng = nodeLon(data, toIdx);
+  const dx = tLng - fLng;
+  const dy = tLat - fLat;
   const lenSq = dx * dx + dy * dy;
-  if (lenSq === 0) return { lat: fromNode[0], lng: fromNode[1] };
+  if (lenSq === 0) return { lat: fLat, lng: fLng };
   const t = Math.max(0, Math.min(1,
-    ((lng - fromNode[1]) * dx + (lat - fromNode[0]) * dy) / lenSq
+    ((lng - fLng) * dx + (lat - fLat) * dy) / lenSq
   ));
-  return { lat: fromNode[0] + t * dy, lng: fromNode[1] + t * dx };
+  return { lat: fLat + t * dy, lng: fLng + t * dx };
 }
 
 /**
@@ -453,19 +477,20 @@ function projectOntoEdge(
  */
 function targetLatLng(
   target: HoverTarget | null,
-  data: Pick<GraphData, "nodes" | "edges"> | null
+  data: GraphTopology | null
 ): { lat: number; lng: number } | null {
   if (!target || !data) return null;
   if (target.kind === "edge") {
-    const edge = data.edges[target.index];
-    if (!edge) return null;
-    const from = data.nodes[edge[0]];
-    const to = data.nodes[edge[1]];
-    if (!from || !to) return null;
-    return { lat: (from[0] + to[0]) / 2, lng: (from[1] + to[1]) / 2 };
+    if (target.index >= data.nEdges) return null;
+    const from = edgeFrom(data, target.index), to = edgeTo(data, target.index);
+    if (from >= data.nNodes || to >= data.nNodes) return null;
+    return {
+      lat: (nodeLat(data, from) + nodeLat(data, to)) / 2,
+      lng: (nodeLon(data, from) + nodeLon(data, to)) / 2,
+    };
   }
-  const node = data.nodes[target.index];
-  return node ? { lat: node[0], lng: node[1] } : null;
+  if (target.index >= data.nNodes) return null;
+  return { lat: nodeLat(data, target.index), lng: nodeLon(data, target.index) };
 }
 
 // ---------------------------------------------------------------------------
@@ -477,22 +502,23 @@ function targetLatLng(
 // ---------------------------------------------------------------------------
 
 /**
- * Decode the binary topology (server graph_registry.topology_binary) into the same
- * {nodes, edges} shape the JSON path yields — WITHOUT JSON.parse-ing a ~150MB
- * string, the allocation that OOM-crashes mobile Safari on the NYC graph. Layout:
- * 12-byte header [magic, uint32 nNodes, uint32 nEdges], then nNodes×2 int32
- * (lat, lon ×1e7), then nEdges×2 uint32 (from_idx, to_idx). Edge names are dropped
- * (street tooltips reverse-geocode instead); the edges index is the canonical edge id.
+ * Decode the binary topology (server graph_registry.topology_binary) into the
+ * mobile-safe typed-array GraphTopology — coords/ends are zero-copy views onto
+ * the blob, so the NYC graph stays near its ~35MB wire size instead of expanding
+ * to ~500MB of boxed JS tuples (the allocation that OOM-crashed mobile Safari).
+ * Layout: 12-byte header [magic, uint32 nNodes, uint32 nEdges], then nNodes×2
+ * int32 (lat, lon ×1e7), then nEdges×2 uint32 (from_idx, to_idx). Edge names are
+ * dropped (street tooltips reverse-geocode instead); the edge index is the id.
  */
 // 'GTB1' little-endian as a uint32 (G=0x47, T=0x54, B=0x42, '1'=0x31).
 const TOPOLOGY_BIN_MAGIC = 0x31425447;
 
-function decodeTopologyBin(buf: ArrayBuffer): Pick<GraphData, "nodes" | "edges"> {
-  // Validate the header BEFORE allocating. A stale/truncated/corrupt cached blob
-  // (or a non-binary error body that slipped through) would otherwise be read as
-  // garbage nNodes/nEdges — allocating multi-GB arrays that OOM-crash the tab, or
-  // building edges that reference nonexistent nodes (the downstream crash). On any
-  // inconsistency we throw, and callers fall back to a fresh fetch / JSON.
+function decodeTopologyBin(buf: ArrayBuffer): GraphTopology {
+  // Validate the header BEFORE creating views. A stale/truncated/corrupt cached
+  // blob (or a non-binary error body that slipped through) would otherwise be
+  // read as garbage nNodes/nEdges — views that index out of bounds, or edges
+  // referencing nonexistent nodes (the downstream crash). On any inconsistency
+  // we throw, and callers fall back to a fresh fetch / JSON.
   if (buf.byteLength < 12) {
     throw new Error(`topology blob too small (${buf.byteLength} bytes)`);
   }
@@ -511,19 +537,13 @@ function decodeTopologyBin(buf: ArrayBuffer): Pick<GraphData, "nodes" | "edges">
   }
   const coords = new Int32Array(buf, 12, nNodes * 2);
   const ends = new Uint32Array(buf, 12 + nNodes * 8, nEdges * 2);
-  const nodes: [number, number][] = new Array(nNodes);
-  for (let i = 0; i < nNodes; i++) {
-    nodes[i] = [coords[2 * i] / 1e7, coords[2 * i + 1] / 1e7];
+  // Clamp out-of-range node indices to 0 in place rather than leaving a dangling
+  // ref that reads NaN coords in buildEdgeIndex/redraw — a degenerate self-edge
+  // is harmless. Mutating the view also sanitizes the blob we cache.
+  for (let i = 0; i < ends.length; i++) {
+    if (ends[i] >= nNodes) ends[i] = 0;
   }
-  const edges: [number, number, string][] = new Array(nEdges);
-  for (let i = 0; i < nEdges; i++) {
-    // Clamp out-of-range node indices to 0 rather than leaving a dangling ref
-    // that crashes buildEdgeIndex/redraw — a degenerate self-edge is harmless.
-    const a = ends[2 * i] < nNodes ? ends[2 * i] : 0;
-    const b = ends[2 * i + 1] < nNodes ? ends[2 * i + 1] : 0;
-    edges[i] = [a, b, ""];
-  }
-  return { nodes, edges };
+  return { nNodes, nEdges, coords, ends };
 }
 
 /**
@@ -536,23 +556,13 @@ function decodeTopologyBin(buf: ArrayBuffer): Pick<GraphData, "nodes" | "edges">
  */
 function votesMatchTopology(
   voteData: { n_edges?: number; n_nodes?: number; edge_votes?: unknown[] },
-  topology: Pick<GraphData, "nodes" | "edges"> | null,
+  topology: GraphTopology | null,
 ): boolean {
   if (!topology) return false;
   const nEdges = voteData.n_edges ?? voteData.edge_votes?.length;
-  if (nEdges != null && nEdges !== topology.edges.length) return false;
-  if (voteData.n_nodes != null && voteData.n_nodes !== topology.nodes.length) return false;
+  if (nEdges != null && nEdges !== topology.nEdges) return false;
+  if (voteData.n_nodes != null && voteData.n_nodes !== topology.nNodes) return false;
   return true;
-}
-
-function buildNodeAdj(topology: Pick<GraphData, "nodes" | "edges">): number[][] {
-  const adj: number[][] = new Array(topology.nodes.length);
-  for (let i = 0; i < adj.length; i++) adj[i] = [];
-  for (let i = 0; i < topology.edges.length; i++) {
-    adj[topology.edges[i][0]].push(i);
-    adj[topology.edges[i][1]].push(i);
-  }
-  return adj;
 }
 
 // ---------------------------------------------------------------------------
@@ -656,6 +666,10 @@ interface GraphLayerProps {
    *  is the exact edge the modal votes on — pass it through so the banner votes
    *  on the same edge instead of re-snapping the midpoint (which can diverge). */
   onIndicatorClick?: (latlng: { lat: number; lng: number }, voteEdgeId?: number) => void;
+  /** Called when a user clicks/taps a ROUTE-proposal diamond. The host forces the
+   *  current route through the proposal's two anchor endpoints (inserted as
+   *  ghost waypoints in the faster order) so the corridor becomes selected. */
+  onRouteProposalClick?: (proposal: RouteProposal) => void;
   /** GraphLayer writes a function here that, given a tapped point, fans out a
    *  crowded proposal cluster at that spot and returns true (consuming the tap).
    *  Returns false if there's nothing to fan out, so the host runs its tap action.
@@ -693,7 +707,7 @@ interface GraphLayerProps {
   onPinnedResolve?: (voteEdgeId: number | null) => void;
 }
 
-export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, hoverProposalPoint = null, onWaypointMatch, onIndicatorClick, clusterExploderRef, onRemoveProposal, onRemoveSelected, suppressHover = false, pathEdgeIds = null, onProposalDrop, onPinnedResolve }: GraphLayerProps) {
+export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, hoverProposalPoint = null, onWaypointMatch, onIndicatorClick, onRouteProposalClick, clusterExploderRef, onRemoveProposal, onRemoveSelected, suppressHover = false, pathEdgeIds = null, onProposalDrop, onPinnedResolve }: GraphLayerProps) {
   const map = useMap();
   const { subscribeToDelta } = useWebSocketContext();
   const { setSnapFn, setResolveVoteEdgeId, setResolveTopLabelForPath, setCurrentSnap, isDraggingRef: graphDraggingRef, snapToGraph, setDragging } = useGraphSnap();
@@ -722,7 +736,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const hoverCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const hoverCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const graphDataRef = useRef<GraphData | null>(null);
-  const topologyRef = useRef<Pick<GraphData, "nodes" | "edges"> | null>(null);
+  const topologyRef = useRef<GraphTopology | null>(null);
   const edgeIndexRef = useRef<Flatbush | null>(null);
   const nodeIndexRef = useRef<Flatbush | null>(null);
   const redrawTimeoutRef = useRef<number | null>(null);
@@ -757,7 +771,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
   // Node adjacency list — node index → [edge indices]. Built once from topology,
   // used to derive node votes from edge totals (max of adjacent edges).
-  const nodeAdjRef = useRef<number[][] | null>(null);
+  const nodeAdjRef = useRef<NodeAdj | null>(null);
 
   // Last-seen revision for gap detection
   const lastRevRef = useRef(0);
@@ -781,7 +795,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     lat: number, lng: number, overrideEdgeIdx?: number | null
   ): ResolvedSelection | null => {
     const data = graphDataRef.current;
-    if (!data?.edges?.length) return null;
+    if (!data?.nEdges) return null;
 
     // 1. Indicator override — select that edge directly.
     if (overrideEdgeIdx != null) {
@@ -802,7 +816,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     if (hit) {
       const voteEdgeId = hit.target.kind === "edge"
         ? hit.target.index
-        : nodeAdjRef.current?.[hit.target.index]?.[0] ?? null;
+        : adjFirst(nodeAdjRef.current, hit.target.index);
       return { target: hit.target, snapLat: hit.snapLat, snapLng: hit.snapLng, voteEdgeId };
     }
 
@@ -895,6 +909,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const pinnedRafRef = useRef<number | null>(null);
   // Pinned target (node or edge) for highlight and tooltip
   const pinnedTargetRef = useRef<HoverTarget | null>(null);
+  // The graph node/edge a live waypoint drag would snap to — drawn on the hover
+  // canvas as a drop preview so you can see exactly which edge you'll land on
+  // before releasing. Derived from `dragPoint` by mirroring the committed snapFn.
+  const dragSnapTargetRef = useRef<HoverTarget | null>(null);
   // When an indicator is clicked, store the exact edge index so the
   // pinnedPoint effect uses it directly instead of re-running hitTest
   // (which can snap to a neighboring edge).
@@ -925,6 +943,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
   // Vote-type indicator markers — top-voted segment per vote type
   const [winners, setWinners] = useState<VoteTypeWinner[]>([]);
+  // Server-computed ROUTE proposals (corridors). Fetched in parallel with the
+  // vote heatmap and refetched on the same vote-delta signal (the endpoint is
+  // revision-cached, so a refetch on each vote is cheap / 304s when unchanged).
+  const [routeProposals, setRouteProposals] = useState<RouteProposal[]>([]);
+  // The edge set a hovered route diamond highlights — all of its blocks' edges.
+  const routeHighlightEdgesRef = useRef<number[] | null>(null);
   const [currentZoom, setCurrentZoom] = useState<number>(() => map.getZoom());
   const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
 
@@ -996,6 +1020,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
   // Stable ref for the indicator-click callback (avoids re-running the
   // useMemo that builds marker components every time the parent re-renders).
+  const onRouteProposalClickRef = useRef(onRouteProposalClick);
+  useEffect(() => { onRouteProposalClickRef.current = onRouteProposalClick; }, [onRouteProposalClick]);
+
   const onIndicatorClickRef = useRef(onIndicatorClick);
   useEffect(() => { onIndicatorClickRef.current = onIndicatorClick; }, [onIndicatorClick]);
 
@@ -1041,19 +1068,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const g = graphDataRef.current;
     if (!g) return null;
     const candidates = isStationNetwork
-      ? g.edges.map((_, i) => i)
+      ? Array.from({ length: g.nEdges }, (_, i) => i)
       : winners.map((w) => w.edgeIdx);
     let best: number | null = null;
     let bestDist = Infinity;
     for (const edgeIdx of candidates) {
-      const edge = g.edges[edgeIdx];
-      if (!edge) continue;
-      const [fromIdx, toIdx] = edge;
-      const fromNode = g.nodes[fromIdx];
-      const toNode = g.nodes[toIdx];
-      if (!fromNode || !toNode) continue;
-      const midLat = (fromNode[0] + toNode[0]) / 2;
-      const midLng = (fromNode[1] + toNode[1]) / 2;
+      if (edgeIdx >= g.nEdges) continue;
+      const fromIdx = edgeFrom(g, edgeIdx), toIdx = edgeTo(g, edgeIdx);
+      const midLat = (nodeLat(g, fromIdx) + nodeLat(g, toIdx)) / 2;
+      const midLng = (nodeLon(g, fromIdx) + nodeLon(g, toIdx)) / 2;
       const dist = haversineMeters(lat, lng, midLat, midLng);
       if (dist < bestDist) { bestDist = dist; best = edgeIdx; }
     }
@@ -1072,8 +1095,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // label a node's share link encodes as `vt`, so the upgrade honours the link.
   const strongestProposalEdgeForNode = useCallback((nodeIdx: number): number | null => {
     const g = graphDataRef.current;
-    const adj = nodeAdjRef.current?.[nodeIdx];
-    if (!g?.edge_vote_types || !adj) return null;
+    const adjList = nodeAdjRef.current;
+    if (!g?.edge_vote_types || !adjList) return null;
+    const adj = adjEdgesOf(adjList, nodeIdx);
     let bestEdge: number | null = null;
     let bestNet = 0; // net ≤ 0 is not a proposal, so only positive nets qualify
     for (const eid of adj) {
@@ -1175,16 +1199,14 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const pairKey = (a: number, b: number) => (a < b ? `${a}|${b}` : `${b}|${a}`);
     const pathPairs = new Set<string>();
     for (const ei of pathEdgeIds) {
-      const e = g.edges[ei];
-      if (e) pathPairs.add(pairKey(e[0], e[1]));
+      if (ei < g.nEdges) pathPairs.add(pairKey(edgeFrom(g, ei), edgeTo(g, ei)));
     }
     const next = new Set<number>();
     for (const w of winners) {
       // Skip proposals that ARE waypoints — `role` styles those.
       if (w.edgeIdx === startEdgeIdx || w.edgeIdx === endEdgeIdx || midEdgeSet.has(w.edgeIdx)) continue;
-      const e = g.edges[w.edgeIdx];
-      if (!e) continue;
-      if (pathPairs.has(pairKey(e[0], e[1]))) next.add(w.edgeIdx);
+      if (w.edgeIdx >= g.nEdges) continue;
+      if (pathPairs.has(pairKey(edgeFrom(g, w.edgeIdx), edgeTo(g, w.edgeIdx)))) next.add(w.edgeIdx);
     }
     setOnPathEdgeSet((prev) => {
       if (prev.size === next.size && [...next].every((x) => prev.has(x))) return prev;
@@ -1211,11 +1233,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     let best: { edgeIdx: number; lat: number; lng: number } | null = null;
     let bestD = Infinity;
     for (const w of winnersRef.current) {
-      const edge = g.edges[w.edgeIdx];
-      if (!edge) continue;
-      const a = g.nodes[edge[0]], b = g.nodes[edge[1]];
-      if (!a || !b) continue;
-      const lat = (a[0] + b[0]) / 2, lng = (a[1] + b[1]) / 2;
+      if (w.edgeIdx >= g.nEdges) continue;
+      const fromIdx = edgeFrom(g, w.edgeIdx), toIdx = edgeTo(g, w.edgeIdx);
+      const lat = (nodeLat(g, fromIdx) + nodeLat(g, toIdx)) / 2;
+      const lng = (nodeLon(g, fromIdx) + nodeLon(g, toIdx)) / 2;
       // Hit-test at where the icon is actually drawn; snap to the real midpoint.
       const override = spread?.get(w.edgeIdx);
       const mp = map.latLngToContainerPoint(override ? [override[0], override[1]] : [lat, lng]);
@@ -1246,6 +1267,37 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     () => (dragPoint ? proposalIconAt(map.latLngToContainerPoint([dragPoint.lat, dragPoint.lng]))?.edgeIdx ?? null : null),
     [dragPoint, proposalIconAt, map]
   );
+
+  // Light the graph edge (or node) a live waypoint drag would snap to — the drop
+  // preview. Mirrors the registered snapFn exactly (sticky proposal first, then
+  // hitTest) so the highlight matches where the waypoint actually lands on release.
+  // Out of snap range → no highlight, matching the "drag stays free" snap rule.
+  useEffect(() => {
+    let next: HoverTarget | null = null;
+    if (dragPoint) {
+      const data = graphDataRef.current;
+      if (data) {
+        const sticky = stickyProposalSnapRef.current(dragPoint.lat, dragPoint.lng);
+        if (sticky) {
+          next = { kind: "edge", index: sticky.edgeIdx };
+        } else {
+          const pt = map.latLngToContainerPoint([dragPoint.lat, dragPoint.lng]);
+          const result = hitTest(
+            data, map, pt.x, pt.y, dragPoint.lat, dragPoint.lng,
+            edgeIndexRef.current, nodeIndexRef.current
+          );
+          if (result) next = result.target;
+        }
+      }
+    }
+    const prev = dragSnapTargetRef.current;
+    const same = (!prev && !next)
+      || (!!prev && !!next && prev.kind === next.kind && prev.index === next.index);
+    if (!same) {
+      dragSnapTargetRef.current = next;
+      redrawHoverHighlightRef.current();
+    }
+  }, [dragPoint, map]);
 
   // A waypoint drag whose live position hovers over a crowded proposal cluster
   // fans it out — the SAME exploder a tap uses — so you can drop onto a specific
@@ -1426,6 +1478,40 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const fetchVotesRef = useRef(fetchVotes);
   useEffect(() => { fetchVotesRef.current = fetchVotes; }, [fetchVotes]);
 
+  // Route-proposal fetch — runs alongside the vote fetch and on each vote signal.
+  // Guarded against a topology mismatch (the proposal edge ids are indexed to the
+  // server's current graph, same as the vote arrays).
+  const fetchRouteProposals = useCallback(async () => {
+    const topo = topologyRef.current;
+    if (!topo) return;
+    try {
+      const url = `${CONFIG.apiUrl}/route-proposals?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`;
+      const response = await fetch(url, { headers: passcodeHeaders() });
+      if (!response.ok) throw new Error(`Route-proposal fetch failed: ${response.status}`);
+      const body = await response.json();
+      if (body?.n_edges != null && body.n_edges !== topo.nEdges) return; // stale topology
+      setRouteProposals(parseRouteProposals(body));
+    } catch (error) {
+      console.error("Failed to fetch route proposals:", error);
+    }
+  }, [themeMode]);
+
+  const fetchRouteProposalsRef = useRef(fetchRouteProposals);
+  useEffect(() => { fetchRouteProposalsRef.current = fetchRouteProposals; }, [fetchRouteProposals]);
+
+  // Coalesce bursts of votes into one refetch (the diamonds don't need per-vote
+  // immediacy and the corridor only shifts after several votes land).
+  const routeRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRouteProposalsRefetch = useCallback(() => {
+    if (routeRefetchTimerRef.current) return;
+    routeRefetchTimerRef.current = setTimeout(() => {
+      routeRefetchTimerRef.current = null;
+      fetchRouteProposalsRef.current();
+    }, 800);
+  }, []);
+  const scheduleRouteProposalsRefetchRef = useRef(scheduleRouteProposalsRefetch);
+  useEffect(() => { scheduleRouteProposalsRefetchRef.current = scheduleRouteProposalsRefetch; }, [scheduleRouteProposalsRefetch]);
+
   // Shared helper: increment edge votes, update vote-type breakdowns, re-derive
   // affected node votes. Used by both WebSocket deltas and optimistic updates.
   // Apply a vote change to the in-memory graph data. `dir` is +1 (up) / -1
@@ -1459,11 +1545,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     (async () => {
       // 1. Resolve the graph version, then load topology from IndexedDB when it
       //    matches — skipping the multi-MB download and JSON parse entirely.
-      let topology: GraphData | null = null;
+      let topology: GraphTopology | null = null;
       let version: string | null = null;
       let usedCachedTopology = false;
       // Assigned inside the try below; the step-3 stale-topology guard reuses it.
-      let fetchFreshTopology: ((forceReload?: boolean) => Promise<GraphData | null>) | null = null;
+      let fetchFreshTopology: ((forceReload?: boolean) => Promise<GraphTopology | null>) | null = null;
       try {
         try {
           const vr = await fetch(withMap(`${CONFIG.apiUrl}/graph-version`), { headers: passcodeHeaders() });
@@ -1485,18 +1571,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         // cache:"reload" so the browser HTTP cache is bypassed too — used by the
         // stale-topology recovery path in step 3, where even the version-busted
         // URL may have been served stale from Safari's HTTP cache.
-        const fetchTopologyFromNetwork = async (forceReload = false): Promise<GraphData | null> => {
+        const fetchTopologyFromNetwork = async (forceReload = false): Promise<GraphTopology | null> => {
           const init: RequestInit = forceReload
             ? { headers: passcodeHeaders(), cache: "reload" }
             : { headers: passcodeHeaders() };
           // Station networks (tiny, names matter) use the JSON topology; large
           // street graphs use the binary topology so a phone never JSON.parse-es a
           // ~150MB string (the OOM that crashed mobile Safari on the NYC graph).
+          // Both are normalized to the flat typed-array GraphTopology so consumers
+          // (and the heatmap's memory footprint) don't depend on the wire format.
           if (isStationNetwork) {
             const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), init);
             if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
-            const t = await r.json();
-            if (version && t) setCachedTopology(version, t);
+            const t = topologyFromJson(await r.json());
+            if (version) setCachedTopology(version, t);
             return t;
           }
           try {
@@ -1506,7 +1594,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             );
             if (!r.ok) throw new Error(`Binary topology fetch failed: ${r.status}`);
             const buf = await r.arrayBuffer();
-            const t = decodeTopologyBin(buf) as GraphData;
+            const t = decodeTopologyBin(buf);
             if (version) setCachedTopologyBin(version, buf);
             return t;
           } catch (binErr) {
@@ -1514,8 +1602,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             console.warn("Binary topology unavailable, using JSON:", binErr);
             const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), init);
             if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
-            const t = await r.json();
-            if (version && t) setCachedTopology(version, t);
+            const t = topologyFromJson(await r.json());
+            if (version) setCachedTopology(version, t);
             return t;
           }
         };
@@ -1523,7 +1611,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
         if (version) {
           if (isStationNetwork) {
-            const cached = await getCachedTopology<GraphData>(version);
+            const cached = await getCachedTopology<GraphTopology>(version);
             if (cached) { topology = cached; usedCachedTopology = true; }
           } else {
             const buf = await getCachedTopologyBin(version);
@@ -1531,7 +1619,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             // cache and fall through to a fresh network fetch rather than aborting.
             if (buf) {
               try {
-                topology = decodeTopologyBin(buf) as GraphData;
+                topology = decodeTopologyBin(buf);
                 usedCachedTopology = true;
               } catch (decodeErr) {
                 console.warn("Cached binary topology was corrupt, refetching:", decodeErr);
@@ -1590,10 +1678,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         // caches and bail rather than paint a crash.
         if (!votesMatchTopology(voteData, topologyRef.current)) {
           console.warn("Topology/vote mismatch — refetching fresh topology", {
-            topoEdges: topologyRef.current?.edges.length,
+            topoEdges: topologyRef.current?.nEdges,
             voteEdges: voteData.n_edges ?? voteData.edge_votes?.length,
           });
-          let fresh: GraphData | null = null;
+          let fresh: GraphTopology | null = null;
           try {
             fresh = fetchFreshTopology ? await fetchFreshTopology(true) : null;
           } catch (refetchErr) {
@@ -1630,12 +1718,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
         refreshGraphDisplayRef.current();
         setHeatmapLoaded();
+        fetchRouteProposalsRef.current();
       } catch (error) {
         console.error("Failed to fetch graph votes:", error);
       }
     })();
     return () => { cancelled = true; };
   }, [applyDeltaToGraphData, setHeatmapLoaded]);
+
+  // Re-fetch route proposals when the vote namespace (theme mode) switches. On
+  // first mount topology isn't loaded yet so this no-ops; the post-vote call in
+  // the loader above does the initial fetch.
+  useEffect(() => { fetchRouteProposalsRef.current(); }, [themeMode]);
 
   // Subscribe to WebSocket deltas — apply each directly to the vote arrays.
   // If a revision gap is detected, do a full refetch to recover.
@@ -1665,6 +1759,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
       applyDeltaToGraphData(delta);
       refreshGraphDisplayRef.current();
+      scheduleRouteProposalsRefetchRef.current();
     });
     return unsubscribe;
   }, [subscribeToDelta, themeMode, applyDeltaToGraphData]);
@@ -1688,6 +1783,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
       applyMyVoteChange(data, adj, detail.edgeIds, detail.label, detail.prevDir, detail.newDir);
       refreshGraphDisplayRef.current();
+      scheduleRouteProposalsRefetchRef.current();
     };
     window.addEventListener("optimistic-vote", handler);
     return () => window.removeEventListener("optimistic-vote", handler);
@@ -1720,9 +1816,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     //   2. destination-out narrower stroke (carves the hole)
     //   3. Stroke narrower at low alpha (faint white interior)
     const drawNode = (nodeIndex: number, alpha: number) => {
-      const node = data.nodes[nodeIndex];
-      if (!node) return;
-      const pt = map.latLngToContainerPoint([node[0], node[1]]);
+      if (nodeIndex >= data.nNodes) return;
+      const pt = map.latLngToContainerPoint([nodeLat(data, nodeIndex), nodeLon(data, nodeIndex)]);
 
       hoverCtx.globalCompositeOperation = "source-over";
       hoverCtx.globalAlpha = alpha;
@@ -1745,11 +1840,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     };
 
     const drawEdge = (edgeIndex: number, alpha: number) => {
-      const edge = data.edges[edgeIndex];
-      if (!edge) return;
-      const [fromIdx, toIdx] = edge;
-      const fromScreen = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);
-      const toScreen = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);
+      if (edgeIndex >= data.nEdges) return;
+      const fromIdx = edgeFrom(data, edgeIndex), toIdx = edgeTo(data, edgeIndex);
+      const fromScreen = map.latLngToContainerPoint([nodeLat(data, fromIdx), nodeLon(data, fromIdx)]);
+      const toScreen = map.latLngToContainerPoint([nodeLat(data, toIdx), nodeLon(data, toIdx)]);
 
       const strokeLine = () => {
         hoverCtx.beginPath();
@@ -1791,6 +1885,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const hoverIsPinned = pinned && hover && hover.kind === pinned.kind && hover.index === pinned.index;
     if (hover && !hoverIsPinned) drawTarget(hover, 0.6);
 
+    // Drag-snap preview — the edge/node the waypoint being dragged would land on.
+    // Full opacity so the active drop target reads clearly over hover/pinned.
+    const dragSnap = dragSnapTargetRef.current;
+    if (dragSnap) drawTarget(dragSnap, 1.0);
+
+    // Hovered ROUTE proposal — light up every edge in all of its blocks so the
+    // whole corridor previews at once (not just the diamond's anchor edge).
+    const routeEdges = routeHighlightEdgesRef.current;
+    if (routeEdges) for (const e of routeEdges) drawEdge(e, 0.7);
+
     // Reset state for any subsequent canvas operations
     hoverCtx.globalCompositeOperation = "source-over";
     hoverCtx.globalAlpha = 1.0;
@@ -1815,10 +1919,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     L.DomUtil.setPosition(canvas, topLeft);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (!data.edges || !data.nodes) return;
+    if (!data.ends || !data.coords) return;
 
-    const nodes = data.nodes;
-    const edges = data.edges;
+    const coords = data.coords;
+    const ends = data.ends;
     const edgeVotes = data.edge_votes ?? [];
 
     // maxVotes is global (so colors stay consistent across the viewport) but
@@ -1847,7 +1951,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const origin = map.getPixelOrigin();
     let proj = projCacheRef.current;
     if (!proj || proj.zoom !== zoom || proj.ox !== origin.x || proj.oy !== origin.y) {
-      const n = nodes.length;
+      const n = data.nNodes;
       proj = {
         zoom,
         ox: origin.x,
@@ -1865,15 +1969,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
     const projectNode = (i: number) => {
       if (done[i]) return;
-      const p = map.latLngToLayerPoint([nodes[i][0], nodes[i][1]]);
+      const p = map.latLngToLayerPoint([coords[2 * i] / COORD_SCALE, coords[2 * i + 1] / COORD_SCALE]);
       xs[i] = p.x;
       ys[i] = p.y;
       done[i] = 1;
     };
 
     const drawSeg = (i: number) => {
-      const a = edges[i][0];
-      const b = edges[i][1];
+      const a = ends[2 * i];
+      const b = ends[2 * i + 1];
       projectNode(a);
       projectNode(b);
       ctx.beginPath();
@@ -1898,7 +2002,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           bounds.getNorth() + mLat,
         )
       : null;
-    const count = visible ? visible.length : edges.length;
+    const count = visible ? visible.length : data.nEdges;
     const edgeAt = (k: number): number => (visible ? visible[k] : k);
 
     // ----------------------------------------------------------------
@@ -2068,7 +2172,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       hoverRafRef.current = requestAnimationFrame(() => {
         hoverRafRef.current = null;
         const data = graphDataRef.current;
-        if (!data?.edges) {
+        if (!data?.nEdges) {
           if (hoverTargetRef.current) {
             hoverTargetRef.current = null;
             setHoverTarget(null);
@@ -2194,15 +2298,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             if (candidates.length > 0) nearestIdx = candidates[0];
           } else {
             let nearestDist = Infinity;
-            for (let i = 0; i < data.nodes.length; i++) {
-              const n = data.nodes[i];
-              const d = (n[0] - e.latlng.lat) ** 2 + (n[1] - e.latlng.lng) ** 2;
+            for (let i = 0; i < data.nNodes; i++) {
+              const d = (nodeLat(data, i) - e.latlng.lat) ** 2 + (nodeLon(data, i) - e.latlng.lng) ** 2;
               if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
             }
           }
           if (nearestIdx >= 0) {
-            const n = data.nodes[nearestIdx];
-            const snapPos = { lat: n[0], lng: n[1] };
+            const snapPos = { lat: nodeLat(data, nearestIdx), lng: nodeLon(data, nearestIdx) };
             onSnapRef.current?.(snapPos);
             setCurrentSnap(snapPos);
           } else {
@@ -2338,8 +2440,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       const gd = graphDataRef.current;
       const onFeature = gd && (prevTarget.kind === "edge"
         ? projectOntoEdge(gd, prevTarget.index, pinnedLat, pinnedLng)
-        : (gd.nodes[prevTarget.index]
-            ? { lat: gd.nodes[prevTarget.index][0], lng: gd.nodes[prevTarget.index][1] }
+        : (prevTarget.index < gd.nNodes
+            ? { lat: nodeLat(gd, prevTarget.index), lng: nodeLon(gd, prevTarget.index) }
             : null));
       if (onFeature) {
         const a = map.latLngToContainerPoint([onFeature.lat, onFeature.lng]);
@@ -2354,7 +2456,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // resolve can still UPGRADE to its proposal once winners arrive (no lock
     // yet), but after that the selection never drifts to a neighbour on a vote.
     const lockNow = pinnedLockRef.current;
-    if (!hadOverride && lockNow && graphDataRef.current?.edges[lockNow.edgeIdx]
+    if (!hadOverride && lockNow && lockNow.edgeIdx < (graphDataRef.current?.nEdges ?? 0)
         && (target?.kind !== "edge" || target.index !== lockNow.edgeIdx)) {
       target = { kind: "edge", index: lockNow.edgeIdx };
     }
@@ -2437,27 +2539,23 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
   if (hoverTarget && data) {
     if (hoverTarget.kind === "edge") {
-      const edge = data.edges[hoverTarget.index];
-      if (edge) {
-        const [fromIdx, toIdx] = edge;
-        const fromNode = data.nodes[fromIdx];
-        const toNode = data.nodes[toIdx];
-        const midLat = (fromNode[0] + toNode[0]) / 2;
-        const midLng = (fromNode[1] + toNode[1]) / 2;
+      if (hoverTarget.index < data.nEdges) {
+        const fromIdx = edgeFrom(data, hoverTarget.index), toIdx = edgeTo(data, hoverTarget.index);
+        const midLat = (nodeLat(data, fromIdx) + nodeLat(data, toIdx)) / 2;
+        const midLng = (nodeLon(data, fromIdx) + nodeLon(data, toIdx)) / 2;
 
-        tooltipName = edge[2] || resolveAddress(midLat, midLng, bumpGeocode);
+        tooltipName = edgeName(data, hoverTarget.index) || resolveAddress(midLat, midLng, bumpGeocode);
         hoverVoteTypes = decodeVoteTypes((data.edge_vote_types ?? [])[hoverTarget.index], legend);
       }
     } else {
-      const node = data.nodes[hoverTarget.index];
-      if (node) {
-        tooltipName = resolveAddress(node[0], node[1], bumpGeocode);
+      if (hoverTarget.index < data.nNodes) {
+        tooltipName = resolveAddress(nodeLat(data, hoverTarget.index), nodeLon(data, hoverTarget.index), bumpGeocode);
         hoverVoteTypes = decodeVoteTypes((data.node_vote_types ?? [])[hoverTarget.index], legend);
       }
     }
     // A station carries its name on its self-edge (index == node index); use it
     // instead of a (disabled) reverse-geocode regardless of node/edge resolution.
-    if (isStationNetwork) tooltipName = data.edges[hoverTarget.index]?.[2] || tooltipName;
+    if (isStationNetwork) tooltipName = edgeName(data, hoverTarget.index) || tooltipName;
   }
 
   // -------------------------------------------------------------------------
@@ -2475,30 +2573,26 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
   if (showPinned) {
     if (pinnedTarget.kind === "edge") {
-      const edge = data.edges[pinnedTarget.index];
-      if (edge) {
-        const [fromIdx, toIdx] = edge;
-        const fromNode = data.nodes[fromIdx];
-        const toNode = data.nodes[toIdx];
-        const midLat = (fromNode[0] + toNode[0]) / 2;
-        const midLng = (fromNode[1] + toNode[1]) / 2;
-        pinnedName = edge[2] || resolveAddress(midLat, midLng, bumpGeocode);
+      if (pinnedTarget.index < data.nEdges) {
+        const fromIdx = edgeFrom(data, pinnedTarget.index), toIdx = edgeTo(data, pinnedTarget.index);
+        const midLat = (nodeLat(data, fromIdx) + nodeLat(data, toIdx)) / 2;
+        const midLng = (nodeLon(data, fromIdx) + nodeLon(data, toIdx)) / 2;
+        pinnedName = edgeName(data, pinnedTarget.index) || resolveAddress(midLat, midLng, bumpGeocode);
         pinnedVoteTypes = decodeVoteTypes((data.edge_vote_types ?? [])[pinnedTarget.index], legend);
         pinnedVoteEdgeId = pinnedTarget.index;
       }
     } else {
-      const node = data.nodes[pinnedTarget.index];
-      if (node) {
-        pinnedName = resolveAddress(node[0], node[1], bumpGeocode);
+      if (pinnedTarget.index < data.nNodes) {
+        pinnedName = resolveAddress(nodeLat(data, pinnedTarget.index), nodeLon(data, pinnedTarget.index), bumpGeocode);
         pinnedVoteTypes = decodeVoteTypes((data.node_vote_types ?? [])[pinnedTarget.index], legend);
-        pinnedVoteEdgeId = nodeAdjRef.current?.[pinnedTarget.index]?.[0] ?? null;
+        pinnedVoteEdgeId = adjFirst(nodeAdjRef.current, pinnedTarget.index);
       }
     }
     // Anchor + share-link coord come from the SAME helper the position effect
     // uses, so the card's key and its on-screen anchor can never drift apart.
     pinnedPointLatLng = targetLatLng(pinnedTarget, data);
     // Stations carry their name on the self-edge (index == node index).
-    if (isStationNetwork) pinnedName = data.edges[pinnedTarget.index]?.[2] || pinnedName;
+    if (isStationNetwork) pinnedName = edgeName(data, pinnedTarget.index) || pinnedName;
   }
 
   // Publish the resolved vote edge back to the host so the selected point's
@@ -2708,7 +2802,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // winner that hosts a waypoint stays drawn (it's the fixed pin), just tinted
     // + click-through (see the icon opts below).
     const source: VoteTypeWinner[] = isStationNetwork
-      ? topology.edges.map((_, i) => ({ legendIdx: i, label: stationLabel, edgeIdx: i, count: 0 }))
+      ? Array.from({ length: topology.nEdges }, (_, i) => ({ legendIdx: i, label: stationLabel, edgeIdx: i, count: 0 }))
       : winners;
     if (source.length === 0) return null;
 
@@ -2729,14 +2823,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // can measure on-screen distance between icons for cluster detection.
     const placed = source
       .map((w) => {
-        const edge = topology.edges[w.edgeIdx];
-        if (!edge) return null;
-        const [fromIdx, toIdx] = edge;
-        const fromNode = topology.nodes[fromIdx];
-        const toNode = topology.nodes[toIdx];
-        if (!fromNode || !toNode) return null;
-        const midLat = (fromNode[0] + toNode[0]) / 2;
-        const midLng = (fromNode[1] + toNode[1]) / 2;
+        if (w.edgeIdx >= topology.nEdges) return null;
+        const fromIdx = edgeFrom(topology, w.edgeIdx), toIdx = edgeTo(topology, w.edgeIdx);
+        const midLat = (nodeLat(topology, fromIdx) + nodeLat(topology, toIdx)) / 2;
+        const midLng = (nodeLon(topology, fromIdx) + nodeLon(topology, toIdx)) / 2;
         return { w, midLat, midLng };
       })
       .filter(Boolean) as Array<{
@@ -2972,20 +3062,25 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           key={w.edgeIdx}
           position={[posLat, posLng]}
           icon={icon}
-          // Stacking order, highest first:
-          //   3000  fanned-out (spread override) — the exploded cluster reads as
-          //         one group on top of everything else.
-          //   2500  a MATCHED waypoint (start/end/mid). It carries the [×] badge,
-          //         so it must sit above any overlapping non-matched sibling — else
-          //         when two proposals stack and the lower one is the waypoint, the
-          //         upper icon conceals its badge.
-          //   2000  the selected (open-modal) proposal.
-          //   1000  everything else.
+          // Stacking: a state BAND (far-apart bases) plus the proposal's net
+          // votes as the in-band offset, so where pins overlap the more-supported
+          // one sits on top — but explode/waypoint/selected still lift a pin into
+          // a higher band regardless of votes. Bands are 100k apart and votes are
+          // capped at 50k, so the vote offset can never bleed one band into the
+          // next. Highest band first:
+          //   300000+  fanned-out (spread override) — the exploded cluster reads
+          //            as one group on top of everything else.
+          //   200000+  a MATCHED waypoint (start/end/mid). It carries the [×]
+          //            badge, so it must sit above any overlapping non-matched
+          //            sibling — else the upper icon conceals its badge.
+          //   100000+  the selected (open-modal) proposal.
+          //     1000+  everything else, ordered by votes.
           zIndexOffset={
-            override ? 3000
-            : role !== null ? 2500
-            : w.edgeIdx === selectedEdgeIdx ? 2000
-            : 1000
+            (override ? 300000
+             : role !== null ? 200000
+             : w.edgeIdx === selectedEdgeIdx ? 100000
+             : 1000)
+            + Math.min(50000, Math.max(0, w.count))
           }
           interactive={!passthrough}
           onActivate={activateIndicator}
@@ -3062,9 +3157,60 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     return () => { cancelled = true; };
   }, [pinnedVoteEdgeId, themeMode]);
 
+  // Route-proposal diamonds — one per corridor, at the midpoint of its middle
+  // path edge. Hovering lights the whole corridor; clicking forces the route
+  // through its anchors; it reads "selected" once the live route covers every
+  // block (the auto-select rule). A separate layer from the point indicators.
+  const routeIndicatorMarkers = useMemo(() => {
+    const topology = topologyRef.current;
+    if (!topology || routeProposals.length === 0) return null;
+    const selectedSet = pathEdgeIds ? new Set(pathEdgeIds) : null;
+
+    return routeProposals.map((p) => {
+      const midEdge = p.edgeIds[Math.floor(p.edgeIds.length / 2)];
+      let posLat: number, posLng: number;
+      if (midEdge != null && midEdge < topology.nEdges) {
+        const fromIdx = edgeFrom(topology, midEdge), toIdx = edgeTo(topology, midEdge);
+        posLat = (nodeLat(topology, fromIdx) + nodeLat(topology, toIdx)) / 2;
+        posLng = (nodeLon(topology, fromIdx) + nodeLon(topology, toIdx)) / 2;
+      } else {
+        // Fallback: geometric midpoint of the two anchors.
+        posLat = (p.anchorCoords[0].lat + p.anchorCoords[1].lat) / 2;
+        posLng = (p.anchorCoords[0].lng + p.anchorCoords[1].lng) / 2;
+      }
+
+      const covered = selectedSet ? isRouteCovered(p.blocks, selectedSet) : false;
+      const icon = makeVoteTypeIcon(p.label, theme.suggestions, {
+        diamond: true, selected: covered,
+      });
+
+      const activate = () => {
+        routeHighlightEdgesRef.current = routeBlockEdges(p);
+        redrawHoverHighlightRef.current();
+      };
+      const deactivate = () => {
+        routeHighlightEdgesRef.current = null;
+        redrawHoverHighlightRef.current();
+      };
+
+      return (
+        <IndicatorMarker
+          key={`route-${p.id}`}
+          position={[posLat, posLng]}
+          icon={icon}
+          zIndexOffset={(covered ? 150000 : 5000) + Math.min(48000, Math.max(0, p.score))}
+          onActivate={activate}
+          onDeactivate={deactivate}
+          onClick={() => onRouteProposalClickRef.current?.(p)}
+        />
+      );
+    });
+  }, [routeProposals, pathEdgeIds, currentZoom, map, theme.suggestions, mapStyle.heat]);
+
   return (
     <>
       {indicatorMarkers}
+      {routeIndicatorMarkers}
       {showPinned && pinnedScreenPos && createPortal(
         <ProposalCard
           // Key by the selected feature's identity (kind + index), stable across

@@ -22,6 +22,7 @@
 // — negligible even though selection re-runs on every incoming vote.
 
 import type { GraphData } from "../../types";
+import { type GraphTopology, nodeLat, nodeLon, edgeFrom, edgeTo } from "./graphTopology";
 
 export interface VoteTypeWinner {
   legendIdx: number;
@@ -163,19 +164,21 @@ function metersBetween(
 }
 
 /**
- * Builds an `EdgePosition` from a GraphData-shaped `{ nodes, edges }`: an edge's
- * midpoint is the mean of its two endpoint nodes.
+ * Builds an `EdgePosition` from a typed-array topology: an edge's midpoint is
+ * the mean of its two endpoint nodes.
  */
 export function edgeMidpointResolver(
-  data: Pick<GraphData, "nodes" | "edges"> | null
+  data: GraphTopology | null
 ): EdgePosition {
   return (edgeIdx) => {
-    const edge = data?.edges?.[edgeIdx];
-    if (!edge) return null;
-    const from = data!.nodes?.[edge[0]];
-    const to = data!.nodes?.[edge[1]];
-    if (!from || !to) return null;
-    return [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2];
+    if (!data || edgeIdx >= data.nEdges) return null;
+    const from = edgeFrom(data, edgeIdx);
+    const to = edgeTo(data, edgeIdx);
+    if (from >= data.nNodes || to >= data.nNodes) return null;
+    return [
+      (nodeLat(data, from) + nodeLat(data, to)) / 2,
+      (nodeLon(data, from) + nodeLon(data, to)) / 2,
+    ];
   };
 }
 
@@ -251,7 +254,7 @@ export const TOP_PROPOSAL_MIN_SPACING_M = 300;
  */
 export function selectTopProposals(
   data:
-    | Pick<GraphData, "vote_type_legend" | "edge_vote_types" | "nodes" | "edges">
+    | (Pick<GraphData, "vote_type_legend" | "edge_vote_types"> & GraphTopology)
     | null,
   salt: number,
   limit: number,

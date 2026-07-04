@@ -101,8 +101,14 @@ export interface WebSocketMessage {
 }
 
 export interface GraphData {
-  nodes: [number, number][];
-  edges: [number, number, string][];
+  // Topology as flat typed arrays (mobile memory; see graphTopology.ts). The
+  // NYC street graph is too large to box as [lat,lon][]/[from,to,name][] without
+  // OOM-crashing mobile Safari. Read via graphTopology accessors, not by index.
+  nNodes: number;
+  nEdges: number;
+  coords: Int32Array; // 2·nNodes int32, [lat,lon] scaled by 1e7
+  ends: Uint32Array; // 2·nEdges uint32, [fromIdx,toIdx] per edge
+  edgeNames?: string[]; // station networks only; street graphs omit names
   node_votes?: number[];
   edge_votes?: number[];
   vote_type_legend?: string[];

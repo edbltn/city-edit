@@ -12,6 +12,11 @@ export interface VoteTypeIconOptions {
    *  (spread) icons: the divot points at a precise location, but a spread icon
    *  sits in an arbitrary grid cell — not on its real spot — so it shouldn't. */
   square?: boolean;
+  /** Render a DIAMOND container (same single icon area, rotated 45°) instead of
+   *  the square — the visual marker for a ROUTE proposal vs a point proposal. Its
+   *  bottom vertex is the anchor tip, so it points down at the location like the
+   *  pin's tail. Takes precedence over `square`. */
+  diamond?: boolean;
   /** Make the icon click-through (pointer-events:none). Used when the proposal is
    *  a linked waypoint: it's a fixed visual, and the kite RouteMarker underneath
    *  receives the drag/click. */
@@ -57,6 +62,11 @@ const INNER_PATH = "M6,6 H28 V28 H21.9 L17,32.1 L12.1,28 H6 Z";
 // identical so dropping the divot doesn't shift the icon; it just loses its point.
 const SQUARE_PATH = "M3,3 H31 V31 H3 Z";
 const INNER_SQUARE_PATH = "M6,6 H28 V28 H6 Z";
+// Diamond variant (route proposals): the square rotated 45° within the same box,
+// its bottom vertex pulled down to the tail tip so the kite points at the spot.
+// Vertices: top (17,3) · right (31,17) · bottom-tip (17,36) · left (3,17).
+const DIAMOND_PATH = "M17,3 L31,17 L17,36 L3,17 Z";
+const INNER_DIAMOND_PATH = "M17,9 L26,17 L17,30 L8,17 Z";
 const TIP: [number, number] = [17, 36];
 
 /**
@@ -77,13 +87,17 @@ export function makeVoteTypeIcon(
   if (opts.selected) cls.push("is-selected");
   if (opts.tint === "start") cls.push("is-start");
   else if (opts.tint === "end") cls.push("is-end");
+  if (opts.diamond) cls.push("is-diamond");
 
   const glyph = icon
     ? `<img class="vote-type-indicator-icon" src="${iconSrc(icon)}" alt="" />`
     : suggestionGlyphSvg(hashLabelToColor(label));
 
-  const shape = opts.square ? SQUARE_PATH : OUTER_PATH;
-  const innerShape = opts.square ? INNER_SQUARE_PATH : INNER_PATH;
+  // Diamond (route) takes precedence over the square (fanned-out) variant.
+  const shape = opts.diamond ? DIAMOND_PATH : opts.square ? SQUARE_PATH : OUTER_PATH;
+  const innerShape = opts.diamond
+    ? INNER_DIAMOND_PATH
+    : opts.square ? INNER_SQUARE_PATH : INNER_PATH;
   // Remove badge: a sibling of the pin/icon inside the scaled .vote-type-indicator,
   // so CSS pins it to the square's top-right corner (SVG 31,3) and it inherits the
   // icon's scale + fanned-out position. data-x-edge lets the delegated handler in

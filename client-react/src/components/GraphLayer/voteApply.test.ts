@@ -1,12 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { applyEdgeVoteChange, applyAuthoritativeCounts, applyMyVoteChange } from "./voteApply";
+import { topologyFromJson, buildNodeAdj } from "./graphTopology";
 import type { GraphData } from "../../types";
 
 // Minimal graph: 2 edges sharing node 1.  edge0 = (0,1), edge1 = (1,2)
 function makeData(): GraphData {
-  return {
+  const topo = topologyFromJson({
     nodes: [[0, 0], [0, 1], [0, 2]],
     edges: [[0, 1, ""], [1, 2, ""]],
+  });
+  return {
+    ...topo,
     edge_votes: [0, 0],
     node_votes: [0, 0, 0],
     vote_type_legend: [],
@@ -14,7 +18,11 @@ function makeData(): GraphData {
     node_vote_types: [[], []],
   };
 }
-const ADJ = [[0], [0, 1], [1]];
+// CSR adjacency equivalent to [[0], [0, 1], [1]].
+const ADJ = buildNodeAdj(topologyFromJson({
+  nodes: [[0, 0], [0, 1], [0, 2]],
+  edges: [[0, 1, ""], [1, 2, ""]],
+}));
 
 function row(data: GraphData, eid: number, label: string) {
   const li = (data.vote_type_legend ?? []).indexOf(label);

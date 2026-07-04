@@ -121,6 +121,32 @@
   opacity: 1;
 }
 
+/* Full-placeholder tooltip, shown only when the placeholder is clipped (narrow
+   viewport). Replaces the native `title` so it reveals near-instantly on hover
+   instead of after the browser's ~500ms delay. */
+.landing-search-tip {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  padding: 4px 8px;
+  font-size: var(--font-size-xs);
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.landing-search-wrap:hover .landing-search-tip,
+.landing-search-wrap:focus-within .landing-search-tip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .landing-grid {
   flex: 1;
   display: grid;

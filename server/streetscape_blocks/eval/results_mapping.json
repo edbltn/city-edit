@@ -1,0 +1,31 @@
+{
+  "blocks": "blocks_hybrid16_manhattan.geojson",
+  "n_blocks": 10451,
+  "n_edges": 225797,
+  "contained": 150005,
+  "snapped": 36735,
+  "unmapped": 39057,
+  "coverage_gap": 0.173,
+  "heuristics": {
+    "H_centroid": {
+      "precision_labelled": 0.6088,
+      "precision_contained": 0.5882,
+      "sec": 0.08
+    },
+    "H_poly": {
+      "precision_labelled": 1.0,
+      "precision_contained": 1.0,
+      "sec": 3.41
+    },
+    "H_knn_poly": {
+      "precision_labelled": 0.961,
+      "precision_contained": 0.9632,
+      "sec": 2.85
+    },
+    "H_seg": {
+      "precision_labelled": 0.9712,
+      "precision_contained": 0.9814,
+      "sec": 2.59
+    }
+  }
+}
