@@ -60,6 +60,10 @@ export interface VoteDelta {
   /** Authoritative post-write [up, down] per edge id for this vote type. Present
    *  on directional votes → clients SET (idempotent) instead of incrementing. */
   vtCounts?: Record<string, [number, number]>;
+  /** Authoritative deduped [up, down] per affected BLOCK id for this vote type
+   *  (maps with a block layer only) → clients SET, keeping open modals and the
+   *  block heat current without a full refetch. */
+  blockCounts?: Record<string, [number, number]>;
 }
 
 export interface RouteResponse {

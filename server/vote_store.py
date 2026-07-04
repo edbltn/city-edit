@@ -227,6 +227,7 @@ def publish_delta(
     redis_client, slug: str, edge_ids: list[int], mode: int, vt_id: int,
     direction: int = UP, reversed_vote: bool = False,
     vt_counts: dict[int, list[int]] | None = None,
+    block_counts: dict[int, list[int]] | None = None,
 ) -> int:
     rev = redis_client.incr(revision_key(slug))
     delta: dict = {
@@ -245,6 +246,11 @@ def publish_delta(
     # incrementing — so a caster's optimistic guess can't drift or double-count.
     if vt_counts is not None:
         delta["vtCounts"] = {str(eid): counts for eid, counts in vt_counts.items()}
+    # Authoritative post-write deduped [up, down] per affected BLOCK (same SET
+    # semantics as vtCounts) so open modals/heat track block counts without a
+    # full /api/graph-votes refetch.
+    if block_counts is not None:
+        delta["blockCounts"] = {str(b): counts for b, counts in block_counts.items()}
     redis_client.publish(channel_key(slug), json.dumps(delta))
     return rev
 

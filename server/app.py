@@ -1103,10 +1103,14 @@ def cast_vote():
                 vt_counts = vote_store.read_edge_vt_counts(
                     redis_client, slug, changed, mode_int, vt_id
                 )
+                block_counts = block_votes.read_block_vt_counts(
+                    redis_client, slug, mode_int,
+                    (b for b in plan.touched_blocks if isinstance(b, int)), vt_id,
+                ) if ebid is not None else None
                 vote_store.publish_delta(
                     redis_client, slug, changed, mode_int, vt_id,
                     direction=direction or vote_store.UP, reversed_vote=reversed_any,
-                    vt_counts=vt_counts,
+                    vt_counts=vt_counts, block_counts=block_counts,
                 )
                 _invalidate_vote_cache(slug)
 

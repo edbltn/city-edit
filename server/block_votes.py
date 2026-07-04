@@ -169,6 +169,27 @@ def build_block_arrays(redis_client, slug: str, mode: int, n_blocks: int) -> dic
     }
 
 
+def read_block_vt_counts(
+    redis_client, slug: str, mode: int, block_ids, vt_id: int,
+) -> dict[int, list[int]]:
+    """{block_id: [up, down]} for one vote type, read from the aggregate after a
+    write — the authoritative deduped counts the delta broadcast SETs on clients
+    (the block twin of vote_store.read_edge_vt_counts)."""
+    block_ids = list(block_ids)
+    if not block_ids:
+        return {}
+    bagg = bagg_key(slug, mode)
+    pipe = redis_client.pipeline()
+    for b in block_ids:
+        pipe.hget(bagg, str(pack_block_field(b, vt_id, 0)))
+        pipe.hget(bagg, str(pack_block_field(b, vt_id, 1)))
+    vals = pipe.execute()
+    return {
+        b: [int(vals[2 * i] or 0), int(vals[2 * i + 1] or 0)]
+        for i, b in enumerate(block_ids)
+    }
+
+
 # ── Rebuild (derived state recovery) ────────────────────────────────────────
 
 def clear(redis_client, slug: str, mode: int) -> None:

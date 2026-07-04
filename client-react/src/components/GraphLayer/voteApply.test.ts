@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyEdgeVoteChange, applyAuthoritativeCounts, applyMyVoteChange } from "./voteApply";
+import { applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, applyMyVoteChange } from "./voteApply";
 import { topologyFromJson, buildNodeAdj } from "./graphTopology";
 import type { GraphData } from "../../types";
 
@@ -132,5 +132,46 @@ describe("applyAuthoritativeCounts (SET, idempotent)", () => {
     expect(d.node_votes![1]).toBe(5);
     const li = d.vote_type_legend!.indexOf("X");
     expect(d.node_vote_types![1].find(([l]) => l === li)).toEqual([li, 5, 0]);
+  });
+});
+
+describe("applyBlockCounts (SET, idempotent, block twin of vtCounts)", () => {
+  function makeBlockData(): GraphData {
+    return {
+      ...makeData(),
+      block_votes: [0, 0, 0],
+      block_vote_types: [[], [], []],
+      block_vote_type_legend: [],
+    };
+  }
+
+  it("SETs deduped counts, updates net, and registers the label", () => {
+    const d = makeBlockData();
+    expect(applyBlockCounts(d, "X", { "1": [3, 1] })).toBe(true);
+    expect(d.block_vote_type_legend).toEqual(["X"]);
+    expect(d.block_vote_types![1]).toEqual([[0, 3, 1]]);
+    expect(d.block_votes![1]).toBe(2);
+  });
+
+  it("is idempotent and reports no change on re-apply", () => {
+    const d = makeBlockData();
+    applyBlockCounts(d, "X", { "1": [2, 0] });
+    expect(applyBlockCounts(d, "X", { "1": [2, 0] })).toBe(false);
+    expect(d.block_votes![1]).toBe(2);
+  });
+
+  it("drops a type that reaches 0/0 and adjusts the net down", () => {
+    const d = makeBlockData();
+    applyBlockCounts(d, "X", { "0": [1, 0] });
+    applyBlockCounts(d, "X", { "0": [0, 0] });
+    expect(d.block_vote_types![0]).toEqual([]);
+    expect(d.block_votes![0]).toBe(0);
+  });
+
+  it("ignores out-of-range blocks and returns false without block arrays", () => {
+    const d = makeBlockData();
+    expect(applyBlockCounts(d, "X", { "99": [1, 0] })).toBe(false);
+    const bare = makeData();
+    expect(applyBlockCounts(bare, "X", { "0": [1, 0] })).toBe(false);
   });
 });

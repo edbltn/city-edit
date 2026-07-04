@@ -32,7 +32,7 @@ import { selectTopProposals, topLabelForEdges, type VoteTypeWinner } from "./top
 import {
   computeRouteProposals, routeBlockEdges, isRouteCovered, type RouteProposal,
 } from "./routeProposals";
-import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts } from "./voteApply";
+import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts } from "./voteApply";
 import {
   COORD_SCALE,
   type GraphTopology,
@@ -1590,8 +1590,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     } else {
       applyEdgeVoteChange(data, adj, delta.edges, vtLabel, delta.dir ?? 1, delta.reversed ?? false);
     }
+    if (delta.blockCounts && applyBlockCounts(data, vtLabel, delta.blockCounts)) {
+      broadcastBlockVotes(data);
+    }
     lastRevRef.current = delta.rev;
-  }, []);
+  }, [broadcastBlockVotes]);
 
   // Load topology + votes on mount, preferring persisted caches.
   useEffect(() => {

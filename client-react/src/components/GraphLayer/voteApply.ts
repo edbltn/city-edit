@@ -170,6 +170,49 @@ export function applyEdgeVoteChange(
  * the caster's optimistic guess is corrected rather than compounded. A vote
  * type that drops to 0/0 is removed from the edge's breakdown.
  */
+/**
+ * SET the authoritative deduped [up, down] for `vtLabel` on each BLOCK in
+ * `blockCounts` (the delta's block twin of vtCounts — see
+ * docs/three-layer-model.md §2.4). Idempotent like the edge SET. Returns true
+ * when anything changed so the caller can re-broadcast the block heat.
+ */
+export function applyBlockCounts(
+  data: VoteData,
+  vtLabel: string,
+  blockCounts: Record<string, [number, number]>,
+): boolean {
+  const blockVotes = data.block_votes;
+  const blockVoteTypes = data.block_vote_types;
+  if (!blockVotes || !blockVoteTypes) return false;
+  const legend = data.block_vote_type_legend ?? (data.block_vote_type_legend = []);
+  let li = legend.indexOf(vtLabel);
+  if (li < 0) {
+    li = legend.length;
+    legend.push(vtLabel);
+  }
+
+  let changed = false;
+  for (const [bidStr, counts] of Object.entries(blockCounts)) {
+    const bid = Number(bidStr);
+    if (bid < 0 || bid >= blockVotes.length) continue;
+    const up = counts[0] ?? 0;
+    const down = counts[1] ?? 0;
+
+    const pairs = blockVoteTypes[bid] || [];
+    const existing = pairs.find(([l]) => l === li);
+    const oldNet = existing ? existing[1] - existing[2] : 0;
+    if (existing && existing[1] === up && existing[2] === down) continue;
+
+    let next = pairs.filter(([l]) => l !== li);
+    if (up !== 0 || down !== 0) next.push([li, up, down]);
+    next.sort((a, b) => b[1] - b[2] - (a[1] - a[2]));
+    blockVoteTypes[bid] = next;
+    blockVotes[bid] = (blockVotes[bid] || 0) + (up - down - oldNet);
+    changed = true;
+  }
+  return changed;
+}
+
 export function applyAuthoritativeCounts(
   data: VoteData,
   adj: NodeAdj,
