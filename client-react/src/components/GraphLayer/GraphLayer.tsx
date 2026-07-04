@@ -22,6 +22,7 @@ import { withMap, getMapSlug, passcodeHeaders, getCurrentMap } from "../../map/r
 import { useWebSocketContext } from "../../context/WebSocketContext";
 import { useGraphSnap, useTheme, useHeatmap, useGhostPin } from "../../context";
 import type { GraphData, ProposalMatch } from "../../types";
+import { BLOCK_VOTES_EVENT, type BlockVotesDetail } from "../MapLibreBackground/MapLibreBackground";
 import { makeVoteTypeIcon } from "./voteTypeIcon";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import { selectTopProposals, topLabelForEdges, type VoteTypeWinner } from "./topProposals";
@@ -767,6 +768,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // Memoized max edge-vote count, recomputed only when the vote revision
   // changes (i.e. on a vote/delta) rather than on every zoom/pan frame.
   const maxVotesRef = useRef(1);
+  // True when this map has a block layer — blocks become the heat display
+  // (MapLibre fill), so the canvas skips the per-edge heatmap (edges show only
+  // on hover/selection).
+  const blocksActiveRef = useRef(false);
   const maxVotesRevRef = useRef(-1);
 
   // Node adjacency list — node index → [edge indices]. Built once from topology,
@@ -1706,6 +1711,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         setVoteTypeMap(voteData.vote_types);
         if (version) setCachedVotes(getMapSlug() || themeMode, version, voteData);
 
+        // Block layer (when the map has one): broadcast deduped block votes to
+        // the MapLibre fill layer, and switch the canvas edge-heatmap off — blocks
+        // are the primary heat, edges show only on hover/selection.
+        const blockVotes = voteData.block_votes as number[] | undefined;
+        blocksActiveRef.current = Array.isArray(blockVotes) && blockVotes.length > 0;
+        if (blocksActiveRef.current) {
+          const detail: BlockVotesDetail = {
+            blockVotes: blockVotes!,
+            max: Math.max(HEAT_FULL_SCALE, arrayMax(blockVotes!)),
+          };
+          window.dispatchEvent(new CustomEvent(BLOCK_VOTES_EVENT, { detail }));
+        }
+
         // Replay any deltas that arrived while waiting for the fetch
         const pending = pendingDeltasRef.current;
         if (pending.length > 0) {
@@ -1920,6 +1938,14 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (!data.ends || !data.coords) return;
+
+    // Blocks are the heat display (MapLibre fill layer): skip the per-edge canvas
+    // heatmap entirely. The hover/selection highlight (its own canvas) still
+    // paints, so edges appear only when hovered or on a route.
+    if (blocksActiveRef.current) {
+      redrawHoverHighlightRef.current();
+      return;
+    }
 
     const coords = data.coords;
     const ends = data.ends;

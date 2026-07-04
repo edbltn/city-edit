@@ -64,17 +64,30 @@ export const CONFIG = {
   // default for the bootstrap (nyc); applyCityConfig() rebinds it to the active
   // city's tilesPath once the map config loads.
   graphTilesUrl: isLocalDev
-    ? "http://localhost:5001/api/tiles/nyc/graph.pmtiles"
+    ? `${import.meta.env.VITE_API_BASE || "http://localhost:5001"}/api/tiles/nyc/graph.pmtiles`
     : "/api/tiles/nyc/graph.pmtiles",
+
+  // Block polygons (one per street segment) — the primary heat display when a
+  // city has them. Same per-city tiles dir as the graph; availability is
+  // detected from the /api/graph-votes response carrying block_votes.
+  blockTilesUrl: isLocalDev
+    ? `${import.meta.env.VITE_API_BASE || "http://localhost:5001"}/api/tiles/nyc/blocks.pmtiles`
+    : "/api/tiles/nyc/blocks.pmtiles",
 
   // Leaflet behaviors
   preferCanvas: true,
 
-  // API & Socket URLs - auto-detect based on environment
-  apiUrl: isLocalDev ? "http://localhost:5001/api" : "/api",
-  wsUrl: isLocalDev
-    ? "ws://localhost:5001/ws"
-    : `${wsProtocol}//${typeof window !== "undefined" ? window.location.host : ""}/ws`,
+  // API & Socket URLs - auto-detect based on environment. VITE_API_BASE /
+  // VITE_WS_BASE override the dev defaults so a worktree stack can point at its
+  // own Flask on a non-default port without colliding with the main dev server.
+  apiUrl: import.meta.env.VITE_API_BASE
+    ? `${import.meta.env.VITE_API_BASE}/api`
+    : (isLocalDev ? "http://localhost:5001/api" : "/api"),
+  wsUrl: import.meta.env.VITE_WS_BASE
+    ? `${import.meta.env.VITE_WS_BASE}/ws`
+    : (isLocalDev
+      ? "ws://localhost:5001/ws"
+      : `${wsProtocol}//${typeof window !== "undefined" ? window.location.host : ""}/ws`),
 };
 
 // Public city shape returned by the API (matches server cities.City.to_public()).
@@ -106,5 +119,7 @@ export function applyCityConfig(city: CityConfig): void {
   CONFIG.maxZoom = maxZoom;
   if (tilesPath) {
     CONFIG.graphTilesUrl = isLocalDev ? `http://localhost:5001${tilesPath}` : tilesPath;
+    const blocksPath = tilesPath.replace("graph.pmtiles", "blocks.pmtiles");
+    CONFIG.blockTilesUrl = isLocalDev ? `http://localhost:5001${blocksPath}` : blocksPath;
   }
 }
