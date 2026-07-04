@@ -53,33 +53,43 @@ Single source of truth:
   label→id via the loaded `vote_types` map (`setVoteTypeMap`). Unknown label → no
   vote (`0`), which is always correct for a brand-new type.
 - `coverage(mode, edgeIds, label, dir)` answers the multi-select availability
-  question in one pass: which edges are already at `dir`, which hold the opposite,
-  which are unvoted. Drives button greying and "only cast what changed".
+  question in one pass at **block grain** (see
+  [three-layer-model.md](three-layer-model.md) §4): of the blocks the edges touch,
+  which already hold my `dir`, which hold the opposite, which are unvoted. Drives
+  the tri-state button rendering (active only when *every* block is covered).
 
 ## 4. One cast path
 
 Both the top-bar route cast and the in-map proposal `+`/`−` go through
-`castVotes({ edgeIds, label, direction })` (RouteContext):
+`castVotes({ edgeIds, label, direction })` (RouteContext). The plan/press
+semantics — block-scoped **clear-then-cast** — are defined in
+[three-layer-model.md](three-layer-model.md) §4; mechanically:
 
-1. Compute `coverage`. If every edge is already at `direction` → **toggle off**
-   (`direction = 0`, removes the votes). Otherwise cast `direction` on the edges
-   that aren't already there (reversing any that hold the opposite).
-2. Optimistic apply (`optimistic-vote` event → `applyEdgeVoteChange`), recording a
-   rollback snapshot.
+1. Compute block coverage. Every touched block already at `direction` →
+   **unvote** (`direction = 0`, clears my votes of that type across the touched
+   blocks). Otherwise clear-then-cast `direction` on the selection edges.
+2. Optimistic apply (`optimistic-vote` event → `applyMyVoteChange`), recording a
+   rollback snapshot — for the cast edges *and* the locally-known cleared edges.
 3. `POST /api/vote { map, edge_ids, vote_type, direction, voter_id }`.
-4. Server replies + broadcasts **authoritative `vtCounts`**; the client SETs them
-   (idempotent), so the optimistic guess can never drift or double-count.
+4. Server replies (`cleared` lists edges it unvoted beyond the selection) +
+   broadcasts **authoritative `vtCounts`**; the client SETs them (idempotent), so
+   the optimistic guess can never drift or double-count.
 5. On failure: roll back the optimistic apply and the local store entry.
 
 ## 5. Server (one endpoint)
 
-`POST /api/vote` has a single directional codepath:
+`POST /api/vote` has a single directional codepath (block-scoped semantics per
+[three-layer-model.md](three-layer-model.md) §4.2–4.3):
 
-- Reads each edge's prior direction for `(slug, edge, vt, device)`.
-- `direction != 0`: upserts the row (reversal overwrites); `direction == 0`:
-  deletes the row. Redis counts move accordingly under `_proposal_vote_lock`.
+- Expands the selection edges to their touched blocks (`edge_block_id`) and
+  clears the device's same-type rows across those blocks, inside the voter lock.
+- `direction != 0`: upserts the row on each selection edge; `direction == 0`:
+  clears only. Redis edge counts and block-dedup state (`block_votes`) move
+  accordingly.
 - Persists to Postgres **synchronously** (so the next vote reads the committed
   prior direction), then publishes `vtCounts` read straight back from Redis.
+- Invariant: no block ever holds `+` and `−` from the same device for the same
+  vote type.
 
 Removed: the separate "bulk upvote" branch, the `point`/`segments` snapping
 branches, `record_point_vote`, and the dead `desire_path_voting` /
