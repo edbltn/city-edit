@@ -411,24 +411,26 @@ def evict_lru_devices_for_edges(
         return {}
 
 
-def get_voter_edge_direction(
-    map_slug: str, edge_id: int, vt_id: int, device_id: str
-) -> int:
-    """Return a device's current direction for one proposal (+1/-1), or 0 if none."""
+def get_voter_type_rows(
+    map_slug: str, vote_type_id: int, device_id: str
+) -> dict[int, int]:
+    """Return {edge_id: direction} for ALL of a device's rows of one vote type
+    on a map — the prior state the block-scoped vote plan clears against."""
     if not DATABASE_URL:
-        return 0
+        return {}
     try:
         with get_cursor() as cursor:
             cursor.execute(
-                "SELECT direction FROM edge_votes "
-                "WHERE map_slug = %s AND edge_id = %s AND vote_type_id = %s AND device_id = %s",
-                (map_slug, edge_id, vt_id, device_id),
+                """SELECT edge_id, direction
+                   FROM edge_votes
+                   WHERE map_slug = %s AND vote_type_id = %s AND device_id = %s""",
+                (map_slug, vote_type_id, device_id),
             )
-            row = cursor.fetchone()
-            return int(row[0]) if row else 0
+            return {int(edge_id): int(direction)
+                    for edge_id, direction in cursor.fetchall()}
     except Exception as e:
-        logger.error(f"[DB] Failed to read voter edge direction: {e}")
-        return 0
+        logger.error(f"[DB] Failed to read voter type rows: {e}")
+        return {}
 
 
 # ── Vote types (label ↔ id) ─────────────────────────────────────────────────

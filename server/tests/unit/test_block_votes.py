@@ -5,6 +5,8 @@ counts once per block no matter how many edges in that block carry it; removals
 are exact; reversals move the device; and a rebuild from Postgres rows yields the
 same aggregate as the incremental path.
 """
+import logging
+
 import block_votes as bv
 from vote_store import UP, DOWN
 
@@ -101,3 +103,29 @@ def test_rebuild_matches_incremental(redis_client):
     assert inc == reb
     assert net(redis_client, 10) == 1
     assert net(redis_client, 20) == -1
+
+
+def test_rebuild_warns_on_both_directions_in_a_block(redis_client, caplog):
+    # Canonical rows violating the §2.5 invariant: one device holds UP on edge 0
+    # and DOWN on edge 1, both in block 10. Rebuild logs a warning, no crash.
+    rows = [
+        (0, VT, UP, "d1"),
+        (1, VT, DOWN, "d1"),
+    ]
+    with caplog.at_level(logging.WARNING, logger="block_votes"):
+        bv.rebuild_from_db(redis_client, SLUG, MODE, EDGE_BLOCK, rows)
+    warnings = [r for r in caplog.records if "invariant violation" in r.message]
+    assert len(warnings) == 1
+    msg = warnings[0].message
+    assert "block 10" in msg and f"vt {VT}" in msg and "d1" in msg
+
+
+def test_rebuild_no_warning_when_consistent(redis_client, caplog):
+    rows = [
+        (0, VT, UP, "d1"),
+        (1, VT, UP, "d1"),
+        (2, VT, DOWN, "d1"),  # different block — allowed
+    ]
+    with caplog.at_level(logging.WARNING, logger="block_votes"):
+        bv.rebuild_from_db(redis_client, SLUG, MODE, EDGE_BLOCK, rows)
+    assert not [r for r in caplog.records if "invariant violation" in r.message]

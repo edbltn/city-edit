@@ -198,6 +198,10 @@ def rebuild_from_db(
     clear(redis_client, slug, mode)
     n_edges = len(edge_block_id)
     touched_keys: set[str] = set()
+    # (block, vt, device) → dbit seen so far; 2 = both seen + already warned.
+    # Guards the §2.5 invariant (a block never holds both directions from one
+    # device+type) — canonical rows violating it are logged, not dropped.
+    seen_dir: dict[tuple[int, int, str], int] = {}
     pipe = redis_client.pipeline()
     n = 0
     for edge_id, vt_id, direction, device_id in rows:
@@ -208,6 +212,15 @@ def rebuild_from_db(
             continue
         d = direction if direction in (UP, DOWN) else UP
         dbit = dir_to_bit(d)
+        key = (b, vt_id, device_id)
+        prev_bit = seen_dir.get(key)
+        if prev_bit is None:
+            seen_dir[key] = dbit
+        elif prev_bit != dbit and prev_bit != 2:
+            logger.warning(
+                f"[BLOCKVOTES] invariant violation in {slug}/{mode}: block {b} "
+                f"vt {vt_id} device {device_id} holds BOTH directions")
+            seen_dir[key] = 2
         bdk = bd_key(slug, mode, b, vt_id, dbit)
         pipe.hincrby(bdk, device_id, 1)
         touched_keys.add(bdk)

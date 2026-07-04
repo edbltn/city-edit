@@ -22,6 +22,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature
 from werkzeug.security import generate_password_hash, check_password_hash
 
 import vote_store
+import vote_semantics
 import vote_migration
 import route_proposals
 import block_votes
@@ -31,7 +32,7 @@ from graph_registry import GraphRegistry, OsrmRegistry, STATION_NETWORKS
 from osrm_router import extract_all_segments
 from database import (
     init_db, get_cursor, record_edge_votes, delete_edge_votes,
-    get_voter_edge_direction, get_voter_edge_directions,
+    get_voter_edge_directions, get_voter_type_rows,
     count_devices_per_ip_for_edges, evict_lru_devices_for_edges,
     seed_presets, list_maps, get_map, get_map_by_subdomain, slug_available,
     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,
@@ -949,12 +950,17 @@ def cast_vote():
     Body: { map, mode, vote_type, voter_id, edge_ids: [int], direction }
       direction: +1 vote for · -1 vote against · 0 remove this voter's vote.
 
-    Every cast is directional and per-voter. For each edge we read this voter's
-    prior direction and only touch the ones that change (so a multi-select leaves
-    already-cast edges alone, and reverses ones holding the opposite). The DB
+    Every cast is directional, per-voter, and block-scoped (docs/three-layer-
+    model.md §4): the voter's prior same-type rows are read, a clear-then-cast
+    plan is computed (vote_semantics.plan_block_vote) that first removes their
+    votes across every touched block, then casts on exactly the selection edges
+    — so a block never holds both directions from one device. Maps without a
+    block layer degrade to per-edge semantics via singleton blocks. The DB
     write is synchronous (under a lock) so the next vote observes the committed
     prior direction, and the broadcast carries authoritative [up, down] counts so
-    clients SET — never increment — and can't drift or double-count.
+    clients SET — never increment — and can't drift or double-count. The
+    response's `cleared` lists edges unvoted beyond the cast set so the client
+    reconciles its local store.
     """
     data = request.get_json()
     if not data:
@@ -1020,19 +1026,28 @@ def cast_vote():
         # they hold whether the app runs one worker or a horizontally-scaled fleet.
         ebid = rmap.graph.edge_block_id  # None unless this map has a block layer
         with vote_store.voter_lock(redis_client, slug, device_id), _proposal_vote_lock:
+            # Block-scoped clear-then-cast (docs/three-layer-model.md §4): the
+            # plan clears this device's same-type rows across every touched
+            # block, then casts on exactly the selection edges.
+            prior = get_voter_type_rows(slug, vt_id, device_id)
+            plan = vote_semantics.plan_block_vote(edge_ids, direction, prior, ebid)
+
             reversed_any = False
             changed: list[int] = []
             at_cap: list[int] = []  # fresh device, IP at cap → LRU takeover below
-            for eid in edge_ids:
-                prev = get_voter_edge_direction(slug, eid, vt_id, device_id)
-                if prev == direction:
-                    continue
-                if (prev == 0 and direction != 0
+            casts: list[tuple[int, int]] = []
+            for eid, prev in plan.cast:
+                # The soft per-IP cap gates only FRESH casts; reversals and
+                # clears by the same device are exempt (as before the plan).
+                if (prev == 0
                         and ip_device_counts.get(eid, 0) >= MAX_DEVICES_PER_IP_PER_EDGE):
                     at_cap.append(eid)
                     continue
+                casts.append((eid, prev))
+
+            def _apply(eid: int, prev: int, new: int) -> None:
                 vote_store.apply_directional(
-                    redis_client, slug, eid, mode_int, vt_id, direction, prev
+                    redis_client, slug, eid, mode_int, vt_id, new, prev
                 )
                 # Mirror onto the edge's block (deduped per device); no-op without
                 # a block layer or for edges outside any block.
@@ -1041,10 +1056,17 @@ def cast_vote():
                     if b >= 0:
                         block_votes.apply_block_delta(
                             redis_client, slug, mode_int, b, vt_id,
-                            direction, prev, device_id)
+                            new, prev, device_id)
                 changed.append(eid)
-                if prev in (vote_store.UP, vote_store.DOWN) and direction != 0:
+
+            for eid, prev in plan.clear:
+                _apply(eid, prev, 0)
+            for eid, prev in casts:
+                _apply(eid, prev, direction)
+                if prev in (vote_store.UP, vote_store.DOWN):
                     reversed_any = True
+            cleared = [eid for eid, _ in plan.clear]
+            cast_ids = [eid for eid, _ in casts]
 
             # At the cap, take over the IP's least-recently-active device vote
             # rather than declining: ownership moves to this device (so the
@@ -1064,16 +1086,17 @@ def cast_vote():
                 logger.info(f"[VOTE:{slug}] capped {len(capped)} edge(s) for "
                             f"ip={ip_hash[:8]}… (no device to take over)")
             logger.info(f"[VOTE:{slug}] dir={direction} changed={len(changed)} "
+                        f"cleared={len(cleared)} blocks={len(plan.touched_blocks)} "
                         f"vt={vt_id} ({vt_label!r}) ip={ip_hash[:8]}…")
 
             if changed:
                 # Persist synchronously so the next vote reads the new direction.
                 try:
-                    if direction == 0:
-                        delete_edge_votes(slug, changed, vt_id, device_id)
-                    else:
-                        coords = rmap.graph.edge_midpoints(changed)  # migration anchor
-                        record_edge_votes(slug, changed, vt_id, device_id, ip_hash,
+                    if cleared:
+                        delete_edge_votes(slug, cleared, vt_id, device_id)
+                    if cast_ids:
+                        coords = rmap.graph.edge_midpoints(cast_ids)  # migration anchor
+                        record_edge_votes(slug, cast_ids, vt_id, device_id, ip_hash,
                                           direction, coords=coords)
                 except Exception as e:
                     logger.error(f"[VOTE] DB persist failed: {e}")
@@ -1090,6 +1113,7 @@ def cast_vote():
 
         return jsonify({
             "success": True, "edge_ids": edge_ids, "changed": changed,
+            "cleared": cleared,  # edges unvoted (block-scoped clear) but not cast
             "capped": capped, "direction": direction, "reversed": reversed_any,
             "evicted": {str(eid): d for eid, d in evicted.items()},
         })
@@ -1480,7 +1504,9 @@ def graph_topology():
     # without JSON.parse-ing the ~150MB string (which OOM-crashes mobile Safari).
     # Its ETag is distinct from the JSON one so an intermediary never crosses them.
     if request.args.get("format") == "bin":
-        bin_etag = (rmap.graph.topology_etag or '"x"')[:-1] + '-bin"'
+        # -bin2: GTB2 blob (adds n_blocks + trailing edge_block_id section);
+        # distinct suffix so clients holding the GTB1 blob refetch.
+        bin_etag = (rmap.graph.topology_etag or '"x"')[:-1] + '-bin2"'
         if request.headers.get("If-None-Match") == bin_etag:
             resp = app.response_class(status=304)
             resp.headers["ETag"] = bin_etag

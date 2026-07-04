@@ -50,6 +50,31 @@ def load_station_graph(network: str) -> dict:
     return {"nodes": nodes, "edges": edges, "osm_to_graph_idx": {}, "node_pair_to_edge": {}}
 
 
+def encode_topology_bin(nodes, edges, edge_block_id=None, n_blocks: int = 0) -> bytes:
+    """Assemble the GTB2 binary topology blob (pure; see topology_binary).
+
+    [b'GTB2', u32 nNodes, u32 nEdges, u32 nBlocks] + int32 coords (deg×1e7,
+    lat/lon pairs) + uint32 edge ends (from/to pairs) + — when edge_block_id is
+    given — a trailing int32[nEdges] block-id section (−1 = unmapped).
+    """
+    coords = np.fromiter(
+        (round(v * 1e7) for nd in nodes for v in (nd[0], nd[1])),
+        dtype="<i4", count=2 * len(nodes),
+    )
+    ends = np.fromiter(
+        (v for e in edges for v in (e[0], e[1])),
+        dtype="<u4", count=2 * len(edges),
+    )
+    has_blocks = edge_block_id is not None
+    header = struct.pack(
+        "<4sIII", b"GTB2", len(nodes), len(edges), n_blocks if has_blocks else 0
+    )
+    parts = [header, coords.tobytes(), ends.tobytes()]
+    if has_blocks:
+        parts.append(np.asarray(edge_block_id, dtype="<i4").tobytes())
+    return b"".join(parts)
+
+
 class CityGraph:
     """Lazily-loaded graph + derived lookups for a single city + network."""
 
@@ -197,9 +222,11 @@ class CityGraph:
     def topology_binary(self) -> bytes:
         """Compact little-endian binary topology — the mobile-safe wire format.
 
-        Layout: 12-byte header [magic 'GTB1', uint32 nNodes, uint32 nEdges], then
-        nNodes×2 int32 (lat, lon as degrees×1e7, ~1cm precision), then nEdges×2
-        uint32 (from_idx, to_idx). Edge names are omitted (the client reverse-
+        Layout (GTB2): 16-byte header [magic 'GTB2', uint32 nNodes, uint32
+        nEdges, uint32 nBlocks], then nNodes×2 int32 (lat, lon as degrees×1e7,
+        ~1cm precision), then nEdges×2 uint32 (from_idx, to_idx), then — only
+        when nBlocks > 0 — a trailing int32[nEdges] edge_block_id section
+        (−1 = unmapped edge). Edge names are omitted (the client reverse-
         geocodes street tooltips instead). This exists so a phone decodes an
         ArrayBuffer rather than JSON.parse-ing the ~150MB NYC topology string,
         which OOM-crashes mobile Safari. Built once per load and cached; ~37MB raw
@@ -207,17 +234,11 @@ class CityGraph:
         edges array index is the canonical edge id (matches /api/graph-votes)."""
         self.ensure_loaded()
         if self.topology_bin is None:
-            nodes, edges = self.nodes, self.edges
-            coords = np.fromiter(
-                (round(v * 1e7) for nd in nodes for v in (nd[0], nd[1])),
-                dtype="<i4", count=2 * len(nodes),
+            self.topology_bin = encode_topology_bin(
+                self.nodes, self.edges,
+                self.edge_block_id if self.has_blocks else None,
+                n_blocks=self.n_blocks if self.has_blocks else 0,
             )
-            ends = np.fromiter(
-                (v for e in edges for v in (e[0], e[1])),
-                dtype="<u4", count=2 * len(edges),
-            )
-            header = struct.pack("<4sII", b"GTB1", len(nodes), len(edges))
-            self.topology_bin = header + coords.tobytes() + ends.tobytes()
         return self.topology_bin
 
     def snap_point_to_edge(self, lat: float, lon: float) -> list[int]:
