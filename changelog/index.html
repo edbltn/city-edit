@@ -29,6 +29,17 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-04-three-layer-voting.html">
+    <div class="date">2026-07-04</div>
+    <h2>Three-layer voting model — graph · blocks · route proposals</h2>
+    <p>The edge/node graph stays the storage source of truth; procedural per-city <em>blocks</em>
+    (median IoU 0.84 vs NYC planimetric ground truth) become the aggregation/display/interaction grain —
+    votes deduped once per voter, block-scoped clear-then-cast in <code>/api/vote</code> so a block never
+    holds + and − from one device; route proposals are now computed deterministically on the client
+    (server Leiden engine removed). Plus a critical fix: the packed vote-type field widened 16&nbsp;→&nbsp;24
+    bits — ids past 65,535 were overflowing into the direction bit and recording as downvotes.</p>
+  </a>
+
   <a class="entry" href="./2026-06-17-mobile-graph-memory.html">
     <div class="date">2026-06-17</div>
     <h2>The mobile-Safari heatmap crash was the graph's own memory</h2>

@@ -76,3 +76,7 @@ loadtest/*.log
 
 # streetscape_blocks generated data (regenerable, too big for git)
 server/streetscape_blocks/output/
+
+# osmnx http cache + eval fixtures (regenerable, too big for git)
+server/streetscape_blocks/cache/
+server/streetscape_blocks/eval/*.npz
