@@ -118,6 +118,32 @@ export function isRouteCovered(blocks: number[][], selectedEdges: Iterable<numbe
   return blocks.every((block) => block.some((e) => sel.has(e)));
 }
 
+/**
+ * Expand a selection's edge set to its DIRECTION TWINS among `candidateEdges`.
+ * A two-way street stores each direction as its own edge, and a routed path
+ * often traverses the twin of the edge a proposal's block recorded — a raw
+ * edge-id intersection then misses coverage the user plainly traced. Any
+ * candidate sharing an (undirected) node pair with a selected edge joins the
+ * set, so isRouteCovered sees the street, not the direction.
+ */
+export function expandSelectionToUndirected(
+  topo: { nEdges: number; ends: ArrayLike<number> },
+  selected: Iterable<number>,
+  candidateEdges: Iterable<number>,
+): Set<number> {
+  const sel = new Set(selected);
+  const key = (e: number) => {
+    const u = topo.ends[2 * e], v = topo.ends[2 * e + 1];
+    return u < v ? `${u}|${v}` : `${v}|${u}`;
+  };
+  const pairs = new Set<string>();
+  for (const e of sel) if (e < topo.nEdges) pairs.add(key(e));
+  for (const e of candidateEdges) {
+    if (e < topo.nEdges && !sel.has(e) && pairs.has(key(e))) sel.add(e);
+  }
+  return sel;
+}
+
 // --------------------------------------------------------------------------
 // De-dupe point proposals subsumed by a route.
 // --------------------------------------------------------------------------

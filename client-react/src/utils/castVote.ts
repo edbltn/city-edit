@@ -13,6 +13,7 @@
 
 import { CONFIG } from "../config";
 import { getMapSlug, getPasscodeToken } from "../map/runtime";
+import { dlog, derror } from "./debugLog";
 import { getVoterId } from "./voterIdentity";
 import {
   blockCoverage,
@@ -153,6 +154,10 @@ export async function castVotes(params: {
   const { targetDir, castEdges, clearEdges } = planBlockVote({
     mode, edgeIds: edges, label, direction, blocks,
   });
+  dlog("cast", `press ${direction > 0 ? "+" : "−"} "${label}" →`,
+    targetDir === 0 ? "UNVOTE-ALL" : `cast ${targetDir}`,
+    { selection: edges.length, blocks: blocks.length,
+      cast: castEdges.length, clear: clearEdges.length });
 
   // Optimistic transitions: clears (prev → 0) then casts (prev → targetDir),
   // grouped by prevDir so rollback can restore the exact prior state.
@@ -196,6 +201,10 @@ export async function castVotes(params: {
     if (!res.ok) throw new Error(`Vote failed: ${res.status}`);
 
     const result = await res.json();
+    dlog("cast", "server:", {
+      changed: result?.changed?.length ?? 0, cleared: result?.cleared?.length ?? 0,
+      capped: result?.capped?.length ?? 0, evicted: Object.keys(result?.evicted ?? {}).length,
+    });
 
     // The server may decline some edges under the per-IP abuse cap, returning
     // them in `capped` (absent from `changed`, with no count broadcast). Roll
@@ -243,7 +252,7 @@ export async function castVotes(params: {
       dispatchOptimistic({ mode, label, edgeIds: g.edges, prevDir: g.newDir, newDir: g.prevDir });
       setVotes(mode, g.edges, label, g.prevDir as VoteDirection | 0);
     }
-    console.error("Failed to cast vote:", err);
+    derror("cast", "failed, rolled back:", err);
     return { ok: false, targetDir, changedEdges: [] };
   }
 }

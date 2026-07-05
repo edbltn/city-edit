@@ -11,6 +11,7 @@ Index and conventions for everything under `docs/`. Start here.
 | [url-routing.md](url-routing.md) | How the SPA resolves *which map* to show (slug / subdomain / apex), how links are built, and how an admin adds a vanity subdomain. |
 | [flask-considerations.md](flask-considerations.md) | Backend architecture notes for the real-time vote broadcast path and running across multiple Flask servers. |
 | [testing.md](testing.md) | The test taxonomy — (backend, frontend) × (unit, integration, E2E) — and how to run each. |
+| [debugging.md](debugging.md) | The debugging workflow: named debug tabs (`?tab=<name>`), client `[channel]` debug logging + `cityedit.dumpState()`, the server log-tag table, and curl probes. |
 | [gcp-deployment.md](gcp-deployment.md) | Deploying to Google Cloud (Cloud Run + Memorystore + Artifact Registry + Cloud Build), mapping custom domains, and reaching/backing up prod Postgres. |
 | [archive/](archive/) | Historical design docs that no longer match the code. See [archive/README.md](archive/README.md). |
 

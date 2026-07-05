@@ -3,8 +3,10 @@ import { createRoot } from "react-dom/client";
 import "./styles/globals.css";
 import App from "./App.tsx";
 import { installTouchHoverGuard } from "./utils/touchHover";
+import { initDebug } from "./utils/debugLog";
 
 installTouchHoverGuard();
+initDebug();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

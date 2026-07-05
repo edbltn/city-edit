@@ -30,7 +30,8 @@ import { makeVoteTypeIcon } from "./voteTypeIcon";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import { selectTopProposals, topLabelForEdges, type VoteTypeWinner } from "./topProposals";
 import {
-  computeRouteProposals, routeBlockEdges, isRouteCovered, type RouteProposal,
+  computeRouteProposals, routeBlockEdges, isRouteCovered, expandSelectionToUndirected,
+  type RouteProposal,
 } from "./routeProposals";
 import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts } from "./voteApply";
 import {
@@ -68,6 +69,7 @@ import {
   type VoteDirection,
 } from "../../utils/voteStore";
 import { castVotes, voteButtonState } from "../../utils/castVote";
+import { dlog, dwarn, derror, debugState } from "../../utils/debugLog";
 import { useVotesVersion } from "../../utils/useVotesVersion";
 import { getVoterId } from "../../utils/voterIdentity";
 import { isHoverSuppressed } from "../../utils/touchHover";
@@ -906,6 +908,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // Pinned tooltip screen position (follows start pin on map pan/zoom)
   const [pinnedScreenPos, setPinnedScreenPos] = useState<{ x: number; y: number } | null>(null);
   const pinnedRafRef = useRef<number | null>(null);
+  // Route-summary card screen position (anchored to the route's middle edge,
+  // follows pan/zoom the same way). Null when no route selection exists.
+  const [routeCardPos, setRouteCardPos] = useState<{ x: number; y: number } | null>(null);
+  const routeCardRafRef = useRef<number | null>(null);
   // Pinned target (node or edge) for highlight and tooltip
   const pinnedTargetRef = useRef<HoverTarget | null>(null);
   // The graph node/edge a live waypoint drag would snap to — drawn on the hover
@@ -1502,7 +1508,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const adj = nodeAdjRef.current;
     const data = graphDataRef.current;
     if (!topo || !adj || !data?.edge_vote_types) return;
+    const t0 = performance.now();
     const next = computeRouteProposals(topo, adj, data);
+    dlog("proposals", `recompute: ${next.length} corridors in ${(performance.now() - t0).toFixed(1)}ms`,
+      next.map((p) => `${p.label}#${p.id}(${p.score})`));
+    debugState("routeProposals", next.length);
     // Clustering is deterministic, so an unchanged vote state yields an
     // identical list — keep the previous array to avoid remounting diamonds.
     setRouteProposals((prev) =>
@@ -1539,11 +1549,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       // our topology. Don't paint the mismatch (it would crash); leave the current
       // heatmap and let the next full page load reconcile against fresh topology.
       if (!votesMatchTopology(voteData, topologyRef.current)) {
-        console.warn("Skipping vote refresh: topology/vote dimension mismatch");
+        dwarn("votes", "skipping vote refresh: topology/vote dimension mismatch");
         return;
       }
       graphDataRef.current = { ...topologyRef.current!, ...voteData };
       lastRevRef.current = voteData.rev ?? 0;
+      dlog("votes", `loaded rev ${voteData.rev}: `
+        + `${voteData.block_votes?.length ?? 0} block slots, `
+        + `legend [${(voteData.vote_type_legend ?? []).join(", ")}]`);
+      debugState("votesRev", voteData.rev);
       // Teach the vote store this map's label→id map so packed lookups resolve.
       setVoteTypeMap(voteData.vote_types);
       broadcastBlockVotes(voteData);
@@ -1561,7 +1575,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       refreshGraphDisplayRef.current();
       scheduleRouteProposalsRecomputeRef.current();
     } catch (error) {
-      console.error("Failed to fetch graph votes:", error);
+      derror("votes", "failed to fetch graph votes:", error);
     }
   }, [themeMode, broadcastBlockVotes]);
 
@@ -1667,7 +1681,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             return t;
           } catch (binErr) {
             // Older server without the binary endpoint — fall back to JSON.
-            console.warn("Binary topology unavailable, using JSON:", binErr);
+            dwarn("topo", "binary topology unavailable, using JSON:", binErr);
             const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), init);
             if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
             const t = topologyFromJson(await r.json());
@@ -1690,7 +1704,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
                 topology = decodeTopologyBin(buf);
                 usedCachedTopology = true;
               } catch (decodeErr) {
-                console.warn("Cached binary topology was corrupt, refetching:", decodeErr);
+                dwarn("topo", "cached binary topology was corrupt, refetching:", decodeErr);
               }
             }
           }
@@ -1699,7 +1713,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           topology = await fetchTopologyFromNetwork();
         }
       } catch (error) {
-        console.error("Failed to load graph topology:", error);
+        derror("topo", "failed to load graph topology:", error);
         return;
       }
       if (cancelled || !topology) return;
@@ -1711,6 +1725,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       nodeAdjRef.current = buildNodeAdj(topology);
       blockIndexRef.current = buildBlockIndex(topology);
       hasBlocksRef.current = !!topology.edgeBlockId;
+      dlog("topo", `ready: ${topology.nEdges} edges, ${topology.nNodes} nodes, `
+        + `${topology.nBlocks ?? 0} blocks (${usedCachedTopology ? "IndexedDB cache" : "network"})`);
+      debugState("topology", {
+        nEdges: topology.nEdges, nBlocks: topology.nBlocks ?? 0, cached: usedCachedTopology,
+      });
       scheduleRedrawRef.current();
 
       // 2. Paint immediately from cached votes (same graph version only) so the
@@ -1748,7 +1767,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         // the votes once they line up. If still mismatched, drop the persisted
         // caches and bail rather than paint a crash.
         if (!votesMatchTopology(voteData, topologyRef.current)) {
-          console.warn("Topology/vote mismatch — refetching fresh topology", {
+          dwarn("topo", "topology/vote mismatch — refetching fresh topology", {
             topoEdges: topologyRef.current?.nEdges,
             voteEdges: voteData.n_edges ?? voteData.edge_votes?.length,
           });
@@ -1794,7 +1813,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         setHeatmapLoaded();
         recomputeRouteProposalsRef.current();
       } catch (error) {
-        console.error("Failed to fetch graph votes:", error);
+        derror("votes", "failed to fetch graph votes:", error);
       }
     })();
     return () => { cancelled = true; };
@@ -1822,6 +1841,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
       // Gap detection: if we missed revisions, full refetch
       if (lastRevRef.current > 0 && delta.rev > lastRevRef.current + 1) {
+        dwarn("votes", `delta gap (have rev ${lastRevRef.current}, got ${delta.rev}) — full refetch`);
         fetchVotesRef.current();
         return;
       }
@@ -1831,6 +1851,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         return;
       }
 
+      dlog("votes", `delta rev ${delta.rev}: "${delta.vtLabel ?? delta.vt}" `
+        + `edges=${delta.edges.length} blocks=${Object.keys(delta.blockCounts ?? {}).length}`);
       applyDeltaToGraphData(delta);
       refreshGraphDisplayRef.current();
       scheduleRouteProposalsRecomputeRef.current();
@@ -2599,6 +2621,48 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   }, [map, pinnedLat, pinnedLng, resolveSelection, isHeatmapLoading, winners,
       isStationNetwork, nearestProposalEdgeIndex, strongestProposalEdgeForNode, votesVersion]);
 
+  // Anchor the route-summary card to the midpoint of the route's MIDDLE path
+  // edge, tracking pan/zoom like the pinned card. Active only for a full route
+  // selection on a street map (start AND end; a lone point uses the pinned card
+  // instead). isHeatmapLoading re-runs it once topology arrives, so a deep-linked
+  // route (waypoints set before the graph loads) still gets its card.
+  useEffect(() => {
+    const topo = topologyRef.current;
+    const ids = pathEdgeIds;
+    const hasRoute = !isStationNetwork && startLat !== null && endLat !== null
+      && !!ids && ids.length > 0 && !!topo;
+    if (!hasRoute) { setRouteCardPos(null); return; }
+    const midEdge = ids![Math.floor(ids!.length / 2)];
+    if (midEdge >= topo!.nEdges) { setRouteCardPos(null); return; }
+    const f = edgeFrom(topo!, midEdge), t = edgeTo(topo!, midEdge);
+    const anchorLat = (nodeLat(topo!, f) + nodeLat(topo!, t)) / 2;
+    const anchorLng = (nodeLon(topo!, f) + nodeLon(topo!, t)) / 2;
+
+    const update = () => {
+      const pt = map.latLngToContainerPoint([anchorLat, anchorLng]);
+      const rect = map.getContainer().getBoundingClientRect();
+      setRouteCardPos({ x: rect.left + pt.x, y: rect.top + pt.y - 8 });
+    };
+    const throttledUpdate = () => {
+      if (routeCardRafRef.current) return;
+      routeCardRafRef.current = requestAnimationFrame(() => {
+        routeCardRafRef.current = null;
+        update();
+      });
+    };
+    update();
+    map.on("move", throttledUpdate);
+    map.on("zoom", throttledUpdate);
+    return () => {
+      map.off("move", throttledUpdate);
+      map.off("zoom", throttledUpdate);
+      if (routeCardRafRef.current) {
+        cancelAnimationFrame(routeCardRafRef.current);
+        routeCardRafRef.current = null;
+      }
+    };
+  }, [map, pathEdgeIds, startLat, startLng, endLat, endLng, isStationNetwork, isHeatmapLoading]);
+
   // Collapse any open spread when the selection is CLEARED (modal "X" / "Clear").
   // Keyed only on the pinned point, so it fires on the transition to null — NOT on
   // every re-run of the resolve effect above (which also runs on votesVersion /
@@ -2741,6 +2805,58 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   if (pinnedWinner && pinnedVoteTypes.length === 0) {
     pinnedVoteTypes = [{ label: pinnedWinner.label, up: pinnedWinner.count, down: 0 }];
   }
+
+  // -------------------------------------------------------------------------
+  // Route-summary card content (docs §2.4: everything displays at block grain)
+  // -------------------------------------------------------------------------
+
+  // The selection's touched blocks, materialized once for the card (count +
+  // the ± buttons' pressed state) and the route cast.
+  const routeBlocks = useMemo(() => {
+    void graphVoteVersion;
+    const topo = topologyRef.current;
+    if (!topo || !pathEdgeIds || pathEdgeIds.length === 0) return null;
+    return materializeBlocks(topo, blockIndexRef.current, pathEdgeIds);
+  }, [pathEdgeIds, graphVoteVersion, isHeatmapLoading]);
+
+  // Vote rows summed over the whole selection — block-grain (deduped per-block
+  // counts) when the map has blocks, per-edge sums otherwise.
+  const routeVoteRows = useMemo<VoteTypeRow[]>(() => {
+    void graphVoteVersion;
+    void votesVersion;
+    const d = graphDataRef.current;
+    if (!d || !pathEdgeIds || pathEdgeIds.length === 0) return [];
+    const rows = selectionVoteRows(d, pathEdgeIds);
+    if (rows) return rows;
+    const legendNow = d.vote_type_legend ?? [];
+    const sums = new Map<string, { up: number; down: number }>();
+    for (const eid of pathEdgeIds) {
+      for (const [li, up, down] of (d.edge_vote_types ?? [])[eid] ?? []) {
+        const label = legendNow[li];
+        if (!label) continue;
+        const cur = sums.get(label) ?? { up: 0, down: 0 };
+        cur.up += up ?? 0;
+        cur.down += down ?? 0;
+        sums.set(label, cur);
+      }
+    }
+    return [...sums.entries()]
+      .map(([label, v]) => ({ label, ...v }))
+      .sort((a, b) => (b.up - b.down) - (a.up - a.down));
+  }, [pathEdgeIds, graphVoteVersion, votesVersion, isHeatmapLoading]);
+
+  // The route proposal the current selection covers (every block touched), if
+  // any — it becomes the card's header, so selecting a diamond (or manually
+  // tracing its corridor) titles the summary with that proposal. Coverage is
+  // twin-expanded, matching the diamonds' own covered state.
+  const coveredRouteProposal = useMemo(() => {
+    void isHeatmapLoading;
+    const topo = topologyRef.current;
+    if (!topo || !pathEdgeIds || pathEdgeIds.length === 0 || routeProposals.length === 0) return null;
+    const sel = expandSelectionToUndirected(
+      topo, pathEdgeIds, routeProposals.flatMap((p) => p.blockEdgeIds));
+    return routeProposals.find((p) => isRouteCovered(p.blocks, sel)) ?? null;
+  }, [pathEdgeIds, routeProposals, isHeatmapLoading]);
 
   // geocodeVersion used to re-render when async geocode completes
   void geocodeVersion;
@@ -3170,16 +3286,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           // one sits on top — but explode/waypoint/selected still lift a pin into
           // a higher band regardless of votes. Bands are 100k apart and votes are
           // capped at 50k, so the vote offset can never bleed one band into the
-          // next. Highest band first:
-          //   300000+  fanned-out (spread override) — the exploded cluster reads
-          //            as one group on top of everything else.
+          // next. Highest band first (route diamonds slot in between — see
+          // routeIndicatorMarkers):
+          //   500000+  fanned-out (spread override) — the exploded cluster is the
+          //            disambiguation UI, so it reads as one group on top of
+          //            EVERYTHING, route diamonds included.
+          //   400000+  a route diamond covered by the selection (routeIndicator).
+          //   300000+  a route diamond, uncovered (routeIndicator).
           //   200000+  a MATCHED waypoint (start/end/mid). It carries the [×]
           //            badge, so it must sit above any overlapping non-matched
           //            sibling — else the upper icon conceals its badge.
           //   100000+  the selected (open-modal) proposal.
           //     1000+  everything else, ordered by votes.
           zIndexOffset={
-            (override ? 300000
+            (override ? 500000
              : role !== null ? 200000
              : w.edgeIdx === selectedEdgeIdx ? 100000
              : 1000)
@@ -3240,6 +3360,23 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       // Block-scoped semantics (docs §4): the plan/unvote spans the touched
       // block; omitted (pre-topology) castVotes falls back to singletons.
       blocks: topo ? materializeBlocks(topo, blockIndexRef.current, [edgeId]) : undefined,
+    });
+  }, [themeMode]);
+
+  // Cast a directional vote on the WHOLE route selection — the route-summary
+  // card's ± buttons. Same unified castVotes path (and the same edge set +
+  // block materialization) as the top-bar route cast, so pressed/unvote
+  // semantics match wherever the vote is made from. The card passes an edgeId
+  // only to enable its buttons; the cast targets every path edge.
+  const castRouteVote = useCallback((
+    _edgeId: number | null, label: string, newDir: VoteDirection,
+  ) => {
+    const ids = pathEdgeIdsRef.current;
+    if (!ids || ids.length === 0 || !label) return;
+    const topo = topologyRef.current;
+    castVotes({
+      mode: themeMode, edgeIds: Array.from(ids), label, direction: newDir,
+      blocks: topo ? materializeBlocks(topo, blockIndexRef.current, ids) : undefined,
     });
   }, [themeMode]);
 
@@ -3316,7 +3453,27 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const routeIndicatorMarkers = useMemo(() => {
     const topology = topologyRef.current;
     if (!topology || routeProposals.length === 0) return null;
-    const selectedSet = pathEdgeIds ? new Set(pathEdgeIds) : null;
+    // Coverage is matched with direction twins included (a routed path often
+    // traverses the twin of the edge a corridor's block recorded).
+    const selectedSet = pathEdgeIds
+      ? expandSelectionToUndirected(
+          topology, pathEdgeIds, routeProposals.flatMap((p) => p.blockEdgeIds))
+      : null;
+
+    // Container points of the current waypoints (start/end/mids). A diamond
+    // whose icon box overlaps a waypoint's icon box goes PASSTHROUGH: the
+    // diamond outranks every settled icon (bands below), so left interactive it
+    // would swallow the press meant for the waypoint's kite RouteMarker — the
+    // "can't drag a start that sits on a proposal" bug. Passthrough hands the
+    // gesture to the kite, exactly like a matched point pin does. Pan shifts
+    // both projections by the same delta, so only zoom (a dep) re-runs this.
+    const waypointPts: L.Point[] = [];
+    if (startLat !== null && startLng !== null) waypointPts.push(map.latLngToContainerPoint([startLat, startLng]));
+    if (endLat !== null && endLng !== null) waypointPts.push(map.latLngToContainerPoint([endLat, endLng]));
+    for (const wp of ghostWaypointsRef.current) waypointPts.push(map.latLngToContainerPoint([wp.lat, wp.lng]));
+    // Both icons share the pin geometry: 34×42 box, anchor at the tip (17,36).
+    const overlapsWaypoint = (pt: L.Point) =>
+      waypointPts.some((wp) => Math.abs(wp.x - pt.x) < 34 && Math.abs(wp.y - pt.y) < 42);
 
     return routeProposals.map((p) => {
       const midEdge = p.edgeIds[Math.floor(p.edgeIds.length / 2)];
@@ -3332,8 +3489,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       }
 
       const covered = selectedSet ? isRouteCovered(p.blocks, selectedSet) : false;
+      const dp = map.latLngToContainerPoint([posLat, posLng]);
+      const passthrough = overlapsWaypoint(dp);
       const icon = makeVoteTypeIcon(p.label, theme.suggestions, {
-        diamond: true, selected: covered,
+        diamond: true, selected: covered, passthrough,
       });
 
       const activate = () => {
@@ -3352,14 +3511,31 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           key={`route-${p.id}`}
           position={[posLat, posLng]}
           icon={icon}
-          zIndexOffset={(covered ? 150000 : 5000) + Math.min(48000, Math.max(0, p.score))}
+          // Route diamonds sit ABOVE every settled point icon (matched/selected/
+          // browse) so a corridor is never buried under point pins; covered ones
+          // outrank uncovered; the fanned-out spread (500000+) alone stays above
+          // them (it's the explicit disambiguation gesture). Bands documented at
+          // the point-icon zIndexOffset.
+          zIndexOffset={(covered ? 400000 : 300000) + Math.min(48000, Math.max(0, p.score))}
+          interactive={!passthrough}
           onActivate={activate}
           onDeactivate={deactivate}
-          onClick={() => onRouteProposalClickRef.current?.(p)}
+          onClick={() => {
+            // Drop any hover card sitting at the click point — the route-summary
+            // card about to open would otherwise render underneath it until the
+            // next mousemove refreshes the hover.
+            if (hoverTargetRef.current) {
+              hoverTargetRef.current = null;
+              setHoverTarget(null);
+              redrawHoverHighlightRef.current();
+            }
+            onRouteProposalClickRef.current?.(p);
+          }}
         />
       );
     });
-  }, [routeProposals, pathEdgeIds, currentZoom, map, theme.suggestions, mapStyle.heat]);
+  }, [routeProposals, pathEdgeIds, currentZoom, map, theme.suggestions, mapStyle.heat,
+      startLat, startLng, endLat, endLng, ghostKey]);
 
   return (
     <>
@@ -3395,6 +3571,50 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             overModalRef.current = over;
             // Clear any transient hover card when entering the pinned modal so
             // it doesn't linger over the selection.
+            if (over && hoverTargetRef.current) {
+              hoverTargetRef.current = null;
+              setHoverTarget(null);
+              redrawHoverHighlightRef.current();
+            }
+          }}
+        />,
+        mapContainer
+      )}
+      {/* Route-summary card — the modal for a FULL route selection (start+end),
+          which the pinned card (lone point) never covers. Summarizes the blocks
+          the route selects and the block-grain vote rows across them; headed by
+          the covered route proposal when the selection covers one. The ±
+          buttons cast on the whole selection via castRouteVote. */}
+      {routeCardPos && routeBlocks && routeBlocks.length > 0 && !showPinned && createPortal(
+        <ProposalCard
+          key={`route:${coveredRouteProposal?.id ?? "selection"}`}
+          winner={coveredRouteProposal
+            ? {
+                legendIdx: coveredRouteProposal.legendIdx,
+                label: coveredRouteProposal.label,
+                edgeIdx: coveredRouteProposal.edgeIds[0],
+                count: coveredRouteProposal.score,
+              }
+            : null}
+          eyebrow="Route Proposal"
+          screenX={routeCardPos.x}
+          screenY={routeCardPos.y}
+          name=""
+          // Maps without block artifacts fall back to singleton blocks (one per
+          // edge), where "blocks" would read as a huge nonsense number — call
+          // those what they are.
+          metaText={`selects ${routeBlocks.length} ${hasBlocksRef.current ? "block" : "segment"}${routeBlocks.length !== 1 ? "s" : ""}`}
+          rows={routeVoteRows}
+          interactive
+          edgeId={pathEdgeIds && pathEdgeIds.length > 0 ? pathEdgeIds[0] : null}
+          blocks={routeBlocks}
+          mode={themeMode}
+          voteTypes={theme.suggestions}
+          shareUrl={window.location.href}
+          onVote={castRouteVote}
+          registerEl={(el) => { pinnedModalElRef.current = el; }}
+          onHoverChange={(over) => {
+            overModalRef.current = over;
             if (over && hoverTargetRef.current) {
               hoverTargetRef.current = null;
               setHoverTarget(null);
@@ -3468,9 +3688,15 @@ function ExpandIcon({ size = 12 }: { size?: number }) {
 
 interface ProposalCardProps {
   winner: VoteTypeWinner | null;
+  /** Header eyebrow text over the winner label. The route-summary card passes
+   *  "Route Proposal"; point cards keep the default. */
+  eyebrow?: string;
   screenX: number;
   screenY: number;
   name: string;
+  /** Replaces the default "N proposals" meta line — the route-summary card
+   *  puts its block count here ("selects N blocks"). */
+  metaText?: string | null;
   rows: VoteTypeRow[];
   interactive?: boolean;
   edgeId?: number | null;
@@ -3502,7 +3728,7 @@ type CardPos = {
 };
 
 function ProposalCard({
-  winner, screenX, screenY, name, rows,
+  winner, eyebrow = "Top Proposal", screenX, screenY, name, metaText = null, rows,
   interactive = false, edgeId = null, blocks = null, mode = "", shareUrl = null, voteTypes, onVote, onRemove, onHoverChange, registerEl,
 }: ProposalCardProps) {
   const [copied, setCopied] = useState(false);
@@ -3672,7 +3898,7 @@ function ProposalCard({
                 )}
               </span>
               <div className="graph-indicator-modal-headtext">
-                <div className="graph-indicator-modal-eyebrow">Top Proposal</div>
+                <div className="graph-indicator-modal-eyebrow">{eyebrow}</div>
                 <div className="graph-indicator-modal-label">{winner.label}</div>
               </div>
             </div>
@@ -3711,9 +3937,10 @@ function ProposalCard({
           <div className="graph-indicator-modal-body">
             {name && <div className="graph-tooltip-name">{name}</div>}
             <div className="graph-tooltip-meta">
-              {rows.length > 0
-                ? `${rows.length} proposal${rows.length !== 1 ? "s" : ""}`
-                : "no proposals yet"}
+              {metaText
+                ?? (rows.length > 0
+                  ? `${rows.length} proposal${rows.length !== 1 ? "s" : ""}`
+                  : "no proposals yet")}
             </div>
             {rows.length > 0 && (
               <div className="graph-proposal-rows" style={voteColumnWidths(rows)}>

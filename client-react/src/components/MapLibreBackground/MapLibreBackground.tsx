@@ -10,6 +10,7 @@ import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { CONFIG } from "../../config";
+import { dlog, dwarn, debugState } from "../../utils/debugLog";
 import { maplibreRasterTiles, type MapStyle } from "../../mapStyles";
 
 // Register PMTiles protocol once at module level
@@ -102,6 +103,11 @@ function buildStyle(
         type: "raster",
         tiles,
         tileSize: 256,
+        // CartoDB serves tiles up to z19; capping the SOURCE makes MapLibre
+        // overzoom (stretch) z19 tiles beyond that, like Leaflet's
+        // maxNativeZoom. A maxzoom on the LAYER would instead hide the base
+        // map entirely once the camera passes it.
+        maxzoom: 19,
         attribution:
           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
       },
@@ -128,8 +134,6 @@ function buildStyle(
         id: "carto-tiles",
         type: "raster",
         source: "carto-base",
-        minzoom: 0,
-        maxzoom: 19,
       },
       // Block heat — the primary vote display, colored from feature-state:
       // a translucent fill plus a thin bright outline (brightness without bulk).
@@ -212,18 +216,23 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
           mapStyle,
         ),
         center: [CONFIG.initialView.lon, CONFIG.initialView.lat],
-        zoom: CONFIG.initialView.zoom,
+        zoom: CONFIG.initialView.zoom - LEAFLET_TO_MAPLIBRE_ZOOM,
         interactive: false,
         attributionControl: false,
       });
 
       map.on("error", (e) => {
-        console.warn("MapLibre error (non-fatal):", e.error?.message ?? e);
+        dwarn("maplibre", "error (non-fatal):", e.error?.message ?? e);
       });
 
       // Base map has rendered for the first time — let the loader dismiss and
       // the Leaflet raster fallback unmount (MapLibre is the base map now).
-      map.on("load", () => onReady?.(true));
+      map.on("load", () => {
+        dlog("maplibre", "load — MapLibre is the base map (raster fallback unmounts)");
+        debugState("maplibreLoaded", true);
+        onReady?.(true);
+      });
+      debugState("maplibreLoaded", false);
 
       mapRef.current = map;
       if (import.meta.env.DEV) {
@@ -235,7 +244,8 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         mapRef.current = null;
       };
     } catch (err) {
-      console.warn("MapLibre GL JS unavailable (WebGL required):", err);
+      dwarn("maplibre", "GL JS unavailable (WebGL required) — raster fallback stays:", err);
+      debugState("maplibreLoaded", "webgl-unavailable");
       // Leaflet TileLayer provides the fallback base map — it's already
       // mounting, so consider the base map ready (and keep the raster).
       onReady?.(false);
@@ -252,7 +262,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
       const ml = mapRef.current;
       if (!ml) return;
       const center = leafletMap.getCenter();
-      const zoom = leafletMap.getZoom();
+      const zoom = leafletMap.getZoom() - LEAFLET_TO_MAPLIBRE_ZOOM;
       ml.jumpTo({
         center: [center.lng, center.lat],
         zoom,
@@ -261,13 +271,54 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
       });
     };
 
+    // During Leaflet's ANIMATED zoom (wheel / zoom buttons) no `move` events
+    // fire until the 250ms CSS transition ends — Leaflet suppresses them
+    // (`_move(…, supressEvent=true)`) — so jumpTo alone leaves the GL base map
+    // + block heat frozen mid-zoom while the Leaflet layers glide, then snaps.
+    // Ride the animation instead: transition the GL container with the SAME
+    // duration/curve Leaflet gives `.leaflet-zoom-animated` layers, mapping
+    // every current container point p to `q + p·scale` (its position in the
+    // target frame). Pinch-zoom is untouched: it fires per-frame `move` events
+    // and stays live through syncCamera.
+    const handleZoomAnim = (e: L.ZoomAnimEvent) => {
+      const el = containerRef.current;
+      const animating = (leafletMap as unknown as { _animatingZoom?: boolean })._animatingZoom;
+      if (!el || !mapRef.current || !animating) return;
+      const scale = leafletMap.getZoomScale(e.zoom, leafletMap.getZoom());
+      // Where the viewport's current top-left corner lands in the target frame
+      // (container coords): project() scales linearly with zoom, so the whole
+      // current frame maps into the target one by translate(q) scale(scale).
+      const nw = leafletMap.containerPointToLatLng([0, 0]);
+      const q = leafletMap
+        .project(nw, e.zoom)
+        .subtract(leafletMap.project(e.center, e.zoom))
+        .add(leafletMap.getSize().divideBy(2));
+      el.style.transition = "transform 0.25s cubic-bezier(0, 0, 0.25, 1)";
+      el.style.transform = `translate3d(${q.x}px, ${q.y}px, 0) scale(${scale})`;
+    };
+
+    // At transition end Leaflet fires `move` (→ syncCamera jumpTo) then
+    // `zoomend`, in the same tick. Clearing the transform here lands in the
+    // same compositor frame as MapLibre's re-render of the final camera (its
+    // rAF runs before paint), so the crisp frame swaps in without a flash.
+    const handleZoomEnd = () => {
+      const el = containerRef.current;
+      if (!el || !el.style.transform) return;
+      el.style.transition = "";
+      el.style.transform = "";
+    };
+
     // Sync on every move frame for smooth panning
     leafletMap.on("move", syncCamera);
+    leafletMap.on("zoomanim", handleZoomAnim);
+    leafletMap.on("zoomend", handleZoomEnd);
     // Initial sync
     syncCamera();
 
     return () => {
       leafletMap.off("move", syncCamera);
+      leafletMap.off("zoomanim", handleZoomAnim);
+      leafletMap.off("zoomend", handleZoomEnd);
     };
   }, [leafletMap]);
 
@@ -314,6 +365,9 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
 
     const onVotes = (e: Event) => {
       latest.current = (e as CustomEvent<BlockVotesDetail>).detail;
+      const nz = latest.current.blockVotes.reduce((n, v) => (v > 0 ? n + 1 : n), 0);
+      dlog("blocks", `heat broadcast: ${nz} blocks lit (max=${latest.current.max})`);
+      debugState("blockHeatNonzero", nz);
       apply();
     };
 
@@ -322,6 +376,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
     // which would also drop the heat key set above.
     const onSelect = (e: Event) => {
       const next = (e as CustomEvent<BlockSelectDetail>).detail.blockIds;
+      dlog("blocks", `select: [${next.slice(0, 12).join(",")}${next.length > 12 ? ",…" : ""}]`);
       const ml = mapRef.current;
       if (ml && ml.getSource("blocks")) {
         const nextSet = new Set(next);
@@ -357,6 +412,9 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         width: "100%",
         height: "100%",
         zIndex: 0,
+        // The zoom-animation ride scales this element about the viewport's
+        // top-left corner (see handleZoomAnim).
+        transformOrigin: "0 0",
       }}
     />
   );

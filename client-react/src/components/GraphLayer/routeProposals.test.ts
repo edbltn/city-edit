@@ -4,6 +4,7 @@ import {
   proposalShapeClass,
   routeBlockEdges,
   isRouteCovered,
+  expandSelectionToUndirected,
   dropPointsCoveredByRoutes,
   chooseAnchorOrder,
   computeRouteProposals,
@@ -88,6 +89,33 @@ describe("isRouteCovered (auto-select)", () => {
   it("clears coverage when a block drops out of the selection", () => {
     expect(isRouteCovered(blocks, new Set([0, 1, 2]))).toBe(true);
     expect(isRouteCovered(blocks, new Set([0, 1]))).toBe(false);
+  });
+});
+
+describe("expandSelectionToUndirected", () => {
+  // Edges 0/1 are direction twins (nodes 10↔11); edge 2 is a different street.
+  const topo = {
+    nEdges: 3,
+    ends: Int32Array.from([10, 11, /* e0 */ 11, 10, /* e1 */ 11, 12 /* e2 */]),
+  };
+
+  it("adds candidate edges sharing a node pair with a selected edge", () => {
+    const sel = expandSelectionToUndirected(topo, [0], [1, 2]);
+    expect(sel.has(0)).toBe(true);
+    expect(sel.has(1)).toBe(true);  // twin of selected 0 → joins
+    expect(sel.has(2)).toBe(false); // different street → not added
+  });
+
+  it("makes twin-traversing routes read as covering the corridor", () => {
+    // Corridor block recorded edge 1; the routed path traversed twin edge 0.
+    const blocks = [[1]];
+    expect(isRouteCovered(blocks, [0])).toBe(false); // raw ids miss
+    expect(isRouteCovered(blocks, expandSelectionToUndirected(topo, [0], [1]))).toBe(true);
+  });
+
+  it("ignores out-of-range candidates and leaves the selection intact", () => {
+    const sel = expandSelectionToUndirected(topo, [2], [99]);
+    expect([...sel]).toEqual([2]);
   });
 });
 

@@ -41,7 +41,13 @@ from database import (
 
 # ── Logging ────────────────────────────────────────────────────────────────
 
-logging.basicConfig(level=logging.INFO, format='%(message)s', stream=sys.stdout)
+# Every server log line carries a [TAG] prefix ([VOTE], [GRAPH], [DB], …) —
+# the tag table + debugging workflow live in docs/debugging.md. LOG_LEVEL=DEBUG
+# turns on the chattier lines without a code change.
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format='%(message)s', stream=sys.stdout,
+)
 logger = logging.getLogger(__name__)
 sys.stdout.reconfigure(line_buffering=True)
 

@@ -17,6 +17,7 @@
 // The server (/api/my-votes, vote deltas) is authoritative across devices;
 // reconcileEdge folds its truth in.
 
+import { dlog } from "./debugLog";
 import { packVoteKey, unpackVoteKey, modeToInt } from "./voteKey";
 
 export type VoteDirection = 1 | -1;
@@ -370,10 +371,12 @@ export function resetMapVotes(
   const modeInt = modeToInt(mode);
   const ids = loadById();
   let changed = false;
+  let dropped = 0;
   for (const key of [...ids.keys()]) {
     if (unpackVoteKey(key).modeInt === modeInt) {
       ids.delete(key);
       changed = true;
+      dropped++;
     }
   }
   const lbl = loadByLabel();
@@ -382,8 +385,11 @@ export function resetMapVotes(
     if (key.startsWith(prefix)) {
       lbl.delete(key);
       changed = true;
+      dropped++;
     }
   }
+  dlog("store", `resetMapVotes(${mode}): dropped ${dropped} local entries, `
+    + `applying ${Object.keys(serverVotes).length} server edges`);
   for (const [eidStr, labels] of Object.entries(serverVotes)) {
     const eid = Number(eidStr);
     for (const [label, dir] of Object.entries(labels)) {

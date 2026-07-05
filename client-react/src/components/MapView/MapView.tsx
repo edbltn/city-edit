@@ -340,10 +340,13 @@ export function MapView() {
     setMarkerHoverCount((c) => Math.max(0, c + (hovering ? 1 : -1)));
   }, []);
 
-  // Wrapper for marker drag start — suppresses ghost pin and next click
+  // Wrapper for marker drag start — suppresses ghost pin and next click. Also
+  // drops any matched-waypoint hover card: the kite is leaving its proposal, so
+  // the card must not linger at the old spot while (and after) it moves.
   const handleMarkerDragStart = useCallback(() => {
     setIsDraggingMarker(true);
     setSuppressClick();
+    setHoverProposalPoint(null);
   }, [setSuppressClick]);
 
   // Wrapper for marker drag finish — re-enables ghost pin
@@ -627,8 +630,12 @@ export function MapView() {
           onOutOfBounds={handleOutOfBounds}
           onHoverChange={(h) => {
             handleMarkerHover(h);
-            // On a proposal, surface that proposal's hover card while the kite is hovered.
-            if (waypointMatch.mids[index] != null) setHoverProposalPoint(h ? wp : null);
+            // On a proposal, surface that proposal's hover card while the kite is
+            // hovered. Un-hover clears UNCONDITIONALLY: the match may have gone
+            // null since the hover began (a drag moved the kite off its
+            // proposal), and a guarded clear would strand the card forever.
+            if (!h) setHoverProposalPoint(null);
+            else if (waypointMatch.mids[index] != null) setHoverProposalPoint(wp);
           }}
         />
       ))}
@@ -672,7 +679,9 @@ export function MapView() {
           onOutOfBounds={handleOutOfBounds}
           onHoverChange={(h) => {
             handleMarkerHover(h);
-            if (waypointMatch.start != null && start.coords) setHoverProposalPoint(h ? start.coords : null);
+            // Un-hover clears unconditionally — see the mid marker's note.
+            if (!h) setHoverProposalPoint(null);
+            else if (waypointMatch.start != null && start.coords) setHoverProposalPoint(start.coords);
           }}
         />
       )}
@@ -695,7 +704,9 @@ export function MapView() {
           onOutOfBounds={handleOutOfBounds}
           onHoverChange={(h) => {
             handleMarkerHover(h);
-            if (waypointMatch.end != null && end.coords) setHoverProposalPoint(h ? end.coords : null);
+            // Un-hover clears unconditionally — see the mid marker's note.
+            if (!h) setHoverProposalPoint(null);
+            else if (waypointMatch.end != null && end.coords) setHoverProposalPoint(end.coords);
           }}
         />
       )}

@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { CONFIG } from "../config";
+import { dlog, dwarn } from "../utils/debugLog";
 import { withMap, getMapSlug, getPasscodeToken } from "../map/runtime";
 import type { VoteDelta } from "../types";
 
@@ -40,6 +41,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
+      dlog("ws", "connected", wsUrl);
       setConnectionStatus("connected");
       backoffRef.current = 1000;
     };
@@ -58,11 +60,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         }
         // "init" and "keepalive" are handled silently
       } catch (e) {
-        console.warn("bad ws message", e);
+        dwarn("ws", "bad message", e);
       }
     };
 
     ws.onclose = () => {
+      dwarn("ws", `disconnected — reconnecting in ${backoffRef.current}ms`);
       setConnectionStatus("disconnected");
       const delay = backoffRef.current;
       backoffRef.current = Math.min(delay * 2, MAX_BACKOFF);
