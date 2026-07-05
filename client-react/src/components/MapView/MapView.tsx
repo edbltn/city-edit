@@ -60,6 +60,10 @@ function MapPanes() {
 
     // Set default map cursor to crosshair (for placing start/end points)
     map.getContainer().style.cursor = "crosshair";
+
+    if (import.meta.env.DEV) {
+      (window as unknown as Record<string, unknown>).__lmap = map;
+    }
   }, [map]);
 
   return null;

@@ -16,6 +16,13 @@ import { maplibreRasterTiles, type MapStyle } from "../../mapStyles";
 const protocol = new Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 
+// Leaflet zoom N ≠ MapLibre zoom N: Leaflet's scale is defined against 256px
+// world tiles, MapLibre's against 512px, so the same number renders MapLibre
+// at exactly 2× Leaflet's scale. Subtract 1 when driving the MapLibre camera
+// from Leaflet or the two renderers agree only at the screen center and every
+// Leaflet-drawn layer (pins, routes, hover edges) drifts outward from there.
+const LEAFLET_TO_MAPLIBRE_ZOOM = 1;
+
 // Block-vote payload broadcast by GraphLayer (which owns the /api/graph-votes
 // fetch). MapLibreBackground colors the block fills from it via feature-state.
 export interface BlockVotesDetail {
@@ -99,10 +106,14 @@ function buildStyle(
           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
       },
       // Block polygons from PMTiles (one per street segment / merged foot path).
+      // block_id is the NATIVE feature id (tippecanoe --use-attribute-for-id
+      // moves the attribute onto the id and out of properties) — do NOT set
+      // promoteId: it would look up the now-absent property and override every
+      // id with undefined, silently detaching all feature-state (heat,
+      // selection).
       blocks: {
         type: "vector",
         url: `pmtiles://${blockTilesUrl}`,
-        promoteId: "block_id",
       },
     },
     layers: [

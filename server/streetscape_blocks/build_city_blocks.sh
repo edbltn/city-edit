@@ -55,8 +55,12 @@ CITY="$CITY" NETWORK="$NETWORK" BLOCKS_FILE="$BLOCKS_FILE" \
 
 echo "== [5/5] blocks.pmtiles"
 if command -v tippecanoe >/dev/null 2>&1; then
+  # --use-attribute-for-id: block_id becomes the NATIVE feature id (required by
+  # the client's setFeatureState heat/selection; MapLibre reads native ids, no
+  # promoteId). Matches how the existing nyc blocks.pmtiles was built.
   tippecanoe -o "$DATA_DIR/blocks.pmtiles" -zg --drop-densest-as-needed \
     --extend-zooms-if-still-dropping --coalesce-densest-as-needed \
+    --use-attribute-for-id=block_id \
     -l blocks --force "$BLOCKS_FILE"
 else
   echo "tippecanoe not found — skipping PMTiles (install: brew install tippecanoe)"
