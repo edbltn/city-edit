@@ -17,7 +17,7 @@
 // The server (/api/my-votes, vote deltas) is authoritative across devices;
 // reconcileEdge folds its truth in.
 
-import { packVoteKey, modeToInt } from "./voteKey";
+import { packVoteKey, unpackVoteKey, modeToInt } from "./voteKey";
 
 export type VoteDirection = 1 | -1;
 export type Coverage = {
@@ -347,6 +347,50 @@ export function reconcileEdge(
   let changed = false;
   for (const [label, dir] of Object.entries(serverLabels)) {
     if (dir === 1 || dir === -1) changed = writeVote(mode, edgeId, label, dir) || changed;
+  }
+  if (changed) {
+    persistById();
+    persistByLabel();
+    notify();
+  }
+}
+
+/**
+ * Replace this mode's entire local vote state with the server's authoritative
+ * my-votes snapshot ({edgeId: {label: direction}}). Runs on map load: a stale
+ * localStorage claiming votes the server lacks (dev DB reset, resnapped edge
+ * ids, another device's cleanup) makes blockCoverage read "all" and silently
+ * flips the next cast into a block-unvote — so on load the server wins
+ * outright, including deleting local entries it doesn't confirm.
+ */
+export function resetMapVotes(
+  mode: string,
+  serverVotes: Record<string, Record<string, number>>,
+) {
+  const modeInt = modeToInt(mode);
+  const ids = loadById();
+  let changed = false;
+  for (const key of [...ids.keys()]) {
+    if (unpackVoteKey(key).modeInt === modeInt) {
+      ids.delete(key);
+      changed = true;
+    }
+  }
+  const lbl = loadByLabel();
+  const prefix = `${mode}|`;
+  for (const key of [...lbl.keys()]) {
+    if (key.startsWith(prefix)) {
+      lbl.delete(key);
+      changed = true;
+    }
+  }
+  for (const [eidStr, labels] of Object.entries(serverVotes)) {
+    const eid = Number(eidStr);
+    for (const [label, dir] of Object.entries(labels)) {
+      if (dir === 1 || dir === -1) {
+        changed = writeVote(mode, eid, label, dir as VoteDirection) || changed;
+      }
+    }
   }
   if (changed) {
     persistById();

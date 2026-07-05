@@ -30,13 +30,14 @@ export interface VoteTypeIconOptions {
    *  (the badge is pointer-events:auto; the rest of the icon is not). */
   removeEdge?: number | null;
   /** "Heat" of this proposal, 0–1, normalized against the hottest visible
-   *  proposal's vote count. Drives a colored glow + border tint via CSS (the
-   *  `--heat` / `--heat-color` custom properties below), so a top proposal looks
-   *  as hot as the votes behind it. 0 (or omitted) renders the plain pin. */
+   *  proposal's vote count. Rendered as INK, not glow (CSS off the `--heat` /
+   *  `--heat-color` custom properties below): the pin's paper fill warms toward
+   *  the ramp color and its outline burns hotter and slightly thicker — crisp
+   *  at every heat. 0 (or omitted) renders the plain pin. */
   heat?: number;
-  /** The glow/tint color for `heat`, sampled from the active map's heat ramp at
-   *  the same intensity the canvas heatmap uses — so a pin matches the hue the
-   *  heat field would paint under it. Ignored when `heat` is falsy. */
+  /** The tint color for `heat`, sampled from the active map's heat ramp at the
+   *  same intensity the heat field uses — so a pin matches the hue the heat
+   *  would paint under it. Ignored when `heat` is falsy. */
   heatColor?: string;
 }
 
@@ -105,7 +106,7 @@ export function makeVoteTypeIcon(
   const removeBadge = opts.removeEdge != null
     ? `<span class="vote-type-indicator-x" data-x-edge="${opts.removeEdge}" role="button" aria-label="Remove from route">×</span>`
     : "";
-  // Heat: hand the glow intensity + color to CSS as custom properties on the
+  // Heat: hand the intensity + color to CSS as custom properties on the
   // scaled .vote-type-indicator. CSS color-mixes the border and a drop-shadow
   // glow by `--heat`, so a hotter proposal both glows brighter and burns its
   // outline toward the ramp color. Omitted entirely at heat 0 → the plain pin.

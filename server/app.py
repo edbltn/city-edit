@@ -1187,16 +1187,21 @@ _start_graph_reload_listener()
 
 @app.route("/api/my-votes", methods=["GET"])
 def my_votes():
-    """Return the requesting voter's directional votes for the given edges on a map."""
+    """Return the requesting voter's directional votes on a map.
+
+    With edge_ids: just those edges (the modal-open reconcile). Without:
+    the voter's FULL vote set for the map — the client resets its local
+    store from this on load, so a stale localStorage can never claim votes
+    the server lacks (which would flip casts into block-unvotes)."""
     rmap_slug = (request.args.get("map") or DEFAULT_MAP_SLUG).strip()
 
-    raw = request.args.get("edge_ids", "")
-    try:
-        edge_ids = [int(x) for x in raw.split(",") if x.strip() != ""]
-    except ValueError:
-        return jsonify({"error": "edge_ids must be comma-separated integers"}), 400
-    if not edge_ids:
-        return jsonify({"votes": {}})
+    raw = request.args.get("edge_ids")
+    edge_ids: list[int] | None = None
+    if raw is not None and raw.strip() != "":
+        try:
+            edge_ids = [int(x) for x in raw.split(",") if x.strip() != ""]
+        except ValueError:
+            return jsonify({"error": "edge_ids must be comma-separated integers"}), 400
 
     device_id, _ip_hash = _resolve_user(request.args)
     by_edge = get_voter_edge_directions(rmap_slug, edge_ids, device_id)
@@ -1423,6 +1428,14 @@ def serve_tiles(filename):
     response.headers["Accept-Ranges"] = "bytes"
     response.headers["Cache-Control"] = "public, max-age=604800"
     response.headers["Access-Control-Allow-Origin"] = "*"
+    # Content-Range isn't a CORS-safelisted response header: without exposing
+    # it, the pmtiles client (cross-origin in local dev, :3000 → :5001) can't
+    # size the archive and MapLibre's style never finishes loading — the whole
+    # block layer silently never renders. Prod (nginx, same-origin) never hits
+    # this, which is why it only bit local dev.
+    response.headers["Access-Control-Expose-Headers"] = (
+        "Content-Range, Accept-Ranges, Content-Length, ETag"
+    )
     return response
 
 

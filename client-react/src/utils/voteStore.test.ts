@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   getVote, setVote, setVotes, coverage, blockCoverage, myVotesInBlocks,
-  reconcileEdge, setVoteTypeMap, subscribeVotes, getVotesVersion, _resetVoteStore,
+  reconcileEdge, resetMapVotes, setVoteTypeMap, subscribeVotes, getVotesVersion,
+  _resetVoteStore,
 } from "./voteStore";
 
 const MODE = "walkways";
@@ -200,5 +201,45 @@ describe("voteStore — reconcileEdge (server authoritative)", () => {
     reconcileEdge(MODE, 9, { "Add bike lane": -1, "Add trees": 1 });
     expect(getVote(MODE, 9, "Add bike lane")).toBe(-1);
     expect(getVote(MODE, 9, "Add trees")).toBe(1);
+  });
+});
+
+describe("voteStore — resetMapVotes (server-authoritative load reset)", () => {
+  it("deletes this mode's stale entries the server doesn't confirm", () => {
+    setVoteTypeMap(TYPES);
+    setVotes(MODE, [1, 2, 3], "Add bike lane", 1); // stale local claims
+    resetMapVotes(MODE, { "2": { "Add bike lane": 1 } });
+    expect(getVote(MODE, 1, "Add bike lane")).toBe(0);
+    expect(getVote(MODE, 2, "Add bike lane")).toBe(1);
+    expect(getVote(MODE, 3, "Add bike lane")).toBe(0);
+  });
+
+  it("applies server directions, including downvotes", () => {
+    setVoteTypeMap(TYPES);
+    resetMapVotes(MODE, { "7": { "Add bike lane": -1, "Add trees": 1 } });
+    expect(getVote(MODE, 7, "Add bike lane")).toBe(-1);
+    expect(getVote(MODE, 7, "Add trees")).toBe(1);
+  });
+
+  it("leaves other modes untouched", () => {
+    setVoteTypeMap(TYPES);
+    setVote("walk", 5, "Add bike lane", 1);
+    resetMapVotes(MODE, {});
+    expect(getVote("walk", 5, "Add bike lane")).toBe(1);
+  });
+
+  it("clears label-keyed (unmapped-type) entries of the mode too", () => {
+    // no setVoteTypeMap: entries land in the byLabel fallback layer
+    setVote(MODE, 9, "Brand New Suggestion", 1);
+    resetMapVotes(MODE, {});
+    expect(getVote(MODE, 9, "Brand New Suggestion")).toBe(0);
+  });
+
+  it("bumps the version so a raced reconcile can detect the mutation", () => {
+    setVoteTypeMap(TYPES);
+    setVote(MODE, 1, "Add bike lane", 1);
+    const v = getVotesVersion();
+    resetMapVotes(MODE, {});
+    expect(getVotesVersion()).toBeGreaterThan(v);
   });
 });

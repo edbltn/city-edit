@@ -223,6 +223,20 @@ export function MapView() {
 
   const { setMapReady } = useHeatmap();
 
+  // True once MapLibre's WebGL map has loaded — from then on MapLibre IS the
+  // base map (raster + block heat + block selection), and the opaque Leaflet
+  // raster fallback below must unmount or it paints over every MapLibre layer.
+  const [maplibreActive, setMaplibreActive] = useState(false);
+  const handleMapLibreReady = useCallback((active: boolean) => {
+    if (active) {
+      setMaplibreActive(true);
+      // The Leaflet container's own opaque background must also get out of the
+      // way (globals.css keys off this class).
+      document.body.classList.add("maplibre-active");
+    }
+    setMapReady();
+  }, [setMapReady]);
+
   // Backstop: if MapLibre's `load` never fires (e.g. it constructs but stalls),
   // don't trap the user behind the loader forever — mark the base map ready
   // after a generous timeout so the heatmap alone can dismiss the loader.
@@ -488,7 +502,7 @@ export function MapView() {
   return (
     <>
     {/* MapLibre GL JS background — renders base map + graph from PMTiles */}
-    <MapLibreBackground leafletMap={leafletMap} mapStyle={mapStyle} onReady={setMapReady} />
+    <MapLibreBackground leafletMap={leafletMap} mapStyle={mapStyle} onReady={handleMapLibreReady} />
 
     <MapContainer
       center={[initialMapView.lat, initialMapView.lng]}
@@ -534,17 +548,22 @@ export function MapView() {
         suppress={isHoveringPath || ghostState.isDragging || isDraggingMarker || markerHoverCount > 0 || ghostSuppressed}
       />
 
-      {/* Raster tile fallback — visible until MapLibre loads, or when WebGL unavailable.
-          maxNativeZoom caps tile requests at CartoDB's available zoom and upscales
-          beyond it, so deep zoom (maxZoom) doesn't request nonexistent blank tiles. */}
-      <TileLayer
-        key={mapStyle.id}
-        url={mapStyle.tileUrl}
-        subdomains={["a", "b", "c", "d"]}
-        maxZoom={CONFIG.maxZoom}
-        maxNativeZoom={19}
-        attribution={mapStyle.tileAttribution}
-      />
+      {/* Raster tile fallback — visible until MapLibre loads, or permanently when
+          WebGL is unavailable. MUST unmount once MapLibre is active: it is opaque
+          and sits above the MapLibre canvas, so leaving it hides the block heat
+          and block-selection layers entirely. maxNativeZoom caps tile requests at
+          CartoDB's available zoom and upscales beyond it, so deep zoom (maxZoom)
+          doesn't request nonexistent blank tiles. */}
+      {!maplibreActive && (
+        <TileLayer
+          key={mapStyle.id}
+          url={mapStyle.tileUrl}
+          subdomains={["a", "b", "c", "d"]}
+          maxZoom={CONFIG.maxZoom}
+          maxNativeZoom={19}
+          attribution={mapStyle.tileAttribution}
+        />
+      )}
 
       {/* Zoom control in bottom right */}
       <ZoomControl />

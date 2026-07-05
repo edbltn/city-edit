@@ -39,18 +39,43 @@ export const BLOCK_SELECT_EVENT = "city-edit:block-select";
 function blockFillPaint(heat: MapStyle["heat"]): maplibregl.FillLayerSpecification["paint"] {
   const h = ["coalesce", ["feature-state", "heat"], 0] as const;
   return {
+    // Start the ramp at `warm` (not halo) so even a single vote reads clearly,
+    // and keep the fill translucent — the outline layer below carries the
+    // brightness, so a voted block doesn't render as a solid slab.
     "fill-color": [
       "interpolate", ["linear"], h,
-      0.0, heat.halo,
-      0.4, heat.warm,
-      0.7, heat.hot,
+      0.0, heat.warm,
+      0.2, heat.hot,
+      0.6, heat.peak,
       1.0, heat.peak,
     ],
     "fill-opacity": [
       "interpolate", ["linear"], h,
       0.0, 0.0,
-      0.001, 0.28,
-      1.0, 0.72,
+      0.001, 0.42,
+      1.0, 0.58,
+    ],
+  };
+}
+
+/** Thin bright outline tracing a voted block — the crisp edge that makes the
+ *  heat pop without thickening the fill. Same ramp, heat-driven opacity. */
+function blockLinePaint(heat: MapStyle["heat"]): maplibregl.LineLayerSpecification["paint"] {
+  const h = ["coalesce", ["feature-state", "heat"], 0] as const;
+  return {
+    "line-color": [
+      "interpolate", ["linear"], h,
+      0.0, heat.warm,
+      0.2, heat.hot,
+      0.6, heat.peak,
+      1.0, heat.peak,
+    ],
+    "line-width": 1.25,
+    "line-opacity": [
+      "interpolate", ["linear"], h,
+      0.0, 0.0,
+      0.001, 0.75,
+      1.0, 0.95,
     ],
   };
 }
@@ -95,13 +120,21 @@ function buildStyle(
         minzoom: 0,
         maxzoom: 19,
       },
-      // Block heat — the primary vote display, colored from feature-state.
+      // Block heat — the primary vote display, colored from feature-state:
+      // a translucent fill plus a thin bright outline (brightness without bulk).
       {
         id: "block-heat",
         type: "fill",
         source: "blocks",
         "source-layer": "blocks",
         paint: blockFillPaint(mapStyle.heat),
+      },
+      {
+        id: "block-heat-line",
+        type: "line",
+        source: "blocks",
+        "source-layer": "blocks",
+        paint: blockLinePaint(mapStyle.heat),
       },
       // Block selection — feature-state { selected } lights the block polygons
       // covering the current selection/hover: a subtle translucent fill plus a
@@ -143,8 +176,11 @@ interface MapLibreBackgroundProps {
   /** Active map style — drives basemap tiles + background color */
   mapStyle: MapStyle;
   /** Called once the base map has first loaded (or immediately if WebGL is
-   *  unavailable and the raster fallback takes over). Idempotent upstream. */
-  onReady?: () => void;
+   *  unavailable and the raster fallback takes over). `active` is true only in
+   *  the WebGL case — the caller uses it to drop the opaque Leaflet raster
+   *  fallback, WITHOUT which every MapLibre layer (block heat, block selection)
+   *  is painted over and invisible. Idempotent upstream. */
+  onReady?: (active: boolean) => void;
 }
 
 export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBackgroundProps) {
@@ -174,10 +210,14 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         console.warn("MapLibre error (non-fatal):", e.error?.message ?? e);
       });
 
-      // Base map has rendered for the first time — let the loader dismiss.
-      map.on("load", () => onReady?.());
+      // Base map has rendered for the first time — let the loader dismiss and
+      // the Leaflet raster fallback unmount (MapLibre is the base map now).
+      map.on("load", () => onReady?.(true));
 
       mapRef.current = map;
+      if (import.meta.env.DEV) {
+        (window as unknown as Record<string, unknown>).__ml = map;
+      }
 
       return () => {
         map.remove();
@@ -186,8 +226,8 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
     } catch (err) {
       console.warn("MapLibre GL JS unavailable (WebGL required):", err);
       // Leaflet TileLayer provides the fallback base map — it's already
-      // mounting, so consider the base map ready.
-      onReady?.();
+      // mounting, so consider the base map ready (and keep the raster).
+      onReady?.(false);
     }
     // mapStyle is resolved once at bootstrap and stable for the session.
     // onReady is a stable callback (useCallback) so it won't re-init the map.

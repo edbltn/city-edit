@@ -64,7 +64,8 @@ import {
   clearGraphCache,
 } from "../../utils/graphCache";
 import {
-  blockCoverage, reconcileEdge, setVoteTypeMap, type VoteDirection,
+  blockCoverage, getVotesVersion, reconcileEdge, resetMapVotes, setVoteTypeMap,
+  type VoteDirection,
 } from "../../utils/voteStore";
 import { castVotes, voteButtonState } from "../../utils/castVote";
 import { useVotesVersion } from "../../utils/useVotesVersion";
@@ -3242,6 +3243,29 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     });
   }, [themeMode]);
 
+  // On map load, RESET this mode's local my-votes to the server's full snapshot
+  // (no edge_ids = the device's every row on this map). localStorage survives
+  // things the server doesn't (a dev DB reset, a resnap that shifted edge ids),
+  // and a store claiming votes the server lacks makes blockCoverage read "all"
+  // — silently turning the user's next cast into a block-unvote no-op. Server
+  // truth wins outright on load, including deletions.
+  useEffect(() => {
+    let cancelled = false;
+    const url = `${CONFIG.apiUrl}/my-votes?map=${encodeURIComponent(getMapSlug())}`
+      + `&mode=${encodeURIComponent(themeMode)}`
+      + `&voter_id=${encodeURIComponent(getVoterId())}`;
+    const versionAtFetch = getVotesVersion();
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j?.votes) return;
+        if (getVotesVersion() !== versionAtFetch) return; // a cast raced us
+        resetMapVotes(themeMode, j.votes as Record<string, Record<string, number>>);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [themeMode]);
+
   // Reconcile local "my votes" against the server when a proposal modal opens
   // (authoritative across devices). Keyed on the pinned edge so it refetches
   // whenever the selection changes. Requested at BLOCK breadth — every edge of
@@ -3263,10 +3287,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const url = `${CONFIG.apiUrl}/my-votes?map=${encodeURIComponent(getMapSlug())}`
       + `&mode=${encodeURIComponent(themeMode)}&edge_ids=${edgeIds.join(",")}`
       + `&voter_id=${encodeURIComponent(getVoterId())}`;
+    const versionAtFetch = getVotesVersion();
     fetch(url)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (cancelled || !j?.votes) return;
+        // Drop the response if any cast mutated the store while this fetch was
+        // in flight: overwriting a fresh optimistic vote with the fetch-time
+        // server state makes the NEXT press read stale coverage and flip into
+        // a block-unvote (the +/−/+ "heat vanished" bug).
+        if (getVotesVersion() !== versionAtFetch) return;
         // Apply the FULL response in one pass — it's authoritative my-vote
         // state for every edge it covers. reconcileEdge only persists/notifies
         // (bumping votesVersion, which re-renders the modal) on actual change.

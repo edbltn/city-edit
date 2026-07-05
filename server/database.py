@@ -318,19 +318,32 @@ def update_edge_vote_edge_id(row_id: int, new_edge_id: int) -> bool:
 
 
 def get_voter_edge_directions(
-    map_slug: str, edge_ids: list[int], device_id: str
+    map_slug: str, edge_ids: list[int] | None, device_id: str
 ) -> dict[int, dict[int, int]]:
-    """Return {edge_id: {vote_type_id: direction}} for one device on a map's edges."""
-    if not DATABASE_URL or not edge_ids:
+    """Return {edge_id: {vote_type_id: direction}} for one device on a map.
+
+    edge_ids=None returns the device's FULL vote set for the map — the
+    authoritative snapshot the client resets its local store from on load (a
+    stale localStorage claiming votes the server lacks flips casts into
+    unvotes; see docs/three-layer-model.md §4.1)."""
+    if not DATABASE_URL or (edge_ids is not None and not edge_ids):
         return {}
     try:
         with get_cursor() as cursor:
-            cursor.execute(
-                """SELECT edge_id, vote_type_id, direction
-                   FROM edge_votes
-                   WHERE map_slug = %s AND device_id = %s AND edge_id = ANY(%s)""",
-                (map_slug, device_id, list(edge_ids)),
-            )
+            if edge_ids is None:
+                cursor.execute(
+                    """SELECT edge_id, vote_type_id, direction
+                       FROM edge_votes
+                       WHERE map_slug = %s AND device_id = %s""",
+                    (map_slug, device_id),
+                )
+            else:
+                cursor.execute(
+                    """SELECT edge_id, vote_type_id, direction
+                       FROM edge_votes
+                       WHERE map_slug = %s AND device_id = %s AND edge_id = ANY(%s)""",
+                    (map_slug, device_id, list(edge_ids)),
+                )
             result: dict[int, dict[int, int]] = {}
             for edge_id, vt_id, direction in cursor.fetchall():
                 result.setdefault(edge_id, {})[vt_id] = direction
