@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QGIS export — one command turns a map slug into a GeoPackage of blocks, proposals, graph, and sample routes — 2026-07-07</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>QGIS export — one command turns a map slug into a GeoPackage of blocks, proposals, graph, and sample routes</h1>
+    <div class="dateline">2026-07-07 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#exporter">1</a>
+<a href="#proposals">2</a>
+<a href="#guide">3</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">New tooling:
+  <code>scripts/export_qgis_artifacts.py &lt;slug&gt;</code> exports everything a map serves into a single
+  QGIS-ready GeoPackage — Layer-2 blocks joined with their vote aggregates, both kinds of top proposals
+  (PBTPs and RBTPs, computed by the <em>actual client TS modules</em> via vite-node, so nothing drifts),
+  the full Layer-1 votable graph with per-edge votes, and sample OSRM routes paired with the graph edges
+  they mapped to. Tested end-to-end on NYC: 10 layers, 853MB, 53 seconds. Guide:
+  <code>docs/qgis-export.md</code>.</p>
+
+  
+    <section class="card" id="exporter">
+      <div class="tag">Tooling · GIS export</div>
+      <h2>1 · scripts/export_qgis_artifacts.py — the one-command exporter</h2>
+      <h3>The ask</h3>
+      <p>A repeatable way to pull everything a City Edit map serves — blocks with their votes, top proposals (both kinds), the votable route graph, and sample A→B routes — into QGIS to play with.</p>
+      <h3>What was built &amp; why</h3>
+      <ul><li>One <strong>GeoPackage per slug</strong> (<code>exports/qgis/&lt;slug&gt;/city-edit-&lt;slug&gt;.gpkg</code>, EPSG:4326) with 10 layers, so the whole export drags into QGIS as a single file; a <code>manifest.json</code> records vote revision, topology/blocks versions, seed, and per-layer counts.</li>
+<li>Reads the <strong>same live API a browser does</strong> (Flask :5001): the GTB2 binary topology (decoded with numpy straight off the wire format), <code>/api/graph-votes</code>, and <code>POST /api/routes</code> — so the export always reflects the currently-served state, and aborts if the vote arrays don't match the topology dimensions.</li>
+<li>Block polygons come from <code>blocks_generic_&lt;city&gt;.geojson</code> — the exact file the edge→block bake read — joined to the served per-block vote aggregates by <code>block_id</code>; the file is sha-checked against the bake metadata and a mismatch warns loudly.</li>
+<li>The full NYC graph (3.3M edges) is built with vectorized shapely (<code>shapely.linestrings</code> over the raw coord arrays) and written via pyogrio — the whole export runs in ~53s.</li>
+<li>Sample routes mix two kinds: anchor-to-anchor requests for the top route proposals (does OSRM re-trace the hot corridor?) plus seeded-random node pairs 0.8–6 km apart; each also exports the graph edges its <code>edge_ids</code> resolved to, so OSRM-geometry vs graph-snap divergence is visible as two overlaid layers.</li>
+<li>Escape hatches: <code>--bbox=w,s,e,n</code> clips blocks+graph for laptop-friendly files, <code>--skip</code> reruns one piece, <code>--all-nodes</code> exports all 1.3M nodes instead of just voted ones, <code>--seed</code>/<code>--routes</code> control the samples.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>scripts/export_qgis_artifacts.py</li>
+<li>.gitignore</li></ul>
+    </section>
+    
+
+    <section class="card" id="proposals">
+      <div class="tag">Client · proposals fidelity</div>
+      <h2>2 · export-proposals.ts — proposals computed by the real client modules</h2>
+      <h3>The ask</h3>
+      <p>Top proposals are computed CLIENT-side (docs/three-layer-model.md §3) — a Python re-implementation of the PBTP pipeline and the RBTP corridor clustering would drift the first time either module changed.</p>
+      <h3>What was built &amp; why</h3>
+      <ul><li>A small vite-node script inside <code>client-react/</code> imports the actual <code>graphTopology.ts</code> / <code>topProposals.ts</code> / <code>routeProposals.ts</code> modules, fetches the same two API responses the app does, and runs <code>selectTopProposals</code> + <code>computeRouteProposals</code> verbatim — the Python side just turns the resulting JSON into geometries.</li>
+<li>One deliberate divergence, documented in both places: the PBTP tiebreak salt is fixed to 0 (the app randomizes per page load to rotate equal-net pins), so exports are deterministic for a given (topology, vote state).</li>
+<li>Points a same-type route subsumes are <em>flagged</em> (<code>covered_by_route</code>) rather than dropped — in QGIS you filter interactively instead of losing the data.</li>
+<li>RBTP path geometry is recovered by walking the ordered edge ids from <code>anchors[0]</code> (the modules only expose edge ids + anchors); the block-edge union and the two anchors export as their own layers, mirroring the highlight/vote set vs the pin's corridor line.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/scripts/export-proposals.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="guide">
+      <div class="tag">Docs</div>
+      <h2>3 · docs/qgis-export.md — the guide</h2>
+      <h3>The ask</h3>
+      <p>A quick guide for generating and using the artifacts.</p>
+      <h3>What was built &amp; why</h3>
+      <ul><li>Covers prerequisites (dev stack, the streetscape geo venv, block artifacts, vite-node), the one-command run, a table of all 10 layers with their attributes, every CLI option, QGIS styling recipes per layer (graduated <code>net_votes</code> fill for blocks, rule-based heatmap override for graph edges, solid-vs-dashed overlay for the OSRM↔graph snap check), and the fidelity notes (fixed salt, sha check, vote revision in the manifest).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>docs/qgis-export.md</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Tested end-to-end on NYC (<code>nyc-walkways</code>): 53s total → 853MB GeoPackage with all 10 layers — blocks 563,812 · graph_edges 3,299,152 · graph_nodes 87 (voted) · proposals 4 points + 2 routes (+ edges/blocks/anchors layers) · sample_routes 8 + their matched-edge twins.</li>
+<li>Cross-checked the vote join: 634 blocks with non-zero <code>net_votes</code> in the GeoPackage — exactly the number of non-zero entries in the served <code>block_votes</code> array.</li>
+<li>Proposal fidelity: the vite-node helper returned the same 4 PBTPs + 2 RBTPs the client computes (<code>Add bike lane</code> corridor, score 69, 46 blocks), and <code>covered_by_route</code> correctly flags the one bike-lane point sitting on that corridor.</li>
+<li>Corridor sanity: the sample route between the top RBTP's anchors resolved to 69 <code>edge_ids</code> — the same count as the proposal's path edges (OSRM re-traced the corridor).</li>
+<li>All 8 sample routes returned geometry and non-empty matched-edge multilines; <code>--bbox=-74.03,40.70,-73.93,40.77 --skip proposals,routes</code> exercised the clip path (50,805 blocks / 331,138 edges, 16s).</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Run <code>server/streetscape_blocks/env/bin/python scripts/export_qgis_artifacts.py nyc-walkways</code> with the dev stack up (Redis + Flask :5001) and confirm it finishes with “done in ~60s”.</li>
+<li>Drag <code>exports/qgis/nyc-walkways/city-edit-nyc-walkways.gpkg</code> into QGIS and confirm all 10 layers appear and land on New York.</li>
+<li>Style <code>blocks</code> graduated on <code>net_votes</code> with filter <code>net_votes != 0</code>: the voted blocks should match the heat you see at <a href='http://localhost:3000/m/nyc-walkways'>localhost:3000/m/nyc-walkways</a>.</li>
+<li>Overlay <code>sample_route_edges</code> (dashed) on <code>sample_routes</code> (solid): the pairs should trace the same streets; divergence = an OSRM↔graph mapping discrepancy worth a look.</li>
+<li>Open <code>proposals_route</code>'s attribute table: 2 corridors with scores 69 and 8; select one and confirm <code>proposals_route_blocks</code> highlights its wider vote set around the path.</li>
+<li>Cast a vote in the app, re-run the export, and confirm <code>manifest.json</code>'s <code>vote_revision</code> bumped and the new block shows in QGIS after a layer reload.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Green is added, red removed.</p>
+    
+        <details open>
+          <summary><span class="fname">.gitignore</span>
+            <span class="stat"><span class="d-add">+3</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill on">Tooling / scripts</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">repo root</span>
+        <span class="ctx-sum">ignore rules</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">.gitignore</span>
+        <span class="ctx-sum">+1 rule</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">exports/</span><span class="ol-sum">NEW — regenerable QGIS exports stay out of git</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>exports/ — regenerable via scripts/export_qgis_artifacts.py</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/.gitignore b/.gitignore</span>
+<span class="d-meta">index cf4f782..9ed61f3 100644</span>
+<span class="d-meta">--- a/.gitignore</span>
+<span class="d-meta">+++ b/.gitignore</span>
+<span class="d-hunk">@@ -80,3 +80,6 @@ server/streetscape_blocks/output/</span>
+<span class="d-ctx"> # osmnx http cache + eval fixtures (regenerable, too big for git)</span>
+<span class="d-ctx"> server/streetscape_blocks/cache/</span>
+<span class="d-ctx"> server/streetscape_blocks/eval/*.npz</span>
+<span class="d-add">+</span>
+<span class="d-add">+# QGIS artifact exports (regenerable via scripts/export_qgis_artifacts.py)</span>
+<span class="d-add">+exports/</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/scripts/export-proposals.ts</span>
+            <span class="stat"><span class="d-add">+126</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span><span class="pill on">Tooling / scripts</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · scripts/</span>
+        <span class="ctx-sum">NEW dir — node-side helpers that reuse src/ modules verbatim</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">export-proposals.ts</span>
+        <span class="ctx-sum">NEW ~130 LOC — PBTPs + RBTPs via the real client pipeline, dumped as JSON</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Imports</span><span class="ol-sum">graphTopology / topProposals / routeProposals — the app&#x27;s own modules</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">chainPathNodes</span><span class="ol-sum">ordered edge ids + start anchor → node sequence (path geometry)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main</span><span class="ol-sum">fetch bin topology + votes → selectTopProposals + computeRouteProposals → JSON</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>TIEBREAK_SALT = 0 — deterministic exports (app randomizes per load); documented divergence</li><li>dimension guard — refuses to run votes against a mismatched topology (the stale-cache trap)</li><li>covered_by_route flag via dropPointsCoveredByRoutes — flag, don&#x27;t drop, for QGIS filtering</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/scripts/export-proposals.ts b/client-react/scripts/export-proposals.ts</span>
+<span class="d-ctx">new file mode 100644</span>
+<span class="d-meta">index 0000000..1a6dc2c</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/scripts/export-proposals.ts</span>
+<span class="d-hunk">@@ -0,0 +1,126 @@</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// export-proposals.ts — dump top proposals (PBTPs + RBTPs) as plain JSON</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// Helper for scripts/export_qgis_artifacts.py. Runs the SAME modules the app</span>
+<span class="d-add">+// uses (topProposals.ts / routeProposals.ts / graphTopology.ts) against the</span>
+<span class="d-add">+// live local API, so the exported proposals are byte-faithful to what the</span>
+<span class="d-add">+// client would show — no reimplementation to drift.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// Run from client-react/ (vite-node resolves the src/ imports):</span>
+<span class="d-add">+//   node_modules/.bin/vite-node scripts/export-proposals.ts -- \</span>
+<span class="d-add">+//     &lt;apiBase&gt; &lt;mapSlug&gt; &lt;mode&gt; &lt;outJsonPath&gt;</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// The one deliberate divergence from the app: the tiebreak salt is fixed to 0</span>
+<span class="d-add">+// (the app randomizes it per page load to rotate equal-net proposals), so the</span>
+<span class="d-add">+// export is deterministic for a given (topology, vote state).</span>
+<span class="d-add">+</span>
+<span class="d-add">+import { writeFileSync } from &quot;node:fs&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import {</span>
+<span class="d-add">+  buildNodeAdj,</span>
+<span class="d-add">+  decodeTopologyBin,</span>
+<span class="d-add">+  edgeFrom,</span>
+<span class="d-add">+  edgeTo,</span>
+<span class="d-add">+  nodeLatLng,</span>
+<span class="d-add">+  type GraphTopology,</span>
+<span class="d-add">+} from &quot;../src/components/GraphLayer/graphTopology&quot;;</span>
+<span class="d-add">+import { selectTopProposals } from &quot;../src/components/GraphLayer/topProposals&quot;;</span>
+<span class="d-add">+import {</span>
+<span class="d-add">+  computeRouteProposals,</span>
+<span class="d-add">+  dropPointsCoveredByRoutes,</span>
+<span class="d-add">+  type RouteProposal,</span>
+<span class="d-add">+} from &quot;../src/components/GraphLayer/routeProposals&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const TIEBREAK_SALT = 0; // fixed for reproducibility (app uses a per-load random)</span>
+<span class="d-add">+const POINT_PROPOSAL_LIMIT = 20; // GraphLayer&#x27;s TOP_PROPOSAL_LIMIT</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Node sequence of a simple path, walked from `startNode` along ordered edges. */</span>
+<span class="d-add">+function chainPathNodes(topo: GraphTopology, edgeIds: number[], startNode: number): number[] {</span>
+<span class="d-add">+  const nodes = [startNode];</span>
+<span class="d-add">+  let cur = startNode;</span>
+<span class="d-add">+  for (const e of edgeIds) {</span>
+<span class="d-add">+    const u = edgeFrom(topo, e);</span>
+<span class="d-add">+    const v = edgeTo(topo, e);</span>
+<span class="d-add">+    cur = u === cur ? v : u;</span>
+<span class="d-add">+    nodes.push(cur);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return nodes;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+async function main() {</span>
+<span class="d-add">+  // vite-node passes everything after &quot;--&quot; through; tolerate its absence.</span>
+<span class="d-add">+  const args = process.argv.slice(2).filter((a) =&gt; a !== &quot;--&quot;);</span>
+<span class="d-add">+  const [apiBase, slug, mode, outPath] = args;</span>
+<span class="d-add">+  if (!apiBase || !slug || !mode || !outPath) {</span>
+<span class="d-add">+    console.error(&quot;usage: vite-node scripts/export-proposals.ts -- &lt;apiBase&gt; &lt;slug&gt; &lt;mode&gt; &lt;outJson&gt;&quot;);</span>
+<span class="d-add">+    process.exit(2);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const topoResp = await fetch(`${apiBase}/api/graph-topology?map=${slug}&amp;format=bin`);</span>
+<span class="d-add">+  if (!topoResp.ok) throw new Error(`graph-topology ${topoResp.status}`);</span>
+<span class="d-add">+  const topo = decodeTopologyBin(await topoResp.arrayBuffer());</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const votesResp = await fetch(`${apiBase}/api/graph-votes?map=${slug}&amp;mode=${mode}`);</span>
+<span class="d-add">+  if (!votesResp.ok) throw new Error(`graph-votes ${votesResp.status}`);</span>
+<span class="d-add">+  const votes = await votesResp.json();</span>
+<span class="d-add">+</span>
+<span class="d-add">+  if (votes.n_edges !== topo.nEdges || votes.n_nodes !== topo.nNodes) {</span>
+<span class="d-add">+    throw new Error(</span>
+<span class="d-add">+      `votes/topology mismatch: votes ${votes.n_nodes}n/${votes.n_edges}e vs ` +</span>
+<span class="d-add">+        `topology ${topo.nNodes}n/${topo.nEdges}e — is a stale cache being served?`,</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const adj = buildNodeAdj(topo);</span>
+<span class="d-add">+  const data = {</span>
+<span class="d-add">+    vote_type_legend: votes.vote_type_legend as string[],</span>
+<span class="d-add">+    edge_vote_types: votes.edge_vote_types as [number, number, number][][],</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // RBTPs — the deterministic corridor extraction (limit 20, all defaults).</span>
+<span class="d-add">+  const routes: RouteProposal[] = computeRouteProposals(topo, adj, data);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // PBTPs — the four-step pin selection GraphLayer runs.</span>
+<span class="d-add">+  const points = selectTopProposals({ ...topo, ...data }, TIEBREAK_SALT, POINT_PROPOSAL_LIMIT);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Flag (rather than drop) points a same-type route already covers, so the</span>
+<span class="d-add">+  // QGIS layer can show both regimes and filter interactively.</span>
+<span class="d-add">+  const surviving = new Set(dropPointsCoveredByRoutes(points, routes).map((p) =&gt; p.edgeIdx));</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const out = {</span>
+<span class="d-add">+    slug,</span>
+<span class="d-add">+    mode,</span>
+<span class="d-add">+    salt: TIEBREAK_SALT,</span>
+<span class="d-add">+    legend: data.vote_type_legend,</span>
+<span class="d-add">+    points: points.map((p) =&gt; ({</span>
+<span class="d-add">+      edge_id: p.edgeIdx,</span>
+<span class="d-add">+      label: p.label,</span>
+<span class="d-add">+      legend_idx: p.legendIdx,</span>
+<span class="d-add">+      net: p.count,</span>
+<span class="d-add">+      ends: [nodeLatLng(topo, edgeFrom(topo, p.edgeIdx)), nodeLatLng(topo, edgeTo(topo, p.edgeIdx))],</span>
+<span class="d-add">+      covered_by_route: !surviving.has(p.edgeIdx),</span>
+<span class="d-add">+    })),</span>
+<span class="d-add">+    routes: routes.map((r) =&gt; ({</span>
+<span class="d-add">+      id: r.id,</span>
+<span class="d-add">+      label: r.label,</span>
+<span class="d-add">+      legend_idx: r.legendIdx,</span>
+<span class="d-add">+      score: r.score,</span>
+<span class="d-add">+      edge_ids: r.edgeIds,</span>
+<span class="d-add">+      block_edge_ids: r.blockEdgeIds,</span>
+<span class="d-add">+      n_blocks: r.blocks.length,</span>
+<span class="d-add">+      anchors: r.anchors,</span>
+<span class="d-add">+      anchor_coords: r.anchorCoords.map((c) =&gt; [c.lat, c.lng]),</span>
+<span class="d-add">+      path_latlngs: chainPathNodes(topo, r.edgeIds, r.anchors[0]).map((n) =&gt; nodeLatLng(topo, n)),</span>
+<span class="d-add">+    })),</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  writeFileSync(outPath, JSON.stringify(out));</span>
+<span class="d-add">+  console.error(</span>
+<span class="d-add">+    `[export-proposals] ${slug}/${mode}: ${out.points.length} point + ${out.routes.length} route proposals -&gt; ${outPath}`,</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+main().catch((e) =&gt; {</span>
+<span class="d-add">+  console.error(`[export-proposals] FAILED: ${e?.stack || e}`);</span>
+<span class="d-add">+  process.exit(1);</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">docs/qgis-export.md</span>
+            <span class="stat"><span class="d-add">+94</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill on">Tooling / scripts</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">docs</span>
+        <span class="ctx-sum">developer guides</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">qgis-export.md</span>
+        <span class="ctx-sum">NEW — the how-to: prerequisites, layer table, options, QGIS styling recipes</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Quick start</span><span class="ol-sum">one command, where output lands</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Prerequisites</span><span class="ol-sum">dev stack · geo venv · block artifacts · vite-node · OSRM</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Layer table</span><span class="ol-sum">all 10 layers with their attributes</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Options + styling tips + fidelity notes</span><span class="ol-sum">bbox/skip/seed; per-layer QGIS recipes</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>entire file is new</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/qgis-export.md b/docs/qgis-export.md</span>
+<span class="d-ctx">new file mode 100644</span>
+<span class="d-meta">index 0000000..548ea2c</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/docs/qgis-export.md</span>
+<span class="d-hunk">@@ -0,0 +1,94 @@</span>
+<span class="d-add">+# Exporting a map&#x27;s artifacts for QGIS</span>
+<span class="d-add">+</span>
+<span class="d-add">+One command turns everything a City Edit map serves — blocks + votes, top</span>
+<span class="d-add">+proposals, the votable route graph, and sample OSRM routes — into a single</span>
+<span class="d-add">+GeoPackage you can drag into QGIS and play with.</span>
+<span class="d-add">+</span>
+<span class="d-add">+```bash</span>
+<span class="d-add">+# stack must be up: Redis :6379, Flask :5001 (SKIP_PREWARM=1 is fine — the</span>
+<span class="d-add">+# export&#x27;s first request loads the graph lazily)</span>
+<span class="d-add">+server/streetscape_blocks/env/bin/python scripts/export_qgis_artifacts.py nyc-walkways</span>
+<span class="d-add">+```</span>
+<span class="d-add">+</span>
+<span class="d-add">+Output: `exports/qgis/&lt;slug&gt;/city-edit-&lt;slug&gt;.gpkg` (+ `manifest.json`</span>
+<span class="d-add">+recording vote revision, topology/blocks versions, seed, and per-layer feature</span>
+<span class="d-add">+counts). Open QGIS → drag the `.gpkg` in → pick the layers you want.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Prerequisites</span>
+<span class="d-add">+</span>
+<span class="d-add">+- **The local dev stack** (the export reads the same API a browser does):</span>
+<span class="d-add">+  Redis on `:6379` and Flask on `:5001`. Vite is not needed.</span>
+<span class="d-add">+- **The geo venv** — `server/streetscape_blocks/env` (geopandas/shapely/</span>
+<span class="d-add">+  pyogrio). If missing, see `server/streetscape_blocks/README.md` for the</span>
+<span class="d-add">+  one-time setup.</span>
+<span class="d-add">+- **Block artifacts for the city** — `server/osm_data/&lt;city&gt;/edge_blocks_</span>
+<span class="d-add">+  &lt;network&gt;.npy/.json` and `server/streetscape_blocks/output/blocks_generic_</span>
+<span class="d-add">+  &lt;city&gt;.geojson` (built by `build_city_blocks.sh &lt;city&gt;`). Maps without them</span>
+<span class="d-add">+  just skip the blocks layer.</span>
+<span class="d-add">+- **vite-node** — already in `client-react/node_modules` (proposals are</span>
+<span class="d-add">+  computed by the *actual client TS modules*, not a Python re-implementation).</span>
+<span class="d-add">+- **OSRM** for the sample routes (however you normally run it for local dev);</span>
+<span class="d-add">+  failed routes are skipped with a warning, everything else still exports.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## The layers</span>
+<span class="d-add">+</span>
+<span class="d-add">+| Layer | Geometry | What it is |</span>
+<span class="d-add">+|---|---|---|</span>
+<span class="d-add">+| `blocks` | polygons | Layer-2 streetscape blocks joined with their aggregated votes: `net_votes`, `up_votes`, `down_votes`, `top_label`, and a `vote_types` JSON breakdown per block |</span>
+<span class="d-add">+| `graph_edges` | lines | The full Layer-1 votable graph: `edge_id`, `from_node`/`to_node`, `block_id`, `net_votes`, `top_label` |</span>
+<span class="d-add">+| `graph_nodes` | points | Voted nodes only by default (`--all-nodes` for every node — ~1.3M for NYC) |</span>
+<span class="d-add">+| `proposals_point` | points | PBTPs (square pins): pin at the winning edge&#x27;s midpoint; `covered_by_route` marks ones a same-type route proposal subsumes |</span>
+<span class="d-add">+| `proposals_point_edges` | lines | The winning edge of each PBTP |</span>
+<span class="d-add">+| `proposals_route` | lines | RBTPs (diamond pins): the ordered corridor path, with `score`, `n_blocks`, and the `block_ids` it covers |</span>
+<span class="d-add">+| `proposals_route_blocks` | multilines | Each RBTP&#x27;s full block-edge union — the set hovering highlights and voting casts on |</span>
+<span class="d-add">+| `proposals_route_anchors` | points | The two terminal intersections of each RBTP |</span>
+<span class="d-add">+| `sample_routes` | lines | OSRM geometry for sample A→B requests: 3 between top-RBTP anchors (`kind=proposal:&lt;id&gt;`) + N seeded-random pairs 0.8–6 km apart (`kind=random`) |</span>
+<span class="d-add">+| `sample_route_edges` | multilines | The graph edges each sample route&#x27;s `edge_ids` resolved to — overlay on `sample_routes` to check the OSRM→graph snap |</span>
+<span class="d-add">+</span>
+<span class="d-add">+All layers are EPSG:4326.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Options</span>
+<span class="d-add">+</span>
+<span class="d-add">+```bash</span>
+<span class="d-add">+… export_qgis_artifacts.py &lt;slug&gt; \</span>
+<span class="d-add">+    [--api http://localhost:5001]        # point at another instance</span>
+<span class="d-add">+    [--out DIR]                          # default exports/qgis/&lt;slug&gt;/</span>
+<span class="d-add">+    [--routes 6] [--seed 42]             # sample-route count / determinism</span>
+<span class="d-add">+    [--bbox=west,south,east,north]       # clip blocks + graph (proposals/routes stay whole)</span>
+<span class="d-add">+                                         # (use the = form — a leading &quot;-74…&quot; otherwise trips argparse)</span>
+<span class="d-add">+    [--all-nodes]                        # every graph node, not just voted ones</span>
+<span class="d-add">+    [--skip blocks,graph,proposals,routes]  # rerun just one piece faster</span>
+<span class="d-add">+```</span>
+<span class="d-add">+</span>
+<span class="d-add">+For a laptop-friendly file, clip to a borough, e.g. Manhattan below Central</span>
+<span class="d-add">+Park: `--bbox=-74.03,40.70,-73.93,40.77`.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## QGIS styling tips</span>
+<span class="d-add">+</span>
+<span class="d-add">+- **blocks**: Graduated fill on `net_votes` (filter `net_votes != 0` to see</span>
+<span class="d-add">+  just the voted ones), or Categorized on `top_label` to color by proposal</span>
+<span class="d-add">+  type. `vote_types` holds the full per-type up/down JSON for the info panel.</span>
+<span class="d-add">+- **graph_edges**: at city scale render as a simple 0.3pt line; add a</span>
+<span class="d-add">+  rule-based override `net_votes &gt; 0` with width/color by `net_votes` to get</span>
+<span class="d-add">+  the heatmap look.</span>
+<span class="d-add">+- **proposals**: Categorized on `label`; label routes with `score`. Put</span>
+<span class="d-add">+  `proposals_route_blocks` under `proposals_route` in a muted color to see</span>
+<span class="d-add">+  corridor vs. vote-set.</span>
+<span class="d-add">+- **sample checks**: style `sample_routes` solid and `sample_route_edges`</span>
+<span class="d-add">+  dashed in a contrasting color — anywhere they diverge is an OSRM↔graph</span>
+<span class="d-add">+  mapping discrepancy worth a look.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Fidelity notes</span>
+<span class="d-add">+</span>
+<span class="d-add">+- Proposals are computed by `client-react/scripts/export-proposals.ts`, which</span>
+<span class="d-add">+  imports `topProposals.ts` / `routeProposals.ts` / `graphTopology.ts` — the</span>
+<span class="d-add">+  same code paths the app runs, against the same `/api/graph-topology` +</span>
+<span class="d-add">+  `/api/graph-votes` responses. One deliberate difference: the PBTP tiebreak</span>
+<span class="d-add">+  salt is fixed to 0 (the app randomizes it per page load), so exports are</span>
+<span class="d-add">+  deterministic for a given vote state.</span>
+<span class="d-add">+- The blocks layer joins votes by the `block_id` property of</span>
+<span class="d-add">+  `blocks_generic_&lt;city&gt;.geojson` — the same file the edge→block bake read.</span>
+<span class="d-add">+  The script sha-checks it against the bake metadata and warns if the</span>
+<span class="d-add">+  polygons on disk no longer match the block ids being served.</span>
+<span class="d-add">+- Votes come from Redis via the API at a specific `rev` (recorded in</span>
+<span class="d-add">+  `manifest.json`); re-run the export after casting votes to refresh.</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">scripts/export_qgis_artifacts.py</span>
+            <span class="stat"><span class="d-add">+407</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill on">Tooling / scripts</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">scripts/</span>
+        <span class="ctx-sum">repo-level developer tooling (worktree helpers, cloud tests — now GIS export)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">export_qgis_artifacts.py</span>
+        <span class="ctx-sum">NEW ~380 LOC — slug → 10-layer GeoPackage via the live local API</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">API helpers</span><span class="ol-sum">stdlib urllib GET/POST (the geo venv has no requests)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Topology</span><span class="ol-sum">GTB1/GTB2 binary decode + vectorized edge-LineString builders</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">vt_summary</span><span class="ol-sum">one [legendIdx,up,down] list → top label / totals / JSON breakdown</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Layer builders</span><span class="ol-sum">blocks join · graph edges/nodes · proposal layers · sample routes</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">run_proposals_helper</span><span class="ol-sum">shells out to vite-node → the client TS modules</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">sample_route_pairs</span><span class="ol-sum">top-RBTP anchors + seeded random 0.8–6km node pairs</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main</span><span class="ol-sum">arg parsing, consistency checks, per-layer writes, manifest</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Topology class — numpy views over the GTB2 wire format (coords 1e7-scaled i32, ends u32, edge_block_id i32)</li><li>build_blocks_layer — sha-checks blocks_generic_&lt;city&gt;.geojson against the bake metadata, joins by block_id</li><li>build_graph_edge_layer — 3.3M vectorized linestrings; net_votes + top_label + block_id per edge</li><li>build_proposal_layers — point/point_edges + route/route_blocks/route_anchors GeoDataFrames</li><li>build_sample_route_layers — OSRM geometry + the edge_ids resolved back to graph multilines</li><li>main — fresh-gpkg unlink, --bbox .cx clip on blocks/graph layers, --skip, manifest.json</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/scripts/export_qgis_artifacts.py b/scripts/export_qgis_artifacts.py</span>
+<span class="d-ctx">new file mode 100644</span>
+<span class="d-meta">index 0000000..ac85a7c</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/scripts/export_qgis_artifacts.py</span>
+<span class="d-hunk">@@ -0,0 +1,407 @@</span>
+<span class="d-add">+#!/usr/bin/env python3</span>
+<span class="d-add">+&quot;&quot;&quot;Export QGIS-ready artifacts for one City Edit map slug.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Produces a single GeoPackage (EPSG:4326) with one layer per artifact, so the</span>
+<span class="d-add">+whole export drags into QGIS as one file:</span>
+<span class="d-add">+</span>
+<span class="d-add">+  blocks                 Layer-2 streetscape polygons + their aggregated votes</span>
+<span class="d-add">+  graph_edges            Layer-1 votable graph edges + net votes (full city)</span>
+<span class="d-add">+  graph_nodes            voted graph nodes (all nodes with --all-nodes)</span>
+<span class="d-add">+  proposals_point        PBTPs — square-pin proposals, point at edge midpoint</span>
+<span class="d-add">+  proposals_point_edges  the winning edge of each PBTP, as a line</span>
+<span class="d-add">+  proposals_route        RBTPs — diamond-pin corridors, the ordered path line</span>
+<span class="d-add">+  proposals_route_blocks per-RBTP block-edge union (the highlight/vote set)</span>
+<span class="d-add">+  proposals_route_anchors the two terminal intersections of each RBTP</span>
+<span class="d-add">+  sample_routes          OSRM geometries for sample A→B requests</span>
+<span class="d-add">+  sample_route_edges     the graph edges each sample route mapped to (edge_ids)</span>
+<span class="d-add">+</span>
+<span class="d-add">+Data sources (everything a browser client sees, plus the block polygons):</span>
+<span class="d-add">+  - the LOCAL dev API (Flask on :5001) for topology, votes, and routing</span>
+<span class="d-add">+  - server/streetscape_blocks/output/blocks_generic_&lt;city&gt;.geojson for polygons</span>
+<span class="d-add">+  - client-react/scripts/export-proposals.ts (via vite-node) for proposals —</span>
+<span class="d-add">+    the REAL client modules compute them, so nothing here can drift</span>
+<span class="d-add">+</span>
+<span class="d-add">+Run with the streetscape geo venv (it has geopandas/shapely/pyogrio):</span>
+<span class="d-add">+</span>
+<span class="d-add">+  server/streetscape_blocks/env/bin/python scripts/export_qgis_artifacts.py \</span>
+<span class="d-add">+      nyc-walkways</span>
+<span class="d-add">+</span>
+<span class="d-add">+Full usage: --help. Guide: docs/qgis-export.md.</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+import argparse</span>
+<span class="d-add">+import hashlib</span>
+<span class="d-add">+import json</span>
+<span class="d-add">+import subprocess</span>
+<span class="d-add">+import sys</span>
+<span class="d-add">+import tempfile</span>
+<span class="d-add">+import time</span>
+<span class="d-add">+import urllib.error</span>
+<span class="d-add">+import urllib.request</span>
+<span class="d-add">+from pathlib import Path</span>
+<span class="d-add">+</span>
+<span class="d-add">+import numpy as np</span>
+<span class="d-add">+import pandas as pd</span>
+<span class="d-add">+import geopandas as gpd</span>
+<span class="d-add">+import shapely</span>
+<span class="d-add">+</span>
+<span class="d-add">+REPO = Path(__file__).resolve().parents[1]</span>
+<span class="d-add">+BLOCKS_DIR = REPO / &quot;server&quot; / &quot;streetscape_blocks&quot; / &quot;output&quot;</span>
+<span class="d-add">+CLIENT_DIR = REPO / &quot;client-react&quot;</span>
+<span class="d-add">+CRS = &quot;EPSG:4326&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+# GTB2 binary topology header (see client graphTopology.ts / graph_registry).</span>
+<span class="d-add">+TOPOLOGY_MAGIC_V1 = 0x31425447  # &#x27;GTB1&#x27;</span>
+<span class="d-add">+TOPOLOGY_MAGIC_V2 = 0x32425447  # &#x27;GTB2&#x27;</span>
+<span class="d-add">+</span>
+<span class="d-add">+SAMPLE_ROUTE_MIN_M = 800</span>
+<span class="d-add">+SAMPLE_ROUTE_MAX_M = 6_000</span>
+<span class="d-add">+SAMPLE_ROUTES_FROM_PROPOSALS = 3  # additionally route between top-RBTP anchors</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+# ── API helpers (stdlib urllib — the geo venv has no requests) ──────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+def api_json(base: str, path: str):</span>
+<span class="d-add">+    with urllib.request.urlopen(f&quot;{base}{path}&quot;, timeout=120) as resp:</span>
+<span class="d-add">+        return json.load(resp)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def api_bytes(base: str, path: str) -&gt; bytes:</span>
+<span class="d-add">+    with urllib.request.urlopen(f&quot;{base}{path}&quot;, timeout=120) as resp:</span>
+<span class="d-add">+        return resp.read()</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def api_post_json(base: str, path: str, body: dict):</span>
+<span class="d-add">+    req = urllib.request.Request(</span>
+<span class="d-add">+        f&quot;{base}{path}&quot;, data=json.dumps(body).encode(),</span>
+<span class="d-add">+        headers={&quot;Content-Type&quot;: &quot;application/json&quot;}, method=&quot;POST&quot;,</span>
+<span class="d-add">+    )</span>
+<span class="d-add">+    with urllib.request.urlopen(req, timeout=120) as resp:</span>
+<span class="d-add">+        return json.load(resp)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+# ── Topology ────────────────────────────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+class Topology:</span>
+<span class="d-add">+    &quot;&quot;&quot;Decoded GTB1/GTB2 blob: node coords, edge endpoints, edge→block ids.&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def __init__(self, buf: bytes):</span>
+<span class="d-add">+        head = np.frombuffer(buf, dtype=np.uint32, count=4)</span>
+<span class="d-add">+        if head[0] == TOPOLOGY_MAGIC_V2:</span>
+<span class="d-add">+            header_bytes, self.n_blocks = 16, int(head[3])</span>
+<span class="d-add">+        elif head[0] == TOPOLOGY_MAGIC_V1:</span>
+<span class="d-add">+            header_bytes, self.n_blocks = 12, 0</span>
+<span class="d-add">+        else:</span>
+<span class="d-add">+            raise ValueError(f&quot;bad topology magic 0x{head[0]:x}&quot;)</span>
+<span class="d-add">+        self.n_nodes = int(head[1])</span>
+<span class="d-add">+        self.n_edges = int(head[2])</span>
+<span class="d-add">+</span>
+<span class="d-add">+        off = header_bytes</span>
+<span class="d-add">+        coords = np.frombuffer(buf, dtype=np.int32, count=2 * self.n_nodes, offset=off)</span>
+<span class="d-add">+        off += coords.nbytes</span>
+<span class="d-add">+        self.lat = coords[0::2] / 1e7</span>
+<span class="d-add">+        self.lon = coords[1::2] / 1e7</span>
+<span class="d-add">+        self.ends = np.frombuffer(</span>
+<span class="d-add">+            buf, dtype=np.uint32, count=2 * self.n_edges, offset=off,</span>
+<span class="d-add">+        ).reshape(-1, 2)</span>
+<span class="d-add">+        off += self.ends.nbytes</span>
+<span class="d-add">+        if self.n_blocks &gt; 0:</span>
+<span class="d-add">+            self.edge_block_id = np.frombuffer(buf, dtype=np.int32, count=self.n_edges, offset=off)</span>
+<span class="d-add">+        else:</span>
+<span class="d-add">+            self.edge_block_id = np.full(self.n_edges, -1, dtype=np.int32)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def edge_lines(self, edge_ids: np.ndarray):</span>
+<span class="d-add">+        &quot;&quot;&quot;Vectorized 2-point LineStrings for the given edge ids.&quot;&quot;&quot;</span>
+<span class="d-add">+        e = self.ends[edge_ids]                       # (n, 2) node indices</span>
+<span class="d-add">+        xy = np.stack([self.lon[e], self.lat[e]], axis=-1)  # (n, 2, 2) lon/lat</span>
+<span class="d-add">+        return shapely.linestrings(xy.reshape(-1, 2), indices=np.repeat(np.arange(len(e)), 2))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def multiline(self, edge_ids) -&gt; shapely.MultiLineString:</span>
+<span class="d-add">+        return shapely.MultiLineString(list(self.edge_lines(np.asarray(edge_ids, dtype=np.int64))))</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+# ── Vote-array helpers ──────────────────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+def vt_summary(vt_entry, legend):</span>
+<span class="d-add">+    &quot;&quot;&quot;(top_label, up_total, down_total, breakdown_json) for one [idx,up,dn] list.&quot;&quot;&quot;</span>
+<span class="d-add">+    if not vt_entry:</span>
+<span class="d-add">+        return None, 0, 0, None</span>
+<span class="d-add">+    up = sum(p[1] for p in vt_entry)</span>
+<span class="d-add">+    down = sum(p[2] for p in vt_entry)</span>
+<span class="d-add">+    # Entries arrive sorted by net desc (server encode order) — first is the top.</span>
+<span class="d-add">+    top = legend[vt_entry[0][0]] if vt_entry[0][0] &lt; len(legend) else None</span>
+<span class="d-add">+    breakdown = {legend[i]: {&quot;up&quot;: u, &quot;down&quot;: d} for i, u, d in vt_entry if i &lt; len(legend)}</span>
+<span class="d-add">+    return top, up, down, json.dumps(breakdown)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+# ── Layer builders ──────────────────────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+def build_blocks_layer(city_id: str, network: str, votes: dict) -&gt; gpd.GeoDataFrame:</span>
+<span class="d-add">+    meta_path = REPO / &quot;server&quot; / &quot;osm_data&quot; / city_id / f&quot;edge_blocks_{network}.json&quot;</span>
+<span class="d-add">+    meta = json.loads(meta_path.read_text())</span>
+<span class="d-add">+    blocks_path = BLOCKS_DIR / meta[&quot;blocks_file&quot;]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    sha = hashlib.sha256(blocks_path.read_bytes()).hexdigest()[:16]</span>
+<span class="d-add">+    if sha != meta[&quot;blocks_sha256&quot;]:</span>
+<span class="d-add">+        print(f&quot;  WARNING: {blocks_path.name} sha {sha} != baked {meta[&#x27;blocks_sha256&#x27;]} &quot;</span>
+<span class="d-add">+              f&quot;— polygons may not match the served block ids&quot;, file=sys.stderr)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    print(f&quot;  reading {blocks_path.name} …&quot;)</span>
+<span class="d-add">+    gdf = gpd.read_file(blocks_path)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    n_blocks = votes[&quot;n_blocks&quot;]</span>
+<span class="d-add">+    legend = votes[&quot;block_vote_type_legend&quot;]</span>
+<span class="d-add">+    net = np.asarray(votes[&quot;block_votes&quot;], dtype=np.int32)</span>
+<span class="d-add">+    bvt = votes[&quot;block_vote_types&quot;]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    bid = gdf[&quot;block_id&quot;].to_numpy()</span>
+<span class="d-add">+    valid = (bid &gt;= 0) &amp; (bid &lt; n_blocks)</span>
+<span class="d-add">+    gdf[&quot;net_votes&quot;] = np.where(valid, net[np.clip(bid, 0, n_blocks - 1)], 0).astype(np.int32)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    tops, ups, downs, jsons = [], [], [], []</span>
+<span class="d-add">+    for b, ok in zip(bid, valid):</span>
+<span class="d-add">+        top, up, down, js = vt_summary(bvt[b] if ok else None, legend)</span>
+<span class="d-add">+        tops.append(top); ups.append(up); downs.append(down); jsons.append(js)</span>
+<span class="d-add">+    gdf[&quot;top_label&quot;] = tops</span>
+<span class="d-add">+    gdf[&quot;up_votes&quot;] = np.asarray(ups, dtype=np.int32)</span>
+<span class="d-add">+    gdf[&quot;down_votes&quot;] = np.asarray(downs, dtype=np.int32)</span>
+<span class="d-add">+    gdf[&quot;vote_types&quot;] = jsons</span>
+<span class="d-add">+    return gdf</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def build_graph_edge_layer(topo: Topology, votes: dict) -&gt; gpd.GeoDataFrame:</span>
+<span class="d-add">+    legend = votes[&quot;vote_type_legend&quot;]</span>
+<span class="d-add">+    net = np.asarray(votes[&quot;edge_votes&quot;], dtype=np.int32)</span>
+<span class="d-add">+    evt = votes[&quot;edge_vote_types&quot;]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    top_label = np.full(topo.n_edges, None, dtype=object)</span>
+<span class="d-add">+    for eid in np.nonzero(net)[0]:</span>
+<span class="d-add">+        top_label[eid], _, _, _ = vt_summary(evt[eid], legend)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    all_edges = np.arange(topo.n_edges, dtype=np.int64)</span>
+<span class="d-add">+    return gpd.GeoDataFrame(</span>
+<span class="d-add">+        {</span>
+<span class="d-add">+            &quot;edge_id&quot;: all_edges.astype(np.int32),</span>
+<span class="d-add">+            &quot;from_node&quot;: topo.ends[:, 0].astype(np.int32),</span>
+<span class="d-add">+            &quot;to_node&quot;: topo.ends[:, 1].astype(np.int32),</span>
+<span class="d-add">+            &quot;block_id&quot;: topo.edge_block_id,</span>
+<span class="d-add">+            &quot;net_votes&quot;: net,</span>
+<span class="d-add">+            &quot;top_label&quot;: top_label,</span>
+<span class="d-add">+        },</span>
+<span class="d-add">+        geometry=topo.edge_lines(all_edges), crs=CRS,</span>
+<span class="d-add">+    )</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def build_graph_node_layer(topo: Topology, votes: dict, all_nodes: bool) -&gt; gpd.GeoDataFrame:</span>
+<span class="d-add">+    net = np.asarray(votes[&quot;node_votes&quot;], dtype=np.int32)</span>
+<span class="d-add">+    ids = np.arange(topo.n_nodes, dtype=np.int64) if all_nodes else np.nonzero(net)[0]</span>
+<span class="d-add">+    return gpd.GeoDataFrame(</span>
+<span class="d-add">+        {&quot;node_id&quot;: ids.astype(np.int32), &quot;net_votes&quot;: net[ids]},</span>
+<span class="d-add">+        geometry=shapely.points(topo.lon[ids], topo.lat[ids]), crs=CRS,</span>
+<span class="d-add">+    )</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def run_proposals_helper(api: str, slug: str, mode: str) -&gt; dict:</span>
+<span class="d-add">+    &quot;&quot;&quot;Compute PBTPs/RBTPs with the actual client TS modules via vite-node.&quot;&quot;&quot;</span>
+<span class="d-add">+    out_json = Path(tempfile.mkstemp(suffix=&quot;.json&quot;, prefix=&quot;proposals-&quot;)[1])</span>
+<span class="d-add">+    cmd = [</span>
+<span class="d-add">+        str(CLIENT_DIR / &quot;node_modules&quot; / &quot;.bin&quot; / &quot;vite-node&quot;),</span>
+<span class="d-add">+        &quot;scripts/export-proposals.ts&quot;, &quot;--&quot;, api, slug, mode, str(out_json),</span>
+<span class="d-add">+    ]</span>
+<span class="d-add">+    subprocess.run(cmd, cwd=CLIENT_DIR, check=True)</span>
+<span class="d-add">+    data = json.loads(out_json.read_text())</span>
+<span class="d-add">+    out_json.unlink()</span>
+<span class="d-add">+    return data</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def build_proposal_layers(topo: Topology, proposals: dict) -&gt; dict[str, gpd.GeoDataFrame]:</span>
+<span class="d-add">+    pts, routes = proposals[&quot;points&quot;], proposals[&quot;routes&quot;]</span>
+<span class="d-add">+    layers: dict[str, gpd.GeoDataFrame] = {}</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if pts:</span>
+<span class="d-add">+        rows = pd.DataFrame([</span>
+<span class="d-add">+            {</span>
+<span class="d-add">+                &quot;edge_id&quot;: p[&quot;edge_id&quot;], &quot;label&quot;: p[&quot;label&quot;], &quot;net_votes&quot;: p[&quot;net&quot;],</span>
+<span class="d-add">+                &quot;block_id&quot;: int(topo.edge_block_id[p[&quot;edge_id&quot;]]),</span>
+<span class="d-add">+                &quot;covered_by_route&quot;: bool(p[&quot;covered_by_route&quot;]),</span>
+<span class="d-add">+            }</span>
+<span class="d-add">+            for p in pts</span>
+<span class="d-add">+        ])</span>
+<span class="d-add">+        mids = [((a[1] + b[1]) / 2, (a[0] + b[0]) / 2) for a, b in (p[&quot;ends&quot;] for p in pts)]</span>
+<span class="d-add">+        layers[&quot;proposals_point&quot;] = gpd.GeoDataFrame(</span>
+<span class="d-add">+            rows, geometry=[shapely.Point(x, y) for x, y in mids], crs=CRS)</span>
+<span class="d-add">+        layers[&quot;proposals_point_edges&quot;] = gpd.GeoDataFrame(</span>
+<span class="d-add">+            rows, geometry=[</span>
+<span class="d-add">+                shapely.LineString([(a[1], a[0]), (b[1], b[0])]) for a, b in (p[&quot;ends&quot;] for p in pts)</span>
+<span class="d-add">+            ], crs=CRS)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if routes:</span>
+<span class="d-add">+        rows = pd.DataFrame([</span>
+<span class="d-add">+            {</span>
+<span class="d-add">+                &quot;proposal_id&quot;: r[&quot;id&quot;], &quot;label&quot;: r[&quot;label&quot;], &quot;score&quot;: r[&quot;score&quot;],</span>
+<span class="d-add">+                &quot;n_path_edges&quot;: len(r[&quot;edge_ids&quot;]), &quot;n_blocks&quot;: r[&quot;n_blocks&quot;],</span>
+<span class="d-add">+                &quot;block_ids&quot;: &quot;,&quot;.join(str(b) for b in sorted(</span>
+<span class="d-add">+                    {int(topo.edge_block_id[e]) for e in r[&quot;block_edge_ids&quot;]} - {-1})),</span>
+<span class="d-add">+            }</span>
+<span class="d-add">+            for r in routes</span>
+<span class="d-add">+        ])</span>
+<span class="d-add">+        layers[&quot;proposals_route&quot;] = gpd.GeoDataFrame(</span>
+<span class="d-add">+            rows, geometry=[</span>
+<span class="d-add">+                shapely.LineString([(lng, lat) for lat, lng in r[&quot;path_latlngs&quot;]]) for r in routes</span>
+<span class="d-add">+            ], crs=CRS)</span>
+<span class="d-add">+        layers[&quot;proposals_route_blocks&quot;] = gpd.GeoDataFrame(</span>
+<span class="d-add">+            rows, geometry=[topo.multiline(r[&quot;block_edge_ids&quot;]) for r in routes], crs=CRS)</span>
+<span class="d-add">+        anchor_rows, anchor_geoms = [], []</span>
+<span class="d-add">+        for r in routes:</span>
+<span class="d-add">+            for which, (lat, lng) in zip((&quot;start&quot;, &quot;end&quot;), r[&quot;anchor_coords&quot;]):</span>
+<span class="d-add">+                anchor_rows.append({&quot;proposal_id&quot;: r[&quot;id&quot;], &quot;label&quot;: r[&quot;label&quot;], &quot;which&quot;: which})</span>
+<span class="d-add">+                anchor_geoms.append(shapely.Point(lng, lat))</span>
+<span class="d-add">+        layers[&quot;proposals_route_anchors&quot;] = gpd.GeoDataFrame(</span>
+<span class="d-add">+            pd.DataFrame(anchor_rows), geometry=anchor_geoms, crs=CRS)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    return layers</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def sample_route_pairs(topo: Topology, proposals: dict, n_random: int, seed: int):</span>
+<span class="d-add">+    &quot;&quot;&quot;(kind, [lat,lng] start, [lat,lng] end) pairs: top-RBTP anchors + seeded</span>
+<span class="d-add">+    random node pairs SAMPLE_ROUTE_MIN_M–MAX_M apart (routable, city-scale).&quot;&quot;&quot;</span>
+<span class="d-add">+    pairs = []</span>
+<span class="d-add">+    for r in proposals.get(&quot;routes&quot;, [])[:SAMPLE_ROUTES_FROM_PROPOSALS]:</span>
+<span class="d-add">+        (alat, alng), (blat, blng) = r[&quot;anchor_coords&quot;]</span>
+<span class="d-add">+        pairs.append((f&quot;proposal:{r[&#x27;id&#x27;]}&quot;, [alat, alng], [blat, blng]))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    degree = np.bincount(topo.ends.ravel(), minlength=topo.n_nodes)</span>
+<span class="d-add">+    connected = np.nonzero(degree &gt; 0)[0]</span>
+<span class="d-add">+    rng = np.random.default_rng(seed)</span>
+<span class="d-add">+    attempts = 0</span>
+<span class="d-add">+    while len(pairs) &lt; n_random + min(SAMPLE_ROUTES_FROM_PROPOSALS,</span>
+<span class="d-add">+                                      len(proposals.get(&quot;routes&quot;, []))) and attempts &lt; 10_000:</span>
+<span class="d-add">+        attempts += 1</span>
+<span class="d-add">+        a, b = connected[rng.integers(0, len(connected), size=2)]</span>
+<span class="d-add">+        dlat = (topo.lat[a] - topo.lat[b]) * 111_320</span>
+<span class="d-add">+        dlon = (topo.lon[a] - topo.lon[b]) * 111_320 * np.cos(np.radians(topo.lat[a]))</span>
+<span class="d-add">+        dist = float(np.hypot(dlat, dlon))</span>
+<span class="d-add">+        if SAMPLE_ROUTE_MIN_M &lt;= dist &lt;= SAMPLE_ROUTE_MAX_M:</span>
+<span class="d-add">+            pairs.append((&quot;random&quot;, [float(topo.lat[a]), float(topo.lon[a])],</span>
+<span class="d-add">+                          [float(topo.lat[b]), float(topo.lon[b])]))</span>
+<span class="d-add">+    return pairs</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def build_sample_route_layers(api: str, slug: str, topo: Topology, pairs) -&gt; dict[str, gpd.GeoDataFrame]:</span>
+<span class="d-add">+    rows, geoms, edge_geoms = [], [], []</span>
+<span class="d-add">+    for i, (kind, start, end) in enumerate(pairs):</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            resp = api_post_json(api, &quot;/api/routes&quot;, {&quot;map&quot;: slug, &quot;start&quot;: start, &quot;end&quot;: end})</span>
+<span class="d-add">+        except urllib.error.HTTPError as e:</span>
+<span class="d-add">+            print(f&quot;  sample route {i} ({kind}): HTTP {e.code} — skipped&quot;, file=sys.stderr)</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        route = resp.get(&quot;route&quot;) or {}</span>
+<span class="d-add">+        coords = (route.get(&quot;geometry&quot;) or {}).get(&quot;coordinates&quot;) or []</span>
+<span class="d-add">+        edge_ids = resp.get(&quot;edge_ids&quot;) or []</span>
+<span class="d-add">+        if len(coords) &lt; 2:</span>
+<span class="d-add">+            print(f&quot;  sample route {i} ({kind}): no geometry — skipped&quot;, file=sys.stderr)</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        rows.append({</span>
+<span class="d-add">+            &quot;route_idx&quot;: i, &quot;kind&quot;: kind,</span>
+<span class="d-add">+            &quot;start_lat&quot;: start[0], &quot;start_lng&quot;: start[1],</span>
+<span class="d-add">+            &quot;end_lat&quot;: end[0], &quot;end_lng&quot;: end[1],</span>
+<span class="d-add">+            &quot;distance_m&quot;: route.get(&quot;distance&quot;), &quot;duration_s&quot;: route.get(&quot;duration&quot;),</span>
+<span class="d-add">+            &quot;n_edge_ids&quot;: len(edge_ids),</span>
+<span class="d-add">+            &quot;edge_ids&quot;: &quot;,&quot;.join(str(e) for e in edge_ids),</span>
+<span class="d-add">+        })</span>
+<span class="d-add">+        geoms.append(shapely.LineString(coords))  # already [lon, lat]</span>
+<span class="d-add">+        edge_geoms.append(topo.multiline(edge_ids) if edge_ids else shapely.MultiLineString([]))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if not rows:</span>
+<span class="d-add">+        return {}</span>
+<span class="d-add">+    df = pd.DataFrame(rows)</span>
+<span class="d-add">+    return {</span>
+<span class="d-add">+        &quot;sample_routes&quot;: gpd.GeoDataFrame(df, geometry=geoms, crs=CRS),</span>
+<span class="d-add">+        &quot;sample_route_edges&quot;: gpd.GeoDataFrame(df, geometry=edge_geoms, crs=CRS),</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+# ── Main ────────────────────────────────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+def main():</span>
+<span class="d-add">+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])</span>
+<span class="d-add">+    ap.add_argument(&quot;slug&quot;, help=&quot;map slug, e.g. nyc-walkways&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--api&quot;, default=&quot;http://localhost:5001&quot;, help=&quot;Flask API base&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--out&quot;, default=None, help=&quot;output dir (default exports/qgis/&lt;slug&gt;)&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--routes&quot;, type=int, default=6, help=&quot;number of random sample routes&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--seed&quot;, type=int, default=42, help=&quot;RNG seed for sample routes&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--bbox&quot;, default=None, help=&quot;clip blocks/graph to &#x27;west,south,east,north&#x27;&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--all-nodes&quot;, action=&quot;store_true&quot;,</span>
+<span class="d-add">+                    help=&quot;export every graph node (default: voted nodes only)&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--skip&quot;, default=&quot;&quot;, help=&quot;comma list of blocks,graph,proposals,routes&quot;)</span>
+<span class="d-add">+    args = ap.parse_args()</span>
+<span class="d-add">+    skip = set(filter(None, args.skip.split(&quot;,&quot;)))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    out_dir = Path(args.out) if args.out else REPO / &quot;exports&quot; / &quot;qgis&quot; / args.slug</span>
+<span class="d-add">+    out_dir.mkdir(parents=True, exist_ok=True)</span>
+<span class="d-add">+    gpkg = out_dir / f&quot;city-edit-{args.slug}.gpkg&quot;</span>
+<span class="d-add">+    if gpkg.exists():</span>
+<span class="d-add">+        gpkg.unlink()  # fresh file — stale layers from a previous run must not linger</span>
+<span class="d-add">+</span>
+<span class="d-add">+    t0 = time.time()</span>
+<span class="d-add">+    info = api_json(args.api, f&quot;/api/maps/{args.slug}&quot;)</span>
+<span class="d-add">+    city_id, mode, network = info[&quot;cityId&quot;], info[&quot;mode&quot;], info[&quot;network&quot;]</span>
+<span class="d-add">+    print(f&quot;[export] {args.slug}: city={city_id} mode={mode} network={network}&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    print(&quot;[export] fetching topology + votes …&quot;)</span>
+<span class="d-add">+    topo = Topology(api_bytes(args.api, f&quot;/api/graph-topology?map={args.slug}&amp;format=bin&quot;))</span>
+<span class="d-add">+    votes = api_json(args.api, f&quot;/api/graph-votes?map={args.slug}&amp;mode={mode}&quot;)</span>
+<span class="d-add">+    if votes[&quot;n_edges&quot;] != topo.n_edges or votes[&quot;n_nodes&quot;] != topo.n_nodes:</span>
+<span class="d-add">+        sys.exit(f&quot;FATAL: votes ({votes[&#x27;n_nodes&#x27;]}n/{votes[&#x27;n_edges&#x27;]}e) don&#x27;t match &quot;</span>
+<span class="d-add">+                 f&quot;topology ({topo.n_nodes}n/{topo.n_edges}e)&quot;)</span>
+<span class="d-add">+    print(f&quot;[export] topology {topo.n_nodes:,} nodes / {topo.n_edges:,} edges / &quot;</span>
+<span class="d-add">+          f&quot;{topo.n_blocks:,} blocks, vote revision {votes[&#x27;rev&#x27;]}&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    bbox = tuple(float(x) for x in args.bbox.split(&quot;,&quot;)) if args.bbox else None</span>
+<span class="d-add">+    written = {}</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def write(name: str, gdf: gpd.GeoDataFrame):</span>
+<span class="d-add">+        if bbox is not None and name.startswith((&quot;blocks&quot;, &quot;graph&quot;)):</span>
+<span class="d-add">+            gdf = gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]</span>
+<span class="d-add">+        gdf.to_file(gpkg, layer=name, driver=&quot;GPKG&quot;)</span>
+<span class="d-add">+        written[name] = len(gdf)</span>
+<span class="d-add">+        print(f&quot;  layer {name}: {len(gdf):,} features&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if &quot;blocks&quot; not in skip and topo.n_blocks &gt; 0:</span>
+<span class="d-add">+        print(&quot;[export] blocks + votes …&quot;)</span>
+<span class="d-add">+        write(&quot;blocks&quot;, build_blocks_layer(city_id, network, votes))</span>
+<span class="d-add">+    elif topo.n_blocks == 0:</span>
+<span class="d-add">+        print(&quot;[export] map has no block artifacts — skipping blocks layer&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if &quot;graph&quot; not in skip:</span>
+<span class="d-add">+        print(&quot;[export] route graph …&quot;)</span>
+<span class="d-add">+        write(&quot;graph_edges&quot;, build_graph_edge_layer(topo, votes))</span>
+<span class="d-add">+        write(&quot;graph_nodes&quot;, build_graph_node_layer(topo, votes, args.all_nodes))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    proposals = {&quot;points&quot;: [], &quot;routes&quot;: []}</span>
+<span class="d-add">+    if &quot;proposals&quot; not in skip:</span>
+<span class="d-add">+        print(&quot;[export] proposals (vite-node → client TS modules) …&quot;)</span>
+<span class="d-add">+        proposals = run_proposals_helper(args.api, args.slug, mode)</span>
+<span class="d-add">+        for name, gdf in build_proposal_layers(topo, proposals).items():</span>
+<span class="d-add">+            write(name, gdf)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if &quot;routes&quot; not in skip and network == &quot;streets&quot;:</span>
+<span class="d-add">+        print(&quot;[export] sample routes …&quot;)</span>
+<span class="d-add">+        pairs = sample_route_pairs(topo, proposals, args.routes, args.seed)</span>
+<span class="d-add">+        for name, gdf in build_sample_route_layers(args.api, args.slug, topo, pairs).items():</span>
+<span class="d-add">+            write(name, gdf)</span>
+<span class="d-add">+    elif network != &quot;streets&quot;:</span>
+<span class="d-add">+        print(f&quot;[export] network &#x27;{network}&#x27; has no routing — skipping sample routes&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    manifest = {</span>
+<span class="d-add">+        &quot;slug&quot;: args.slug, &quot;city&quot;: city_id, &quot;mode&quot;: mode, &quot;network&quot;: network,</span>
+<span class="d-add">+        &quot;api&quot;: args.api, &quot;generated_utc&quot;: time.strftime(&quot;%Y-%m-%dT%H:%M:%SZ&quot;, time.gmtime()),</span>
+<span class="d-add">+        &quot;vote_revision&quot;: votes[&quot;rev&quot;], &quot;topology_version&quot;: votes.get(&quot;topology_version&quot;),</span>
+<span class="d-add">+        &quot;blocks_version&quot;: votes.get(&quot;blocks_version&quot;),</span>
+<span class="d-add">+        &quot;seed&quot;: args.seed, &quot;bbox&quot;: args.bbox, &quot;layers&quot;: written,</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    (out_dir / &quot;manifest.json&quot;).write_text(json.dumps(manifest, indent=2))</span>
+<span class="d-add">+    print(f&quot;[export] done in {time.time() - t0:.0f}s → {gpkg}&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+if __name__ == &quot;__main__&quot;:</span>
+<span class="d-add">+    main()</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes-qgis-export.diff</code> by <code>changelog/build_qgis_export_report.py</code>.
+    Regenerate after further edits with
+    <code>git diff -- &lt;files&gt; &gt; changelog/changes-qgis-export.diff &amp;&amp; python changelog/build_qgis_export_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
