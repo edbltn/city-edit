@@ -63,6 +63,63 @@ resource "google_monitoring_uptime_check_config" "app_health" {
 }
 
 # -----------------------------------------------------------------------------
+# Per-endpoint latency — log-based distribution metric
+#
+# Cloud Run's built-in request_latencies metric has no URL label, so per-
+# endpoint percentiles come from the request logs instead: every request log
+# entry carries httpRequest.latency + requestUrl. The filter whitelists the
+# real API surface — bot scanners probe /api/.env, /api/wp-config.php etc.
+# constantly and would otherwise explode the endpoint label's cardinality.
+# Values are in SECONDS (extracted from the "0.123s" latency string).
+# -----------------------------------------------------------------------------
+
+resource "google_logging_metric" "api_latency" {
+  name        = "cityedit_api_latency"
+  description = "Per-endpoint request latency (seconds) for the app's real API surface, from Cloud Run request logs"
+
+  filter = <<-EOT
+    resource.type="cloud_run_revision"
+    resource.labels.service_name="desire-path-mapper"
+    logName="projects/${var.project_id}/logs/run.googleapis.com%2Frequests"
+    httpRequest.requestUrl=~"://[^/]+/(api/(vote|route-votes|routes|geocode|reverse-geocode|nearest-node|graph-votes|graph-topology|graph-version|my-votes|maps|tiles|cities|vote-type-lists)|health)([/?].*)?$"
+  EOT
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "DISTRIBUTION"
+    unit        = "s"
+
+    labels {
+      key         = "endpoint"
+      value_type  = "STRING"
+      description = "API path prefix, e.g. /api/vote (subpaths collapse into it)"
+    }
+
+    labels {
+      key         = "method"
+      value_type  = "STRING"
+      description = "HTTP method"
+    }
+  }
+
+  value_extractor = "REGEXP_EXTRACT(httpRequest.latency, \"([0-9]+\\\\.?[0-9]*)s\")"
+
+  label_extractors = {
+    endpoint = "REGEXP_EXTRACT(httpRequest.requestUrl, \"://[^/]+(/api/[a-z-]+|/health)\")"
+    method   = "EXTRACT(httpRequest.requestMethod)"
+  }
+
+  # 1ms … ~30min in ~35% steps — fine-grained where user-facing latency lives.
+  bucket_options {
+    exponential_buckets {
+      num_finite_buckets = 48
+      growth_factor      = 1.35
+      scale              = 0.001
+    }
+  }
+}
+
+# -----------------------------------------------------------------------------
 # Alert policies
 # -----------------------------------------------------------------------------
 
@@ -351,7 +408,7 @@ resource "google_monitoring_dashboard" "system_health" {
             title = "System"
             text = {
               format = "MARKDOWN"
-              content = "**🌐 cityedit.org** → **Cloud Run `desire-path-mapper`** (nginx + Flask, 8Gi × 1–4 instances) → **OSRM** `desire-path-osrm` (routing, 4Gi × 1) · **Redis** Memorystore `desire-path-prod` (serving votes, 1GB LRU) · **Cloud SQL** `desire-path-votes-prod` (canonical votes)\n\nScorecards below = component health at a glance. Sections: App → OSRM → Redis → SQL."
+              content = "**🌐 cityedit.org** → **Cloud Run `desire-path-mapper`** (nginx + Flask, 8Gi × 1–4 instances) → **OSRM** `desire-path-osrm` (routing, 4Gi × 1) · **Redis** Memorystore `desire-path-prod` (serving votes, 1GB LRU) · **Cloud SQL** `desire-path-votes-prod` (canonical votes)\n\nScorecards below = component health at a glance. Sections: App → API latency by endpoint (grouped by backing store) → OSRM → Redis → SQL."
               # The API echoes an empty style object back; without it every plan
               # shows a perpetual dashboard_json diff.
               style = {}
@@ -658,9 +715,132 @@ resource "google_monitoring_dashboard" "system_health" {
           }
         },
 
+        # ---- API latency by endpoint (log-based metric, seconds) -------------
+        # Grouped by what each endpoint leans on, so a slow group points at its
+        # backing store. Data starts at metric creation (log-based metrics
+        # aren't retroactive).
+        {
+          yPos = 33, width = 24, height = 10
+          widget = {
+            title = "API P99 by endpoint — Redis / Postgres backed (s)"
+            xyChart = {
+              dataSets = [{
+                plotType = "LINE"
+                timeSeriesQuery = {
+                  timeSeriesFilter = {
+                    filter = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.api_latency.name}\" resource.type=\"cloud_run_revision\" metric.label.\"endpoint\"=monitoring.regex.full_match(\"/api/(vote|graph-votes|my-votes|route-votes|maps)|/health\")"
+                    aggregation = {
+                      alignmentPeriod    = "300s"
+                      perSeriesAligner   = "ALIGN_DELTA"
+                      crossSeriesReducer = "REDUCE_PERCENTILE_99"
+                      groupByFields      = ["metric.label.\"endpoint\""]
+                    }
+                  }
+                }
+              }]
+            }
+          }
+        },
+        {
+          xPos = 24, yPos = 33, width = 24, height = 10
+          widget = {
+            title = "/api/routes (OSRM) — P50 / P95 / P99 (s)"
+            xyChart = {
+              dataSets = [
+                {
+                  plotType = "LINE"
+                  legendTemplate = "P50"
+                  timeSeriesQuery = {
+                    timeSeriesFilter = {
+                      filter = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.api_latency.name}\" resource.type=\"cloud_run_revision\" metric.label.\"endpoint\"=\"/api/routes\""
+                      aggregation = {
+                        alignmentPeriod    = "300s"
+                        perSeriesAligner   = "ALIGN_DELTA"
+                        crossSeriesReducer = "REDUCE_PERCENTILE_50"
+                      }
+                    }
+                  }
+                },
+                {
+                  plotType = "LINE"
+                  legendTemplate = "P95"
+                  timeSeriesQuery = {
+                    timeSeriesFilter = {
+                      filter = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.api_latency.name}\" resource.type=\"cloud_run_revision\" metric.label.\"endpoint\"=\"/api/routes\""
+                      aggregation = {
+                        alignmentPeriod    = "300s"
+                        perSeriesAligner   = "ALIGN_DELTA"
+                        crossSeriesReducer = "REDUCE_PERCENTILE_95"
+                      }
+                    }
+                  }
+                },
+                {
+                  plotType = "LINE"
+                  legendTemplate = "P99"
+                  timeSeriesQuery = {
+                    timeSeriesFilter = {
+                      filter = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.api_latency.name}\" resource.type=\"cloud_run_revision\" metric.label.\"endpoint\"=\"/api/routes\""
+                      aggregation = {
+                        alignmentPeriod    = "300s"
+                        perSeriesAligner   = "ALIGN_DELTA"
+                        crossSeriesReducer = "REDUCE_PERCENTILE_99"
+                      }
+                    }
+                  }
+                },
+              ]
+            }
+          }
+        },
+        {
+          yPos = 43, width = 24, height = 10
+          widget = {
+            title = "API P99 by endpoint — in-process graph provider (s)"
+            xyChart = {
+              dataSets = [{
+                plotType = "LINE"
+                timeSeriesQuery = {
+                  timeSeriesFilter = {
+                    filter = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.api_latency.name}\" resource.type=\"cloud_run_revision\" metric.label.\"endpoint\"=monitoring.regex.full_match(\"/api/(reverse-geocode|nearest-node|graph-topology|graph-version)\")"
+                    aggregation = {
+                      alignmentPeriod    = "300s"
+                      perSeriesAligner   = "ALIGN_DELTA"
+                      crossSeriesReducer = "REDUCE_PERCENTILE_99"
+                      groupByFields      = ["metric.label.\"endpoint\""]
+                    }
+                  }
+                }
+              }]
+            }
+          }
+        },
+        {
+          xPos = 24, yPos = 43, width = 24, height = 10
+          widget = {
+            title = "API P99 by endpoint — external (Photon) + static (s)"
+            xyChart = {
+              dataSets = [{
+                plotType = "LINE"
+                timeSeriesQuery = {
+                  timeSeriesFilter = {
+                    filter = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.api_latency.name}\" resource.type=\"cloud_run_revision\" metric.label.\"endpoint\"=monitoring.regex.full_match(\"/api/(geocode|tiles|cities|vote-type-lists)\")"
+                    aggregation = {
+                      alignmentPeriod    = "300s"
+                      perSeriesAligner   = "ALIGN_DELTA"
+                      crossSeriesReducer = "REDUCE_PERCENTILE_99"
+                      groupByFields      = ["metric.label.\"endpoint\""]
+                    }
+                  }
+                }
+              }]
+            }
+          }
+        },
+
         # ---- OSRM section ----------------------------------------------------
         {
-          yPos = 33, width = 16, height = 10
+          yPos = 53, width = 16, height = 10
           widget = {
             title = "OSRM — requests/s by response class"
             xyChart = {
@@ -682,7 +862,7 @@ resource "google_monitoring_dashboard" "system_health" {
           }
         },
         {
-          xPos = 16, yPos = 33, width = 16, height = 10
+          xPos = 16, yPos = 53, width = 16, height = 10
           widget = {
             title = "OSRM — latency P50 / P99 (ms)"
             xyChart = {
@@ -720,7 +900,7 @@ resource "google_monitoring_dashboard" "system_health" {
           }
         },
         {
-          xPos = 32, yPos = 33, width = 16, height = 10
+          xPos = 32, yPos = 53, width = 16, height = 10
           widget = {
             title = "OSRM — memory & CPU (P99)"
             xyChart = {
@@ -760,7 +940,7 @@ resource "google_monitoring_dashboard" "system_health" {
 
         # ---- Redis section ---------------------------------------------------
         {
-          yPos = 43, width = 16, height = 10
+          yPos = 63, width = 16, height = 10
           widget = {
             title = "Redis — memory usage ratio"
             xyChart = {
@@ -781,7 +961,7 @@ resource "google_monitoring_dashboard" "system_health" {
           }
         },
         {
-          xPos = 16, yPos = 43, width = 16, height = 10
+          xPos = 16, yPos = 63, width = 16, height = 10
           widget = {
             title = "Redis — connected clients"
             xyChart = {
@@ -801,7 +981,7 @@ resource "google_monitoring_dashboard" "system_health" {
           }
         },
         {
-          xPos = 32, yPos = 43, width = 16, height = 10
+          xPos = 32, yPos = 63, width = 16, height = 10
           widget = {
             title = "Redis — commands/s"
             xyChart = {
@@ -824,7 +1004,7 @@ resource "google_monitoring_dashboard" "system_health" {
 
         # ---- Cloud SQL section -----------------------------------------------
         {
-          yPos = 53, width = 16, height = 10
+          yPos = 73, width = 16, height = 10
           widget = {
             title = "Cloud SQL — CPU & memory utilization"
             xyChart = {
@@ -860,7 +1040,7 @@ resource "google_monitoring_dashboard" "system_health" {
           }
         },
         {
-          xPos = 16, yPos = 53, width = 16, height = 10
+          xPos = 16, yPos = 73, width = 16, height = 10
           widget = {
             title = "Cloud SQL — active connections"
             xyChart = {
@@ -881,7 +1061,7 @@ resource "google_monitoring_dashboard" "system_health" {
           }
         },
         {
-          xPos = 32, yPos = 53, width = 16, height = 10
+          xPos = 32, yPos = 73, width = 16, height = 10
           widget = {
             title = "Cloud SQL — disk utilization"
             xyChart = {

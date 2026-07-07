@@ -157,6 +157,54 @@ SECTIONS = [
     },
 ]
 
+SECTIONS.append(
+    {
+        "id": "perendpoint",
+        "tag": "GCP · log-based metrics",
+        "title": "4 · P99 by request type, grouped by backing store",
+        "symptom": (
+            "The service-level P99 says <em>something</em> is slow but not <em>what</em>: a vote should be "
+            "a Redis round-trip (tens of ms), a route is an OSRM hop, an address lookup is an in-process "
+            "KD-tree query — one number over all of them is unreadable. And reverse-geocode was reported "
+            "“a bit slow”."
+        ),
+        "cause": [
+            "Cloud Run's built-in <code>request_latencies</code> metric has no URL label, so it can't be "
+            "split by endpoint. The request <em>logs</em> carry <code>httpRequest.latency</code> + "
+            "<code>requestUrl</code> for every request — the standard fix is a log-based distribution "
+            "metric with the endpoint extracted as a label.",
+            "Measured baseline from 7 days of logs (per-endpoint p50/p95/p99): "
+            "<code>/api/reverse-geocode</code> 320ms/935ms/1.1s(!), <code>/api/maps</code> "
+            "123ms/3.6s/5.5s, <code>/api/graph-votes</code> 183ms/14.9s/19s, "
+            "<code>/api/graph-topology</code> 2.6s/3.2s/6.1s, <code>/api/routes</code> 65ms/312ms, "
+            "<code>/health</code> 6ms. <code>/api/vote</code> had zero traffic in the window.",
+            "Root cause found while digging: <code>resolve_map()</code> → <code>get_map()</code> runs "
+            "<code>_MAP_SELECT</code> — which LEFT JOINs a full-table "
+            "<code>COUNT(*) … GROUP BY map_slug</code> over <code>edge_votes</code> — against the "
+            "db-f1-micro Postgres on <strong>every API request</strong>. That's the shared ~100–300ms "
+            "floor under reverse-geocode/routes/vote and the multi-second tail on /api/maps. The "
+            "endpoint's own work (KD-tree + ≤5-hop BFS) is sub-millisecond.",
+            "Bot scanners constantly probe <code>/api/.env</code>, <code>/api/wp-config.php</code> etc. — "
+            "an unfiltered URL label would blow up the metric's cardinality with junk endpoints.",
+        ],
+        "fixes": [
+            "New log-based distribution metric <code>cityedit_api_latency</code> (seconds, 48 exponential "
+            "buckets from 1ms): filter whitelists the real API surface + <code>/health</code>; labels "
+            "<code>endpoint</code> (path prefix — subpaths like <code>/api/maps/&lt;slug&gt;</code> "
+            "collapse into their parent) and <code>method</code>.",
+            "New dashboard section “API latency by endpoint”, one chart per backing store so a slow group "
+            "points at its dependency: <strong>Redis/Postgres</strong> (vote, graph-votes, my-votes, "
+            "route-votes, maps, health), <strong>OSRM</strong> (/api/routes with P50/P95/P99), "
+            "<strong>in-process graph provider</strong> (reverse-geocode, nearest-node, graph-topology, "
+            "graph-version), <strong>external + static</strong> (geocode/Photon, tiles/PMTiles).",
+            "Verified live end-to-end: generated real traffic against prod, and the metric split into 7 "
+            "endpoint series (e.g. routes p99 219ms, reverse-geocode 162ms cold / ~10ms warm, "
+            "nearest-node 8ms). Note log-based metrics record from creation forward only.",
+        ],
+        "files": ["terraform/monitoring.tf"],
+    }
+)
+
 VERIFY = [
     "Targeted apply completed clean: 12 resources created (1 project service, 1 notification channel, "
     "1 uptime check, 8 alert policies, 1 dashboard); the app service was excluded and untouched.",
@@ -167,6 +215,10 @@ VERIFY = [
     "<code>curl https://cityedit.org/health</code> → 200 in ~100ms.",
     "<code>terraform plan</code> after the JSON normalization: “No changes” — no perpetual dashboard "
     "diff, no app churn pending from this work.",
+    "Round 2 (per-endpoint): pulled 2,225 request-log entries over 7 days and computed per-endpoint "
+    "percentiles to set the baseline; created the log-based metric + dashboard section via a second "
+    "targeted apply (fresh DB snapshot taken first); generated live traffic and read back 7 endpoint "
+    "series from the new metric with sensible values.",
 ]
 
 CHECKLIST = [
@@ -180,6 +232,11 @@ CHECKLIST = [
     "something real (most likely app memory brushing 90% during a warmup).",
     "Optional fire drill: in Alerting, open “City Edit: /health failing” and use “Test notification "
     "channel” to confirm the email lands in your inbox and not spam.",
+    "Scroll to “API latency by endpoint”: after a bit of real traffic each chart should show one line "
+    "per endpoint (data begins at metric creation — history before that shows nothing).",
+    "Use the app normally for a day, then read the Redis/Postgres chart: /api/vote should sit in the "
+    "tens of ms; if it tracks /api/maps upward instead, the per-request map-lookup DB query is the "
+    "culprit (see the improvement notes in the session summary).",
 ]
 
 
@@ -212,14 +269,15 @@ FILE_CONTEXT = {
         # Monitoring watches the server-side components; the client is out of scope.
         "on": ["nginx", "Flask API", "OSRM", "Redis"],
         "module": ("terraform · GCP infra", "declarative prod infrastructure (Cloud Run, Memorystore, Cloud SQL, scheduler, bastion) — this file adds the observability layer over all of it"),
-        "file": ("monitoring.tf", "~914 LOC (new) — Cloud Monitoring dashboard-as-code, uptime check, notification channel, 8 alert policies"),
+        "file": ("monitoring.tf", "~1100 LOC (new) — Cloud Monitoring dashboard-as-code, uptime check, notification channel, log-based endpoint-latency metric, 8 alert policies"),
         "outline": [
             ("google_project_service.monitoring", "enable monitoring.googleapis.com", True),
             ("locals — metric filters", "app / osrm / redis / sql resource-filter strings, built once", True),
             ("notification_channel.email_eric", "email channel for every policy", True),
             ("uptime_check_config.app_health", "GET cityedit.org/health every 60s, 6 regions", True),
+            ("logging_metric.api_latency", "per-endpoint latency distribution from request logs, bot-scanner whitelist", True),
             ("alert_policy × 8", "uptime · 5xx · P99 · app mem · OSRM mem · OSRM instances · Redis mem · SQL disk", True),
-            ("dashboard.system_health", "48-col mosaic: diagram header → scorecard row → per-component sections", True),
+            ("dashboard.system_health", "48-col mosaic: diagram header → scorecards → app → endpoint-latency → OSRM/Redis/SQL", True),
             ("output dashboard_url", "console deep-link derived from the dashboard id", True),
         ],
         "blocks": [
@@ -235,7 +293,9 @@ FILE_CONTEXT = {
             "osrm_no_instances policy — instance_count < 1, missing-data counts as violation",
             "redis_memory policy — usage_ratio > 0.85 (allkeys-lru evicts serving keys past 1.0)",
             "sql_disk policy — disk/utilization > 0.85 (postgres goes read-only when full)",
-            "dashboard — jsonencode'd mosaic: text diagram, 6 scorecards, 12 charts across app/OSRM/Redis/SQL",
+            "logging metric cityedit_api_latency — DELTA distribution (s), endpoint+method labels, whitelist filter",
+            "dashboard — jsonencode'd mosaic: text diagram, 6 scorecards, 16 charts across app/endpoints/OSRM/Redis/SQL",
+            "endpoint-latency charts — 4 tiles grouped by backing store (Redis+PG · OSRM · in-process graph · external)",
             "dashboard_url output — https://console.cloud.google.com/monitoring/dashboards/builder/<id>",
         ],
     },

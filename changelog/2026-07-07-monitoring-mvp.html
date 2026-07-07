@@ -98,6 +98,7 @@
   <nav class="toc"><a href="#dashboard">1</a>
 <a href="#alerts">2</a>
 <a href="#applysafety">3</a>
+<a href="#perendpoint">4</a>
     <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
   </nav>
 
@@ -157,6 +158,25 @@
     </section>
     
 
+    <section class="card" id="perendpoint">
+      <div class="tag">GCP · log-based metrics</div>
+      <h2>4 · P99 by request type, grouped by backing store</h2>
+      <h3>Before</h3>
+      <p>The service-level P99 says <em>something</em> is slow but not <em>what</em>: a vote should be a Redis round-trip (tens of ms), a route is an OSRM hop, an address lookup is an in-process KD-tree query — one number over all of them is unreadable. And reverse-geocode was reported “a bit slow”.</p>
+      <h3>Context</h3>
+      <ul><li>Cloud Run's built-in <code>request_latencies</code> metric has no URL label, so it can't be split by endpoint. The request <em>logs</em> carry <code>httpRequest.latency</code> + <code>requestUrl</code> for every request — the standard fix is a log-based distribution metric with the endpoint extracted as a label.</li>
+<li>Measured baseline from 7 days of logs (per-endpoint p50/p95/p99): <code>/api/reverse-geocode</code> 320ms/935ms/1.1s(!), <code>/api/maps</code> 123ms/3.6s/5.5s, <code>/api/graph-votes</code> 183ms/14.9s/19s, <code>/api/graph-topology</code> 2.6s/3.2s/6.1s, <code>/api/routes</code> 65ms/312ms, <code>/health</code> 6ms. <code>/api/vote</code> had zero traffic in the window.</li>
+<li>Root cause found while digging: <code>resolve_map()</code> → <code>get_map()</code> runs <code>_MAP_SELECT</code> — which LEFT JOINs a full-table <code>COUNT(*) … GROUP BY map_slug</code> over <code>edge_votes</code> — against the db-f1-micro Postgres on <strong>every API request</strong>. That's the shared ~100–300ms floor under reverse-geocode/routes/vote and the multi-second tail on /api/maps. The endpoint's own work (KD-tree + ≤5-hop BFS) is sub-millisecond.</li>
+<li>Bot scanners constantly probe <code>/api/.env</code>, <code>/api/wp-config.php</code> etc. — an unfiltered URL label would blow up the metric's cardinality with junk endpoints.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>New log-based distribution metric <code>cityedit_api_latency</code> (seconds, 48 exponential buckets from 1ms): filter whitelists the real API surface + <code>/health</code>; labels <code>endpoint</code> (path prefix — subpaths like <code>/api/maps/&lt;slug&gt;</code> collapse into their parent) and <code>method</code>.</li>
+<li>New dashboard section “API latency by endpoint”, one chart per backing store so a slow group points at its dependency: <strong>Redis/Postgres</strong> (vote, graph-votes, my-votes, route-votes, maps, health), <strong>OSRM</strong> (/api/routes with P50/P95/P99), <strong>in-process graph provider</strong> (reverse-geocode, nearest-node, graph-topology, graph-version), <strong>external + static</strong> (geocode/Photon, tiles/PMTiles).</li>
+<li>Verified live end-to-end: generated real traffic against prod, and the metric split into 7 endpoint series (e.g. routes p99 219ms, reverse-geocode 162ms cold / ~10ms warm, nearest-node 8ms). Note log-based metrics record from creation forward only.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>terraform/monitoring.tf</li></ul>
+    </section>
+    
+
   <section class="card verify" id="verify">
     <div class="tag">Verification</div>
     <h2>What was run</h2>
@@ -164,7 +184,8 @@
 <li>Listed back from the live APIs: the dashboard, the 60s uptime check, and all 8 policies (<code>enabled: True</code>) exist under project <code>google-mpf-ywspom2sxeey</code>.</li>
 <li>Queried real time-series through the Monitoring API: app memory P99 = 0.77 (matches the known ~6Gi/8Gi steady state) and 28/28 uptime probes passing across all 6 regions in the first 20 min.</li>
 <li><code>curl https://cityedit.org/health</code> → 200 in ~100ms.</li>
-<li><code>terraform plan</code> after the JSON normalization: “No changes” — no perpetual dashboard diff, no app churn pending from this work.</li></ul>
+<li><code>terraform plan</code> after the JSON normalization: “No changes” — no perpetual dashboard diff, no app churn pending from this work.</li>
+<li>Round 2 (per-endpoint): pulled 2,225 request-log entries over 7 days and computed per-endpoint percentiles to set the baseline; created the log-based metric + dashboard section via a second targeted apply (fresh DB snapshot taken first); generated live traffic and read back 7 endpoint series from the new metric with sensible values.</li></ul>
   </section>
 
   <section class="card checklist" id="checklist">
@@ -174,7 +195,9 @@
 <li>Check the App latency chart: P50 should sit far below P99; note the current P99 baseline for future reference.</li>
 <li>Cloud Console → Monitoring → Alerting: 8 policies listed, all enabled, notification channel “Eric (email)” attached.</li>
 <li>You should receive NO alert emails — if one arrives in the next hours, the threshold is telling us something real (most likely app memory brushing 90% during a warmup).</li>
-<li>Optional fire drill: in Alerting, open “City Edit: /health failing” and use “Test notification channel” to confirm the email lands in your inbox and not spam.</li></ul>
+<li>Optional fire drill: in Alerting, open “City Edit: /health failing” and use “Test notification channel” to confirm the email lands in your inbox and not spam.</li>
+<li>Scroll to “API latency by endpoint”: after a bit of real traffic each chart should show one line per endpoint (data begins at metric creation — history before that shows nothing).</li>
+<li>Use the app normally for a day, then read the Redis/Postgres chart: /api/vote should sit in the tens of ms; if it tracks /api/maps upward instead, the per-request map-lookup DB query is the culprit (see the improvement notes in the session summary).</li></ul>
   </section>
 
   <section id="diff">
@@ -183,7 +206,7 @@
     
         <details open>
           <summary><span class="fname">terraform/monitoring.tf</span>
-            <span class="stat"><span class="d-add">+914</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+190</span> / <span class="d-del">-10</span></span>
           </summary>
           
     <div class="ctx">
@@ -200,536 +223,118 @@
       <div class="ctx-tier ctx-file">
         <span class="ctx-k">File</span>
         <span class="ctx-v">monitoring.tf</span>
-        <span class="ctx-sum">~914 LOC (new) — Cloud Monitoring dashboard-as-code, uptime check, notification channel, 8 alert policies</span>
+        <span class="ctx-sum">~1100 LOC (new) — Cloud Monitoring dashboard-as-code, uptime check, notification channel, log-based endpoint-latency metric, 8 alert policies</span>
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
-        <ul class="ctx-outline"><li class="changed"><span class="ol-label">google_project_service.monitoring</span><span class="ol-sum">enable monitoring.googleapis.com</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">locals — metric filters</span><span class="ol-sum">app / osrm / redis / sql resource-filter strings, built once</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">notification_channel.email_eric</span><span class="ol-sum">email channel for every policy</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">uptime_check_config.app_health</span><span class="ol-sum">GET cityedit.org/health every 60s, 6 regions</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">alert_policy × 8</span><span class="ol-sum">uptime · 5xx · P99 · app mem · OSRM mem · OSRM instances · Redis mem · SQL disk</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dashboard.system_health</span><span class="ol-sum">48-col mosaic: diagram header → scorecard row → per-component sections</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">output dashboard_url</span><span class="ol-sum">console deep-link derived from the dashboard id</span><span class="ol-tag">changed</span></li></ul>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">google_project_service.monitoring</span><span class="ol-sum">enable monitoring.googleapis.com</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">locals — metric filters</span><span class="ol-sum">app / osrm / redis / sql resource-filter strings, built once</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">notification_channel.email_eric</span><span class="ol-sum">email channel for every policy</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">uptime_check_config.app_health</span><span class="ol-sum">GET cityedit.org/health every 60s, 6 regions</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">logging_metric.api_latency</span><span class="ol-sum">per-endpoint latency distribution from request logs, bot-scanner whitelist</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">alert_policy × 8</span><span class="ol-sum">uptime · 5xx · P99 · app mem · OSRM mem · OSRM instances · Redis mem · SQL disk</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dashboard.system_health</span><span class="ol-sum">48-col mosaic: diagram header → scorecards → app → endpoint-latency → OSRM/Redis/SQL</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">output dashboard_url</span><span class="ol-sum">console deep-link derived from the dashboard id</span><span class="ol-tag">changed</span></li></ul>
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">Changed blocks (top → bottom)</div>
-        <ol class="ctx-blocks"><li>project service — monitoring.googleapis.com enabled</li><li>locals — one filter string per monitored resource (cloud_run_revision × 2, redis_instance, cloudsql_database)</li><li>email notification channel — eric.didier.bolton@gmail.com</li><li>uptime check — /health via HTTPS, 10s timeout, 60s period</li><li>app_uptime policy — check_passed FRACTION_TRUE &lt; 0.5 for 2 min</li><li>app_5xx_rate policy — 5xx request rate &gt; 0.05/s for 5 min</li><li>app_p99_latency policy — ALIGN_PERCENTILE_99 &gt; 5000ms for 5 min</li><li>app_memory policy — memory/utilizations P99 &gt; 0.9 (steady state 0.70-0.75)</li><li>osrm_memory policy — same shape, 4Gi service</li><li>osrm_no_instances policy — instance_count &lt; 1, missing-data counts as violation</li><li>redis_memory policy — usage_ratio &gt; 0.85 (allkeys-lru evicts serving keys past 1.0)</li><li>sql_disk policy — disk/utilization &gt; 0.85 (postgres goes read-only when full)</li><li>dashboard — jsonencode&#x27;d mosaic: text diagram, 6 scorecards, 12 charts across app/OSRM/Redis/SQL</li><li>dashboard_url output — https://console.cloud.google.com/monitoring/dashboards/builder/&lt;id&gt;</li></ol>
+        <ol class="ctx-blocks"><li>project service — monitoring.googleapis.com enabled</li><li>locals — one filter string per monitored resource (cloud_run_revision × 2, redis_instance, cloudsql_database)</li><li>email notification channel — eric.didier.bolton@gmail.com</li><li>uptime check — /health via HTTPS, 10s timeout, 60s period</li><li>app_uptime policy — check_passed FRACTION_TRUE &lt; 0.5 for 2 min</li><li>app_5xx_rate policy — 5xx request rate &gt; 0.05/s for 5 min</li><li>app_p99_latency policy — ALIGN_PERCENTILE_99 &gt; 5000ms for 5 min</li><li>app_memory policy — memory/utilizations P99 &gt; 0.9 (steady state 0.70-0.75)</li><li>osrm_memory policy — same shape, 4Gi service</li><li>osrm_no_instances policy — instance_count &lt; 1, missing-data counts as violation</li><li>redis_memory policy — usage_ratio &gt; 0.85 (allkeys-lru evicts serving keys past 1.0)</li><li>sql_disk policy — disk/utilization &gt; 0.85 (postgres goes read-only when full)</li><li>logging metric cityedit_api_latency — DELTA distribution (s), endpoint+method labels, whitelist filter</li><li>dashboard — jsonencode&#x27;d mosaic: text diagram, 6 scorecards, 16 charts across app/endpoints/OSRM/Redis/SQL</li><li>endpoint-latency charts — 4 tiles grouped by backing store (Redis+PG · OSRM · in-process graph · external)</li><li>dashboard_url output — https://console.cloud.google.com/monitoring/dashboards/builder/&lt;id&gt;</li></ol>
       </div>
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/terraform/monitoring.tf b/terraform/monitoring.tf</span>
-<span class="d-ctx">new file mode 100644</span>
-<span class="d-meta">index 0000000..6cc814b</span>
-<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">index 6cc814b..c0d6f95 100644</span>
+<span class="d-meta">--- a/terraform/monitoring.tf</span>
 <span class="d-meta">+++ b/terraform/monitoring.tf</span>
-<span class="d-hunk">@@ -0,0 +1,914 @@</span>
-<span class="d-add">+# =============================================================================</span>
-<span class="d-add">+# Monitoring MVP — dashboard + uptime check + alert policies</span>
+<span class="d-hunk">@@ -62,6 +62,63 @@ resource &quot;google_monitoring_uptime_check_config&quot; &quot;app_health&quot; {</span>
+<span class="d-ctx">   depends_on = [google_project_service.monitoring]</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# -----------------------------------------------------------------------------</span>
+<span class="d-add">+# Per-endpoint latency — log-based distribution metric</span>
 <span class="d-add">+#</span>
-<span class="d-add">+# One Cloud Monitoring dashboard (&quot;City Edit — System Health&quot;) laid out as a</span>
-<span class="d-add">+# live system diagram: a component-health scorecard row (app / OSRM / Redis /</span>
-<span class="d-add">+# Cloud SQL) followed by a metrics section per component. Alerts email Eric.</span>
-<span class="d-add">+# All of this is pure Cloud Monitoring config — it never touches the running</span>
-<span class="d-add">+# services, so it&#x27;s safe to `terraform apply -target` independently.</span>
-<span class="d-add">+# =============================================================================</span>
-<span class="d-add">+</span>
-<span class="d-add">+resource &quot;google_project_service&quot; &quot;monitoring&quot; {</span>
-<span class="d-add">+  service = &quot;monitoring.googleapis.com&quot;</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+locals {</span>
-<span class="d-add">+  app_filter  = &quot;resource.type=\&quot;cloud_run_revision\&quot; resource.label.\&quot;service_name\&quot;=\&quot;desire-path-mapper\&quot;&quot;</span>
-<span class="d-add">+  osrm_filter = &quot;resource.type=\&quot;cloud_run_revision\&quot; resource.label.\&quot;service_name\&quot;=\&quot;desire-path-osrm\&quot;&quot;</span>
-<span class="d-add">+  redis_filter = &quot;resource.type=\&quot;redis_instance\&quot; resource.label.\&quot;instance_id\&quot;=\&quot;projects/${var.project_id}/locations/${var.region}/instances/${google_redis_instance.cache.name}\&quot;&quot;</span>
-<span class="d-add">+  sql_filter   = &quot;resource.type=\&quot;cloudsql_database\&quot; resource.label.\&quot;database_id\&quot;=\&quot;${var.project_id}:${google_sql_database_instance.votes.name}\&quot;&quot;</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+# -----------------------------------------------------------------------------</span>
-<span class="d-add">+# Notification channel</span>
+<span class="d-add">+# Cloud Run&#x27;s built-in request_latencies metric has no URL label, so per-</span>
+<span class="d-add">+# endpoint percentiles come from the request logs instead: every request log</span>
+<span class="d-add">+# entry carries httpRequest.latency + requestUrl. The filter whitelists the</span>
+<span class="d-add">+# real API surface — bot scanners probe /api/.env, /api/wp-config.php etc.</span>
+<span class="d-add">+# constantly and would otherwise explode the endpoint label&#x27;s cardinality.</span>
+<span class="d-add">+# Values are in SECONDS (extracted from the &quot;0.123s&quot; latency string).</span>
 <span class="d-add">+# -----------------------------------------------------------------------------</span>
 <span class="d-add">+</span>
-<span class="d-add">+resource &quot;google_monitoring_notification_channel&quot; &quot;email_eric&quot; {</span>
-<span class="d-add">+  display_name = &quot;Eric (email)&quot;</span>
-<span class="d-add">+  type         = &quot;email&quot;</span>
+<span class="d-add">+resource &quot;google_logging_metric&quot; &quot;api_latency&quot; {</span>
+<span class="d-add">+  name        = &quot;cityedit_api_latency&quot;</span>
+<span class="d-add">+  description = &quot;Per-endpoint request latency (seconds) for the app&#x27;s real API surface, from Cloud Run request logs&quot;</span>
 <span class="d-add">+</span>
-<span class="d-add">+  labels = {</span>
-<span class="d-add">+    email_address = &quot;eric.didier.bolton@gmail.com&quot;</span>
-<span class="d-add">+  }</span>
+<span class="d-add">+  filter = &lt;&lt;-EOT</span>
+<span class="d-add">+    resource.type=&quot;cloud_run_revision&quot;</span>
+<span class="d-add">+    resource.labels.service_name=&quot;desire-path-mapper&quot;</span>
+<span class="d-add">+    logName=&quot;projects/${var.project_id}/logs/run.googleapis.com%2Frequests&quot;</span>
+<span class="d-add">+    httpRequest.requestUrl=~&quot;://[^/]+/(api/(vote|route-votes|routes|geocode|reverse-geocode|nearest-node|graph-votes|graph-topology|graph-version|my-votes|maps|tiles|cities|vote-type-lists)|health)([/?].*)?$&quot;</span>
+<span class="d-add">+  EOT</span>
 <span class="d-add">+</span>
-<span class="d-add">+  depends_on = [google_project_service.monitoring]</span>
-<span class="d-add">+}</span>
+<span class="d-add">+  metric_descriptor {</span>
+<span class="d-add">+    metric_kind = &quot;DELTA&quot;</span>
+<span class="d-add">+    value_type  = &quot;DISTRIBUTION&quot;</span>
+<span class="d-add">+    unit        = &quot;s&quot;</span>
 <span class="d-add">+</span>
-<span class="d-add">+# -----------------------------------------------------------------------------</span>
-<span class="d-add">+# Uptime check — public /health on cityedit.org (200 only when Redis reachable,</span>
-<span class="d-add">+# so it covers both the app container and its Redis dependency)</span>
-<span class="d-add">+# -----------------------------------------------------------------------------</span>
+<span class="d-add">+    labels {</span>
+<span class="d-add">+      key         = &quot;endpoint&quot;</span>
+<span class="d-add">+      value_type  = &quot;STRING&quot;</span>
+<span class="d-add">+      description = &quot;API path prefix, e.g. /api/vote (subpaths collapse into it)&quot;</span>
+<span class="d-add">+    }</span>
 <span class="d-add">+</span>
-<span class="d-add">+resource &quot;google_monitoring_uptime_check_config&quot; &quot;app_health&quot; {</span>
-<span class="d-add">+  display_name = &quot;City Edit app /health&quot;</span>
-<span class="d-add">+  timeout      = &quot;10s&quot;</span>
-<span class="d-add">+  period       = &quot;60s&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+  http_check {</span>
-<span class="d-add">+    path         = &quot;/health&quot;</span>
-<span class="d-add">+    port         = 443</span>
-<span class="d-add">+    use_ssl      = true</span>
-<span class="d-add">+    validate_ssl = true</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  monitored_resource {</span>
-<span class="d-add">+    type = &quot;uptime_url&quot;</span>
-<span class="d-add">+    labels = {</span>
-<span class="d-add">+      project_id = var.project_id</span>
-<span class="d-add">+      host       = &quot;cityedit.org&quot;</span>
+<span class="d-add">+    labels {</span>
+<span class="d-add">+      key         = &quot;method&quot;</span>
+<span class="d-add">+      value_type  = &quot;STRING&quot;</span>
+<span class="d-add">+      description = &quot;HTTP method&quot;</span>
 <span class="d-add">+    }</span>
 <span class="d-add">+  }</span>
 <span class="d-add">+</span>
-<span class="d-add">+  depends_on = [google_project_service.monitoring]</span>
-<span class="d-add">+}</span>
+<span class="d-add">+  value_extractor = &quot;REGEXP_EXTRACT(httpRequest.latency, \&quot;([0-9]+\\\\.?[0-9]*)s\&quot;)&quot;</span>
 <span class="d-add">+</span>
-<span class="d-add">+# -----------------------------------------------------------------------------</span>
-<span class="d-add">+# Alert policies</span>
-<span class="d-add">+# -----------------------------------------------------------------------------</span>
+<span class="d-add">+  label_extractors = {</span>
+<span class="d-add">+    endpoint = &quot;REGEXP_EXTRACT(httpRequest.requestUrl, \&quot;://[^/]+(/api/[a-z-]+|/health)\&quot;)&quot;</span>
+<span class="d-add">+    method   = &quot;EXTRACT(httpRequest.requestMethod)&quot;</span>
+<span class="d-add">+  }</span>
 <span class="d-add">+</span>
-<span class="d-add">+resource &quot;google_monitoring_alert_policy&quot; &quot;app_uptime&quot; {</span>
-<span class="d-add">+  display_name = &quot;City Edit: /health failing (app or Redis down)&quot;</span>
-<span class="d-add">+  combiner     = &quot;OR&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+  conditions {</span>
-<span class="d-add">+    display_name = &quot;Uptime check on cityedit.org/health failing&quot;</span>
-<span class="d-add">+    condition_threshold {</span>
-<span class="d-add">+      filter          = &quot;resource.type = \&quot;uptime_url\&quot; AND metric.type = \&quot;monitoring.googleapis.com/uptime_check/check_passed\&quot; AND metric.labels.check_id = \&quot;${google_monitoring_uptime_check_config.app_health.uptime_check_id}\&quot;&quot;</span>
-<span class="d-add">+      comparison      = &quot;COMPARISON_LT&quot;</span>
-<span class="d-add">+      threshold_value = 0.5</span>
-<span class="d-add">+      duration        = &quot;120s&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+      aggregations {</span>
-<span class="d-add">+        alignment_period     = &quot;300s&quot;</span>
-<span class="d-add">+        per_series_aligner   = &quot;ALIGN_FRACTION_TRUE&quot;</span>
-<span class="d-add">+        cross_series_reducer = &quot;REDUCE_MEAN&quot;</span>
-<span class="d-add">+        group_by_fields      = [&quot;resource.label.host&quot;]</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+</span>
-<span class="d-add">+      trigger {</span>
-<span class="d-add">+        count = 1</span>
-<span class="d-add">+      }</span>
+<span class="d-add">+  # 1ms … ~30min in ~35% steps — fine-grained where user-facing latency lives.</span>
+<span class="d-add">+  bucket_options {</span>
+<span class="d-add">+    exponential_buckets {</span>
+<span class="d-add">+      num_finite_buckets = 48</span>
+<span class="d-add">+      growth_factor      = 1.35</span>
+<span class="d-add">+      scale              = 0.001</span>
 <span class="d-add">+    }</span>
 <span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  documentation {</span>
-<span class="d-add">+    content   = &quot;cityedit.org/health has been failing for 2+ minutes. It returns 503 when Flask can&#x27;t reach Redis, and times out when the app service itself is down. Check the Cloud Run service `desire-path-mapper` and Memorystore `desire-path-prod`.&quot;</span>
-<span class="d-add">+    mime_type = &quot;text/markdown&quot;</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  notification_channels = [google_monitoring_notification_channel.email_eric.id]</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
-<span class="d-add">+resource &quot;google_monitoring_alert_policy&quot; &quot;app_5xx_rate&quot; {</span>
-<span class="d-add">+  display_name = &quot;City Edit: app 5xx error rate&quot;</span>
-<span class="d-add">+  combiner     = &quot;OR&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+  conditions {</span>
-<span class="d-add">+    display_name = &quot;5xx responses above 0.05/s for 5 min&quot;</span>
-<span class="d-add">+    condition_threshold {</span>
-<span class="d-add">+      filter          = &quot;${local.app_filter} metric.type=\&quot;run.googleapis.com/request_count\&quot; metric.label.\&quot;response_code_class\&quot;=\&quot;5xx\&quot;&quot;</span>
-<span class="d-add">+      comparison      = &quot;COMPARISON_GT&quot;</span>
-<span class="d-add">+      threshold_value = 0.05</span>
-<span class="d-add">+      duration        = &quot;300s&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+      aggregations {</span>
-<span class="d-add">+        alignment_period     = &quot;300s&quot;</span>
-<span class="d-add">+        per_series_aligner   = &quot;ALIGN_RATE&quot;</span>
-<span class="d-add">+        cross_series_reducer = &quot;REDUCE_SUM&quot;</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+</span>
-<span class="d-add">+      trigger {</span>
-<span class="d-add">+        count = 1</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+    }</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  documentation {</span>
-<span class="d-add">+    content   = &quot;The app is serving a sustained stream of 5xx (≈15+ errors per 5 min). Usual suspects: gunicorn worker timeout on a graph load, OSRM unreachable, or an OOM-restart loop — check Cloud Run logs for `desire-path-mapper`.&quot;</span>
-<span class="d-add">+    mime_type = &quot;text/markdown&quot;</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  notification_channels = [google_monitoring_notification_channel.email_eric.id]</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+resource &quot;google_monitoring_alert_policy&quot; &quot;app_p99_latency&quot; {</span>
-<span class="d-add">+  display_name = &quot;City Edit: app P99 latency &gt; 5s&quot;</span>
-<span class="d-add">+  combiner     = &quot;OR&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+  conditions {</span>
-<span class="d-add">+    display_name = &quot;P99 request latency above 5s for 5 min&quot;</span>
-<span class="d-add">+    condition_threshold {</span>
-<span class="d-add">+      filter          = &quot;${local.app_filter} metric.type=\&quot;run.googleapis.com/request_latencies\&quot;&quot;</span>
-<span class="d-add">+      comparison      = &quot;COMPARISON_GT&quot;</span>
-<span class="d-add">+      threshold_value = 5000</span>
-<span class="d-add">+      duration        = &quot;300s&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+      aggregations {</span>
-<span class="d-add">+        alignment_period     = &quot;300s&quot;</span>
-<span class="d-add">+        per_series_aligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
-<span class="d-add">+        cross_series_reducer = &quot;REDUCE_MAX&quot;</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+</span>
-<span class="d-add">+      trigger {</span>
-<span class="d-add">+        count = 1</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+    }</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  documentation {</span>
-<span class="d-add">+    content   = &quot;P99 latency on `desire-path-mapper` has exceeded 5s for 5 minutes. Likely head-of-line blocking (gevent hub frozen by a GIL-bound graph load), a cold graph warmup on a fresh instance, or Redis latency.&quot;</span>
-<span class="d-add">+    mime_type = &quot;text/markdown&quot;</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  notification_channels = [google_monitoring_notification_channel.email_eric.id]</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+# The app runs at ~5.5-6.0Gi of its 8Gi limit in steady state (see the resource</span>
-<span class="d-add">+# comment on google_cloud_run_service.app), so alert at 90% — past that a graph</span>
-<span class="d-add">+# warmup transient will OOM-kill the instance.</span>
-<span class="d-add">+resource &quot;google_monitoring_alert_policy&quot; &quot;app_memory&quot; {</span>
-<span class="d-add">+  display_name = &quot;City Edit: app memory &gt; 90% of limit&quot;</span>
-<span class="d-add">+  combiner     = &quot;OR&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+  conditions {</span>
-<span class="d-add">+    display_name = &quot;Flask container memory utilization above 90%&quot;</span>
-<span class="d-add">+    condition_threshold {</span>
-<span class="d-add">+      filter          = &quot;${local.app_filter} metric.type=\&quot;run.googleapis.com/container/memory/utilizations\&quot;&quot;</span>
-<span class="d-add">+      comparison      = &quot;COMPARISON_GT&quot;</span>
-<span class="d-add">+      threshold_value = 0.9</span>
-<span class="d-add">+      duration        = &quot;300s&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+      aggregations {</span>
-<span class="d-add">+        alignment_period     = &quot;300s&quot;</span>
-<span class="d-add">+        per_series_aligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
-<span class="d-add">+        cross_series_reducer = &quot;REDUCE_MAX&quot;</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+</span>
-<span class="d-add">+      trigger {</span>
-<span class="d-add">+        count = 1</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+    }</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  documentation {</span>
-<span class="d-add">+    content   = &quot;An app instance is above 90% of its 8Gi memory limit (steady state is ~70-75%). Next stop is an OOM kill mid-request. Check whether a new city graph or an unbounded cache pushed the baseline up.&quot;</span>
-<span class="d-add">+    mime_type = &quot;text/markdown&quot;</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  notification_channels = [google_monitoring_notification_channel.email_eric.id]</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+resource &quot;google_monitoring_alert_policy&quot; &quot;osrm_memory&quot; {</span>
-<span class="d-add">+  display_name = &quot;City Edit: OSRM memory &gt; 90% of limit&quot;</span>
-<span class="d-add">+  combiner     = &quot;OR&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+  conditions {</span>
-<span class="d-add">+    display_name = &quot;OSRM container memory utilization above 90%&quot;</span>
-<span class="d-add">+    condition_threshold {</span>
-<span class="d-add">+      filter          = &quot;${local.osrm_filter} metric.type=\&quot;run.googleapis.com/container/memory/utilizations\&quot;&quot;</span>
-<span class="d-add">+      comparison      = &quot;COMPARISON_GT&quot;</span>
-<span class="d-add">+      threshold_value = 0.9</span>
-<span class="d-add">+      duration        = &quot;300s&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+      aggregations {</span>
-<span class="d-add">+        alignment_period     = &quot;300s&quot;</span>
-<span class="d-add">+        per_series_aligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
-<span class="d-add">+        cross_series_reducer = &quot;REDUCE_MAX&quot;</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+</span>
-<span class="d-add">+      trigger {</span>
-<span class="d-add">+        count = 1</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+    }</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  documentation {</span>
-<span class="d-add">+    content   = &quot;OSRM is above 90% of its 4Gi limit. The merged MLD dataset is ~1.6GB resident; growth here means a bigger merged extract landed — bump the limit before it OOMs (it OOM&#x27;d at 2Gi once already).&quot;</span>
-<span class="d-add">+    mime_type = &quot;text/markdown&quot;</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  notification_channels = [google_monitoring_notification_channel.email_eric.id]</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+# OSRM runs with minScale=maxScale=1; if the instance count falls below 1 the</span>
-<span class="d-add">+# routing backend is down even though the public app may still look healthy.</span>
-<span class="d-add">+resource &quot;google_monitoring_alert_policy&quot; &quot;osrm_no_instances&quot; {</span>
-<span class="d-add">+  display_name = &quot;City Edit: OSRM has no running instance&quot;</span>
-<span class="d-add">+  combiner     = &quot;OR&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+  conditions {</span>
-<span class="d-add">+    display_name = &quot;OSRM instance count below 1 for 5 min&quot;</span>
-<span class="d-add">+    condition_threshold {</span>
-<span class="d-add">+      filter          = &quot;${local.osrm_filter} metric.type=\&quot;run.googleapis.com/container/instance_count\&quot;&quot;</span>
-<span class="d-add">+      comparison      = &quot;COMPARISON_LT&quot;</span>
-<span class="d-add">+      threshold_value = 1</span>
-<span class="d-add">+      duration        = &quot;300s&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+      aggregations {</span>
-<span class="d-add">+        alignment_period     = &quot;300s&quot;</span>
-<span class="d-add">+        per_series_aligner   = &quot;ALIGN_MAX&quot;</span>
-<span class="d-add">+        cross_series_reducer = &quot;REDUCE_SUM&quot;</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+</span>
-<span class="d-add">+      trigger {</span>
-<span class="d-add">+        count = 1</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+</span>
-<span class="d-add">+      # instance_count stops reporting entirely when the service is fully down,</span>
-<span class="d-add">+      # so treat a missing series as a violation rather than &quot;no data&quot;.</span>
-<span class="d-add">+      evaluation_missing_data = &quot;EVALUATION_MISSING_DATA_ACTIVE&quot;</span>
-<span class="d-add">+    }</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  documentation {</span>
-<span class="d-add">+    content   = &quot;The OSRM Cloud Run service (`desire-path-osrm`, pinned min=max=1) has no running instance. Route submission is broken fleet-wide. Check the latest OSRM revision&#x27;s startup probe / logs.&quot;</span>
-<span class="d-add">+    mime_type = &quot;text/markdown&quot;</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  notification_channels = [google_monitoring_notification_channel.email_eric.id]</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+resource &quot;google_monitoring_alert_policy&quot; &quot;redis_memory&quot; {</span>
-<span class="d-add">+  display_name = &quot;City Edit: Redis memory &gt; 85%&quot;</span>
-<span class="d-add">+  combiner     = &quot;OR&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+  conditions {</span>
-<span class="d-add">+    display_name = &quot;Memorystore memory usage ratio above 85%&quot;</span>
-<span class="d-add">+    condition_threshold {</span>
-<span class="d-add">+      filter          = &quot;${local.redis_filter} metric.type=\&quot;redis.googleapis.com/stats/memory/usage_ratio\&quot;&quot;</span>
-<span class="d-add">+      comparison      = &quot;COMPARISON_GT&quot;</span>
-<span class="d-add">+      threshold_value = 0.85</span>
-<span class="d-add">+      duration        = &quot;300s&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+      aggregations {</span>
-<span class="d-add">+        alignment_period   = &quot;300s&quot;</span>
-<span class="d-add">+        per_series_aligner = &quot;ALIGN_MEAN&quot;</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+</span>
-<span class="d-add">+      trigger {</span>
-<span class="d-add">+        count = 1</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+    }</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  documentation {</span>
-<span class="d-add">+    content   = &quot;Memorystore (`desire-path-prod`, 1GB BASIC) is above 85% memory. Eviction policy is allkeys-lru, so past 100% Redis starts evicting vote/serving keys — the heatmap serves *only* from Redis, so evictions surface as missing votes until a `rebuild_redis_for_map`. Consider bumping `memory_size_gb`.&quot;</span>
-<span class="d-add">+    mime_type = &quot;text/markdown&quot;</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  notification_channels = [google_monitoring_notification_channel.email_eric.id]</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+resource &quot;google_monitoring_alert_policy&quot; &quot;sql_disk&quot; {</span>
-<span class="d-add">+  display_name = &quot;City Edit: Cloud SQL disk &gt; 85%&quot;</span>
-<span class="d-add">+  combiner     = &quot;OR&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+  conditions {</span>
-<span class="d-add">+    display_name = &quot;Postgres disk utilization above 85%&quot;</span>
-<span class="d-add">+    condition_threshold {</span>
-<span class="d-add">+      filter          = &quot;${local.sql_filter} metric.type=\&quot;cloudsql.googleapis.com/database/disk/utilization\&quot;&quot;</span>
-<span class="d-add">+      comparison      = &quot;COMPARISON_GT&quot;</span>
-<span class="d-add">+      threshold_value = 0.85</span>
-<span class="d-add">+      duration        = &quot;300s&quot;</span>
-<span class="d-add">+</span>
-<span class="d-add">+      aggregations {</span>
-<span class="d-add">+        alignment_period   = &quot;300s&quot;</span>
-<span class="d-add">+        per_series_aligner = &quot;ALIGN_MEAN&quot;</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+</span>
-<span class="d-add">+      trigger {</span>
-<span class="d-add">+        count = 1</span>
-<span class="d-add">+      }</span>
-<span class="d-add">+    }</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  documentation {</span>
-<span class="d-add">+    content   = &quot;Cloud SQL `desire-path-votes-prod` (db-f1-micro) disk is above 85%. Postgres goes read-only when the disk fills — votes stop persisting. Grow the disk or prune old rows.&quot;</span>
-<span class="d-add">+    mime_type = &quot;text/markdown&quot;</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  notification_channels = [google_monitoring_notification_channel.email_eric.id]</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+# -----------------------------------------------------------------------------</span>
-<span class="d-add">+# Dashboard — &quot;City Edit — System Health&quot;</span>
-<span class="d-add">+#</span>
-<span class="d-add">+# Mosaic grid, 48 columns. Top-to-bottom: architecture text diagram → one</span>
-<span class="d-add">+# health scorecard per component → per-component metric sections</span>
-<span class="d-add">+# (app → OSRM → Redis → Cloud SQL).</span>
-<span class="d-add">+# -----------------------------------------------------------------------------</span>
-<span class="d-add">+</span>
-<span class="d-add">+resource &quot;google_monitoring_dashboard&quot; &quot;system_health&quot; {</span>
-<span class="d-add">+  dashboard_json = jsonencode({</span>
-<span class="d-add">+    displayName = &quot;City Edit — System Health&quot;</span>
-<span class="d-add">+    mosaicLayout = {</span>
-<span class="d-add">+      columns = 48</span>
-<span class="d-add">+      tiles = [</span>
-<span class="d-add">+        # ---- Row 0: architecture diagram ------------------------------------</span>
+<span class="d-ctx"> # -----------------------------------------------------------------------------</span>
+<span class="d-ctx"> # Alert policies</span>
+<span class="d-ctx"> # -----------------------------------------------------------------------------</span>
+<span class="d-hunk">@@ -351,7 +408,7 @@ resource &quot;google_monitoring_dashboard&quot; &quot;system_health&quot; {</span>
+<span class="d-ctx">             title = &quot;System&quot;</span>
+<span class="d-ctx">             text = {</span>
+<span class="d-ctx">               format = &quot;MARKDOWN&quot;</span>
+<span class="d-del">-              content = &quot;**🌐 cityedit.org** → **Cloud Run `desire-path-mapper`** (nginx + Flask, 8Gi × 1–4 instances) → **OSRM** `desire-path-osrm` (routing, 4Gi × 1) · **Redis** Memorystore `desire-path-prod` (serving votes, 1GB LRU) · **Cloud SQL** `desire-path-votes-prod` (canonical votes)\n\nScorecards below = component health at a glance. Sections: App → OSRM → Redis → SQL.&quot;</span>
+<span class="d-add">+              content = &quot;**🌐 cityedit.org** → **Cloud Run `desire-path-mapper`** (nginx + Flask, 8Gi × 1–4 instances) → **OSRM** `desire-path-osrm` (routing, 4Gi × 1) · **Redis** Memorystore `desire-path-prod` (serving votes, 1GB LRU) · **Cloud SQL** `desire-path-votes-prod` (canonical votes)\n\nScorecards below = component health at a glance. Sections: App → API latency by endpoint (grouped by backing store) → OSRM → Redis → SQL.&quot;</span>
+<span class="d-ctx">               # The API echoes an empty style object back; without it every plan</span>
+<span class="d-ctx">               # shows a perpetual dashboard_json diff.</span>
+<span class="d-ctx">               style = {}</span>
+<span class="d-hunk">@@ -658,9 +715,132 @@ resource &quot;google_monitoring_dashboard&quot; &quot;system_health&quot; {</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">         },</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+        # ---- API latency by endpoint (log-based metric, seconds) -------------</span>
+<span class="d-add">+        # Grouped by what each endpoint leans on, so a slow group points at its</span>
+<span class="d-add">+        # backing store. Data starts at metric creation (log-based metrics</span>
+<span class="d-add">+        # aren&#x27;t retroactive).</span>
 <span class="d-add">+        {</span>
-<span class="d-add">+          width = 48, height = 5</span>
+<span class="d-add">+          yPos = 33, width = 24, height = 10</span>
 <span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;System&quot;</span>
-<span class="d-add">+            text = {</span>
-<span class="d-add">+              format = &quot;MARKDOWN&quot;</span>
-<span class="d-add">+              content = &quot;**🌐 cityedit.org** → **Cloud Run `desire-path-mapper`** (nginx + Flask, 8Gi × 1–4 instances) → **OSRM** `desire-path-osrm` (routing, 4Gi × 1) · **Redis** Memorystore `desire-path-prod` (serving votes, 1GB LRU) · **Cloud SQL** `desire-path-votes-prod` (canonical votes)\n\nScorecards below = component health at a glance. Sections: App → OSRM → Redis → SQL.&quot;</span>
-<span class="d-add">+              # The API echoes an empty style object back; without it every plan</span>
-<span class="d-add">+              # shows a perpetual dashboard_json diff.</span>
-<span class="d-add">+              style = {}</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+</span>
-<span class="d-add">+        # ---- Row 1: component health scorecards -----------------------------</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          yPos = 5, width = 8, height = 8</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;App uptime (/health)&quot;</span>
-<span class="d-add">+            scorecard = {</span>
-<span class="d-add">+              timeSeriesQuery = {</span>
-<span class="d-add">+                timeSeriesFilter = {</span>
-<span class="d-add">+                  filter = &quot;metric.type=\&quot;monitoring.googleapis.com/uptime_check/check_passed\&quot; resource.type=\&quot;uptime_url\&quot; metric.label.\&quot;check_id\&quot;=\&quot;${google_monitoring_uptime_check_config.app_health.uptime_check_id}\&quot;&quot;</span>
-<span class="d-add">+                  aggregation = {</span>
-<span class="d-add">+                    alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                    perSeriesAligner   = &quot;ALIGN_FRACTION_TRUE&quot;</span>
-<span class="d-add">+                    crossSeriesReducer = &quot;REDUCE_MEAN&quot;</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }</span>
-<span class="d-add">+              gaugeView  = { upperBound = 1 }</span>
-<span class="d-add">+              thresholds = [{ value = 0.95, color = &quot;RED&quot;, direction = &quot;BELOW&quot; }]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          xPos = 8, yPos = 5, width = 8, height = 8</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;App P99 latency (ms)&quot;</span>
-<span class="d-add">+            scorecard = {</span>
-<span class="d-add">+              timeSeriesQuery = {</span>
-<span class="d-add">+                timeSeriesFilter = {</span>
-<span class="d-add">+                  filter = &quot;${local.app_filter} metric.type=\&quot;run.googleapis.com/request_latencies\&quot;&quot;</span>
-<span class="d-add">+                  aggregation = {</span>
-<span class="d-add">+                    alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                    perSeriesAligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
-<span class="d-add">+                    crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }</span>
-<span class="d-add">+              sparkChartView = { sparkChartType = &quot;SPARK_LINE&quot; }</span>
-<span class="d-add">+              thresholds = [</span>
-<span class="d-add">+                { value = 2000, color = &quot;YELLOW&quot;, direction = &quot;ABOVE&quot; },</span>
-<span class="d-add">+                { value = 5000, color = &quot;RED&quot;, direction = &quot;ABOVE&quot; },</span>
-<span class="d-add">+              ]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          xPos = 16, yPos = 5, width = 8, height = 8</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;App memory (of 8Gi)&quot;</span>
-<span class="d-add">+            scorecard = {</span>
-<span class="d-add">+              timeSeriesQuery = {</span>
-<span class="d-add">+                timeSeriesFilter = {</span>
-<span class="d-add">+                  filter = &quot;${local.app_filter} metric.type=\&quot;run.googleapis.com/container/memory/utilizations\&quot;&quot;</span>
-<span class="d-add">+                  aggregation = {</span>
-<span class="d-add">+                    alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                    perSeriesAligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
-<span class="d-add">+                    crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }</span>
-<span class="d-add">+              gaugeView = { upperBound = 1 }</span>
-<span class="d-add">+              thresholds = [</span>
-<span class="d-add">+                { value = 0.8, color = &quot;YELLOW&quot;, direction = &quot;ABOVE&quot; },</span>
-<span class="d-add">+                { value = 0.9, color = &quot;RED&quot;, direction = &quot;ABOVE&quot; },</span>
-<span class="d-add">+              ]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          xPos = 24, yPos = 5, width = 8, height = 8</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;OSRM memory (of 4Gi)&quot;</span>
-<span class="d-add">+            scorecard = {</span>
-<span class="d-add">+              timeSeriesQuery = {</span>
-<span class="d-add">+                timeSeriesFilter = {</span>
-<span class="d-add">+                  filter = &quot;${local.osrm_filter} metric.type=\&quot;run.googleapis.com/container/memory/utilizations\&quot;&quot;</span>
-<span class="d-add">+                  aggregation = {</span>
-<span class="d-add">+                    alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                    perSeriesAligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
-<span class="d-add">+                    crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }</span>
-<span class="d-add">+              gaugeView = { upperBound = 1 }</span>
-<span class="d-add">+              thresholds = [</span>
-<span class="d-add">+                { value = 0.8, color = &quot;YELLOW&quot;, direction = &quot;ABOVE&quot; },</span>
-<span class="d-add">+                { value = 0.9, color = &quot;RED&quot;, direction = &quot;ABOVE&quot; },</span>
-<span class="d-add">+              ]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          xPos = 32, yPos = 5, width = 8, height = 8</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;Redis memory (of 1GB)&quot;</span>
-<span class="d-add">+            scorecard = {</span>
-<span class="d-add">+              timeSeriesQuery = {</span>
-<span class="d-add">+                timeSeriesFilter = {</span>
-<span class="d-add">+                  filter = &quot;${local.redis_filter} metric.type=\&quot;redis.googleapis.com/stats/memory/usage_ratio\&quot;&quot;</span>
-<span class="d-add">+                  aggregation = {</span>
-<span class="d-add">+                    alignmentPeriod  = &quot;300s&quot;</span>
-<span class="d-add">+                    perSeriesAligner = &quot;ALIGN_MEAN&quot;</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }</span>
-<span class="d-add">+              gaugeView = { upperBound = 1 }</span>
-<span class="d-add">+              thresholds = [</span>
-<span class="d-add">+                { value = 0.75, color = &quot;YELLOW&quot;, direction = &quot;ABOVE&quot; },</span>
-<span class="d-add">+                { value = 0.85, color = &quot;RED&quot;, direction = &quot;ABOVE&quot; },</span>
-<span class="d-add">+              ]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          xPos = 40, yPos = 5, width = 8, height = 8</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;SQL CPU&quot;</span>
-<span class="d-add">+            scorecard = {</span>
-<span class="d-add">+              timeSeriesQuery = {</span>
-<span class="d-add">+                timeSeriesFilter = {</span>
-<span class="d-add">+                  filter = &quot;${local.sql_filter} metric.type=\&quot;cloudsql.googleapis.com/database/cpu/utilization\&quot;&quot;</span>
-<span class="d-add">+                  aggregation = {</span>
-<span class="d-add">+                    alignmentPeriod  = &quot;300s&quot;</span>
-<span class="d-add">+                    perSeriesAligner = &quot;ALIGN_MEAN&quot;</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }</span>
-<span class="d-add">+              gaugeView = { upperBound = 1 }</span>
-<span class="d-add">+              thresholds = [</span>
-<span class="d-add">+                { value = 0.7, color = &quot;YELLOW&quot;, direction = &quot;ABOVE&quot; },</span>
-<span class="d-add">+                { value = 0.9, color = &quot;RED&quot;, direction = &quot;ABOVE&quot; },</span>
-<span class="d-add">+              ]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+</span>
-<span class="d-add">+        # ---- App section -----------------------------------------------------</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          yPos = 13, width = 16, height = 10</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;App — requests/s by response class&quot;</span>
+<span class="d-add">+            title = &quot;API P99 by endpoint — Redis / Postgres backed (s)&quot;</span>
 <span class="d-add">+            xyChart = {</span>
 <span class="d-add">+              dataSets = [{</span>
-<span class="d-add">+                plotType = &quot;STACKED_AREA&quot;</span>
+<span class="d-add">+                plotType = &quot;LINE&quot;</span>
 <span class="d-add">+                timeSeriesQuery = {</span>
 <span class="d-add">+                  timeSeriesFilter = {</span>
-<span class="d-add">+                    filter = &quot;${local.app_filter} metric.type=\&quot;run.googleapis.com/request_count\&quot;&quot;</span>
+<span class="d-add">+                    filter = &quot;metric.type=\&quot;logging.googleapis.com/user/${google_logging_metric.api_latency.name}\&quot; resource.type=\&quot;cloud_run_revision\&quot; metric.label.\&quot;endpoint\&quot;=monitoring.regex.full_match(\&quot;/api/(vote|graph-votes|my-votes|route-votes|maps)|/health\&quot;)&quot;</span>
 <span class="d-add">+                    aggregation = {</span>
-<span class="d-add">+                      alignmentPeriod    = &quot;60s&quot;</span>
-<span class="d-add">+                      perSeriesAligner   = &quot;ALIGN_RATE&quot;</span>
-<span class="d-add">+                      crossSeriesReducer = &quot;REDUCE_SUM&quot;</span>
-<span class="d-add">+                      groupByFields      = [&quot;metric.label.\&quot;response_code_class\&quot;&quot;]</span>
+<span class="d-add">+                      alignmentPeriod    = &quot;300s&quot;</span>
+<span class="d-add">+                      perSeriesAligner   = &quot;ALIGN_DELTA&quot;</span>
+<span class="d-add">+                      crossSeriesReducer = &quot;REDUCE_PERCENTILE_99&quot;</span>
+<span class="d-add">+                      groupByFields      = [&quot;metric.label.\&quot;endpoint\&quot;&quot;]</span>
 <span class="d-add">+                    }</span>
 <span class="d-add">+                  }</span>
 <span class="d-add">+                }</span>
@@ -738,9 +343,9 @@
 <span class="d-add">+          }</span>
 <span class="d-add">+        },</span>
 <span class="d-add">+        {</span>
-<span class="d-add">+          xPos = 16, yPos = 13, width = 16, height = 10</span>
+<span class="d-add">+          xPos = 24, yPos = 33, width = 24, height = 10</span>
 <span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;App — request latency P50 / P95 / P99 (ms)&quot;</span>
+<span class="d-add">+            title = &quot;/api/routes (OSRM) — P50 / P95 / P99 (s)&quot;</span>
 <span class="d-add">+            xyChart = {</span>
 <span class="d-add">+              dataSets = [</span>
 <span class="d-add">+                {</span>
@@ -748,11 +353,11 @@
 <span class="d-add">+                  legendTemplate = &quot;P50&quot;</span>
 <span class="d-add">+                  timeSeriesQuery = {</span>
 <span class="d-add">+                    timeSeriesFilter = {</span>
-<span class="d-add">+                      filter = &quot;${local.app_filter} metric.type=\&quot;run.googleapis.com/request_latencies\&quot;&quot;</span>
+<span class="d-add">+                      filter = &quot;metric.type=\&quot;logging.googleapis.com/user/${google_logging_metric.api_latency.name}\&quot; resource.type=\&quot;cloud_run_revision\&quot; metric.label.\&quot;endpoint\&quot;=\&quot;/api/routes\&quot;&quot;</span>
 <span class="d-add">+                      aggregation = {</span>
 <span class="d-add">+                        alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                        perSeriesAligner   = &quot;ALIGN_PERCENTILE_50&quot;</span>
-<span class="d-add">+                        crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
+<span class="d-add">+                        perSeriesAligner   = &quot;ALIGN_DELTA&quot;</span>
+<span class="d-add">+                        crossSeriesReducer = &quot;REDUCE_PERCENTILE_50&quot;</span>
 <span class="d-add">+                      }</span>
 <span class="d-add">+                    }</span>
 <span class="d-add">+                  }</span>
@@ -762,11 +367,11 @@
 <span class="d-add">+                  legendTemplate = &quot;P95&quot;</span>
 <span class="d-add">+                  timeSeriesQuery = {</span>
 <span class="d-add">+                    timeSeriesFilter = {</span>
-<span class="d-add">+                      filter = &quot;${local.app_filter} metric.type=\&quot;run.googleapis.com/request_latencies\&quot;&quot;</span>
+<span class="d-add">+                      filter = &quot;metric.type=\&quot;logging.googleapis.com/user/${google_logging_metric.api_latency.name}\&quot; resource.type=\&quot;cloud_run_revision\&quot; metric.label.\&quot;endpoint\&quot;=\&quot;/api/routes\&quot;&quot;</span>
 <span class="d-add">+                      aggregation = {</span>
 <span class="d-add">+                        alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                        perSeriesAligner   = &quot;ALIGN_PERCENTILE_95&quot;</span>
-<span class="d-add">+                        crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
+<span class="d-add">+                        perSeriesAligner   = &quot;ALIGN_DELTA&quot;</span>
+<span class="d-add">+                        crossSeriesReducer = &quot;REDUCE_PERCENTILE_95&quot;</span>
 <span class="d-add">+                      }</span>
 <span class="d-add">+                    }</span>
 <span class="d-add">+                  }</span>
@@ -776,11 +381,11 @@
 <span class="d-add">+                  legendTemplate = &quot;P99&quot;</span>
 <span class="d-add">+                  timeSeriesQuery = {</span>
 <span class="d-add">+                    timeSeriesFilter = {</span>
-<span class="d-add">+                      filter = &quot;${local.app_filter} metric.type=\&quot;run.googleapis.com/request_latencies\&quot;&quot;</span>
+<span class="d-add">+                      filter = &quot;metric.type=\&quot;logging.googleapis.com/user/${google_logging_metric.api_latency.name}\&quot; resource.type=\&quot;cloud_run_revision\&quot; metric.label.\&quot;endpoint\&quot;=\&quot;/api/routes\&quot;&quot;</span>
 <span class="d-add">+                      aggregation = {</span>
 <span class="d-add">+                        alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                        perSeriesAligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
-<span class="d-add">+                        crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
+<span class="d-add">+                        perSeriesAligner   = &quot;ALIGN_DELTA&quot;</span>
+<span class="d-add">+                        crossSeriesReducer = &quot;REDUCE_PERCENTILE_99&quot;</span>
 <span class="d-add">+                      }</span>
 <span class="d-add">+                    }</span>
 <span class="d-add">+                  }</span>
@@ -790,43 +395,20 @@
 <span class="d-add">+          }</span>
 <span class="d-add">+        },</span>
 <span class="d-add">+        {</span>
-<span class="d-add">+          xPos = 32, yPos = 13, width = 16, height = 10</span>
+<span class="d-add">+          yPos = 43, width = 24, height = 10</span>
 <span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;App — memory utilization (P99 per instance)&quot;</span>
+<span class="d-add">+            title = &quot;API P99 by endpoint — in-process graph provider (s)&quot;</span>
 <span class="d-add">+            xyChart = {</span>
 <span class="d-add">+              dataSets = [{</span>
 <span class="d-add">+                plotType = &quot;LINE&quot;</span>
 <span class="d-add">+                timeSeriesQuery = {</span>
 <span class="d-add">+                  timeSeriesFilter = {</span>
-<span class="d-add">+                    filter = &quot;${local.app_filter} metric.type=\&quot;run.googleapis.com/container/memory/utilizations\&quot;&quot;</span>
+<span class="d-add">+                    filter = &quot;metric.type=\&quot;logging.googleapis.com/user/${google_logging_metric.api_latency.name}\&quot; resource.type=\&quot;cloud_run_revision\&quot; metric.label.\&quot;endpoint\&quot;=monitoring.regex.full_match(\&quot;/api/(reverse-geocode|nearest-node|graph-topology|graph-version)\&quot;)&quot;</span>
 <span class="d-add">+                    aggregation = {</span>
 <span class="d-add">+                      alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                      perSeriesAligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
-<span class="d-add">+                      crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
-<span class="d-add">+                      groupByFields      = [&quot;resource.label.\&quot;revision_name\&quot;&quot;]</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }]</span>
-<span class="d-add">+              thresholds = [{ value = 0.9 }]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          yPos = 23, width = 16, height = 10</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;App — CPU utilization (P99 per instance)&quot;</span>
-<span class="d-add">+            xyChart = {</span>
-<span class="d-add">+              dataSets = [{</span>
-<span class="d-add">+                plotType = &quot;LINE&quot;</span>
-<span class="d-add">+                timeSeriesQuery = {</span>
-<span class="d-add">+                  timeSeriesFilter = {</span>
-<span class="d-add">+                    filter = &quot;${local.app_filter} metric.type=\&quot;run.googleapis.com/container/cpu/utilizations\&quot;&quot;</span>
-<span class="d-add">+                    aggregation = {</span>
-<span class="d-add">+                      alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                      perSeriesAligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
-<span class="d-add">+                      crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
-<span class="d-add">+                      groupByFields      = [&quot;resource.label.\&quot;revision_name\&quot;&quot;]</span>
+<span class="d-add">+                      perSeriesAligner   = &quot;ALIGN_DELTA&quot;</span>
+<span class="d-add">+                      crossSeriesReducer = &quot;REDUCE_PERCENTILE_99&quot;</span>
+<span class="d-add">+                      groupByFields      = [&quot;metric.label.\&quot;endpoint\&quot;&quot;]</span>
 <span class="d-add">+                    }</span>
 <span class="d-add">+                  }</span>
 <span class="d-add">+                }</span>
@@ -835,41 +417,20 @@
 <span class="d-add">+          }</span>
 <span class="d-add">+        },</span>
 <span class="d-add">+        {</span>
-<span class="d-add">+          xPos = 16, yPos = 23, width = 16, height = 10</span>
+<span class="d-add">+          xPos = 24, yPos = 43, width = 24, height = 10</span>
 <span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;App — instance count (autoscaler, max 4)&quot;</span>
-<span class="d-add">+            xyChart = {</span>
-<span class="d-add">+              dataSets = [{</span>
-<span class="d-add">+                plotType = &quot;STACKED_AREA&quot;</span>
-<span class="d-add">+                timeSeriesQuery = {</span>
-<span class="d-add">+                  timeSeriesFilter = {</span>
-<span class="d-add">+                    filter = &quot;${local.app_filter} metric.type=\&quot;run.googleapis.com/container/instance_count\&quot;&quot;</span>
-<span class="d-add">+                    aggregation = {</span>
-<span class="d-add">+                      alignmentPeriod    = &quot;60s&quot;</span>
-<span class="d-add">+                      perSeriesAligner   = &quot;ALIGN_MAX&quot;</span>
-<span class="d-add">+                      crossSeriesReducer = &quot;REDUCE_SUM&quot;</span>
-<span class="d-add">+                      groupByFields      = [&quot;metric.label.\&quot;state\&quot;&quot;]</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          xPos = 32, yPos = 23, width = 16, height = 10</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;App — concurrent requests (P99)&quot;</span>
+<span class="d-add">+            title = &quot;API P99 by endpoint — external (Photon) + static (s)&quot;</span>
 <span class="d-add">+            xyChart = {</span>
 <span class="d-add">+              dataSets = [{</span>
 <span class="d-add">+                plotType = &quot;LINE&quot;</span>
 <span class="d-add">+                timeSeriesQuery = {</span>
 <span class="d-add">+                  timeSeriesFilter = {</span>
-<span class="d-add">+                    filter = &quot;${local.app_filter} metric.type=\&quot;run.googleapis.com/container/max_request_concurrencies\&quot;&quot;</span>
+<span class="d-add">+                    filter = &quot;metric.type=\&quot;logging.googleapis.com/user/${google_logging_metric.api_latency.name}\&quot; resource.type=\&quot;cloud_run_revision\&quot; metric.label.\&quot;endpoint\&quot;=monitoring.regex.full_match(\&quot;/api/(geocode|tiles|cities|vote-type-lists)\&quot;)&quot;</span>
 <span class="d-add">+                    aggregation = {</span>
 <span class="d-add">+                      alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                      perSeriesAligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
-<span class="d-add">+                      crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
+<span class="d-add">+                      perSeriesAligner   = &quot;ALIGN_DELTA&quot;</span>
+<span class="d-add">+                      crossSeriesReducer = &quot;REDUCE_PERCENTILE_99&quot;</span>
+<span class="d-add">+                      groupByFields      = [&quot;metric.label.\&quot;endpoint\&quot;&quot;]</span>
 <span class="d-add">+                    }</span>
 <span class="d-add">+                  }</span>
 <span class="d-add">+                }</span>
@@ -878,260 +439,85 @@
 <span class="d-add">+          }</span>
 <span class="d-add">+        },</span>
 <span class="d-add">+</span>
-<span class="d-add">+        # ---- OSRM section ----------------------------------------------------</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          yPos = 33, width = 16, height = 10</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;OSRM — requests/s by response class&quot;</span>
-<span class="d-add">+            xyChart = {</span>
-<span class="d-add">+              dataSets = [{</span>
-<span class="d-add">+                plotType = &quot;STACKED_AREA&quot;</span>
-<span class="d-add">+                timeSeriesQuery = {</span>
-<span class="d-add">+                  timeSeriesFilter = {</span>
-<span class="d-add">+                    filter = &quot;${local.osrm_filter} metric.type=\&quot;run.googleapis.com/request_count\&quot;&quot;</span>
-<span class="d-add">+                    aggregation = {</span>
-<span class="d-add">+                      alignmentPeriod    = &quot;60s&quot;</span>
-<span class="d-add">+                      perSeriesAligner   = &quot;ALIGN_RATE&quot;</span>
-<span class="d-add">+                      crossSeriesReducer = &quot;REDUCE_SUM&quot;</span>
-<span class="d-add">+                      groupByFields      = [&quot;metric.label.\&quot;response_code_class\&quot;&quot;]</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          xPos = 16, yPos = 33, width = 16, height = 10</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;OSRM — latency P50 / P99 (ms)&quot;</span>
-<span class="d-add">+            xyChart = {</span>
-<span class="d-add">+              dataSets = [</span>
-<span class="d-add">+                {</span>
-<span class="d-add">+                  plotType = &quot;LINE&quot;</span>
-<span class="d-add">+                  legendTemplate = &quot;P50&quot;</span>
-<span class="d-add">+                  timeSeriesQuery = {</span>
-<span class="d-add">+                    timeSeriesFilter = {</span>
-<span class="d-add">+                      filter = &quot;${local.osrm_filter} metric.type=\&quot;run.googleapis.com/request_latencies\&quot;&quot;</span>
-<span class="d-add">+                      aggregation = {</span>
-<span class="d-add">+                        alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                        perSeriesAligner   = &quot;ALIGN_PERCENTILE_50&quot;</span>
-<span class="d-add">+                        crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
-<span class="d-add">+                      }</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                },</span>
-<span class="d-add">+                {</span>
-<span class="d-add">+                  plotType = &quot;LINE&quot;</span>
-<span class="d-add">+                  legendTemplate = &quot;P99&quot;</span>
-<span class="d-add">+                  timeSeriesQuery = {</span>
-<span class="d-add">+                    timeSeriesFilter = {</span>
-<span class="d-add">+                      filter = &quot;${local.osrm_filter} metric.type=\&quot;run.googleapis.com/request_latencies\&quot;&quot;</span>
-<span class="d-add">+                      aggregation = {</span>
-<span class="d-add">+                        alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                        perSeriesAligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
-<span class="d-add">+                        crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
-<span class="d-add">+                      }</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                },</span>
-<span class="d-add">+              ]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          xPos = 32, yPos = 33, width = 16, height = 10</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;OSRM — memory &amp; CPU (P99)&quot;</span>
-<span class="d-add">+            xyChart = {</span>
-<span class="d-add">+              dataSets = [</span>
-<span class="d-add">+                {</span>
-<span class="d-add">+                  plotType = &quot;LINE&quot;</span>
-<span class="d-add">+                  legendTemplate = &quot;memory&quot;</span>
-<span class="d-add">+                  timeSeriesQuery = {</span>
-<span class="d-add">+                    timeSeriesFilter = {</span>
-<span class="d-add">+                      filter = &quot;${local.osrm_filter} metric.type=\&quot;run.googleapis.com/container/memory/utilizations\&quot;&quot;</span>
-<span class="d-add">+                      aggregation = {</span>
-<span class="d-add">+                        alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                        perSeriesAligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
-<span class="d-add">+                        crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
-<span class="d-add">+                      }</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                },</span>
-<span class="d-add">+                {</span>
-<span class="d-add">+                  plotType = &quot;LINE&quot;</span>
-<span class="d-add">+                  legendTemplate = &quot;cpu&quot;</span>
-<span class="d-add">+                  timeSeriesQuery = {</span>
-<span class="d-add">+                    timeSeriesFilter = {</span>
-<span class="d-add">+                      filter = &quot;${local.osrm_filter} metric.type=\&quot;run.googleapis.com/container/cpu/utilizations\&quot;&quot;</span>
-<span class="d-add">+                      aggregation = {</span>
-<span class="d-add">+                        alignmentPeriod    = &quot;300s&quot;</span>
-<span class="d-add">+                        perSeriesAligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
-<span class="d-add">+                        crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
-<span class="d-add">+                      }</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                },</span>
-<span class="d-add">+              ]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+</span>
-<span class="d-add">+        # ---- Redis section ---------------------------------------------------</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          yPos = 43, width = 16, height = 10</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;Redis — memory usage ratio&quot;</span>
-<span class="d-add">+            xyChart = {</span>
-<span class="d-add">+              dataSets = [{</span>
-<span class="d-add">+                plotType = &quot;LINE&quot;</span>
-<span class="d-add">+                timeSeriesQuery = {</span>
-<span class="d-add">+                  timeSeriesFilter = {</span>
-<span class="d-add">+                    filter = &quot;${local.redis_filter} metric.type=\&quot;redis.googleapis.com/stats/memory/usage_ratio\&quot;&quot;</span>
-<span class="d-add">+                    aggregation = {</span>
-<span class="d-add">+                      alignmentPeriod  = &quot;60s&quot;</span>
-<span class="d-add">+                      perSeriesAligner = &quot;ALIGN_MEAN&quot;</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }]</span>
-<span class="d-add">+              thresholds = [{ value = 0.85 }]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          xPos = 16, yPos = 43, width = 16, height = 10</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;Redis — connected clients&quot;</span>
-<span class="d-add">+            xyChart = {</span>
-<span class="d-add">+              dataSets = [{</span>
-<span class="d-add">+                plotType = &quot;LINE&quot;</span>
-<span class="d-add">+                timeSeriesQuery = {</span>
-<span class="d-add">+                  timeSeriesFilter = {</span>
-<span class="d-add">+                    filter = &quot;${local.redis_filter} metric.type=\&quot;redis.googleapis.com/clients/connected\&quot;&quot;</span>
-<span class="d-add">+                    aggregation = {</span>
-<span class="d-add">+                      alignmentPeriod  = &quot;60s&quot;</span>
-<span class="d-add">+                      perSeriesAligner = &quot;ALIGN_MEAN&quot;</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+        {</span>
-<span class="d-add">+          xPos = 32, yPos = 43, width = 16, height = 10</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;Redis — commands/s&quot;</span>
-<span class="d-add">+            xyChart = {</span>
-<span class="d-add">+              dataSets = [{</span>
-<span class="d-add">+                plotType = &quot;LINE&quot;</span>
-<span class="d-add">+                timeSeriesQuery = {</span>
-<span class="d-add">+                  timeSeriesFilter = {</span>
-<span class="d-add">+                    filter = &quot;${local.redis_filter} metric.type=\&quot;redis.googleapis.com/commands/calls\&quot;&quot;</span>
-<span class="d-add">+                    aggregation = {</span>
-<span class="d-add">+                      alignmentPeriod    = &quot;60s&quot;</span>
-<span class="d-add">+                      perSeriesAligner   = &quot;ALIGN_RATE&quot;</span>
-<span class="d-add">+                      crossSeriesReducer = &quot;REDUCE_SUM&quot;</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+</span>
-<span class="d-add">+        # ---- Cloud SQL section -----------------------------------------------</span>
-<span class="d-add">+        {</span>
+<span class="d-ctx">         # ---- OSRM section ----------------------------------------------------</span>
+<span class="d-ctx">         {</span>
+<span class="d-del">-          yPos = 33, width = 16, height = 10</span>
 <span class="d-add">+          yPos = 53, width = 16, height = 10</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;Cloud SQL — CPU &amp; memory utilization&quot;</span>
-<span class="d-add">+            xyChart = {</span>
-<span class="d-add">+              dataSets = [</span>
-<span class="d-add">+                {</span>
-<span class="d-add">+                  plotType = &quot;LINE&quot;</span>
-<span class="d-add">+                  legendTemplate = &quot;cpu&quot;</span>
-<span class="d-add">+                  timeSeriesQuery = {</span>
-<span class="d-add">+                    timeSeriesFilter = {</span>
-<span class="d-add">+                      filter = &quot;${local.sql_filter} metric.type=\&quot;cloudsql.googleapis.com/database/cpu/utilization\&quot;&quot;</span>
-<span class="d-add">+                      aggregation = {</span>
-<span class="d-add">+                        alignmentPeriod  = &quot;300s&quot;</span>
-<span class="d-add">+                        perSeriesAligner = &quot;ALIGN_MEAN&quot;</span>
-<span class="d-add">+                      }</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                },</span>
-<span class="d-add">+                {</span>
-<span class="d-add">+                  plotType = &quot;LINE&quot;</span>
-<span class="d-add">+                  legendTemplate = &quot;memory&quot;</span>
-<span class="d-add">+                  timeSeriesQuery = {</span>
-<span class="d-add">+                    timeSeriesFilter = {</span>
-<span class="d-add">+                      filter = &quot;${local.sql_filter} metric.type=\&quot;cloudsql.googleapis.com/database/memory/utilization\&quot;&quot;</span>
-<span class="d-add">+                      aggregation = {</span>
-<span class="d-add">+                        alignmentPeriod  = &quot;300s&quot;</span>
-<span class="d-add">+                        perSeriesAligner = &quot;ALIGN_MEAN&quot;</span>
-<span class="d-add">+                      }</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                },</span>
-<span class="d-add">+              ]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+        {</span>
+<span class="d-ctx">           widget = {</span>
+<span class="d-ctx">             title = &quot;OSRM — requests/s by response class&quot;</span>
+<span class="d-ctx">             xyChart = {</span>
+<span class="d-hunk">@@ -682,7 +862,7 @@ resource &quot;google_monitoring_dashboard&quot; &quot;system_health&quot; {</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">         },</span>
+<span class="d-ctx">         {</span>
+<span class="d-del">-          xPos = 16, yPos = 33, width = 16, height = 10</span>
 <span class="d-add">+          xPos = 16, yPos = 53, width = 16, height = 10</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;Cloud SQL — active connections&quot;</span>
-<span class="d-add">+            xyChart = {</span>
-<span class="d-add">+              dataSets = [{</span>
-<span class="d-add">+                plotType = &quot;LINE&quot;</span>
-<span class="d-add">+                timeSeriesQuery = {</span>
-<span class="d-add">+                  timeSeriesFilter = {</span>
-<span class="d-add">+                    filter = &quot;${local.sql_filter} metric.type=\&quot;cloudsql.googleapis.com/database/postgresql/num_backends\&quot;&quot;</span>
-<span class="d-add">+                    aggregation = {</span>
-<span class="d-add">+                      alignmentPeriod    = &quot;60s&quot;</span>
-<span class="d-add">+                      perSeriesAligner   = &quot;ALIGN_MEAN&quot;</span>
-<span class="d-add">+                      crossSeriesReducer = &quot;REDUCE_SUM&quot;</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+        {</span>
+<span class="d-ctx">           widget = {</span>
+<span class="d-ctx">             title = &quot;OSRM — latency P50 / P99 (ms)&quot;</span>
+<span class="d-ctx">             xyChart = {</span>
+<span class="d-hunk">@@ -720,7 +900,7 @@ resource &quot;google_monitoring_dashboard&quot; &quot;system_health&quot; {</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">         },</span>
+<span class="d-ctx">         {</span>
+<span class="d-del">-          xPos = 32, yPos = 33, width = 16, height = 10</span>
 <span class="d-add">+          xPos = 32, yPos = 53, width = 16, height = 10</span>
-<span class="d-add">+          widget = {</span>
-<span class="d-add">+            title = &quot;Cloud SQL — disk utilization&quot;</span>
-<span class="d-add">+            xyChart = {</span>
-<span class="d-add">+              dataSets = [{</span>
-<span class="d-add">+                plotType = &quot;LINE&quot;</span>
-<span class="d-add">+                timeSeriesQuery = {</span>
-<span class="d-add">+                  timeSeriesFilter = {</span>
-<span class="d-add">+                    filter = &quot;${local.sql_filter} metric.type=\&quot;cloudsql.googleapis.com/database/disk/utilization\&quot;&quot;</span>
-<span class="d-add">+                    aggregation = {</span>
-<span class="d-add">+                      alignmentPeriod  = &quot;300s&quot;</span>
-<span class="d-add">+                      perSeriesAligner = &quot;ALIGN_MEAN&quot;</span>
-<span class="d-add">+                    }</span>
-<span class="d-add">+                  }</span>
-<span class="d-add">+                }</span>
-<span class="d-add">+              }]</span>
-<span class="d-add">+              thresholds = [{ value = 0.85 }]</span>
-<span class="d-add">+            }</span>
-<span class="d-add">+          }</span>
-<span class="d-add">+        },</span>
-<span class="d-add">+      ]</span>
-<span class="d-add">+    }</span>
-<span class="d-add">+  })</span>
-<span class="d-add">+</span>
-<span class="d-add">+  depends_on = [google_project_service.monitoring]</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+output &quot;dashboard_url&quot; {</span>
-<span class="d-add">+  description = &quot;Cloud Monitoring system-health dashboard&quot;</span>
-<span class="d-add">+  value       = &quot;https://console.cloud.google.com/monitoring/dashboards/builder/${element(split(&quot;/&quot;, google_monitoring_dashboard.system_health.id), length(split(&quot;/&quot;, google_monitoring_dashboard.system_health.id)) - 1)}?project=${var.project_id}&quot;</span>
-<span class="d-add">+}</span></pre>
+<span class="d-ctx">           widget = {</span>
+<span class="d-ctx">             title = &quot;OSRM — memory &amp; CPU (P99)&quot;</span>
+<span class="d-ctx">             xyChart = {</span>
+<span class="d-hunk">@@ -760,7 +940,7 @@ resource &quot;google_monitoring_dashboard&quot; &quot;system_health&quot; {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         # ---- Redis section ---------------------------------------------------</span>
+<span class="d-ctx">         {</span>
+<span class="d-del">-          yPos = 43, width = 16, height = 10</span>
+<span class="d-add">+          yPos = 63, width = 16, height = 10</span>
+<span class="d-ctx">           widget = {</span>
+<span class="d-ctx">             title = &quot;Redis — memory usage ratio&quot;</span>
+<span class="d-ctx">             xyChart = {</span>
+<span class="d-hunk">@@ -781,7 +961,7 @@ resource &quot;google_monitoring_dashboard&quot; &quot;system_health&quot; {</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">         },</span>
+<span class="d-ctx">         {</span>
+<span class="d-del">-          xPos = 16, yPos = 43, width = 16, height = 10</span>
+<span class="d-add">+          xPos = 16, yPos = 63, width = 16, height = 10</span>
+<span class="d-ctx">           widget = {</span>
+<span class="d-ctx">             title = &quot;Redis — connected clients&quot;</span>
+<span class="d-ctx">             xyChart = {</span>
+<span class="d-hunk">@@ -801,7 +981,7 @@ resource &quot;google_monitoring_dashboard&quot; &quot;system_health&quot; {</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">         },</span>
+<span class="d-ctx">         {</span>
+<span class="d-del">-          xPos = 32, yPos = 43, width = 16, height = 10</span>
+<span class="d-add">+          xPos = 32, yPos = 63, width = 16, height = 10</span>
+<span class="d-ctx">           widget = {</span>
+<span class="d-ctx">             title = &quot;Redis — commands/s&quot;</span>
+<span class="d-ctx">             xyChart = {</span>
+<span class="d-hunk">@@ -824,7 +1004,7 @@ resource &quot;google_monitoring_dashboard&quot; &quot;system_health&quot; {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         # ---- Cloud SQL section -----------------------------------------------</span>
+<span class="d-ctx">         {</span>
+<span class="d-del">-          yPos = 53, width = 16, height = 10</span>
+<span class="d-add">+          yPos = 73, width = 16, height = 10</span>
+<span class="d-ctx">           widget = {</span>
+<span class="d-ctx">             title = &quot;Cloud SQL — CPU &amp; memory utilization&quot;</span>
+<span class="d-ctx">             xyChart = {</span>
+<span class="d-hunk">@@ -860,7 +1040,7 @@ resource &quot;google_monitoring_dashboard&quot; &quot;system_health&quot; {</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">         },</span>
+<span class="d-ctx">         {</span>
+<span class="d-del">-          xPos = 16, yPos = 53, width = 16, height = 10</span>
+<span class="d-add">+          xPos = 16, yPos = 73, width = 16, height = 10</span>
+<span class="d-ctx">           widget = {</span>
+<span class="d-ctx">             title = &quot;Cloud SQL — active connections&quot;</span>
+<span class="d-ctx">             xyChart = {</span>
+<span class="d-hunk">@@ -881,7 +1061,7 @@ resource &quot;google_monitoring_dashboard&quot; &quot;system_health&quot; {</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">         },</span>
+<span class="d-ctx">         {</span>
+<span class="d-del">-          xPos = 32, yPos = 53, width = 16, height = 10</span>
+<span class="d-add">+          xPos = 32, yPos = 73, width = 16, height = 10</span>
+<span class="d-ctx">           widget = {</span>
+<span class="d-ctx">             title = &quot;Cloud SQL — disk utilization&quot;</span>
+<span class="d-ctx">             xyChart = {</span></pre>
         </details>
         
   </section>
