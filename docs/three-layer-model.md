@@ -47,10 +47,17 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored
 ### 2.1 What a block is
 
 One polygon per street segment between intersections (a "streetscape block"),
-covering the roadbed + sidewalk right-of-way. Blocks partition the votable
-network: **every edge belongs to exactly one block** (strict many-to-one), and a
-node belongs to the block of its lowest-indexed adjacent edge (deterministic,
-matching the client's `adjFirst` node→edge upgrade rule).
+covering the roadbed + sidewalk right-of-way — plus one small **disc block per
+junction node** (12 m, `build_node_blocks.py`), punched out of the street/foot
+polygons so blocks never overlap. Junction discs exist because street polygons
+otherwise extend across intersections (Voronoi flare): the short edges crossing
+an intersection would bake into a PERPENDICULAR street's block, so a route down
+an avenue would select — and cast onto — every cross street it passes (the
+"ladder" bug). Blocks partition the votable network: **every edge belongs to
+exactly one block** (strict many-to-one), and a node belongs to the block of its
+**shortest** incident edge (deterministic, matching the client's `adjShortest`
+node→edge upgrade rule — the shortest incident edge is the one whose midpoint
+falls inside the junction's own disc).
 
 ### 2.2 Generation — procedural, per city, at graph-build time
 
@@ -61,11 +68,16 @@ be added without city-specific open data (`server/streetscape_blocks/`):
    intersections merged at 12 m) → buffer each segment by a per-road-class
    half-width → seed points every 6 m → Voronoi partition by nearest segment →
    dissolve + clip. One polygon per street segment.
-2. `build_foot_blocks.py` — edges not covered by any street block (park paths,
-   plazas, boardwalks — ~18% in NYC) are buffered and merged into one block per
-   connected foot component, appended with continuing `block_id`s. This is what
-   makes the edge→block mapping **total**.
-3. `build_edge_blocks.py` — bakes `edge_block_id: int32[n_edges]`
+2. `build_node_blocks.py` — every walk-graph junction (unique-neighbour degree
+   ≥ 3) becomes its own 12 m disc block (`road_class="node"`), subtracted from
+   every street block it touches so blocks stay disjoint.
+3. `build_foot_blocks.py` — edges not covered by any street block (park paths,
+   plazas, boardwalks — ~18% in NYC) are buffered (6 m), merged, and **severed
+   at the junction discs** (12 m > 6 m, so the mesh disconnects there): one
+   block per path segment between junctions — the same grain as streets, not
+   one giant block per connected park network. Appended with continuing
+   `block_id`s; this is what makes the edge→block mapping **total**.
+4. `build_edge_blocks.py` — bakes `edge_block_id: int32[n_edges]`
    (`osm_data/<city>/edge_blocks_<network>.npy` + a meta JSON stamping
    `topology_etag` + `blocks_sha256`). Assignment: polygon containment of the
    edge midpoint, else nearest block within 30 m (see `eval/RESULTS.md` — nearest
@@ -75,9 +87,11 @@ be added without city-specific open data (`server/streetscape_blocks/`):
 output against Brook's NYC planimetric blocks (`build_nyc_blocks.py`, from NYC
 open-data roadbed+sidewalk polygons — the reference this algorithm mimics).
 Current numbers (see `COMPARISON.md`): median IoU **0.84**, median area ratio
-**1.00**, median centroid offset ~1 m over ~82k shared segments. NYC keeps the
-planimetric blocks; new cities use the procedural generator and should be
-spot-checked with the same comparison harness when planimetric data exists.
+**1.00**, median centroid offset ~1 m over ~82k shared segments. **Every city —
+NYC included — serves the procedural output** (`edge_blocks_streets.json` stamps
+`blocks_file: blocks_generic_nyc.geojson`); Brook's planimetric blocks are the
+evaluation reference only. New cities should be spot-checked with the same
+comparison harness when planimetric data exists.
 
 Generation runs **when a city's graph is built** (alongside
 `refresh_osm.py` / the graph-builder image) and the artifacts are baked next to

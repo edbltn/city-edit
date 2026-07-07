@@ -4,10 +4,14 @@
 build_blocks_generic.py covers ~82% of foot-graph edges; the rest are foot edges
 >30 m from any drive centerline — park interior paths, pedestrian plazas,
 boardwalks. This takes those unmapped edges (edge_blocks_<net>.npy == −1), buffers
-them, and MERGES the overlapping buffers into one polygon per connected foot-path
-component, then appends them to blocks_generic_<city>.geojson so their votes show
-up on the block heatmap too (road_class="foot", seg_id=−1, block_ids continuing
-from the street blocks).
+them, MERGES the overlapping buffers, and SUBTRACTS the junction-node discs
+(road_class="node" features from build_node_blocks.py) before splitting into
+connected components. The discs (12 m) are wider than the tube radius (6 m), so
+the merged mesh severs at every junction and each polygon is one path segment
+between junctions — the same grain as street blocks. (Without the subtraction a
+whole park's path network union-finds into a handful of giant blocks — the old
+Central Park behaviour.) Results append to blocks_generic_<city>.geojson
+(road_class="foot", seg_id=−1, block_ids continuing from the existing features).
 
 After running this, re-run build_edge_blocks.py and rebuild blocks.pmtiles.
 
@@ -30,6 +34,7 @@ if _SERVER not in sys.path:
 
 import shapely  # noqa: E402
 from shapely import LineString, union_all, get_parts, buffer as shp_buffer  # noqa: E402
+from shapely.geometry import shape as shp_shape  # noqa: E402
 
 from cities import CITIES  # noqa: E402
 from graph_registry import CityGraph  # noqa: E402
@@ -82,14 +87,26 @@ def main():
     bufs = shp_buffer(np.array(lines, dtype=object), HALF_WIDTH_M,
                       cap_style="round", join_style="round")
     merged = union_all(bufs)
-    parts = [p for p in get_parts(merged) if p.area >= MIN_AREA_M2]
-    print(f"[foot] merged into {len(parts)} foot blocks (≥{MIN_AREA_M2:.0f} m²)")
 
-    # Load existing street blocks and append the foot blocks.
+    # Load the existing blocks now: the junction-node discs in them cut the
+    # merged mesh into per-segment components (and keep foot blocks from
+    # overlapping the discs — blocks must never overlap).
     out_dir = os.environ.get("BLOCKS_OUT", os.path.join(_HERE, "output"))
     blocks_path = os.path.join(out_dir, f"blocks_generic_{CITY}.geojson")
     fc = json.load(open(blocks_path))
     feats = fc["features"]
+
+    disc_ll = [shp_shape(f["geometry"]) for f in feats
+               if f["properties"].get("road_class") == "node"]
+    if disc_ll:
+        def to_m_geom(a):  # (lon,lat) ndarray -> metres in the same local frame
+            return np.column_stack(((a[:, 0] - w) * mlon, (a[:, 1] - s) * mlat))
+        discs_m = shapely.transform(np.array(disc_ll, dtype=object), to_m_geom)
+        merged = shapely.difference(merged, union_all(discs_m))
+        print(f"[foot] subtracted {len(disc_ll)} junction discs")
+
+    parts = [p for p in get_parts(merged) if p.area >= MIN_AREA_M2]
+    print(f"[foot] merged into {len(parts)} foot blocks (≥{MIN_AREA_M2:.0f} m²)")
     next_id = max((f["properties"]["block_id"] for f in feats), default=-1) + 1
 
     for poly in parts:

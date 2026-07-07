@@ -50,7 +50,7 @@ import {
   buildBlockIndex,
   touchedBlockKeys,
   adjEdgesOf,
-  adjFirst,
+  adjShortest,
 } from "./graphTopology";
 import { materializeBlocks, selectionVoteRows } from "../../utils/blockSelection";
 import { iconForLabel, iconSrc, mapStyleForTheme } from "../../themes";
@@ -804,7 +804,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     if (hit) {
       const voteEdgeId = hit.target.kind === "edge"
         ? hit.target.index
-        : adjFirst(nodeAdjRef.current, hit.target.index);
+        : adjShortest(data, nodeAdjRef.current, hit.target.index);
       return { target: hit.target, snapLat: hit.snapLat, snapLng: hit.snapLng, voteEdgeId };
     }
 
@@ -974,7 +974,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       const edgeIds: number[] = [];
       const pushTarget = (t: HoverTarget | null) => {
         if (!t) return;
-        const e = t.kind === "edge" ? t.index : adjFirst(nodeAdjRef.current, t.index);
+        const e = t.kind === "edge" ? t.index : adjShortest(topo, nodeAdjRef.current, t.index);
         if (e != null) edgeIds.push(e);
       };
       const path = pathEdgeIdsRef.current;
@@ -1620,13 +1620,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       //    matches — skipping the multi-MB download and JSON parse entirely.
       let topology: GraphTopology | null = null;
       let version: string | null = null;
+      let blocksVersion: string | null = null;
       let usedCachedTopology = false;
       // Assigned inside the try below; the step-3 stale-topology guard reuses it.
       let fetchFreshTopology: ((forceReload?: boolean) => Promise<GraphTopology | null>) | null = null;
       try {
         try {
           const vr = await fetch(withMap(`${CONFIG.apiUrl}/graph-version`), { headers: passcodeHeaders() });
-          if (vr.ok) version = (await vr.json()).version ?? null;
+          if (vr.ok) {
+            const vj = await vr.json();
+            version = vj.version ?? null;
+            blocksVersion = vj.blocks ?? null;
+          }
         } catch {
           // Version probe failed — fall back to a direct topology fetch.
         }
@@ -1640,14 +1645,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         const withVersion = (url: string, v: string | null = version) =>
           v ? url + (url.includes("?") ? "&" : "?") + "v=" + encodeURIComponent(v) : url;
 
-        // The binary blob's format is versioned SEPARATELY from the topology
-        // content: adding the edge_block_id section (GTB2) didn't change the
-        // node/edge content, so /graph-version still reports the same etag.
-        // Suffix the blob's cache key + URL buster with the format tag —
-        // mirroring the server's "-bin2" ETag — or a client holding the old
-        // GTB1 blob under the same version would pin it (in IndexedDB AND the
-        // day-long HTTP cache) and never receive the block mapping.
-        const binVersion = version ? `${version}-bin2` : null;
+        // The binary blob's format AND block mapping are versioned SEPARATELY
+        // from the topology content: adding the edge_block_id section (GTB2) —
+        // or re-baking the block set against the same graph — doesn't change
+        // the node/edge content, so /graph-version still reports the same etag.
+        // Suffix the blob's cache key + URL buster with the format tag and the
+        // blocks version — mirroring the server's "-bin2-<blocks>" ETag — or a
+        // client holding an old blob under the same version would pin it (in
+        // IndexedDB AND the day-long HTTP cache) and keep painting selections
+        // through a stale edge→block mapping.
+        const binVersion = version
+          ? `${version}-bin2${blocksVersion ? `-${blocksVersion}` : ""}`
+          : null;
 
         // Fetch the topology from the NETWORK (not IndexedDB). `forceReload` adds
         // cache:"reload" so the browser HTTP cache is bypassed too — used by the
@@ -2699,8 +2708,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     } else {
       if (hoverTarget.index < data.nNodes) {
         tooltipName = resolveAddress(nodeLat(data, hoverTarget.index), nodeLon(data, hoverTarget.index), bumpGeocode);
-        // A node belongs to its adjFirst edge's block (docs §2.1).
-        const hoverNodeEdge = adjFirst(nodeAdjRef.current, hoverTarget.index);
+        // A node belongs to its shortest incident edge's block (docs §2.1) —
+        // the edge whose midpoint sits inside the junction's own disc block.
+        const hoverNodeEdge = adjShortest(data, nodeAdjRef.current, hoverTarget.index);
         hoverVoteTypes = (hoverNodeEdge != null ? selectionVoteRows(data, [hoverNodeEdge]) : null)
           ?? decodeVoteTypes((data.node_vote_types ?? [])[hoverTarget.index], legend);
       }
@@ -2739,8 +2749,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     } else {
       if (pinnedTarget.index < data.nNodes) {
         pinnedName = resolveAddress(nodeLat(data, pinnedTarget.index), nodeLon(data, pinnedTarget.index), bumpGeocode);
-        pinnedVoteEdgeId = adjFirst(nodeAdjRef.current, pinnedTarget.index);
-        // A node belongs to its vote edge's block (docs §2.1 adjFirst rule).
+        pinnedVoteEdgeId = adjShortest(data, nodeAdjRef.current, pinnedTarget.index);
+        // A node belongs to its vote edge's block (docs §2.1 shortest-incident rule).
         pinnedVoteTypes = (pinnedVoteEdgeId != null ? selectionVoteRows(data, [pinnedVoteEdgeId]) : null)
           ?? decodeVoteTypes((data.node_vote_types ?? [])[pinnedTarget.index], legend);
       }

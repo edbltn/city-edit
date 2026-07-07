@@ -5,6 +5,8 @@ import {
   TOPOLOGY_BIN_MAGIC_V2,
   decodeTopologyBin,
   buildBlockIndex,
+  buildNodeAdj,
+  adjShortest,
   blockKeyOf,
   edgesOfBlockKey,
   touchedBlockKeys,
@@ -208,5 +210,43 @@ describe("touchedBlockKeys", () => {
   it("is all singletons on a blockless topology", () => {
     const topo = topoWithBlocks(null);
     expect(touchedBlockKeys(topo, [2, 0, 2])).toEqual([-4, -2]);
+  });
+});
+
+describe("adjShortest", () => {
+  // node 0 at origin; node 1 ~1.1km north; node 2 ~110m east.
+  // Edge order puts the LONG edge first, so adjFirst-style array order would
+  // pick the wrong representative — adjShortest must pick the short one.
+  function starTopo(): GraphTopology {
+    const coords = new Int32Array([
+      0, 0, // node 0
+      Math.round(0.01 * COORD_SCALE), 0, // node 1 (far)
+      0, Math.round(0.001 * COORD_SCALE), // node 2 (near)
+    ]);
+    const ends = new Uint32Array([
+      0, 1, // e0: long
+      0, 2, // e1: short
+    ]);
+    return { nNodes: 3, nEdges: 2, coords, ends };
+  }
+
+  it("returns the shortest incident edge, not the first", () => {
+    const topo = starTopo();
+    const adj = buildNodeAdj(topo);
+    expect(adjShortest(topo, adj, 0)).toBe(1);
+    expect(adjShortest(topo, adj, 1)).toBe(0); // only edge at node 1
+    expect(adjShortest(topo, adj, 2)).toBe(1);
+  });
+
+  it("returns null without adjacency or for an isolated node", () => {
+    const topo = starTopo();
+    expect(adjShortest(topo, null, 0)).toBeNull();
+    const lonely: GraphTopology = {
+      nNodes: 1,
+      nEdges: 0,
+      coords: new Int32Array(2),
+      ends: new Uint32Array(0),
+    };
+    expect(adjShortest(lonely, buildNodeAdj(lonely), 0)).toBeNull();
   });
 });

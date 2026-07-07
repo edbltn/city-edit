@@ -29,12 +29,15 @@ brew install tippecanoe
 ./build_city_blocks.sh <city-id>            # or: refresh_osm.py --city <id> --blocks
 ```
 
-The script runs: procedural street blocks → edge→block bake (pass 1) →
-`build_foot_blocks.py` for the uncovered edges (park paths, plazas — makes the
-mapping **total**) → final bake → `blocks.pmtiles`. Artifacts land next to the
-graph (`osm_data/<city>/edge_blocks_<network>.npy/.json`, `blocks.pmtiles`); the
-bake stamps the graph's `topology_etag`, so rebuilding the graph invalidates the
-mapping and the script must re-run.
+The script runs: procedural street blocks → `build_node_blocks.py` (one 12 m
+disc block per walk-graph junction, punched out of the street blocks so a route
+never selects a perpendicular street's block at an intersection) → edge→block
+bake (pass 1) → `build_foot_blocks.py` for the uncovered edges (park paths,
+plazas — severed at the junction discs so each path segment is its own block;
+makes the mapping **total**) → final bake → `blocks.pmtiles`. Artifacts land
+next to the graph (`osm_data/<city>/edge_blocks_<network>.npy/.json`,
+`blocks.pmtiles`); the bake stamps the graph's `topology_etag`, so rebuilding
+the graph invalidates the mapping and the script must re-run.
 
 ## Evaluation against ground truth
 

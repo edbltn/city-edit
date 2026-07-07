@@ -382,12 +382,19 @@ def _build_graph_votes_body_locked(
     if rmap.graph.edge_block_id is not None:
         block_mode = vote_store.mode_to_int(mode or rmap.mode)
         # bd:/bagg: are derived state; rebuild from Postgres if cold while edge
-        # votes exist (first request after a deploy, evicted keys, a resnap).
-        if (redis_client.exists(block_votes.bagg_key(rmap.slug, block_mode)) == 0
-                and redis_client.hlen(vote_store.hash_key(rmap.slug)) > 0):
+        # votes exist (first request after a deploy, evicted keys, a resnap) OR
+        # when the aggregate was built against a DIFFERENT block set — block ids
+        # renumber on every re-bake, so stale bagg entries would color and count
+        # the wrong polygons. The blocks version marker rides next to the bagg.
+        bver_key = f"bver:{rmap.slug}:{block_mode}"
+        bagg_cold = redis_client.exists(block_votes.bagg_key(rmap.slug, block_mode)) == 0
+        bagg_stale = (redis_client.get(bver_key) or "") != (rmap.graph.blocks_version or "")
+        if (bagg_cold or bagg_stale) and redis_client.hlen(vote_store.hash_key(rmap.slug)) > 0:
             block_votes.rebuild_from_db(
                 redis_client, rmap.slug, block_mode, rmap.graph.edge_block_id,
                 database.fetch_edge_vote_devices(rmap.slug))
+        if bagg_cold or bagg_stale:
+            redis_client.set(bver_key, rmap.graph.blocks_version or "")
         arrays.update(block_votes.build_block_arrays(
             redis_client, rmap.slug, block_mode, rmap.graph.n_blocks))
         arrays["blocks_version"] = rmap.graph.blocks_version
@@ -1513,7 +1520,13 @@ def graph_version():
     rmap.graph.ensure_loaded()
     if rmap.graph.topology_etag is None:
         return jsonify({"error": "Graph not loaded"}), 500
-    resp = jsonify({"version": rmap.graph.topology_etag})
+    # `blocks` versions the edge→block mapping SEPARATELY from the topology: a
+    # re-baked block set (same graph → same `version`) must still bust the
+    # client's cached GTB2 blob, whose trailing section carries edge_block_id.
+    resp = jsonify({
+        "version": rmap.graph.topology_etag,
+        "blocks": rmap.graph.blocks_version,
+    })
     resp.headers["Cache-Control"] = "no-cache"
     return resp
 
@@ -1532,8 +1545,10 @@ def graph_topology():
     # Its ETag is distinct from the JSON one so an intermediary never crosses them.
     if request.args.get("format") == "bin":
         # -bin2: GTB2 blob (adds n_blocks + trailing edge_block_id section);
-        # distinct suffix so clients holding the GTB1 blob refetch.
-        bin_etag = (rmap.graph.topology_etag or '"x"')[:-1] + '-bin2"'
+        # distinct suffix so clients holding the GTB1 blob refetch. The blocks
+        # version rides along so a re-baked mapping (same topology) busts too.
+        blocks_tag = f"-{rmap.graph.blocks_version}" if rmap.graph.blocks_version else ""
+        bin_etag = (rmap.graph.topology_etag or '"x"')[:-1] + f'-bin2{blocks_tag}"'
         if request.headers.get("If-None-Match") == bin_etag:
             resp = app.response_class(status=304)
             resp.headers["ETag"] = bin_etag

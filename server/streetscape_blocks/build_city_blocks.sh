@@ -5,10 +5,12 @@
 #
 # Pipeline:
 #   1. build_blocks_generic.py   procedural street blocks from OSM alone (geo venv)
-#   2. build_edge_blocks.py      bake edge→block (server venv; marks gaps as −1)
-#   3. build_foot_blocks.py      blocks for the −1 edges (park paths, plazas)
-#   4. build_edge_blocks.py      re-bake against the completed block set
-#   5. tippecanoe                blocks.pmtiles next to the graph (display layer)
+#   2. build_node_blocks.py      junction-node discs, punched out of street blocks
+#   3. build_edge_blocks.py      bake edge→block (server venv; marks gaps as −1)
+#   4. build_foot_blocks.py      blocks for the −1 edges (park paths, plazas),
+#                                severed at the junction discs
+#   5. build_edge_blocks.py      re-bake against the completed block set
+#   6. tippecanoe                blocks.pmtiles next to the graph (display layer)
 #
 # Run AFTER the city's walk graph exists (refresh_osm.py --city <id>): the bake
 # stamps the graph's topology_etag, so a graph rebuild invalidates the mapping
@@ -39,21 +41,25 @@ from cities import CITIES
 print(CITIES['$CITY'].data_dir)
 ")"
 
-echo "== [1/5] procedural street blocks ($CITY, bbox $BBOX)"
+echo "== [1/6] procedural street blocks ($CITY, bbox $BBOX)"
 CITY="$CITY" BBOX="$BBOX" BLOCKS_OUT="$OUT" "$GEO_PY" "$HERE/build_blocks_generic.py"
 
-echo "== [2/5] edge→block bake (pass 1: find uncovered edges)"
+echo "== [2/6] junction-node discs (each junction is its own block)"
+CITY="$CITY" NETWORK="$NETWORK" BLOCKS_OUT="$OUT" \
+  srv_py streetscape_blocks/build_node_blocks.py
+
+echo "== [3/6] edge→block bake (pass 1: find uncovered edges)"
 CITY="$CITY" NETWORK="$NETWORK" BLOCKS_FILE="$BLOCKS_FILE" \
   srv_py streetscape_blocks/build_edge_blocks.py
 
-echo "== [3/5] foot blocks for uncovered edges"
+echo "== [4/6] foot blocks for uncovered edges"
 CITY="$CITY" NETWORK="$NETWORK" srv_py streetscape_blocks/build_foot_blocks.py
 
-echo "== [4/5] edge→block bake (final, against completed block set)"
+echo "== [5/6] edge→block bake (final, against completed block set)"
 CITY="$CITY" NETWORK="$NETWORK" BLOCKS_FILE="$BLOCKS_FILE" \
   srv_py streetscape_blocks/build_edge_blocks.py
 
-echo "== [5/5] blocks.pmtiles"
+echo "== [6/6] blocks.pmtiles"
 if command -v tippecanoe >/dev/null 2>&1; then
   # --use-attribute-for-id: block_id becomes the NATIVE feature id (required by
   # the client's setFeatureState heat/selection; MapLibre reads native ids, no

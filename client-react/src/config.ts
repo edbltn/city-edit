@@ -100,6 +100,9 @@ export interface CityConfig {
   minZoom: number;
   maxZoom: number;
   tilesPath: string;
+  /** Cache-buster for blocks.pmtiles (server: file mtime); null/absent when
+   *  the city ships no block artifacts. */
+  blocksVersion?: number | null;
 }
 
 /**
@@ -108,7 +111,7 @@ export interface CityConfig {
  * read the active city's values. Pan limits get generous padding around the bbox.
  */
 export function applyCityConfig(city: CityConfig): void {
-  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath } = city;
+  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath, blocksVersion } = city;
   CONFIG.initialView = { lat: center.lat, lon: center.lon, zoom: defaultZoom };
   CONFIG.mappedBounds = { sw: { ...bounds.sw }, ne: { ...bounds.ne } };
   CONFIG.nycBounds = {
@@ -119,7 +122,10 @@ export function applyCityConfig(city: CityConfig): void {
   CONFIG.maxZoom = maxZoom;
   if (tilesPath) {
     CONFIG.graphTilesUrl = isLocalDev ? `http://localhost:5001${tilesPath}` : tilesPath;
-    const blocksPath = tilesPath.replace("graph.pmtiles", "blocks.pmtiles");
+    // ?v= busts the week-long HTTP cache when the block set is re-baked —
+    // stale cached ranges of the OLD archive must never mix with the new one.
+    const blocksPath = tilesPath.replace("graph.pmtiles", "blocks.pmtiles")
+      + (blocksVersion ? `?v=${blocksVersion}` : "");
     CONFIG.blockTilesUrl = isLocalDev ? `http://localhost:5001${blocksPath}` : blocksPath;
   }
 }

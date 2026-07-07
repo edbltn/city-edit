@@ -195,6 +195,42 @@ export function adjFirst(adj: NodeAdj | null, nid: number): number | null {
   return s < adj.start[nid + 1] ? adj.edges[s] : null;
 }
 
+/**
+ * The SHORTEST incident edge id for `nid` (straight-line, cos-corrected), or
+ * null when the node has no edges. This is the edge that stands in for a node
+ * everywhere a node needs a block/vote target (docs §2.1): junction nodes own
+ * a small disc block, and the shortest incident edge is the one whose midpoint
+ * sits inside that disc — so node selections resolve to the junction's own
+ * block instead of whichever full street block `adjFirst`'s array order lands
+ * on (the mis-oriented-highlight bug).
+ */
+export function adjShortest(
+  d: GraphTopology,
+  adj: NodeAdj | null,
+  nid: number,
+): number | null {
+  if (!adj) return null;
+  const s = adj.start[nid];
+  const e = adj.start[nid + 1];
+  if (s >= e) return null;
+  const cosLat = Math.cos((d.coords[2 * nid] / COORD_SCALE) * (Math.PI / 180));
+  let best = -1;
+  let bestD2 = Infinity;
+  for (let k = s; k < e; k++) {
+    const eid = adj.edges[k];
+    const a = d.ends[2 * eid];
+    const b = d.ends[2 * eid + 1];
+    const dLat = d.coords[2 * a] - d.coords[2 * b];
+    const dLon = (d.coords[2 * a + 1] - d.coords[2 * b + 1]) * cosLat;
+    const d2 = dLat * dLat + dLon * dLon;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = eid;
+    }
+  }
+  return best;
+}
+
 // ── Block index (CSR) ───────────────────────────────────────────────────────
 // Blocks are the aggregation/interaction grain (docs/three-layer-model.md §2):
 // every edge maps to at most one block via edgeBlockId. Same CSR layout as

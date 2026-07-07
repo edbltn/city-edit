@@ -64,7 +64,20 @@ class City:
             "minZoom": self.min_zoom,
             "maxZoom": self.max_zoom,
             "tilesPath": f"/api/tiles/{self.id}/graph.pmtiles",
+            # Cache-buster for blocks.pmtiles (served with max-age=1w under a
+            # fixed URL): the client appends ?v=<this>, so a re-baked block set
+            # is never mixed with week-old cached ranges. A cheap stat — no
+            # graph load — and None when the city has no block artifacts.
+            "blocksVersion": self._blocks_version(),
         }
+
+    def _blocks_version(self) -> int | None:
+        """mtime of this city's blocks.pmtiles, or None when absent."""
+        path = os.path.join(os.path.dirname(__file__), self.data_dir, "blocks.pmtiles")
+        try:
+            return int(os.stat(path).st_mtime)
+        except OSError:
+            return None
 
 
 # ── Registry ─────────────────────────────────────────────────────────────────
