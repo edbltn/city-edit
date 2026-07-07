@@ -29,6 +29,60 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-07-node-block-discs.html">
+    <div class="date">2026-07-07</div>
+    <h2>Junction-node disc blocks — killing the cross-street ladder</h2>
+    <p>A route down an avenue selected (and block-scoped casting voted on) every cross street it passed:
+    street block polygons extend across intersections, so the short edges crossing one baked into a
+    perpendicular street's block. Every walk-graph junction is now its own 12&nbsp;m disc block, punched
+    out of the street and foot polygons — measured on the re-baked NYC mapping, 0 of 5,351 midtown-avenue
+    crossing stubs still land in a cross street. The same discs sever the park-path mesh at junctions,
+    turning Central Park's giant union-find foot blobs into per-segment blocks (163 in the park), the same
+    grain as the street grid. NYC re-baked to 563,812 blocks with a total mapping; nodes resolve to their
+    disc via a new shortest-incident-edge rule; and a re-baked block set now busts every downstream cache
+    (topology blob key, Redis block aggregates via a version marker, blocks.pmtiles via ?v=mtime).</p>
+  </a>
+
+  <a class="entry" href="./2026-07-07-monitoring-mvp.html">
+    <div class="date">2026-07-07</div>
+    <h2>Monitoring MVP — system-health dashboard, uptime check, and 8 alert policies</h2>
+    <p>Prod's first observability layer, all as Terraform: a Cloud Monitoring dashboard laid out as the
+    system diagram (traffic-path header, a health gauge per component, then per-component metric
+    sections for the app, OSRM, Redis and Cloud SQL), a 60s uptime check on /health, and 8 email alert
+    policies with thresholds set from this system's measured cliffs — the app's 90%-of-8Gi OOM line,
+    OSRM's pinned single instance (missing metric data counts as down), Redis's 1GB LRU eviction point,
+    Postgres's read-only-on-full disk. Applied with a targeted -target list so the drifted app service
+    was never touched; dashboard JSON normalized to the API's stored form so plans stay clean.</p>
+  </a>
+
+  <a class="entry" href="./2026-07-05-routeprop-ui-fixes.html">
+    <div class="date">2026-07-05</div>
+    <h2>Route-proposal UI — diamond stacking, drag-through, and the route summary card</h2>
+    <p>Three interaction fixes around the new route proposals, reproduced and verified live. Route
+    diamonds re-banded above every settled point pin (spread stays topmost at 500k); a diamond that
+    overlaps a waypoint now goes click-through — it had been eating the press meant for the pin's drag
+    handle, the reported “can't drag a start on a top proposal” bug; and selecting a route (via a diamond
+    or by tracing one) opens a summary card of the blocks it selects — block-grain vote rows, a covered
+    “Route Proposal” header matched with direction twins, and ± buttons that cast on the whole selection
+    through the same unified path as the top-bar cast. Plus two stuck-hover-card fixes. Follow-up round:
+    tapping an RBTP now selects its diamond directly (anchors-still-waypoints rule — OSRM's anchor-to-anchor
+    leg rarely re-traces the corridor, so coverage alone never fired), diamonds get the same heat tint as
+    PBTP squares, and the PBTP/RBTP terminology is defined in docs/three-layer-model.md and both module
+    headers.</p>
+  </a>
+
+  <a class="entry" href="./2026-07-05-maplibre-zoom-drift.html">
+    <div class="date">2026-07-05</div>
+    <h2>MapLibre ↔ Leaflet position drift — zoom off-by-one + riding the zoom animation</h2>
+    <p>The post-restyle “position drift” was two camera bugs between the renderers that now share the
+    screen. Leaflet defines zoom against 256px world tiles, MapLibre against 512px — passing the zoom
+    straight through ran the GL base map + block heat at exactly 2× Leaflet's scale, aligned only at the
+    screen center (measured: 117&nbsp;px vs 233&nbsp;px for the same probe point). And during animated
+    zooms Leaflet suppresses <code>move</code> events, freezing the GL map for 250&nbsp;ms while pins
+    glided. Fixed with a −1 zoom offset plus a <code>zoomanim</code> CSS-transition ride on the GL
+    container using Leaflet's exact curve; verified sub-pixel in the live app.</p>
+  </a>
+
   <a class="entry" href="./2026-07-04-three-layer-voting.html">
     <div class="date">2026-07-04</div>
     <h2>Three-layer voting model — graph · blocks · route proposals</h2>

@@ -1,0 +1,671 @@
+diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
+index 59e47d0..6176072 100644
+--- a/client-react/src/components/GraphLayer/GraphLayer.tsx
++++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -50,7 +50,7 @@ import {
+   buildBlockIndex,
+   touchedBlockKeys,
+   adjEdgesOf,
+-  adjFirst,
++  adjShortest,
+ } from "./graphTopology";
+ import { materializeBlocks, selectionVoteRows } from "../../utils/blockSelection";
+ import { iconForLabel, iconSrc, mapStyleForTheme } from "../../themes";
+@@ -804,7 +804,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     if (hit) {
+       const voteEdgeId = hit.target.kind === "edge"
+         ? hit.target.index
+-        : adjFirst(nodeAdjRef.current, hit.target.index);
++        : adjShortest(data, nodeAdjRef.current, hit.target.index);
+       return { target: hit.target, snapLat: hit.snapLat, snapLng: hit.snapLng, voteEdgeId };
+     }
+ 
+@@ -974,7 +974,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       const edgeIds: number[] = [];
+       const pushTarget = (t: HoverTarget | null) => {
+         if (!t) return;
+-        const e = t.kind === "edge" ? t.index : adjFirst(nodeAdjRef.current, t.index);
++        const e = t.kind === "edge" ? t.index : adjShortest(topo, nodeAdjRef.current, t.index);
+         if (e != null) edgeIds.push(e);
+       };
+       const path = pathEdgeIdsRef.current;
+@@ -1620,13 +1620,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       //    matches — skipping the multi-MB download and JSON parse entirely.
+       let topology: GraphTopology | null = null;
+       let version: string | null = null;
++      let blocksVersion: string | null = null;
+       let usedCachedTopology = false;
+       // Assigned inside the try below; the step-3 stale-topology guard reuses it.
+       let fetchFreshTopology: ((forceReload?: boolean) => Promise<GraphTopology | null>) | null = null;
+       try {
+         try {
+           const vr = await fetch(withMap(`${CONFIG.apiUrl}/graph-version`), { headers: passcodeHeaders() });
+-          if (vr.ok) version = (await vr.json()).version ?? null;
++          if (vr.ok) {
++            const vj = await vr.json();
++            version = vj.version ?? null;
++            blocksVersion = vj.blocks ?? null;
++          }
+         } catch {
+           // Version probe failed — fall back to a direct topology fetch.
+         }
+@@ -1640,14 +1645,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+         const withVersion = (url: string, v: string | null = version) =>
+           v ? url + (url.includes("?") ? "&" : "?") + "v=" + encodeURIComponent(v) : url;
+ 
+-        // The binary blob's format is versioned SEPARATELY from the topology
+-        // content: adding the edge_block_id section (GTB2) didn't change the
+-        // node/edge content, so /graph-version still reports the same etag.
+-        // Suffix the blob's cache key + URL buster with the format tag —
+-        // mirroring the server's "-bin2" ETag — or a client holding the old
+-        // GTB1 blob under the same version would pin it (in IndexedDB AND the
+-        // day-long HTTP cache) and never receive the block mapping.
+-        const binVersion = version ? `${version}-bin2` : null;
++        // The binary blob's format AND block mapping are versioned SEPARATELY
++        // from the topology content: adding the edge_block_id section (GTB2) —
++        // or re-baking the block set against the same graph — doesn't change
++        // the node/edge content, so /graph-version still reports the same etag.
++        // Suffix the blob's cache key + URL buster with the format tag and the
++        // blocks version — mirroring the server's "-bin2-<blocks>" ETag — or a
++        // client holding an old blob under the same version would pin it (in
++        // IndexedDB AND the day-long HTTP cache) and keep painting selections
++        // through a stale edge→block mapping.
++        const binVersion = version
++          ? `${version}-bin2${blocksVersion ? `-${blocksVersion}` : ""}`
++          : null;
+ 
+         // Fetch the topology from the NETWORK (not IndexedDB). `forceReload` adds
+         // cache:"reload" so the browser HTTP cache is bypassed too — used by the
+@@ -2699,8 +2708,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     } else {
+       if (hoverTarget.index < data.nNodes) {
+         tooltipName = resolveAddress(nodeLat(data, hoverTarget.index), nodeLon(data, hoverTarget.index), bumpGeocode);
+-        // A node belongs to its adjFirst edge's block (docs §2.1).
+-        const hoverNodeEdge = adjFirst(nodeAdjRef.current, hoverTarget.index);
++        // A node belongs to its shortest incident edge's block (docs §2.1) —
++        // the edge whose midpoint sits inside the junction's own disc block.
++        const hoverNodeEdge = adjShortest(data, nodeAdjRef.current, hoverTarget.index);
+         hoverVoteTypes = (hoverNodeEdge != null ? selectionVoteRows(data, [hoverNodeEdge]) : null)
+           ?? decodeVoteTypes((data.node_vote_types ?? [])[hoverTarget.index], legend);
+       }
+@@ -2739,8 +2749,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     } else {
+       if (pinnedTarget.index < data.nNodes) {
+         pinnedName = resolveAddress(nodeLat(data, pinnedTarget.index), nodeLon(data, pinnedTarget.index), bumpGeocode);
+-        pinnedVoteEdgeId = adjFirst(nodeAdjRef.current, pinnedTarget.index);
+-        // A node belongs to its vote edge's block (docs §2.1 adjFirst rule).
++        pinnedVoteEdgeId = adjShortest(data, nodeAdjRef.current, pinnedTarget.index);
++        // A node belongs to its vote edge's block (docs §2.1 shortest-incident rule).
+         pinnedVoteTypes = (pinnedVoteEdgeId != null ? selectionVoteRows(data, [pinnedVoteEdgeId]) : null)
+           ?? decodeVoteTypes((data.node_vote_types ?? [])[pinnedTarget.index], legend);
+       }
+diff --git a/client-react/src/components/GraphLayer/graphTopology.test.ts b/client-react/src/components/GraphLayer/graphTopology.test.ts
+index a1c7f2b..a41616f 100644
+--- a/client-react/src/components/GraphLayer/graphTopology.test.ts
++++ b/client-react/src/components/GraphLayer/graphTopology.test.ts
+@@ -5,6 +5,8 @@ import {
+   TOPOLOGY_BIN_MAGIC_V2,
+   decodeTopologyBin,
+   buildBlockIndex,
++  buildNodeAdj,
++  adjShortest,
+   blockKeyOf,
+   edgesOfBlockKey,
+   touchedBlockKeys,
+@@ -210,3 +212,41 @@ describe("touchedBlockKeys", () => {
+     expect(touchedBlockKeys(topo, [2, 0, 2])).toEqual([-4, -2]);
+   });
+ });
++
++describe("adjShortest", () => {
++  // node 0 at origin; node 1 ~1.1km north; node 2 ~110m east.
++  // Edge order puts the LONG edge first, so adjFirst-style array order would
++  // pick the wrong representative — adjShortest must pick the short one.
++  function starTopo(): GraphTopology {
++    const coords = new Int32Array([
++      0, 0, // node 0
++      Math.round(0.01 * COORD_SCALE), 0, // node 1 (far)
++      0, Math.round(0.001 * COORD_SCALE), // node 2 (near)
++    ]);
++    const ends = new Uint32Array([
++      0, 1, // e0: long
++      0, 2, // e1: short
++    ]);
++    return { nNodes: 3, nEdges: 2, coords, ends };
++  }
++
++  it("returns the shortest incident edge, not the first", () => {
++    const topo = starTopo();
++    const adj = buildNodeAdj(topo);
++    expect(adjShortest(topo, adj, 0)).toBe(1);
++    expect(adjShortest(topo, adj, 1)).toBe(0); // only edge at node 1
++    expect(adjShortest(topo, adj, 2)).toBe(1);
++  });
++
++  it("returns null without adjacency or for an isolated node", () => {
++    const topo = starTopo();
++    expect(adjShortest(topo, null, 0)).toBeNull();
++    const lonely: GraphTopology = {
++      nNodes: 1,
++      nEdges: 0,
++      coords: new Int32Array(2),
++      ends: new Uint32Array(0),
++    };
++    expect(adjShortest(lonely, buildNodeAdj(lonely), 0)).toBeNull();
++  });
++});
+diff --git a/client-react/src/components/GraphLayer/graphTopology.ts b/client-react/src/components/GraphLayer/graphTopology.ts
+index 8696ffe..1d2a374 100644
+--- a/client-react/src/components/GraphLayer/graphTopology.ts
++++ b/client-react/src/components/GraphLayer/graphTopology.ts
+@@ -195,6 +195,42 @@ export function adjFirst(adj: NodeAdj | null, nid: number): number | null {
+   return s < adj.start[nid + 1] ? adj.edges[s] : null;
+ }
+ 
++/**
++ * The SHORTEST incident edge id for `nid` (straight-line, cos-corrected), or
++ * null when the node has no edges. This is the edge that stands in for a node
++ * everywhere a node needs a block/vote target (docs §2.1): junction nodes own
++ * a small disc block, and the shortest incident edge is the one whose midpoint
++ * sits inside that disc — so node selections resolve to the junction's own
++ * block instead of whichever full street block `adjFirst`'s array order lands
++ * on (the mis-oriented-highlight bug).
++ */
++export function adjShortest(
++  d: GraphTopology,
++  adj: NodeAdj | null,
++  nid: number,
++): number | null {
++  if (!adj) return null;
++  const s = adj.start[nid];
++  const e = adj.start[nid + 1];
++  if (s >= e) return null;
++  const cosLat = Math.cos((d.coords[2 * nid] / COORD_SCALE) * (Math.PI / 180));
++  let best = -1;
++  let bestD2 = Infinity;
++  for (let k = s; k < e; k++) {
++    const eid = adj.edges[k];
++    const a = d.ends[2 * eid];
++    const b = d.ends[2 * eid + 1];
++    const dLat = d.coords[2 * a] - d.coords[2 * b];
++    const dLon = (d.coords[2 * a + 1] - d.coords[2 * b + 1]) * cosLat;
++    const d2 = dLat * dLat + dLon * dLon;
++    if (d2 < bestD2) {
++      bestD2 = d2;
++      best = eid;
++    }
++  }
++  return best;
++}
++
+ // ── Block index (CSR) ───────────────────────────────────────────────────────
+ // Blocks are the aggregation/interaction grain (docs/three-layer-model.md §2):
+ // every edge maps to at most one block via edgeBlockId. Same CSR layout as
+diff --git a/client-react/src/config.ts b/client-react/src/config.ts
+index 1423ee9..60b0480 100644
+--- a/client-react/src/config.ts
++++ b/client-react/src/config.ts
+@@ -100,6 +100,9 @@ export interface CityConfig {
+   minZoom: number;
+   maxZoom: number;
+   tilesPath: string;
++  /** Cache-buster for blocks.pmtiles (server: file mtime); null/absent when
++   *  the city ships no block artifacts. */
++  blocksVersion?: number | null;
+ }
+ 
+ /**
+@@ -108,7 +111,7 @@ export interface CityConfig {
+  * read the active city's values. Pan limits get generous padding around the bbox.
+  */
+ export function applyCityConfig(city: CityConfig): void {
+-  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath } = city;
++  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath, blocksVersion } = city;
+   CONFIG.initialView = { lat: center.lat, lon: center.lon, zoom: defaultZoom };
+   CONFIG.mappedBounds = { sw: { ...bounds.sw }, ne: { ...bounds.ne } };
+   CONFIG.nycBounds = {
+@@ -119,7 +122,10 @@ export function applyCityConfig(city: CityConfig): void {
+   CONFIG.maxZoom = maxZoom;
+   if (tilesPath) {
+     CONFIG.graphTilesUrl = isLocalDev ? `http://localhost:5001${tilesPath}` : tilesPath;
+-    const blocksPath = tilesPath.replace("graph.pmtiles", "blocks.pmtiles");
++    // ?v= busts the week-long HTTP cache when the block set is re-baked —
++    // stale cached ranges of the OLD archive must never mix with the new one.
++    const blocksPath = tilesPath.replace("graph.pmtiles", "blocks.pmtiles")
++      + (blocksVersion ? `?v=${blocksVersion}` : "");
+     CONFIG.blockTilesUrl = isLocalDev ? `http://localhost:5001${blocksPath}` : blocksPath;
+   }
+ }
+diff --git a/docs/three-layer-model.md b/docs/three-layer-model.md
+index ff76299..c94ca20 100644
+--- a/docs/three-layer-model.md
++++ b/docs/three-layer-model.md
+@@ -47,10 +47,17 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored
+ ### 2.1 What a block is
+ 
+ One polygon per street segment between intersections (a "streetscape block"),
+-covering the roadbed + sidewalk right-of-way. Blocks partition the votable
+-network: **every edge belongs to exactly one block** (strict many-to-one), and a
+-node belongs to the block of its lowest-indexed adjacent edge (deterministic,
+-matching the client's `adjFirst` node→edge upgrade rule).
++covering the roadbed + sidewalk right-of-way — plus one small **disc block per
++junction node** (12 m, `build_node_blocks.py`), punched out of the street/foot
++polygons so blocks never overlap. Junction discs exist because street polygons
++otherwise extend across intersections (Voronoi flare): the short edges crossing
++an intersection would bake into a PERPENDICULAR street's block, so a route down
++an avenue would select — and cast onto — every cross street it passes (the
++"ladder" bug). Blocks partition the votable network: **every edge belongs to
++exactly one block** (strict many-to-one), and a node belongs to the block of its
++**shortest** incident edge (deterministic, matching the client's `adjShortest`
++node→edge upgrade rule — the shortest incident edge is the one whose midpoint
++falls inside the junction's own disc).
+ 
+ ### 2.2 Generation — procedural, per city, at graph-build time
+ 
+@@ -61,11 +68,16 @@ be added without city-specific open data (`server/streetscape_blocks/`):
+    intersections merged at 12 m) → buffer each segment by a per-road-class
+    half-width → seed points every 6 m → Voronoi partition by nearest segment →
+    dissolve + clip. One polygon per street segment.
+-2. `build_foot_blocks.py` — edges not covered by any street block (park paths,
+-   plazas, boardwalks — ~18% in NYC) are buffered and merged into one block per
+-   connected foot component, appended with continuing `block_id`s. This is what
+-   makes the edge→block mapping **total**.
+-3. `build_edge_blocks.py` — bakes `edge_block_id: int32[n_edges]`
++2. `build_node_blocks.py` — every walk-graph junction (unique-neighbour degree
++   ≥ 3) becomes its own 12 m disc block (`road_class="node"`), subtracted from
++   every street block it touches so blocks stay disjoint.
++3. `build_foot_blocks.py` — edges not covered by any street block (park paths,
++   plazas, boardwalks — ~18% in NYC) are buffered (6 m), merged, and **severed
++   at the junction discs** (12 m > 6 m, so the mesh disconnects there): one
++   block per path segment between junctions — the same grain as streets, not
++   one giant block per connected park network. Appended with continuing
++   `block_id`s; this is what makes the edge→block mapping **total**.
++4. `build_edge_blocks.py` — bakes `edge_block_id: int32[n_edges]`
+    (`osm_data/<city>/edge_blocks_<network>.npy` + a meta JSON stamping
+    `topology_etag` + `blocks_sha256`). Assignment: polygon containment of the
+    edge midpoint, else nearest block within 30 m (see `eval/RESULTS.md` — nearest
+@@ -75,9 +87,11 @@ be added without city-specific open data (`server/streetscape_blocks/`):
+ output against Brook's NYC planimetric blocks (`build_nyc_blocks.py`, from NYC
+ open-data roadbed+sidewalk polygons — the reference this algorithm mimics).
+ Current numbers (see `COMPARISON.md`): median IoU **0.84**, median area ratio
+-**1.00**, median centroid offset ~1 m over ~82k shared segments. NYC keeps the
+-planimetric blocks; new cities use the procedural generator and should be
+-spot-checked with the same comparison harness when planimetric data exists.
++**1.00**, median centroid offset ~1 m over ~82k shared segments. **Every city —
++NYC included — serves the procedural output** (`edge_blocks_streets.json` stamps
++`blocks_file: blocks_generic_nyc.geojson`); Brook's planimetric blocks are the
++evaluation reference only. New cities should be spot-checked with the same
++comparison harness when planimetric data exists.
+ 
+ Generation runs **when a city's graph is built** (alongside
+ `refresh_osm.py` / the graph-builder image) and the artifacts are baked next to
+diff --git a/server/app.py b/server/app.py
+index 4a863d5..6b33570 100644
+--- a/server/app.py
++++ b/server/app.py
+@@ -382,12 +382,19 @@ def _build_graph_votes_body_locked(
+     if rmap.graph.edge_block_id is not None:
+         block_mode = vote_store.mode_to_int(mode or rmap.mode)
+         # bd:/bagg: are derived state; rebuild from Postgres if cold while edge
+-        # votes exist (first request after a deploy, evicted keys, a resnap).
+-        if (redis_client.exists(block_votes.bagg_key(rmap.slug, block_mode)) == 0
+-                and redis_client.hlen(vote_store.hash_key(rmap.slug)) > 0):
++        # votes exist (first request after a deploy, evicted keys, a resnap) OR
++        # when the aggregate was built against a DIFFERENT block set — block ids
++        # renumber on every re-bake, so stale bagg entries would color and count
++        # the wrong polygons. The blocks version marker rides next to the bagg.
++        bver_key = f"bver:{rmap.slug}:{block_mode}"
++        bagg_cold = redis_client.exists(block_votes.bagg_key(rmap.slug, block_mode)) == 0
++        bagg_stale = (redis_client.get(bver_key) or "") != (rmap.graph.blocks_version or "")
++        if (bagg_cold or bagg_stale) and redis_client.hlen(vote_store.hash_key(rmap.slug)) > 0:
+             block_votes.rebuild_from_db(
+                 redis_client, rmap.slug, block_mode, rmap.graph.edge_block_id,
+                 database.fetch_edge_vote_devices(rmap.slug))
++        if bagg_cold or bagg_stale:
++            redis_client.set(bver_key, rmap.graph.blocks_version or "")
+         arrays.update(block_votes.build_block_arrays(
+             redis_client, rmap.slug, block_mode, rmap.graph.n_blocks))
+         arrays["blocks_version"] = rmap.graph.blocks_version
+@@ -1513,7 +1520,13 @@ def graph_version():
+     rmap.graph.ensure_loaded()
+     if rmap.graph.topology_etag is None:
+         return jsonify({"error": "Graph not loaded"}), 500
+-    resp = jsonify({"version": rmap.graph.topology_etag})
++    # `blocks` versions the edge→block mapping SEPARATELY from the topology: a
++    # re-baked block set (same graph → same `version`) must still bust the
++    # client's cached GTB2 blob, whose trailing section carries edge_block_id.
++    resp = jsonify({
++        "version": rmap.graph.topology_etag,
++        "blocks": rmap.graph.blocks_version,
++    })
+     resp.headers["Cache-Control"] = "no-cache"
+     return resp
+ 
+@@ -1532,8 +1545,10 @@ def graph_topology():
+     # Its ETag is distinct from the JSON one so an intermediary never crosses them.
+     if request.args.get("format") == "bin":
+         # -bin2: GTB2 blob (adds n_blocks + trailing edge_block_id section);
+-        # distinct suffix so clients holding the GTB1 blob refetch.
+-        bin_etag = (rmap.graph.topology_etag or '"x"')[:-1] + '-bin2"'
++        # distinct suffix so clients holding the GTB1 blob refetch. The blocks
++        # version rides along so a re-baked mapping (same topology) busts too.
++        blocks_tag = f"-{rmap.graph.blocks_version}" if rmap.graph.blocks_version else ""
++        bin_etag = (rmap.graph.topology_etag or '"x"')[:-1] + f'-bin2{blocks_tag}"'
+         if request.headers.get("If-None-Match") == bin_etag:
+             resp = app.response_class(status=304)
+             resp.headers["ETag"] = bin_etag
+diff --git a/server/cities.py b/server/cities.py
+index 250aec9..d4d1677 100644
+--- a/server/cities.py
++++ b/server/cities.py
+@@ -64,8 +64,21 @@ class City:
+             "minZoom": self.min_zoom,
+             "maxZoom": self.max_zoom,
+             "tilesPath": f"/api/tiles/{self.id}/graph.pmtiles",
++            # Cache-buster for blocks.pmtiles (served with max-age=1w under a
++            # fixed URL): the client appends ?v=<this>, so a re-baked block set
++            # is never mixed with week-old cached ranges. A cheap stat — no
++            # graph load — and None when the city has no block artifacts.
++            "blocksVersion": self._blocks_version(),
+         }
+ 
++    def _blocks_version(self) -> int | None:
++        """mtime of this city's blocks.pmtiles, or None when absent."""
++        path = os.path.join(os.path.dirname(__file__), self.data_dir, "blocks.pmtiles")
++        try:
++            return int(os.stat(path).st_mtime)
++        except OSError:
++            return None
++
+ 
+ # ── Registry ─────────────────────────────────────────────────────────────────
+ 
+diff --git a/server/streetscape_blocks/README.md b/server/streetscape_blocks/README.md
+index 9bf7310..3c34d65 100644
+--- a/server/streetscape_blocks/README.md
++++ b/server/streetscape_blocks/README.md
+@@ -29,12 +29,15 @@ brew install tippecanoe
+ ./build_city_blocks.sh <city-id>            # or: refresh_osm.py --city <id> --blocks
+ ```
+ 
+-The script runs: procedural street blocks → edge→block bake (pass 1) →
+-`build_foot_blocks.py` for the uncovered edges (park paths, plazas — makes the
+-mapping **total**) → final bake → `blocks.pmtiles`. Artifacts land next to the
+-graph (`osm_data/<city>/edge_blocks_<network>.npy/.json`, `blocks.pmtiles`); the
+-bake stamps the graph's `topology_etag`, so rebuilding the graph invalidates the
+-mapping and the script must re-run.
++The script runs: procedural street blocks → `build_node_blocks.py` (one 12 m
++disc block per walk-graph junction, punched out of the street blocks so a route
++never selects a perpendicular street's block at an intersection) → edge→block
++bake (pass 1) → `build_foot_blocks.py` for the uncovered edges (park paths,
++plazas — severed at the junction discs so each path segment is its own block;
++makes the mapping **total**) → final bake → `blocks.pmtiles`. Artifacts land
++next to the graph (`osm_data/<city>/edge_blocks_<network>.npy/.json`,
++`blocks.pmtiles`); the bake stamps the graph's `topology_etag`, so rebuilding
++the graph invalidates the mapping and the script must re-run.
+ 
+ ## Evaluation against ground truth
+ 
+diff --git a/server/streetscape_blocks/build_city_blocks.sh b/server/streetscape_blocks/build_city_blocks.sh
+index 1633fc4..f9cc06d 100755
+--- a/server/streetscape_blocks/build_city_blocks.sh
++++ b/server/streetscape_blocks/build_city_blocks.sh
+@@ -5,10 +5,12 @@
+ #
+ # Pipeline:
+ #   1. build_blocks_generic.py   procedural street blocks from OSM alone (geo venv)
+-#   2. build_edge_blocks.py      bake edge→block (server venv; marks gaps as −1)
+-#   3. build_foot_blocks.py      blocks for the −1 edges (park paths, plazas)
+-#   4. build_edge_blocks.py      re-bake against the completed block set
+-#   5. tippecanoe                blocks.pmtiles next to the graph (display layer)
++#   2. build_node_blocks.py      junction-node discs, punched out of street blocks
++#   3. build_edge_blocks.py      bake edge→block (server venv; marks gaps as −1)
++#   4. build_foot_blocks.py      blocks for the −1 edges (park paths, plazas),
++#                                severed at the junction discs
++#   5. build_edge_blocks.py      re-bake against the completed block set
++#   6. tippecanoe                blocks.pmtiles next to the graph (display layer)
+ #
+ # Run AFTER the city's walk graph exists (refresh_osm.py --city <id>): the bake
+ # stamps the graph's topology_etag, so a graph rebuild invalidates the mapping
+@@ -39,21 +41,25 @@ from cities import CITIES
+ print(CITIES['$CITY'].data_dir)
+ ")"
+ 
+-echo "== [1/5] procedural street blocks ($CITY, bbox $BBOX)"
++echo "== [1/6] procedural street blocks ($CITY, bbox $BBOX)"
+ CITY="$CITY" BBOX="$BBOX" BLOCKS_OUT="$OUT" "$GEO_PY" "$HERE/build_blocks_generic.py"
+ 
+-echo "== [2/5] edge→block bake (pass 1: find uncovered edges)"
++echo "== [2/6] junction-node discs (each junction is its own block)"
++CITY="$CITY" NETWORK="$NETWORK" BLOCKS_OUT="$OUT" \
++  srv_py streetscape_blocks/build_node_blocks.py
++
++echo "== [3/6] edge→block bake (pass 1: find uncovered edges)"
+ CITY="$CITY" NETWORK="$NETWORK" BLOCKS_FILE="$BLOCKS_FILE" \
+   srv_py streetscape_blocks/build_edge_blocks.py
+ 
+-echo "== [3/5] foot blocks for uncovered edges"
++echo "== [4/6] foot blocks for uncovered edges"
+ CITY="$CITY" NETWORK="$NETWORK" srv_py streetscape_blocks/build_foot_blocks.py
+ 
+-echo "== [4/5] edge→block bake (final, against completed block set)"
++echo "== [5/6] edge→block bake (final, against completed block set)"
+ CITY="$CITY" NETWORK="$NETWORK" BLOCKS_FILE="$BLOCKS_FILE" \
+   srv_py streetscape_blocks/build_edge_blocks.py
+ 
+-echo "== [5/5] blocks.pmtiles"
++echo "== [6/6] blocks.pmtiles"
+ if command -v tippecanoe >/dev/null 2>&1; then
+   # --use-attribute-for-id: block_id becomes the NATIVE feature id (required by
+   # the client's setFeatureState heat/selection; MapLibre reads native ids, no
+diff --git a/server/streetscape_blocks/build_foot_blocks.py b/server/streetscape_blocks/build_foot_blocks.py
+index 1a11ebe..6120618 100644
+--- a/server/streetscape_blocks/build_foot_blocks.py
++++ b/server/streetscape_blocks/build_foot_blocks.py
+@@ -4,10 +4,14 @@
+ build_blocks_generic.py covers ~82% of foot-graph edges; the rest are foot edges
+ >30 m from any drive centerline — park interior paths, pedestrian plazas,
+ boardwalks. This takes those unmapped edges (edge_blocks_<net>.npy == −1), buffers
+-them, and MERGES the overlapping buffers into one polygon per connected foot-path
+-component, then appends them to blocks_generic_<city>.geojson so their votes show
+-up on the block heatmap too (road_class="foot", seg_id=−1, block_ids continuing
+-from the street blocks).
++them, MERGES the overlapping buffers, and SUBTRACTS the junction-node discs
++(road_class="node" features from build_node_blocks.py) before splitting into
++connected components. The discs (12 m) are wider than the tube radius (6 m), so
++the merged mesh severs at every junction and each polygon is one path segment
++between junctions — the same grain as street blocks. (Without the subtraction a
++whole park's path network union-finds into a handful of giant blocks — the old
++Central Park behaviour.) Results append to blocks_generic_<city>.geojson
++(road_class="foot", seg_id=−1, block_ids continuing from the existing features).
+ 
+ After running this, re-run build_edge_blocks.py and rebuild blocks.pmtiles.
+ 
+@@ -30,6 +34,7 @@ if _SERVER not in sys.path:
+ 
+ import shapely  # noqa: E402
+ from shapely import LineString, union_all, get_parts, buffer as shp_buffer  # noqa: E402
++from shapely.geometry import shape as shp_shape  # noqa: E402
+ 
+ from cities import CITIES  # noqa: E402
+ from graph_registry import CityGraph  # noqa: E402
+@@ -82,14 +87,26 @@ def main():
+     bufs = shp_buffer(np.array(lines, dtype=object), HALF_WIDTH_M,
+                       cap_style="round", join_style="round")
+     merged = union_all(bufs)
+-    parts = [p for p in get_parts(merged) if p.area >= MIN_AREA_M2]
+-    print(f"[foot] merged into {len(parts)} foot blocks (≥{MIN_AREA_M2:.0f} m²)")
+ 
+-    # Load existing street blocks and append the foot blocks.
++    # Load the existing blocks now: the junction-node discs in them cut the
++    # merged mesh into per-segment components (and keep foot blocks from
++    # overlapping the discs — blocks must never overlap).
+     out_dir = os.environ.get("BLOCKS_OUT", os.path.join(_HERE, "output"))
+     blocks_path = os.path.join(out_dir, f"blocks_generic_{CITY}.geojson")
+     fc = json.load(open(blocks_path))
+     feats = fc["features"]
++
++    disc_ll = [shp_shape(f["geometry"]) for f in feats
++               if f["properties"].get("road_class") == "node"]
++    if disc_ll:
++        def to_m_geom(a):  # (lon,lat) ndarray -> metres in the same local frame
++            return np.column_stack(((a[:, 0] - w) * mlon, (a[:, 1] - s) * mlat))
++        discs_m = shapely.transform(np.array(disc_ll, dtype=object), to_m_geom)
++        merged = shapely.difference(merged, union_all(discs_m))
++        print(f"[foot] subtracted {len(disc_ll)} junction discs")
++
++    parts = [p for p in get_parts(merged) if p.area >= MIN_AREA_M2]
++    print(f"[foot] merged into {len(parts)} foot blocks (≥{MIN_AREA_M2:.0f} m²)")
+     next_id = max((f["properties"]["block_id"] for f in feats), default=-1) + 1
+ 
+     for poly in parts:
+diff --git a/server/streetscape_blocks/build_node_blocks.py b/server/streetscape_blocks/build_node_blocks.py
+new file mode 100644
+index 0000000..c3c9308
+--- /dev/null
++++ b/server/streetscape_blocks/build_node_blocks.py
+@@ -0,0 +1,144 @@
++#!/usr/bin/env python3
++"""Give every junction node its own block — a small disc punched out of the
++street/foot blocks (docs/three-layer-model.md §2).
++
++Why: block polygons extend across intersections (the Voronoi assigns the
++intersection flare to ONE of the crossing segments), so the short graph edges
++that cross an intersection get baked into a PERPENDICULAR street's block. A
++route down an avenue then selects — and block-scoped casting votes on — every
++cross street it passes ("ladder" selections). Discs at junction nodes catch
++those edges' midpoints instead, so a path only ever touches blocks that share
++its orientation, plus the intersections themselves.
++
++What it does, given blocks_generic_<city>.geojson:
++  1. drops any road_class in {"node","foot"} features (idempotent re-runs; foot
++     blocks are rebuilt afterwards by build_foot_blocks.py);
++  2. finds junction nodes of the city walk graph — unique-neighbour degree >= 3
++     (degree-2 geometry nodes and dead ends stay part of their street block);
++  3. buffers each into a disc of NODE_BLOCK_RADIUS_M (default 12 m ~ the client's
++     3 px node hover/snap affordance at z≈15, and > build_foot_blocks' 6 m tube
++     radius so foot components sever at junctions);
++  4. subtracts the discs from every street block they intersect (blocks and
++     discs never overlap — containment in the bake stays unambiguous);
++  5. appends the discs as features: road_class="node", seg_id=-1, node_id=<idx>,
++     block_id continuing after the street blocks.
++
++Run in the SERVER venv, then re-run build_edge_blocks.py (see
++build_city_blocks.sh, which orders the whole pipeline):
++
++  CITY=nyc NETWORK=streets ./env/bin/python streetscape_blocks/build_node_blocks.py
++"""
++import json
++import math
++import os
++import sys
++import time
++
++import numpy as np
++
++_HERE = os.path.dirname(os.path.abspath(__file__))
++_SERVER = os.path.abspath(os.path.join(_HERE, ".."))
++if _SERVER not in sys.path:
++    sys.path.insert(0, _SERVER)
++
++import shapely  # noqa: E402
++from shapely import STRtree, buffer as shp_buffer, points as shp_points, union_all  # noqa: E402
++from shapely.geometry import shape, mapping  # noqa: E402
++
++from cities import CITIES  # noqa: E402
++from graph_registry import CityGraph  # noqa: E402
++
++CITY = os.environ.get("CITY", "nyc")
++NETWORK = os.environ.get("NETWORK", "streets")
++RADIUS_M = float(os.environ.get("NODE_BLOCK_RADIUS_M", "12"))
++# Discs are 16-gons: plenty round at 12 m, keeps the geojson/tiles small.
++QUAD_SEGS = int(os.environ.get("NODE_BLOCK_QUAD_SEGS", "4"))
++
++
++def junction_nodes(g) -> np.ndarray:
++    """Indices of nodes with unique-neighbour degree >= 3 (true junctions)."""
++    # edge rows are [u, v, name, road_class, length_m] — take the endpoints only
++    E = np.array([(e[0], e[1]) for e in g.edges], dtype=np.int64)
++    E = E[E[:, 0] != E[:, 1]]                      # self-edges don't add degree
++    und = np.unique(np.sort(E, axis=1), axis=0)    # unique undirected pairs
++    deg = np.bincount(und.ravel(), minlength=len(g.nodes))
++    return np.where(deg >= 3)[0]
++
++
++def main():
++    t0 = time.time()
++    city = CITIES[CITY]
++    g = CityGraph(city, redis_client=None, network=NETWORK)
++    g.ensure_loaded()
++    nodes = np.asarray(g.nodes, dtype=np.float64)  # [N,2] = (lat, lon)
++
++    junctions = junction_nodes(g)
++    print(f"[node_blocks] {len(junctions)} junction nodes "
++          f"(deg>=3) of {len(nodes)} — r={RADIUS_M}m", flush=True)
++
++    # Same local equirectangular frame as build_foot_blocks.py so both scripts
++    # agree exactly on where a disc's boundary falls.
++    s, w, n, e = city.bbox
++    mlat = 111_320.0
++    mlon = 111_320.0 * math.cos(math.radians((s + n) / 2))
++
++    xs = (nodes[junctions, 1] - w) * mlon
++    ys = (nodes[junctions, 0] - s) * mlat
++    discs_m = shp_buffer(shp_points(xs, ys), RADIUS_M, quad_segs=QUAD_SEGS)
++    to_ll = lambda a: np.column_stack((a[:, 0] / mlon + w, a[:, 1] / mlat + s))
++    discs = shapely.transform(discs_m, to_ll)
++    print(f"[node_blocks] built {len(discs)} discs in {time.time()-t0:.0f}s", flush=True)
++
++    out_dir = os.environ.get("BLOCKS_OUT", os.path.join(_HERE, "output"))
++    blocks_path = os.path.join(out_dir, f"blocks_generic_{CITY}.geojson")
++    fc = json.load(open(blocks_path))
++    feats = [f for f in fc["features"]
++             if f["properties"].get("road_class") not in ("node", "foot")]
++    dropped = len(fc["features"]) - len(feats)
++    if dropped:
++        print(f"[node_blocks] dropped {dropped} stale node/foot features "
++              f"(rebuilt downstream)", flush=True)
++
++    # Subtract every disc from every street block it intersects.
++    geoms = shapely.from_geojson(
++        json.dumps({"type": "GeometryCollection",
++                    "geometries": [f["geometry"] for f in feats]}))
++    polys = np.asarray(shapely.get_parts(geoms) if geoms.geom_type == "GeometryCollection"
++                       else [geoms], dtype=object)
++    tree = STRtree(discs)
++    block_idx, disc_idx = tree.query(polys, predicate="intersects")
++    print(f"[node_blocks] clipping {len(np.unique(block_idx))} street blocks "
++          f"touched by discs…", flush=True)
++    cut = 0
++    for bi in np.unique(block_idx):
++        d_union = union_all(discs[disc_idx[block_idx == bi]])
++        # area_m2 is left as-is: informational only, and the removed disc area
++        # (~450 m² per touched corner) is small against a block's ROW.
++        feats[bi]["geometry"] = mapping(shapely.difference(polys[bi], d_union))
++        cut += 1
++
++    next_id = max((f["properties"]["block_id"] for f in feats), default=-1) + 1
++    disc_area = math.pi * RADIUS_M * RADIUS_M
++    for k, poly in enumerate(discs):
++        feats.append({
++            "type": "Feature",
++            "properties": {
++                "block_id": next_id, "seg_id": -1, "road_class": "node",
++                "road_name": None, "area_m2": round(disc_area, 1),
++                "node_id": int(junctions[k]),
++            },
++            "geometry": mapping(poly),
++        })
++        next_id += 1
++
++    fc["features"] = feats
++    tmp = blocks_path + ".tmp"
++    json.dump(fc, open(tmp, "w"))
++    os.replace(tmp, blocks_path)
++    print(f"[node_blocks] clipped {cut} blocks, appended {len(discs)} node discs "
++          f"→ {os.path.basename(blocks_path)} ({len(feats)} features, "
++          f"{time.time()-t0:.0f}s)", flush=True)
++
++
++if __name__ == "__main__":
++    main()

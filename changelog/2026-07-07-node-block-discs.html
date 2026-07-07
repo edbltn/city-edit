@@ -1,0 +1,1260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Junction-node disc blocks — killing the cross-street ladder — 2026-07-07</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Junction-node disc blocks — killing the cross-street ladder</h1>
+    <div class="dateline">2026-07-07 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#ladder">1</a>
+<a href="#centralpark">2</a>
+<a href="#staleness">3</a>
+<a href="#adjshortest">4</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Why did a route down 7th Avenue select every cross street it passed? Because street
+  block polygons extend across intersections, so the short graph edges that CROSS an intersection baked into
+  a perpendicular street's block — and selection + casting are block-scoped. The fix makes every junction its
+  own small block: a 12&nbsp;m disc punched out of the street and foot polygons. The same discs sever the
+  park-path mesh at junctions, so Central Park went from a handful of giant merged blocks to per-segment
+  blocks — the same grain as the street grid (answering “why is Central Park clustering so bad”: its old
+  foot blocks merged one block per CONNECTED component, a genuinely different rule than the street
+  Voronoi). NYC re-baked to 563,812 blocks with a total edge mapping, plus staleness plumbing so a re-baked
+  block set busts every downstream cache (topology blob, Redis block aggregates, pmtiles).</p>
+
+  
+    <section class="card" id="ladder">
+      <div class="tag">Blocks pipeline · node discs</div>
+      <h2>1 · Every junction is its own block — the ladder dies at the bake</h2>
+      <h3>Symptom</h3>
+      <p>Casting a route down an avenue selected — and block-scoped casting voted on — every perpendicular cross street it passed: ladder-shaped selections (see the 7th/6th-Ave screenshot that motivated this). Wrong-orientation blocks got real votes, not just a wrong highlight.</p>
+      <h3>Root cause</h3>
+      <ul><li>Street block polygons extend ACROSS intersections: the segment-Voronoi assigns each intersection's flare to ONE of the crossing segments (that's also why the tuned half-widths outsize a naive area/length calibration — COMPARISON.md).</li>
+<li>The walk graph splits avenue edges at crossings, so a route carries short stubs through every intersection. A stub's midpoint lands in the flare — i.e. inside the PERPENDICULAR street's polygon — so <code>build_edge_blocks.py</code> baked it into the cross street's block.</li>
+<li>Selection and casting are block-scoped (docs §2.4, §4): one contaminated stub pulls the whole cross-street block into every route selection that passes it.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>New <code>build_node_blocks.py</code>: every walk-graph junction (unique-neighbour degree ≥ 3 — geometry nodes and dead ends stay in their street block) becomes a 12 m disc block (<code>road_class="node"</code>, 16-gon, <code>NODE_BLOCK_RADIUS_M</code> env knob). 12 m ≈ the client's 3 px node hover/snap affordance at z≈15, and covers NYC intersection interiors.</li>
+<li>The discs are SUBTRACTED from every street block they touch, so blocks stay disjoint and the bake's midpoint-containment stays unambiguous. Crossing stubs now land in the disc, not the cross street.</li>
+<li>Measured on the re-baked NYC mapping: of 5,351 crossing stubs on midtown avenues, <strong>0</strong> map to a perpendicular street block (99.9% → their junction's disc, 0.1% → their own street's block).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/streetscape_blocks/build_node_blocks.py</li>
+<li>server/streetscape_blocks/build_city_blocks.sh</li>
+<li>server/streetscape_blocks/README.md</li></ul>
+    </section>
+    
+
+    <section class="card" id="centralpark">
+      <div class="tag">Blocks pipeline · foot blocks</div>
+      <h2>2 · Central Park: from union-find blobs to per-segment blocks</h2>
+      <h3>Symptom</h3>
+      <p>Central Park (and every park/plaza network) chunked into a handful of GIANT blocks — hovering one path segment selected half the park. Visibly different logic than the street grid.</p>
+      <h3>Root cause</h3>
+      <ul><li>It literally was different logic: streets get one block per segment via segment-Voronoi, but <code>build_foot_blocks.py</code> buffered the uncovered foot edges by 6 m and <code>union_all</code>-ed them — one block per CONNECTED component. A park's path network is one connected component, so the whole park merged.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The foot builder now subtracts the junction discs from the merged mesh before splitting into parts. Disc radius (12 m) > tube radius (6 m), so the mesh SEVERS at every junction: one block per path segment between junctions — the same grain as streets.</li>
+<li>Central Park went from a few giant blobs to <strong>163 per-segment foot blocks</strong> (largest 5,106 m², median 626 m²) + 7,357 junction discs.</li>
+<li>City-wide re-bake: 563,812 blocks (138,346 street + 415,967 discs + 9,499 foot), 3,299,150 / 3,299,152 edges mapped (2 degenerate leftovers).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/streetscape_blocks/build_foot_blocks.py</li>
+<li>docs/three-layer-model.md</li></ul>
+    </section>
+    
+
+    <section class="card" id="staleness">
+      <div class="tag">Server + client · cache staleness</div>
+      <h2>3 · A re-baked block set can no longer serve stale derived state</h2>
+      <h3>Symptom</h3>
+      <p>Re-baking blocks against the SAME graph left three caches silently stale: the client's GTB2 topology blob (IndexedDB + day-long HTTP cache, keyed only by the topology etag), the Redis block-vote aggregate (bd:/bagg: keyed by now-renumbered block ids), and blocks.pmtiles (week-long HTTP cache under a fixed URL — mixed old/new byte ranges).</p>
+      <h3>Root cause</h3>
+      <ul><li>The blocks artifacts are versioned separately (blocks_sha256) but nothing downstream consumed that version: /api/graph-version reported only the topology etag, the bagg rebuild only fired when the key was MISSING, and the tiles URL carried no version at all.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>/api/graph-version</code> now carries <code>blocks</code> (blocks_sha256); the client folds it into the blob cache key + URL buster (<code>-bin2-&lt;blocks&gt;</code>), mirroring the server's bin ETag which now carries the same suffix.</li>
+<li>graph-votes rebuilds bd:/bagg: from Postgres when a <code>bver:&lt;slug&gt;:&lt;mode&gt;</code> marker mismatches the live blocks_version — verified live: first request after the re-bake rebuilt 634 blocks' worth of existing votes onto the new ids.</li>
+<li><code>cities.to_public</code> ships <code>blocksVersion</code> (blocks.pmtiles mtime — a stat, no graph load) and <code>applyCityConfig</code> appends <code>?v=</code> to the tiles URL (verified in the live tab: <code>blocks.pmtiles?v=1783465143</code>).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/app.py</li>
+<li>server/cities.py</li>
+<li>client-react/src/config.ts</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="adjshortest">
+      <div class="tag">Client · node→block resolution</div>
+      <h2>4 · Nodes resolve to their disc via the shortest incident edge</h2>
+      <h3>Symptom</h3>
+      <p>With discs in place, a hovered/pinned NODE could still highlight (and vote into) a full street block: the node→edge upgrade rule was “first incident edge by array order” — arbitrary, and usually a long street edge whose midpoint sits mid-block.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>adjFirst</code> picked the lowest edge id among the node's incident edges; which block that lands in is an accident of edge numbering.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>New <code>adjShortest</code> (graphTopology.ts, +2 unit tests): the SHORTEST incident edge — cos-corrected straight-line — is the one whose midpoint falls inside the junction's own disc, so node targets resolve to the disc block. Swapped in at all four call sites: selection resolver (voteEdgeId), block-select broadcast, hover tooltip rows, pinned-card vote edge.</li>
+<li>docs §2.1 updated: a node belongs to its shortest incident edge's block (the adjShortest rule).</li>
+<li>Verified live: hovering an off-route intersection lights a disc-sized ring — no street-length band; the 7th Ave route corridor selects clean (screenshots), vs the ladder in the motivating screenshot.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/graphTopology.ts</li>
+<li>client-react/src/components/GraphLayer/graphTopology.test.ts</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li>
+<li>docs/three-layer-model.md</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Offline ladder metric on the re-baked mapping: 5,351 intersection-crossing stubs on midtown avenues (named *Avenue, junction endpoint, &lt;24 m) — 99.9% map to their junction's disc, 0.1% to their own street, <strong>0</strong> to a perpendicular street block.</li>
+<li>Central Park bbox scan: 163 foot blocks (largest 5,106 m², median 626 m²) + 7,357 node discs — previously a handful of park-sized union blobs.</li>
+<li>Final bake is total: 3,299,150 / 3,299,152 edges mapped (563,812 blocks); tippecanoe kept the discs at max zoom — a dense midtown z14 tile decodes with 2,025 node features carrying native block ids.</li>
+<li>Live on <code>/m/nyc-walkways</code> (debug tab): a W 58th → W 12th route down 7th Ave selects ONE clean corridor — no ladder rungs (screenshots before/after zoom); hovering an off-route intersection lights a disc-sized ring, not a cross-street band.</li>
+<li>Staleness plumbing observed live: fresh topology fetched under the new <code>-bin2-cac9f883edd12ab6</code> key (client logged 563,812 blocks), bagg auto-rebuilt onto new block ids (634 blocks lit from existing votes, <code>bver</code> marker set), tiles fetched as <code>blocks.pmtiles?v=1783465143</code>.</li>
+<li><code>npx tsc --noEmit</code> clean; graphTopology + blockSelection suites green (24/24, incl. 2 new adjShortest specs); server unit suite green (47/47).</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <a href='http://localhost:3000/m/nyc-walkways'>http://localhost:3000/m/nyc-walkways</a>, set a start at W 58th St &amp; 7th Ave and an end at W 12th St: the selected corridor must hug 7th Ave with NO cross-street rungs (compare your ladder screenshot).</li>
+<li>Zoom into any intersection on the route: a small disc should read selected at the junction, with the street blocks ending at its rim (no overlap).</li>
+<li>Pan to Central Park and hover a path: the highlight should cover ONE path segment between junctions, not half the park.</li>
+<li>Hover an intersection node off the route: a disc-sized highlight, and its tooltip counts come from the disc block; click it and cast — the vote should land on the disc, not a street.</li>
+<li>Hard-reload once: the console <code>[topo] ready</code> line must say 563812 blocks (stale-cache guard), and the network tab must show <code>blocks.pmtiles?v=…</code>.</li>
+<li>For other cities (philly/sf/dc/chicago), re-run <code>./build_city_blocks.sh &lt;city&gt;</code> before their next deploy — their baked mappings predate the disc step.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Green is added, red removed.</p>
+    
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+26</span> / <span class="d-del">-16</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">the vote/proposal layer: topology load, selection resolve, cards</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~3.9k LOC — this commit touches only the version probe + the four node→edge sites</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">topology load effect</span><span class="ol-sum">graph-version probe now reads blocks; blob key -bin2-&lt;blocks&gt;</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">resolveSelection</span><span class="ol-sum">node voteEdgeId via adjShortest</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dispatchBlockSelect</span><span class="ol-sum">node targets broadcast their disc&#x27;s block</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">hover / pinned card content</span><span class="ol-sum">node rows + pinned vote edge via adjShortest</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">markers / proposals / casts</span><span class="ol-sum">unchanged in this commit</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>blocksVersion from /api/graph-version (vj.blocks)</li><li>binVersion = `${version}-bin2${blocksVersion ? `-${blocksVersion}` : &quot;&quot;}`</li><li>4 × adjFirst → adjShortest (resolver, block-select, hover rows, pinned vote edge)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 59e47d0..6176072 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -50,7 +50,7 @@ import {</span>
+<span class="d-ctx">   buildBlockIndex,</span>
+<span class="d-ctx">   touchedBlockKeys,</span>
+<span class="d-ctx">   adjEdgesOf,</span>
+<span class="d-del">-  adjFirst,</span>
+<span class="d-add">+  adjShortest,</span>
+<span class="d-ctx"> } from &quot;./graphTopology&quot;;</span>
+<span class="d-ctx"> import { materializeBlocks, selectionVoteRows } from &quot;../../utils/blockSelection&quot;;</span>
+<span class="d-ctx"> import { iconForLabel, iconSrc, mapStyleForTheme } from &quot;../../themes&quot;;</span>
+<span class="d-hunk">@@ -804,7 +804,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     if (hit) {</span>
+<span class="d-ctx">       const voteEdgeId = hit.target.kind === &quot;edge&quot;</span>
+<span class="d-ctx">         ? hit.target.index</span>
+<span class="d-del">-        : adjFirst(nodeAdjRef.current, hit.target.index);</span>
+<span class="d-add">+        : adjShortest(data, nodeAdjRef.current, hit.target.index);</span>
+<span class="d-ctx">       return { target: hit.target, snapLat: hit.snapLat, snapLng: hit.snapLng, voteEdgeId };</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -974,7 +974,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       const edgeIds: number[] = [];</span>
+<span class="d-ctx">       const pushTarget = (t: HoverTarget | null) =&gt; {</span>
+<span class="d-ctx">         if (!t) return;</span>
+<span class="d-del">-        const e = t.kind === &quot;edge&quot; ? t.index : adjFirst(nodeAdjRef.current, t.index);</span>
+<span class="d-add">+        const e = t.kind === &quot;edge&quot; ? t.index : adjShortest(topo, nodeAdjRef.current, t.index);</span>
+<span class="d-ctx">         if (e != null) edgeIds.push(e);</span>
+<span class="d-ctx">       };</span>
+<span class="d-ctx">       const path = pathEdgeIdsRef.current;</span>
+<span class="d-hunk">@@ -1620,13 +1620,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       //    matches — skipping the multi-MB download and JSON parse entirely.</span>
+<span class="d-ctx">       let topology: GraphTopology | null = null;</span>
+<span class="d-ctx">       let version: string | null = null;</span>
+<span class="d-add">+      let blocksVersion: string | null = null;</span>
+<span class="d-ctx">       let usedCachedTopology = false;</span>
+<span class="d-ctx">       // Assigned inside the try below; the step-3 stale-topology guard reuses it.</span>
+<span class="d-ctx">       let fetchFreshTopology: ((forceReload?: boolean) =&gt; Promise&lt;GraphTopology | null&gt;) | null = null;</span>
+<span class="d-ctx">       try {</span>
+<span class="d-ctx">         try {</span>
+<span class="d-ctx">           const vr = await fetch(withMap(`${CONFIG.apiUrl}/graph-version`), { headers: passcodeHeaders() });</span>
+<span class="d-del">-          if (vr.ok) version = (await vr.json()).version ?? null;</span>
+<span class="d-add">+          if (vr.ok) {</span>
+<span class="d-add">+            const vj = await vr.json();</span>
+<span class="d-add">+            version = vj.version ?? null;</span>
+<span class="d-add">+            blocksVersion = vj.blocks ?? null;</span>
+<span class="d-add">+          }</span>
+<span class="d-ctx">         } catch {</span>
+<span class="d-ctx">           // Version probe failed — fall back to a direct topology fetch.</span>
+<span class="d-ctx">         }</span>
+<span class="d-hunk">@@ -1640,14 +1645,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         const withVersion = (url: string, v: string | null = version) =&gt;</span>
+<span class="d-ctx">           v ? url + (url.includes(&quot;?&quot;) ? &quot;&amp;&quot; : &quot;?&quot;) + &quot;v=&quot; + encodeURIComponent(v) : url;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-        // The binary blob&#x27;s format is versioned SEPARATELY from the topology</span>
+<span class="d-del">-        // content: adding the edge_block_id section (GTB2) didn&#x27;t change the</span>
+<span class="d-del">-        // node/edge content, so /graph-version still reports the same etag.</span>
+<span class="d-del">-        // Suffix the blob&#x27;s cache key + URL buster with the format tag —</span>
+<span class="d-del">-        // mirroring the server&#x27;s &quot;-bin2&quot; ETag — or a client holding the old</span>
+<span class="d-del">-        // GTB1 blob under the same version would pin it (in IndexedDB AND the</span>
+<span class="d-del">-        // day-long HTTP cache) and never receive the block mapping.</span>
+<span class="d-del">-        const binVersion = version ? `${version}-bin2` : null;</span>
+<span class="d-add">+        // The binary blob&#x27;s format AND block mapping are versioned SEPARATELY</span>
+<span class="d-add">+        // from the topology content: adding the edge_block_id section (GTB2) —</span>
+<span class="d-add">+        // or re-baking the block set against the same graph — doesn&#x27;t change</span>
+<span class="d-add">+        // the node/edge content, so /graph-version still reports the same etag.</span>
+<span class="d-add">+        // Suffix the blob&#x27;s cache key + URL buster with the format tag and the</span>
+<span class="d-add">+        // blocks version — mirroring the server&#x27;s &quot;-bin2-&lt;blocks&gt;&quot; ETag — or a</span>
+<span class="d-add">+        // client holding an old blob under the same version would pin it (in</span>
+<span class="d-add">+        // IndexedDB AND the day-long HTTP cache) and keep painting selections</span>
+<span class="d-add">+        // through a stale edge→block mapping.</span>
+<span class="d-add">+        const binVersion = version</span>
+<span class="d-add">+          ? `${version}-bin2${blocksVersion ? `-${blocksVersion}` : &quot;&quot;}`</span>
+<span class="d-add">+          : null;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         // Fetch the topology from the NETWORK (not IndexedDB). `forceReload` adds</span>
+<span class="d-ctx">         // cache:&quot;reload&quot; so the browser HTTP cache is bypassed too — used by the</span>
+<span class="d-hunk">@@ -2699,8 +2708,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     } else {</span>
+<span class="d-ctx">       if (hoverTarget.index &lt; data.nNodes) {</span>
+<span class="d-ctx">         tooltipName = resolveAddress(nodeLat(data, hoverTarget.index), nodeLon(data, hoverTarget.index), bumpGeocode);</span>
+<span class="d-del">-        // A node belongs to its adjFirst edge&#x27;s block (docs §2.1).</span>
+<span class="d-del">-        const hoverNodeEdge = adjFirst(nodeAdjRef.current, hoverTarget.index);</span>
+<span class="d-add">+        // A node belongs to its shortest incident edge&#x27;s block (docs §2.1) —</span>
+<span class="d-add">+        // the edge whose midpoint sits inside the junction&#x27;s own disc block.</span>
+<span class="d-add">+        const hoverNodeEdge = adjShortest(data, nodeAdjRef.current, hoverTarget.index);</span>
+<span class="d-ctx">         hoverVoteTypes = (hoverNodeEdge != null ? selectionVoteRows(data, [hoverNodeEdge]) : null)</span>
+<span class="d-ctx">           ?? decodeVoteTypes((data.node_vote_types ?? [])[hoverTarget.index], legend);</span>
+<span class="d-ctx">       }</span>
+<span class="d-hunk">@@ -2739,8 +2749,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     } else {</span>
+<span class="d-ctx">       if (pinnedTarget.index &lt; data.nNodes) {</span>
+<span class="d-ctx">         pinnedName = resolveAddress(nodeLat(data, pinnedTarget.index), nodeLon(data, pinnedTarget.index), bumpGeocode);</span>
+<span class="d-del">-        pinnedVoteEdgeId = adjFirst(nodeAdjRef.current, pinnedTarget.index);</span>
+<span class="d-del">-        // A node belongs to its vote edge&#x27;s block (docs §2.1 adjFirst rule).</span>
+<span class="d-add">+        pinnedVoteEdgeId = adjShortest(data, nodeAdjRef.current, pinnedTarget.index);</span>
+<span class="d-add">+        // A node belongs to its vote edge&#x27;s block (docs §2.1 shortest-incident rule).</span>
+<span class="d-ctx">         pinnedVoteTypes = (pinnedVoteEdgeId != null ? selectionVoteRows(data, [pinnedVoteEdgeId]) : null)</span>
+<span class="d-ctx">           ?? decodeVoteTypes((data.node_vote_types ?? [])[pinnedTarget.index], legend);</span>
+<span class="d-ctx">       }</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/graphTopology.test.ts</span>
+            <span class="stat"><span class="d-add">+40</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">unit tests for the topology model</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">graphTopology.test.ts</span>
+        <span class="ctx-sum">decode/index/block-key specs</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">adjShortest specs</span><span class="ol-sum">NEW — long-edge-first star topology; null cases</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>2 new tests: picks the short edge over array order · null without adjacency / isolated node</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/graphTopology.test.ts b/client-react/src/components/GraphLayer/graphTopology.test.ts</span>
+<span class="d-meta">index a1c7f2b..a41616f 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/graphTopology.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/graphTopology.test.ts</span>
+<span class="d-hunk">@@ -5,6 +5,8 @@ import {</span>
+<span class="d-ctx">   TOPOLOGY_BIN_MAGIC_V2,</span>
+<span class="d-ctx">   decodeTopologyBin,</span>
+<span class="d-ctx">   buildBlockIndex,</span>
+<span class="d-add">+  buildNodeAdj,</span>
+<span class="d-add">+  adjShortest,</span>
+<span class="d-ctx">   blockKeyOf,</span>
+<span class="d-ctx">   edgesOfBlockKey,</span>
+<span class="d-ctx">   touchedBlockKeys,</span>
+<span class="d-hunk">@@ -210,3 +212,41 @@ describe(&quot;touchedBlockKeys&quot;, () =&gt; {</span>
+<span class="d-ctx">     expect(touchedBlockKeys(topo, [2, 0, 2])).toEqual([-4, -2]);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;adjShortest&quot;, () =&gt; {</span>
+<span class="d-add">+  // node 0 at origin; node 1 ~1.1km north; node 2 ~110m east.</span>
+<span class="d-add">+  // Edge order puts the LONG edge first, so adjFirst-style array order would</span>
+<span class="d-add">+  // pick the wrong representative — adjShortest must pick the short one.</span>
+<span class="d-add">+  function starTopo(): GraphTopology {</span>
+<span class="d-add">+    const coords = new Int32Array([</span>
+<span class="d-add">+      0, 0, // node 0</span>
+<span class="d-add">+      Math.round(0.01 * COORD_SCALE), 0, // node 1 (far)</span>
+<span class="d-add">+      0, Math.round(0.001 * COORD_SCALE), // node 2 (near)</span>
+<span class="d-add">+    ]);</span>
+<span class="d-add">+    const ends = new Uint32Array([</span>
+<span class="d-add">+      0, 1, // e0: long</span>
+<span class="d-add">+      0, 2, // e1: short</span>
+<span class="d-add">+    ]);</span>
+<span class="d-add">+    return { nNodes: 3, nEdges: 2, coords, ends };</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;returns the shortest incident edge, not the first&quot;, () =&gt; {</span>
+<span class="d-add">+    const topo = starTopo();</span>
+<span class="d-add">+    const adj = buildNodeAdj(topo);</span>
+<span class="d-add">+    expect(adjShortest(topo, adj, 0)).toBe(1);</span>
+<span class="d-add">+    expect(adjShortest(topo, adj, 1)).toBe(0); // only edge at node 1</span>
+<span class="d-add">+    expect(adjShortest(topo, adj, 2)).toBe(1);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;returns null without adjacency or for an isolated node&quot;, () =&gt; {</span>
+<span class="d-add">+    const topo = starTopo();</span>
+<span class="d-add">+    expect(adjShortest(topo, null, 0)).toBeNull();</span>
+<span class="d-add">+    const lonely: GraphTopology = {</span>
+<span class="d-add">+      nNodes: 1,</span>
+<span class="d-add">+      nEdges: 0,</span>
+<span class="d-add">+      coords: new Int32Array(2),</span>
+<span class="d-add">+      ends: new Uint32Array(0),</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+    expect(adjShortest(lonely, buildNodeAdj(lonely), 0)).toBeNull();</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/graphTopology.ts</span>
+            <span class="stat"><span class="d-add">+36</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">typed-array topology + CSR adjacency/block indexes</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">graphTopology.ts</span>
+        <span class="ctx-sum">~290 LOC — the mobile-safe topology model</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">accessors / decode</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">buildNodeAdj / adjFirst</span><span class="ol-sum">unchanged (adjFirst kept for API compat)</span></li><li class="changed"><span class="ol-label">adjShortest</span><span class="ol-sum">NEW — shortest incident edge (cos-corrected), the node→disc rule</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">block index / keys</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>adjShortest(d, adj, nid) — int32-coord squared lengths, lon scaled by cos(lat)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/graphTopology.ts b/client-react/src/components/GraphLayer/graphTopology.ts</span>
+<span class="d-meta">index 8696ffe..1d2a374 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/graphTopology.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/graphTopology.ts</span>
+<span class="d-hunk">@@ -195,6 +195,42 @@ export function adjFirst(adj: NodeAdj | null, nid: number): number | null {</span>
+<span class="d-ctx">   return s &lt; adj.start[nid + 1] ? adj.edges[s] : null;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * The SHORTEST incident edge id for `nid` (straight-line, cos-corrected), or</span>
+<span class="d-add">+ * null when the node has no edges. This is the edge that stands in for a node</span>
+<span class="d-add">+ * everywhere a node needs a block/vote target (docs §2.1): junction nodes own</span>
+<span class="d-add">+ * a small disc block, and the shortest incident edge is the one whose midpoint</span>
+<span class="d-add">+ * sits inside that disc — so node selections resolve to the junction&#x27;s own</span>
+<span class="d-add">+ * block instead of whichever full street block `adjFirst`&#x27;s array order lands</span>
+<span class="d-add">+ * on (the mis-oriented-highlight bug).</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function adjShortest(</span>
+<span class="d-add">+  d: GraphTopology,</span>
+<span class="d-add">+  adj: NodeAdj | null,</span>
+<span class="d-add">+  nid: number,</span>
+<span class="d-add">+): number | null {</span>
+<span class="d-add">+  if (!adj) return null;</span>
+<span class="d-add">+  const s = adj.start[nid];</span>
+<span class="d-add">+  const e = adj.start[nid + 1];</span>
+<span class="d-add">+  if (s &gt;= e) return null;</span>
+<span class="d-add">+  const cosLat = Math.cos((d.coords[2 * nid] / COORD_SCALE) * (Math.PI / 180));</span>
+<span class="d-add">+  let best = -1;</span>
+<span class="d-add">+  let bestD2 = Infinity;</span>
+<span class="d-add">+  for (let k = s; k &lt; e; k++) {</span>
+<span class="d-add">+    const eid = adj.edges[k];</span>
+<span class="d-add">+    const a = d.ends[2 * eid];</span>
+<span class="d-add">+    const b = d.ends[2 * eid + 1];</span>
+<span class="d-add">+    const dLat = d.coords[2 * a] - d.coords[2 * b];</span>
+<span class="d-add">+    const dLon = (d.coords[2 * a + 1] - d.coords[2 * b + 1]) * cosLat;</span>
+<span class="d-add">+    const d2 = dLat * dLat + dLon * dLon;</span>
+<span class="d-add">+    if (d2 &lt; bestD2) {</span>
+<span class="d-add">+      bestD2 = d2;</span>
+<span class="d-add">+      best = eid;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return best;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> // ── Block index (CSR) ───────────────────────────────────────────────────────</span>
+<span class="d-ctx"> // Blocks are the aggregation/interaction grain (docs/three-layer-model.md §2):</span>
+<span class="d-ctx"> // every edge maps to at most one block via edgeBlockId. Same CSR layout as</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/config.ts</span>
+            <span class="stat"><span class="d-add">+8</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · config</span>
+        <span class="ctx-sum">bootstrap-time CONFIG + per-city rebinding</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">config.ts</span>
+        <span class="ctx-sum">~130 LOC — CONFIG object, CityConfig shape, applyCityConfig</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">CityConfig interface</span><span class="ol-sum">NEW blocksVersion field</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">applyCityConfig</span><span class="ol-sum">blocks tiles URL now carries ?v=&lt;blocksVersion&gt;</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>blockTilesUrl = &lt;tilesPath→blocks.pmtiles&gt; + ?v= — busts the week-long HTTP cache on re-bake</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/config.ts b/client-react/src/config.ts</span>
+<span class="d-meta">index 1423ee9..60b0480 100644</span>
+<span class="d-meta">--- a/client-react/src/config.ts</span>
+<span class="d-meta">+++ b/client-react/src/config.ts</span>
+<span class="d-hunk">@@ -100,6 +100,9 @@ export interface CityConfig {</span>
+<span class="d-ctx">   minZoom: number;</span>
+<span class="d-ctx">   maxZoom: number;</span>
+<span class="d-ctx">   tilesPath: string;</span>
+<span class="d-add">+  /** Cache-buster for blocks.pmtiles (server: file mtime); null/absent when</span>
+<span class="d-add">+   *  the city ships no block artifacts. */</span>
+<span class="d-add">+  blocksVersion?: number | null;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /**</span>
+<span class="d-hunk">@@ -108,7 +111,7 @@ export interface CityConfig {</span>
+<span class="d-ctx">  * read the active city&#x27;s values. Pan limits get generous padding around the bbox.</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> export function applyCityConfig(city: CityConfig): void {</span>
+<span class="d-del">-  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath } = city;</span>
+<span class="d-add">+  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath, blocksVersion } = city;</span>
+<span class="d-ctx">   CONFIG.initialView = { lat: center.lat, lon: center.lon, zoom: defaultZoom };</span>
+<span class="d-ctx">   CONFIG.mappedBounds = { sw: { ...bounds.sw }, ne: { ...bounds.ne } };</span>
+<span class="d-ctx">   CONFIG.nycBounds = {</span>
+<span class="d-hunk">@@ -119,7 +122,10 @@ export function applyCityConfig(city: CityConfig): void {</span>
+<span class="d-ctx">   CONFIG.maxZoom = maxZoom;</span>
+<span class="d-ctx">   if (tilesPath) {</span>
+<span class="d-ctx">     CONFIG.graphTilesUrl = isLocalDev ? `http://localhost:5001${tilesPath}` : tilesPath;</span>
+<span class="d-del">-    const blocksPath = tilesPath.replace(&quot;graph.pmtiles&quot;, &quot;blocks.pmtiles&quot;);</span>
+<span class="d-add">+    // ?v= busts the week-long HTTP cache when the block set is re-baked —</span>
+<span class="d-add">+    // stale cached ranges of the OLD archive must never mix with the new one.</span>
+<span class="d-add">+    const blocksPath = tilesPath.replace(&quot;graph.pmtiles&quot;, &quot;blocks.pmtiles&quot;)</span>
+<span class="d-add">+      + (blocksVersion ? `?v=${blocksVersion}` : &quot;&quot;);</span>
+<span class="d-ctx">     CONFIG.blockTilesUrl = isLocalDev ? `http://localhost:5001${blocksPath}` : blocksPath;</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> }</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">docs/three-layer-model.md</span>
+            <span class="stat"><span class="d-add">+26</span> / <span class="d-del">-12</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">docs</span>
+        <span class="ctx-sum">the source-of-truth spec for the graph/blocks/route-proposals separation</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">three-layer-model.md</span>
+        <span class="ctx-sum">layer definitions + block-scoped vote semantics</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">§2.1 What a block is</span><span class="ol-sum">REWRITTEN — junction discs + the adjShortest rule + why (the ladder)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§2.2 Generation</span><span class="ol-sum">4-step list — build_node_blocks inserted; foot severing documented</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§2.2 Evaluation</span><span class="ol-sum">corrected: EVERY city (NYC included) serves the procedural output</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">§2.3–§4</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>§2.1 — discs (12 m), disjointness, node → shortest-incident-edge block</li><li>§2.2 — pipeline list matches build_city_blocks.sh&#x27;s six steps</li><li>evaluation para — Brook&#x27;s planimetric blocks are the reference ONLY (bake meta proves it)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/three-layer-model.md b/docs/three-layer-model.md</span>
+<span class="d-meta">index ff76299..c94ca20 100644</span>
+<span class="d-meta">--- a/docs/three-layer-model.md</span>
+<span class="d-meta">+++ b/docs/three-layer-model.md</span>
+<span class="d-hunk">@@ -47,10 +47,17 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored</span>
+<span class="d-ctx"> ### 2.1 What a block is</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> One polygon per street segment between intersections (a &quot;streetscape block&quot;),</span>
+<span class="d-del">-covering the roadbed + sidewalk right-of-way. Blocks partition the votable</span>
+<span class="d-del">-network: **every edge belongs to exactly one block** (strict many-to-one), and a</span>
+<span class="d-del">-node belongs to the block of its lowest-indexed adjacent edge (deterministic,</span>
+<span class="d-del">-matching the client&#x27;s `adjFirst` node→edge upgrade rule).</span>
+<span class="d-add">+covering the roadbed + sidewalk right-of-way — plus one small **disc block per</span>
+<span class="d-add">+junction node** (12 m, `build_node_blocks.py`), punched out of the street/foot</span>
+<span class="d-add">+polygons so blocks never overlap. Junction discs exist because street polygons</span>
+<span class="d-add">+otherwise extend across intersections (Voronoi flare): the short edges crossing</span>
+<span class="d-add">+an intersection would bake into a PERPENDICULAR street&#x27;s block, so a route down</span>
+<span class="d-add">+an avenue would select — and cast onto — every cross street it passes (the</span>
+<span class="d-add">+&quot;ladder&quot; bug). Blocks partition the votable network: **every edge belongs to</span>
+<span class="d-add">+exactly one block** (strict many-to-one), and a node belongs to the block of its</span>
+<span class="d-add">+**shortest** incident edge (deterministic, matching the client&#x27;s `adjShortest`</span>
+<span class="d-add">+node→edge upgrade rule — the shortest incident edge is the one whose midpoint</span>
+<span class="d-add">+falls inside the junction&#x27;s own disc).</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ### 2.2 Generation — procedural, per city, at graph-build time</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -61,11 +68,16 @@ be added without city-specific open data (`server/streetscape_blocks/`):</span>
+<span class="d-ctx">    intersections merged at 12 m) → buffer each segment by a per-road-class</span>
+<span class="d-ctx">    half-width → seed points every 6 m → Voronoi partition by nearest segment →</span>
+<span class="d-ctx">    dissolve + clip. One polygon per street segment.</span>
+<span class="d-del">-2. `build_foot_blocks.py` — edges not covered by any street block (park paths,</span>
+<span class="d-del">-   plazas, boardwalks — ~18% in NYC) are buffered and merged into one block per</span>
+<span class="d-del">-   connected foot component, appended with continuing `block_id`s. This is what</span>
+<span class="d-del">-   makes the edge→block mapping **total**.</span>
+<span class="d-del">-3. `build_edge_blocks.py` — bakes `edge_block_id: int32[n_edges]`</span>
+<span class="d-add">+2. `build_node_blocks.py` — every walk-graph junction (unique-neighbour degree</span>
+<span class="d-add">+   ≥ 3) becomes its own 12 m disc block (`road_class=&quot;node&quot;`), subtracted from</span>
+<span class="d-add">+   every street block it touches so blocks stay disjoint.</span>
+<span class="d-add">+3. `build_foot_blocks.py` — edges not covered by any street block (park paths,</span>
+<span class="d-add">+   plazas, boardwalks — ~18% in NYC) are buffered (6 m), merged, and **severed</span>
+<span class="d-add">+   at the junction discs** (12 m &gt; 6 m, so the mesh disconnects there): one</span>
+<span class="d-add">+   block per path segment between junctions — the same grain as streets, not</span>
+<span class="d-add">+   one giant block per connected park network. Appended with continuing</span>
+<span class="d-add">+   `block_id`s; this is what makes the edge→block mapping **total**.</span>
+<span class="d-add">+4. `build_edge_blocks.py` — bakes `edge_block_id: int32[n_edges]`</span>
+<span class="d-ctx">    (`osm_data/&lt;city&gt;/edge_blocks_&lt;network&gt;.npy` + a meta JSON stamping</span>
+<span class="d-ctx">    `topology_etag` + `blocks_sha256`). Assignment: polygon containment of the</span>
+<span class="d-ctx">    edge midpoint, else nearest block within 30 m (see `eval/RESULTS.md` — nearest</span>
+<span class="d-hunk">@@ -75,9 +87,11 @@ be added without city-specific open data (`server/streetscape_blocks/`):</span>
+<span class="d-ctx"> output against Brook&#x27;s NYC planimetric blocks (`build_nyc_blocks.py`, from NYC</span>
+<span class="d-ctx"> open-data roadbed+sidewalk polygons — the reference this algorithm mimics).</span>
+<span class="d-ctx"> Current numbers (see `COMPARISON.md`): median IoU **0.84**, median area ratio</span>
+<span class="d-del">-**1.00**, median centroid offset ~1 m over ~82k shared segments. NYC keeps the</span>
+<span class="d-del">-planimetric blocks; new cities use the procedural generator and should be</span>
+<span class="d-del">-spot-checked with the same comparison harness when planimetric data exists.</span>
+<span class="d-add">+**1.00**, median centroid offset ~1 m over ~82k shared segments. **Every city —</span>
+<span class="d-add">+NYC included — serves the procedural output** (`edge_blocks_streets.json` stamps</span>
+<span class="d-add">+`blocks_file: blocks_generic_nyc.geojson`); Brook&#x27;s planimetric blocks are the</span>
+<span class="d-add">+evaluation reference only. New cities should be spot-checked with the same</span>
+<span class="d-add">+comparison harness when planimetric data exists.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> Generation runs **when a city&#x27;s graph is built** (alongside</span>
+<span class="d-ctx"> `refresh_osm.py` / the graph-builder image) and the artifacts are baked next to</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+21</span> / <span class="d-del">-6</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">server · Flask app</span>
+        <span class="ctx-sum">routes: votes, topology, tiles, maps</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~3.3k LOC — the API surface</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">_build_graph_votes_body_locked</span><span class="ol-sum">bagg cold-check → NEW cold-OR-stale check via bver marker</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">graph_version</span><span class="ol-sum">NEW blocks field next to version</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">graph_topology ?format=bin</span><span class="ol-sum">bin ETag now suffixed with the blocks version</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">serve_tiles</span><span class="ol-sum">unchanged (max-age=1w — hence the ?v= buster)</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>bver:&lt;slug&gt;:&lt;mode&gt; marker — mismatch vs graph.blocks_version triggers block_votes.rebuild_from_db</li><li>graph-version response: {version: topology_etag, blocks: blocks_sha256}</li><li>bin_etag: &quot;&lt;etag&gt;-bin2-&lt;blocks&gt;&quot; — a re-bake busts intermediary caches too</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index 4a863d5..6b33570 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -382,12 +382,19 @@ def _build_graph_votes_body_locked(</span>
+<span class="d-ctx">     if rmap.graph.edge_block_id is not None:</span>
+<span class="d-ctx">         block_mode = vote_store.mode_to_int(mode or rmap.mode)</span>
+<span class="d-ctx">         # bd:/bagg: are derived state; rebuild from Postgres if cold while edge</span>
+<span class="d-del">-        # votes exist (first request after a deploy, evicted keys, a resnap).</span>
+<span class="d-del">-        if (redis_client.exists(block_votes.bagg_key(rmap.slug, block_mode)) == 0</span>
+<span class="d-del">-                and redis_client.hlen(vote_store.hash_key(rmap.slug)) &gt; 0):</span>
+<span class="d-add">+        # votes exist (first request after a deploy, evicted keys, a resnap) OR</span>
+<span class="d-add">+        # when the aggregate was built against a DIFFERENT block set — block ids</span>
+<span class="d-add">+        # renumber on every re-bake, so stale bagg entries would color and count</span>
+<span class="d-add">+        # the wrong polygons. The blocks version marker rides next to the bagg.</span>
+<span class="d-add">+        bver_key = f&quot;bver:{rmap.slug}:{block_mode}&quot;</span>
+<span class="d-add">+        bagg_cold = redis_client.exists(block_votes.bagg_key(rmap.slug, block_mode)) == 0</span>
+<span class="d-add">+        bagg_stale = (redis_client.get(bver_key) or &quot;&quot;) != (rmap.graph.blocks_version or &quot;&quot;)</span>
+<span class="d-add">+        if (bagg_cold or bagg_stale) and redis_client.hlen(vote_store.hash_key(rmap.slug)) &gt; 0:</span>
+<span class="d-ctx">             block_votes.rebuild_from_db(</span>
+<span class="d-ctx">                 redis_client, rmap.slug, block_mode, rmap.graph.edge_block_id,</span>
+<span class="d-ctx">                 database.fetch_edge_vote_devices(rmap.slug))</span>
+<span class="d-add">+        if bagg_cold or bagg_stale:</span>
+<span class="d-add">+            redis_client.set(bver_key, rmap.graph.blocks_version or &quot;&quot;)</span>
+<span class="d-ctx">         arrays.update(block_votes.build_block_arrays(</span>
+<span class="d-ctx">             redis_client, rmap.slug, block_mode, rmap.graph.n_blocks))</span>
+<span class="d-ctx">         arrays[&quot;blocks_version&quot;] = rmap.graph.blocks_version</span>
+<span class="d-hunk">@@ -1513,7 +1520,13 @@ def graph_version():</span>
+<span class="d-ctx">     rmap.graph.ensure_loaded()</span>
+<span class="d-ctx">     if rmap.graph.topology_etag is None:</span>
+<span class="d-ctx">         return jsonify({&quot;error&quot;: &quot;Graph not loaded&quot;}), 500</span>
+<span class="d-del">-    resp = jsonify({&quot;version&quot;: rmap.graph.topology_etag})</span>
+<span class="d-add">+    # `blocks` versions the edge→block mapping SEPARATELY from the topology: a</span>
+<span class="d-add">+    # re-baked block set (same graph → same `version`) must still bust the</span>
+<span class="d-add">+    # client&#x27;s cached GTB2 blob, whose trailing section carries edge_block_id.</span>
+<span class="d-add">+    resp = jsonify({</span>
+<span class="d-add">+        &quot;version&quot;: rmap.graph.topology_etag,</span>
+<span class="d-add">+        &quot;blocks&quot;: rmap.graph.blocks_version,</span>
+<span class="d-add">+    })</span>
+<span class="d-ctx">     resp.headers[&quot;Cache-Control&quot;] = &quot;no-cache&quot;</span>
+<span class="d-ctx">     return resp</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1532,8 +1545,10 @@ def graph_topology():</span>
+<span class="d-ctx">     # Its ETag is distinct from the JSON one so an intermediary never crosses them.</span>
+<span class="d-ctx">     if request.args.get(&quot;format&quot;) == &quot;bin&quot;:</span>
+<span class="d-ctx">         # -bin2: GTB2 blob (adds n_blocks + trailing edge_block_id section);</span>
+<span class="d-del">-        # distinct suffix so clients holding the GTB1 blob refetch.</span>
+<span class="d-del">-        bin_etag = (rmap.graph.topology_etag or &#x27;&quot;x&quot;&#x27;)[:-1] + &#x27;-bin2&quot;&#x27;</span>
+<span class="d-add">+        # distinct suffix so clients holding the GTB1 blob refetch. The blocks</span>
+<span class="d-add">+        # version rides along so a re-baked mapping (same topology) busts too.</span>
+<span class="d-add">+        blocks_tag = f&quot;-{rmap.graph.blocks_version}&quot; if rmap.graph.blocks_version else &quot;&quot;</span>
+<span class="d-add">+        bin_etag = (rmap.graph.topology_etag or &#x27;&quot;x&quot;&#x27;)[:-1] + f&#x27;-bin2{blocks_tag}&quot;&#x27;</span>
+<span class="d-ctx">         if request.headers.get(&quot;If-None-Match&quot;) == bin_etag:</span>
+<span class="d-ctx">             resp = app.response_class(status=304)</span>
+<span class="d-ctx">             resp.headers[&quot;ETag&quot;] = bin_etag</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/cities.py</span>
+            <span class="stat"><span class="d-add">+13</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">server · cities registry</span>
+        <span class="ctx-sum">static per-city config exposed to the client at bootstrap</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">cities.py</span>
+        <span class="ctx-sum">~150 LOC — City dataclass + registry</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">to_public</span><span class="ol-sum">NEW blocksVersion field</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_blocks_version</span><span class="ol-sum">NEW — blocks.pmtiles mtime via os.stat (no graph load)</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>blocksVersion: int mtime or None when the city ships no block artifacts</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/cities.py b/server/cities.py</span>
+<span class="d-meta">index 250aec9..d4d1677 100644</span>
+<span class="d-meta">--- a/server/cities.py</span>
+<span class="d-meta">+++ b/server/cities.py</span>
+<span class="d-hunk">@@ -64,8 +64,21 @@ class City:</span>
+<span class="d-ctx">             &quot;minZoom&quot;: self.min_zoom,</span>
+<span class="d-ctx">             &quot;maxZoom&quot;: self.max_zoom,</span>
+<span class="d-ctx">             &quot;tilesPath&quot;: f&quot;/api/tiles/{self.id}/graph.pmtiles&quot;,</span>
+<span class="d-add">+            # Cache-buster for blocks.pmtiles (served with max-age=1w under a</span>
+<span class="d-add">+            # fixed URL): the client appends ?v=&lt;this&gt;, so a re-baked block set</span>
+<span class="d-add">+            # is never mixed with week-old cached ranges. A cheap stat — no</span>
+<span class="d-add">+            # graph load — and None when the city has no block artifacts.</span>
+<span class="d-add">+            &quot;blocksVersion&quot;: self._blocks_version(),</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    def _blocks_version(self) -&gt; int | None:</span>
+<span class="d-add">+        &quot;&quot;&quot;mtime of this city&#x27;s blocks.pmtiles, or None when absent.&quot;&quot;&quot;</span>
+<span class="d-add">+        path = os.path.join(os.path.dirname(__file__), self.data_dir, &quot;blocks.pmtiles&quot;)</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            return int(os.stat(path).st_mtime)</span>
+<span class="d-add">+        except OSError:</span>
+<span class="d-add">+            return None</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # ── Registry ─────────────────────────────────────────────────────────────────</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/streetscape_blocks/README.md</span>
+            <span class="stat"><span class="d-add">+9</span> / <span class="d-del">-6</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">server · streetscape_blocks</span>
+        <span class="ctx-sum">generator docs</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">README.md</span>
+        <span class="ctx-sum">adding-a-city + evaluation instructions</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">pipeline paragraph</span><span class="ol-sum">discs + severed foot blocks documented</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>one-paragraph description of the disc step and why foot blocks sever at junctions</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/README.md b/server/streetscape_blocks/README.md</span>
+<span class="d-meta">index 9bf7310..3c34d65 100644</span>
+<span class="d-meta">--- a/server/streetscape_blocks/README.md</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/README.md</span>
+<span class="d-hunk">@@ -29,12 +29,15 @@ brew install tippecanoe</span>
+<span class="d-ctx"> ./build_city_blocks.sh &lt;city-id&gt;            # or: refresh_osm.py --city &lt;id&gt; --blocks</span>
+<span class="d-ctx"> ```</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-The script runs: procedural street blocks → edge→block bake (pass 1) →</span>
+<span class="d-del">-`build_foot_blocks.py` for the uncovered edges (park paths, plazas — makes the</span>
+<span class="d-del">-mapping **total**) → final bake → `blocks.pmtiles`. Artifacts land next to the</span>
+<span class="d-del">-graph (`osm_data/&lt;city&gt;/edge_blocks_&lt;network&gt;.npy/.json`, `blocks.pmtiles`); the</span>
+<span class="d-del">-bake stamps the graph&#x27;s `topology_etag`, so rebuilding the graph invalidates the</span>
+<span class="d-del">-mapping and the script must re-run.</span>
+<span class="d-add">+The script runs: procedural street blocks → `build_node_blocks.py` (one 12 m</span>
+<span class="d-add">+disc block per walk-graph junction, punched out of the street blocks so a route</span>
+<span class="d-add">+never selects a perpendicular street&#x27;s block at an intersection) → edge→block</span>
+<span class="d-add">+bake (pass 1) → `build_foot_blocks.py` for the uncovered edges (park paths,</span>
+<span class="d-add">+plazas — severed at the junction discs so each path segment is its own block;</span>
+<span class="d-add">+makes the mapping **total**) → final bake → `blocks.pmtiles`. Artifacts land</span>
+<span class="d-add">+next to the graph (`osm_data/&lt;city&gt;/edge_blocks_&lt;network&gt;.npy/.json`,</span>
+<span class="d-add">+`blocks.pmtiles`); the bake stamps the graph&#x27;s `topology_etag`, so rebuilding</span>
+<span class="d-add">+the graph invalidates the mapping and the script must re-run.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ## Evaluation against ground truth</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/streetscape_blocks/build_city_blocks.sh</span>
+            <span class="stat"><span class="d-add">+15</span> / <span class="d-del">-9</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">server · streetscape_blocks</span>
+        <span class="ctx-sum">one-command per-city Layer-2 build</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_city_blocks.sh</span>
+        <span class="ctx-sum">~75 LOC — orchestrates generators → bakes → pmtiles</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">pipeline comment</span><span class="ol-sum">5 → 6 steps</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">step 2 (NEW)</span><span class="ol-sum">build_node_blocks.py between street blocks and the first bake</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">tippecanoe</span><span class="ol-sum">unchanged — block_id stays the NATIVE feature id</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>steps renumbered [1/6]…[6/6]; node discs run in the server venv like the bakes</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_city_blocks.sh b/server/streetscape_blocks/build_city_blocks.sh</span>
+<span class="d-meta">index 1633fc4..f9cc06d 100755</span>
+<span class="d-meta">--- a/server/streetscape_blocks/build_city_blocks.sh</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_city_blocks.sh</span>
+<span class="d-hunk">@@ -5,10 +5,12 @@</span>
+<span class="d-ctx"> #</span>
+<span class="d-ctx"> # Pipeline:</span>
+<span class="d-ctx"> #   1. build_blocks_generic.py   procedural street blocks from OSM alone (geo venv)</span>
+<span class="d-del">-#   2. build_edge_blocks.py      bake edge→block (server venv; marks gaps as −1)</span>
+<span class="d-del">-#   3. build_foot_blocks.py      blocks for the −1 edges (park paths, plazas)</span>
+<span class="d-del">-#   4. build_edge_blocks.py      re-bake against the completed block set</span>
+<span class="d-del">-#   5. tippecanoe                blocks.pmtiles next to the graph (display layer)</span>
+<span class="d-add">+#   2. build_node_blocks.py      junction-node discs, punched out of street blocks</span>
+<span class="d-add">+#   3. build_edge_blocks.py      bake edge→block (server venv; marks gaps as −1)</span>
+<span class="d-add">+#   4. build_foot_blocks.py      blocks for the −1 edges (park paths, plazas),</span>
+<span class="d-add">+#                                severed at the junction discs</span>
+<span class="d-add">+#   5. build_edge_blocks.py      re-bake against the completed block set</span>
+<span class="d-add">+#   6. tippecanoe                blocks.pmtiles next to the graph (display layer)</span>
+<span class="d-ctx"> #</span>
+<span class="d-ctx"> # Run AFTER the city&#x27;s walk graph exists (refresh_osm.py --city &lt;id&gt;): the bake</span>
+<span class="d-ctx"> # stamps the graph&#x27;s topology_etag, so a graph rebuild invalidates the mapping</span>
+<span class="d-hunk">@@ -39,21 +41,25 @@ from cities import CITIES</span>
+<span class="d-ctx"> print(CITIES[&#x27;$CITY&#x27;].data_dir)</span>
+<span class="d-ctx"> &quot;)&quot;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-echo &quot;== [1/5] procedural street blocks ($CITY, bbox $BBOX)&quot;</span>
+<span class="d-add">+echo &quot;== [1/6] procedural street blocks ($CITY, bbox $BBOX)&quot;</span>
+<span class="d-ctx"> CITY=&quot;$CITY&quot; BBOX=&quot;$BBOX&quot; BLOCKS_OUT=&quot;$OUT&quot; &quot;$GEO_PY&quot; &quot;$HERE/build_blocks_generic.py&quot;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-echo &quot;== [2/5] edge→block bake (pass 1: find uncovered edges)&quot;</span>
+<span class="d-add">+echo &quot;== [2/6] junction-node discs (each junction is its own block)&quot;</span>
+<span class="d-add">+CITY=&quot;$CITY&quot; NETWORK=&quot;$NETWORK&quot; BLOCKS_OUT=&quot;$OUT&quot; \</span>
+<span class="d-add">+  srv_py streetscape_blocks/build_node_blocks.py</span>
+<span class="d-add">+</span>
+<span class="d-add">+echo &quot;== [3/6] edge→block bake (pass 1: find uncovered edges)&quot;</span>
+<span class="d-ctx"> CITY=&quot;$CITY&quot; NETWORK=&quot;$NETWORK&quot; BLOCKS_FILE=&quot;$BLOCKS_FILE&quot; \</span>
+<span class="d-ctx">   srv_py streetscape_blocks/build_edge_blocks.py</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-echo &quot;== [3/5] foot blocks for uncovered edges&quot;</span>
+<span class="d-add">+echo &quot;== [4/6] foot blocks for uncovered edges&quot;</span>
+<span class="d-ctx"> CITY=&quot;$CITY&quot; NETWORK=&quot;$NETWORK&quot; srv_py streetscape_blocks/build_foot_blocks.py</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-echo &quot;== [4/5] edge→block bake (final, against completed block set)&quot;</span>
+<span class="d-add">+echo &quot;== [5/6] edge→block bake (final, against completed block set)&quot;</span>
+<span class="d-ctx"> CITY=&quot;$CITY&quot; NETWORK=&quot;$NETWORK&quot; BLOCKS_FILE=&quot;$BLOCKS_FILE&quot; \</span>
+<span class="d-ctx">   srv_py streetscape_blocks/build_edge_blocks.py</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-echo &quot;== [5/5] blocks.pmtiles&quot;</span>
+<span class="d-add">+echo &quot;== [6/6] blocks.pmtiles&quot;</span>
+<span class="d-ctx"> if command -v tippecanoe &gt;/dev/null 2&gt;&amp;1; then</span>
+<span class="d-ctx">   # --use-attribute-for-id: block_id becomes the NATIVE feature id (required by</span>
+<span class="d-ctx">   # the client&#x27;s setFeatureState heat/selection; MapLibre reads native ids, no</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/streetscape_blocks/build_foot_blocks.py</span>
+            <span class="stat"><span class="d-add">+24</span> / <span class="d-del">-7</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">server · streetscape_blocks</span>
+        <span class="ctx-sum">Layer-2 block generators</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_foot_blocks.py</span>
+        <span class="ctx-sum">~140 LOC — buffers the edges no street block covers; makes the mapping total</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module docstring</span><span class="ol-sum">REWRITTEN — severing rationale (12 m disc &gt; 6 m tube)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">edge buffering</span><span class="ol-sum">6 m round-cap buffers over unmapped edges, union_all</span></li><li class="changed"><span class="ol-label">disc subtraction</span><span class="ol-sum">NEW — subtract road_class=node features before get_parts</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">append</span><span class="ol-sum">road_class=foot features, continuing block_ids</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>loads the blocks geojson BEFORE splitting so the discs can cut the merged mesh</li><li>shapely.transform of the lon/lat discs into the same local-metres frame → difference(merged, union)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_foot_blocks.py b/server/streetscape_blocks/build_foot_blocks.py</span>
+<span class="d-meta">index 1a11ebe..6120618 100644</span>
+<span class="d-meta">--- a/server/streetscape_blocks/build_foot_blocks.py</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_foot_blocks.py</span>
+<span class="d-hunk">@@ -4,10 +4,14 @@</span>
+<span class="d-ctx"> build_blocks_generic.py covers ~82% of foot-graph edges; the rest are foot edges</span>
+<span class="d-ctx"> &gt;30 m from any drive centerline — park interior paths, pedestrian plazas,</span>
+<span class="d-ctx"> boardwalks. This takes those unmapped edges (edge_blocks_&lt;net&gt;.npy == −1), buffers</span>
+<span class="d-del">-them, and MERGES the overlapping buffers into one polygon per connected foot-path</span>
+<span class="d-del">-component, then appends them to blocks_generic_&lt;city&gt;.geojson so their votes show</span>
+<span class="d-del">-up on the block heatmap too (road_class=&quot;foot&quot;, seg_id=−1, block_ids continuing</span>
+<span class="d-del">-from the street blocks).</span>
+<span class="d-add">+them, MERGES the overlapping buffers, and SUBTRACTS the junction-node discs</span>
+<span class="d-add">+(road_class=&quot;node&quot; features from build_node_blocks.py) before splitting into</span>
+<span class="d-add">+connected components. The discs (12 m) are wider than the tube radius (6 m), so</span>
+<span class="d-add">+the merged mesh severs at every junction and each polygon is one path segment</span>
+<span class="d-add">+between junctions — the same grain as street blocks. (Without the subtraction a</span>
+<span class="d-add">+whole park&#x27;s path network union-finds into a handful of giant blocks — the old</span>
+<span class="d-add">+Central Park behaviour.) Results append to blocks_generic_&lt;city&gt;.geojson</span>
+<span class="d-add">+(road_class=&quot;foot&quot;, seg_id=−1, block_ids continuing from the existing features).</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> After running this, re-run build_edge_blocks.py and rebuild blocks.pmtiles.</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -30,6 +34,7 @@ if _SERVER not in sys.path:</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> import shapely  # noqa: E402</span>
+<span class="d-ctx"> from shapely import LineString, union_all, get_parts, buffer as shp_buffer  # noqa: E402</span>
+<span class="d-add">+from shapely.geometry import shape as shp_shape  # noqa: E402</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> from cities import CITIES  # noqa: E402</span>
+<span class="d-ctx"> from graph_registry import CityGraph  # noqa: E402</span>
+<span class="d-hunk">@@ -82,14 +87,26 @@ def main():</span>
+<span class="d-ctx">     bufs = shp_buffer(np.array(lines, dtype=object), HALF_WIDTH_M,</span>
+<span class="d-ctx">                       cap_style=&quot;round&quot;, join_style=&quot;round&quot;)</span>
+<span class="d-ctx">     merged = union_all(bufs)</span>
+<span class="d-del">-    parts = [p for p in get_parts(merged) if p.area &gt;= MIN_AREA_M2]</span>
+<span class="d-del">-    print(f&quot;[foot] merged into {len(parts)} foot blocks (≥{MIN_AREA_M2:.0f} m²)&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    # Load existing street blocks and append the foot blocks.</span>
+<span class="d-add">+    # Load the existing blocks now: the junction-node discs in them cut the</span>
+<span class="d-add">+    # merged mesh into per-segment components (and keep foot blocks from</span>
+<span class="d-add">+    # overlapping the discs — blocks must never overlap).</span>
+<span class="d-ctx">     out_dir = os.environ.get(&quot;BLOCKS_OUT&quot;, os.path.join(_HERE, &quot;output&quot;))</span>
+<span class="d-ctx">     blocks_path = os.path.join(out_dir, f&quot;blocks_generic_{CITY}.geojson&quot;)</span>
+<span class="d-ctx">     fc = json.load(open(blocks_path))</span>
+<span class="d-ctx">     feats = fc[&quot;features&quot;]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    disc_ll = [shp_shape(f[&quot;geometry&quot;]) for f in feats</span>
+<span class="d-add">+               if f[&quot;properties&quot;].get(&quot;road_class&quot;) == &quot;node&quot;]</span>
+<span class="d-add">+    if disc_ll:</span>
+<span class="d-add">+        def to_m_geom(a):  # (lon,lat) ndarray -&gt; metres in the same local frame</span>
+<span class="d-add">+            return np.column_stack(((a[:, 0] - w) * mlon, (a[:, 1] - s) * mlat))</span>
+<span class="d-add">+        discs_m = shapely.transform(np.array(disc_ll, dtype=object), to_m_geom)</span>
+<span class="d-add">+        merged = shapely.difference(merged, union_all(discs_m))</span>
+<span class="d-add">+        print(f&quot;[foot] subtracted {len(disc_ll)} junction discs&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    parts = [p for p in get_parts(merged) if p.area &gt;= MIN_AREA_M2]</span>
+<span class="d-add">+    print(f&quot;[foot] merged into {len(parts)} foot blocks (≥{MIN_AREA_M2:.0f} m²)&quot;)</span>
+<span class="d-ctx">     next_id = max((f[&quot;properties&quot;][&quot;block_id&quot;] for f in feats), default=-1) + 1</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     for poly in parts:</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/streetscape_blocks/build_node_blocks.py</span>
+            <span class="stat"><span class="d-add">+144</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">server · streetscape_blocks</span>
+        <span class="ctx-sum">Layer-2 block generators: street Voronoi, junction discs, foot fill, edge→block bake</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_node_blocks.py</span>
+        <span class="ctx-sum">NEW ~144 LOC — one disc block per walk-graph junction, punched out of street blocks</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module docstring</span><span class="ol-sum">why discs exist (the ladder) + pipeline position</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">junction_nodes</span><span class="ol-sum">unique-neighbour degree ≥ 3 over the walk graph (vectorized)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main — disc build</span><span class="ol-sum">12 m discs in the local-metres frame (same frame as the foot builder)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main — clip + append</span><span class="ol-sum">STRtree subtract from street blocks; append road_class=node features</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>junction_nodes — np.unique over sorted undirected pairs → bincount degree</li><li>disc build — shp_buffer(points, 12, quad_segs=4), transformed back to lon/lat</li><li>clip — tree.query(street_polys, &#x27;intersects&#x27;) grouped per block → shapely.difference</li><li>append — block_ids continue after streets; node_id property kept for debugging</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_node_blocks.py b/server/streetscape_blocks/build_node_blocks.py</span>
+<span class="d-ctx">new file mode 100644</span>
+<span class="d-meta">index 0000000..c3c9308</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_node_blocks.py</span>
+<span class="d-hunk">@@ -0,0 +1,144 @@</span>
+<span class="d-add">+#!/usr/bin/env python3</span>
+<span class="d-add">+&quot;&quot;&quot;Give every junction node its own block — a small disc punched out of the</span>
+<span class="d-add">+street/foot blocks (docs/three-layer-model.md §2).</span>
+<span class="d-add">+</span>
+<span class="d-add">+Why: block polygons extend across intersections (the Voronoi assigns the</span>
+<span class="d-add">+intersection flare to ONE of the crossing segments), so the short graph edges</span>
+<span class="d-add">+that cross an intersection get baked into a PERPENDICULAR street&#x27;s block. A</span>
+<span class="d-add">+route down an avenue then selects — and block-scoped casting votes on — every</span>
+<span class="d-add">+cross street it passes (&quot;ladder&quot; selections). Discs at junction nodes catch</span>
+<span class="d-add">+those edges&#x27; midpoints instead, so a path only ever touches blocks that share</span>
+<span class="d-add">+its orientation, plus the intersections themselves.</span>
+<span class="d-add">+</span>
+<span class="d-add">+What it does, given blocks_generic_&lt;city&gt;.geojson:</span>
+<span class="d-add">+  1. drops any road_class in {&quot;node&quot;,&quot;foot&quot;} features (idempotent re-runs; foot</span>
+<span class="d-add">+     blocks are rebuilt afterwards by build_foot_blocks.py);</span>
+<span class="d-add">+  2. finds junction nodes of the city walk graph — unique-neighbour degree &gt;= 3</span>
+<span class="d-add">+     (degree-2 geometry nodes and dead ends stay part of their street block);</span>
+<span class="d-add">+  3. buffers each into a disc of NODE_BLOCK_RADIUS_M (default 12 m ~ the client&#x27;s</span>
+<span class="d-add">+     3 px node hover/snap affordance at z≈15, and &gt; build_foot_blocks&#x27; 6 m tube</span>
+<span class="d-add">+     radius so foot components sever at junctions);</span>
+<span class="d-add">+  4. subtracts the discs from every street block they intersect (blocks and</span>
+<span class="d-add">+     discs never overlap — containment in the bake stays unambiguous);</span>
+<span class="d-add">+  5. appends the discs as features: road_class=&quot;node&quot;, seg_id=-1, node_id=&lt;idx&gt;,</span>
+<span class="d-add">+     block_id continuing after the street blocks.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Run in the SERVER venv, then re-run build_edge_blocks.py (see</span>
+<span class="d-add">+build_city_blocks.sh, which orders the whole pipeline):</span>
+<span class="d-add">+</span>
+<span class="d-add">+  CITY=nyc NETWORK=streets ./env/bin/python streetscape_blocks/build_node_blocks.py</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+import json</span>
+<span class="d-add">+import math</span>
+<span class="d-add">+import os</span>
+<span class="d-add">+import sys</span>
+<span class="d-add">+import time</span>
+<span class="d-add">+</span>
+<span class="d-add">+import numpy as np</span>
+<span class="d-add">+</span>
+<span class="d-add">+_HERE = os.path.dirname(os.path.abspath(__file__))</span>
+<span class="d-add">+_SERVER = os.path.abspath(os.path.join(_HERE, &quot;..&quot;))</span>
+<span class="d-add">+if _SERVER not in sys.path:</span>
+<span class="d-add">+    sys.path.insert(0, _SERVER)</span>
+<span class="d-add">+</span>
+<span class="d-add">+import shapely  # noqa: E402</span>
+<span class="d-add">+from shapely import STRtree, buffer as shp_buffer, points as shp_points, union_all  # noqa: E402</span>
+<span class="d-add">+from shapely.geometry import shape, mapping  # noqa: E402</span>
+<span class="d-add">+</span>
+<span class="d-add">+from cities import CITIES  # noqa: E402</span>
+<span class="d-add">+from graph_registry import CityGraph  # noqa: E402</span>
+<span class="d-add">+</span>
+<span class="d-add">+CITY = os.environ.get(&quot;CITY&quot;, &quot;nyc&quot;)</span>
+<span class="d-add">+NETWORK = os.environ.get(&quot;NETWORK&quot;, &quot;streets&quot;)</span>
+<span class="d-add">+RADIUS_M = float(os.environ.get(&quot;NODE_BLOCK_RADIUS_M&quot;, &quot;12&quot;))</span>
+<span class="d-add">+# Discs are 16-gons: plenty round at 12 m, keeps the geojson/tiles small.</span>
+<span class="d-add">+QUAD_SEGS = int(os.environ.get(&quot;NODE_BLOCK_QUAD_SEGS&quot;, &quot;4&quot;))</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def junction_nodes(g) -&gt; np.ndarray:</span>
+<span class="d-add">+    &quot;&quot;&quot;Indices of nodes with unique-neighbour degree &gt;= 3 (true junctions).&quot;&quot;&quot;</span>
+<span class="d-add">+    # edge rows are [u, v, name, road_class, length_m] — take the endpoints only</span>
+<span class="d-add">+    E = np.array([(e[0], e[1]) for e in g.edges], dtype=np.int64)</span>
+<span class="d-add">+    E = E[E[:, 0] != E[:, 1]]                      # self-edges don&#x27;t add degree</span>
+<span class="d-add">+    und = np.unique(np.sort(E, axis=1), axis=0)    # unique undirected pairs</span>
+<span class="d-add">+    deg = np.bincount(und.ravel(), minlength=len(g.nodes))</span>
+<span class="d-add">+    return np.where(deg &gt;= 3)[0]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def main():</span>
+<span class="d-add">+    t0 = time.time()</span>
+<span class="d-add">+    city = CITIES[CITY]</span>
+<span class="d-add">+    g = CityGraph(city, redis_client=None, network=NETWORK)</span>
+<span class="d-add">+    g.ensure_loaded()</span>
+<span class="d-add">+    nodes = np.asarray(g.nodes, dtype=np.float64)  # [N,2] = (lat, lon)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    junctions = junction_nodes(g)</span>
+<span class="d-add">+    print(f&quot;[node_blocks] {len(junctions)} junction nodes &quot;</span>
+<span class="d-add">+          f&quot;(deg&gt;=3) of {len(nodes)} — r={RADIUS_M}m&quot;, flush=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # Same local equirectangular frame as build_foot_blocks.py so both scripts</span>
+<span class="d-add">+    # agree exactly on where a disc&#x27;s boundary falls.</span>
+<span class="d-add">+    s, w, n, e = city.bbox</span>
+<span class="d-add">+    mlat = 111_320.0</span>
+<span class="d-add">+    mlon = 111_320.0 * math.cos(math.radians((s + n) / 2))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    xs = (nodes[junctions, 1] - w) * mlon</span>
+<span class="d-add">+    ys = (nodes[junctions, 0] - s) * mlat</span>
+<span class="d-add">+    discs_m = shp_buffer(shp_points(xs, ys), RADIUS_M, quad_segs=QUAD_SEGS)</span>
+<span class="d-add">+    to_ll = lambda a: np.column_stack((a[:, 0] / mlon + w, a[:, 1] / mlat + s))</span>
+<span class="d-add">+    discs = shapely.transform(discs_m, to_ll)</span>
+<span class="d-add">+    print(f&quot;[node_blocks] built {len(discs)} discs in {time.time()-t0:.0f}s&quot;, flush=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    out_dir = os.environ.get(&quot;BLOCKS_OUT&quot;, os.path.join(_HERE, &quot;output&quot;))</span>
+<span class="d-add">+    blocks_path = os.path.join(out_dir, f&quot;blocks_generic_{CITY}.geojson&quot;)</span>
+<span class="d-add">+    fc = json.load(open(blocks_path))</span>
+<span class="d-add">+    feats = [f for f in fc[&quot;features&quot;]</span>
+<span class="d-add">+             if f[&quot;properties&quot;].get(&quot;road_class&quot;) not in (&quot;node&quot;, &quot;foot&quot;)]</span>
+<span class="d-add">+    dropped = len(fc[&quot;features&quot;]) - len(feats)</span>
+<span class="d-add">+    if dropped:</span>
+<span class="d-add">+        print(f&quot;[node_blocks] dropped {dropped} stale node/foot features &quot;</span>
+<span class="d-add">+              f&quot;(rebuilt downstream)&quot;, flush=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # Subtract every disc from every street block it intersects.</span>
+<span class="d-add">+    geoms = shapely.from_geojson(</span>
+<span class="d-add">+        json.dumps({&quot;type&quot;: &quot;GeometryCollection&quot;,</span>
+<span class="d-add">+                    &quot;geometries&quot;: [f[&quot;geometry&quot;] for f in feats]}))</span>
+<span class="d-add">+    polys = np.asarray(shapely.get_parts(geoms) if geoms.geom_type == &quot;GeometryCollection&quot;</span>
+<span class="d-add">+                       else [geoms], dtype=object)</span>
+<span class="d-add">+    tree = STRtree(discs)</span>
+<span class="d-add">+    block_idx, disc_idx = tree.query(polys, predicate=&quot;intersects&quot;)</span>
+<span class="d-add">+    print(f&quot;[node_blocks] clipping {len(np.unique(block_idx))} street blocks &quot;</span>
+<span class="d-add">+          f&quot;touched by discs…&quot;, flush=True)</span>
+<span class="d-add">+    cut = 0</span>
+<span class="d-add">+    for bi in np.unique(block_idx):</span>
+<span class="d-add">+        d_union = union_all(discs[disc_idx[block_idx == bi]])</span>
+<span class="d-add">+        # area_m2 is left as-is: informational only, and the removed disc area</span>
+<span class="d-add">+        # (~450 m² per touched corner) is small against a block&#x27;s ROW.</span>
+<span class="d-add">+        feats[bi][&quot;geometry&quot;] = mapping(shapely.difference(polys[bi], d_union))</span>
+<span class="d-add">+        cut += 1</span>
+<span class="d-add">+</span>
+<span class="d-add">+    next_id = max((f[&quot;properties&quot;][&quot;block_id&quot;] for f in feats), default=-1) + 1</span>
+<span class="d-add">+    disc_area = math.pi * RADIUS_M * RADIUS_M</span>
+<span class="d-add">+    for k, poly in enumerate(discs):</span>
+<span class="d-add">+        feats.append({</span>
+<span class="d-add">+            &quot;type&quot;: &quot;Feature&quot;,</span>
+<span class="d-add">+            &quot;properties&quot;: {</span>
+<span class="d-add">+                &quot;block_id&quot;: next_id, &quot;seg_id&quot;: -1, &quot;road_class&quot;: &quot;node&quot;,</span>
+<span class="d-add">+                &quot;road_name&quot;: None, &quot;area_m2&quot;: round(disc_area, 1),</span>
+<span class="d-add">+                &quot;node_id&quot;: int(junctions[k]),</span>
+<span class="d-add">+            },</span>
+<span class="d-add">+            &quot;geometry&quot;: mapping(poly),</span>
+<span class="d-add">+        })</span>
+<span class="d-add">+        next_id += 1</span>
+<span class="d-add">+</span>
+<span class="d-add">+    fc[&quot;features&quot;] = feats</span>
+<span class="d-add">+    tmp = blocks_path + &quot;.tmp&quot;</span>
+<span class="d-add">+    json.dump(fc, open(tmp, &quot;w&quot;))</span>
+<span class="d-add">+    os.replace(tmp, blocks_path)</span>
+<span class="d-add">+    print(f&quot;[node_blocks] clipped {cut} blocks, appended {len(discs)} node discs &quot;</span>
+<span class="d-add">+          f&quot;→ {os.path.basename(blocks_path)} ({len(feats)} features, &quot;</span>
+<span class="d-add">+          f&quot;{time.time()-t0:.0f}s)&quot;, flush=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+if __name__ == &quot;__main__&quot;:</span>
+<span class="d-add">+    main()</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes-routeprop-ui.diff</code> by <code>changelog/build_routeprop_ui_report.py</code>.
+    Regenerate after further edits with
+    <code>git diff 12475e6^ -- &lt;files&gt; &gt; changelog/changes-routeprop-ui.diff &amp;&amp; python changelog/build_routeprop_ui_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
