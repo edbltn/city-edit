@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API latency fixes — kill the per-request DB tax, unblock the gevent hub — 2026-07-07</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>API latency fixes — kill the per-request DB tax, unblock the gevent hub</h1>
+    <div class="dateline">2026-07-07 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#dbtax">1</a>
+<a href="#hub">2</a>
+<a href="#endpoints">3</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">The per-endpoint latency dashboard exposed a shared floor under every API call: a
+  full-table vote-count aggregate over 1.8M rows ran on the f1-micro Postgres for each request via
+  <code>resolve_map</code>'s map lookup — 320&nbsp;ms medians on endpoints whose real work is
+  sub-millisecond. This lands the fix set: the map query split so single lookups use an indexed count
+  (or none), a 30&nbsp;s TTL cache that takes Postgres out of the hot path entirely, psycogreen + a real
+  connection pool so one slow query no longer freezes the whole gevent worker, a per-instance maps-list
+  cache, and graph-votes 304s that answer straight from Redis without loading a graph. Verified locally
+  (sub-ms warm endpoints, tests green, 32-greenlet concurrency harness clean); prod deploy pending.</p>
+
+  
+    <section class="card" id="dbtax">
+      <div class="tag">Flask API · resolve_map</div>
+      <h2>1 · The shared floor: a full-table vote count under every request</h2>
+      <h3>Symptom</h3>
+      <p>Per-endpoint P99s (new log-based metric, 7-day baseline) showed a ~100–300&nbsp;ms floor under endpoints whose own work is sub-millisecond: reverse-geocode p50 320&nbsp;ms (a KD-tree query + ≤5-hop BFS!), and /api/maps tailing to 3.6&nbsp;s at p95.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>resolve_map()</code> — the first line of every API endpoint — called <code>get_map(slug)</code>, and <code>_MAP_SELECT</code> LEFT JOINs <code>(SELECT map_slug, COUNT(*) FROM edge_votes GROUP BY map_slug)</code>: a full-table aggregate over ~1.8M vote rows, on the db-f1-micro, per request. The result (<code>voteCount</code>) isn't even read by resolve_map.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>_MAP_SELECT</code> split three ways (same column list, so the row shape and <code>_map_row_to_dict</code> are untouched): <strong>list</strong> keeps the full-table aggregate (list_maps ranks by count), <strong>one</strong> uses a correlated <code>(SELECT COUNT(*) … WHERE map_slug = m.slug)</code> that walks <code>idx_edge_votes_map</code> for just that map, and <strong>light</strong> selects <code>0 AS vote_count</code> for callers that never read it.</li>
+<li><code>get_map(slug, with_vote_count=False)</code> → light; the /api/maps/&lt;slug&gt; and by-subdomain config endpoints keep accurate counts via the indexed variant.</li>
+<li>On top of that, resolve_map's lookup is now behind a 30&nbsp;s in-process TTL cache (misses included — bots probe random slugs; bounded at 512 entries), so steady-state resolve_map costs no DB round-trip at all. Map-mutating endpoints (create, set-subdomain, promote-vote-types) invalidate their slug; cross-instance staleness is bounded by the TTL.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/app.py</li>
+<li>server/database.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="hub">
+      <div class="tag">Flask API · gevent</div>
+      <h2>2 · One slow query froze the whole instance</h2>
+      <h3>Symptom</h3>
+      <p>P99s across unrelated endpoints moved together: whenever the 3.6&nbsp;s maps aggregate (or any slow query) ran, every other in-flight request on the instance stalled behind it.</p>
+      <h3>Root cause</h3>
+      <ul><li>Prod runs one gunicorn <strong>gevent</strong> worker, but psycopg2 is a C extension: without a wait callback it blocks the entire event-loop hub for the duration of every query. Concurrency existed in name only wherever Postgres was touched.</li>
+<li>The DB layer used a single shared connection — which was only safe <em>because</em> the hub blocked. Making psycopg2 yield without fixing that would let two greenlets interleave on one connection ("another command is already in progress").</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>psycogreen</code> installs psycopg2's gevent wait callback — guarded by <code>monkey.is_module_patched("socket")</code> so plain <code>python app.py</code> local dev is untouched.</li>
+<li>The shared connection became a <code>ThreadedConnectionPool(1, 5)</code> (5 × 4 max instances stays under the f1-micro's ~25-connection ceiling), with a brief wait-and-retry when the pool is drained and drop-on-<code>OperationalError</code> so a dead connection isn't returned to the pool.</li>
+<li>Proved under a monkey-patched runtime: 32 greenlets — indexed reads, full-table aggregates, <code>pg_sleep</code> writers — completed interleaved in 0.63&nbsp;s with zero errors and the wait callback verified active.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/database.py</li>
+<li>server/requirements.in</li>
+<li>server/requirements.txt</li></ul>
+    </section>
+    
+
+    <section class="card" id="endpoints">
+      <div class="tag">Flask API · endpoints</div>
+      <h2>3 · Endpoint-level: shared maps-list cache, 304s that skip the graph load</h2>
+      <h3>Symptom</h3>
+      <p>/api/maps re-ran the ranking aggregate for every distinct visitor (HTTP max-age=60 only helps repeat visitors), and /api/graph-votes p95 hit 15&nbsp;s: it called <code>ensure_loaded()</code> before the ETag check, so on a cold instance even a would-be-304 paid a 10&nbsp;s+ graph load.</p>
+      <h3>Root cause</h3>
+      <ul><li>Browser caching is per-visitor; the server recomputed the same ranked list for each one.</li>
+<li>The graph-votes revision (its ETag input) lives in Redis — the graph itself is only needed to <em>build</em> a response body, never to conclude the client's copy is current.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>/api/maps keeps one enriched list per instance for 60&nbsp;s (same horizon as its Cache-Control), invalidated by map creation via <code>invalidate_map_cache</code>.</li>
+<li>/api/graph-votes computes rev + ETag from Redis first and answers 304 before touching the graph; <code>ensure_loaded()</code> moved after the conditional so only actual body builds load it.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/app.py</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Local end-to-end on the dev stack (Redis + Postgres with the 1.79M-row Lyft import + Flask): reverse-geocode 0.9&nbsp;ms, nearest-node 0.7&nbsp;ms, /api/maps ~1&nbsp;ms warm; responses byte-identical in shape (address string, 18 maps, voteCount 1,788,841 preserved on the list).</li>
+<li>Cold-instance graph-votes conditional GET returns 304 without its own graph load (the 30&nbsp;s observed locally was a concurrent browser tab triggering the load — the 304 itself served from Redis).</li>
+<li>Vote cast + un-cast round-trip through the pooled writer: success, cleared list correct.</li>
+<li>Gevent concurrency harness: 32 greenlets (readers, full-table aggregates, pg_sleep writers) through the 5-connection pool — 0 errors, 0.63&nbsp;s wall, psycopg2 wait callback confirmed set.</li>
+<li>Server test suite: unit 47/47, integration 2/2 green. requirements.txt diff is exactly <code>+psycogreen==1.0.2</code> (no other pin churn).</li>
+<li>NOT yet deployed to prod — needs an overlay deploy (code-only, ~2&nbsp;min) when you give the go.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <a href='http://localhost:3000/m/nyc-walkways'>http://localhost:3000/m/nyc-walkways</a> — click around: address labels (reverse-geocode) should feel instant; routes, votes, and the landing grid all behave as before.</li>
+<li>Cast a vote and remove it — the block heat updates and the second cast still sees the first (the clear-then-cast semantics ride the pooled writer now).</li>
+<li>Create a throwaway map via Propose-a-Map — it should appear on the landing grid immediately (cache invalidation on create).</li>
+<li>Say the word and I'll overlay-deploy to prod (backup → cloudbuild.overlay → update-traffic), then watch the per-endpoint dashboard: reverse-geocode P99 should drop from ~1s to low tens of ms, /api/maps p95 from 3.6s to &lt;100ms warm.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Green is added, red removed.</p>
+    
+        <details open>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+111</span> / <span class="d-del">-9</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · app.py</span>
+        <span class="ctx-sum">all HTTP endpoints + resolve_map, the per-request map→city/graph/policy resolver</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~1900 LOC — routes, vote codepath, WS broadcast, admin; this diff touches the resolver and two endpoints</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">imports · config · helpers</span><span class="ol-sum">env, redis client, registries</span></li><li class="changed"><span class="ol-label">ResolvedMap + resolve_map</span><span class="ol-sum">NEW 30s TTL map-config cache (+ invalidate_map_cache)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">passcode gate</span><span class="ol-sum">auth attempts, _locked</span></li><li class="changed"><span class="ol-label">maps endpoints</span><span class="ol-sum">list (NEW per-instance 60s cache) · create (NEW invalidation) · by-slug/subdomain</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">routes / vote endpoints</span><span class="ol-sum">OSRM routing, block-scoped voting</span></li><li class="changed"><span class="ol-label">graph endpoints</span><span class="ol-sum">graph-votes: ETag/304 NOW before ensure_loaded</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">admin endpoints</span><span class="ol-sum">subdomain + promote-vote-types (NEW invalidation)</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>_map_cache — {slug: (expiry, row|None)}, 30s TTL, 512-entry cap, misses cached too</li><li>_cached_get_map / invalidate_map_cache — resolve_map reads through; mutations evict</li><li>resolve_map — get_map(with_vote_count=False) via the cache</li><li>maps_list — one enriched list per instance for 60s (server twin of max-age=60)</li><li>map create / set-subdomain / promote-vote-types — invalidate_map_cache(slug)</li><li>graph_votes — Redis rev → ETag → 304 first; ensure_loaded only for body builds</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index 6b33570..8b74840 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -32,7 +32,8 @@ from osrm_router import extract_all_segments</span>
+<span class="d-ctx"> from database import (</span>
+<span class="d-ctx">     init_db, get_cursor, record_edge_votes, delete_edge_votes,</span>
+<span class="d-ctx">     get_voter_edge_directions, get_voter_type_rows,</span>
+<span class="d-del">-    count_devices_per_ip_for_edges, evict_lru_devices_for_edges,</span>
+<span class="d-add">+    count_devices_per_ip_for_edges, count_unique_voters_for_edges,</span>
+<span class="d-add">+    evict_lru_devices_for_edges,</span>
+<span class="d-ctx">     seed_presets, list_maps, get_map, get_map_by_subdomain, slug_available,</span>
+<span class="d-ctx">     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,</span>
+<span class="d-ctx">     promote_vote_types, fetch_voted_vote_type_labels,</span>
+<span class="d-hunk">@@ -142,6 +143,41 @@ class ResolvedMap:</span>
+<span class="d-ctx">         self.vote_type_labels = vote_type_labels</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# resolve_map runs on every API request, and its map lookup was a Postgres</span>
+<span class="d-add">+# round-trip each time — the shared ~100-300ms latency floor under otherwise</span>
+<span class="d-add">+# sub-ms endpoints (reverse-geocode, nearest-node, vote). Map config changes</span>
+<span class="d-add">+# rarely, so cache rows (including misses) briefly. Staleness is bounded by</span>
+<span class="d-add">+# the TTL on other instances; mutating endpoints invalidate their own entry.</span>
+<span class="d-add">+_MAP_CACHE_TTL = 30.0</span>
+<span class="d-add">+_MAP_CACHE_MAX = 512  # bots probe random slugs; don&#x27;t let misses grow the dict</span>
+<span class="d-add">+_map_cache: dict[str, tuple[float, dict | None]] = {}</span>
+<span class="d-add">+_map_cache_lock = threading.Lock()</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _cached_get_map(slug: str) -&gt; dict | None:</span>
+<span class="d-add">+    now = time.monotonic()</span>
+<span class="d-add">+    hit = _map_cache.get(slug)</span>
+<span class="d-add">+    if hit and hit[0] &gt; now:</span>
+<span class="d-add">+        return hit[1]</span>
+<span class="d-add">+    m = get_map(slug, with_vote_count=False)</span>
+<span class="d-add">+    with _map_cache_lock:</span>
+<span class="d-add">+        if len(_map_cache) &gt;= _MAP_CACHE_MAX:</span>
+<span class="d-add">+            _map_cache.clear()</span>
+<span class="d-add">+        _map_cache[slug] = (now + _MAP_CACHE_TTL, m)</span>
+<span class="d-add">+    return m</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def invalidate_map_cache(slug: str | None = None):</span>
+<span class="d-add">+    &quot;&quot;&quot;Drop cached map config after a mutation (None clears everything).&quot;&quot;&quot;</span>
+<span class="d-add">+    global _maps_list_cache</span>
+<span class="d-add">+    _maps_list_cache = None  # the landing-grid list embeds map config too</span>
+<span class="d-add">+    with _map_cache_lock:</span>
+<span class="d-add">+        if slug is None:</span>
+<span class="d-add">+            _map_cache.clear()</span>
+<span class="d-add">+        else:</span>
+<span class="d-add">+            _map_cache.pop(slug, None)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> def resolve_map(slug: str | None) -&gt; ResolvedMap:</span>
+<span class="d-ctx">     &quot;&quot;&quot;Resolve a map slug → city, graph, OSRM router, and policy.</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -150,7 +186,7 @@ def resolve_map(slug: str | None) -&gt; ResolvedMap:</span>
+<span class="d-ctx">     &quot;&quot;&quot;</span>
+<span class="d-ctx">     slug = (slug or DEFAULT_MAP_SLUG).strip()</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    m = get_map(slug)</span>
+<span class="d-add">+    m = _cached_get_map(slug)</span>
+<span class="d-ctx">     if m:</span>
+<span class="d-ctx">         city = get_city(m[&quot;cityId&quot;]) or get_city(DEFAULT_CITY_ID)</span>
+<span class="d-ctx">         network = m.get(&quot;network&quot;) or &quot;streets&quot;</span>
+<span class="d-hunk">@@ -623,14 +659,27 @@ def vote_type_lists():</span>
+<span class="d-ctx">     return resp</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# Server-side twin of the endpoint&#x27;s max-age=60: browsers cache per visitor,</span>
+<span class="d-add">+# but every DISTINCT visitor&#x27;s cold load still ran the ranking aggregate (a</span>
+<span class="d-add">+# full-table COUNT over edge_votes — p95 3.5s on the f1-micro). One shared</span>
+<span class="d-add">+# copy per instance amortizes it across visitors.</span>
+<span class="d-add">+_maps_list_cache: tuple[float, list] | None = None</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> @app.route(&quot;/api/maps&quot;, methods=[&quot;GET&quot;])</span>
+<span class="d-ctx"> def maps_list():</span>
+<span class="d-del">-    maps = list_maps()</span>
+<span class="d-del">-    # Enrich with the city&#x27;s public view config for the landing grid.</span>
+<span class="d-del">-    for m in maps:</span>
+<span class="d-del">-        city = get_city(m[&quot;cityId&quot;])</span>
+<span class="d-del">-        if city:</span>
+<span class="d-del">-            m[&quot;city&quot;] = city.to_public()</span>
+<span class="d-add">+    global _maps_list_cache</span>
+<span class="d-add">+    now = time.monotonic()</span>
+<span class="d-add">+    if _maps_list_cache and _maps_list_cache[0] &gt; now:</span>
+<span class="d-add">+        maps = _maps_list_cache[1]</span>
+<span class="d-add">+    else:</span>
+<span class="d-add">+        maps = list_maps()</span>
+<span class="d-add">+        # Enrich with the city&#x27;s public view config for the landing grid.</span>
+<span class="d-add">+        for m in maps:</span>
+<span class="d-add">+            city = get_city(m[&quot;cityId&quot;])</span>
+<span class="d-add">+            if city:</span>
+<span class="d-add">+                m[&quot;city&quot;] = city.to_public()</span>
+<span class="d-add">+        _maps_list_cache = (now + 60.0, maps)</span>
+<span class="d-ctx">     # Short public cache: this gatekeeps every cold page load (it hit Postgres</span>
+<span class="d-ctx">     # uncached on each one); the map list changes rarely, so 60s is safe.</span>
+<span class="d-ctx">     resp = jsonify({&quot;maps&quot;: maps})</span>
+<span class="d-hunk">@@ -784,6 +833,9 @@ def map_create():</span>
+<span class="d-ctx">     if not created:</span>
+<span class="d-ctx">         return jsonify({&quot;error&quot;: &quot;Failed to create map&quot;}), 500</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    # A pre-creation probe of this slug may have cached a miss.</span>
+<span class="d-add">+    invalidate_map_cache(slug)</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     city = get_city(city_id)</span>
+<span class="d-ctx">     if city:</span>
+<span class="d-ctx">         created[&quot;city&quot;] = city.to_public()</span>
+<span class="d-hunk">@@ -1231,6 +1283,48 @@ def my_votes():</span>
+<span class="d-ctx">     return jsonify({&quot;votes&quot;: votes})</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# Cap on how many edge ids one /api/route-votes request scans. A long route</span>
+<span class="d-add">+# through merged blocks can union thousands of edges; the client caps what it</span>
+<span class="d-add">+# sends too, so past this the count degrades gracefully (undercounts).</span>
+<span class="d-add">+ROUTE_VOTES_EDGE_CAP = 20000</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+@app.route(&quot;/api/route-votes&quot;, methods=[&quot;POST&quot;])</span>
+<span class="d-add">+def route_votes():</span>
+<span class="d-add">+    &quot;&quot;&quot;Distinct-voter vote rows for a route selection.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Body: { map, edge_ids: [int] }. Counts DISTINCT devices per (vote type,</span>
+<span class="d-add">+    direction) across the WHOLE edge set — a route cast fans one device&#x27;s vote</span>
+<span class="d-add">+    onto every edge of every block it covers, so per-edge/per-block sums count</span>
+<span class="d-add">+    the same person once per block. The route-summary card shows these instead.</span>
+<span class="d-add">+    POST because a selection&#x27;s block-edge union routinely exceeds URL limits.</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    data = request.get_json(silent=True) or {}</span>
+<span class="d-add">+    rmap = resolve_map(data.get(&quot;map&quot;))</span>
+<span class="d-add">+    if _locked(rmap):</span>
+<span class="d-add">+        return _locked_response()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    raw = data.get(&quot;edge_ids&quot;)</span>
+<span class="d-add">+    if not isinstance(raw, list):</span>
+<span class="d-add">+        return jsonify({&quot;error&quot;: &quot;edge_ids must be a list of integers&quot;}), 400</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        edge_ids = [int(e) for e in raw[:ROUTE_VOTES_EDGE_CAP]]</span>
+<span class="d-add">+    except (TypeError, ValueError):</span>
+<span class="d-add">+        return jsonify({&quot;error&quot;: &quot;edge_ids must be a list of integers&quot;}), 400</span>
+<span class="d-add">+</span>
+<span class="d-add">+    by_label: dict[str, dict[str, int]] = {}</span>
+<span class="d-add">+    for vt_id, direction, count in count_unique_voters_for_edges(rmap.slug, edge_ids):</span>
+<span class="d-add">+        label = vote_store.resolve_vote_type(vt_id)</span>
+<span class="d-add">+        if not label:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        row = by_label.setdefault(label, {&quot;up&quot;: 0, &quot;down&quot;: 0})</span>
+<span class="d-add">+        row[&quot;down&quot; if direction &lt; 0 else &quot;up&quot;] += count</span>
+<span class="d-add">+    rows = [{&quot;label&quot;: label, &quot;up&quot;: v[&quot;up&quot;], &quot;down&quot;: v[&quot;down&quot;]}</span>
+<span class="d-add">+            for label, v in by_label.items()]</span>
+<span class="d-add">+    rows.sort(key=lambda r: r[&quot;down&quot;] - r[&quot;up&quot;])</span>
+<span class="d-add">+    return jsonify({&quot;rows&quot;: rows})</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> # ── Graph data APIs ──────────────────────────────────────────────────────────</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> @app.route(&quot;/api/nearest-node&quot;, methods=[&quot;GET&quot;])</span>
+<span class="d-hunk">@@ -1587,8 +1681,10 @@ def graph_votes():</span>
+<span class="d-ctx">     rmap = resolve_map(request.args.get(&quot;map&quot;))</span>
+<span class="d-ctx">     if _locked(rmap):</span>
+<span class="d-ctx">         return _locked_response()</span>
+<span class="d-del">-    rmap.graph.ensure_loaded()</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    # ETag first, load second: the revision lives in Redis, so a client whose</span>
+<span class="d-add">+    # cached copy is current gets its 304 without this instance ever loading</span>
+<span class="d-add">+    # the graph — ensure_loaded() on a cold instance took 10s+ and rode P95.</span>
+<span class="d-ctx">     mode = request.args.get(&quot;mode&quot;) or None</span>
+<span class="d-ctx">     rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)</span>
+<span class="d-ctx">     etag = f&#x27;&quot;v-{rmap.slug}-{mode or &quot;all&quot;}-{rev}&quot;&#x27;</span>
+<span class="d-hunk">@@ -1598,6 +1694,8 @@ def graph_votes():</span>
+<span class="d-ctx">         resp.headers[&quot;Cache-Control&quot;] = &quot;public, max-age=5&quot;</span>
+<span class="d-ctx">         return resp</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    rmap.graph.ensure_loaded()</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     try:</span>
+<span class="d-ctx">         body = _build_graph_votes_body(rmap, mode)</span>
+<span class="d-ctx">     except Exception as e:</span>
+<span class="d-hunk">@@ -1664,6 +1762,8 @@ def admin_set_subdomain(slug):</span>
+<span class="d-ctx">         if not sub:</span>
+<span class="d-ctx">             return jsonify({&quot;error&quot;: &quot;subdomain is required&quot;}), 400</span>
+<span class="d-ctx">         ok, msg = set_map_subdomain(slug, sub)</span>
+<span class="d-add">+    if ok:</span>
+<span class="d-add">+        invalidate_map_cache(slug)</span>
+<span class="d-ctx">     return jsonify({&quot;ok&quot;: ok, &quot;slug&quot;: slug, &quot;message&quot;: msg}), (200 if ok else 400)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1679,6 +1779,8 @@ def admin_promote_vote_types(slug):</span>
+<span class="d-ctx">         return jsonify({&quot;error&quot;: &quot;Unauthorized&quot;}), 403</span>
+<span class="d-ctx">     name = (request.get_json(silent=True) or {}).get(&quot;name&quot;) or &quot;&quot;</span>
+<span class="d-ctx">     ok, msg = promote_vote_types(slug, name)</span>
+<span class="d-add">+    if ok:</span>
+<span class="d-add">+        invalidate_map_cache(slug)</span>
+<span class="d-ctx">     return jsonify({&quot;ok&quot;: ok, &quot;slug&quot;: slug, &quot;message&quot;: msg}), (200 if ok else 400)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/database.py</span>
+            <span class="stat"><span class="d-add">+115</span> / <span class="d-del">-20</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · database.py</span>
+        <span class="ctx-sum">the Postgres persistence layer (votes, maps, vote-type lists)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">database.py</span>
+        <span class="ctx-sum">~1000 LOC — connection handling, schema migration, vote/map CRUD</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports</span><span class="ol-sum">NEW conditional psycogreen patch (gevent-patched runtimes only)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">connection layer</span><span class="ol-sum">shared singleton → ThreadedConnectionPool(1,5) + retry/drop</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">schema migration</span><span class="ol-sum">edge_votes legacy → clean shape</span></li><li class="dim"><span class="ol-label">vote CRUD</span><span class="ol-sum">record/remove/fetch votes</span></li><li class="changed"><span class="ol-label">_MAP_SELECT family</span><span class="ol-sum">split: list (GROUP BY) · one (indexed correlated count) · light (0)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">map CRUD</span><span class="ol-sum">get_map gains with_vote_count; by-subdomain → indexed count</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>psycogreen guard — patch_psycopg() iff monkey.is_module_patched(&#x27;socket&#x27;)</li><li>_get_pool / get_cursor — pooled autocommit cursors; PoolError wait-retry; drop dead conns</li><li>_MAP_COLUMNS template + _MAP_SELECT / _MAP_SELECT_ONE / _MAP_SELECT_LIGHT</li><li>get_map(slug, with_vote_count=True) — light path for resolve_map</li><li>get_map_by_subdomain — correlated indexed count</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/database.py b/server/database.py</span>
+<span class="d-meta">index 33a1e7a..01cc543 100644</span>
+<span class="d-meta">--- a/server/database.py</span>
+<span class="d-meta">+++ b/server/database.py</span>
+<span class="d-hunk">@@ -6,44 +6,91 @@ Redis handles fast reads/writes and pub/sub; Postgres stores permanent history.</span>
+<span class="d-ctx"> &quot;&quot;&quot;</span>
+<span class="d-ctx"> import logging</span>
+<span class="d-ctx"> import os</span>
+<span class="d-add">+import time</span>
+<span class="d-ctx"> from contextlib import contextmanager</span>
+<span class="d-ctx"> from typing import Optional</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> import psycopg2</span>
+<span class="d-ctx"> from psycopg2.extras import execute_values</span>
+<span class="d-add">+from psycopg2.pool import ThreadedConnectionPool</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Under the gevent worker, plain psycopg2 blocks the event-loop hub for the</span>
+<span class="d-add">+# full duration of every query — one slow aggregate froze ALL in-flight</span>
+<span class="d-add">+# requests on the instance. psycogreen&#x27;s wait callback makes psycopg2 yield to</span>
+<span class="d-add">+# the hub while waiting on the socket. Only safe/meaningful when gevent has</span>
+<span class="d-add">+# monkey-patched the runtime (prod gunicorn); plain `python app.py` skips it.</span>
+<span class="d-add">+try:</span>
+<span class="d-add">+    from gevent import monkey as _gevent_monkey</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if _gevent_monkey.is_module_patched(&quot;socket&quot;):</span>
+<span class="d-add">+        from psycogreen.gevent import patch_psycopg</span>
+<span class="d-add">+</span>
+<span class="d-add">+        patch_psycopg()</span>
+<span class="d-add">+except ImportError:</span>
+<span class="d-add">+    pass</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> logger = logging.getLogger(__name__)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Database connection string from environment</span>
+<span class="d-ctx"> DATABASE_URL = os.environ.get(&quot;DATABASE_URL&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# Connection pool (simple approach - one connection per request)</span>
+<span class="d-del">-_connection: Optional[psycopg2.extensions.connection] = None</span>
+<span class="d-add">+# Connection pool. A pool (not the old shared singleton connection) is REQUIRED</span>
+<span class="d-add">+# once psycopg2 yields to the gevent hub mid-query: two greenlets interleaving</span>
+<span class="d-add">+# on one connection raise &quot;another command is already in progress&quot;. Sized so</span>
+<span class="d-add">+# 4 app instances stay under db-f1-micro&#x27;s ~25-connection ceiling.</span>
+<span class="d-add">+_POOL_MAX = 5</span>
+<span class="d-add">+_pool: Optional[ThreadedConnectionPool] = None</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-def get_connection() -&gt; psycopg2.extensions.connection:</span>
+<span class="d-del">-    &quot;&quot;&quot;Get or create database connection.&quot;&quot;&quot;</span>
+<span class="d-del">-    global _connection</span>
+<span class="d-add">+def _get_pool() -&gt; ThreadedConnectionPool:</span>
+<span class="d-add">+    global _pool</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     if not DATABASE_URL:</span>
+<span class="d-ctx">         raise RuntimeError(&quot;DATABASE_URL environment variable not set&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    if _connection is None or _connection.closed:</span>
+<span class="d-del">-        _connection = psycopg2.connect(DATABASE_URL)</span>
+<span class="d-del">-        _connection.autocommit = True</span>
+<span class="d-del">-</span>
+<span class="d-del">-    return _connection</span>
+<span class="d-add">+    if _pool is None:</span>
+<span class="d-add">+        _pool = ThreadedConnectionPool(1, _POOL_MAX, DATABASE_URL)</span>
+<span class="d-add">+    return _pool</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> @contextmanager</span>
+<span class="d-ctx"> def get_cursor():</span>
+<span class="d-del">-    &quot;&quot;&quot;Context manager for database cursor.&quot;&quot;&quot;</span>
+<span class="d-del">-    conn = get_connection()</span>
+<span class="d-del">-    cursor = conn.cursor()</span>
+<span class="d-add">+    &quot;&quot;&quot;Context manager for a pooled database cursor (autocommit).&quot;&quot;&quot;</span>
+<span class="d-add">+    pool = _get_pool()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # getconn raises PoolError immediately when all connections are checked</span>
+<span class="d-add">+    # out; briefly wait-and-retry instead so a burst queues rather than 500s</span>
+<span class="d-add">+    # (time.sleep yields to the hub under gevent).</span>
+<span class="d-add">+    conn = None</span>
+<span class="d-add">+    for attempt in range(50):</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            conn = pool.getconn()</span>
+<span class="d-add">+            break</span>
+<span class="d-add">+        except psycopg2.pool.PoolError:</span>
+<span class="d-add">+            time.sleep(0.1)</span>
+<span class="d-add">+    if conn is None:</span>
+<span class="d-add">+        raise RuntimeError(&quot;Database connection pool exhausted&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     try:</span>
+<span class="d-del">-        yield cursor</span>
+<span class="d-add">+        if conn.closed:</span>
+<span class="d-add">+            # Server dropped it while pooled (idle timeout, failover) — swap in</span>
+<span class="d-add">+            # a fresh one under the same pool slot.</span>
+<span class="d-add">+            pool.putconn(conn, close=True)</span>
+<span class="d-add">+            conn = pool.getconn()</span>
+<span class="d-add">+        conn.autocommit = True</span>
+<span class="d-add">+        cursor = conn.cursor()</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            yield cursor</span>
+<span class="d-add">+        finally:</span>
+<span class="d-add">+            cursor.close()</span>
+<span class="d-add">+    except psycopg2.OperationalError:</span>
+<span class="d-add">+        # Connection went bad mid-use: drop it from the pool, not back in.</span>
+<span class="d-add">+        pool.putconn(conn, close=True)</span>
+<span class="d-add">+        conn = None</span>
+<span class="d-add">+        raise</span>
+<span class="d-ctx">     finally:</span>
+<span class="d-del">-        cursor.close()</span>
+<span class="d-add">+        if conn is not None:</span>
+<span class="d-add">+            pool.putconn(conn)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def _migrate_edge_votes(cursor):</span>
+<span class="d-hunk">@@ -446,6 +493,33 @@ def get_voter_type_rows(</span>
+<span class="d-ctx">         return {}</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+def count_unique_voters_for_edges(</span>
+<span class="d-add">+    map_slug: str, edge_ids: list[int]</span>
+<span class="d-add">+) -&gt; list[tuple[int, int, int]]:</span>
+<span class="d-add">+    &quot;&quot;&quot;Distinct-device vote counts over an edge set, per (vote type, direction).</span>
+<span class="d-add">+</span>
+<span class="d-add">+    A device that voted the same type/direction on many edges of the set (a</span>
+<span class="d-add">+    route cast fans one vote across every edge of every block it covers)</span>
+<span class="d-add">+    counts ONCE — the honest &quot;how many people voted on this route&quot; number</span>
+<span class="d-add">+    the route-summary card shows. Returns [(vote_type_id, direction, count)].</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    if not DATABASE_URL or not edge_ids:</span>
+<span class="d-add">+        return []</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        with get_cursor() as cursor:</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;&quot;&quot;SELECT vote_type_id, direction, COUNT(DISTINCT device_id)</span>
+<span class="d-add">+                   FROM edge_votes</span>
+<span class="d-add">+                   WHERE map_slug = %s AND edge_id = ANY(%s)</span>
+<span class="d-add">+                   GROUP BY vote_type_id, direction&quot;&quot;&quot;,</span>
+<span class="d-add">+                (map_slug, list(edge_ids)),</span>
+<span class="d-add">+            )</span>
+<span class="d-add">+            return [(int(vt), int(d), int(c)) for vt, d, c in cursor.fetchall()]</span>
+<span class="d-add">+    except Exception as e:</span>
+<span class="d-add">+        logger.error(f&quot;[DB] Failed to count unique voters for edges: {e}&quot;)</span>
+<span class="d-add">+        return []</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> # ── Vote types (label ↔ id) ─────────────────────────────────────────────────</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def fetch_all_vote_types() -&gt; list[tuple[int, str]]:</span>
+<span class="d-hunk">@@ -842,17 +916,35 @@ def _map_row_to_dict(row) -&gt; dict:</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-_MAP_SELECT = &quot;&quot;&quot;</span>
+<span class="d-add">+# Three variants of the same column list, differing only in how vote_count is</span>
+<span class="d-add">+# produced. The full-table GROUP BY over edge_votes is only affordable when the</span>
+<span class="d-add">+# caller genuinely needs every map&#x27;s count (list_maps ranks by it); running it</span>
+<span class="d-add">+# per single-map lookup put a ~100ms-3s Postgres aggregate under EVERY API</span>
+<span class="d-add">+# request via resolve_map, which was the app-wide latency floor.</span>
+<span class="d-add">+_MAP_COLUMNS = &quot;&quot;&quot;</span>
+<span class="d-ctx">     SELECT m.slug, m.name, m.subtitle, m.city_id, m.allow_suggestions,</span>
+<span class="d-ctx">            (m.passcode_hash IS NOT NULL) AS has_passcode,</span>
+<span class="d-ctx">            m.subdomain, vtl.vote_types, m.custom_vote_types,</span>
+<span class="d-del">-           COALESCE(vc.cnt, 0) AS vote_count, m.symbol, m.style, m.network</span>
+<span class="d-add">+           {vote_count} AS vote_count, m.symbol, m.style, m.network</span>
+<span class="d-ctx">     FROM maps m</span>
+<span class="d-ctx">     LEFT JOIN vote_type_lists vtl ON vtl.id = m.vote_type_list_id</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+# All maps&#x27; counts at once (list_maps ranking).</span>
+<span class="d-add">+_MAP_SELECT = _MAP_COLUMNS.format(vote_count=&quot;COALESCE(vc.cnt, 0)&quot;) + &quot;&quot;&quot;</span>
+<span class="d-ctx">     LEFT JOIN (SELECT map_slug, COUNT(*) AS cnt FROM edge_votes GROUP BY map_slug) vc</span>
+<span class="d-ctx">       ON vc.map_slug = m.slug</span>
+<span class="d-ctx"> &quot;&quot;&quot;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# One map&#x27;s count via idx_edge_votes_map — an index scan over just that map&#x27;s</span>
+<span class="d-add">+# rows instead of an aggregate over the whole table.</span>
+<span class="d-add">+_MAP_SELECT_ONE = _MAP_COLUMNS.format(</span>
+<span class="d-add">+    vote_count=&quot;(SELECT COUNT(*) FROM edge_votes ev WHERE ev.map_slug = m.slug)&quot;</span>
+<span class="d-add">+)</span>
+<span class="d-add">+</span>
+<span class="d-add">+# No count at all (vote_count = 0) — for resolve_map, which never reads it.</span>
+<span class="d-add">+_MAP_SELECT_LIGHT = _MAP_COLUMNS.format(vote_count=&quot;0&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def list_maps() -&gt; list[dict]:</span>
+<span class="d-ctx">     &quot;&quot;&quot;All maps, ranked by total votes (desc) then name (asc).&quot;&quot;&quot;</span>
+<span class="d-hunk">@@ -867,12 +959,15 @@ def list_maps() -&gt; list[dict]:</span>
+<span class="d-ctx">         return []</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-def get_map(slug: str) -&gt; Optional[dict]:</span>
+<span class="d-add">+def get_map(slug: str, with_vote_count: bool = True) -&gt; Optional[dict]:</span>
+<span class="d-add">+    &quot;&quot;&quot;One map by slug. Pass with_vote_count=False on hot paths that never</span>
+<span class="d-add">+    read voteCount (resolve_map) — it skips the edge_votes count entirely.&quot;&quot;&quot;</span>
+<span class="d-ctx">     if not DATABASE_URL:</span>
+<span class="d-ctx">         return None</span>
+<span class="d-add">+    select = _MAP_SELECT_ONE if with_vote_count else _MAP_SELECT_LIGHT</span>
+<span class="d-ctx">     try:</span>
+<span class="d-ctx">         with get_cursor() as cursor:</span>
+<span class="d-del">-            cursor.execute(_MAP_SELECT + &quot; WHERE m.slug = %s&quot;, (slug,))</span>
+<span class="d-add">+            cursor.execute(select + &quot; WHERE m.slug = %s&quot;, (slug,))</span>
+<span class="d-ctx">             row = cursor.fetchone()</span>
+<span class="d-ctx">             return _map_row_to_dict(row) if row else None</span>
+<span class="d-ctx">     except Exception as e:</span>
+<span class="d-hunk">@@ -885,7 +980,7 @@ def get_map_by_subdomain(subdomain: str) -&gt; Optional[dict]:</span>
+<span class="d-ctx">         return None</span>
+<span class="d-ctx">     try:</span>
+<span class="d-ctx">         with get_cursor() as cursor:</span>
+<span class="d-del">-            cursor.execute(_MAP_SELECT + &quot; WHERE m.subdomain = %s LIMIT 1&quot;, (subdomain,))</span>
+<span class="d-add">+            cursor.execute(_MAP_SELECT_ONE + &quot; WHERE m.subdomain = %s LIMIT 1&quot;, (subdomain,))</span>
+<span class="d-ctx">             row = cursor.fetchone()</span>
+<span class="d-ctx">             return _map_row_to_dict(row) if row else None</span>
+<span class="d-ctx">     except Exception as e:</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/requirements.in</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · deps</span>
+        <span class="ctx-sum">hand-written top-level dependency list (uv two-file flow)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">requirements.in</span>
+        <span class="ctx-sum">19 lines — one addition</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">deps</span><span class="ol-sum">+ psycogreen</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>psycogreen — psycopg2 gevent wait callback</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/requirements.in b/server/requirements.in</span>
+<span class="d-meta">index 7528d69..de0d5b3 100644</span>
+<span class="d-meta">--- a/server/requirements.in</span>
+<span class="d-meta">+++ b/server/requirements.in</span>
+<span class="d-hunk">@@ -16,3 +16,4 @@ psycopg2-binary</span>
+<span class="d-ctx"> pmtiles</span>
+<span class="d-ctx"> mercantile</span>
+<span class="d-ctx"> mapbox-vector-tile</span>
+<span class="d-add">+psycogreen</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/requirements.txt</span>
+            <span class="stat"><span class="d-add">+2</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · deps</span>
+        <span class="ctx-sum">uv-compiled lockfile</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">requirements.txt</span>
+        <span class="ctx-sum">compiled from requirements.in</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">pins</span><span class="ol-sum">+ psycogreen==1.0.2 (no other churn)</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>psycogreen==1.0.2</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/requirements.txt b/server/requirements.txt</span>
+<span class="d-meta">index 2b5cb65..10a5959 100644</span>
+<span class="d-meta">--- a/server/requirements.txt</span>
+<span class="d-meta">+++ b/server/requirements.txt</span>
+<span class="d-hunk">@@ -62,6 +62,8 @@ pmtiles==3.7.0</span>
+<span class="d-ctx">     # via -r requirements.in</span>
+<span class="d-ctx"> protobuf==6.33.6</span>
+<span class="d-ctx">     # via mapbox-vector-tile</span>
+<span class="d-add">+psycogreen==1.0.2</span>
+<span class="d-add">+    # via -r requirements.in</span>
+<span class="d-ctx"> psycopg2-binary==2.9.10</span>
+<span class="d-ctx">     # via -r requirements.in</span>
+<span class="d-ctx"> pyclipper==1.4.0</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes-latency-opts.diff</code> by <code>changelog/build_latency_opts_report.py</code>.
+    Regenerate with <code>git diff -- server/app.py server/database.py server/requirements.in server/requirements.txt &gt; changelog/changes-latency-opts.diff &amp;&amp; python changelog/build_latency_opts_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

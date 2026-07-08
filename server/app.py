@@ -32,7 +32,8 @@ from osrm_router import extract_all_segments
 from database import (
     init_db, get_cursor, record_edge_votes, delete_edge_votes,
     get_voter_edge_directions, get_voter_type_rows,
-    count_devices_per_ip_for_edges, evict_lru_devices_for_edges,
+    count_devices_per_ip_for_edges, count_unique_voters_for_edges,
+    evict_lru_devices_for_edges,
     seed_presets, list_maps, get_map, get_map_by_subdomain, slug_available,
     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,
     promote_vote_types, fetch_voted_vote_type_labels,
@@ -142,6 +143,41 @@ class ResolvedMap:
         self.vote_type_labels = vote_type_labels
 
 
+# resolve_map runs on every API request, and its map lookup was a Postgres
+# round-trip each time — the shared ~100-300ms latency floor under otherwise
+# sub-ms endpoints (reverse-geocode, nearest-node, vote). Map config changes
+# rarely, so cache rows (including misses) briefly. Staleness is bounded by
+# the TTL on other instances; mutating endpoints invalidate their own entry.
+_MAP_CACHE_TTL = 30.0
+_MAP_CACHE_MAX = 512  # bots probe random slugs; don't let misses grow the dict
+_map_cache: dict[str, tuple[float, dict | None]] = {}
+_map_cache_lock = threading.Lock()
+
+
+def _cached_get_map(slug: str) -> dict | None:
+    now = time.monotonic()
+    hit = _map_cache.get(slug)
+    if hit and hit[0] > now:
+        return hit[1]
+    m = get_map(slug, with_vote_count=False)
+    with _map_cache_lock:
+        if len(_map_cache) >= _MAP_CACHE_MAX:
+            _map_cache.clear()
+        _map_cache[slug] = (now + _MAP_CACHE_TTL, m)
+    return m
+
+
+def invalidate_map_cache(slug: str | None = None):
+    """Drop cached map config after a mutation (None clears everything)."""
+    global _maps_list_cache
+    _maps_list_cache = None  # the landing-grid list embeds map config too
+    with _map_cache_lock:
+        if slug is None:
+            _map_cache.clear()
+        else:
+            _map_cache.pop(slug, None)
+
+
 def resolve_map(slug: str | None) -> ResolvedMap:
     """Resolve a map slug → city, graph, OSRM router, and policy.
 
@@ -150,7 +186,7 @@ def resolve_map(slug: str | None) -> ResolvedMap:
     """
     slug = (slug or DEFAULT_MAP_SLUG).strip()
 
-    m = get_map(slug)
+    m = _cached_get_map(slug)
     if m:
         city = get_city(m["cityId"]) or get_city(DEFAULT_CITY_ID)
         network = m.get("network") or "streets"
@@ -623,14 +659,27 @@ def vote_type_lists():
     return resp
 
 
+# Server-side twin of the endpoint's max-age=60: browsers cache per visitor,
+# but every DISTINCT visitor's cold load still ran the ranking aggregate (a
+# full-table COUNT over edge_votes — p95 3.5s on the f1-micro). One shared
+# copy per instance amortizes it across visitors.
+_maps_list_cache: tuple[float, list] | None = None
+
+
 @app.route("/api/maps", methods=["GET"])
 def maps_list():
-    maps = list_maps()
-    # Enrich with the city's public view config for the landing grid.
-    for m in maps:
-        city = get_city(m["cityId"])
-        if city:
-            m["city"] = city.to_public()
+    global _maps_list_cache
+    now = time.monotonic()
+    if _maps_list_cache and _maps_list_cache[0] > now:
+        maps = _maps_list_cache[1]
+    else:
+        maps = list_maps()
+        # Enrich with the city's public view config for the landing grid.
+        for m in maps:
+            city = get_city(m["cityId"])
+            if city:
+                m["city"] = city.to_public()
+        _maps_list_cache = (now + 60.0, maps)
     # Short public cache: this gatekeeps every cold page load (it hit Postgres
     # uncached on each one); the map list changes rarely, so 60s is safe.
     resp = jsonify({"maps": maps})
@@ -783,6 +832,9 @@ def map_create():
     )
     if not created:
         return jsonify({"error": "Failed to create map"}), 500
+
+    # A pre-creation probe of this slug may have cached a miss.
+    invalidate_map_cache(slug)
 
     city = get_city(city_id)
     if city:
@@ -1231,6 +1283,48 @@ def my_votes():
     return jsonify({"votes": votes})
 
 
+# Cap on how many edge ids one /api/route-votes request scans. A long route
+# through merged blocks can union thousands of edges; the client caps what it
+# sends too, so past this the count degrades gracefully (undercounts).
+ROUTE_VOTES_EDGE_CAP = 20000
+
+
+@app.route("/api/route-votes", methods=["POST"])
+def route_votes():
+    """Distinct-voter vote rows for a route selection.
+
+    Body: { map, edge_ids: [int] }. Counts DISTINCT devices per (vote type,
+    direction) across the WHOLE edge set — a route cast fans one device's vote
+    onto every edge of every block it covers, so per-edge/per-block sums count
+    the same person once per block. The route-summary card shows these instead.
+    POST because a selection's block-edge union routinely exceeds URL limits.
+    """
+    data = request.get_json(silent=True) or {}
+    rmap = resolve_map(data.get("map"))
+    if _locked(rmap):
+        return _locked_response()
+
+    raw = data.get("edge_ids")
+    if not isinstance(raw, list):
+        return jsonify({"error": "edge_ids must be a list of integers"}), 400
+    try:
+        edge_ids = [int(e) for e in raw[:ROUTE_VOTES_EDGE_CAP]]
+    except (TypeError, ValueError):
+        return jsonify({"error": "edge_ids must be a list of integers"}), 400
+
+    by_label: dict[str, dict[str, int]] = {}
+    for vt_id, direction, count in count_unique_voters_for_edges(rmap.slug, edge_ids):
+        label = vote_store.resolve_vote_type(vt_id)
+        if not label:
+            continue
+        row = by_label.setdefault(label, {"up": 0, "down": 0})
+        row["down" if direction < 0 else "up"] += count
+    rows = [{"label": label, "up": v["up"], "down": v["down"]}
+            for label, v in by_label.items()]
+    rows.sort(key=lambda r: r["down"] - r["up"])
+    return jsonify({"rows": rows})
+
+
 # ── Graph data APIs ──────────────────────────────────────────────────────────
 
 @app.route("/api/nearest-node", methods=["GET"])
@@ -1587,8 +1681,10 @@ def graph_votes():
     rmap = resolve_map(request.args.get("map"))
     if _locked(rmap):
         return _locked_response()
-    rmap.graph.ensure_loaded()
 
+    # ETag first, load second: the revision lives in Redis, so a client whose
+    # cached copy is current gets its 304 without this instance ever loading
+    # the graph — ensure_loaded() on a cold instance took 10s+ and rode P95.
     mode = request.args.get("mode") or None
     rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
     etag = f'"v-{rmap.slug}-{mode or "all"}-{rev}"'
@@ -1597,6 +1693,8 @@ def graph_votes():
         resp.headers["ETag"] = etag
         resp.headers["Cache-Control"] = "public, max-age=5"
         return resp
+
+    rmap.graph.ensure_loaded()
 
     try:
         body = _build_graph_votes_body(rmap, mode)
@@ -1664,6 +1762,8 @@ def admin_set_subdomain(slug):
         if not sub:
             return jsonify({"error": "subdomain is required"}), 400
         ok, msg = set_map_subdomain(slug, sub)
+    if ok:
+        invalidate_map_cache(slug)
     return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
 
 
@@ -1679,6 +1779,8 @@ def admin_promote_vote_types(slug):
         return jsonify({"error": "Unauthorized"}), 403
     name = (request.get_json(silent=True) or {}).get("name") or ""
     ok, msg = promote_vote_types(slug, name)
+    if ok:
+        invalidate_map_cache(slug)
     return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
 
 

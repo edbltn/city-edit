@@ -1,0 +1,429 @@
+diff --git a/server/app.py b/server/app.py
+index 6b33570..8b74840 100644
+--- a/server/app.py
++++ b/server/app.py
+@@ -32,7 +32,8 @@ from osrm_router import extract_all_segments
+ from database import (
+     init_db, get_cursor, record_edge_votes, delete_edge_votes,
+     get_voter_edge_directions, get_voter_type_rows,
+-    count_devices_per_ip_for_edges, evict_lru_devices_for_edges,
++    count_devices_per_ip_for_edges, count_unique_voters_for_edges,
++    evict_lru_devices_for_edges,
+     seed_presets, list_maps, get_map, get_map_by_subdomain, slug_available,
+     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,
+     promote_vote_types, fetch_voted_vote_type_labels,
+@@ -142,6 +143,41 @@ class ResolvedMap:
+         self.vote_type_labels = vote_type_labels
+ 
+ 
++# resolve_map runs on every API request, and its map lookup was a Postgres
++# round-trip each time — the shared ~100-300ms latency floor under otherwise
++# sub-ms endpoints (reverse-geocode, nearest-node, vote). Map config changes
++# rarely, so cache rows (including misses) briefly. Staleness is bounded by
++# the TTL on other instances; mutating endpoints invalidate their own entry.
++_MAP_CACHE_TTL = 30.0
++_MAP_CACHE_MAX = 512  # bots probe random slugs; don't let misses grow the dict
++_map_cache: dict[str, tuple[float, dict | None]] = {}
++_map_cache_lock = threading.Lock()
++
++
++def _cached_get_map(slug: str) -> dict | None:
++    now = time.monotonic()
++    hit = _map_cache.get(slug)
++    if hit and hit[0] > now:
++        return hit[1]
++    m = get_map(slug, with_vote_count=False)
++    with _map_cache_lock:
++        if len(_map_cache) >= _MAP_CACHE_MAX:
++            _map_cache.clear()
++        _map_cache[slug] = (now + _MAP_CACHE_TTL, m)
++    return m
++
++
++def invalidate_map_cache(slug: str | None = None):
++    """Drop cached map config after a mutation (None clears everything)."""
++    global _maps_list_cache
++    _maps_list_cache = None  # the landing-grid list embeds map config too
++    with _map_cache_lock:
++        if slug is None:
++            _map_cache.clear()
++        else:
++            _map_cache.pop(slug, None)
++
++
+ def resolve_map(slug: str | None) -> ResolvedMap:
+     """Resolve a map slug → city, graph, OSRM router, and policy.
+ 
+@@ -150,7 +186,7 @@ def resolve_map(slug: str | None) -> ResolvedMap:
+     """
+     slug = (slug or DEFAULT_MAP_SLUG).strip()
+ 
+-    m = get_map(slug)
++    m = _cached_get_map(slug)
+     if m:
+         city = get_city(m["cityId"]) or get_city(DEFAULT_CITY_ID)
+         network = m.get("network") or "streets"
+@@ -623,14 +659,27 @@ def vote_type_lists():
+     return resp
+ 
+ 
++# Server-side twin of the endpoint's max-age=60: browsers cache per visitor,
++# but every DISTINCT visitor's cold load still ran the ranking aggregate (a
++# full-table COUNT over edge_votes — p95 3.5s on the f1-micro). One shared
++# copy per instance amortizes it across visitors.
++_maps_list_cache: tuple[float, list] | None = None
++
++
+ @app.route("/api/maps", methods=["GET"])
+ def maps_list():
+-    maps = list_maps()
+-    # Enrich with the city's public view config for the landing grid.
+-    for m in maps:
+-        city = get_city(m["cityId"])
+-        if city:
+-            m["city"] = city.to_public()
++    global _maps_list_cache
++    now = time.monotonic()
++    if _maps_list_cache and _maps_list_cache[0] > now:
++        maps = _maps_list_cache[1]
++    else:
++        maps = list_maps()
++        # Enrich with the city's public view config for the landing grid.
++        for m in maps:
++            city = get_city(m["cityId"])
++            if city:
++                m["city"] = city.to_public()
++        _maps_list_cache = (now + 60.0, maps)
+     # Short public cache: this gatekeeps every cold page load (it hit Postgres
+     # uncached on each one); the map list changes rarely, so 60s is safe.
+     resp = jsonify({"maps": maps})
+@@ -784,6 +833,9 @@ def map_create():
+     if not created:
+         return jsonify({"error": "Failed to create map"}), 500
+ 
++    # A pre-creation probe of this slug may have cached a miss.
++    invalidate_map_cache(slug)
++
+     city = get_city(city_id)
+     if city:
+         created["city"] = city.to_public()
+@@ -1231,6 +1283,48 @@ def my_votes():
+     return jsonify({"votes": votes})
+ 
+ 
++# Cap on how many edge ids one /api/route-votes request scans. A long route
++# through merged blocks can union thousands of edges; the client caps what it
++# sends too, so past this the count degrades gracefully (undercounts).
++ROUTE_VOTES_EDGE_CAP = 20000
++
++
++@app.route("/api/route-votes", methods=["POST"])
++def route_votes():
++    """Distinct-voter vote rows for a route selection.
++
++    Body: { map, edge_ids: [int] }. Counts DISTINCT devices per (vote type,
++    direction) across the WHOLE edge set — a route cast fans one device's vote
++    onto every edge of every block it covers, so per-edge/per-block sums count
++    the same person once per block. The route-summary card shows these instead.
++    POST because a selection's block-edge union routinely exceeds URL limits.
++    """
++    data = request.get_json(silent=True) or {}
++    rmap = resolve_map(data.get("map"))
++    if _locked(rmap):
++        return _locked_response()
++
++    raw = data.get("edge_ids")
++    if not isinstance(raw, list):
++        return jsonify({"error": "edge_ids must be a list of integers"}), 400
++    try:
++        edge_ids = [int(e) for e in raw[:ROUTE_VOTES_EDGE_CAP]]
++    except (TypeError, ValueError):
++        return jsonify({"error": "edge_ids must be a list of integers"}), 400
++
++    by_label: dict[str, dict[str, int]] = {}
++    for vt_id, direction, count in count_unique_voters_for_edges(rmap.slug, edge_ids):
++        label = vote_store.resolve_vote_type(vt_id)
++        if not label:
++            continue
++        row = by_label.setdefault(label, {"up": 0, "down": 0})
++        row["down" if direction < 0 else "up"] += count
++    rows = [{"label": label, "up": v["up"], "down": v["down"]}
++            for label, v in by_label.items()]
++    rows.sort(key=lambda r: r["down"] - r["up"])
++    return jsonify({"rows": rows})
++
++
+ # ── Graph data APIs ──────────────────────────────────────────────────────────
+ 
+ @app.route("/api/nearest-node", methods=["GET"])
+@@ -1587,8 +1681,10 @@ def graph_votes():
+     rmap = resolve_map(request.args.get("map"))
+     if _locked(rmap):
+         return _locked_response()
+-    rmap.graph.ensure_loaded()
+ 
++    # ETag first, load second: the revision lives in Redis, so a client whose
++    # cached copy is current gets its 304 without this instance ever loading
++    # the graph — ensure_loaded() on a cold instance took 10s+ and rode P95.
+     mode = request.args.get("mode") or None
+     rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+     etag = f'"v-{rmap.slug}-{mode or "all"}-{rev}"'
+@@ -1598,6 +1694,8 @@ def graph_votes():
+         resp.headers["Cache-Control"] = "public, max-age=5"
+         return resp
+ 
++    rmap.graph.ensure_loaded()
++
+     try:
+         body = _build_graph_votes_body(rmap, mode)
+     except Exception as e:
+@@ -1664,6 +1762,8 @@ def admin_set_subdomain(slug):
+         if not sub:
+             return jsonify({"error": "subdomain is required"}), 400
+         ok, msg = set_map_subdomain(slug, sub)
++    if ok:
++        invalidate_map_cache(slug)
+     return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
+ 
+ 
+@@ -1679,6 +1779,8 @@ def admin_promote_vote_types(slug):
+         return jsonify({"error": "Unauthorized"}), 403
+     name = (request.get_json(silent=True) or {}).get("name") or ""
+     ok, msg = promote_vote_types(slug, name)
++    if ok:
++        invalidate_map_cache(slug)
+     return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
+ 
+ 
+diff --git a/server/database.py b/server/database.py
+index 33a1e7a..01cc543 100644
+--- a/server/database.py
++++ b/server/database.py
+@@ -6,44 +6,91 @@ Redis handles fast reads/writes and pub/sub; Postgres stores permanent history.
+ """
+ import logging
+ import os
++import time
+ from contextlib import contextmanager
+ from typing import Optional
+ 
+ import psycopg2
+ from psycopg2.extras import execute_values
++from psycopg2.pool import ThreadedConnectionPool
++
++# Under the gevent worker, plain psycopg2 blocks the event-loop hub for the
++# full duration of every query — one slow aggregate froze ALL in-flight
++# requests on the instance. psycogreen's wait callback makes psycopg2 yield to
++# the hub while waiting on the socket. Only safe/meaningful when gevent has
++# monkey-patched the runtime (prod gunicorn); plain `python app.py` skips it.
++try:
++    from gevent import monkey as _gevent_monkey
++
++    if _gevent_monkey.is_module_patched("socket"):
++        from psycogreen.gevent import patch_psycopg
++
++        patch_psycopg()
++except ImportError:
++    pass
+ 
+ logger = logging.getLogger(__name__)
+ 
+ # Database connection string from environment
+ DATABASE_URL = os.environ.get("DATABASE_URL")
+ 
+-# Connection pool (simple approach - one connection per request)
+-_connection: Optional[psycopg2.extensions.connection] = None
++# Connection pool. A pool (not the old shared singleton connection) is REQUIRED
++# once psycopg2 yields to the gevent hub mid-query: two greenlets interleaving
++# on one connection raise "another command is already in progress". Sized so
++# 4 app instances stay under db-f1-micro's ~25-connection ceiling.
++_POOL_MAX = 5
++_pool: Optional[ThreadedConnectionPool] = None
+ 
+ 
+-def get_connection() -> psycopg2.extensions.connection:
+-    """Get or create database connection."""
+-    global _connection
++def _get_pool() -> ThreadedConnectionPool:
++    global _pool
+ 
+     if not DATABASE_URL:
+         raise RuntimeError("DATABASE_URL environment variable not set")
+ 
+-    if _connection is None or _connection.closed:
+-        _connection = psycopg2.connect(DATABASE_URL)
+-        _connection.autocommit = True
+-
+-    return _connection
++    if _pool is None:
++        _pool = ThreadedConnectionPool(1, _POOL_MAX, DATABASE_URL)
++    return _pool
+ 
+ 
+ @contextmanager
+ def get_cursor():
+-    """Context manager for database cursor."""
+-    conn = get_connection()
+-    cursor = conn.cursor()
++    """Context manager for a pooled database cursor (autocommit)."""
++    pool = _get_pool()
++
++    # getconn raises PoolError immediately when all connections are checked
++    # out; briefly wait-and-retry instead so a burst queues rather than 500s
++    # (time.sleep yields to the hub under gevent).
++    conn = None
++    for attempt in range(50):
++        try:
++            conn = pool.getconn()
++            break
++        except psycopg2.pool.PoolError:
++            time.sleep(0.1)
++    if conn is None:
++        raise RuntimeError("Database connection pool exhausted")
++
+     try:
+-        yield cursor
++        if conn.closed:
++            # Server dropped it while pooled (idle timeout, failover) — swap in
++            # a fresh one under the same pool slot.
++            pool.putconn(conn, close=True)
++            conn = pool.getconn()
++        conn.autocommit = True
++        cursor = conn.cursor()
++        try:
++            yield cursor
++        finally:
++            cursor.close()
++    except psycopg2.OperationalError:
++        # Connection went bad mid-use: drop it from the pool, not back in.
++        pool.putconn(conn, close=True)
++        conn = None
++        raise
+     finally:
+-        cursor.close()
++        if conn is not None:
++            pool.putconn(conn)
+ 
+ 
+ def _migrate_edge_votes(cursor):
+@@ -446,6 +493,33 @@ def get_voter_type_rows(
+         return {}
+ 
+ 
++def count_unique_voters_for_edges(
++    map_slug: str, edge_ids: list[int]
++) -> list[tuple[int, int, int]]:
++    """Distinct-device vote counts over an edge set, per (vote type, direction).
++
++    A device that voted the same type/direction on many edges of the set (a
++    route cast fans one vote across every edge of every block it covers)
++    counts ONCE — the honest "how many people voted on this route" number
++    the route-summary card shows. Returns [(vote_type_id, direction, count)].
++    """
++    if not DATABASE_URL or not edge_ids:
++        return []
++    try:
++        with get_cursor() as cursor:
++            cursor.execute(
++                """SELECT vote_type_id, direction, COUNT(DISTINCT device_id)
++                   FROM edge_votes
++                   WHERE map_slug = %s AND edge_id = ANY(%s)
++                   GROUP BY vote_type_id, direction""",
++                (map_slug, list(edge_ids)),
++            )
++            return [(int(vt), int(d), int(c)) for vt, d, c in cursor.fetchall()]
++    except Exception as e:
++        logger.error(f"[DB] Failed to count unique voters for edges: {e}")
++        return []
++
++
+ # ── Vote types (label ↔ id) ─────────────────────────────────────────────────
+ 
+ def fetch_all_vote_types() -> list[tuple[int, str]]:
+@@ -842,17 +916,35 @@ def _map_row_to_dict(row) -> dict:
+     }
+ 
+ 
+-_MAP_SELECT = """
++# Three variants of the same column list, differing only in how vote_count is
++# produced. The full-table GROUP BY over edge_votes is only affordable when the
++# caller genuinely needs every map's count (list_maps ranks by it); running it
++# per single-map lookup put a ~100ms-3s Postgres aggregate under EVERY API
++# request via resolve_map, which was the app-wide latency floor.
++_MAP_COLUMNS = """
+     SELECT m.slug, m.name, m.subtitle, m.city_id, m.allow_suggestions,
+            (m.passcode_hash IS NOT NULL) AS has_passcode,
+            m.subdomain, vtl.vote_types, m.custom_vote_types,
+-           COALESCE(vc.cnt, 0) AS vote_count, m.symbol, m.style, m.network
++           {vote_count} AS vote_count, m.symbol, m.style, m.network
+     FROM maps m
+     LEFT JOIN vote_type_lists vtl ON vtl.id = m.vote_type_list_id
++"""
++
++# All maps' counts at once (list_maps ranking).
++_MAP_SELECT = _MAP_COLUMNS.format(vote_count="COALESCE(vc.cnt, 0)") + """
+     LEFT JOIN (SELECT map_slug, COUNT(*) AS cnt FROM edge_votes GROUP BY map_slug) vc
+       ON vc.map_slug = m.slug
+ """
+ 
++# One map's count via idx_edge_votes_map — an index scan over just that map's
++# rows instead of an aggregate over the whole table.
++_MAP_SELECT_ONE = _MAP_COLUMNS.format(
++    vote_count="(SELECT COUNT(*) FROM edge_votes ev WHERE ev.map_slug = m.slug)"
++)
++
++# No count at all (vote_count = 0) — for resolve_map, which never reads it.
++_MAP_SELECT_LIGHT = _MAP_COLUMNS.format(vote_count="0")
++
+ 
+ def list_maps() -> list[dict]:
+     """All maps, ranked by total votes (desc) then name (asc)."""
+@@ -867,12 +959,15 @@ def list_maps() -> list[dict]:
+         return []
+ 
+ 
+-def get_map(slug: str) -> Optional[dict]:
++def get_map(slug: str, with_vote_count: bool = True) -> Optional[dict]:
++    """One map by slug. Pass with_vote_count=False on hot paths that never
++    read voteCount (resolve_map) — it skips the edge_votes count entirely."""
+     if not DATABASE_URL:
+         return None
++    select = _MAP_SELECT_ONE if with_vote_count else _MAP_SELECT_LIGHT
+     try:
+         with get_cursor() as cursor:
+-            cursor.execute(_MAP_SELECT + " WHERE m.slug = %s", (slug,))
++            cursor.execute(select + " WHERE m.slug = %s", (slug,))
+             row = cursor.fetchone()
+             return _map_row_to_dict(row) if row else None
+     except Exception as e:
+@@ -885,7 +980,7 @@ def get_map_by_subdomain(subdomain: str) -> Optional[dict]:
+         return None
+     try:
+         with get_cursor() as cursor:
+-            cursor.execute(_MAP_SELECT + " WHERE m.subdomain = %s LIMIT 1", (subdomain,))
++            cursor.execute(_MAP_SELECT_ONE + " WHERE m.subdomain = %s LIMIT 1", (subdomain,))
+             row = cursor.fetchone()
+             return _map_row_to_dict(row) if row else None
+     except Exception as e:
+diff --git a/server/requirements.in b/server/requirements.in
+index 7528d69..de0d5b3 100644
+--- a/server/requirements.in
++++ b/server/requirements.in
+@@ -16,3 +16,4 @@ psycopg2-binary
+ pmtiles
+ mercantile
+ mapbox-vector-tile
++psycogreen
+diff --git a/server/requirements.txt b/server/requirements.txt
+index 2b5cb65..10a5959 100644
+--- a/server/requirements.txt
++++ b/server/requirements.txt
+@@ -62,6 +62,8 @@ pmtiles==3.7.0
+     # via -r requirements.in
+ protobuf==6.33.6
+     # via mapbox-vector-tile
++psycogreen==1.0.2
++    # via -r requirements.in
+ psycopg2-binary==2.9.10
+     # via -r requirements.in
+ pyclipper==1.4.0

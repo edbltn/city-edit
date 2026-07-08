@@ -62,6 +62,8 @@ pmtiles==3.7.0
     # via -r requirements.in
 protobuf==6.33.6
     # via mapbox-vector-tile
+psycogreen==1.0.2
+    # via -r requirements.in
 psycopg2-binary==2.9.10
     # via -r requirements.in
 pyclipper==1.4.0

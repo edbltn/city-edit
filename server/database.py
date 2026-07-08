@@ -6,44 +6,91 @@ Redis handles fast reads/writes and pub/sub; Postgres stores permanent history.
 """
 import logging
 import os
+import time
 from contextlib import contextmanager
 from typing import Optional
 
 import psycopg2
 from psycopg2.extras import execute_values
+from psycopg2.pool import ThreadedConnectionPool
+
+# Under the gevent worker, plain psycopg2 blocks the event-loop hub for the
+# full duration of every query — one slow aggregate froze ALL in-flight
+# requests on the instance. psycogreen's wait callback makes psycopg2 yield to
+# the hub while waiting on the socket. Only safe/meaningful when gevent has
+# monkey-patched the runtime (prod gunicorn); plain `python app.py` skips it.
+try:
+    from gevent import monkey as _gevent_monkey
+
+    if _gevent_monkey.is_module_patched("socket"):
+        from psycogreen.gevent import patch_psycopg
+
+        patch_psycopg()
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 
 # Database connection string from environment
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# Connection pool (simple approach - one connection per request)
-_connection: Optional[psycopg2.extensions.connection] = None
+# Connection pool. A pool (not the old shared singleton connection) is REQUIRED
+# once psycopg2 yields to the gevent hub mid-query: two greenlets interleaving
+# on one connection raise "another command is already in progress". Sized so
+# 4 app instances stay under db-f1-micro's ~25-connection ceiling.
+_POOL_MAX = 5
+_pool: Optional[ThreadedConnectionPool] = None
 
 
-def get_connection() -> psycopg2.extensions.connection:
-    """Get or create database connection."""
-    global _connection
+def _get_pool() -> ThreadedConnectionPool:
+    global _pool
 
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL environment variable not set")
 
-    if _connection is None or _connection.closed:
-        _connection = psycopg2.connect(DATABASE_URL)
-        _connection.autocommit = True
-
-    return _connection
+    if _pool is None:
+        _pool = ThreadedConnectionPool(1, _POOL_MAX, DATABASE_URL)
+    return _pool
 
 
 @contextmanager
 def get_cursor():
-    """Context manager for database cursor."""
-    conn = get_connection()
-    cursor = conn.cursor()
+    """Context manager for a pooled database cursor (autocommit)."""
+    pool = _get_pool()
+
+    # getconn raises PoolError immediately when all connections are checked
+    # out; briefly wait-and-retry instead so a burst queues rather than 500s
+    # (time.sleep yields to the hub under gevent).
+    conn = None
+    for attempt in range(50):
+        try:
+            conn = pool.getconn()
+            break
+        except psycopg2.pool.PoolError:
+            time.sleep(0.1)
+    if conn is None:
+        raise RuntimeError("Database connection pool exhausted")
+
     try:
-        yield cursor
+        if conn.closed:
+            # Server dropped it while pooled (idle timeout, failover) — swap in
+            # a fresh one under the same pool slot.
+            pool.putconn(conn, close=True)
+            conn = pool.getconn()
+        conn.autocommit = True
+        cursor = conn.cursor()
+        try:
+            yield cursor
+        finally:
+            cursor.close()
+    except psycopg2.OperationalError:
+        # Connection went bad mid-use: drop it from the pool, not back in.
+        pool.putconn(conn, close=True)
+        conn = None
+        raise
     finally:
-        cursor.close()
+        if conn is not None:
+            pool.putconn(conn)
 
 
 def _migrate_edge_votes(cursor):
@@ -446,6 +493,33 @@ def get_voter_type_rows(
         return {}
 
 
+def count_unique_voters_for_edges(
+    map_slug: str, edge_ids: list[int]
+) -> list[tuple[int, int, int]]:
+    """Distinct-device vote counts over an edge set, per (vote type, direction).
+
+    A device that voted the same type/direction on many edges of the set (a
+    route cast fans one vote across every edge of every block it covers)
+    counts ONCE — the honest "how many people voted on this route" number
+    the route-summary card shows. Returns [(vote_type_id, direction, count)].
+    """
+    if not DATABASE_URL or not edge_ids:
+        return []
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                """SELECT vote_type_id, direction, COUNT(DISTINCT device_id)
+                   FROM edge_votes
+                   WHERE map_slug = %s AND edge_id = ANY(%s)
+                   GROUP BY vote_type_id, direction""",
+                (map_slug, list(edge_ids)),
+            )
+            return [(int(vt), int(d), int(c)) for vt, d, c in cursor.fetchall()]
+    except Exception as e:
+        logger.error(f"[DB] Failed to count unique voters for edges: {e}")
+        return []
+
+
 # ── Vote types (label ↔ id) ─────────────────────────────────────────────────
 
 def fetch_all_vote_types() -> list[tuple[int, str]]:
@@ -842,16 +916,34 @@ def _map_row_to_dict(row) -> dict:
     }
 
 
-_MAP_SELECT = """
+# Three variants of the same column list, differing only in how vote_count is
+# produced. The full-table GROUP BY over edge_votes is only affordable when the
+# caller genuinely needs every map's count (list_maps ranks by it); running it
+# per single-map lookup put a ~100ms-3s Postgres aggregate under EVERY API
+# request via resolve_map, which was the app-wide latency floor.
+_MAP_COLUMNS = """
     SELECT m.slug, m.name, m.subtitle, m.city_id, m.allow_suggestions,
            (m.passcode_hash IS NOT NULL) AS has_passcode,
            m.subdomain, vtl.vote_types, m.custom_vote_types,
-           COALESCE(vc.cnt, 0) AS vote_count, m.symbol, m.style, m.network
+           {vote_count} AS vote_count, m.symbol, m.style, m.network
     FROM maps m
     LEFT JOIN vote_type_lists vtl ON vtl.id = m.vote_type_list_id
+"""
+
+# All maps' counts at once (list_maps ranking).
+_MAP_SELECT = _MAP_COLUMNS.format(vote_count="COALESCE(vc.cnt, 0)") + """
     LEFT JOIN (SELECT map_slug, COUNT(*) AS cnt FROM edge_votes GROUP BY map_slug) vc
       ON vc.map_slug = m.slug
 """
+
+# One map's count via idx_edge_votes_map — an index scan over just that map's
+# rows instead of an aggregate over the whole table.
+_MAP_SELECT_ONE = _MAP_COLUMNS.format(
+    vote_count="(SELECT COUNT(*) FROM edge_votes ev WHERE ev.map_slug = m.slug)"
+)
+
+# No count at all (vote_count = 0) — for resolve_map, which never reads it.
+_MAP_SELECT_LIGHT = _MAP_COLUMNS.format(vote_count="0")
 
 
 def list_maps() -> list[dict]:
@@ -867,12 +959,15 @@ def list_maps() -> list[dict]:
         return []
 
 
-def get_map(slug: str) -> Optional[dict]:
+def get_map(slug: str, with_vote_count: bool = True) -> Optional[dict]:
+    """One map by slug. Pass with_vote_count=False on hot paths that never
+    read voteCount (resolve_map) — it skips the edge_votes count entirely."""
     if not DATABASE_URL:
         return None
+    select = _MAP_SELECT_ONE if with_vote_count else _MAP_SELECT_LIGHT
     try:
         with get_cursor() as cursor:
-            cursor.execute(_MAP_SELECT + " WHERE m.slug = %s", (slug,))
+            cursor.execute(select + " WHERE m.slug = %s", (slug,))
             row = cursor.fetchone()
             return _map_row_to_dict(row) if row else None
     except Exception as e:
@@ -885,7 +980,7 @@ def get_map_by_subdomain(subdomain: str) -> Optional[dict]:
         return None
     try:
         with get_cursor() as cursor:
-            cursor.execute(_MAP_SELECT + " WHERE m.subdomain = %s LIMIT 1", (subdomain,))
+            cursor.execute(_MAP_SELECT_ONE + " WHERE m.subdomain = %s LIMIT 1", (subdomain,))
             row = cursor.fetchone()
             return _map_row_to_dict(row) if row else None
     except Exception as e:

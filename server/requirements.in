@@ -16,3 +16,4 @@ psycopg2-binary
 pmtiles
 mercantile
 mapbox-vector-tile
+psycogreen
