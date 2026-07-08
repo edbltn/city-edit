@@ -29,13 +29,14 @@ export interface VoteTypeIconOptions {
    *  resolve which waypoint to remove. Stays clickable even when `passthrough`
    *  (the badge is pointer-events:auto; the rest of the icon is not). */
   removeEdge?: number | null;
-  /** "Heat" of this proposal, 0–1, normalized against the hottest visible
-   *  proposal's vote count. Rendered as a SOLID GLOW RING (CSS off the
-   *  `--heat` / `--heat-color` custom properties below): a hard, fully-opaque
-   *  band of the ramp color hugging the outside of the pin, widening with
-   *  heat, plus a subtle warm stain on the paper fill. Never the outline
-   *  itself — that channel belongs to hover/selected. 0 (or omitted) renders
-   *  the plain pin. */
+  /** "Heat" of this proposal, 0–1: its RANK among the visible top proposals
+   *  (dense rank over distinct vote counts — the caller spreads the pack
+   *  across the map's heat spectrum, hottest = 1). Rendered as a SOLID GLOW
+   *  RING (CSS off the `--heat` / `--heat-color` custom properties below): a
+   *  hard, fully-opaque band of the ramp color hugging the outside of the
+   *  pin, widening with rank, plus a subtle warm stain on the paper fill.
+   *  Never the outline itself — that channel belongs to hover/selected. 0 (or
+   *  omitted) renders the plain pin. */
   heat?: number;
   /** The tint color for `heat`, sampled from the active map's heat ramp at the
    *  same intensity the heat field uses — so a pin matches the hue the heat

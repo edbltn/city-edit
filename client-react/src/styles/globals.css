@@ -1640,12 +1640,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
    the inner half of the stroke hides under the paper fill and the outer half
    reads as a solid band outside the hairline — following the square + tail and
    the diamond exactly. No blur, no alpha: a flat ring of the sampled ramp
-   color, up to ≈1.75px past the hairline on the hottest pin. `--heat-color` is
-   only set when heat > 0, so cold pins paint nothing (transparent fallback). */
+   color, up to ≈1.25px past the hairline on the top-ranked pin. `--heat-color`
+   is only set when heat > 0, so cold pins paint nothing (transparent
+   fallback). */
 .vote-type-indicator-glow {
   fill: none;
   stroke: var(--heat-color, transparent);
-  stroke-width: calc(2px + var(--heat, 0) * 3px);
+  stroke-width: calc(1.75px + var(--heat, 0) * 2.25px);
   stroke-linejoin: round;
   transition: stroke-width 0.15s ease;
 }

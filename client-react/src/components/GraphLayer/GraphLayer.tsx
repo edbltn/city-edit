@@ -54,7 +54,7 @@ import {
 } from "./graphTopology";
 import { materializeBlocks, selectionVoteRows } from "../../utils/blockSelection";
 import { iconForLabel, iconSrc, mapStyleForTheme } from "../../themes";
-import { buildHeatRampStops, sampleHeatRamp } from "../../mapStyles";
+import { buildHeatRampStops, sampleHeatRamp, HEAT_PEAK_POS } from "../../mapStyles";
 import {
   getCachedTopology,
   setCachedTopology,
@@ -3056,17 +3056,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       : winners;
     if (source.length === 0) return null;
 
-    // Per-proposal "heat": normalize each winner's net votes against the hottest
-    // visible proposal (log scale, matching the canvas heatmap so a busy map
-    // doesn't peg everything to max), then sample the map's ramp at that
-    // intensity. The pin glows + tints to that color, as hot as its votes. The
+    // Per-proposal "heat": the RANKING of the visible winners, spread across
+    // the map's heat spectrum — dense rank over distinct vote counts (ties
+    // share a color), lowest → just above the ramp's cold end, hottest → 1.
+    // Ranking (not log-normalized counts) is the scale, so every top proposal
+    // gets its own hue off the ramp instead of the pack clustering wherever
+    // the vote distribution piles up. The color sample is capped at
+    // HEAT_PEAK_POS: the hottest pin wears the ramp's named upper extreme
+    // (peak), never the incandescent tip — bright is the heatmap's job. The
     // bucketed color keys the icon cache so equally-hot pins of a label still
     // share one divIcon (and so a re-render doesn't churn setIcon every frame).
     const rampStops = buildHeatRampStops(mapStyle.heat, mapStyle.basemap);
-    const maxCount = source.reduce((m, w) => Math.max(m, w.count), 0);
+    const rankedCounts = Array.from(new Set(source.map((w) => w.count).filter((c) => c > 0)))
+      .sort((a, b) => a - b);
     const heatOf = (count: number): number =>
-      maxCount > 0 && count > 0
-        ? Math.log(count + 1) / Math.log(maxCount + 1)
+      count > 0 && rankedCounts.length > 0
+        ? (rankedCounts.indexOf(count) + 1) / rankedCounts.length
         : 0;
 
     // Resolve every marker to its edge-midpoint once up front so click handlers
@@ -3207,7 +3212,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       // teal/red) owns the pin's color, so skip heat there to avoid fighting it;
       // otherwise even selected/on-path pins keep their warmth.
       const heat = tint ? 0 : heatOf(w.count);
-      const heatColor = heat > 0 ? sampleHeatRamp(rampStops, heat) : undefined;
+      const heatColor = heat > 0 ? sampleHeatRamp(rampStops, heat * HEAT_PEAK_POS) : undefined;
       const heatBucket = Math.round(heat * 12);
       let icon: L.DivIcon;
       if (isSelected || tint || isSpread || passthrough || removeEdge !== null) {

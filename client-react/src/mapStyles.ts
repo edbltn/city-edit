@@ -248,16 +248,22 @@ function parseRgb(s: string): [number, number, number] {
   return m ? [Number(m[0]), Number(m[1]), Number(m[2])] : [0, 0, 0];
 }
 
+/** Ramp position of `peak` — the upper extreme of the NAMED ramp colors. The
+ *  proposal pins cap their color spectrum here (a pin ring should wear the
+ *  ramp's top color, not blaze); only the heatmap itself runs past it into the
+ *  incandescent tip. */
+export const HEAT_PEAK_POS = 0.85;
+
 /** Expand a HeatRamp into the positioned stops `sampleHeatRamp` interpolates.
- *  `peak` sits at 0.85 (not 1) with the incandescent tip above it, so the
- *  log-crushed top of a busy map's vote distribution still resolves into
+ *  `peak` sits at HEAT_PEAK_POS (not 1) with the incandescent tip above it, so
+ *  the log-crushed top of a busy map's vote distribution still resolves into
  *  visibly different colors instead of one flat band. */
 export function buildHeatRampStops(heat: HeatRamp, basemap: Basemap): HeatRampStop[] {
   return [
     { pos: 0, rgb: parseRgb(heat.halo) },
     { pos: 0.35, rgb: parseRgb(heat.warm) },
     { pos: 0.65, rgb: parseRgb(heat.hot) },
-    { pos: 0.85, rgb: parseRgb(heat.peak) },
+    { pos: HEAT_PEAK_POS, rgb: parseRgb(heat.peak) },
     { pos: 1, rgb: parseRgb(heatTip(heat, basemap)) },
   ];
 }
