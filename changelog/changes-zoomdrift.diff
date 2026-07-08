@@ -1,0 +1,108 @@
+diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+index 17fae88..5fde0e4 100644
+--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
++++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+@@ -102,6 +102,11 @@ function buildStyle(
+         type: "raster",
+         tiles,
+         tileSize: 256,
++        // CartoDB serves tiles up to z19; capping the SOURCE makes MapLibre
++        // overzoom (stretch) z19 tiles beyond that, like Leaflet's
++        // maxNativeZoom. A maxzoom on the LAYER would instead hide the base
++        // map entirely once the camera passes it.
++        maxzoom: 19,
+         attribution:
+           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+       },
+@@ -128,8 +133,6 @@ function buildStyle(
+         id: "carto-tiles",
+         type: "raster",
+         source: "carto-base",
+-        minzoom: 0,
+-        maxzoom: 19,
+       },
+       // Block heat — the primary vote display, colored from feature-state:
+       // a translucent fill plus a thin bright outline (brightness without bulk).
+@@ -212,7 +215,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+           mapStyle,
+         ),
+         center: [CONFIG.initialView.lon, CONFIG.initialView.lat],
+-        zoom: CONFIG.initialView.zoom,
++        zoom: CONFIG.initialView.zoom - LEAFLET_TO_MAPLIBRE_ZOOM,
+         interactive: false,
+         attributionControl: false,
+       });
+@@ -252,7 +255,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+       const ml = mapRef.current;
+       if (!ml) return;
+       const center = leafletMap.getCenter();
+-      const zoom = leafletMap.getZoom();
++      const zoom = leafletMap.getZoom() - LEAFLET_TO_MAPLIBRE_ZOOM;
+       ml.jumpTo({
+         center: [center.lng, center.lat],
+         zoom,
+@@ -261,13 +264,54 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+       });
+     };
+ 
++    // During Leaflet's ANIMATED zoom (wheel / zoom buttons) no `move` events
++    // fire until the 250ms CSS transition ends — Leaflet suppresses them
++    // (`_move(…, supressEvent=true)`) — so jumpTo alone leaves the GL base map
++    // + block heat frozen mid-zoom while the Leaflet layers glide, then snaps.
++    // Ride the animation instead: transition the GL container with the SAME
++    // duration/curve Leaflet gives `.leaflet-zoom-animated` layers, mapping
++    // every current container point p to `q + p·scale` (its position in the
++    // target frame). Pinch-zoom is untouched: it fires per-frame `move` events
++    // and stays live through syncCamera.
++    const handleZoomAnim = (e: L.ZoomAnimEvent) => {
++      const el = containerRef.current;
++      const animating = (leafletMap as unknown as { _animatingZoom?: boolean })._animatingZoom;
++      if (!el || !mapRef.current || !animating) return;
++      const scale = leafletMap.getZoomScale(e.zoom, leafletMap.getZoom());
++      // Where the viewport's current top-left corner lands in the target frame
++      // (container coords): project() scales linearly with zoom, so the whole
++      // current frame maps into the target one by translate(q) scale(scale).
++      const nw = leafletMap.containerPointToLatLng([0, 0]);
++      const q = leafletMap
++        .project(nw, e.zoom)
++        .subtract(leafletMap.project(e.center, e.zoom))
++        .add(leafletMap.getSize().divideBy(2));
++      el.style.transition = "transform 0.25s cubic-bezier(0, 0, 0.25, 1)";
++      el.style.transform = `translate3d(${q.x}px, ${q.y}px, 0) scale(${scale})`;
++    };
++
++    // At transition end Leaflet fires `move` (→ syncCamera jumpTo) then
++    // `zoomend`, in the same tick. Clearing the transform here lands in the
++    // same compositor frame as MapLibre's re-render of the final camera (its
++    // rAF runs before paint), so the crisp frame swaps in without a flash.
++    const handleZoomEnd = () => {
++      const el = containerRef.current;
++      if (!el || !el.style.transform) return;
++      el.style.transition = "";
++      el.style.transform = "";
++    };
++
+     // Sync on every move frame for smooth panning
+     leafletMap.on("move", syncCamera);
++    leafletMap.on("zoomanim", handleZoomAnim);
++    leafletMap.on("zoomend", handleZoomEnd);
+     // Initial sync
+     syncCamera();
+ 
+     return () => {
+       leafletMap.off("move", syncCamera);
++      leafletMap.off("zoomanim", handleZoomAnim);
++      leafletMap.off("zoomend", handleZoomEnd);
+     };
+   }, [leafletMap]);
+ 
+@@ -357,6 +401,9 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+         width: "100%",
+         height: "100%",
+         zIndex: 0,
++        // The zoom-animation ride scales this element about the viewport's
++        // top-left corner (see handleZoomAnim).
++        transformOrigin: "0 0",
+       }}
+     />
+   );

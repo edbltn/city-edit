@@ -1,0 +1,2250 @@
+diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
+index 6176072..0e30c41 100644
+--- a/client-react/src/components/GraphLayer/GraphLayer.tsx
++++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -30,7 +30,8 @@ import { makeVoteTypeIcon } from "./voteTypeIcon";
+ import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
+ import { selectTopProposals, topLabelForEdges, type VoteTypeWinner } from "./topProposals";
+ import {
+-  computeRouteProposals, routeBlockEdges, isRouteCovered, expandSelectionToUndirected,
++  computeRouteProposals, corridorCoordinates, routeBlockEdges, isRouteCovered,
++  expandSelectionToUndirected,
+   type RouteProposal,
+ } from "./routeProposals";
+ import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts } from "./voteApply";
+@@ -301,6 +302,12 @@ const INDEX_NEIGHBOR_K = 20;
+ // server scan) must stay bounded; coverage of a huge block degrades gracefully.
+ const MY_VOTES_EDGE_CAP = 500;
+ 
++// Cap + debounce for the route card's /api/route-votes fetch (distinct-voter
++// rows). POSTed as JSON so it can carry far more edge ids than a URL, but still
++// bounded; the debounce coalesces vote bursts into one refetch.
++const ROUTE_VOTES_EDGE_CAP = 4000;
++const ROUTE_VOTES_DEBOUNCE_MS = 350;
++
+ /** Build a flatbush spatial index of node points. Done once per graph. */
+ function buildNodeIndex(data: GraphTopology): Flatbush | null {
+   const n = data.nNodes;
+@@ -512,6 +519,34 @@ function targetLatLng(
+   return { lat: nodeLat(data, target.index), lng: nodeLon(data, target.index) };
+ }
+ 
++/**
++ * Display anchor for an RBTP diamond: its middle path edge's midpoint, else the
++ * mean of its two anchors. ONE definition shared by the marker render, the
++ * cluster fan-out, and the drop hit-test so they can never disagree on where a
++ * diamond "is".
++ */
++function rbtpDisplayPos(topo: GraphTopology, p: RouteProposal): [number, number] {
++  const midEdge = p.edgeIds[Math.floor(p.edgeIds.length / 2)];
++  if (midEdge != null && midEdge < topo.nEdges) {
++    const from = edgeFrom(topo, midEdge), to = edgeTo(topo, midEdge);
++    if (from < topo.nNodes && to < topo.nNodes) {
++      return [
++        (nodeLat(topo, from) + nodeLat(topo, to)) / 2,
++        (nodeLon(topo, from) + nodeLon(topo, to)) / 2,
++      ];
++    }
++  }
++  return [
++    (p.anchorCoords[0].lat + p.anchorCoords[1].lat) / 2,
++    (p.anchorCoords[0].lng + p.anchorCoords[1].lng) / 2,
++  ];
++}
++
++// Spread-map keys — the fanned-out grid mixes POINT proposals (edge-keyed
++// squares) and ROUTE proposals (id-keyed diamonds), so keys carry the kind.
++const spreadKeyEdge = (edgeIdx: number) => `e${edgeIdx}`;
++const spreadKeyRoute = (id: string) => `r${id}`;
++
+ // ---------------------------------------------------------------------------
+ // Tooltip content helper (shared by hover and pinned tooltips)
+ // ---------------------------------------------------------------------------
+@@ -532,13 +567,20 @@ function targetLatLng(
+  * edge_votes length when the dimensions aren't present (older server).
+  */
+ function votesMatchTopology(
+-  voteData: { n_edges?: number; n_nodes?: number; edge_votes?: unknown[] },
++  voteData: { n_edges?: number; n_nodes?: number; n_blocks?: number;
++    edge_votes?: unknown[]; block_votes?: unknown[] },
+   topology: GraphTopology | null,
+ ): boolean {
+   if (!topology) return false;
+   const nEdges = voteData.n_edges ?? voteData.edge_votes?.length;
+   if (nEdges != null && nEdges !== topology.nEdges) return false;
+   if (voteData.n_nodes != null && voteData.n_nodes !== topology.nNodes) return false;
++  // Block ids renumber on every blocks re-bake (SAME topology etag), so a body
++  // built against a different block set colors the wrong polygons.
++  const nBlocks = voteData.n_blocks ?? voteData.block_votes?.length;
++  if (nBlocks != null && topology.nBlocks != null && nBlocks !== topology.nBlocks) {
++    return false;
++  }
+   return true;
+ }
+ 
+@@ -662,6 +704,19 @@ interface GraphLayerProps {
+   /** Removes the currently-selected point. Wired to the same handler as the
+    *  start marker's delete so the modal's X is functionally identical. */
+   onRemoveSelected?: () => void;
++  /** Clears the ENTIRE route selection — the route-summary card's [×]. */
++  onClearRoute?: () => void;
++  /** Removes a route proposal's corridor from the route (both anchors together).
++   *  Fired by the [×] badge on a selected RBTP diamond (`data-x-route`). */
++  onRouteProposalRemove?: (proposal: RouteProposal) => void;
++  /** GraphLayer writes a resolver here: given a dropped point, the RBTP diamond
++   *  whose icon sits there (at its DISPLAY position — fanned cell when spread),
++   *  or null. Resolving a hit also marks that RBTP selected (the analogue of the
++   *  diamond's own click), so the host can thread the corridor's anchors into
++   *  the route and have the diamond immediately read selected. */
++  routeProposalAtRef?: MutableRefObject<
++    ((latlng: { lat: number; lng: number }) => RouteProposal | null) | null
++  >;
+   /** True while the cursor is over the route/desire path. The graph hover yields
+    *  (no card/highlight) so the path's own midwaypoint grab affordance isn't
+    *  competed with by a graph proposal tooltip. */
+@@ -684,11 +739,11 @@ interface GraphLayerProps {
+   onPinnedResolve?: (voteEdgeId: number | null) => void;
+ }
+ 
+-export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, hoverProposalPoint = null, onWaypointMatch, onIndicatorClick, onRouteProposalClick, clusterExploderRef, onRemoveProposal, onRemoveSelected, suppressHover = false, pathEdgeIds = null, onProposalDrop, onPinnedResolve }: GraphLayerProps) {
++export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, hoverProposalPoint = null, onWaypointMatch, onIndicatorClick, onRouteProposalClick, clusterExploderRef, onRemoveProposal, onRemoveSelected, onClearRoute, onRouteProposalRemove, routeProposalAtRef, suppressHover = false, pathEdgeIds = null, onProposalDrop, onPinnedResolve }: GraphLayerProps) {
+   const map = useMap();
+   const { subscribeToDelta } = useWebSocketContext();
+   const { setSnapFn, setResolveVoteEdgeId, setResolveTopLabelForPath, setCurrentSnap, isDraggingRef: graphDraggingRef, snapToGraph, setDragging } = useGraphSnap();
+-  const { setBlockMaterializer } = useRoute();
++  const { setBlockMaterializer, setCorridorSegmentResolver } = useRoute();
+   // Ghost-pin drag (the dotted-trail + ghost-kite mechanism the path-drag uses).
+   // Reused so dragging a NEW mid out of an exploded on-route proposal renders the
+   // same ghost the path-drag does, and so the host's ghost→dragPoint mirror lights
+@@ -885,6 +940,38 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     return () => setBlockMaterializer(null);
+   }, [setBlockMaterializer]);
+ 
++  // Register the anchors→corridor resolver: consecutive waypoints that are a
++  // route proposal's two anchors route through the corridor VERBATIM — its
++  // stored path edges + geometry — instead of whatever OSRM picks between them.
++  // That's what keeps the rendered selection, the heat/hover highlight, the
++  // block coverage (and thus the diamond's selected ring + card header), and
++  // the vote target all tracing the proposal the user picked. Reads proposals
++  // and topology via refs, so one registration serves every recompute.
++  useEffect(() => {
++    setCorridorSegmentResolver((a, b) => {
++      const topo = topologyRef.current;
++      if (!topo) return null;
++      // Same 5 m anchor-identity threshold as anchorsAreWaypoints: the anchors
++      // were inserted at these exact coords and only move if the user edits them.
++      const near = (x: { lat: number; lng: number }, y: { lat: number; lng: number }) =>
++        map.distance([x.lat, x.lng], [y.lat, y.lng]) < 5;
++      for (const p of routeProposalsRef.current) {
++        const [pa, pb] = p.anchorCoords;
++        const forward = near(a, pa) && near(b, pb);
++        const backward = !forward && near(a, pb) && near(b, pa);
++        if (!forward && !backward) continue;
++        const coords = corridorCoordinates(topo, p);
++        if (!coords) continue; // chain broke (stale topology) — OSRM fallback
++        return {
++          coordinates: backward ? [...coords].reverse() : coords,
++          edgeIds: p.edgeIds,
++        };
++      }
++      return null;
++    });
++    return () => setCorridorSegmentResolver(null);
++  }, [setCorridorSegmentResolver, map]);
++
+   // Hover state
+   const [hoverTarget, setHoverTarget] = useState<HoverTarget | null>(null);
+   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+@@ -952,6 +1039,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // vote heatmap and refetched on the same vote-delta signal (the endpoint is
+   // revision-cached, so a refetch on each vote is cheap / 304s when unchanged).
+   const [routeProposals, setRouteProposals] = useState<RouteProposal[]>([]);
++  // The RBTP the user explicitly tapped (see the terminology note above
++  // routeIndicatorMarkers). Tapping a diamond force-routes through its anchors,
++  // but the OSRM leg between them rarely re-traces the vote corridor exactly —
++  // so the block-coverage rule alone almost never marks the tapped proposal
++  // selected. The tapped id keeps it selected for as long as BOTH its anchors
++  // remain waypoints of the current route (anchorsAreWaypoints below); editing
++  // an anchor away or clearing the route deselects it. Coverage remains the
++  // OTHER route to selected (hand-tracing a corridor on a block map).
++  const [selectedRbtpId, setSelectedRbtpId] = useState<string | null>(null);
++  // Mirror for synchronous reads in delegated/hot-path handlers (the [×] badge
++  // capture click, the diamond drop hit-test).
++  const routeProposalsRef = useRef<RouteProposal[]>(routeProposals);
++  useEffect(() => { routeProposalsRef.current = routeProposals; }, [routeProposals]);
+   // The edge set a hovered route diamond highlights — all of its blocks' edges.
+   const routeHighlightEdgesRef = useRef<number[] | null>(null);
+   const [currentZoom, setCurrentZoom] = useState<number>(() => map.getZoom());
+@@ -1000,23 +1100,28 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+ 
+   // "Fan out crowded icons into a grid" state. Only ONE cluster is ever fanned
+   // out at a time — exploding a new cluster replaces (collapses) whatever was
+-  // open. The map keys a winner's EDGE index -> overridden [lat, lng] and the
+-  // render reads it as a per-icon position override. (Edge, not legendIdx: a vote
+-  // type can win on several edges — top-N-per-type — so legendIdx is no longer
+-  // unique per icon, but edgeIdx always is.)
++  // open. The map keys a proposal's spread key (spreadKeyEdge for a PBTP square,
++  // spreadKeyRoute for an RBTP diamond — both kinds fan out together) ->
++  // overridden [lat, lng]; the render reads it as a per-icon position override.
++  // (Edge, not legendIdx, for points: a vote type can win on several edges —
++  // top-N-per-type — so legendIdx is no longer unique per icon.)
+   //
+   // A spread starts TRANSIENT — a hover/snap-back timer collapses it. Picking one
+   // of its boxes LOCKS it (`spreadLockedRef`), so it persists with no timer until
+   // the selection clears or the map pans/zooms. Locked vs transient is the ONLY
+   // difference between the two; the position map is identical, so the lock is just
+   // a ref flag. Refs mirror the state for synchronous reads in handlers.
+-  type SpreadMap = Map<number, [number, number]>;
++  type SpreadMap = Map<string, [number, number]>;
+   const [spread, setSpread] = useState<SpreadMap | null>(null);
+   const spreadRef = useRef<SpreadMap | null>(null);
+   const spreadLockedRef = useRef(false);
+   const spreadTimeoutRef = useRef<number | null>(null);
+   // collapseSpread is defined far below; this ref lets earlier effects call it.
+   const collapseSpreadRef = useRef<() => void>(() => {});
++  // The cluster exploder, kept on an internal ref too (the prop ref is optional)
++  // so the route-diamond markers — built in a separate memo — can run the same
++  // "crowded stack fans out before any side effect" rule the point pins use.
++  const internalExploderRef = useRef<((latlng: { lat: number; lng: number }) => boolean) | null>(null);
+ 
+   // Set (or clear, with null) the open spread, mirroring it into the ref the
+   // hot-path hit-test reads — proposalIconAt runs on every drag mousemove and
+@@ -1078,12 +1183,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   const onRemoveProposalRef = useRef(onRemoveProposal);
+   useEffect(() => { onRemoveProposalRef.current = onRemoveProposal; }, [onRemoveProposal]);
+ 
++  const onClearRouteRef = useRef(onClearRoute);
++  useEffect(() => { onClearRouteRef.current = onClearRoute; }, [onClearRoute]);
++
++  const onRouteProposalRemoveRef = useRef(onRouteProposalRemove);
++  useEffect(() => { onRouteProposalRemoveRef.current = onRouteProposalRemove; }, [onRouteProposalRemove]);
++
+   // One delegated handler for every proposal's [×] badge, in CAPTURE phase on the
+   // map container so it pre-empts both Leaflet's map click and the indicator
+   // marker's own click (which would otherwise also restart/select). The badge is
+   // pointer-events:auto inside an icon that may be pointer-events:none, so without
+   // this stop the clickthrough trap (see modal_clickthrough memory) would fire the
+-  // map click. data-x-edge tells us which proposal's waypoint to drop.
++  // map click. data-x-edge (a matched waypoint's proposal) / data-x-route (a
++  // selected RBTP corridor) tell us what to drop.
+   useEffect(() => {
+     const container = map.getContainer();
+     const onCaptureClick = (e: MouseEvent) => {
+@@ -1091,6 +1203,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       if (!badge) return;
+       e.stopPropagation();
+       e.preventDefault();
++      const routeId = badge.getAttribute("data-x-route");
++      if (routeId) {
++        const p = routeProposalsRef.current.find((rp) => rp.id === routeId);
++        if (p) onRouteProposalRemoveRef.current?.(p);
++        return;
++      }
+       const edge = Number(badge.getAttribute("data-x-edge"));
+       if (Number.isFinite(edge)) onRemoveProposalRef.current?.(edge);
+     };
+@@ -1226,6 +1344,24 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     return set;
+   }, [midEdgeIdxs]);
+ 
++  // Does the current route still run through BOTH of this RBTP's anchors (as
++  // start/end/mid waypoints)? Governs how long an explicitly-tapped diamond
++  // stays selected: the tap inserted these exact anchor coords as waypoints, so
++  // a tight meters match (they only move if the user edits them) is the right
++  // "still my selection" test — not path-edge coverage, which OSRM's routing
++  // between the anchors rarely satisfies.
++  const anchorsAreWaypoints = useCallback((p: RouteProposal): boolean => {
++    const wps: { lat: number; lng: number }[] = [];
++    if (startLat !== null && startLng !== null) wps.push({ lat: startLat, lng: startLng });
++    if (endLat !== null && endLng !== null) wps.push({ lat: endLat, lng: endLng });
++    wps.push(...ghostWaypointsRef.current);
++    if (wps.length < 2) return false;
++    return p.anchorCoords.every((a) =>
++      wps.some((w) => map.distance([a.lat, a.lng], [w.lat, w.lng]) < 5));
++    // ghostKey stands in for the mids (read via ref; the array identity churns).
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [startLat, startLng, endLat, endLng, ghostKey, map]);
++
+   // Highlight (but do NOT add as waypoints) the top proposals the current route
+   // PASSES THROUGH. Matched by UNDIRECTED node-pair, not raw edge index: a two-way
+   // street stores each direction as its own edge, and the route often traverses
+@@ -1284,7 +1420,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       const lat = (nodeLat(g, fromIdx) + nodeLat(g, toIdx)) / 2;
+       const lng = (nodeLon(g, fromIdx) + nodeLon(g, toIdx)) / 2;
+       // Hit-test at where the icon is actually drawn; snap to the real midpoint.
+-      const override = spread?.get(w.edgeIdx);
++      const override = spread?.get(spreadKeyEdge(w.edgeIdx));
+       const mp = map.latLngToContainerPoint(override ? [override[0], override[1]] : [lat, lng]);
+       if (pt.x < mp.x - ICON_HALF_W || pt.x > mp.x + ICON_HALF_W
+           || pt.y < mp.y - ICON_TOP_PX || pt.y > mp.y + ICON_BOTTOM_PX) continue;
+@@ -1295,12 +1431,67 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     return best;
+   }, [isStationNetwork, map]);
+ 
++  // Same pixel hit-test for ROUTE-proposal diamonds: the RBTP whose icon box
++  // (at its DISPLAY position — fanned grid cell when spread, settled diamond
++  // spot otherwise) contains the point. Backs the diamond sticky snap, the
++  // drop-target ring, and the host's drop-on-diamond resolver.
++  const routeProposalIconAt = useCallback((pt: L.Point): RouteProposal | null => {
++    if (isStationNetwork) return null;
++    const topo = topologyRef.current;
++    if (!topo) return null;
++    const spread = spreadRef.current;
++    let best: RouteProposal | null = null;
++    let bestD = Infinity;
++    for (const p of routeProposalsRef.current) {
++      const override = spread?.get(spreadKeyRoute(p.id));
++      const [lat, lng] = override ?? rbtpDisplayPos(topo, p);
++      const mp = map.latLngToContainerPoint([lat, lng]);
++      if (pt.x < mp.x - ICON_HALF_W || pt.x > mp.x + ICON_HALF_W
++          || pt.y < mp.y - ICON_TOP_PX || pt.y > mp.y + ICON_BOTTOM_PX) continue;
++      const dx = pt.x - mp.x, dy = pt.y - (mp.y - 18);
++      const d = dx * dx + dy * dy;
++      if (d < bestD) { bestD = d; best = p; }
++    }
++    return best;
++  }, [isStationNetwork, map]);
++  const routeProposalIconAtRef = useRef(routeProposalIconAt);
++  useEffect(() => { routeProposalIconAtRef.current = routeProposalIconAt; }, [routeProposalIconAt]);
++
++  // Publish the drop-on-diamond resolver for the host (MapView): dropping a
++  // dragged mid / path-ghost onto a diamond threads the route through the whole
++  // corridor. Resolving a hit also SELECTS that RBTP — exactly what the
++  // diamond's own click does — so once the host inserts the anchors as
++  // waypoints, the diamond (and the route card header) read selected.
++  useEffect(() => {
++    if (!routeProposalAtRef) return;
++    routeProposalAtRef.current = (latlng) => {
++      const p = routeProposalIconAtRef.current(
++        map.latLngToContainerPoint([latlng.lat, latlng.lng]));
++      if (p) setSelectedRbtpId(p.id);
++      return p;
++    };
++    return () => { routeProposalAtRef.current = null; };
++  }, [routeProposalAtRef, map]);
++
+   // Sticky snap: a drag on/near a proposal icon snaps to its exact midpoint so
+   // the waypoint links cleanly. Consulted by the registered snapFn (the committed
+-  // drop) and the mousemove drag branch (the live trail).
++  // drop) and the mousemove drag branch (the live trail). Route-proposal
++  // diamonds are sticky the same way (point pins win where the two overlap), so
++  // a drag hovering a diamond glues the ghost to it before the corridor drop.
+   const stickyProposalSnap = useCallback(
+-    (lat: number, lng: number) => proposalIconAt(map.latLngToContainerPoint([lat, lng])),
+-    [proposalIconAt, map]
++    (lat: number, lng: number) => {
++      const pt = map.latLngToContainerPoint([lat, lng]);
++      const point = proposalIconAt(pt);
++      if (point) return point;
++      const topo = topologyRef.current;
++      const rbtp = topo ? routeProposalIconAt(pt) : null;
++      if (rbtp && topo) {
++        const [rLat, rLng] = rbtpDisplayPos(topo, rbtp);
++        return { edgeIdx: null, lat: rLat, lng: rLng };
++      }
++      return null;
++    },
++    [proposalIconAt, routeProposalIconAt, map]
+   );
+   const stickyProposalSnapRef = useRef(stickyProposalSnap);
+   useEffect(() => { stickyProposalSnapRef.current = stickyProposalSnap; }, [stickyProposalSnap]);
+@@ -1314,6 +1505,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     [dragPoint, proposalIconAt, map]
+   );
+ 
++  // The RBTP diamond a live drag hovers — its drop-target ring (the diamond
++  // analogue of dropTargetEdgeIdx). Dropping there threads the corridor.
++  const dropTargetRbtpId = useMemo(
++    () => (dragPoint ? routeProposalIconAt(map.latLngToContainerPoint([dragPoint.lat, dragPoint.lng]))?.id ?? null : null),
++    [dragPoint, routeProposalIconAt, map]
++  );
++
+   // Light the graph edge (or node) a live waypoint drag would snap to — the drop
+   // preview. Mirrors the registered snapFn exactly (sticky proposal first, then
+   // hitTest) so the highlight matches where the waypoint actually lands on release.
+@@ -1325,7 +1523,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       if (data) {
+         const sticky = stickyProposalSnapRef.current(dragPoint.lat, dragPoint.lng);
+         if (sticky) {
+-          next = { kind: "edge", index: sticky.edgeIdx };
++          // A diamond sticky (edgeIdx null) has no single edge to ring — the
++          // diamond's own drop-target ring (dropTargetRbtpId) is the affordance.
++          next = sticky.edgeIdx != null ? { kind: "edge", index: sticky.edgeIdx } : null;
+         } else {
+           const pt = map.latLngToContainerPoint([dragPoint.lat, dragPoint.lng]);
+           const result = hitTest(
+@@ -1744,16 +1944,27 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       // 2. Paint immediately from cached votes (same graph version only) so the
+       //    heatmap appears without waiting on the network. Skipped when the
+       //    topology was freshly downloaded, since edge indices may have shifted.
++      //    The body must also match the CURRENT block set — block ids renumber
++      //    on every blocks re-bake under the SAME topology etag, and a
++      //    pre-re-bake body paints the wrong polygons (node blocks dark, e.g.)
++      //    which live deltas then layer onto instead of healing.
+       if (usedCachedTopology && version) {
+         const cachedVotes = await getCachedVotes<Partial<GraphData>>(getMapSlug() || themeMode, version);
+         if (cancelled) return;
+-        if (cachedVotes) {
++        const blocksMatch = cachedVotes
++          && (cachedVotes.blocks_version ?? null) === blocksVersion
++          && votesMatchTopology(cachedVotes, topology);
++        if (cachedVotes && blocksMatch) {
+           graphDataRef.current = { ...topology, ...cachedVotes };
+           lastRevRef.current = cachedVotes.rev ?? 0;
+           setVoteTypeMap(cachedVotes.vote_types);
+           broadcastBlockVotes(cachedVotes);
+           refreshGraphDisplayRef.current();
+           setHeatmapLoaded();
++        } else if (cachedVotes) {
++          dwarn("votes", "ignoring cached votes: stale block set", {
++            cached: cachedVotes.blocks_version, live: blocksVersion,
++          });
+         }
+       }
+ 
+@@ -2796,10 +3007,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   const hoverMatchesPinned =
+     showPinned && pinnedTarget && hoverTarget &&
+     hoverTarget.kind === pinnedTarget.kind && hoverTarget.index === pinnedTarget.index;
+-  const showHoverTooltip = hoverTarget !== null && !hoverMatchesPinned;
+   const hoverWinner = (hoverTarget?.kind === "edge")
+     ? winners.find(w => w.edgeIdx === hoverTarget.index) ?? null
+     : null;
++  // With a route selected, a NON-winner edge of that route gets no hover card:
++  // the route-summary card already speaks for the selection, and cursor travel
++  // along the corridor would otherwise pop a card per segment right on top of
++  // it. Winner (top-proposal) edges keep their card — that's how hovering an
++  // auto-selected proposal on the path lights up. Matched with direction twins
++  // (the hover often resolves to the twin of the edge the route recorded).
++  const hoverOnSelectedRoute = !hoverWinner && hoverTarget?.kind === "edge"
++    && !!data && !!pathEdgeIds && pathEdgeIds.length > 0
++    && expandSelectionToUndirected(data, pathEdgeIds, [hoverTarget.index]).has(hoverTarget.index);
++  const showHoverTooltip = hoverTarget !== null && !hoverMatchesPinned && !hoverOnSelectedRoute;
+ 
+   const pinnedWinner = (showPinned && pinnedTarget?.kind === "edge")
+     ? winners.find(w => w.edgeIdx === pinnedTarget.index) ?? null
+@@ -2855,18 +3075,73 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       .sort((a, b) => (b.up - b.down) - (a.up - a.down));
+   }, [pathEdgeIds, graphVoteVersion, votesVersion, isHeatmapLoading]);
+ 
+-  // The route proposal the current selection covers (every block touched), if
+-  // any — it becomes the card's header, so selecting a diamond (or manually
+-  // tracing its corridor) titles the summary with that proposal. Coverage is
+-  // twin-expanded, matching the diamonds' own covered state.
++  // Server-truth rows for the route card: DISTINCT devices per (vote type,
++  // direction) across the selection's block edges (/api/route-votes). A route
++  // cast fans ONE device's vote onto every edge of every block it covers, so the
++  // local per-block sums above count the same person once per block — these
++  // rows count them once, period. Local rows stand in until (or if never — no
++  // DB in some dev setups) the fetch resolves. Refetched, debounced, on every
++  // vote signal (own casts via votesVersion, everyone else's via the
++  // graphVoteVersion delta bump).
++  const [routeUniqueRows, setRouteUniqueRows] = useState<VoteTypeRow[] | null>(null);
++  useEffect(() => { setRouteUniqueRows(null); }, [pathEdgeIds]);
++  useEffect(() => {
++    if (!routeBlocks || routeBlocks.length === 0) {
++      setRouteUniqueRows(null);
++      return;
++    }
++    // Union of the touched blocks' edges, capped to keep the request bounded
++    // (a merged foot-component block can hold thousands of edges; past the cap
++    // the count degrades gracefully toward the per-block numbers).
++    const edgeIds: number[] = [];
++    const seen = new Set<number>();
++    for (const block of routeBlocks) {
++      for (let i = 0; i < block.length; i++) {
++        const e = block[i];
++        if (!seen.has(e)) {
++          seen.add(e);
++          edgeIds.push(e);
++          if (edgeIds.length >= ROUTE_VOTES_EDGE_CAP) break;
++        }
++      }
++      if (edgeIds.length >= ROUTE_VOTES_EDGE_CAP) break;
++    }
++    let cancelled = false;
++    const timer = window.setTimeout(() => {
++      fetch(`${CONFIG.apiUrl}/route-votes`, {
++        method: "POST",
++        headers: { "Content-Type": "application/json", ...passcodeHeaders() },
++        body: JSON.stringify({ map: getMapSlug(), edge_ids: edgeIds }),
++      })
++        .then((r) => (r.ok ? r.json() : null))
++        .then((j) => {
++          if (cancelled || !j?.rows) return;
++          setRouteUniqueRows(j.rows as VoteTypeRow[]);
++        })
++        .catch(() => {});
++    }, ROUTE_VOTES_DEBOUNCE_MS);
++    return () => {
++      cancelled = true;
++      window.clearTimeout(timer);
++    };
++  }, [routeBlocks, votesVersion, graphVoteVersion]);
++
++  // The RBTP the current selection stands for, if any — it becomes the card's
++  // header, so selecting a diamond (or manually tracing its corridor) titles
++  // the summary with that proposal. Mirrors the diamonds' own selected rule:
++  // block coverage (twin-expanded) first, else the explicitly-tapped RBTP
++  // whose anchors are still waypoints.
+   const coveredRouteProposal = useMemo(() => {
+     void isHeatmapLoading;
+     const topo = topologyRef.current;
+     if (!topo || !pathEdgeIds || pathEdgeIds.length === 0 || routeProposals.length === 0) return null;
+     const sel = expandSelectionToUndirected(
+       topo, pathEdgeIds, routeProposals.flatMap((p) => p.blockEdgeIds));
+-    return routeProposals.find((p) => isRouteCovered(p.blocks, sel)) ?? null;
+-  }, [pathEdgeIds, routeProposals, isHeatmapLoading]);
++    const byCoverage = routeProposals.find((p) => isRouteCovered(p.blocks, sel)) ?? null;
++    if (byCoverage) return byCoverage;
++    const tapped = routeProposals.find((p) => p.id === selectedRbtpId) ?? null;
++    return tapped && anchorsAreWaypoints(tapped) ? tapped : null;
++  }, [pathEdgeIds, routeProposals, isHeatmapLoading, selectedRbtpId, anchorsAreWaypoints]);
+ 
+   // geocodeVersion used to re-render when async geocode completes
+   void geocodeVersion;
+@@ -2901,6 +3176,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   }, [clearSpreadTimer, applySpread, scheduleSpreadClassClear]);
+   useEffect(() => { collapseSpreadRef.current = collapseSpread; }, [collapseSpread]);
+ 
++  // (Re)arm the snap-back countdown for a TRANSIENT (not yet locked) spread.
++  // Paused while the cursor rests on one of its fanned icons — square or
++  // diamond — and restarted when it leaves, so the cluster stays open as long
++  // as you hover it. A locked spread has no timer.
++  const armSpreadTimer = useCallback(() => {
++    clearSpreadTimer();
++    spreadTimeoutRef.current = window.setTimeout(collapseSpread, SPREAD_DURATION_MS);
++  }, [clearSpreadTimer, collapseSpread]);
++
+   // Panning or zooming collapses the open spread (including a locked, persisted
+   // one) — the fanned grid was laid out for a fixed screen anchor, so moving the
+   // map is the natural "I'm done with this cluster" gesture.
+@@ -3021,6 +3305,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   //     edge ids (RouteContext.insertWaypointAtSegment), or the on-path highlight
+   //     AND the vote target both vanish.
+   // ===========================================================================
++  // POINT-BASED top proposals — "PBTPs" (square pins): one hot edge per pin,
++  // selected by topProposals.selectTopProposals. Their ROUTE-based counterpart
++  // (RBTPs, the corridor diamonds) renders in routeIndicatorMarkers below;
++  // terminology in docs/three-layer-model.md §3.1.
+   const indicatorMarkers = useMemo(() => {
+     const topology = topologyRef.current;
+     if (!topology) return null;
+@@ -3064,21 +3352,26 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       midLng: number;
+     }>;
+ 
+-    // The snap-back countdown governs a TRANSIENT (not yet locked) spread: it's
+-    // paused while the cursor is over one of its fanned-out icons and (re)started
+-    // when it leaves, so the cluster stays open as long as you hover it and
+-    // collapses once you move away. A locked spread has no timer.
+-    const armSpreadTimer = () => {
+-      clearSpreadTimer();
+-      spreadTimeoutRef.current = window.setTimeout(collapseSpread, SPREAD_DURATION_MS);
+-    };
++    // Everything that participates in a fan-out — the PBTP squares above AND the
++    // RBTP diamonds (routeIndicatorMarkers) — keyed by its spread key at its
++    // settled display position. Both kinds cluster and explode TOGETHER: a stack
++    // of mixed pins fans out as one grid.
++    const clusterables = [
++      ...placed.map((m) => ({
++        key: spreadKeyEdge(m.w.edgeIdx), lat: m.midLat, lng: m.midLng,
++      })),
++      ...routeProposals.map((p) => {
++        const [lat, lng] = rbtpDisplayPos(topology, p);
++        return { key: spreadKeyRoute(p.id), lat, lng };
++      }),
++    ];
+ 
+     // The crowded proposal cluster around a screen anchor: the 2+ icons within
+     // CLUSTER_RADIUS_PX of it. Shared by both explode entry points (browse click
+     // and path/drag tap), so cluster detection lives in exactly one place.
+     const clusterAround = (anchor: L.Point) =>
+-      placed.filter((m) => {
+-        const p = map.latLngToContainerPoint([m.midLat, m.midLng]);
++      clusterables.filter((m) => {
++        const p = map.latLngToContainerPoint([m.lat, m.lng]);
+         const dx = p.x - anchor.x, dy = p.y - anchor.y;
+         return dx * dx + dy * dy <= CLUSTER_RADIUS_PX * CLUSTER_RADIUS_PX;
+       });
+@@ -3088,7 +3381,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     // fanned out at a time, so a fresh fanout collapses whatever was open), then
+     // schedule the snap-back. The new spread is transient until a box is picked.
+     const spreadCluster = (
+-      members: typeof placed,
++      members: typeof clusterables,
+       anchor: L.Point,
+     ) => {
+       const cols = Math.ceil(Math.sqrt(members.length));
+@@ -3103,7 +3396,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+           anchor.x + offsetX,
+           anchor.y + offsetY,
+         ]);
+-        next.set(m.w.edgeIdx, [ll.lat, ll.lng]);
++        next.set(m.key, [ll.lat, ll.lng]);
+       });
+ 
+       map.getContainer().classList.add("votes-spreading");
+@@ -3120,29 +3413,31 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     // proposal happens only by tapping a fanned-out icon. Returns false only when
+     // there's no crowded cluster here, so the host runs its normal tap action
+     // (e.g. place a start on empty map / a lone proposal).
+-    if (clusterExploderRef) {
+-      clusterExploderRef.current = (latlng) => {
+-        const tapPt = map.latLngToContainerPoint([latlng.lat, latlng.lng]);
+-        let anchor: L.Point | null = null;
+-        let nearestSq = Infinity;
+-        for (const m of placed) {
+-          const p = map.latLngToContainerPoint([m.midLat, m.midLng]);
+-          const d = (p.x - tapPt.x) ** 2 + (p.y - tapPt.y) ** 2;
+-          if (d < nearestSq) { nearestSq = d; anchor = p; }
+-        }
+-        if (!anchor || nearestSq > CLUSTER_RADIUS_PX * CLUSTER_RADIUS_PX) return false;
+-        const cluster = clusterAround(anchor);
+-        if (cluster.length <= 1) return false;
+-        // Explode this cluster UNLESS it's already the open one — so a drag calling
+-        // this every frame doesn't re-fan the cluster it's already hovering.
+-        const alreadyOpen = cluster.some((m) => spreadRef.current?.has(m.w.edgeIdx));
+-        if (!alreadyOpen) spreadCluster(cluster, anchor);
+-        return true;
+-      };
+-    }
++    const explodeClusterAt = (latlng: { lat: number; lng: number }): boolean => {
++      const tapPt = map.latLngToContainerPoint([latlng.lat, latlng.lng]);
++      let anchor: L.Point | null = null;
++      let nearestSq = Infinity;
++      for (const m of clusterables) {
++        const p = map.latLngToContainerPoint([m.lat, m.lng]);
++        const d = (p.x - tapPt.x) ** 2 + (p.y - tapPt.y) ** 2;
++        if (d < nearestSq) { nearestSq = d; anchor = p; }
++      }
++      if (!anchor || nearestSq > CLUSTER_RADIUS_PX * CLUSTER_RADIUS_PX) return false;
++      const cluster = clusterAround(anchor);
++      if (cluster.length <= 1) return false;
++      // Explode this cluster UNLESS it's already the open one — so a drag calling
++      // this every frame doesn't re-fan the cluster it's already hovering.
++      const alreadyOpen = cluster.some((m) => spreadRef.current?.has(m.key));
++      if (!alreadyOpen) spreadCluster(cluster, anchor);
++      return true;
++    };
++    // Internal ref: the route-diamond markers run the same gate on their own
++    // clicks (a diamond in a crowded stack fans out instead of selecting).
++    internalExploderRef.current = explodeClusterAt;
++    if (clusterExploderRef) clusterExploderRef.current = explodeClusterAt;
+ 
+     return placed.map(({ w, midLat, midLng }) => {
+-      const override = spread?.get(w.edgeIdx);
++      const override = spread?.get(spreadKeyEdge(w.edgeIdx));
+       const posLat = override ? override[0] : midLat;
+       const posLng = override ? override[1] : midLng;
+ 
+@@ -3205,7 +3500,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+         overIndicatorRef.current = true;
+         // Hovering an icon of the open (transient) cluster pauses its snap-back
+         // timer; a locked cluster has no timer to pause.
+-        if (!spreadLockedRef.current && spreadRef.current?.has(w.edgeIdx)) clearSpreadTimer();
++        if (!spreadLockedRef.current && spreadRef.current?.has(spreadKeyEdge(w.edgeIdx))) clearSpreadTimer();
+         // The hover card is a pointer-only affordance. On touch there's no
+         // mouseout to clear it, so a tap would leave it stuck and resurface it
+         // once the pinned point moves off this edge. The pinned modal is the
+@@ -3229,7 +3524,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+         redrawHoverHighlightRef.current();
+         // Leaving an open (transient) cluster icon (re)starts its snap-back
+         // countdown. A locked cluster has no timer, so its icons don't trigger one.
+-        if (!spreadLockedRef.current && spreadRef.current?.has(w.edgeIdx)) armSpreadTimer();
++        if (!spreadLockedRef.current && spreadRef.current?.has(spreadKeyEdge(w.edgeIdx))) armSpreadTimer();
+       };
+ 
+       const handleClick = () => {
+@@ -3344,7 +3639,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     });
+     // isStationNetwork/stationLabel select the marker source; isHeatmapLoading
+     // re-runs once topology+votes arrive so stations appear even with zero votes.
+-  }, [winners, currentZoom, map, spread, collapseSpread, clearSpreadTimer, applySpread,
++  }, [winners, routeProposals, currentZoom, map, spread, collapseSpread, clearSpreadTimer, armSpreadTimer, applySpread,
+       selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,
+       isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, isStationNetwork, stationLabel, isHeatmapLoading, canHover]);
+ 
+@@ -3456,10 +3751,25 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     return () => { cancelled = true; };
+   }, [pinnedVoteEdgeId, themeMode]);
+ 
+-  // Route-proposal diamonds — one per corridor, at the midpoint of its middle
+-  // path edge. Hovering lights the whole corridor; clicking forces the route
+-  // through its anchors; it reads "selected" once the live route covers every
+-  // block (the auto-select rule). A separate layer from the point indicators.
++  // ===========================================================================
++  // ROUTE-BASED top proposals — "RBTPs" (diamonds)
++  // ===========================================================================
++  // Terminology (docs/three-layer-model.md §3.1): the map surfaces two kinds of
++  // top proposal —
++  //   PBTP — POINT-based top proposal: one hot edge, square pin, computed by
++  //          topProposals.selectTopProposals, rendered by indicatorMarkers above.
++  //   RBTP — ROUTE-based top proposal: a hot CORRIDOR (simple path through the
++  //          vote graph), diamond pin at its middle edge, computed by
++  //          routeProposals.computeRouteProposals, rendered here.
++  //
++  // One diamond per corridor. Hovering lights the whole corridor; clicking
++  // force-routes through its two anchors and SELECTS it. A diamond reads
++  // selected when either
++  //   (a) the live route covers every one of its blocks (the auto-select rule,
++  //       twin-expanded), or
++  //   (b) it's the explicitly-tapped RBTP and both anchors are still waypoints
++  //       — see selectedRbtpId; OSRM's leg between the anchors rarely re-traces
++  //       the corridor, so (a) alone left a tapped diamond looking unselected.
+   const routeIndicatorMarkers = useMemo(() => {
+     const topology = topologyRef.current;
+     if (!topology || routeProposals.length === 0) return null;
+@@ -3470,6 +3780,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+           topology, pathEdgeIds, routeProposals.flatMap((p) => p.blockEdgeIds))
+       : null;
+ 
++    // Same heat treatment as the PBTP squares (normalized within the RBTP
++    // family, log scale) so the two marker kinds read as one visual system —
++    // a diamond warms toward the map's ramp exactly like a square does.
++    const rampStops = buildHeatRampStops(mapStyle.heat);
++    const maxScore = routeProposals.reduce((m, p) => Math.max(m, p.score), 0);
++    const heatOf = (score: number): number =>
++      maxScore > 0 && score > 0
++        ? Math.log(score + 1) / Math.log(maxScore + 1)
++        : 0;
++
+     // Container points of the current waypoints (start/end/mids). A diamond
+     // whose icon box overlaps a waypoint's icon box goes PASSTHROUGH: the
+     // diamond outranks every settled icon (bands below), so left interactive it
+@@ -3486,34 +3806,45 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       waypointPts.some((wp) => Math.abs(wp.x - pt.x) < 34 && Math.abs(wp.y - pt.y) < 42);
+ 
+     return routeProposals.map((p) => {
+-      const midEdge = p.edgeIds[Math.floor(p.edgeIds.length / 2)];
+-      let posLat: number, posLng: number;
+-      if (midEdge != null && midEdge < topology.nEdges) {
+-        const fromIdx = edgeFrom(topology, midEdge), toIdx = edgeTo(topology, midEdge);
+-        posLat = (nodeLat(topology, fromIdx) + nodeLat(topology, toIdx)) / 2;
+-        posLng = (nodeLon(topology, fromIdx) + nodeLon(topology, toIdx)) / 2;
+-      } else {
+-        // Fallback: geometric midpoint of the two anchors.
+-        posLat = (p.anchorCoords[0].lat + p.anchorCoords[1].lat) / 2;
+-        posLng = (p.anchorCoords[0].lng + p.anchorCoords[1].lng) / 2;
+-      }
+-
+-      const covered = selectedSet ? isRouteCovered(p.blocks, selectedSet) : false;
++      // Fanned-out grid cell when this diamond's cluster is exploded, else its
++      // settled display spot (middle edge midpoint / anchor mean).
++      const override = spread?.get(spreadKeyRoute(p.id));
++      const [posLat, posLng] = override ?? rbtpDisplayPos(topology, p);
++
++      const covered = (selectedSet ? isRouteCovered(p.blocks, selectedSet) : false)
++        || (p.id === selectedRbtpId && anchorsAreWaypoints(p));
++      // A live drag hovering this diamond → drop-target ring (dropping threads
++      // the route through the whole corridor).
++      const isDropTarget = p.id === dropTargetRbtpId;
+       const dp = map.latLngToContainerPoint([posLat, posLng]);
+-      const passthrough = overlapsWaypoint(dp);
++      // A fanned-out diamond sits off its real spot in the disambiguation grid —
++      // it must take its own click to be pickable, never passthrough.
++      const passthrough = overlapsWaypoint(dp) && !override;
++      // The [×] badge: this corridor is IN the route (its anchors are current
++      // waypoints, inserted by the diamond's click or a drop onto it) — mirror
++      // the matched point pin's removal affordance as closely as possible.
++      const removable = isRouteMode && p.id === selectedRbtpId && anchorsAreWaypoints(p);
++      const heat = heatOf(p.score);
++      const heatColor = heat > 0 ? sampleHeatRamp(rampStops, heat) : undefined;
+       const icon = makeVoteTypeIcon(p.label, theme.suggestions, {
+-        diamond: true, selected: covered, passthrough,
++        diamond: true, selected: covered || isDropTarget, passthrough,
++        square: !!override, heat, heatColor,
++        removeRoute: removable ? p.id : null,
+       });
+ 
+       const activate = () => {
+         routeHighlightEdgesRef.current = routeBlockEdges(p);
+         redrawHoverHighlightRef.current();
+         dispatchBlockSelectRef.current();
++        // Hovering a fanned diamond pauses the open cluster's snap-back, same
++        // as a fanned square (a locked spread has no timer to pause).
++        if (!spreadLockedRef.current && spreadRef.current?.has(spreadKeyRoute(p.id))) clearSpreadTimer();
+       };
+       const deactivate = () => {
+         routeHighlightEdgesRef.current = null;
+         redrawHoverHighlightRef.current();
+         dispatchBlockSelectRef.current();
++        if (!spreadLockedRef.current && spreadRef.current?.has(spreadKeyRoute(p.id))) armSpreadTimer();
+       };
+ 
+       return (
+@@ -3524,13 +3855,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+           // Route diamonds sit ABOVE every settled point icon (matched/selected/
+           // browse) so a corridor is never buried under point pins; covered ones
+           // outrank uncovered; the fanned-out spread (500000+) alone stays above
+-          // them (it's the explicit disambiguation gesture). Bands documented at
++          // them (it's the explicit disambiguation gesture) — a fanned diamond
++          // joins that top band with the fanned squares. Bands documented at
+           // the point-icon zIndexOffset.
+-          zIndexOffset={(covered ? 400000 : 300000) + Math.min(48000, Math.max(0, p.score))}
++          zIndexOffset={(override ? 500000 : covered ? 400000 : 300000) + Math.min(48000, Math.max(0, p.score))}
+           interactive={!passthrough}
+           onActivate={activate}
+           onDeactivate={deactivate}
+           onClick={() => {
++            dlog("proposals", `diamond click ${p.id} override=${!!override} passthrough=${passthrough}`);
++            // A crowded stack fans out BEFORE any side effect — the same rule
++            // the point pins apply in their handleClick, so a diamond buried in
++            // (or burying) a stack explodes it instead of selecting blind. A
++            // fanned-out diamond (override) was already disambiguated — select.
++            if (!override && internalExploderRef.current?.({ lat: posLat, lng: posLng })) return;
+             // Drop any hover card sitting at the click point — the route-summary
+             // card about to open would otherwise render underneath it until the
+             // next mousemove refreshes the hover.
+@@ -3539,13 +3877,21 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+               setHoverTarget(null);
+               redrawHoverHighlightRef.current();
+             }
++            // Picking a diamond ends any open fan-out — unlike a point pin it
++            // anchors no modal at its grid cell, so nothing needs the spread
++            // kept open (the corridor selection is the outcome).
++            if (spreadRef.current) collapseSpread();
++            // The tap selects this RBTP (rule (b) above); it stays selected
++            // until an anchor leaves the route.
++            setSelectedRbtpId(p.id);
+             onRouteProposalClickRef.current?.(p);
+           }}
+         />
+       );
+     });
+   }, [routeProposals, pathEdgeIds, currentZoom, map, theme.suggestions, mapStyle.heat,
+-      startLat, startLng, endLat, endLng, ghostKey]);
++      startLat, startLng, endLat, endLng, ghostKey, selectedRbtpId, anchorsAreWaypoints,
++      spread, dropTargetRbtpId, isRouteMode, clearSpreadTimer, armSpreadTimer, collapseSpread]);
+ 
+   return (
+     <>
+@@ -3590,11 +3936,24 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+         />,
+         mapContainer
+       )}
++      {showHoverTooltip && createPortal(
++        <ProposalCard
++          winner={isStationNetwork ? null : hoverWinner}
++          screenX={tooltipPos.x}
++          screenY={tooltipPos.y}
++          name={tooltipName}
++          rows={hoverVoteTypes}
++          voteTypes={theme.suggestions}
++        />,
++        mapContainer
++      )}
+       {/* Route-summary card — the modal for a FULL route selection (start+end),
+           which the pinned card (lone point) never covers. Summarizes the blocks
+           the route selects and the block-grain vote rows across them; headed by
+           the covered route proposal when the selection covers one. The ±
+-          buttons cast on the whole selection via castRouteVote. */}
++          buttons cast on the whole selection via castRouteVote. Rendered LAST
++          (same z-index as the hover card) so a transient hover card can never
++          bury the selection's own summary. */}
+       {routeCardPos && routeBlocks && routeBlocks.length > 0 && !showPinned && createPortal(
+         <ProposalCard
+           key={`route:${coveredRouteProposal?.id ?? "selection"}`}
+@@ -3613,15 +3972,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+           // Maps without block artifacts fall back to singleton blocks (one per
+           // edge), where "blocks" would read as a huge nonsense number — call
+           // those what they are.
+-          metaText={`selects ${routeBlocks.length} ${hasBlocksRef.current ? "block" : "segment"}${routeBlocks.length !== 1 ? "s" : ""}`}
+-          rows={routeVoteRows}
++          metaText={`Selects ${routeBlocks.length} ${hasBlocksRef.current ? "block" : "segment"}${routeBlocks.length !== 1 ? "s" : ""}`}
++          // Distinct-voter rows once the server answers (one person = one vote
++          // however many blocks their cast fanned across); local sums meanwhile.
++          rows={routeUniqueRows ?? routeVoteRows}
+           interactive
++          elevated
+           edgeId={pathEdgeIds && pathEdgeIds.length > 0 ? pathEdgeIds[0] : null}
+           blocks={routeBlocks}
+           mode={themeMode}
+           voteTypes={theme.suggestions}
+           shareUrl={window.location.href}
+           onVote={castRouteVote}
++          onRemove={onClearRoute ? () => onClearRouteRef.current?.() : undefined}
++          removeLabel="Deselect this route"
+           registerEl={(el) => { pinnedModalElRef.current = el; }}
+           onHoverChange={(over) => {
+             overModalRef.current = over;
+@@ -3634,17 +3998,6 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+         />,
+         mapContainer
+       )}
+-      {showHoverTooltip && createPortal(
+-        <ProposalCard
+-          winner={isStationNetwork ? null : hoverWinner}
+-          screenX={tooltipPos.x}
+-          screenY={tooltipPos.y}
+-          name={tooltipName}
+-          rows={hoverVoteTypes}
+-          voteTypes={theme.suggestions}
+-        />,
+-        mapContainer
+-      )}
+     </>
+   );
+ }
+@@ -3709,6 +4062,9 @@ interface ProposalCardProps {
+   metaText?: string | null;
+   rows: VoteTypeRow[];
+   interactive?: boolean;
++  /** Lifts the card one z tier above sibling cards (route summary vs transient
++   *  hover). Portals mount at different times, so DOM order can't order them. */
++  elevated?: boolean;
+   edgeId?: number | null;
+   /** The selection's touched blocks as materialized edge lists (docs §4.1) —
+    *  drives the ± buttons' active/unvote state. Null/absent falls back to the
+@@ -3722,6 +4078,9 @@ interface ProposalCardProps {
+   voteTypes?: readonly { label: string; icon: string }[];
+   onVote?: (edgeId: number | null, label: string, dir: VoteDirection) => void;
+   onRemove?: () => void;
++  /** Title/aria for the ✕ — the route-summary card deselects a whole route, not
++   *  a point, so it says so. */
++  removeLabel?: string;
+   /** Notifies when the cursor enters/leaves the card (pinned modal only) so the
+    *  map hover can yield beneath it. */
+   onHoverChange?: (over: boolean) => void;
+@@ -3739,7 +4098,7 @@ type CardPos = {
+ 
+ function ProposalCard({
+   winner, eyebrow = "Top Proposal", screenX, screenY, name, metaText = null, rows,
+-  interactive = false, edgeId = null, blocks = null, mode = "", shareUrl = null, voteTypes, onVote, onRemove, onHoverChange, registerEl,
++  interactive = false, elevated = false, edgeId = null, blocks = null, mode = "", shareUrl = null, voteTypes, onVote, onRemove, removeLabel = "Remove this point", onHoverChange, registerEl,
+ }: ProposalCardProps) {
+   const [copied, setCopied] = useState(false);
+   // Interactive cards can collapse to a small pill (icon + label + expand) so a
+@@ -3867,7 +4226,7 @@ function ProposalCard({
+   return (
+     <div
+       ref={(el) => { cardRef.current = el; registerEl?.(el); }}
+-      className={`graph-indicator-modal graph-proposal-card${interactive ? " is-interactive" : " is-hover"}${minimized ? " is-minimized" : ""}`}
++      className={`graph-indicator-modal graph-proposal-card${interactive ? " is-interactive" : " is-hover"}${minimized ? " is-minimized" : ""}${elevated ? " is-elevated" : ""}`}
+       style={{
+         left: pos?.left ?? screenX,
+         top: pos?.top ?? screenY,
+@@ -3938,7 +4297,7 @@ function ProposalCard({
+                   type="button"
+                   className="graph-proposal-tool graph-proposal-close"
+                   title="Remove"
+-                  aria-label="Remove this point"
++                  aria-label={removeLabel}
+                   onClick={() => onRemove()}
+                 >✕</button>
+               )}
+diff --git a/client-react/src/components/GraphLayer/routeProposals.test.ts b/client-react/src/components/GraphLayer/routeProposals.test.ts
+index 70960f0..318766e 100644
+--- a/client-react/src/components/GraphLayer/routeProposals.test.ts
++++ b/client-react/src/components/GraphLayer/routeProposals.test.ts
+@@ -8,6 +8,7 @@ import {
+   dropPointsCoveredByRoutes,
+   chooseAnchorOrder,
+   computeRouteProposals,
++  corridorCoordinates,
+   dedupeRoutes,
+   MIN_ROUTE_SCORE,
+   MIN_ROUTE_EDGES,
+@@ -445,3 +446,34 @@ describe("computeRouteProposals — determinism", () => {
+     expect(a.every((p) => /^[0-9a-f]{8}$/.test(p.id))).toBe(true);
+   });
+ });
++
++describe("corridorCoordinates (verbatim corridor routing)", () => {
++  it("walks the ordered edges from anchors[0] into a [lng, lat] chain", () => {
++    // makeTopo places node i at [40.7, -74.0 + 0.001*i].
++    const topo = makeTopo([[0, 1], [1, 2], [2, 3]]);
++    const p = bareRoute({ edgeIds: [0, 1, 2], anchors: [0, 3] });
++    expect(corridorCoordinates(topo, p)).toEqual([
++      [-74.0, 40.7], [-73.999, 40.7], [-73.998, 40.7], [-73.997, 40.7],
++    ]);
++  });
++
++  it("chains through edges stored in either direction", () => {
++    // Edge 1 is stored REVERSED (2→1): the walk must still traverse 0→1→2→3.
++    const topo = makeTopo([[0, 1], [2, 1], [2, 3]]);
++    const p = bareRoute({ edgeIds: [0, 1, 2], anchors: [0, 3] });
++    expect(corridorCoordinates(topo, p)?.length).toBe(4);
++    expect(corridorCoordinates(topo, p)?.[3]).toEqual([-73.997, 40.7]);
++  });
++
++  it("returns null when the chain breaks (edge not incident to the walk)", () => {
++    const topo = makeTopo([[0, 1], [2, 3]]);
++    const p = bareRoute({ edgeIds: [0, 1], anchors: [0, 3] }); // edge 1 doesn't touch node 1
++    expect(corridorCoordinates(topo, p)).toBeNull();
++  });
++
++  it("returns null on out-of-range edges or an empty path (stale topology)", () => {
++    const topo = makeTopo([[0, 1]]);
++    expect(corridorCoordinates(topo, bareRoute({ edgeIds: [7], anchors: [0, 1] }))).toBeNull();
++    expect(corridorCoordinates(topo, bareRoute({ edgeIds: [], anchors: [0, 1] }))).toBeNull();
++  });
++});
+diff --git a/client-react/src/components/GraphLayer/routeProposals.ts b/client-react/src/components/GraphLayer/routeProposals.ts
+index 97293bb..d742969 100644
+--- a/client-react/src/components/GraphLayer/routeProposals.ts
++++ b/client-react/src/components/GraphLayer/routeProposals.ts
+@@ -1,6 +1,11 @@
+ // ==========================================================================
+-// Route-based top proposals (client side)
++// Route-based top proposals (RBTPs) — client side
+ // ==========================================================================
++// Terminology (docs/three-layer-model.md §3.1): an RBTP is a ROUTE-based top
++// proposal — a hot corridor through the vote graph, shown as a diamond pin at
++// its middle edge. Its point-based counterpart is the PBTP (one hot edge,
++// square pin) in topProposals.ts.
++//
+ // Pure logic (no React/Leaflet) for the server-computed ROUTE proposals served
+ // by /api/route-proposals. A route proposal is a high-vote corridor: a simple
+ // path through the intersection graph, expressed in BLOCK units (edge groups),
+@@ -165,6 +170,41 @@ export function dropPointsCoveredByRoutes<T extends { edgeIdx: number; legendIdx
+   return points.filter((p) => !covered.get(p.legendIdx)?.has(p.edgeIdx));
+ }
+ 
++// --------------------------------------------------------------------------
++// Corridor geometry — the proposal's stored path as a coordinate chain.
++// --------------------------------------------------------------------------
++/**
++ * The corridor's polyline as GeoJSON [lng, lat] pairs, walked from
++ * `anchors[0]` to `anchors[1]` along the ordered `edgeIds`. This is what lets
++ * a selected RBTP route the selection through the proposal VERBATIM instead of
++ * whatever OSRM picks between the anchors. Returns null if the chain breaks
++ * (stale topology / edge not incident to the walk) — callers fall back to OSRM.
++ */
++export function corridorCoordinates(
++  topo: GraphTopology,
++  p: RouteProposal,
++): [number, number][] | null {
++  if (p.edgeIds.length === 0) return null;
++  let cur = p.anchors[0];
++  if (cur >= topo.nNodes) return null;
++  const coords: [number, number][] = [];
++  const push = (n: number) => {
++    const [lat, lng] = nodeLatLng(topo, n);
++    coords.push([lng, lat]);
++  };
++  push(cur);
++  for (const e of p.edgeIds) {
++    if (e >= topo.nEdges) return null;
++    const u = topo.ends[2 * e];
++    const v = topo.ends[2 * e + 1];
++    const next = u === cur ? v : v === cur ? u : null;
++    if (next === null || next >= topo.nNodes) return null;
++    push(next);
++    cur = next;
++  }
++  return coords;
++}
++
+ // --------------------------------------------------------------------------
+ // Ghost-waypoint forcing — choose the faster anchor insertion order.
+ // --------------------------------------------------------------------------
+diff --git a/client-react/src/components/GraphLayer/voteTypeIcon.ts b/client-react/src/components/GraphLayer/voteTypeIcon.ts
+index 27e2124..6bc081d 100644
+--- a/client-react/src/components/GraphLayer/voteTypeIcon.ts
++++ b/client-react/src/components/GraphLayer/voteTypeIcon.ts
+@@ -29,6 +29,11 @@ export interface VoteTypeIconOptions {
+    *  resolve which waypoint to remove. Stays clickable even when `passthrough`
+    *  (the badge is pointer-events:auto; the rest of the icon is not). */
+   removeEdge?: number | null;
++  /** Same remove [×] badge for a ROUTE proposal diamond — shown when the
++   *  corridor's two anchors are current route waypoints, so [×] pulls the whole
++   *  corridor back out. Stamps the proposal id (`data-x-route`) for the same
++   *  delegated handler. Ignored when `removeEdge` is set. */
++  removeRoute?: string | null;
+   /** "Heat" of this proposal, 0–1, normalized against the hottest visible
+    *  proposal's vote count. Rendered as INK, not glow (CSS off the `--heat` /
+    *  `--heat-color` custom properties below): the pin's paper fill warms toward
+@@ -68,6 +73,10 @@ const INNER_SQUARE_PATH = "M6,6 H28 V28 H6 Z";
+ // Vertices: top (17,3) · right (31,17) · bottom-tip (17,36) · left (3,17).
+ const DIAMOND_PATH = "M17,3 L31,17 L17,36 L3,17 Z";
+ const INNER_DIAMOND_PATH = "M17,9 L26,17 L17,30 L8,17 Z";
++// Symmetric diamond (no pulled-down tip) for fanned-out route icons — the same
++// "drop the locating point in a grid cell" rule the square gives point icons.
++const DIAMOND_SQUARE_PATH = "M17,3 L31,17 L17,31 L3,17 Z";
++const INNER_DIAMOND_SQUARE_PATH = "M17,9 L26,17 L17,25 L8,17 Z";
+ const TIP: [number, number] = [17, 36];
+ 
+ /**
+@@ -94,10 +103,13 @@ export function makeVoteTypeIcon(
+     ? `<img class="vote-type-indicator-icon" src="${iconSrc(icon)}" alt="" />`
+     : suggestionGlyphSvg(hashLabelToColor(label));
+ 
+-  // Diamond (route) takes precedence over the square (fanned-out) variant.
+-  const shape = opts.diamond ? DIAMOND_PATH : opts.square ? SQUARE_PATH : OUTER_PATH;
++  // Diamond (route) keeps its shape family in the fanned-out (square) state —
++  // it just loses the pulled-down locating tip, exactly like the point pin does.
++  const shape = opts.diamond
++    ? (opts.square ? DIAMOND_SQUARE_PATH : DIAMOND_PATH)
++    : opts.square ? SQUARE_PATH : OUTER_PATH;
+   const innerShape = opts.diamond
+-    ? INNER_DIAMOND_PATH
++    ? (opts.square ? INNER_DIAMOND_SQUARE_PATH : INNER_DIAMOND_PATH)
+     : opts.square ? INNER_SQUARE_PATH : INNER_PATH;
+   // Remove badge: a sibling of the pin/icon inside the scaled .vote-type-indicator,
+   // so CSS pins it to the square's top-right corner (SVG 31,3) and it inherits the
+@@ -105,6 +117,8 @@ export function makeVoteTypeIcon(
+   // GraphLayer resolve which waypoint to drop.
+   const removeBadge = opts.removeEdge != null
+     ? `<span class="vote-type-indicator-x" data-x-edge="${opts.removeEdge}" role="button" aria-label="Remove from route">×</span>`
++    : opts.removeRoute
++    ? `<span class="vote-type-indicator-x" data-x-route="${opts.removeRoute}" role="button" aria-label="Remove this route proposal from the route">×</span>`
+     : "";
+   // Heat: hand the intensity + color to CSS as custom properties on the
+   // scaled .vote-type-indicator. CSS color-mixes the border and a drop-shadow
+diff --git a/client-react/src/components/MapView/MapView.tsx b/client-react/src/components/MapView/MapView.tsx
+index cdb7367..04b7833 100644
+--- a/client-react/src/components/MapView/MapView.tsx
++++ b/client-react/src/components/MapView/MapView.tsx
+@@ -30,6 +30,17 @@ import "leaflet/dist/leaflet.css";
+ import "maplibre-gl/dist/maplibre-gl.css";
+ import "./MapView.css";
+ 
++// Equirectangular "duration" between two points — proportional to foot time at
++// city scale, and only the ORDER of candidate waypoint chains matters, so route
++// choices never block on OSRM. Shared by the diamond click and the
++// drop-a-waypoint-onto-a-diamond corridor threading.
++function chainDurationOf(x: LatLng, y: LatLng): number {
++  const meanLat = ((x.lat + y.lat) / 2) * (Math.PI / 180);
++  const dLat = (y.lat - x.lat) * (Math.PI / 180);
++  const dLng = (y.lng - x.lng) * (Math.PI / 180) * Math.cos(meanLat);
++  return Math.hypot(dLat, dLng);
++}
++
+ // Custom pane setup component
+ function MapPanes() {
+   const map = useMap();
+@@ -199,6 +210,9 @@ export function MapView() {
+     insertWaypointAtSegment,
+     updateGhostWaypoint,
+     removeGhostWaypoint,
++    replaceGhostWaypointWithPair,
++    insertWaypointPairAtSegment,
++    removeWaypointsNear,
+     updateWaypoint,
+     clearSuppressClick,
+     setSuppressClick,
+@@ -274,6 +288,11 @@ export function MapView() {
+   // proposal tap — on the path (handleTap) AND on a matched waypoint's kite
+   // (handleProposalRestart) — routes through it so a stack always explodes first.
+   const clusterExploderRef = useRef<((latlng: LatLng) => boolean) | null>(null);
++  // GraphLayer publishes its "which RBTP diamond is at this point?" resolver here
++  // (it also SELECTS the hit, like the diamond's own click). Consulted on every
++  // waypoint/path drop so dropping onto a diamond threads the route through the
++  // proposal's whole corridor instead of just placing a point there.
++  const routeProposalAtRef = useRef<((latlng: LatLng) => RouteProposal | null) | null>(null);
+   // Live dragged-waypoint position, fed to GraphLayer to light the drop-target
+   // proposal. rAF-coalesced so a 60fps drag re-renders at most once per frame.
+   const [dragPoint, setDragPoint] = useState<LatLng | null>(null);
+@@ -349,10 +368,14 @@ export function MapView() {
+     setHoverProposalPoint(null);
+   }, [setSuppressClick]);
+ 
+-  // Wrapper for marker drag finish — re-enables ghost pin
++  // Wrapper for marker drag finish — re-enables ghost pin. Clears the matched-
++  // waypoint hover card too: the drop fires a mouseover with the PRE-drag match
++  // still in state, which otherwise pins the old proposal's card to the kite's
++  // new spot until the cursor happens to leave it.
+   const handleMarkerDragFinish = useCallback(() => {
+     setIsDraggingMarker(false);
+     clearDragPoint();
++    setHoverProposalPoint(null);
+   }, [clearDragPoint]);
+ 
+   // Indicator click follows the same tool logic as a normal map click.
+@@ -377,29 +400,31 @@ export function MapView() {
+   // Forcing the route through a ROUTE proposal (diamond). The corridor's two
+   // anchor endpoints become waypoints: with an existing route they're inserted
+   // as ghost mids in the faster order (start→A→B→end vs start→B→A→end); with no
+-  // route yet they seed start + end. Either way the route now traverses — and
+-  // thus selects — the corridor. Duration is approximated by equirectangular
+-  // distance (monotonic with foot time at city scale), so we don't block on OSRM.
++  // route yet they seed start + end. Either way the segment between the anchors
++  // then routes through the corridor VERBATIM (RouteContext's corridor
++  // resolver), so the selection traces the proposal. Duration is approximated
++  // by equirectangular distance (monotonic with foot time at city scale).
+   const handleRouteProposalClick = useCallback((p: RouteProposal) => {
+     clearSuppressClick();
+-    clearSplitPaths();
+     const [a, b] = p.anchorCoords;
+-    const durationOf = (x: LatLng, y: LatLng) => {
+-      const meanLat = ((x.lat + y.lat) / 2) * (Math.PI / 180);
+-      const dLat = (y.lat - x.lat) * (Math.PI / 180);
+-      const dLng = (y.lng - x.lng) * (Math.PI / 180) * Math.cos(meanLat);
+-      return Math.hypot(dLat, dLng); // proportional to meters; only the order matters
+-    };
++    // Already threaded (both anchors are current waypoints) — a re-tap of the
++    // selected diamond must not insert the anchors again as duplicate mids.
++    const wps = [start.coords, ...ghostWaypoints, end.coords].filter(Boolean) as LatLng[];
++    const nearM = (x: LatLng, y: LatLng) => 6_371_000 * chainDurationOf(x, y);
++    if ([a, b].every((anchor) => wps.some((w) => nearM(anchor, w) < 5))) return;
++    clearSplitPaths();
+     if (start.coords && end.coords && !isStationNetwork) {
+-      const [first, second] = chooseAnchorOrder([start.coords, end.coords], a, b, durationOf);
+-      insertWaypointAtSegment(0, first);
+-      insertWaypointAtSegment(1, second);
++      // One atomic pair insert (not two sequential single inserts): the single
++      // insert's local-geometry fast path would split the OLD route without
++      // ever consulting the corridor resolver.
++      const pair = chooseAnchorOrder([start.coords, end.coords], a, b, chainDurationOf);
++      insertWaypointPairAtSegment(0, pair);
+     } else {
+       clearPoints();
+       setStartPoint(a);
+       if (!isStationNetwork) setEndPoint(b);
+     }
+-  }, [start.coords, end.coords, isStationNetwork, insertWaypointAtSegment, clearPoints, setStartPoint, setEndPoint, clearSuppressClick, clearSplitPaths]);
++  }, [start.coords, end.coords, ghostWaypoints, isStationNetwork, insertWaypointPairAtSegment, clearPoints, setStartPoint, setEndPoint, clearSuppressClick, clearSplitPaths]);
+ 
+   // Tapping a top-proposal waypoint (start/end/mid). A crowded stack fans out
+   // first (no side effect) — the SAME exploder a path tap uses, so matched
+@@ -419,6 +444,70 @@ export function MapView() {
+   // indicator IS the selection). GraphLayer applies the same gate to the [×] badge.
+   const isRouteMode = !!start.coords && !!end.coords && !isStationNetwork;
+ 
++  // Did this drop land on an RBTP diamond? Then the route threads through the
++  // WHOLE corridor: its two anchors join the sequence between `prev` and `next`
++  // in whichever of the two orders gives the shorter chain —
++  //   (1) prev → anchorA → (corridor) → anchorB → next
++  //   (2) prev → anchorB → (corridor) → anchorA → next
++  // (the corridor's own length is the same both ways, so the comparison is the
++  // approach + departure legs). Null when the drop isn't on a diamond or there's
++  // no full route to thread it into.
++  const corridorPairFor = useCallback(
++    (drop: LatLng, prev: LatLng, next: LatLng): [LatLng, LatLng] | null => {
++      if (!isRouteMode) return null;
++      const p = routeProposalAtRef.current?.(drop);
++      if (!p) return null;
++      return chooseAnchorOrder([prev, next], p.anchorCoords[0], p.anchorCoords[1], chainDurationOf);
++    },
++    [isRouteMode]
++  );
++
++  // A mid (ghost waypoint) drag drop: onto a diamond → the mid BECOMES the
++  // corridor (both anchors replace it); anywhere else → the normal move.
++  const handleGhostWaypointDragEnd = useCallback(
++    (index: number, pos: LatLng) => {
++      if (start.coords && end.coords) {
++        const prev = index === 0 ? start.coords : ghostWaypoints[index - 1];
++        const next = index === ghostWaypoints.length - 1 ? end.coords : ghostWaypoints[index + 1];
++        const pair = prev && next ? corridorPairFor(pos, prev, next) : null;
++        if (pair) {
++          replaceGhostWaypointWithPair(index, pair);
++          return;
++        }
++      }
++      updateGhostWaypoint(index, pos);
++    },
++    [start.coords, end.coords, ghostWaypoints, corridorPairFor, replaceGhostWaypointWithPair, updateGhostWaypoint]
++  );
++
++  // A path drag drop (the ghost mid pulled out of the route): onto a diamond →
++  // insert the corridor's two anchors into that segment; else the normal mid.
++  const handleSegmentDrag = useCallback(
++    (segmentIndex: number, pos: LatLng) => {
++      if (start.coords && end.coords) {
++        const seq = [start.coords, ...ghostWaypoints, end.coords];
++        const prev = seq[segmentIndex];
++        const next = seq[segmentIndex + 1];
++        const pair = prev && next ? corridorPairFor(pos, prev, next) : null;
++        if (pair) {
++          insertWaypointPairAtSegment(segmentIndex, pair);
++          return;
++        }
++      }
++      insertWaypointAtSegment(segmentIndex, pos);
++    },
++    [start.coords, end.coords, ghostWaypoints, corridorPairFor, insertWaypointPairAtSegment, insertWaypointAtSegment]
++  );
++
++  // [×] on a selected route-proposal diamond: pull its two corridor anchors back
++  // out of the route in one step (they went in together via click or drop).
++  const removeRouteProposal = useCallback(
++    (p: RouteProposal) => {
++      removeWaypointsNear([p.anchorCoords[0], p.anchorCoords[1]]);
++    },
++    [removeWaypointsNear]
++  );
++
+   // Resolve the [×] badge baked into a matched proposal's indicator (GraphLayer)
+   // to the right removal: the badge stamps the proposal's edge, and waypointMatch
+   // tells us which waypoint sits on that edge. One handler for all three roles —
+@@ -437,8 +526,10 @@ export function MapView() {
+   const onProposalDrop = useCallback((edgeIdx: number, origin: LatLng, drop: LatLng) => {
+     if (waypointMatch.start?.edgeIdx === edgeIdx) { setStartPoint(drop); return; }
+     if (waypointMatch.end?.edgeIdx === edgeIdx) { setEndPoint(drop); return; }
++    // Mid / new-mid drops go through the corridor-aware handlers, so dropping
++    // onto an RBTP diamond threads the whole proposal here too.
+     const midIdx = waypointMatch.mids.findIndex((m) => m?.edgeIdx === edgeIdx);
+-    if (midIdx >= 0) { updateGhostWaypoint(midIdx, drop); return; }
++    if (midIdx >= 0) { handleGhostWaypointDragEnd(midIdx, drop); return; }
+ 
+     // On-path (not a waypoint): insert a NEW mid into whichever route segment the
+     // origin lies on, then insertWaypointAtSegment splits/reroutes like a path drag.
+@@ -460,8 +551,8 @@ export function MapView() {
+         if (d < bestD) { bestD = d; bestIdx = s.idx; }
+       }
+     }
+-    insertWaypointAtSegment(bestIdx, drop);
+-  }, [waypointMatch, setStartPoint, setEndPoint, updateGhostWaypoint, leafletMap, splitDesirePaths, routeData, insertWaypointAtSegment]);
++    handleSegmentDrag(bestIdx, drop);
++  }, [waypointMatch, setStartPoint, setEndPoint, handleGhostWaypointDragEnd, leafletMap, splitDesirePaths, routeData, handleSegmentDrag]);
+ 
+   const { handleMapClick } = useMapClick({
+     state: { start, end },
+@@ -485,8 +576,18 @@ export function MapView() {
+   // selecting whichever icon sits on top. Mirrors handleProposalRestart (kite).
+   const handleTap = useCallback((latlng: LatLng) => {
+     if (clusterExploderRef.current?.(latlng)) return;
++    // A tap landing inside an RBTP diamond's icon box only reaches here when
++    // the diamond couldn't take its own click — it's passthrough over a
++    // waypoint, or the press landed on the path/map around it. Treat it as the
++    // diamond's click (select the corridor), NOT as a route restart / bare
++    // placement — the user aimed at the proposal.
++    const p = routeProposalAtRef.current?.(latlng);
++    if (p) {
++      handleRouteProposalClick(p);
++      return;
++    }
+     handleMapClick(latlng);
+-  }, [handleMapClick]);
++  }, [handleMapClick, handleRouteProposalClick]);
+ 
+   const handleOutOfBounds = useCallback(() => {
+     setError("That's outside this map — drop your pins inside the highlighted area.");
+@@ -538,9 +639,12 @@ export function MapView() {
+         onIndicatorClick={handleIndicatorClick}
+         onRouteProposalClick={handleRouteProposalClick}
+         clusterExploderRef={clusterExploderRef}
++        routeProposalAtRef={routeProposalAtRef}
+         onRemoveProposal={removeProposalAtEdge}
++        onRouteProposalRemove={removeRouteProposal}
+         onProposalDrop={onProposalDrop}
+         onRemoveSelected={clearStart}
++        onClearRoute={clearPoints}
+         suppressHover={isHoveringPath || markerHoverCount > 0}
+         pathEdgeIds={pathEdgeIds}
+       />
+@@ -581,7 +685,7 @@ export function MapView() {
+         <DesirePathLayer
+           geometry={routeData.geometry}
+           segmentIndex={0}
+-          onSegmentDrag={insertWaypointAtSegment}
++          onSegmentDrag={handleSegmentDrag}
+           onTap={handleTap}
+           onPathHoverChange={setIsHoveringPath}
+         />
+@@ -593,7 +697,7 @@ export function MapView() {
+           <SplitDesirePathLayer
+             key={splitPath.id}
+             splitPath={splitPath}
+-            onSegmentDrag={insertWaypointAtSegment}
++            onSegmentDrag={handleSegmentDrag}
+             onTap={handleTap}
+             onPathHoverChange={setIsHoveringPath}
+           />
+@@ -622,7 +726,7 @@ export function MapView() {
+           hidden={waypointMatch.mids[index] != null}
+           onDragStart={handleMarkerDragStart}
+           onDragMove={handleDragMove}
+-          onDragEnd={(pos) => updateGhostWaypoint(index, pos)}
++          onDragEnd={(pos) => handleGhostWaypointDragEnd(index, pos)}
+           onDragFinish={handleMarkerDragFinish}
+           onDelete={() => removeGhostWaypoint(index)}
+           // On a proposal: tapping restarts the path from here ([x] removes it).
+diff --git a/client-react/src/context/RouteContext.tsx b/client-react/src/context/RouteContext.tsx
+index 967f9ac..6e97d53 100644
+--- a/client-react/src/context/RouteContext.tsx
++++ b/client-react/src/context/RouteContext.tsx
+@@ -148,6 +148,17 @@ export type ActiveTool = "start" | "end";
+  *  three-layer-model §4). Registered by GraphLayer, which owns the topology. */
+ export type BlockMaterializer = (edgeIds: number[]) => ArrayLike<number>[];
+ 
++/** Corridor geometry for a pair of points that are some route proposal's two
++ *  anchors: the proposal's stored path as a GeoJSON [lng, lat] chain oriented
++ *  a→b, plus its path edge ids. Registered by GraphLayer (which owns the
++ *  proposals + topology). Null = the pair isn't a proposal's anchors — route
++ *  it normally. This is what makes a selected RBTP follow its corridor
++ *  VERBATIM instead of whatever OSRM picks between the anchors. */
++export type CorridorSegmentResolver = (
++  a: LatLng,
++  b: LatLng,
++) => { coordinates: [number, number][]; edgeIds: number[] } | null;
++
+ interface RouteContextValue {
+   start: RoutePoint;
+   end: RoutePoint;
+@@ -167,6 +178,9 @@ interface RouteContextValue {
+    *  GraphLayer once topology loads; casts and pressed-state fall back to
+    *  singleton [edge] blocks until then. */
+   setBlockMaterializer: (fn: BlockMaterializer | null) => void;
++  /** Register (or clear) the anchors→corridor resolver. Set by GraphLayer once
++   *  proposals + topology exist; until then every segment routes via OSRM. */
++  setCorridorSegmentResolver: (fn: CorridorSegmentResolver | null) => void;
+   ghostWaypoints: LatLng[];
+   ghostWaypointIds: string[];
+   splitDesirePaths: SplitDesirePath[];
+@@ -208,6 +222,20 @@ interface RouteContextValue {
+   insertWaypointAtSegment: (segmentIndex: number, position: LatLng) => Promise<void>;
+   updateGhostWaypoint: (index: number, position: LatLng) => Promise<void>;
+   removeGhostWaypoint: (index: number) => void;
++  /** Replace the mid at `index` with TWO waypoints (a route proposal's corridor
++   *  anchors, already in insertion order) as ONE selection change + recalc —
++   *  dropping a mid onto a route-proposal diamond threads the route through the
++   *  whole corridor. An anchor that coincides with the neighboring waypoint is
++   *  skipped (a zero-length segment breaks the recalc). */
++  replaceGhostWaypointWithPair: (index: number, pair: [LatLng, LatLng]) => void;
++  /** Insert TWO waypoints into segment `segmentIndex` (corridor anchors, in
++   *  order) — the pair analogue of insertWaypointAtSegment, for a path drag
++   *  dropped onto a route-proposal diamond. */
++  insertWaypointPairAtSegment: (segmentIndex: number, pair: [LatLng, LatLng]) => void;
++  /** Remove every waypoint within a few meters of any of `coords` as ONE
++   *  selection change + recalc — the [×] on a selected route-proposal diamond
++   *  pulls both corridor anchors back out together. */
++  removeWaypointsNear: (coords: LatLng[]) => void;
+   clearSplitPaths: () => void;
+   clearSuppressClick: () => void;
+   setSuppressClick: () => void;
+@@ -312,6 +340,14 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+     blockMaterializerRef.current = fn;
+   }, []);
+ 
++  // GraphLayer's anchors→corridor resolver (same registration pattern). Every
++  // segment calculation consults it first, so any consecutive waypoint pair
++  // that IS a route proposal's two anchors routes through the corridor verbatim.
++  const corridorResolverRef = useRef<CorridorSegmentResolver | null>(null);
++  const setCorridorSegmentResolver = useCallback((fn: CorridorSegmentResolver | null) => {
++    corridorResolverRef.current = fn;
++  }, []);
++
+   const setActiveTool = useCallback((tool: ActiveTool) => {
+     setActiveToolState(tool);
+     // Switching away from the start tool drops a pending in-place move.
+@@ -440,6 +476,27 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+   // ============================================
+   const splitAbortRef = useRef<AbortController | null>(null);
+ 
++  // The corridor-verbatim SplitDesirePath for consecutive waypoints a→b when
++  // they are a route proposal's two anchors, else null (route normally). Built
++  // locally from the proposal's stored geometry — no OSRM round-trip, and the
++  // segment's edgeIds are the corridor's own path edges, so the heat/hover
++  // highlight, block coverage, and the vote target all match what's selected.
++  const corridorSegmentFor = useCallback(
++    (a: LatLng, b: LatLng, segmentIndex: number): SplitDesirePath | null => {
++      const c = corridorResolverRef.current?.(a, b);
++      if (!c || c.coordinates.length < 2) return null;
++      const geometry: RouteGeometry = { type: "LineString", coordinates: c.coordinates };
++      return {
++        id: `split-${segmentIndex}`,
++        segmentIndex,
++        geometry,
++        segments: segmentsFromGeometry(geometry),
++        edgeIds: c.edgeIds,
++      };
++    },
++    []
++  );
++
+   const calculateAllSegments = useCallback(async (points: LatLng[]): Promise<SplitDesirePath[]> => {
+     if (points.length < 2) return [];
+ 
+@@ -455,6 +512,10 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+     // segments and the route always renders.
+     const fetchSegment = async (i: number): Promise<SplitDesirePath> => {
+       const a = points[i], b = points[i + 1];
++      // A pair of corridor anchors routes through the proposal VERBATIM —
++      // locally, before (and instead of) any OSRM request.
++      const corridor = corridorSegmentFor(a, b, i);
++      if (corridor) return corridor;
+       const straight: SplitDesirePath = {
+         id: `split-${i}`,
+         segmentIndex: i,
+@@ -493,7 +554,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+     };
+ 
+     return Promise.all(points.slice(0, -1).map((_, i) => fetchSegment(i)));
+-  }, []);
++  }, [corridorSegmentFor]);
+ 
+   /** Recompute the split paths for [start, ...mids, end], discarding stale batches. */
+   const runSplitCalc = useCallback(
+@@ -514,6 +575,26 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+     [calculateAllSegments]
+   );
+ 
++  // Route start→end directly (no mids): through the corridor VERBATIM when the
++  // two points are a route proposal's anchors — represented as a single split
++  // segment, the same shape a mids-only recalc leaves (routeData stays null) —
++  // else the normal OSRM route. Every "route the two endpoints" call site
++  // funnels through here so a corridor selection always traces its proposal.
++  const routeDirect = useCallback(
++    (startC: LatLng, endC: LatLng) => {
++      const corridor = corridorSegmentFor(startC, endC, 0);
++      if (corridor) {
++        // Invalidate any in-flight split batch so it can't clobber the corridor.
++        splitCalcVersionRef.current++;
++        setSplitDesirePaths([corridor]);
++        setIsCalculatingSplit(false);
++        return;
++      }
++      calculateRoute({ start: startC, end: endC, waypoints: [] });
++    },
++    [corridorSegmentFor, calculateRoute]
++  );
++
+   // ============================================
+   // Simple setters
+   // ============================================
+@@ -810,6 +891,75 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+     [calculateAllSegments, applySelection]
+   );
+ 
++  // ============================================
++  // Corridor (waypoint-pair) operations — dropping onto a route-proposal
++  // diamond threads the route through the proposal's TWO anchors at once.
++  // ============================================
++  const replaceGhostWaypointWithPair = useCallback(
++    (index: number, pair: [LatLng, LatLng]) => {
++      const cur = selectionRef.current;
++      const startC = deriveStart(cur).coords;
++      const endC = deriveEnd(cur).coords;
++      if (!startC || !endC) return;
++      const mids = deriveMids(cur);
++      if (index < 0 || index >= mids.length) return;
++
++      suppressNextClickRef.current = true;
++
++      // An anchor that coincides with the neighboring waypoint (the corridor
++      // starts/ends AT an existing point) is skipped, not doubled — a
++      // zero-length segment breaks the recalc (same rule as updateGhostWaypoint).
++      const fullIdx = fullIndexOf(cur, index);
++      const prevC = cur.waypoints[fullIdx - 1].coords;
++      const nextC = cur.waypoints[fullIdx + 1].coords;
++      const keep = pair.filter((c, i) => !sameLatLng(c, i === 0 ? prevC : nextC));
++      if (keep.length === 0) {
++        // Both anchors already ARE the neighbors — the mid is redundant.
++        removePointRef.current(index);
++        return;
++      }
++
++      let nextSel = selUpdateAt(cur, fullIdx, keep[0]);
++      if (keep.length === 2) {
++        nextSel = selInsertMid(nextSel, fullIdx, { coords: keep[1] }, makeId);
++      }
++      routeVersionRef.current++;
++      applySelection(nextSel);
++      setSplitDesirePaths([]);
++      runSplitCalc(startC, endC, deriveMids(nextSel));
++    },
++    [applySelection, runSplitCalc, makeId]
++  );
++
++  const insertWaypointPairAtSegment = useCallback(
++    (segmentIndex: number, pair: [LatLng, LatLng]) => {
++      const cur = selectionRef.current;
++      const startC = deriveStart(cur).coords;
++      const endC = deriveEnd(cur).coords;
++      if (!startC || !endC) return;
++
++      suppressNextClickRef.current = true;
++
++      const seq = [startC, ...deriveMids(cur), endC];
++      const prevC = seq[segmentIndex];
++      const nextC = seq[segmentIndex + 1];
++      if (!prevC || !nextC) return;
++      const keep = pair.filter((c, i) => !sameLatLng(c, i === 0 ? prevC : nextC));
++      if (keep.length === 0) return;
++
++      let nextSel = selInsertMid(cur, segmentIndex, { coords: keep[0] }, makeId);
++      if (keep.length === 2) {
++        nextSel = selInsertMid(nextSel, segmentIndex + 1, { coords: keep[1] }, makeId);
++      }
++      if (nextSel === cur) return;
++      routeVersionRef.current++;
++      applySelection(nextSel);
++      setSplitDesirePaths([]);
++      runSplitCalc(startC, endC, deriveMids(nextSel));
++    },
++    [applySelection, runSplitCalc, makeId]
++  );
++
+   // ============================================
+   // Remove any point (unified logic)
+   // All points conceptually: [start, ...mids, end]
+@@ -852,13 +1002,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+       // doubling up when an endpoint moved).
+       if (nextStartC && nextEndC) {
+         if (mids.length > 0) runSplitCalc(nextStartC, nextEndC, mids);
+-        else calculateRoute({ start: nextStartC, end: nextEndC, waypoints: [] });
++        else routeDirect(nextStartC, nextEndC);
+       }
+       // 0 or 1 points remaining: no route — already cleared above. activeTool
+       // returns to "start" when nothing routable is left.
+       if (next.waypoints.length <= 1) setActiveToolState("start");
+     },
+-    [applySelection, geocodeInto, calculateRoute, clearRoute, runSplitCalc]
++    [applySelection, geocodeInto, routeDirect, clearRoute, runSplitCalc]
+   );
+ 
+   // Keep the ref current so updateGhostWaypoint (defined above) can delegate.
+@@ -869,6 +1019,53 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+   const clearEnd = useCallback(() => removePoint("end"), [removePoint]);
+   const removeGhostWaypoint = useCallback((index: number) => removePoint(index), [removePoint]);
+ 
++  // Meters within which a waypoint counts as sitting ON a given coordinate.
++  // Corridor anchors are inserted at the proposal's exact anchor coords and only
++  // move if the user edits them, so a tight match is the right identity test
++  // (mirrors GraphLayer's anchorsAreWaypoints threshold).
++  const WAYPOINT_NEAR_M = 5;
++
++  // Remove every waypoint near any of `coords` in ONE atomic selection change +
++  // recalc — removing a corridor's two anchors via removePoint twice would fire
++  // two recalcs and shift indices between them. Mirrors removePoint's recalc
++  // choreography exactly.
++  const removeWaypointsNear = useCallback(
++    (coords: LatLng[]) => {
++      const cur = selectionRef.current;
++      const near = (w: LatLng, c: LatLng) =>
++        haversineMeters([w.lng, w.lat], [c.lng, c.lat]) < WAYPOINT_NEAR_M;
++      const kept = cur.waypoints.filter((w) => !coords.some((c) => near(w.coords, c)));
++      if (kept.length === cur.waypoints.length) return;
++
++      const prevStartC = deriveStart(cur).coords;
++      const prevEndC = deriveEnd(cur).coords;
++      const next: Selection = { ...cur, waypoints: kept };
++      const nextStartC = deriveStart(next).coords;
++      const nextEndC = deriveEnd(next).coords;
++      const mids = deriveMids(next);
++
++      routeVersionRef.current++;
++      clearRoute();
++      setSplitDesirePaths([]);
++
++      const startChanged = !coordsEqual(prevStartC, nextStartC);
++      const endChanged = !coordsEqual(prevEndC, nextEndC);
++      if (startChanged || endChanged) handlingRemovalRef.current = true;
++
++      applySelection(next);
++
++      if (startChanged && nextStartC && !deriveStart(next).address) geocodeInto(nextStartC);
++      if (endChanged && nextEndC && !deriveEnd(next).address) geocodeInto(nextEndC);
++
++      if (nextStartC && nextEndC) {
++        if (mids.length > 0) runSplitCalc(nextStartC, nextEndC, mids);
++        else routeDirect(nextStartC, nextEndC);
++      }
++      if (next.waypoints.length <= 1) setActiveToolState("start");
++    },
++    [applySelection, geocodeInto, routeDirect, clearRoute, runSplitCalc]
++  );
++
+   // ============================================
+   // History: back / forward
+   // ============================================
+@@ -900,8 +1097,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+       setSplitDesirePaths([]);
+       const mids = deriveMids(restored);
+       if (nextStartC && nextEndC) {
+-        calculateRoute({ start: nextStartC, end: nextEndC, waypoints: [] });
+         if (mids.length > 0) runSplitCalc(nextStartC, nextEndC, mids);
++        else routeDirect(nextStartC, nextEndC);
+       }
+       if (nextStartC && !deriveStart(restored).address) geocodeInto(nextStartC);
+       if (nextEndC && !deriveEnd(restored).address) geocodeInto(nextEndC);
+@@ -1079,12 +1276,15 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+     const endCoords = { lat: endLat, lng: endLng };
+     const currentMids = ghostWaypointsRef.current;
+ 
+-    // Always calculate the main route
+-    calculateRoute({ start: startCoords, end: endCoords, waypoints: [] });
+-
+-    // If there are mids, also calculate split paths
+-    if (currentMids.length > 0) runSplitCalc(startCoords, endCoords, currentMids);
+-  }, [startLat, startLng, endLat, endLng, calculateRoute, clearRoute, runSplitCalc]);
++    // Mids → split paths per pair (each corridor-aware); no mids → the direct
++    // route, through the corridor verbatim when start/end are its anchors.
++    if (currentMids.length > 0) {
++      calculateRoute({ start: startCoords, end: endCoords, waypoints: [] });
++      runSplitCalc(startCoords, endCoords, currentMids);
++    } else {
++      routeDirect(startCoords, endCoords);
++    }
++  }, [startLat, startLng, endLat, endLng, calculateRoute, routeDirect, clearRoute, runSplitCalc]);
+ 
+   // ============================================
+   // Recalculate when (legacy) explicit waypoints change
+@@ -1131,6 +1331,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+       setVoteDirection,
+       isDirectionCast,
+       setBlockMaterializer,
++      setCorridorSegmentResolver,
+       ghostWaypoints,
+       ghostWaypointIds,
+       splitDesirePaths,
+@@ -1158,6 +1359,9 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+       insertWaypointAtSegment,
+       updateGhostWaypoint,
+       removeGhostWaypoint,
++      replaceGhostWaypointWithPair,
++      insertWaypointPairAtSegment,
++      removeWaypointsNear,
+       clearSplitPaths,
+       clearSuppressClick,
+       setSuppressClick,
+@@ -1180,6 +1384,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+       setVoteDirection,
+       isDirectionCast,
+       setBlockMaterializer,
++      setCorridorSegmentResolver,
+       ghostWaypoints,
+       ghostWaypointIds,
+       splitDesirePaths,
+@@ -1207,6 +1412,9 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+       insertWaypointAtSegment,
+       updateGhostWaypoint,
+       removeGhostWaypoint,
++      replaceGhostWaypointWithPair,
++      insertWaypointPairAtSegment,
++      removeWaypointsNear,
+       clearSplitPaths,
+       clearSuppressClick,
+       setSuppressClick,
+diff --git a/client-react/src/hooks/usePathDrag.ts b/client-react/src/hooks/usePathDrag.ts
+index a800f38..dfb14a9 100644
+--- a/client-react/src/hooks/usePathDrag.ts
++++ b/client-react/src/hooks/usePathDrag.ts
+@@ -93,8 +93,16 @@ export function usePathDrag({
+   const dragTrailRef = useRef<L.Polyline | null>(null);
+   // When the press began (Date.now), so release can tell a tap (quick → restart)
+   // from a drag (held → insert a mid) via the shared TAP_MAX_MS convention. The
+-  // polyline isn't a Leaflet draggable, so timing is the only signal we get.
++  // polyline isn't a Leaflet draggable, so timing is one signal…
+   const pressStartRef = useRef(0);
++  // …and movement is the other: where the press started (screen px) and the max
++  // displacement seen during the gesture. A held press that never drifted past
++  // TAP_MAX_DRIFT_PX is a TAP — a slow click must not become a zero-distance
++  // drag-and-drop (which, near a sticky proposal pin, inserted mids / threaded
++  // corridors the user only meant to select). Max (not net) drift, so pulling a
++  // mid out and dropping it back on its proposal still reads as a drag.
++  const pressPosRef = useRef({ x: 0, y: 0 });
++  const maxDriftSqRef = useRef(0);
+   const [hoverLatLng, setHoverLatLng] = useState<L.LatLng | null>(null);
+ 
+   // Get position from mouse or touch event
+@@ -113,6 +121,9 @@ export function usePathDrag({
+     (e: MouseEvent | TouchEvent) => {
+       if (isDraggingRef.current) {
+         const pos = getEventPosition(e);
++        const dx = pos.x - pressPosRef.current.x;
++        const dy = pos.y - pressPosRef.current.y;
++        maxDriftSqRef.current = Math.max(maxDriftSqRef.current, dx * dx + dy * dy);
+         const container = map.getContainer();
+         const rect = container.getBoundingClientRect();
+         const containerPoint = L.point(pos.x - rect.left, pos.y - rect.top);
+@@ -147,11 +158,12 @@ export function usePathDrag({
+         // Snap to nearest graph node/edge
+         const snapped = snapToGraph(map, latLng.lat, latLng.lng);
+         const finalPos = snapped ?? { lat: latLng.lat, lng: latLng.lng };
+-        // Quick release → a tap on the path → restart the route from here.
+-        // A held press → a drag → insert a mid at the drop point. (A long press
+-        // that never moved still reads as a drag and drops a mid where pressed —
+-        // a "pin here" — which is safer than a stray route-clear.)
+-        if (isTap(pressStartRef.current)) {
++        // Quick release OR a press that never really moved → a tap on the path.
++        // A held press that actually traveled → a drag → insert a mid at the
++        // drop point. (The old time-only rule made a slow unmoved click drop a
++        // mid where pressed — which the sticky proposal pins turned into
++        // accidental corridor threading.)
++        if (isTap(pressStartRef.current, Math.sqrt(maxDriftSqRef.current))) {
+           onTap?.(finalPos);
+         } else {
+           onSegmentDrag?.(segmentIndex, finalPos);
+@@ -195,6 +207,8 @@ export function usePathDrag({
+       // underlying edge/node used for the trail + drop.
+       const pos = getEventPosition(e.originalEvent);
+       pressStartRef.current = Date.now();
++      pressPosRef.current = pos;
++      maxDriftSqRef.current = 0;
+       const snapped = snapToGraph(map, e.latlng.lat, e.latlng.lng);
+ 
+       startDrag(pos, snapped);
+@@ -279,6 +293,8 @@ export function usePathDrag({
+         const snapped = snapToGraph(map, latlng.lat, latlng.lng);
+         const pos = { x: touch.clientX, y: touch.clientY };
+         pressStartRef.current = Date.now();
++        pressPosRef.current = pos;
++        maxDriftSqRef.current = 0;
+ 
+         // Ghost follows the finger (unsnapped); snapped is the underlying drop.
+         startDrag(pos, snapped);
+diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css
+index 423b556..59fab85 100644
+--- a/client-react/src/styles/globals.css
++++ b/client-react/src/styles/globals.css
+@@ -1590,6 +1590,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
+ }
+ .vote-type-indicator.is-start { --x-ring: var(--color-start); }
+ .vote-type-indicator.is-end { --x-ring: var(--color-end); }
++/* On a diamond the square's corner is empty air — center the badge on the
++   diamond's top-right EDGE midpoint (SVG 24,10) so it hugs the shape the same
++   way it hugs the square's corner. */
++.vote-type-indicator.is-diamond .vote-type-indicator-x {
++  left: 24px;
++  top: 10px;
++}
+ /* Hover tint must stay OPAQUE — the badge sits directly on the map, so the
+    translucent --hover-bg would make it see-through. Blend ink into paper. */
+ .vote-type-indicator-x:hover {
+@@ -1747,6 +1754,15 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
+   animation: indicator-modal-in 120ms ease-out;
+ }
+ 
++/* The route-summary card sits above BOTH the pinned modal (1100) and the
++   transient hover card (1200): it anchors mid-route, exactly where the cursor
++   that just selected the route hovers, so at 1100 the hover card buried it on
++   every selection. Portals mount at different times, so DOM order can't
++   order them. */
++.graph-indicator-modal.is-elevated {
++  z-index: 1300;
++}
++
+ @keyframes indicator-modal-in {
+   from {
+     opacity: 0;
+diff --git a/client-react/src/utils/gesture.ts b/client-react/src/utils/gesture.ts
+index 8ff1499..dcc1a8c 100644
+--- a/client-react/src/utils/gesture.ts
++++ b/client-react/src/utils/gesture.ts
+@@ -15,11 +15,22 @@
+ 
+ export const TAP_MAX_MS = 300;
+ 
++// A press that never strayed beyond this many pixels is ALSO a tap, no matter
++// how long it was held. Time alone turned a slow, deliberate click into a
++// zero-distance drag-and-drop — on the route path that "dropped a mid where
++// pressed", and with proposal pins being sticky drop targets it kept threading
++// corridors the user only meant to select. Drift is measured as the MAX
++// displacement during the gesture (never the net): a real drag that returns to
++// its origin — e.g. pulling a mid out and dropping it back on its proposal to
++// link it — must still count as a drag.
++export const TAP_MAX_DRIFT_PX = 8;
++
+ /**
+  * True if a press that began at `pressStartMs` (a `Date.now()` timestamp) and is
+  * ending now counts as a tap — i.e. it was released within TAP_MAX_MS. A longer
+- * press is a drag.
++ * press is a drag — unless it never drifted past TAP_MAX_DRIFT_PX; callers that
++ * track movement pass their max drift so an unmoved hold reads as a tap too.
+  */
+-export function isTap(pressStartMs: number): boolean {
+-  return Date.now() - pressStartMs < TAP_MAX_MS;
++export function isTap(pressStartMs: number, maxDriftPx = Infinity): boolean {
++  return Date.now() - pressStartMs < TAP_MAX_MS || maxDriftPx < TAP_MAX_DRIFT_PX;
+ }
+diff --git a/server/app.py b/server/app.py
+index 6b33570..8b74840 100644
+--- a/server/app.py
++++ b/server/app.py
+@@ -32,7 +32,8 @@ from osrm_router import extract_all_segments
+ from database import (
+     init_db, get_cursor, record_edge_votes, delete_edge_votes,
+     get_voter_edge_directions, get_voter_type_rows,
+-    count_devices_per_ip_for_edges, evict_lru_devices_for_edges,
++    count_devices_per_ip_for_edges, count_unique_voters_for_edges,
++    evict_lru_devices_for_edges,
+     seed_presets, list_maps, get_map, get_map_by_subdomain, slug_available,
+     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,
+     promote_vote_types, fetch_voted_vote_type_labels,
+@@ -142,6 +143,41 @@ class ResolvedMap:
+         self.vote_type_labels = vote_type_labels
+ 
+ 
++# resolve_map runs on every API request, and its map lookup was a Postgres
++# round-trip each time — the shared ~100-300ms latency floor under otherwise
++# sub-ms endpoints (reverse-geocode, nearest-node, vote). Map config changes
++# rarely, so cache rows (including misses) briefly. Staleness is bounded by
++# the TTL on other instances; mutating endpoints invalidate their own entry.
++_MAP_CACHE_TTL = 30.0
++_MAP_CACHE_MAX = 512  # bots probe random slugs; don't let misses grow the dict
++_map_cache: dict[str, tuple[float, dict | None]] = {}
++_map_cache_lock = threading.Lock()
++
++
++def _cached_get_map(slug: str) -> dict | None:
++    now = time.monotonic()
++    hit = _map_cache.get(slug)
++    if hit and hit[0] > now:
++        return hit[1]
++    m = get_map(slug, with_vote_count=False)
++    with _map_cache_lock:
++        if len(_map_cache) >= _MAP_CACHE_MAX:
++            _map_cache.clear()
++        _map_cache[slug] = (now + _MAP_CACHE_TTL, m)
++    return m
++
++
++def invalidate_map_cache(slug: str | None = None):
++    """Drop cached map config after a mutation (None clears everything)."""
++    global _maps_list_cache
++    _maps_list_cache = None  # the landing-grid list embeds map config too
++    with _map_cache_lock:
++        if slug is None:
++            _map_cache.clear()
++        else:
++            _map_cache.pop(slug, None)
++
++
+ def resolve_map(slug: str | None) -> ResolvedMap:
+     """Resolve a map slug → city, graph, OSRM router, and policy.
+ 
+@@ -150,7 +186,7 @@ def resolve_map(slug: str | None) -> ResolvedMap:
+     """
+     slug = (slug or DEFAULT_MAP_SLUG).strip()
+ 
+-    m = get_map(slug)
++    m = _cached_get_map(slug)
+     if m:
+         city = get_city(m["cityId"]) or get_city(DEFAULT_CITY_ID)
+         network = m.get("network") or "streets"
+@@ -623,14 +659,27 @@ def vote_type_lists():
+     return resp
+ 
+ 
++# Server-side twin of the endpoint's max-age=60: browsers cache per visitor,
++# but every DISTINCT visitor's cold load still ran the ranking aggregate (a
++# full-table COUNT over edge_votes — p95 3.5s on the f1-micro). One shared
++# copy per instance amortizes it across visitors.
++_maps_list_cache: tuple[float, list] | None = None
++
++
+ @app.route("/api/maps", methods=["GET"])
+ def maps_list():
+-    maps = list_maps()
+-    # Enrich with the city's public view config for the landing grid.
+-    for m in maps:
+-        city = get_city(m["cityId"])
+-        if city:
+-            m["city"] = city.to_public()
++    global _maps_list_cache
++    now = time.monotonic()
++    if _maps_list_cache and _maps_list_cache[0] > now:
++        maps = _maps_list_cache[1]
++    else:
++        maps = list_maps()
++        # Enrich with the city's public view config for the landing grid.
++        for m in maps:
++            city = get_city(m["cityId"])
++            if city:
++                m["city"] = city.to_public()
++        _maps_list_cache = (now + 60.0, maps)
+     # Short public cache: this gatekeeps every cold page load (it hit Postgres
+     # uncached on each one); the map list changes rarely, so 60s is safe.
+     resp = jsonify({"maps": maps})
+@@ -784,6 +833,9 @@ def map_create():
+     if not created:
+         return jsonify({"error": "Failed to create map"}), 500
+ 
++    # A pre-creation probe of this slug may have cached a miss.
++    invalidate_map_cache(slug)
++
+     city = get_city(city_id)
+     if city:
+         created["city"] = city.to_public()
+@@ -1231,6 +1283,48 @@ def my_votes():
+     return jsonify({"votes": votes})
+ 
+ 
++# Cap on how many edge ids one /api/route-votes request scans. A long route
++# through merged blocks can union thousands of edges; the client caps what it
++# sends too, so past this the count degrades gracefully (undercounts).
++ROUTE_VOTES_EDGE_CAP = 20000
++
++
++@app.route("/api/route-votes", methods=["POST"])
++def route_votes():
++    """Distinct-voter vote rows for a route selection.
++
++    Body: { map, edge_ids: [int] }. Counts DISTINCT devices per (vote type,
++    direction) across the WHOLE edge set — a route cast fans one device's vote
++    onto every edge of every block it covers, so per-edge/per-block sums count
++    the same person once per block. The route-summary card shows these instead.
++    POST because a selection's block-edge union routinely exceeds URL limits.
++    """
++    data = request.get_json(silent=True) or {}
++    rmap = resolve_map(data.get("map"))
++    if _locked(rmap):
++        return _locked_response()
++
++    raw = data.get("edge_ids")
++    if not isinstance(raw, list):
++        return jsonify({"error": "edge_ids must be a list of integers"}), 400
++    try:
++        edge_ids = [int(e) for e in raw[:ROUTE_VOTES_EDGE_CAP]]
++    except (TypeError, ValueError):
++        return jsonify({"error": "edge_ids must be a list of integers"}), 400
++
++    by_label: dict[str, dict[str, int]] = {}
++    for vt_id, direction, count in count_unique_voters_for_edges(rmap.slug, edge_ids):
++        label = vote_store.resolve_vote_type(vt_id)
++        if not label:
++            continue
++        row = by_label.setdefault(label, {"up": 0, "down": 0})
++        row["down" if direction < 0 else "up"] += count
++    rows = [{"label": label, "up": v["up"], "down": v["down"]}
++            for label, v in by_label.items()]
++    rows.sort(key=lambda r: r["down"] - r["up"])
++    return jsonify({"rows": rows})
++
++
+ # ── Graph data APIs ──────────────────────────────────────────────────────────
+ 
+ @app.route("/api/nearest-node", methods=["GET"])
+@@ -1587,8 +1681,10 @@ def graph_votes():
+     rmap = resolve_map(request.args.get("map"))
+     if _locked(rmap):
+         return _locked_response()
+-    rmap.graph.ensure_loaded()
+ 
++    # ETag first, load second: the revision lives in Redis, so a client whose
++    # cached copy is current gets its 304 without this instance ever loading
++    # the graph — ensure_loaded() on a cold instance took 10s+ and rode P95.
+     mode = request.args.get("mode") or None
+     rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+     etag = f'"v-{rmap.slug}-{mode or "all"}-{rev}"'
+@@ -1598,6 +1694,8 @@ def graph_votes():
+         resp.headers["Cache-Control"] = "public, max-age=5"
+         return resp
+ 
++    rmap.graph.ensure_loaded()
++
+     try:
+         body = _build_graph_votes_body(rmap, mode)
+     except Exception as e:
+@@ -1664,6 +1762,8 @@ def admin_set_subdomain(slug):
+         if not sub:
+             return jsonify({"error": "subdomain is required"}), 400
+         ok, msg = set_map_subdomain(slug, sub)
++    if ok:
++        invalidate_map_cache(slug)
+     return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
+ 
+ 
+@@ -1679,6 +1779,8 @@ def admin_promote_vote_types(slug):
+         return jsonify({"error": "Unauthorized"}), 403
+     name = (request.get_json(silent=True) or {}).get("name") or ""
+     ok, msg = promote_vote_types(slug, name)
++    if ok:
++        invalidate_map_cache(slug)
+     return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
+ 
+ 
+diff --git a/server/database.py b/server/database.py
+index 33a1e7a..01cc543 100644
+--- a/server/database.py
++++ b/server/database.py
+@@ -6,44 +6,91 @@ Redis handles fast reads/writes and pub/sub; Postgres stores permanent history.
+ """
+ import logging
+ import os
++import time
+ from contextlib import contextmanager
+ from typing import Optional
+ 
+ import psycopg2
+ from psycopg2.extras import execute_values
++from psycopg2.pool import ThreadedConnectionPool
++
++# Under the gevent worker, plain psycopg2 blocks the event-loop hub for the
++# full duration of every query — one slow aggregate froze ALL in-flight
++# requests on the instance. psycogreen's wait callback makes psycopg2 yield to
++# the hub while waiting on the socket. Only safe/meaningful when gevent has
++# monkey-patched the runtime (prod gunicorn); plain `python app.py` skips it.
++try:
++    from gevent import monkey as _gevent_monkey
++
++    if _gevent_monkey.is_module_patched("socket"):
++        from psycogreen.gevent import patch_psycopg
++
++        patch_psycopg()
++except ImportError:
++    pass
+ 
+ logger = logging.getLogger(__name__)
+ 
+ # Database connection string from environment
+ DATABASE_URL = os.environ.get("DATABASE_URL")
+ 
+-# Connection pool (simple approach - one connection per request)
+-_connection: Optional[psycopg2.extensions.connection] = None
++# Connection pool. A pool (not the old shared singleton connection) is REQUIRED
++# once psycopg2 yields to the gevent hub mid-query: two greenlets interleaving
++# on one connection raise "another command is already in progress". Sized so
++# 4 app instances stay under db-f1-micro's ~25-connection ceiling.
++_POOL_MAX = 5
++_pool: Optional[ThreadedConnectionPool] = None
+ 
+ 
+-def get_connection() -> psycopg2.extensions.connection:
+-    """Get or create database connection."""
+-    global _connection
++def _get_pool() -> ThreadedConnectionPool:
++    global _pool
+ 
+     if not DATABASE_URL:
+         raise RuntimeError("DATABASE_URL environment variable not set")
+ 
+-    if _connection is None or _connection.closed:
+-        _connection = psycopg2.connect(DATABASE_URL)
+-        _connection.autocommit = True
+-
+-    return _connection
++    if _pool is None:
++        _pool = ThreadedConnectionPool(1, _POOL_MAX, DATABASE_URL)
++    return _pool
+ 
+ 
+ @contextmanager
+ def get_cursor():
+-    """Context manager for database cursor."""
+-    conn = get_connection()
+-    cursor = conn.cursor()
++    """Context manager for a pooled database cursor (autocommit)."""
++    pool = _get_pool()
++
++    # getconn raises PoolError immediately when all connections are checked
++    # out; briefly wait-and-retry instead so a burst queues rather than 500s
++    # (time.sleep yields to the hub under gevent).
++    conn = None
++    for attempt in range(50):
++        try:
++            conn = pool.getconn()
++            break
++        except psycopg2.pool.PoolError:
++            time.sleep(0.1)
++    if conn is None:
++        raise RuntimeError("Database connection pool exhausted")
++
+     try:
+-        yield cursor
++        if conn.closed:
++            # Server dropped it while pooled (idle timeout, failover) — swap in
++            # a fresh one under the same pool slot.
++            pool.putconn(conn, close=True)
++            conn = pool.getconn()
++        conn.autocommit = True
++        cursor = conn.cursor()
++        try:
++            yield cursor
++        finally:
++            cursor.close()
++    except psycopg2.OperationalError:
++        # Connection went bad mid-use: drop it from the pool, not back in.
++        pool.putconn(conn, close=True)
++        conn = None
++        raise
+     finally:
+-        cursor.close()
++        if conn is not None:
++            pool.putconn(conn)
+ 
+ 
+ def _migrate_edge_votes(cursor):
+@@ -446,6 +493,33 @@ def get_voter_type_rows(
+         return {}
+ 
+ 
++def count_unique_voters_for_edges(
++    map_slug: str, edge_ids: list[int]
++) -> list[tuple[int, int, int]]:
++    """Distinct-device vote counts over an edge set, per (vote type, direction).
++
++    A device that voted the same type/direction on many edges of the set (a
++    route cast fans one vote across every edge of every block it covers)
++    counts ONCE — the honest "how many people voted on this route" number
++    the route-summary card shows. Returns [(vote_type_id, direction, count)].
++    """
++    if not DATABASE_URL or not edge_ids:
++        return []
++    try:
++        with get_cursor() as cursor:
++            cursor.execute(
++                """SELECT vote_type_id, direction, COUNT(DISTINCT device_id)
++                   FROM edge_votes
++                   WHERE map_slug = %s AND edge_id = ANY(%s)
++                   GROUP BY vote_type_id, direction""",
++                (map_slug, list(edge_ids)),
++            )
++            return [(int(vt), int(d), int(c)) for vt, d, c in cursor.fetchall()]
++    except Exception as e:
++        logger.error(f"[DB] Failed to count unique voters for edges: {e}")
++        return []
++
++
+ # ── Vote types (label ↔ id) ─────────────────────────────────────────────────
+ 
+ def fetch_all_vote_types() -> list[tuple[int, str]]:
+@@ -842,17 +916,35 @@ def _map_row_to_dict(row) -> dict:
+     }
+ 
+ 
+-_MAP_SELECT = """
++# Three variants of the same column list, differing only in how vote_count is
++# produced. The full-table GROUP BY over edge_votes is only affordable when the
++# caller genuinely needs every map's count (list_maps ranks by it); running it
++# per single-map lookup put a ~100ms-3s Postgres aggregate under EVERY API
++# request via resolve_map, which was the app-wide latency floor.
++_MAP_COLUMNS = """
+     SELECT m.slug, m.name, m.subtitle, m.city_id, m.allow_suggestions,
+            (m.passcode_hash IS NOT NULL) AS has_passcode,
+            m.subdomain, vtl.vote_types, m.custom_vote_types,
+-           COALESCE(vc.cnt, 0) AS vote_count, m.symbol, m.style, m.network
++           {vote_count} AS vote_count, m.symbol, m.style, m.network
+     FROM maps m
+     LEFT JOIN vote_type_lists vtl ON vtl.id = m.vote_type_list_id
++"""
++
++# All maps' counts at once (list_maps ranking).
++_MAP_SELECT = _MAP_COLUMNS.format(vote_count="COALESCE(vc.cnt, 0)") + """
+     LEFT JOIN (SELECT map_slug, COUNT(*) AS cnt FROM edge_votes GROUP BY map_slug) vc
+       ON vc.map_slug = m.slug
+ """
+ 
++# One map's count via idx_edge_votes_map — an index scan over just that map's
++# rows instead of an aggregate over the whole table.
++_MAP_SELECT_ONE = _MAP_COLUMNS.format(
++    vote_count="(SELECT COUNT(*) FROM edge_votes ev WHERE ev.map_slug = m.slug)"
++)
++
++# No count at all (vote_count = 0) — for resolve_map, which never reads it.
++_MAP_SELECT_LIGHT = _MAP_COLUMNS.format(vote_count="0")
++
+ 
+ def list_maps() -> list[dict]:
+     """All maps, ranked by total votes (desc) then name (asc)."""
+@@ -867,12 +959,15 @@ def list_maps() -> list[dict]:
+         return []
+ 
+ 
+-def get_map(slug: str) -> Optional[dict]:
++def get_map(slug: str, with_vote_count: bool = True) -> Optional[dict]:
++    """One map by slug. Pass with_vote_count=False on hot paths that never
++    read voteCount (resolve_map) — it skips the edge_votes count entirely."""
+     if not DATABASE_URL:
+         return None
++    select = _MAP_SELECT_ONE if with_vote_count else _MAP_SELECT_LIGHT
+     try:
+         with get_cursor() as cursor:
+-            cursor.execute(_MAP_SELECT + " WHERE m.slug = %s", (slug,))
++            cursor.execute(select + " WHERE m.slug = %s", (slug,))
+             row = cursor.fetchone()
+             return _map_row_to_dict(row) if row else None
+     except Exception as e:
+@@ -885,7 +980,7 @@ def get_map_by_subdomain(subdomain: str) -> Optional[dict]:
+         return None
+     try:
+         with get_cursor() as cursor:
+-            cursor.execute(_MAP_SELECT + " WHERE m.subdomain = %s LIMIT 1", (subdomain,))
++            cursor.execute(_MAP_SELECT_ONE + " WHERE m.subdomain = %s LIMIT 1", (subdomain,))
+             row = cursor.fetchone()
+             return _map_row_to_dict(row) if row else None
+     except Exception as e:

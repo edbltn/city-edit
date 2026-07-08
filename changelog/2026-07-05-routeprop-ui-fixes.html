@@ -1,0 +1,1343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Route-proposal UI — diamond stacking, drag-through, and the route summary card — 2026-07-05</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.25; }
+  pre.diff span { display: block; white-space: pre; }
+  pre.diff span span { display: inline; }
+
+  .s-kw { color: #a52a5a; }
+  .s-str { color: #0a3069; }
+  .s-com { color: #77716a; font-style: italic; }
+  .s-num { color: #0550ae; }
+  .s-lit { color: #0550ae; }
+  .s-fn { color: #6639ba; }
+  .s-type { color: #953800; }
+  .s-prop { color: #116329; }
+  .s-tag { color: #116329; }
+  .s-attr { color: #0550ae; }
+  .s-dec { color: #6639ba; }
+
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Route-proposal UI — diamond stacking, drag-through, and the route summary card</h1>
+    <div class="dateline">2026-07-05 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#zorder">1</a>
+<a href="#dragthrough">2</a>
+<a href="#rbtpselect">4</a>
+<a href="#routecard">3</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Three interaction fixes around the new route proposals, all reproduced and verified live
+  on <code>/m/plum</code>: route diamonds now stack above every settled point pin; a diamond overlapping a
+  waypoint goes click-through so the pin underneath is draggable again (the reported “can't drag a start on
+  a top proposal” bug — the diamond was eating the press); and selecting a route — via a diamond or by
+  tracing one — opens a summary card of the blocks the route selects, with block-grain vote rows and ±
+  buttons that cast on the whole selection. Plus two stuck-hover-card fixes found while reproducing.
+  <br><br><em>Note: the diff below spans the same files as the parallel debug-instrumentation workstream
+  (commit <code>12475e6</code>); a handful of <code>dlog(...)</code> lines in it belong to that work.</em></p>
+
+  
+    <section class="card" id="zorder">
+      <div class="tag">Client · marker stacking</div>
+      <h2>1 · Route diamonds now sit on top of every settled point pin</h2>
+      <h3>Symptom</h3>
+      <p>A route-proposal diamond could hide UNDER point pins: a matched waypoint pin (band 200k) or the selected pin (100k) outranked an uncovered diamond (old band 5k) and even a covered one (old 150k) — so the corridor's marker vanished exactly when you interacted near it.</p>
+      <h3>Root cause</h3>
+      <ul><li>Leaflet stacks markers by <code>zIndexOffset</code> bands. Point pins used 1k&nbsp;(browse)&nbsp;/&nbsp;100k&nbsp;(selected)&nbsp;/&nbsp;200k&nbsp;(matched waypoint)&nbsp;/&nbsp;300k&nbsp;(fanned-out spread); route diamonds were slotted at 5k/150k — below most of that, so any interacting point pin buried them.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Diamonds re-banded ABOVE all settled point pins: uncovered <code>300000&nbsp;+&nbsp;score</code>, covered <code>400000&nbsp;+&nbsp;score</code> (score capped at 48k so bands can't bleed).</li>
+<li>The fanned-out spread moved from 300k to <code>500000</code> — the exploded cluster is the explicit disambiguation gesture, so it alone stays above diamonds.</li>
+<li>The band table is documented once, at the point-icon <code>zIndexOffset</code>, and referenced from the diamond's.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="dragthrough">
+      <div class="tag">Client · drag gesture</div>
+      <h2>2 · Dragging a start that sits on a proposal works again</h2>
+      <h3>Symptom</h3>
+      <p>With a start/end/mid waypoint sitting on a point-based top proposal, click-dragging the pin did nothing useful — reproduced live: the press landed on the route-proposal DIAMOND stacked at the same spot, which swallowed the drag and (on a plain click) force-routed through the corridor anchors instead.</p>
+      <h3>Root cause</h3>
+      <ul><li>A matched waypoint's square pin is deliberately <code>passthrough</code> (pointer-events:none) so the invisible kite RouteMarker underneath takes the drag. But the diamond between them is interactive, and its band (now even higher) outranks the kite's <code>zIndexOffset:&nbsp;1000</code> — so the press never reached the kite.</li>
+<li>The same interplay made a click on the visually-topmost square actually hit the diamond — verified with <code>document.elementsFromPoint</code> on the live stack.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>A diamond whose icon box (34×42, tip-anchored — same geometry as the pins) overlaps any current waypoint goes <code>passthrough</code> + <code>interactive:false</code>, exactly like a matched point pin: the kite gets the gesture. Pan can't invalidate the test (both projections shift equally); zoom re-runs it via the existing <code>currentZoom</code> dep.</li>
+<li>Two stuck-hover-card bugs found while reproducing: the matched-waypoint hover card was cleared only when the match still existed, so dragging the waypoint OFF its proposal stranded the card forever. Un-hover now clears unconditionally, and both drag start and drag finish drop the card (the drop fires a mouseover with the pre-drag match still in state).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx</li>
+<li>client-react/src/components/MapView/MapView.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="rbtpselect">
+      <div class="tag">Client · RBTP selection + styling</div>
+      <h2>4 · Tapping an RBTP now selects its diamond — and diamonds match PBTP styling</h2>
+      <h3>Symptom</h3>
+      <p>Clicking a route-based top proposal (RBTP) diamond on /m/plum forced the route through its anchors but the diamond never flipped to its selected look, and the summary card had no “Route Proposal” header. Separately, diamonds rendered plain white while point-based top proposal (PBTP) squares carry the map-ramp heat tint.</p>
+      <h3>Root cause</h3>
+      <ul><li>Selected-state relied solely on the block-coverage rule (<code>isRouteCovered</code>), but the A→B leg between the anchors is routed by OSRM, which need not re-trace the vote corridor — the doc's “uses the proposal's stored path verbatim” contract was never implemented. On maps without block artifacts (singleton blocks, like plum) coverage essentially never fires.</li>
+<li>The diamond icons were built without the <code>heat</code>/<code>heatColor</code> options the PBTP squares get, so they skipped the ramp tint entirely.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Explicit-tap selection: tapping a diamond records <code>selectedRbtpId</code>; the RBTP reads selected for as long as BOTH its anchors remain waypoints of the current route (<code>anchorsAreWaypoints</code>, 5&nbsp;m match — the tap inserted those exact coords). Editing an anchor away or clearing the route deselects. Block coverage remains the other route to selected; the summary-card header follows the same rule.</li>
+<li>Heat parity: diamonds now get the same log-normalized ramp tint as squares (normalized within the RBTP family by score), so both marker kinds read as one visual system.</li>
+<li>Terminology documented everywhere: <strong>PBTP</strong> = point-based top proposal (square, one hot edge, <code>topProposals.ts</code>); <strong>RBTP</strong> = route-based top proposal (diamond, hot corridor, <code>routeProposals.ts</code>) — defined in docs/three-layer-model.md §&nbsp;Terminology, both module headers, and both GraphLayer marker sections. §3.3 rewritten to match reality (OSRM leg + explicit-tap rule; verbatim corridor routing noted as an open follow-up).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx</li>
+<li>client-react/src/components/GraphLayer/routeProposals.ts</li>
+<li>client-react/src/components/GraphLayer/topProposals.ts</li>
+<li>docs/three-layer-model.md</li></ul>
+    </section>
+    
+
+    <section class="card" id="routecard">
+      <div class="tag">Client · route summary modal</div>
+      <h2>3 · Selecting a route shows a blocks-summary card</h2>
+      <h3>Symptom</h3>
+      <p>Selecting a route-based top proposal (or tracing any route) gave no summary at all — the pinned card only exists for a lone point, so the main voting object (the route) had no modal.</p>
+      <h3>Root cause</h3>
+      <ul><li>The ProposalCard was only wired to the pinned (lone start) selection; nothing rendered for a full start+end selection.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>New route-summary card for every full route selection on a street map: anchored to the route's middle path edge (tracks pan/zoom like the pinned card), headed by the covered route proposal (eyebrow “Route Proposal”) when the selection covers one, meta line <code>selects N blocks</code> (<code>segments</code> on maps without block artifacts, where blocks fall back to one-per-edge), and block-grain vote rows summed over the whole selection (<code>selectionVoteRows</code>; per-edge sums as the no-blocks fallback).</li>
+<li>Its ± buttons cast on the WHOLE selection through the same unified <code>castVotes</code> path (same edge set + block materialization) as the top-bar route cast, so pressed/unvote semantics match wherever the vote is made from.</li>
+<li>Coverage (the diamond's selected state AND the card header) is now matched with direction twins included — new <code>expandSelectionToUndirected</code> in routeProposals.ts (+3 unit tests): a routed path often traverses the twin of the edge a corridor's block recorded, so raw edge-id intersection under-reported coverage.</li>
+<li>Kept legible: hover cards are suppressed for non-winner edges of the selected route (the card already speaks for them), a diamond click drops any hover card at the click point, and the card renders in a new <code>is-elevated</code> z tier (1300) above the transient hover card (1200) — portals mount at different times, so DOM order can't keep the summary visible.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx</li>
+<li>client-react/src/components/GraphLayer/routeProposals.ts</li>
+<li>client-react/src/components/GraphLayer/routeProposals.test.ts</li>
+<li>client-react/src/styles/globals.css</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Round 2 (RBTP selection + styling), verified live on /m/plum: before the fix a diamond click left the diamond unselected and the card headerless; after, the diamond flips to the selected double-ring, carries the same lavender ramp tint as the squares (zoomed screenshots), and the card is headed “ROUTE PROPOSAL · Improve bike lane”.</li>
+<li>Reproduced the drag bug live before fixing (localhost, <code>/m/plum</code>): a click on the square-with-diamond stack hit the DIAMOND (<code>document.elementsFromPoint</code> showed it topmost at z&nbsp;5842 over the square's 1460 and every kite's ~1400–1600) and force-routed through the corridor.</li>
+<li>After the fix: dragged the start onto that same stack (sticky-snap matched it to the proposal), then dragged it away — the start MOVED (URL waypoint updated), no corridor re-selection, no map pan.</li>
+<li>Diamond click on <code>/m/plum</code> now selects the corridor AND opens the summary card — “selects 383 segments · Improve bike lane −0/163/+163” — with the card on top of hover cards (z tiers verified in the DOM).</li>
+<li>Visual: the diamond paints above the browse square at the same anchor (zoomed screenshots before/after).</li>
+<li><code>npx tsc --noEmit</code> clean; client suite green — 189/189 (3 new tests for <code>expandSelectionToUndirected</code>).</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <a href='http://localhost:3000/m/plum'>http://localhost:3000/m/plum</a> and find the icon cluster (Anza Vista area): the DIAMOND should read fully on top of the point squares.</li>
+<li>Click the diamond: the corridor routes through its anchors and a summary card opens mid-route — “selects N segments” with a votable Improve-bike-lane row. Press + and confirm the row count bumps and the heat lights the corridor.</li>
+<li>Click a point square to make it the start, set an end, then drag the start pin somewhere else: the pin must move (no corridor jump, no map pan), and no proposal card may be left stranded after the drop.</li>
+<li>Hover along the selected route: no per-segment hover cards over the summary card; hovering a top-proposal pin on the route still shows that proposal's card.</li>
+<li>On a map WITH block artifacts (NYC once votes exist), the meta line should say “blocks”, not “segments”, and tracing every block of a corridor should title the card “Route Proposal”.</li>
+<li>Click the RBTP diamond: it should flip to the selected double-ring immediately and stay selected while both anchors remain waypoints; drag one anchor elsewhere and it should deselect.</li>
+<li>Compare a diamond and a square side by side: same border, glyph, and heat tint treatment.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Green is added, red removed.</p>
+    
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+338</span> / <span class="d-del">-30</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">the vote/proposal layer: heatmap canvas, top-proposal pins, route diamonds, hover + pinned cards</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~3.9k LOC — topology load, winners, indicators, selection resolve, all proposal cards</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">IndicatorMarker</span><span class="ol-sum">marker wrapper (interactive flag, unmount hover release)</span></li><li class="dim"><span class="ol-label">Waypoint→proposal matching</span><span class="ol-sum">startEdgeIdx/endEdgeIdx/midEdgeSet + passthrough rules</span></li><li class="dim"><span class="ol-label">Pinned selection resolve</span><span class="ol-sum">override → node upgrade → sticky → lock</span></li><li class="changed"><span class="ol-label">Route-card position effect</span><span class="ol-sum">NEW — anchors the summary card to the route&#x27;s middle edge</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Hover / pinned card content</span><span class="ol-sum">block-grain rows; NEW route-edge hover suppression</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Route-summary content memos</span><span class="ol-sum">NEW — routeBlocks · routeVoteRows · coveredRouteProposal</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">castProposalVote / castRouteVote</span><span class="ol-sum">unified castVotes paths; route cast is NEW</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">indicatorMarkers</span><span class="ol-sum">point pins; spread band 300k → 500k</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">routeIndicatorMarkers</span><span class="ol-sum">diamonds; NEW top bands + waypoint-overlap passthrough</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Render portals</span><span class="ol-sum">pinned card · hover card · NEW route-summary card (elevated)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ProposalCard</span><span class="ol-sum">NEW eyebrow / metaText / elevated props</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>point-pin zIndexOffset — band table rewritten: spread 500k, diamonds 300k/400k documented</li><li>routeIndicatorMarkers — waypointPts + overlapsWaypoint (34×42 icon-box test)</li><li>diamond icon — passthrough class when overlapping a waypoint; interactive={!passthrough}</li><li>diamond zIndexOffset — (covered ? 400000 : 300000) + min(48000, score)</li><li>diamond onClick — clears the hover card at the click point before selecting</li><li>route-card position effect — middle path edge midpoint, move/zoom rAF throttle</li><li>routeBlocks / routeVoteRows / coveredRouteProposal memos — block-grain summary content</li><li>hoverOnSelectedRoute — twin-aware suppression of non-winner hover cards on the route</li><li>castRouteVote — castVotes over ALL path edges + materialized blocks</li><li>route-summary portal — eyebrow &#x27;Route Proposal&#x27;, &#x27;selects N blocks/segments&#x27;, elevated</li><li>ProposalCard — eyebrow/metaText/elevated props wired through header, meta line, className</li><li>selectedRbtpId + anchorsAreWaypoints — explicit-tap RBTP selection (anchors-still-waypoints)</li><li>diamond heat — same log-normalized ramp tint as PBTP squares (score-normalized)</li><li>PBTP/RBTP terminology headers on indicatorMarkers + routeIndicatorMarkers</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 47fc622..89e3c16 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -30,7 +30,8 @@ import { makeVoteTypeIcon } from &quot;./voteTypeIcon&quot;;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> { suggestionGlyphForLabel } <span class="s-kw">from</span> <span class="s-str">&quot;../../utils/suggestionIcon&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> { selectTopProposals, topLabelForEdges, <span class="s-kw">type</span> <span class="s-type">VoteTypeWinner</span> } <span class="s-kw">from</span> <span class="s-str">&quot;./topProposals&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> {</span>
+<span class="d-del">-  computeRouteProposals, routeBlockEdges, isRouteCovered, <span class="s-kw">type</span> <span class="s-type">RouteProposal</span>,</span>
+<span class="d-add">+  computeRouteProposals, routeBlockEdges, isRouteCovered, expandSelectionToUndirected,</span>
+<span class="d-add">+  <span class="s-kw">type</span> <span class="s-type">RouteProposal</span>,</span>
+<span class="d-ctx"> } <span class="s-kw">from</span> <span class="s-str">&quot;./routeProposals&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts } <span class="s-kw">from</span> <span class="s-str">&quot;./voteApply&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> {</span>
+<span class="d-hunk">@@ -68,6 +69,7 @@ import {</span>
+<span class="d-ctx">   <span class="s-kw">type</span> <span class="s-type">VoteDirection</span>,</span>
+<span class="d-ctx"> } <span class="s-kw">from</span> <span class="s-str">&quot;../../utils/voteStore&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> { castVotes, voteButtonState } <span class="s-kw">from</span> <span class="s-str">&quot;../../utils/castVote&quot;</span>;</span>
+<span class="d-add">+<span class="s-kw">import</span> { dlog, dwarn, derror, debugState } <span class="s-kw">from</span> <span class="s-str">&quot;../../utils/debugLog&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> { useVotesVersion } <span class="s-kw">from</span> <span class="s-str">&quot;../../utils/useVotesVersion&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> { getVoterId } <span class="s-kw">from</span> <span class="s-str">&quot;../../utils/voterIdentity&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> { isHoverSuppressed } <span class="s-kw">from</span> <span class="s-str">&quot;../../utils/touchHover&quot;</span>;</span>
+<span class="d-hunk">@@ -906,6 +908,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   <span class="s-com">// Pinned tooltip screen position (follows start pin on map pan/zoom)</span></span>
+<span class="d-ctx">   <span class="s-kw">const</span> [pinnedScreenPos, setPinnedScreenPos] = useState&lt;{ x: number; y: number } | <span class="s-lit">null</span>&gt;(<span class="s-lit">null</span>);</span>
+<span class="d-ctx">   <span class="s-kw">const</span> pinnedRafRef = useRef&lt;number | <span class="s-lit">null</span>&gt;(<span class="s-lit">null</span>);</span>
+<span class="d-add">+  <span class="s-com">// Route-summary card screen position (anchored to the route&#x27;s middle edge,</span></span>
+<span class="d-add">+  <span class="s-com">// follows pan/zoom the same way). Null when no route selection exists.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> [routeCardPos, setRouteCardPos] = useState&lt;{ x: number; y: number } | <span class="s-lit">null</span>&gt;(<span class="s-lit">null</span>);</span>
+<span class="d-add">+  <span class="s-kw">const</span> routeCardRafRef = useRef&lt;number | <span class="s-lit">null</span>&gt;(<span class="s-lit">null</span>);</span>
+<span class="d-ctx">   <span class="s-com">// Pinned target (node or edge) for highlight and tooltip</span></span>
+<span class="d-ctx">   <span class="s-kw">const</span> pinnedTargetRef = useRef&lt;<span class="s-type">HoverTarget</span> | <span class="s-lit">null</span>&gt;(<span class="s-lit">null</span>);</span>
+<span class="d-ctx">   <span class="s-com">// The graph node/edge a live waypoint drag would snap to — drawn on the hover</span></span>
+<span class="d-hunk">@@ -946,6 +952,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   <span class="s-com">// vote heatmap and refetched on the same vote-delta signal (the endpoint is</span></span>
+<span class="d-ctx">   <span class="s-com">// revision-cached, so a refetch on each vote is cheap / 304s when unchanged).</span></span>
+<span class="d-ctx">   <span class="s-kw">const</span> [routeProposals, setRouteProposals] = useState&lt;<span class="s-type">RouteProposal</span>[]&gt;([]);</span>
+<span class="d-add">+  <span class="s-com">// The RBTP the user explicitly tapped (see the terminology note above</span></span>
+<span class="d-add">+  <span class="s-com">// routeIndicatorMarkers). Tapping a diamond force-routes through its anchors,</span></span>
+<span class="d-add">+  <span class="s-com">// but the OSRM leg between them rarely re-traces the vote corridor exactly —</span></span>
+<span class="d-add">+  <span class="s-com">// so the block-coverage rule alone almost never marks the tapped proposal</span></span>
+<span class="d-add">+  <span class="s-com">// selected. The tapped id keeps it selected for as long as BOTH its anchors</span></span>
+<span class="d-add">+  <span class="s-com">// remain waypoints of the current route (anchorsAreWaypoints below); editing</span></span>
+<span class="d-add">+  <span class="s-com">// an anchor away or clearing the route deselects it. Coverage remains the</span></span>
+<span class="d-add">+  <span class="s-com">// OTHER route to selected (hand-tracing a corridor on a block map).</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> [selectedRbtpId, setSelectedRbtpId] = useState&lt;string | <span class="s-lit">null</span>&gt;(<span class="s-lit">null</span>);</span>
+<span class="d-ctx">   <span class="s-com">// The edge set a hovered route diamond highlights — all of its blocks&#x27; edges.</span></span>
+<span class="d-ctx">   <span class="s-kw">const</span> routeHighlightEdgesRef = useRef&lt;number[] | <span class="s-lit">null</span>&gt;(<span class="s-lit">null</span>);</span>
+<span class="d-ctx">   <span class="s-kw">const</span> [currentZoom, setCurrentZoom] = useState&lt;number&gt;(() =&gt; map.<span class="s-fn">getZoom</span>());</span>
+<span class="d-hunk">@@ -1220,6 +1235,24 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     <span class="s-kw">return</span> <span class="s-kw">set</span>;</span>
+<span class="d-ctx">   }, [midEdgeIdxs]);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  <span class="s-com">// Does the current route still run through BOTH of this RBTP&#x27;s anchors (as</span></span>
+<span class="d-add">+  <span class="s-com">// start/end/mid waypoints)? Governs how long an explicitly-tapped diamond</span></span>
+<span class="d-add">+  <span class="s-com">// stays selected: the tap inserted these exact anchor coords as waypoints, so</span></span>
+<span class="d-add">+  <span class="s-com">// a tight meters match (they only move if the user edits them) is the right</span></span>
+<span class="d-add">+  <span class="s-com">// &quot;still my selection&quot; test — not path-edge coverage, which OSRM&#x27;s routing</span></span>
+<span class="d-add">+  <span class="s-com">// between the anchors rarely satisfies.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> anchorsAreWaypoints = <span class="s-fn">useCallback</span>((p: <span class="s-type">RouteProposal</span>): boolean =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> wps: { lat: number; lng: number }[] = [];</span>
+<span class="d-add">+    <span class="s-kw">if</span> (startLat !== <span class="s-lit">null</span> &amp;&amp; startLng !== <span class="s-lit">null</span>) wps.<span class="s-fn">push</span>({ lat: startLat, lng: startLng });</span>
+<span class="d-add">+    <span class="s-kw">if</span> (endLat !== <span class="s-lit">null</span> &amp;&amp; endLng !== <span class="s-lit">null</span>) wps.<span class="s-fn">push</span>({ lat: endLat, lng: endLng });</span>
+<span class="d-add">+    wps.<span class="s-fn">push</span>(...ghostWaypointsRef.current);</span>
+<span class="d-add">+    <span class="s-kw">if</span> (wps.length &lt; <span class="s-num">2</span>) <span class="s-kw">return</span> <span class="s-lit">false</span>;</span>
+<span class="d-add">+    <span class="s-kw">return</span> p.anchorCoords.<span class="s-fn">every</span>((a) =&gt;</span>
+<span class="d-add">+      wps.<span class="s-fn">some</span>((w) =&gt; map.<span class="s-fn">distance</span>([a.lat, a.lng], [w.lat, w.lng]) &lt; <span class="s-num">5</span>));</span>
+<span class="d-add">+    <span class="s-com">// ghostKey stands in for the mids (read via ref; the array identity churns).</span></span>
+<span class="d-add">+    <span class="s-com">// eslint-disable-next-line react-hooks/exhaustive-deps</span></span>
+<span class="d-add">+  }, [startLat, startLng, endLat, endLng, ghostKey, map]);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   <span class="s-com">// Highlight (but do NOT add as waypoints) the top proposals the current route</span></span>
+<span class="d-ctx">   <span class="s-com">// PASSES THROUGH. Matched by UNDIRECTED node-pair, not raw edge index: a two-way</span></span>
+<span class="d-ctx">   <span class="s-com">// street stores each direction as its own edge, and the route often traverses</span></span>
+<span class="d-hunk">@@ -1502,7 +1535,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     <span class="s-kw">const</span> adj = nodeAdjRef.current;</span>
+<span class="d-ctx">     <span class="s-kw">const</span> data = graphDataRef.current;</span>
+<span class="d-ctx">     <span class="s-kw">if</span> (!topo || !adj || !data?.edge_vote_types) <span class="s-kw">return</span>;</span>
+<span class="d-add">+    <span class="s-kw">const</span> t0 = performance.<span class="s-fn">now</span>();</span>
+<span class="d-ctx">     <span class="s-kw">const</span> next = <span class="s-fn">computeRouteProposals</span>(topo, adj, data);</span>
+<span class="d-add">+    <span class="s-fn">dlog</span>(<span class="s-str">&quot;proposals&quot;</span>, <span class="s-str">`recompute: ${next.length} corridors in ${(performance.now() - t0).toFixed(1)}ms`</span>,</span>
+<span class="d-add">+      next.<span class="s-fn">map</span>((p) =&gt; <span class="s-str">`${p.label}#${p.id}(${p.score})`</span>));</span>
+<span class="d-add">+    <span class="s-fn">debugState</span>(<span class="s-str">&quot;routeProposals&quot;</span>, next.length);</span>
+<span class="d-ctx">     <span class="s-com">// Clustering is deterministic, so an unchanged vote state yields an</span></span>
+<span class="d-ctx">     <span class="s-com">// identical list — keep the previous array to avoid remounting diamonds.</span></span>
+<span class="d-ctx">     <span class="s-fn">setRouteProposals</span>((prev) =&gt;</span>
+<span class="d-hunk">@@ -1539,11 +1576,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       <span class="s-com">// our topology. Don&#x27;t paint the mismatch (it would crash); leave the current</span></span>
+<span class="d-ctx">       <span class="s-com">// heatmap and let the next full page load reconcile against fresh topology.</span></span>
+<span class="d-ctx">       <span class="s-kw">if</span> (!<span class="s-fn">votesMatchTopology</span>(voteData, topologyRef.current)) {</span>
+<span class="d-del">-        console.<span class="s-fn">warn</span>(<span class="s-str">&quot;Skipping vote refresh: topology/vote dimension mismatch&quot;</span>);</span>
+<span class="d-add">+        <span class="s-fn">dwarn</span>(<span class="s-str">&quot;votes&quot;</span>, <span class="s-str">&quot;skipping vote refresh: topology/vote dimension mismatch&quot;</span>);</span>
+<span class="d-ctx">         <span class="s-kw">return</span>;</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">       graphDataRef.current = { ...topologyRef.current!, ...voteData };</span>
+<span class="d-ctx">       lastRevRef.current = voteData.rev ?? <span class="s-num">0</span>;</span>
+<span class="d-add">+      <span class="s-fn">dlog</span>(<span class="s-str">&quot;votes&quot;</span>, <span class="s-str">`loaded rev ${voteData.rev}: `</span></span>
+<span class="d-add">+        + <span class="s-str">`${voteData.block_votes?.length ?? 0} block slots, `</span></span>
+<span class="d-add">+        + <span class="s-str">`legend [${(voteData.vote_type_legend ?? []).join(&quot;, &quot;)}]`</span>);</span>
+<span class="d-add">+      <span class="s-fn">debugState</span>(<span class="s-str">&quot;votesRev&quot;</span>, voteData.rev);</span>
+<span class="d-ctx">       <span class="s-com">// Teach the vote store this map&#x27;s label→id map so packed lookups resolve.</span></span>
+<span class="d-ctx">       <span class="s-fn">setVoteTypeMap</span>(voteData.vote_types);</span>
+<span class="d-ctx">       <span class="s-fn">broadcastBlockVotes</span>(voteData);</span>
+<span class="d-hunk">@@ -1561,7 +1602,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       refreshGraphDisplayRef.<span class="s-fn">current</span>();</span>
+<span class="d-ctx">       scheduleRouteProposalsRecomputeRef.<span class="s-fn">current</span>();</span>
+<span class="d-ctx">     } <span class="s-kw">catch</span> (error) {</span>
+<span class="d-del">-      console.<span class="s-fn">error</span>(<span class="s-str">&quot;Failed to fetch graph votes:&quot;</span>, error);</span>
+<span class="d-add">+      <span class="s-fn">derror</span>(<span class="s-str">&quot;votes&quot;</span>, <span class="s-str">&quot;failed to fetch graph votes:&quot;</span>, error);</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">   }, [themeMode, broadcastBlockVotes]);</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1667,7 +1708,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">             <span class="s-kw">return</span> t;</span>
+<span class="d-ctx">           } <span class="s-kw">catch</span> (binErr) {</span>
+<span class="d-ctx">             <span class="s-com">// Older server without the binary endpoint — fall back to JSON.</span></span>
+<span class="d-del">-            console.<span class="s-fn">warn</span>(<span class="s-str">&quot;Binary topology unavailable, using JSON:&quot;</span>, binErr);</span>
+<span class="d-add">+            <span class="s-fn">dwarn</span>(<span class="s-str">&quot;topo&quot;</span>, <span class="s-str">&quot;binary topology unavailable, using JSON:&quot;</span>, binErr);</span>
+<span class="d-ctx">             <span class="s-kw">const</span> r = <span class="s-kw">await</span> <span class="s-fn">fetch</span>(<span class="s-fn">withVersion</span>(<span class="s-fn">withMap</span>(<span class="s-str">`${CONFIG.apiUrl}/graph-topology`</span>)), init);</span>
+<span class="d-ctx">             <span class="s-kw">if</span> (!r.ok) <span class="s-kw">throw</span> <span class="s-kw">new</span> <span class="s-fn">Error</span>(<span class="s-str">`Topology fetch failed: ${r.status}`</span>);</span>
+<span class="d-ctx">             <span class="s-kw">const</span> t = <span class="s-fn">topologyFromJson</span>(<span class="s-kw">await</span> r.<span class="s-fn">json</span>());</span>
+<span class="d-hunk">@@ -1690,7 +1731,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">                 topology = <span class="s-fn">decodeTopologyBin</span>(buf);</span>
+<span class="d-ctx">                 usedCachedTopology = <span class="s-lit">true</span>;</span>
+<span class="d-ctx">               } <span class="s-kw">catch</span> (decodeErr) {</span>
+<span class="d-del">-                console.<span class="s-fn">warn</span>(<span class="s-str">&quot;Cached binary topology was corrupt, refetching:&quot;</span>, decodeErr);</span>
+<span class="d-add">+                <span class="s-fn">dwarn</span>(<span class="s-str">&quot;topo&quot;</span>, <span class="s-str">&quot;cached binary topology was corrupt, refetching:&quot;</span>, decodeErr);</span>
+<span class="d-ctx">               }</span>
+<span class="d-ctx">             }</span>
+<span class="d-ctx">           }</span>
+<span class="d-hunk">@@ -1699,7 +1740,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           topology = <span class="s-kw">await</span> <span class="s-fn">fetchTopologyFromNetwork</span>();</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx">       } <span class="s-kw">catch</span> (error) {</span>
+<span class="d-del">-        console.<span class="s-fn">error</span>(<span class="s-str">&quot;Failed to load graph topology:&quot;</span>, error);</span>
+<span class="d-add">+        <span class="s-fn">derror</span>(<span class="s-str">&quot;topo&quot;</span>, <span class="s-str">&quot;failed to load graph topology:&quot;</span>, error);</span>
+<span class="d-ctx">         <span class="s-kw">return</span>;</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">       <span class="s-kw">if</span> (cancelled || !topology) <span class="s-kw">return</span>;</span>
+<span class="d-hunk">@@ -1711,6 +1752,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       nodeAdjRef.current = <span class="s-fn">buildNodeAdj</span>(topology);</span>
+<span class="d-ctx">       blockIndexRef.current = <span class="s-fn">buildBlockIndex</span>(topology);</span>
+<span class="d-ctx">       hasBlocksRef.current = !!topology.edgeBlockId;</span>
+<span class="d-add">+      <span class="s-fn">dlog</span>(<span class="s-str">&quot;topo&quot;</span>, <span class="s-str">`ready: ${topology.nEdges} edges, ${topology.nNodes} nodes, `</span></span>
+<span class="d-add">+        + <span class="s-str">`${topology.nBlocks ?? 0} blocks (${usedCachedTopology ? &quot;IndexedDB cache&quot; : &quot;network&quot;})`</span>);</span>
+<span class="d-add">+      <span class="s-fn">debugState</span>(<span class="s-str">&quot;topology&quot;</span>, {</span>
+<span class="d-add">+        nEdges: topology.nEdges, nBlocks: topology.nBlocks ?? <span class="s-num">0</span>, cached: usedCachedTopology,</span>
+<span class="d-add">+      });</span>
+<span class="d-ctx">       scheduleRedrawRef.<span class="s-fn">current</span>();</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       <span class="s-com">// 2. Paint immediately from cached votes (same graph version only) so the</span></span>
+<span class="d-hunk">@@ -1748,7 +1794,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         <span class="s-com">// the votes once they line up. If still mismatched, drop the persisted</span></span>
+<span class="d-ctx">         <span class="s-com">// caches and bail rather than paint a crash.</span></span>
+<span class="d-ctx">         <span class="s-kw">if</span> (!<span class="s-fn">votesMatchTopology</span>(voteData, topologyRef.current)) {</span>
+<span class="d-del">-          console.<span class="s-fn">warn</span>(<span class="s-str">&quot;Topology/vote mismatch — refetching fresh topology&quot;</span>, {</span>
+<span class="d-add">+          <span class="s-fn">dwarn</span>(<span class="s-str">&quot;topo&quot;</span>, <span class="s-str">&quot;topology/vote mismatch — refetching fresh topology&quot;</span>, {</span>
+<span class="d-ctx">             topoEdges: topologyRef.current?.nEdges,</span>
+<span class="d-ctx">             voteEdges: voteData.n_edges ?? voteData.edge_votes?.length,</span>
+<span class="d-ctx">           });</span>
+<span class="d-hunk">@@ -1794,7 +1840,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         <span class="s-fn">setHeatmapLoaded</span>();</span>
+<span class="d-ctx">         recomputeRouteProposalsRef.<span class="s-fn">current</span>();</span>
+<span class="d-ctx">       } <span class="s-kw">catch</span> (error) {</span>
+<span class="d-del">-        console.<span class="s-fn">error</span>(<span class="s-str">&quot;Failed to fetch graph votes:&quot;</span>, error);</span>
+<span class="d-add">+        <span class="s-fn">derror</span>(<span class="s-str">&quot;votes&quot;</span>, <span class="s-str">&quot;failed to fetch graph votes:&quot;</span>, error);</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">     })();</span>
+<span class="d-ctx">     <span class="s-kw">return</span> () =&gt; { cancelled = <span class="s-lit">true</span>; };</span>
+<span class="d-hunk">@@ -1822,6 +1868,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       <span class="s-com">// Gap detection: if we missed revisions, full refetch</span></span>
+<span class="d-ctx">       <span class="s-kw">if</span> (lastRevRef.current &gt; <span class="s-num">0</span> &amp;&amp; delta.rev &gt; lastRevRef.current + <span class="s-num">1</span>) {</span>
+<span class="d-add">+        <span class="s-fn">dwarn</span>(<span class="s-str">&quot;votes&quot;</span>, <span class="s-str">`delta gap (have rev ${lastRevRef.current}, got ${delta.rev}) — full refetch`</span>);</span>
+<span class="d-ctx">         fetchVotesRef.<span class="s-fn">current</span>();</span>
+<span class="d-ctx">         <span class="s-kw">return</span>;</span>
+<span class="d-ctx">       }</span>
+<span class="d-hunk">@@ -1831,6 +1878,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         <span class="s-kw">return</span>;</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+      <span class="s-fn">dlog</span>(<span class="s-str">&quot;votes&quot;</span>, <span class="s-str">`delta rev ${delta.rev}: &quot;${delta.vtLabel ?? delta.vt}&quot; `</span></span>
+<span class="d-add">+        + <span class="s-str">`edges=${delta.edges.length} blocks=${Object.keys(delta.blockCounts ?? {}).length}`</span>);</span>
+<span class="d-ctx">       <span class="s-fn">applyDeltaToGraphData</span>(delta);</span>
+<span class="d-ctx">       refreshGraphDisplayRef.<span class="s-fn">current</span>();</span>
+<span class="d-ctx">       scheduleRouteProposalsRecomputeRef.<span class="s-fn">current</span>();</span>
+<span class="d-hunk">@@ -2599,6 +2648,48 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   }, [map, pinnedLat, pinnedLng, resolveSelection, isHeatmapLoading, winners,</span>
+<span class="d-ctx">       isStationNetwork, nearestProposalEdgeIndex, strongestProposalEdgeForNode, votesVersion]);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  <span class="s-com">// Anchor the route-summary card to the midpoint of the route&#x27;s MIDDLE path</span></span>
+<span class="d-add">+  <span class="s-com">// edge, tracking pan/zoom like the pinned card. Active only for a full route</span></span>
+<span class="d-add">+  <span class="s-com">// selection on a street map (start AND end; a lone point uses the pinned card</span></span>
+<span class="d-add">+  <span class="s-com">// instead). isHeatmapLoading re-runs it once topology arrives, so a deep-linked</span></span>
+<span class="d-add">+  <span class="s-com">// route (waypoints set before the graph loads) still gets its card.</span></span>
+<span class="d-add">+  <span class="s-fn">useEffect</span>(() =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> topo = topologyRef.current;</span>
+<span class="d-add">+    <span class="s-kw">const</span> ids = pathEdgeIds;</span>
+<span class="d-add">+    <span class="s-kw">const</span> hasRoute = !isStationNetwork &amp;&amp; startLat !== <span class="s-lit">null</span> &amp;&amp; endLat !== <span class="s-lit">null</span></span>
+<span class="d-add">+      &amp;&amp; !!ids &amp;&amp; ids.length &gt; <span class="s-num">0</span> &amp;&amp; !!topo;</span>
+<span class="d-add">+    <span class="s-kw">if</span> (!hasRoute) { <span class="s-fn">setRouteCardPos</span>(<span class="s-lit">null</span>); <span class="s-kw">return</span>; }</span>
+<span class="d-add">+    <span class="s-kw">const</span> midEdge = ids![<span class="s-type">Math</span>.<span class="s-fn">floor</span>(ids!.length / <span class="s-num">2</span>)];</span>
+<span class="d-add">+    <span class="s-kw">if</span> (midEdge &gt;= topo!.nEdges) { <span class="s-fn">setRouteCardPos</span>(<span class="s-lit">null</span>); <span class="s-kw">return</span>; }</span>
+<span class="d-add">+    <span class="s-kw">const</span> f = <span class="s-fn">edgeFrom</span>(topo!, midEdge), t = <span class="s-fn">edgeTo</span>(topo!, midEdge);</span>
+<span class="d-add">+    <span class="s-kw">const</span> anchorLat = (<span class="s-fn">nodeLat</span>(topo!, f) + <span class="s-fn">nodeLat</span>(topo!, t)) / <span class="s-num">2</span>;</span>
+<span class="d-add">+    <span class="s-kw">const</span> anchorLng = (<span class="s-fn">nodeLon</span>(topo!, f) + <span class="s-fn">nodeLon</span>(topo!, t)) / <span class="s-num">2</span>;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">const</span> update = () =&gt; {</span>
+<span class="d-add">+      <span class="s-kw">const</span> pt = map.<span class="s-fn">latLngToContainerPoint</span>([anchorLat, anchorLng]);</span>
+<span class="d-add">+      <span class="s-kw">const</span> rect = map.<span class="s-fn">getContainer</span>().<span class="s-fn">getBoundingClientRect</span>();</span>
+<span class="d-add">+      <span class="s-fn">setRouteCardPos</span>({ x: rect.left + pt.x, y: rect.top + pt.y - <span class="s-num">8</span> });</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+    <span class="s-kw">const</span> throttledUpdate = () =&gt; {</span>
+<span class="d-add">+      <span class="s-kw">if</span> (routeCardRafRef.current) <span class="s-kw">return</span>;</span>
+<span class="d-add">+      routeCardRafRef.current = <span class="s-fn">requestAnimationFrame</span>(() =&gt; {</span>
+<span class="d-add">+        routeCardRafRef.current = <span class="s-lit">null</span>;</span>
+<span class="d-add">+        <span class="s-fn">update</span>();</span>
+<span class="d-add">+      });</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+    <span class="s-fn">update</span>();</span>
+<span class="d-add">+    map.<span class="s-fn">on</span>(<span class="s-str">&quot;move&quot;</span>, throttledUpdate);</span>
+<span class="d-add">+    map.<span class="s-fn">on</span>(<span class="s-str">&quot;zoom&quot;</span>, throttledUpdate);</span>
+<span class="d-add">+    <span class="s-kw">return</span> () =&gt; {</span>
+<span class="d-add">+      map.<span class="s-fn">off</span>(<span class="s-str">&quot;move&quot;</span>, throttledUpdate);</span>
+<span class="d-add">+      map.<span class="s-fn">off</span>(<span class="s-str">&quot;zoom&quot;</span>, throttledUpdate);</span>
+<span class="d-add">+      <span class="s-kw">if</span> (routeCardRafRef.current) {</span>
+<span class="d-add">+        <span class="s-fn">cancelAnimationFrame</span>(routeCardRafRef.current);</span>
+<span class="d-add">+        routeCardRafRef.current = <span class="s-lit">null</span>;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+  }, [map, pathEdgeIds, startLat, startLng, endLat, endLng, isStationNetwork, isHeatmapLoading]);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   <span class="s-com">// Collapse any open spread when the selection is CLEARED (modal &quot;X&quot; / &quot;Clear&quot;).</span></span>
+<span class="d-ctx">   <span class="s-com">// Keyed only on the pinned point, so it fires on the transition to null — NOT on</span></span>
+<span class="d-ctx">   <span class="s-com">// every re-run of the resolve effect above (which also runs on votesVersion /</span></span>
+<span class="d-hunk">@@ -2722,10 +2813,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   <span class="s-kw">const</span> hoverMatchesPinned =</span>
+<span class="d-ctx">     showPinned &amp;&amp; pinnedTarget &amp;&amp; hoverTarget &amp;&amp;</span>
+<span class="d-ctx">     hoverTarget.kind === pinnedTarget.kind &amp;&amp; hoverTarget.index === pinnedTarget.index;</span>
+<span class="d-del">-  <span class="s-kw">const</span> showHoverTooltip = hoverTarget !== <span class="s-lit">null</span> &amp;&amp; !hoverMatchesPinned;</span>
+<span class="d-ctx">   <span class="s-kw">const</span> hoverWinner = (hoverTarget?.kind === <span class="s-str">&quot;edge&quot;</span>)</span>
+<span class="d-ctx">     ? winners.<span class="s-fn">find</span>(w =&gt; w.edgeIdx === hoverTarget.index) ?? <span class="s-lit">null</span></span>
+<span class="d-ctx">     : <span class="s-lit">null</span>;</span>
+<span class="d-add">+  <span class="s-com">// With a route selected, a NON-winner edge of that route gets no hover card:</span></span>
+<span class="d-add">+  <span class="s-com">// the route-summary card already speaks for the selection, and cursor travel</span></span>
+<span class="d-add">+  <span class="s-com">// along the corridor would otherwise pop a card per segment right on top of</span></span>
+<span class="d-add">+  <span class="s-com">// it. Winner (top-proposal) edges keep their card — that&#x27;s how hovering an</span></span>
+<span class="d-add">+  <span class="s-com">// auto-selected proposal on the path lights up. Matched with direction twins</span></span>
+<span class="d-add">+  <span class="s-com">// (the hover often resolves to the twin of the edge the route recorded).</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> hoverOnSelectedRoute = !hoverWinner &amp;&amp; hoverTarget?.kind === <span class="s-str">&quot;edge&quot;</span></span>
+<span class="d-add">+    &amp;&amp; !!data &amp;&amp; !!pathEdgeIds &amp;&amp; pathEdgeIds.length &gt; <span class="s-num">0</span></span>
+<span class="d-add">+    &amp;&amp; <span class="s-fn">expandSelectionToUndirected</span>(data, pathEdgeIds, [hoverTarget.index]).<span class="s-fn">has</span>(hoverTarget.index);</span>
+<span class="d-add">+  <span class="s-kw">const</span> showHoverTooltip = hoverTarget !== <span class="s-lit">null</span> &amp;&amp; !hoverMatchesPinned &amp;&amp; !hoverOnSelectedRoute;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-kw">const</span> pinnedWinner = (showPinned &amp;&amp; pinnedTarget?.kind === <span class="s-str">&quot;edge&quot;</span>)</span>
+<span class="d-ctx">     ? winners.<span class="s-fn">find</span>(w =&gt; w.edgeIdx === pinnedTarget.index) ?? <span class="s-lit">null</span></span>
+<span class="d-hunk">@@ -2742,6 +2842,62 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     pinnedVoteTypes = [{ label: pinnedWinner.label, up: pinnedWinner.count, down: <span class="s-num">0</span> }];</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  <span class="s-com">// -------------------------------------------------------------------------</span></span>
+<span class="d-add">+  <span class="s-com">// Route-summary card content (docs §2.4: everything displays at block grain)</span></span>
+<span class="d-add">+  <span class="s-com">// -------------------------------------------------------------------------</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-com">// The selection&#x27;s touched blocks, materialized once for the card (count +</span></span>
+<span class="d-add">+  <span class="s-com">// the ± buttons&#x27; pressed state) and the route cast.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> routeBlocks = <span class="s-fn">useMemo</span>(() =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">void</span> graphVoteVersion;</span>
+<span class="d-add">+    <span class="s-kw">const</span> topo = topologyRef.current;</span>
+<span class="d-add">+    <span class="s-kw">if</span> (!topo || !pathEdgeIds || pathEdgeIds.length === <span class="s-num">0</span>) <span class="s-kw">return</span> <span class="s-lit">null</span>;</span>
+<span class="d-add">+    <span class="s-kw">return</span> <span class="s-fn">materializeBlocks</span>(topo, blockIndexRef.current, pathEdgeIds);</span>
+<span class="d-add">+  }, [pathEdgeIds, graphVoteVersion, isHeatmapLoading]);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-com">// Vote rows summed over the whole selection — block-grain (deduped per-block</span></span>
+<span class="d-add">+  <span class="s-com">// counts) when the map has blocks, per-edge sums otherwise.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> routeVoteRows = useMemo&lt;<span class="s-type">VoteTypeRow</span>[]&gt;(() =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">void</span> graphVoteVersion;</span>
+<span class="d-add">+    <span class="s-kw">void</span> votesVersion;</span>
+<span class="d-add">+    <span class="s-kw">const</span> d = graphDataRef.current;</span>
+<span class="d-add">+    <span class="s-kw">if</span> (!d || !pathEdgeIds || pathEdgeIds.length === <span class="s-num">0</span>) <span class="s-kw">return</span> [];</span>
+<span class="d-add">+    <span class="s-kw">const</span> rows = <span class="s-fn">selectionVoteRows</span>(d, pathEdgeIds);</span>
+<span class="d-add">+    <span class="s-kw">if</span> (rows) <span class="s-kw">return</span> rows;</span>
+<span class="d-add">+    <span class="s-kw">const</span> legendNow = d.vote_type_legend ?? [];</span>
+<span class="d-add">+    <span class="s-kw">const</span> sums = <span class="s-kw">new</span> <span class="s-type">Map</span>&lt;string, { up: number; down: number }&gt;();</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">const</span> eid <span class="s-kw">of</span> pathEdgeIds) {</span>
+<span class="d-add">+      <span class="s-kw">for</span> (<span class="s-kw">const</span> [li, up, down] <span class="s-kw">of</span> (d.edge_vote_types ?? [])[eid] ?? []) {</span>
+<span class="d-add">+        <span class="s-kw">const</span> label = legendNow[li];</span>
+<span class="d-add">+        <span class="s-kw">if</span> (!label) <span class="s-kw">continue</span>;</span>
+<span class="d-add">+        <span class="s-kw">const</span> cur = sums.<span class="s-kw">get</span>(label) ?? { up: <span class="s-num">0</span>, down: <span class="s-num">0</span> };</span>
+<span class="d-add">+        cur.up += up ?? <span class="s-num">0</span>;</span>
+<span class="d-add">+        cur.down += down ?? <span class="s-num">0</span>;</span>
+<span class="d-add">+        sums.<span class="s-kw">set</span>(label, cur);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-kw">return</span> [...sums.<span class="s-fn">entries</span>()]</span>
+<span class="d-add">+      .<span class="s-fn">map</span>(([label, v]) =&gt; ({ label, ...v }))</span>
+<span class="d-add">+      .<span class="s-fn">sort</span>((a, b) =&gt; (b.up - b.down) - (a.up - a.down));</span>
+<span class="d-add">+  }, [pathEdgeIds, graphVoteVersion, votesVersion, isHeatmapLoading]);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-com">// The RBTP the current selection stands for, if any — it becomes the card&#x27;s</span></span>
+<span class="d-add">+  <span class="s-com">// header, so selecting a diamond (or manually tracing its corridor) titles</span></span>
+<span class="d-add">+  <span class="s-com">// the summary with that proposal. Mirrors the diamonds&#x27; own selected rule:</span></span>
+<span class="d-add">+  <span class="s-com">// block coverage (twin-expanded) first, else the explicitly-tapped RBTP</span></span>
+<span class="d-add">+  <span class="s-com">// whose anchors are still waypoints.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> coveredRouteProposal = <span class="s-fn">useMemo</span>(() =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">void</span> isHeatmapLoading;</span>
+<span class="d-add">+    <span class="s-kw">const</span> topo = topologyRef.current;</span>
+<span class="d-add">+    <span class="s-kw">if</span> (!topo || !pathEdgeIds || pathEdgeIds.length === <span class="s-num">0</span> || routeProposals.length === <span class="s-num">0</span>) <span class="s-kw">return</span> <span class="s-lit">null</span>;</span>
+<span class="d-add">+    <span class="s-kw">const</span> sel = <span class="s-fn">expandSelectionToUndirected</span>(</span>
+<span class="d-add">+      topo, pathEdgeIds, routeProposals.<span class="s-fn">flatMap</span>((p) =&gt; p.blockEdgeIds));</span>
+<span class="d-add">+    <span class="s-kw">const</span> byCoverage = routeProposals.<span class="s-fn">find</span>((p) =&gt; <span class="s-fn">isRouteCovered</span>(p.blocks, sel)) ?? <span class="s-lit">null</span>;</span>
+<span class="d-add">+    <span class="s-kw">if</span> (byCoverage) <span class="s-kw">return</span> byCoverage;</span>
+<span class="d-add">+    <span class="s-kw">const</span> tapped = routeProposals.<span class="s-fn">find</span>((p) =&gt; p.id === selectedRbtpId) ?? <span class="s-lit">null</span>;</span>
+<span class="d-add">+    <span class="s-kw">return</span> tapped &amp;&amp; <span class="s-fn">anchorsAreWaypoints</span>(tapped) ? tapped : <span class="s-lit">null</span>;</span>
+<span class="d-add">+  }, [pathEdgeIds, routeProposals, isHeatmapLoading, selectedRbtpId, anchorsAreWaypoints]);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   <span class="s-com">// geocodeVersion used to re-render when async geocode completes</span></span>
+<span class="d-ctx">   <span class="s-kw">void</span> geocodeVersion;</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -2895,6 +3051,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   <span class="s-com">//     edge ids (RouteContext.insertWaypointAtSegment), or the on-path highlight</span></span>
+<span class="d-ctx">   <span class="s-com">//     AND the vote target both vanish.</span></span>
+<span class="d-ctx">   <span class="s-com">// ===========================================================================</span></span>
+<span class="d-add">+  <span class="s-com">// POINT-BASED top proposals — &quot;PBTPs&quot; (square pins): one hot edge per pin,</span></span>
+<span class="d-add">+  <span class="s-com">// selected by topProposals.selectTopProposals. Their ROUTE-based counterpart</span></span>
+<span class="d-add">+  <span class="s-com">// (RBTPs, the corridor diamonds) renders in routeIndicatorMarkers below;</span></span>
+<span class="d-add">+  <span class="s-com">// terminology in docs/three-layer-model.md §3.1.</span></span>
+<span class="d-ctx">   <span class="s-kw">const</span> indicatorMarkers = <span class="s-fn">useMemo</span>(() =&gt; {</span>
+<span class="d-ctx">     <span class="s-kw">const</span> topology = topologyRef.current;</span>
+<span class="d-ctx">     <span class="s-kw">if</span> (!topology) <span class="s-kw">return</span> <span class="s-lit">null</span>;</span>
+<span class="d-hunk">@@ -3170,16 +3330,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           <span class="s-com">// one sits on top — but explode/waypoint/selected still lift a pin into</span></span>
+<span class="d-ctx">           <span class="s-com">// a higher band regardless of votes. Bands are 100k apart and votes are</span></span>
+<span class="d-ctx">           <span class="s-com">// capped at 50k, so the vote offset can never bleed one band into the</span></span>
+<span class="d-del">-          <span class="s-com">// next. Highest band first:</span></span>
+<span class="d-del">-          <span class="s-com">//   300000+  fanned-out (spread override) — the exploded cluster reads</span></span>
+<span class="d-del">-          <span class="s-com">//            as one group on top of everything else.</span></span>
+<span class="d-add">+          <span class="s-com">// next. Highest band first (route diamonds slot in between — see</span></span>
+<span class="d-add">+          <span class="s-com">// routeIndicatorMarkers):</span></span>
+<span class="d-add">+          <span class="s-com">//   500000+  fanned-out (spread override) — the exploded cluster is the</span></span>
+<span class="d-add">+          <span class="s-com">//            disambiguation UI, so it reads as one group on top of</span></span>
+<span class="d-add">+          <span class="s-com">//            EVERYTHING, route diamonds included.</span></span>
+<span class="d-add">+          <span class="s-com">//   400000+  a route diamond covered by the selection (routeIndicator).</span></span>
+<span class="d-add">+          <span class="s-com">//   300000+  a route diamond, uncovered (routeIndicator).</span></span>
+<span class="d-ctx">           <span class="s-com">//   200000+  a MATCHED waypoint (start/end/mid). It carries the [×]</span></span>
+<span class="d-ctx">           <span class="s-com">//            badge, so it must sit above any overlapping non-matched</span></span>
+<span class="d-ctx">           <span class="s-com">//            sibling — else the upper icon conceals its badge.</span></span>
+<span class="d-ctx">           <span class="s-com">//   100000+  the selected (open-modal) proposal.</span></span>
+<span class="d-ctx">           <span class="s-com">//     1000+  everything else, ordered by votes.</span></span>
+<span class="d-ctx">           zIndexOffset={</span>
+<span class="d-del">-            (<span class="s-kw">override</span> ? <span class="s-num">300000</span></span>
+<span class="d-add">+            (<span class="s-kw">override</span> ? <span class="s-num">500000</span></span>
+<span class="d-ctx">              : role !== <span class="s-lit">null</span> ? <span class="s-num">200000</span></span>
+<span class="d-ctx">              : w.edgeIdx === selectedEdgeIdx ? <span class="s-num">100000</span></span>
+<span class="d-ctx">              : <span class="s-num">1000</span>)</span>
+<span class="d-hunk">@@ -3243,6 +3407,23 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     });</span>
+<span class="d-ctx">   }, [themeMode]);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  <span class="s-com">// Cast a directional vote on the WHOLE route selection — the route-summary</span></span>
+<span class="d-add">+  <span class="s-com">// card&#x27;s ± buttons. Same unified castVotes path (and the same edge set +</span></span>
+<span class="d-add">+  <span class="s-com">// block materialization) as the top-bar route cast, so pressed/unvote</span></span>
+<span class="d-add">+  <span class="s-com">// semantics match wherever the vote is made from. The card passes an edgeId</span></span>
+<span class="d-add">+  <span class="s-com">// only to enable its buttons; the cast targets every path edge.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> castRouteVote = <span class="s-fn">useCallback</span>((</span>
+<span class="d-add">+    _edgeId: number | <span class="s-lit">null</span>, label: string, newDir: <span class="s-type">VoteDirection</span>,</span>
+<span class="d-add">+  ) =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> ids = pathEdgeIdsRef.current;</span>
+<span class="d-add">+    <span class="s-kw">if</span> (!ids || ids.length === <span class="s-num">0</span> || !label) <span class="s-kw">return</span>;</span>
+<span class="d-add">+    <span class="s-kw">const</span> topo = topologyRef.current;</span>
+<span class="d-add">+    <span class="s-fn">castVotes</span>({</span>
+<span class="d-add">+      mode: themeMode, edgeIds: <span class="s-type">Array</span>.<span class="s-kw">from</span>(ids), label, direction: newDir,</span>
+<span class="d-add">+      blocks: topo ? <span class="s-fn">materializeBlocks</span>(topo, blockIndexRef.current, ids) : <span class="s-lit">undefined</span>,</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+  }, [themeMode]);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   <span class="s-com">// On map load, RESET this mode&#x27;s local my-votes to the server&#x27;s full snapshot</span></span>
+<span class="d-ctx">   <span class="s-com">// (no edge_ids = the device&#x27;s every row on this map). localStorage survives</span></span>
+<span class="d-ctx">   <span class="s-com">// things the server doesn&#x27;t (a dev DB reset, a resnap that shifted edge ids),</span></span>
+<span class="d-hunk">@@ -3309,14 +3490,59 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     <span class="s-kw">return</span> () =&gt; { cancelled = <span class="s-lit">true</span>; };</span>
+<span class="d-ctx">   }, [pinnedVoteEdgeId, themeMode]);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  <span class="s-com">// Route-proposal diamonds — one per corridor, at the midpoint of its middle</span></span>
+<span class="d-del">-  <span class="s-com">// path edge. Hovering lights the whole corridor; clicking forces the route</span></span>
+<span class="d-del">-  <span class="s-com">// through its anchors; it reads &quot;selected&quot; once the live route covers every</span></span>
+<span class="d-del">-  <span class="s-com">// block (the auto-select rule). A separate layer from the point indicators.</span></span>
+<span class="d-add">+  <span class="s-com">// ===========================================================================</span></span>
+<span class="d-add">+  <span class="s-com">// ROUTE-BASED top proposals — &quot;RBTPs&quot; (diamonds)</span></span>
+<span class="d-add">+  <span class="s-com">// ===========================================================================</span></span>
+<span class="d-add">+  <span class="s-com">// Terminology (docs/three-layer-model.md §3.1): the map surfaces two kinds of</span></span>
+<span class="d-add">+  <span class="s-com">// top proposal —</span></span>
+<span class="d-add">+  <span class="s-com">//   PBTP — POINT-based top proposal: one hot edge, square pin, computed by</span></span>
+<span class="d-add">+  <span class="s-com">//          topProposals.selectTopProposals, rendered by indicatorMarkers above.</span></span>
+<span class="d-add">+  <span class="s-com">//   RBTP — ROUTE-based top proposal: a hot CORRIDOR (simple path through the</span></span>
+<span class="d-add">+  <span class="s-com">//          vote graph), diamond pin at its middle edge, computed by</span></span>
+<span class="d-add">+  <span class="s-com">//          routeProposals.computeRouteProposals, rendered here.</span></span>
+<span class="d-add">+  <span class="s-com">//</span></span>
+<span class="d-add">+  <span class="s-com">// One diamond per corridor. Hovering lights the whole corridor; clicking</span></span>
+<span class="d-add">+  <span class="s-com">// force-routes through its two anchors and SELECTS it. A diamond reads</span></span>
+<span class="d-add">+  <span class="s-com">// selected when either</span></span>
+<span class="d-add">+  <span class="s-com">//   (a) the live route covers every one of its blocks (the auto-select rule,</span></span>
+<span class="d-add">+  <span class="s-com">//       twin-expanded), or</span></span>
+<span class="d-add">+  <span class="s-com">//   (b) it&#x27;s the explicitly-tapped RBTP and both anchors are still waypoints</span></span>
+<span class="d-add">+  <span class="s-com">//       — see selectedRbtpId; OSRM&#x27;s leg between the anchors rarely re-traces</span></span>
+<span class="d-add">+  <span class="s-com">//       the corridor, so (a) alone left a tapped diamond looking unselected.</span></span>
+<span class="d-ctx">   <span class="s-kw">const</span> routeIndicatorMarkers = <span class="s-fn">useMemo</span>(() =&gt; {</span>
+<span class="d-ctx">     <span class="s-kw">const</span> topology = topologyRef.current;</span>
+<span class="d-ctx">     <span class="s-kw">if</span> (!topology || routeProposals.length === <span class="s-num">0</span>) <span class="s-kw">return</span> <span class="s-lit">null</span>;</span>
+<span class="d-del">-    <span class="s-kw">const</span> selectedSet = pathEdgeIds ? <span class="s-kw">new</span> <span class="s-fn">Set</span>(pathEdgeIds) : <span class="s-lit">null</span>;</span>
+<span class="d-add">+    <span class="s-com">// Coverage is matched with direction twins included (a routed path often</span></span>
+<span class="d-add">+    <span class="s-com">// traverses the twin of the edge a corridor&#x27;s block recorded).</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> selectedSet = pathEdgeIds</span>
+<span class="d-add">+      ? <span class="s-fn">expandSelectionToUndirected</span>(</span>
+<span class="d-add">+          topology, pathEdgeIds, routeProposals.<span class="s-fn">flatMap</span>((p) =&gt; p.blockEdgeIds))</span>
+<span class="d-add">+      : <span class="s-lit">null</span>;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com">// Same heat treatment as the PBTP squares (normalized within the RBTP</span></span>
+<span class="d-add">+    <span class="s-com">// family, log scale) so the two marker kinds read as one visual system —</span></span>
+<span class="d-add">+    <span class="s-com">// a diamond warms toward the map&#x27;s ramp exactly like a square does.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> rampStops = <span class="s-fn">buildHeatRampStops</span>(mapStyle.heat);</span>
+<span class="d-add">+    <span class="s-kw">const</span> maxScore = routeProposals.<span class="s-fn">reduce</span>((m, p) =&gt; <span class="s-type">Math</span>.<span class="s-fn">max</span>(m, p.score), <span class="s-num">0</span>);</span>
+<span class="d-add">+    <span class="s-kw">const</span> heatOf = (score: number): number =&gt;</span>
+<span class="d-add">+      maxScore &gt; <span class="s-num">0</span> &amp;&amp; score &gt; <span class="s-num">0</span></span>
+<span class="d-add">+        ? <span class="s-type">Math</span>.<span class="s-fn">log</span>(score + <span class="s-num">1</span>) / <span class="s-type">Math</span>.<span class="s-fn">log</span>(maxScore + <span class="s-num">1</span>)</span>
+<span class="d-add">+        : <span class="s-num">0</span>;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com">// Container points of the current waypoints (start/end/mids). A diamond</span></span>
+<span class="d-add">+    <span class="s-com">// whose icon box overlaps a waypoint&#x27;s icon box goes PASSTHROUGH: the</span></span>
+<span class="d-add">+    <span class="s-com">// diamond outranks every settled icon (bands below), so left interactive it</span></span>
+<span class="d-add">+    <span class="s-com">// would swallow the press meant for the waypoint&#x27;s kite RouteMarker — the</span></span>
+<span class="d-add">+    <span class="s-com">// &quot;can&#x27;t drag a start that sits on a proposal&quot; bug. Passthrough hands the</span></span>
+<span class="d-add">+    <span class="s-com">// gesture to the kite, exactly like a matched point pin does. Pan shifts</span></span>
+<span class="d-add">+    <span class="s-com">// both projections by the same delta, so only zoom (a dep) re-runs this.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> waypointPts: <span class="s-type">L</span>.<span class="s-type">Point</span>[] = [];</span>
+<span class="d-add">+    <span class="s-kw">if</span> (startLat !== <span class="s-lit">null</span> &amp;&amp; startLng !== <span class="s-lit">null</span>) waypointPts.<span class="s-fn">push</span>(map.<span class="s-fn">latLngToContainerPoint</span>([startLat, startLng]));</span>
+<span class="d-add">+    <span class="s-kw">if</span> (endLat !== <span class="s-lit">null</span> &amp;&amp; endLng !== <span class="s-lit">null</span>) waypointPts.<span class="s-fn">push</span>(map.<span class="s-fn">latLngToContainerPoint</span>([endLat, endLng]));</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">const</span> wp <span class="s-kw">of</span> ghostWaypointsRef.current) waypointPts.<span class="s-fn">push</span>(map.<span class="s-fn">latLngToContainerPoint</span>([wp.lat, wp.lng]));</span>
+<span class="d-add">+    <span class="s-com">// Both icons share the pin geometry: 34×42 box, anchor at the tip (17,36).</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> overlapsWaypoint = (pt: <span class="s-type">L</span>.<span class="s-type">Point</span>) =&gt;</span>
+<span class="d-add">+      waypointPts.<span class="s-fn">some</span>((wp) =&gt; <span class="s-type">Math</span>.<span class="s-fn">abs</span>(wp.x - pt.x) &lt; <span class="s-num">34</span> &amp;&amp; <span class="s-type">Math</span>.<span class="s-fn">abs</span>(wp.y - pt.y) &lt; <span class="s-num">42</span>);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-kw">return</span> routeProposals.<span class="s-fn">map</span>((p) =&gt; {</span>
+<span class="d-ctx">       <span class="s-kw">const</span> midEdge = p.edgeIds[<span class="s-type">Math</span>.<span class="s-fn">floor</span>(p.edgeIds.length / <span class="s-num">2</span>)];</span>
+<span class="d-hunk">@@ -3331,9 +3557,14 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         posLng = (p.anchorCoords[<span class="s-num">0</span>].lng + p.anchorCoords[<span class="s-num">1</span>].lng) / <span class="s-num">2</span>;</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-      <span class="s-kw">const</span> covered = selectedSet ? <span class="s-fn">isRouteCovered</span>(p.blocks, selectedSet) : <span class="s-lit">false</span>;</span>
+<span class="d-add">+      <span class="s-kw">const</span> covered = (selectedSet ? <span class="s-fn">isRouteCovered</span>(p.blocks, selectedSet) : <span class="s-lit">false</span>)</span>
+<span class="d-add">+        || (p.id === selectedRbtpId &amp;&amp; <span class="s-fn">anchorsAreWaypoints</span>(p));</span>
+<span class="d-add">+      <span class="s-kw">const</span> dp = map.<span class="s-fn">latLngToContainerPoint</span>([posLat, posLng]);</span>
+<span class="d-add">+      <span class="s-kw">const</span> passthrough = <span class="s-fn">overlapsWaypoint</span>(dp);</span>
+<span class="d-add">+      <span class="s-kw">const</span> heat = <span class="s-fn">heatOf</span>(p.score);</span>
+<span class="d-add">+      <span class="s-kw">const</span> heatColor = heat &gt; <span class="s-num">0</span> ? <span class="s-fn">sampleHeatRamp</span>(rampStops, heat) : <span class="s-lit">undefined</span>;</span>
+<span class="d-ctx">       <span class="s-kw">const</span> icon = <span class="s-fn">makeVoteTypeIcon</span>(p.label, theme.suggestions, {</span>
+<span class="d-del">-        diamond: <span class="s-lit">true</span>, selected: covered,</span>
+<span class="d-add">+        diamond: <span class="s-lit">true</span>, selected: covered, passthrough, heat, heatColor,</span>
+<span class="d-ctx">       });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       <span class="s-kw">const</span> activate = () =&gt; {</span>
+<span class="d-hunk">@@ -3352,14 +3583,34 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           key={<span class="s-str">`route-${p.id}`</span>}</span>
+<span class="d-ctx">           position={[posLat, posLng]}</span>
+<span class="d-ctx">           icon={icon}</span>
+<span class="d-del">-          zIndexOffset={(covered ? <span class="s-num">150000</span> : <span class="s-num">5000</span>) + <span class="s-type">Math</span>.<span class="s-fn">min</span>(<span class="s-num">48000</span>, <span class="s-type">Math</span>.<span class="s-fn">max</span>(<span class="s-num">0</span>, p.score))}</span>
+<span class="d-add">+          <span class="s-com">// Route diamonds sit ABOVE every settled point icon (matched/selected/</span></span>
+<span class="d-add">+          <span class="s-com">// browse) so a corridor is never buried under point pins; covered ones</span></span>
+<span class="d-add">+          <span class="s-com">// outrank uncovered; the fanned-out spread (500000+) alone stays above</span></span>
+<span class="d-add">+          <span class="s-com">// them (it&#x27;s the explicit disambiguation gesture). Bands documented at</span></span>
+<span class="d-add">+          <span class="s-com">// the point-icon zIndexOffset.</span></span>
+<span class="d-add">+          zIndexOffset={(covered ? <span class="s-num">400000</span> : <span class="s-num">300000</span>) + <span class="s-type">Math</span>.<span class="s-fn">min</span>(<span class="s-num">48000</span>, <span class="s-type">Math</span>.<span class="s-fn">max</span>(<span class="s-num">0</span>, p.score))}</span>
+<span class="d-add">+          interactive={!passthrough}</span>
+<span class="d-ctx">           onActivate={activate}</span>
+<span class="d-ctx">           onDeactivate={deactivate}</span>
+<span class="d-del">-          onClick={() =&gt; onRouteProposalClickRef.current?.(p)}</span>
+<span class="d-add">+          onClick={() =&gt; {</span>
+<span class="d-add">+            <span class="s-com">// Drop any hover card sitting at the click point — the route-summary</span></span>
+<span class="d-add">+            <span class="s-com">// card about to open would otherwise render underneath it until the</span></span>
+<span class="d-add">+            <span class="s-com">// next mousemove refreshes the hover.</span></span>
+<span class="d-add">+            <span class="s-kw">if</span> (hoverTargetRef.current) {</span>
+<span class="d-add">+              hoverTargetRef.current = <span class="s-lit">null</span>;</span>
+<span class="d-add">+              <span class="s-fn">setHoverTarget</span>(<span class="s-lit">null</span>);</span>
+<span class="d-add">+              redrawHoverHighlightRef.<span class="s-fn">current</span>();</span>
+<span class="d-add">+            }</span>
+<span class="d-add">+            <span class="s-com">// The tap selects this RBTP (rule (b) above); it stays selected</span></span>
+<span class="d-add">+            <span class="s-com">// until an anchor leaves the route.</span></span>
+<span class="d-add">+            <span class="s-fn">setSelectedRbtpId</span>(p.id);</span>
+<span class="d-add">+            onRouteProposalClickRef.current?.(p);</span>
+<span class="d-add">+          }}</span>
+<span class="d-ctx">         /&gt;</span>
+<span class="d-ctx">       );</span>
+<span class="d-ctx">     });</span>
+<span class="d-del">-  }, [routeProposals, pathEdgeIds, currentZoom, map, theme.suggestions, mapStyle.heat]);</span>
+<span class="d-add">+  }, [routeProposals, pathEdgeIds, currentZoom, map, theme.suggestions, mapStyle.heat,</span>
+<span class="d-add">+      startLat, startLng, endLat, endLng, ghostKey, selectedRbtpId, anchorsAreWaypoints]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-kw">return</span> (</span>
+<span class="d-ctx">     &lt;&gt;</span>
+<span class="d-hunk">@@ -3415,6 +3666,53 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         /&gt;,</span>
+<span class="d-ctx">         mapContainer</span>
+<span class="d-ctx">       )}</span>
+<span class="d-add">+      {/* <span class="s-type">Route</span>-summary card — the modal <span class="s-kw">for</span> a <span class="s-type">FULL</span> route <span class="s-fn">selection</span> (start+end),</span>
+<span class="d-add">+          which the pinned <span class="s-fn">card</span> (lone point) never covers. <span class="s-type">Summarizes</span> the blocks</span>
+<span class="d-add">+          the route selects and the block-grain vote rows across them; headed by</span>
+<span class="d-add">+          the covered route proposal when the selection covers one. <span class="s-type">The</span> ±</span>
+<span class="d-add">+          buttons cast on the whole selection via castRouteVote. <span class="s-type">Rendered</span> <span class="s-type">LAST</span></span>
+<span class="d-add">+          (same z-index <span class="s-kw">as</span> the hover card) so a transient hover card can never</span>
+<span class="d-add">+          bury the selection<span class="s-str">&#x27;s own summary. */}</span></span>
+<span class="d-add">+      {routeCardPos &amp;&amp; routeBlocks &amp;&amp; routeBlocks.length &gt; <span class="s-num">0</span> &amp;&amp; !showPinned &amp;&amp; <span class="s-fn">createPortal</span>(</span>
+<span class="d-add">+        &lt;<span class="s-type">ProposalCard</span></span>
+<span class="d-add">+          key={<span class="s-str">`route:${coveredRouteProposal?.id ?? &quot;selection&quot;}`</span>}</span>
+<span class="d-add">+          winner={coveredRouteProposal</span>
+<span class="d-add">+            ? {</span>
+<span class="d-add">+                legendIdx: coveredRouteProposal.legendIdx,</span>
+<span class="d-add">+                label: coveredRouteProposal.label,</span>
+<span class="d-add">+                edgeIdx: coveredRouteProposal.edgeIds[<span class="s-num">0</span>],</span>
+<span class="d-add">+                count: coveredRouteProposal.score,</span>
+<span class="d-add">+              }</span>
+<span class="d-add">+            : <span class="s-lit">null</span>}</span>
+<span class="d-add">+          eyebrow=<span class="s-str">&quot;Route Proposal&quot;</span></span>
+<span class="d-add">+          screenX={routeCardPos.x}</span>
+<span class="d-add">+          screenY={routeCardPos.y}</span>
+<span class="d-add">+          name=<span class="s-str">&quot;&quot;</span></span>
+<span class="d-add">+          <span class="s-com">// Maps without block artifacts fall back to singleton blocks (one per</span></span>
+<span class="d-add">+          <span class="s-com">// edge), where &quot;blocks&quot; would read as a huge nonsense number — call</span></span>
+<span class="d-add">+          <span class="s-com">// those what they are.</span></span>
+<span class="d-add">+          metaText={<span class="s-str">`selects ${routeBlocks.length} ${hasBlocksRef.current ? &quot;block&quot; : &quot;segment&quot;}${routeBlocks.length !== 1 ? &quot;s&quot; : &quot;&quot;}`</span>}</span>
+<span class="d-add">+          rows={routeVoteRows}</span>
+<span class="d-add">+          interactive</span>
+<span class="d-add">+          elevated</span>
+<span class="d-add">+          edgeId={pathEdgeIds &amp;&amp; pathEdgeIds.length &gt; <span class="s-num">0</span> ? pathEdgeIds[<span class="s-num">0</span>] : <span class="s-lit">null</span>}</span>
+<span class="d-add">+          blocks={routeBlocks}</span>
+<span class="d-add">+          mode={themeMode}</span>
+<span class="d-add">+          voteTypes={theme.suggestions}</span>
+<span class="d-add">+          shareUrl={window.location.href}</span>
+<span class="d-add">+          onVote={castRouteVote}</span>
+<span class="d-add">+          registerEl={(el) =&gt; { pinnedModalElRef.current = el; }}</span>
+<span class="d-add">+          onHoverChange={(over) =&gt; {</span>
+<span class="d-add">+            overModalRef.current = over;</span>
+<span class="d-add">+            <span class="s-kw">if</span> (over &amp;&amp; hoverTargetRef.current) {</span>
+<span class="d-add">+              hoverTargetRef.current = <span class="s-lit">null</span>;</span>
+<span class="d-add">+              <span class="s-fn">setHoverTarget</span>(<span class="s-lit">null</span>);</span>
+<span class="d-add">+              redrawHoverHighlightRef.<span class="s-fn">current</span>();</span>
+<span class="d-add">+            }</span>
+<span class="d-add">+          }}</span>
+<span class="d-add">+        /&gt;,</span>
+<span class="d-add">+        mapContainer</span>
+<span class="d-add">+      )}</span>
+<span class="d-ctx">     &lt;/&gt;</span>
+<span class="d-ctx">   );</span>
+<span class="d-ctx"> }</span>
+<span class="d-hunk">@@ -3468,11 +3766,20 @@ function ExpandIcon({ size = 12 }: { size?: number }) {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-kw">interface</span> <span class="s-type">ProposalCardProps</span> {</span>
+<span class="d-ctx">   winner: <span class="s-type">VoteTypeWinner</span> | <span class="s-lit">null</span>;</span>
+<span class="d-add">+<span class="s-com">  /** Header eyebrow text over the winner label. The route-summary card passes</span></span>
+<span class="d-add">+<span class="s-com">   *  &quot;Route Proposal&quot;; point cards keep the default. */</span></span>
+<span class="d-add">+  eyebrow?: string;</span>
+<span class="d-ctx">   screenX: number;</span>
+<span class="d-ctx">   screenY: number;</span>
+<span class="d-ctx">   name: string;</span>
+<span class="d-add">+<span class="s-com">  /** Replaces the default &quot;N proposals&quot; meta line — the route-summary card</span></span>
+<span class="d-add">+<span class="s-com">   *  puts its block count here (&quot;selects N blocks&quot;). */</span></span>
+<span class="d-add">+  metaText?: string | <span class="s-lit">null</span>;</span>
+<span class="d-ctx">   rows: <span class="s-type">VoteTypeRow</span>[];</span>
+<span class="d-ctx">   interactive?: boolean;</span>
+<span class="d-add">+<span class="s-com">  /** Lifts the card one z tier above sibling cards (route summary vs transient</span></span>
+<span class="d-add">+<span class="s-com">   *  hover). Portals mount at different times, so DOM order can&#x27;t order them. */</span></span>
+<span class="d-add">+  elevated?: boolean;</span>
+<span class="d-ctx">   edgeId?: number | <span class="s-lit">null</span>;</span>
+<span class="d-ctx"> <span class="s-com">  /** The selection&#x27;s touched blocks as materialized edge lists (docs §4.1) —</span></span>
+<span class="d-ctx"> <span class="s-com">   *  drives the ± buttons&#x27; active/unvote state. Null/absent falls back to the</span></span>
+<span class="d-hunk">@@ -3502,8 +3809,8 @@ type CardPos = {</span>
+<span class="d-ctx"> };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-kw">function</span> <span class="s-fn">ProposalCard</span>({</span>
+<span class="d-del">-  winner, screenX, screenY, name, rows,</span>
+<span class="d-del">-  interactive = <span class="s-lit">false</span>, edgeId = <span class="s-lit">null</span>, blocks = <span class="s-lit">null</span>, mode = <span class="s-str">&quot;&quot;</span>, shareUrl = <span class="s-lit">null</span>, voteTypes, onVote, onRemove, onHoverChange, registerEl,</span>
+<span class="d-add">+  winner, eyebrow = <span class="s-str">&quot;Top Proposal&quot;</span>, screenX, screenY, name, metaText = <span class="s-lit">null</span>, rows,</span>
+<span class="d-add">+  interactive = <span class="s-lit">false</span>, elevated = <span class="s-lit">false</span>, edgeId = <span class="s-lit">null</span>, blocks = <span class="s-lit">null</span>, mode = <span class="s-str">&quot;&quot;</span>, shareUrl = <span class="s-lit">null</span>, voteTypes, onVote, onRemove, onHoverChange, registerEl,</span>
+<span class="d-ctx"> }: <span class="s-type">ProposalCardProps</span>) {</span>
+<span class="d-ctx">   <span class="s-kw">const</span> [copied, setCopied] = <span class="s-fn">useState</span>(<span class="s-lit">false</span>);</span>
+<span class="d-ctx">   <span class="s-com">// Interactive cards can collapse to a small pill (icon + label + expand) so a</span></span>
+<span class="d-hunk">@@ -3631,7 +3938,7 @@ function ProposalCard({</span>
+<span class="d-ctx">   <span class="s-kw">return</span> (</span>
+<span class="d-ctx">     &lt;div</span>
+<span class="d-ctx">       ref={(el) =&gt; { cardRef.current = el; registerEl?.(el); }}</span>
+<span class="d-del">-      className={<span class="s-str">`graph-indicator-modal graph-proposal-card${interactive ? &quot; is-interactive&quot; : &quot; is-hover&quot;}${minimized ? &quot; is-minimized&quot; : &quot;&quot;}`</span>}</span>
+<span class="d-add">+      className={<span class="s-str">`graph-indicator-modal graph-proposal-card${interactive ? &quot; is-interactive&quot; : &quot; is-hover&quot;}${minimized ? &quot; is-minimized&quot; : &quot;&quot;}${elevated ? &quot; is-elevated&quot; : &quot;&quot;}`</span>}</span>
+<span class="d-ctx">       style={{</span>
+<span class="d-ctx">         left: pos?.left ?? screenX,</span>
+<span class="d-ctx">         top: pos?.top ?? screenY,</span>
+<span class="d-hunk">@@ -3672,7 +3979,7 @@ function ProposalCard({</span>
+<span class="d-ctx">                 )}</span>
+<span class="d-ctx">               &lt;/span&gt;</span>
+<span class="d-ctx">               &lt;div className=<span class="s-str">&quot;graph-indicator-modal-headtext&quot;</span>&gt;</span>
+<span class="d-del">-                &lt;div className=<span class="s-str">&quot;graph-indicator-modal-eyebrow&quot;</span>&gt;<span class="s-type">Top</span> <span class="s-type">Proposal</span>&lt;/div&gt;</span>
+<span class="d-add">+                &lt;div className=<span class="s-str">&quot;graph-indicator-modal-eyebrow&quot;</span>&gt;{eyebrow}&lt;/div&gt;</span>
+<span class="d-ctx">                 &lt;div className=<span class="s-str">&quot;graph-indicator-modal-label&quot;</span>&gt;{winner.label}&lt;/div&gt;</span>
+<span class="d-ctx">               &lt;/div&gt;</span>
+<span class="d-ctx">             &lt;/div&gt;</span>
+<span class="d-hunk">@@ -3711,9 +4018,10 @@ function ProposalCard({</span>
+<span class="d-ctx">           &lt;div className=<span class="s-str">&quot;graph-indicator-modal-body&quot;</span>&gt;</span>
+<span class="d-ctx">             {name &amp;&amp; &lt;div className=<span class="s-str">&quot;graph-tooltip-name&quot;</span>&gt;{name}&lt;/div&gt;}</span>
+<span class="d-ctx">             &lt;div className=<span class="s-str">&quot;graph-tooltip-meta&quot;</span>&gt;</span>
+<span class="d-del">-              {rows.length &gt; <span class="s-num">0</span></span>
+<span class="d-del">-                ? <span class="s-str">`${rows.length} proposal${rows.length !== 1 ? &quot;s&quot; : &quot;&quot;}`</span></span>
+<span class="d-del">-                : <span class="s-str">&quot;no proposals yet&quot;</span>}</span>
+<span class="d-add">+              {metaText</span>
+<span class="d-add">+                ?? (rows.length &gt; <span class="s-num">0</span></span>
+<span class="d-add">+                  ? <span class="s-str">`${rows.length} proposal${rows.length !== 1 ? &quot;s&quot; : &quot;&quot;}`</span></span>
+<span class="d-add">+                  : <span class="s-str">&quot;no proposals yet&quot;</span>)}</span>
+<span class="d-ctx">             &lt;/div&gt;</span>
+<span class="d-ctx">             {rows.length &gt; <span class="s-num">0</span> &amp;&amp; (</span>
+<span class="d-ctx">               &lt;div className=<span class="s-str">&quot;graph-proposal-rows&quot;</span> style={<span class="s-fn">voteColumnWidths</span>(rows)}&gt;</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+            <span class="stat"><span class="d-add">+28</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">unit tests for the pure route-proposal logic</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">routeProposals.test.ts</span>
+        <span class="ctx-sum">coverage/dedupe/clustering specs</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">isRouteCovered specs</span><span class="ol-sum">auto-select rule</span></li><li class="changed"><span class="ol-label">expandSelectionToUndirected specs</span><span class="ol-sum">NEW — twins join, strangers don&#x27;t, bounds respected</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>3 new tests: twin joins selection · twin-traversing route reads covered · out-of-range candidates ignored</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeProposals.test.ts b/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+<span class="d-meta">index ee0b0f6..70960f0 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+<span class="d-hunk">@@ -4,6 +4,7 @@ import {</span>
+<span class="d-ctx">   proposalShapeClass,</span>
+<span class="d-ctx">   routeBlockEdges,</span>
+<span class="d-ctx">   isRouteCovered,</span>
+<span class="d-add">+  expandSelectionToUndirected,</span>
+<span class="d-ctx">   dropPointsCoveredByRoutes,</span>
+<span class="d-ctx">   chooseAnchorOrder,</span>
+<span class="d-ctx">   computeRouteProposals,</span>
+<span class="d-hunk">@@ -91,6 +92,33 @@ describe(&quot;isRouteCovered (auto-select)&quot;, () =&gt; {</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+<span class="s-fn">describe</span>(<span class="s-str">&quot;expandSelectionToUndirected&quot;</span>, () =&gt; {</span>
+<span class="d-add">+  <span class="s-com">// Edges 0/1 are direction twins (nodes 10↔11); edge 2 is a different street.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> topo = {</span>
+<span class="d-add">+    nEdges: <span class="s-num">3</span>,</span>
+<span class="d-add">+    ends: <span class="s-type">Int32Array</span>.<span class="s-kw">from</span>([<span class="s-num">10</span>, <span class="s-num">11</span>, <span class="s-com">/* e0 */</span> <span class="s-num">11</span>, <span class="s-num">10</span>, <span class="s-com">/* e1 */</span> <span class="s-num">11</span>, <span class="s-num">12</span> <span class="s-com">/* e2 */</span>]),</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;adds candidate edges sharing a node pair with a selected edge&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> sel = <span class="s-fn">expandSelectionToUndirected</span>(topo, [<span class="s-num">0</span>], [<span class="s-num">1</span>, <span class="s-num">2</span>]);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(sel.<span class="s-fn">has</span>(<span class="s-num">0</span>)).<span class="s-fn">toBe</span>(<span class="s-lit">true</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(sel.<span class="s-fn">has</span>(<span class="s-num">1</span>)).<span class="s-fn">toBe</span>(<span class="s-lit">true</span>);  <span class="s-com">// twin of selected 0 → joins</span></span>
+<span class="d-add">+    <span class="s-fn">expect</span>(sel.<span class="s-fn">has</span>(<span class="s-num">2</span>)).<span class="s-fn">toBe</span>(<span class="s-lit">false</span>); <span class="s-com">// different street → not added</span></span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;makes twin-traversing routes read as covering the corridor&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-com">// Corridor block recorded edge 1; the routed path traversed twin edge 0.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> blocks = [[<span class="s-num">1</span>]];</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(<span class="s-fn">isRouteCovered</span>(blocks, [<span class="s-num">0</span>])).<span class="s-fn">toBe</span>(<span class="s-lit">false</span>); <span class="s-com">// raw ids miss</span></span>
+<span class="d-add">+    <span class="s-fn">expect</span>(<span class="s-fn">isRouteCovered</span>(blocks, <span class="s-fn">expandSelectionToUndirected</span>(topo, [<span class="s-num">0</span>], [<span class="s-num">1</span>]))).<span class="s-fn">toBe</span>(<span class="s-lit">true</span>);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;ignores out-of-range candidates and leaves the selection intact&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> sel = <span class="s-fn">expandSelectionToUndirected</span>(topo, [<span class="s-num">2</span>], [<span class="s-num">99</span>]);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>([...sel]).<span class="s-fn">toEqual</span>([<span class="s-num">2</span>]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> <span class="s-fn">describe</span>(<span class="s-str">&quot;dropPointsCoveredByRoutes&quot;</span>, () =&gt; {</span>
+<span class="d-ctx">   <span class="s-fn">it</span>(<span class="s-str">&quot;removes same-type point proposals subsumed by a route, keeps others&quot;</span>, () =&gt; {</span>
+<span class="d-ctx">     <span class="s-kw">const</span> routes = [<span class="s-fn">route</span>()]; <span class="s-com">// Bike lane covers edges {0,5,1,2}</span></span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/routeProposals.ts</span>
+            <span class="stat"><span class="d-add">+32</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">pure route-proposal logic (no React/Leaflet): parsing, coverage, dedupe, clustering</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">routeProposals.ts</span>
+        <span class="ctx-sum">~620 LOC — client-side deterministic corridor extraction + coverage rules</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Wire parsing</span><span class="ol-sum">parseRouteProposal(s)</span></li><li class="changed"><span class="ol-label">Shape / highlight / coverage</span><span class="ol-sum">isRouteCovered; NEW expandSelectionToUndirected</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Point dedupe · anchor order</span><span class="ol-sum">dropPointsCoveredByRoutes · chooseAnchorOrder</span></li><li class="dim"><span class="ol-label">Deterministic clustering</span><span class="ol-sum">computeRouteProposals pipeline</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>expandSelectionToUndirected — joins direction twins (shared undirected node pair) into the selection set</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeProposals.ts b/client-react/src/components/GraphLayer/routeProposals.ts</span>
+<span class="d-meta">index 2a7e7b7..01ff698 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/routeProposals.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeProposals.ts</span>
+<span class="d-hunk">@@ -1,6 +1,11 @@</span>
+<span class="d-ctx"> <span class="s-com">// ==========================================================================</span></span>
+<span class="d-del">-<span class="s-com">// Route-based top proposals (client side)</span></span>
+<span class="d-add">+<span class="s-com">// Route-based top proposals (RBTPs) — client side</span></span>
+<span class="d-ctx"> <span class="s-com">// ==========================================================================</span></span>
+<span class="d-add">+<span class="s-com">// Terminology (docs/three-layer-model.md §3.1): an RBTP is a ROUTE-based top</span></span>
+<span class="d-add">+<span class="s-com">// proposal — a hot corridor through the vote graph, shown as a diamond pin at</span></span>
+<span class="d-add">+<span class="s-com">// its middle edge. Its point-based counterpart is the PBTP (one hot edge,</span></span>
+<span class="d-add">+<span class="s-com">// square pin) in topProposals.ts.</span></span>
+<span class="d-add">+<span class="s-com">//</span></span>
+<span class="d-ctx"> <span class="s-com">// Pure logic (no React/Leaflet) for the server-computed ROUTE proposals served</span></span>
+<span class="d-ctx"> <span class="s-com">// by /api/route-proposals. A route proposal is a high-vote corridor: a simple</span></span>
+<span class="d-ctx"> <span class="s-com">// path through the intersection graph, expressed in BLOCK units (edge groups),</span></span>
+<span class="d-hunk">@@ -118,6 +123,32 @@ export function isRouteCovered(blocks: number[][], selectedEdges: Iterable&lt;numbe</span>
+<span class="d-ctx">   <span class="s-kw">return</span> blocks.<span class="s-fn">every</span>((block) =&gt; block.<span class="s-fn">some</span>((e) =&gt; sel.<span class="s-fn">has</span>(e)));</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+<span class="s-com">/**</span></span>
+<span class="d-add">+<span class="s-com"> * Expand a selection&#x27;s edge set to its DIRECTION TWINS among `candidateEdges`.</span></span>
+<span class="d-add">+<span class="s-com"> * A two-way street stores each direction as its own edge, and a routed path</span></span>
+<span class="d-add">+<span class="s-com"> * often traverses the twin of the edge a proposal&#x27;s block recorded — a raw</span></span>
+<span class="d-add">+<span class="s-com"> * edge-id intersection then misses coverage the user plainly traced. Any</span></span>
+<span class="d-add">+<span class="s-com"> * candidate sharing an (undirected) node pair with a selected edge joins the</span></span>
+<span class="d-add">+<span class="s-com"> * set, so isRouteCovered sees the street, not the direction.</span></span>
+<span class="d-add">+<span class="s-com"> */</span></span>
+<span class="d-add">+<span class="s-kw">export</span> <span class="s-kw">function</span> <span class="s-fn">expandSelectionToUndirected</span>(</span>
+<span class="d-add">+  topo: { nEdges: number; ends: <span class="s-type">ArrayLike</span>&lt;number&gt; },</span>
+<span class="d-add">+  selected: <span class="s-type">Iterable</span>&lt;number&gt;,</span>
+<span class="d-add">+  candidateEdges: <span class="s-type">Iterable</span>&lt;number&gt;,</span>
+<span class="d-add">+): <span class="s-type">Set</span>&lt;number&gt; {</span>
+<span class="d-add">+  <span class="s-kw">const</span> sel = <span class="s-kw">new</span> <span class="s-fn">Set</span>(selected);</span>
+<span class="d-add">+  <span class="s-kw">const</span> key = (e: number) =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> u = topo.ends[<span class="s-num">2</span> * e], v = topo.ends[<span class="s-num">2</span> * e + <span class="s-num">1</span>];</span>
+<span class="d-add">+    <span class="s-kw">return</span> u &lt; v ? <span class="s-str">`${u}|${v}`</span> : <span class="s-str">`${v}|${u}`</span>;</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+  <span class="s-kw">const</span> pairs = <span class="s-kw">new</span> <span class="s-type">Set</span>&lt;string&gt;();</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">const</span> e <span class="s-kw">of</span> sel) <span class="s-kw">if</span> (e &lt; topo.nEdges) pairs.<span class="s-fn">add</span>(<span class="s-fn">key</span>(e));</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">const</span> e <span class="s-kw">of</span> candidateEdges) {</span>
+<span class="d-add">+    <span class="s-kw">if</span> (e &lt; topo.nEdges &amp;&amp; !sel.<span class="s-fn">has</span>(e) &amp;&amp; pairs.<span class="s-fn">has</span>(<span class="s-fn">key</span>(e))) sel.<span class="s-fn">add</span>(e);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  <span class="s-kw">return</span> sel;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> <span class="s-com">// --------------------------------------------------------------------------</span></span>
+<span class="d-ctx"> <span class="s-com">// De-dupe point proposals subsumed by a route.</span></span>
+<span class="d-ctx"> <span class="s-com">// --------------------------------------------------------------------------</span></span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/topProposals.ts</span>
+            <span class="stat"><span class="d-add">+5</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">pure PBTP selection logic (winners → dedupe → spacing → cap)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">topProposals.ts</span>
+        <span class="ctx-sum">~280 LOC — which edges get a square Top Proposal pin</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Header</span><span class="ol-sum">NEW PBTP/RBTP terminology note</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Selection pipeline</span><span class="ol-sum">computeVoteTypeWinners → … → applyTopProposalLimit</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>header — PBTP defined, RBTP cross-referenced (docs §3.1 Terminology)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/topProposals.ts b/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-meta">index a83daf4..61810a3 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-hunk">@@ -1,6 +1,10 @@</span>
+<span class="d-ctx"> <span class="s-com">// ==========================================================================</span></span>
+<span class="d-del">-<span class="s-com">// Top-proposal selection</span></span>
+<span class="d-add">+<span class="s-com">// Point-based top proposals (PBTPs) — selection</span></span>
+<span class="d-ctx"> <span class="s-com">// ==========================================================================</span></span>
+<span class="d-add">+<span class="s-com">// Terminology (docs/three-layer-model.md §3.1): a PBTP is a POINT-based top</span></span>
+<span class="d-add">+<span class="s-com">// proposal — one hot edge, shown as a square pin. Its route-based counterpart</span></span>
+<span class="d-add">+<span class="s-com">// is the RBTP (a hot corridor, diamond pin) in routeProposals.ts.</span></span>
+<span class="d-add">+<span class="s-com">//</span></span>
+<span class="d-ctx"> <span class="s-com">// Pure logic (no React/Leaflet) for choosing which segments get a &quot;Top</span></span>
+<span class="d-ctx"> <span class="s-com">// Proposal&quot; indicator. The path is four explicit steps:</span></span>
+<span class="d-ctx"> <span class="s-com">//</span></span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/components/MapView/MapView.tsx</span>
+            <span class="stat"><span class="d-add">+21</span> / <span class="d-del">-6</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/MapView</span>
+        <span class="ctx-sum">the map host: waypoint markers, tap routing, drag wiring, GraphLayer props</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapView.tsx</span>
+        <span class="ctx-sum">~750 LOC — owns start/end/mids state and every marker&#x27;s drag/tap/hover handlers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Marker drag wrappers</span><span class="ol-sum">dragStart/dragFinish; NEW hover-card clears</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Tap / indicator handlers</span><span class="ol-sum">restart-from-proposal, cluster exploder</span></li><li class="dim"><span class="ol-label">GraphLayer wiring</span><span class="ol-sum">waypointMatch, hoverProposalPoint, drops</span></li><li class="changed"><span class="ol-label">Ghost/start/end RouteMarkers</span><span class="ol-sum">hidden-when-matched kites; NEW unconditional un-hover clear</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>handleMarkerDragStart — also clears the matched-waypoint hover card</li><li>handleMarkerDragFinish — clears it again (drop fires mouseover with the PRE-drag match)</li><li>mid/start/end onHoverChange — un-hover clears UNCONDITIONALLY (guarded clear stranded cards)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapView/MapView.tsx b/client-react/src/components/MapView/MapView.tsx</span>
+<span class="d-meta">index 5d80568..b1db3f8 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapView/MapView.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapView/MapView.tsx</span>
+<span class="d-hunk">@@ -340,16 +340,23 @@ export function MapView() {</span>
+<span class="d-ctx">     <span class="s-fn">setMarkerHoverCount</span>((c) =&gt; <span class="s-type">Math</span>.<span class="s-fn">max</span>(<span class="s-num">0</span>, c + (hovering ? <span class="s-num">1</span> : -<span class="s-num">1</span>)));</span>
+<span class="d-ctx">   }, []);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  <span class="s-com">// Wrapper for marker drag start — suppresses ghost pin and next click</span></span>
+<span class="d-add">+  <span class="s-com">// Wrapper for marker drag start — suppresses ghost pin and next click. Also</span></span>
+<span class="d-add">+  <span class="s-com">// drops any matched-waypoint hover card: the kite is leaving its proposal, so</span></span>
+<span class="d-add">+  <span class="s-com">// the card must not linger at the old spot while (and after) it moves.</span></span>
+<span class="d-ctx">   <span class="s-kw">const</span> handleMarkerDragStart = <span class="s-fn">useCallback</span>(() =&gt; {</span>
+<span class="d-ctx">     <span class="s-fn">setIsDraggingMarker</span>(<span class="s-lit">true</span>);</span>
+<span class="d-ctx">     <span class="s-fn">setSuppressClick</span>();</span>
+<span class="d-add">+    <span class="s-fn">setHoverProposalPoint</span>(<span class="s-lit">null</span>);</span>
+<span class="d-ctx">   }, [setSuppressClick]);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  <span class="s-com">// Wrapper for marker drag finish — re-enables ghost pin</span></span>
+<span class="d-add">+  <span class="s-com">// Wrapper for marker drag finish — re-enables ghost pin. Clears the matched-</span></span>
+<span class="d-add">+  <span class="s-com">// waypoint hover card too: the drop fires a mouseover with the PRE-drag match</span></span>
+<span class="d-add">+  <span class="s-com">// still in state, which otherwise pins the old proposal&#x27;s card to the kite&#x27;s</span></span>
+<span class="d-add">+  <span class="s-com">// new spot until the cursor happens to leave it.</span></span>
+<span class="d-ctx">   <span class="s-kw">const</span> handleMarkerDragFinish = <span class="s-fn">useCallback</span>(() =&gt; {</span>
+<span class="d-ctx">     <span class="s-fn">setIsDraggingMarker</span>(<span class="s-lit">false</span>);</span>
+<span class="d-ctx">     <span class="s-fn">clearDragPoint</span>();</span>
+<span class="d-add">+    <span class="s-fn">setHoverProposalPoint</span>(<span class="s-lit">null</span>);</span>
+<span class="d-ctx">   }, [clearDragPoint]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-com">// Indicator click follows the same tool logic as a normal map click.</span></span>
+<span class="d-hunk">@@ -627,8 +634,12 @@ export function MapView() {</span>
+<span class="d-ctx">           onOutOfBounds={handleOutOfBounds}</span>
+<span class="d-ctx">           onHoverChange={(h) =&gt; {</span>
+<span class="d-ctx">             <span class="s-fn">handleMarkerHover</span>(h);</span>
+<span class="d-del">-            <span class="s-com">// On a proposal, surface that proposal&#x27;s hover card while the kite is hovered.</span></span>
+<span class="d-del">-            <span class="s-kw">if</span> (waypointMatch.mids[index] != <span class="s-lit">null</span>) <span class="s-fn">setHoverProposalPoint</span>(h ? wp : <span class="s-lit">null</span>);</span>
+<span class="d-add">+            <span class="s-com">// On a proposal, surface that proposal&#x27;s hover card while the kite is</span></span>
+<span class="d-add">+            <span class="s-com">// hovered. Un-hover clears UNCONDITIONALLY: the match may have gone</span></span>
+<span class="d-add">+            <span class="s-com">// null since the hover began (a drag moved the kite off its</span></span>
+<span class="d-add">+            <span class="s-com">// proposal), and a guarded clear would strand the card forever.</span></span>
+<span class="d-add">+            <span class="s-kw">if</span> (!h) <span class="s-fn">setHoverProposalPoint</span>(<span class="s-lit">null</span>);</span>
+<span class="d-add">+            <span class="s-kw">else</span> <span class="s-kw">if</span> (waypointMatch.mids[index] != <span class="s-lit">null</span>) <span class="s-fn">setHoverProposalPoint</span>(wp);</span>
+<span class="d-ctx">           }}</span>
+<span class="d-ctx">         /&gt;</span>
+<span class="d-ctx">       ))}</span>
+<span class="d-hunk">@@ -672,7 +683,9 @@ export function MapView() {</span>
+<span class="d-ctx">           onOutOfBounds={handleOutOfBounds}</span>
+<span class="d-ctx">           onHoverChange={(h) =&gt; {</span>
+<span class="d-ctx">             <span class="s-fn">handleMarkerHover</span>(h);</span>
+<span class="d-del">-            <span class="s-kw">if</span> (waypointMatch.start != <span class="s-lit">null</span> &amp;&amp; start.coords) <span class="s-fn">setHoverProposalPoint</span>(h ? start.coords : <span class="s-lit">null</span>);</span>
+<span class="d-add">+            <span class="s-com">// Un-hover clears unconditionally — see the mid marker&#x27;s note.</span></span>
+<span class="d-add">+            <span class="s-kw">if</span> (!h) <span class="s-fn">setHoverProposalPoint</span>(<span class="s-lit">null</span>);</span>
+<span class="d-add">+            <span class="s-kw">else</span> <span class="s-kw">if</span> (waypointMatch.start != <span class="s-lit">null</span> &amp;&amp; start.coords) <span class="s-fn">setHoverProposalPoint</span>(start.coords);</span>
+<span class="d-ctx">           }}</span>
+<span class="d-ctx">         /&gt;</span>
+<span class="d-ctx">       )}</span>
+<span class="d-hunk">@@ -695,7 +708,9 @@ export function MapView() {</span>
+<span class="d-ctx">           onOutOfBounds={handleOutOfBounds}</span>
+<span class="d-ctx">           onHoverChange={(h) =&gt; {</span>
+<span class="d-ctx">             <span class="s-fn">handleMarkerHover</span>(h);</span>
+<span class="d-del">-            <span class="s-kw">if</span> (waypointMatch.end != <span class="s-lit">null</span> &amp;&amp; end.coords) <span class="s-fn">setHoverProposalPoint</span>(h ? end.coords : <span class="s-lit">null</span>);</span>
+<span class="d-add">+            <span class="s-com">// Un-hover clears unconditionally — see the mid marker&#x27;s note.</span></span>
+<span class="d-add">+            <span class="s-kw">if</span> (!h) <span class="s-fn">setHoverProposalPoint</span>(<span class="s-lit">null</span>);</span>
+<span class="d-add">+            <span class="s-kw">else</span> <span class="s-kw">if</span> (waypointMatch.end != <span class="s-lit">null</span> &amp;&amp; end.coords) <span class="s-fn">setHoverProposalPoint</span>(end.coords);</span>
+<span class="d-ctx">           }}</span>
+<span class="d-ctx">         /&gt;</span>
+<span class="d-ctx">       )}</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/styles/globals.css</span>
+            <span class="stat"><span class="d-add">+9</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · styles</span>
+        <span class="ctx-sum">theme-invariant global styles: layout, z tiers, cards, indicators</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">globals.css</span>
+        <span class="ctx-sum">~2k LOC — includes the proposal-card z-index tiers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Proposal card tiers</span><span class="ol-sum">1100 pinned · 1200 hover · NEW 1300 is-elevated</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>.graph-indicator-modal.is-elevated — z-index 1300, above the transient hover card</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
+<span class="d-meta">index 423b556..1c68ac0 100644</span>
+<span class="d-meta">--- a/client-react/src/styles/globals.css</span>
+<span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
+<span class="d-hunk">@@ -1747,6 +1747,15 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx">   <span class="s-prop">animation</span>: indicator-modal-in <span class="s-num">120ms</span> ease-out;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+<span class="s-com">/* The route-summary card sits above BOTH the pinned modal (1100) and the</span></span>
+<span class="d-add">+   transient hover card (<span class="s-num">1200</span>): it anchors mid-route, exactly where the cursor</span>
+<span class="d-add">+   that just selected the route hovers, so at <span class="s-num">1100</span> the hover card buried it on</span>
+<span class="d-add">+   every selection. Portals mount at different times, so DOM order can<span class="s-str">&#x27;t</span></span>
+<span class="d-add">+   order them. */</span>
+<span class="d-add">+.graph-indicator-modal.is-elevated {</span>
+<span class="d-add">+  <span class="s-prop">z-index</span>: <span class="s-num">1300</span>;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> <span class="s-dec">@keyframes</span> indicator-modal-in {</span>
+<span class="d-ctx">   from {</span>
+<span class="d-ctx">     <span class="s-prop">opacity</span>: <span class="s-num">0</span>;</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">docs/three-layer-model.md</span>
+            <span class="stat"><span class="d-add">+33</span> / <span class="d-del">-7</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">docs</span>
+        <span class="ctx-sum">the source-of-truth spec for the graph/blocks/route-proposals separation</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">three-layer-model.md</span>
+        <span class="ctx-sum">layer definitions + block-scoped vote semantics</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Layer diagram</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">Terminology callout</span><span class="ol-sum">NEW — PBTP / RBTP definitions + where each lives</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§3.3 Selection behavior</span><span class="ol-sum">REWRITTEN — coverage (twin-expanded) OR explicit tap; OSRM-leg reality</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">§4 Vote semantics</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Terminology — PBTP (square, one hot edge) / RBTP (diamond, hot corridor), shared icon system</li><li>§3.3 — selected = coverage OR tapped-with-anchors-still-waypoints; verbatim corridor routing = open follow-up</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/three-layer-model.md b/docs/three-layer-model.md</span>
+<span class="d-meta">index ff76299..7e49fec 100644</span>
+<span class="d-meta">--- a/docs/three-layer-model.md</span>
+<span class="d-meta">+++ b/docs/three-layer-model.md</span>
+<span class="d-hunk">@@ -24,6 +24,22 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored</span>
+<span class="d-ctx">          (source of truth) per (map, edge, vote_type, device) → direction ±1</span>
+<span class="d-ctx"> ```</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+&gt; **Terminology — PBTP / RBTP.** The map surfaces two kinds of *top proposal*,</span>
+<span class="d-add">+&gt; and the code, changelogs, and discussions use these abbreviations throughout:</span>
+<span class="d-add">+&gt;</span>
+<span class="d-add">+&gt; - **PBTP** — **point-based top proposal**: one hot edge, rendered as a</span>
+<span class="d-add">+&gt;   **square** pin at the edge midpoint. Selected by</span>
+<span class="d-add">+&gt;   `topProposals.selectTopProposals` (client), drawn by GraphLayer&#x27;s</span>
+<span class="d-add">+&gt;   `indicatorMarkers`.</span>
+<span class="d-add">+&gt; - **RBTP** — **route-based top proposal**: a hot **corridor** (Layer 3 below),</span>
+<span class="d-add">+&gt;   rendered as a **diamond** pin at its middle path edge. Computed by</span>
+<span class="d-add">+&gt;   `routeProposals.computeRouteProposals` (client), drawn by GraphLayer&#x27;s</span>
+<span class="d-add">+&gt;   `routeIndicatorMarkers`.</span>
+<span class="d-add">+&gt;</span>
+<span class="d-add">+&gt; Same-type PBTPs subsumed by an RBTP&#x27;s blocks are dropped</span>
+<span class="d-add">+&gt; (`dropPointsCoveredByRoutes`); both kinds share one icon system</span>
+<span class="d-add">+&gt; (`makeVoteTypeIcon`: square vs `diamond`, same tint/heat/selected states).</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> ---</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ## 1. Layer 1 — the edge/node graph</span>
+<span class="d-hunk">@@ -168,13 +184,23 @@ proposal → blocks is a well-defined projection.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ### 3.3 Selection behavior</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-- A route proposal renders **selected** when the current selection covers **all</span>
+<span class="d-del">-  of its blocks** (≥ 1 selected edge in every block) — exactly like point</span>
+<span class="d-del">-  proposals render selected when their block is covered. `isRouteCovered` is the</span>
+<span class="d-del">-  shared predicate.</span>
+<span class="d-del">-- Tapping a route proposal inserts its two anchors as waypoints</span>
+<span class="d-del">-  (`chooseAnchorOrder` picks the faster order) so the route traverses the</span>
+<span class="d-del">-  corridor; the A→B leg uses the proposal&#x27;s stored path verbatim.</span>
+<span class="d-add">+- An RBTP renders **selected** when either:</span>
+<span class="d-add">+  1. **Coverage** — the current selection covers **all of its blocks** (≥ 1</span>
+<span class="d-add">+     selected edge in every block), exactly like PBTPs render selected when</span>
+<span class="d-add">+     their block is covered. `isRouteCovered` is the shared predicate, with the</span>
+<span class="d-add">+     selection **expanded to direction twins** first</span>
+<span class="d-add">+     (`expandSelectionToUndirected`) — a routed path often traverses the twin</span>
+<span class="d-add">+     of the edge a corridor&#x27;s block recorded.</span>
+<span class="d-add">+  2. **Explicit tap** — it is the RBTP the user tapped (GraphLayer&#x27;s</span>
+<span class="d-add">+     `selectedRbtpId`) and **both of its anchors are still waypoints** of the</span>
+<span class="d-add">+     current route. Editing an anchor away or clearing the route deselects it.</span>
+<span class="d-add">+- Tapping an RBTP inserts its two anchors as waypoints (`chooseAnchorOrder`</span>
+<span class="d-add">+  picks the faster order) so the route runs anchor-to-anchor. The A→B leg is</span>
+<span class="d-add">+  routed by **OSRM**, which need not re-trace the corridor&#x27;s exact path — that</span>
+<span class="d-add">+  is *why* rule 2 exists: coverage alone almost never fires for a tapped RBTP,</span>
+<span class="d-add">+  especially on maps without block artifacts (singleton blocks). Routing the</span>
+<span class="d-add">+  leg through the proposal&#x27;s stored `edgeIds` verbatim remains an open</span>
+<span class="d-add">+  follow-up.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ## 4. Vote semantics — block-scoped clear-then-cast</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes-routeprop-ui.diff</code> by <code>changelog/build_routeprop_ui_report.py</code>.
+    Regenerate after further edits with
+    <code>git diff 12475e6^ -- &lt;files&gt; &gt; changelog/changes-routeprop-ui.diff &amp;&amp; python changelog/build_routeprop_ui_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
