@@ -30,10 +30,12 @@ export interface VoteTypeIconOptions {
    *  (the badge is pointer-events:auto; the rest of the icon is not). */
   removeEdge?: number | null;
   /** "Heat" of this proposal, 0–1, normalized against the hottest visible
-   *  proposal's vote count. Rendered as INK, not glow (CSS off the `--heat` /
-   *  `--heat-color` custom properties below): the pin's paper fill warms toward
-   *  the ramp color and its outline burns hotter and slightly thicker — crisp
-   *  at every heat. 0 (or omitted) renders the plain pin. */
+   *  proposal's vote count. Rendered as a SOLID GLOW RING (CSS off the
+   *  `--heat` / `--heat-color` custom properties below): a hard, fully-opaque
+   *  band of the ramp color hugging the outside of the pin, widening with
+   *  heat, plus a subtle warm stain on the paper fill. Never the outline
+   *  itself — that channel belongs to hover/selected. 0 (or omitted) renders
+   *  the plain pin. */
   heat?: number;
   /** The tint color for `heat`, sampled from the active map's heat ramp at the
    *  same intensity the heat field uses — so a pin matches the hue the heat
@@ -111,9 +113,10 @@ export function makeVoteTypeIcon(
     ? `<span class="vote-type-indicator-x" data-x-edge="${opts.removeEdge}" role="button" aria-label="Remove from route">×</span>`
     : "";
   // Heat: hand the intensity + color to CSS as custom properties on the
-  // scaled .vote-type-indicator. CSS color-mixes the border and a drop-shadow
-  // glow by `--heat`, so a hotter proposal both glows brighter and burns its
-  // outline toward the ramp color. Omitted entirely at heat 0 → the plain pin.
+  // scaled .vote-type-indicator. CSS strokes the -glow path (painted first,
+  // below the fill) into a solid ring of the ramp color that widens with
+  // `--heat`. Omitted entirely at heat 0 → the plain pin, and no glow paints
+  // (`--heat-color` falls back to transparent).
   const heat = opts.heat && opts.heatColor ? opts.heat : 0;
   const heatStyle = heat > 0
     ? ` style="--heat:${heat.toFixed(3)};--heat-color:${opts.heatColor}"`
@@ -121,6 +124,7 @@ export function makeVoteTypeIcon(
   const html =
     `<div class="${cls.join(" ")}"${heatStyle}>` +
       `<svg class="vote-type-indicator-pin" viewBox="0 0 ${SVG_W} ${SVG_H}" width="${SVG_W}" height="${SVG_H}">` +
+        `<path class="vote-type-indicator-glow" d="${shape}" />` +
         `<path class="vote-type-indicator-fill" d="${shape}" />` +
         `<path class="vote-type-indicator-outer" d="${shape}" />` +
         `<path class="vote-type-indicator-inner" d="${innerShape}" />` +
