@@ -122,7 +122,7 @@ export interface GraphData {
   edge_vote_types?: [number, number, number][][];
   node_vote_types?: [number, number, number][][];
   // Block layer (docs/three-layer-model.md §2.4) — deduped per-block counts:
-  // block_votes[b] = net (up − down); block_vote_types[b] = [legendIdx, up,
+  // block_votes[b] = total activity (up + down); block_vote_types[b] = [legendIdx, up,
   // down][] indexing block_vote_type_legend (its own legend, not vote_type_legend).
   block_votes?: number[];
   block_vote_types?: [number, number, number][][];

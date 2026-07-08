@@ -118,8 +118,9 @@ def build_block_arrays(redis_client, slug: str, mode: int, n_blocks: int) -> dic
 
     Returns the same shape as vote_store.build_arrays' edge fields, keyed by
     block_id:
-      block_votes[b]      = up − down  (net deduped, for the heat ramp)
-      block_vote_types[b] = [[legendIdx, up, down], …]  sorted by net desc
+      block_votes[b]      = up + down  (total deduped activity, for the heat
+                            ramp — downvotes are engagement, so they read hot)
+      block_vote_types[b] = [[legendIdx, up, down], …]  sorted by total desc
     """
     from vote_store import resolve_vote_type
     raw = redis_client.hgetall(bagg_key(slug, mode))
@@ -149,14 +150,14 @@ def build_block_arrays(redis_client, slug: str, mode: int, n_blocks: int) -> dic
 
     def encode(vt_map):
         enc = []
-        for vt_id, (u, dn) in sorted(vt_map.items(), key=lambda x: -(x[1][0] - x[1][1])):
+        for vt_id, (u, dn) in sorted(vt_map.items(), key=lambda x: -(x[1][0] + x[1][1])):
             if vt_id not in li:
                 li[vt_id] = len(legend)
                 legend.append(resolve_vote_type(vt_id))
             enc.append([li[vt_id], u, dn])
         return enc
 
-    block_votes = [up[i] - down[i] for i in range(n_blocks)]
+    block_votes = [up[i] + down[i] for i in range(n_blocks)]
     block_vote_types: list[list] = [[] for _ in range(n_blocks)]
     for b, vt_map in bvt.items():
         block_vote_types[b] = encode(vt_map)

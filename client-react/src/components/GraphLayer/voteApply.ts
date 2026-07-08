@@ -200,14 +200,16 @@ export function applyBlockCounts(
 
     const pairs = blockVoteTypes[bid] || [];
     const existing = pairs.find(([l]) => l === li);
-    const oldNet = existing ? existing[1] - existing[2] : 0;
+    // Heat is TOTAL deduped activity (up + down): downvotes are engagement,
+    // so they read hot too — mirrors server block_votes.build_block_arrays.
+    const oldTotal = existing ? existing[1] + existing[2] : 0;
     if (existing && existing[1] === up && existing[2] === down) continue;
 
     let next = pairs.filter(([l]) => l !== li);
     if (up !== 0 || down !== 0) next.push([li, up, down]);
-    next.sort((a, b) => b[1] - b[2] - (a[1] - a[2]));
+    next.sort((a, b) => b[1] + b[2] - (a[1] + a[2]));
     blockVoteTypes[bid] = next;
-    blockVotes[bid] = (blockVotes[bid] || 0) + (up - down - oldNet);
+    blockVotes[bid] = (blockVotes[bid] || 0) + (up + down - oldTotal);
     changed = true;
   }
   return changed;

@@ -19,7 +19,8 @@ EDGE_BLOCK = [10, 10, 20, -1]
 N_BLOCKS = 30
 
 
-def net(redis_client, block_id):
+def total(redis_client, block_id):
+    """block_votes is TOTAL deduped activity (up + down) — the heat value."""
     arr = bv.build_block_arrays(redis_client, SLUG, MODE, N_BLOCKS)
     return arr["block_votes"][block_id]
 
@@ -28,7 +29,7 @@ def test_same_user_multiple_edges_counts_once(redis_client):
     # One device votes UP on both edges of block 10.
     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d1")
     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d1")
-    assert net(redis_client, 10) == 1  # deduped, not 2
+    assert total(redis_client, 10) == 1  # deduped, not 2
     # multiplicity is tracked even though the deduped count is 1
     assert redis_client.hget(bv.bd_key(SLUG, MODE, 10, VT, 0), "d1") == "2"
     assert redis_client.hlen(bv.bd_key(SLUG, MODE, 10, VT, 0)) == 1
@@ -37,29 +38,29 @@ def test_same_user_multiple_edges_counts_once(redis_client):
 def test_distinct_users_accumulate(redis_client):
     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d1")
     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d2")
-    assert net(redis_client, 10) == 2
+    assert total(redis_client, 10) == 2
 
 
 def test_removal_is_exact(redis_client):
     # d1 on both edges of block 10 → count 1
     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d1")
     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d1")
-    assert net(redis_client, 10) == 1
+    assert total(redis_client, 10) == 1
     # remove one edge → still present (multiplicity 2→1)
     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, 0, UP, "d1")
-    assert net(redis_client, 10) == 1
+    assert total(redis_client, 10) == 1
     # remove the other edge → gone
     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, 0, UP, "d1")
-    assert net(redis_client, 10) == 0
+    assert total(redis_client, 10) == 0
     # the device hash field is cleaned up
     assert redis_client.hget(bv.bd_key(SLUG, MODE, 10, VT, 0), "d1") is None
 
 
 def test_reversal_moves_device(redis_client):
     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d1")
-    assert net(redis_client, 10) == 1
+    assert total(redis_client, 10) == 1
     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, DOWN, UP, "d1")
-    assert net(redis_client, 10) == -1  # up 0, down 1
+    assert total(redis_client, 10) == 1  # up 0, down 1 → total 1 (downvotes read hot)
     arr = bv.build_block_arrays(redis_client, SLUG, MODE, N_BLOCKS)
     # vote-type breakdown reflects the down vote: [legendIdx, up, down]
     assert arr["block_vote_types"][10] == [[0, 0, 1]]
@@ -76,8 +77,8 @@ def test_apply_deltas_dedups_across_block_edges(redis_client):
     # A route votes both edges of block 10 + the single edge of block 20.
     prev = {0: 0, 1: 0, 2: 0}
     bv.apply_block_deltas(redis_client, SLUG, MODE, EDGE_BLOCK, [0, 1, 2], VT, UP, prev, "d1")
-    assert net(redis_client, 10) == 1   # two edges, one user → 1
-    assert net(redis_client, 20) == 1
+    assert total(redis_client, 10) == 1   # two edges, one user → 1
+    assert total(redis_client, 20) == 1
 
 
 def test_rebuild_matches_incremental(redis_client):
@@ -101,8 +102,8 @@ def test_rebuild_matches_incremental(redis_client):
     inc = {k: v for k, v in incremental.items() if int(v) != 0}
     reb = {k: v for k, v in rebuilt.items() if int(v) != 0}
     assert inc == reb
-    assert net(redis_client, 10) == 1
-    assert net(redis_client, 20) == -1
+    assert total(redis_client, 10) == 1
+    assert total(redis_client, 20) == 1  # one DOWN vote → total 1
 
 
 def test_rebuild_warns_on_both_directions_in_a_block(redis_client, caplog):

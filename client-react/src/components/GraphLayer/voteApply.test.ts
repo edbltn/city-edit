@@ -145,12 +145,12 @@ describe("applyBlockCounts (SET, idempotent, block twin of vtCounts)", () => {
     };
   }
 
-  it("SETs deduped counts, updates net, and registers the label", () => {
+  it("SETs deduped counts, updates total activity, and registers the label", () => {
     const d = makeBlockData();
     expect(applyBlockCounts(d, "X", { "1": [3, 1] })).toBe(true);
     expect(d.block_vote_type_legend).toEqual(["X"]);
     expect(d.block_vote_types![1]).toEqual([[0, 3, 1]]);
-    expect(d.block_votes![1]).toBe(2);
+    expect(d.block_votes![1]).toBe(4); // heat = up + down (downvotes read hot)
   });
 
   it("is idempotent and reports no change on re-apply", () => {
@@ -160,7 +160,7 @@ describe("applyBlockCounts (SET, idempotent, block twin of vtCounts)", () => {
     expect(d.block_votes![1]).toBe(2);
   });
 
-  it("drops a type that reaches 0/0 and adjusts the net down", () => {
+  it("drops a type that reaches 0/0 and adjusts the total down", () => {
     const d = makeBlockData();
     applyBlockCounts(d, "X", { "0": [1, 0] });
     applyBlockCounts(d, "X", { "0": [0, 0] });

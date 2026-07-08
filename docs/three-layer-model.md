@@ -133,7 +133,7 @@ so each user counts once:
 - Served from the Redis structures in `server/block_votes.py`
   (`bd:<slug>:<mode>:<block>:<vt>:<dir>` device-multiplicity hashes +
   `bagg:<slug>:<mode>` aggregate; rebuilt from Postgres on cold start / resnap)
-  as `block_votes[]` (net = up − down) and `block_vote_types[]`
+  as `block_votes[]` (total activity = up + down — downvotes read hot too) and `block_vote_types[]`
   (`[legendIdx, up, down]` per block) on `/api/graph-votes`.
 - The **heat display is the block fill** (MapLibre feature-state on the blocks
   PMTiles); the per-edge canvas heat is the fallback for maps without blocks.
