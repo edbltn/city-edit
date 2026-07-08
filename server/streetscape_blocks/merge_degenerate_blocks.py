@@ -65,6 +65,24 @@ CITY = os.environ.get("CITY", "nyc")
 NETWORK = os.environ.get("NETWORK", "streets")
 STUB_MAX_M = float(os.environ.get("STUB_MAX_M", "40"))
 MAX_ROUNDS = int(os.environ.get("MERGE_MAX_ROUNDS", "25"))
+# Edges-are-the-source-of-truth guard: a polygon whose bbox diagonal exceeds its
+# member edges' bbox diagonal by more than this is a PHANTOM (its shape came
+# from a drive centerline with no votable edges — e.g. a motorway ROW whose only
+# members are a footway overpass); its geometry is regenerated as the buffered
+# union of exactly its member edges. Features with ZERO member edges are dropped
+# outright (nothing can ever light or select them).
+TRIM_SLACK_M = float(os.environ.get("TRIM_SLACK_M", "60"))
+# Tube radius per member-edge road class when regenerating a phantom's geometry
+# (same half-widths as build_blocks_generic.py, small pad so the band reads).
+HALF_WIDTH = {
+    "motorway": 18.0, "motorway_link": 12.0, "trunk": 16.0, "trunk_link": 11.0,
+    "primary": 14.0, "primary_link": 10.0, "secondary": 11.0, "secondary_link": 9.0,
+    "tertiary": 9.0, "tertiary_link": 8.0, "residential": 8.0, "living_street": 7.0,
+    "unclassified": 8.0, "service": 6.0, "pedestrian": 6.0, "footway": 4.0,
+    "path": 4.0, "cycleway": 4.0,
+}
+DEFAULT_HALF_WIDTH = 8.0
+TUBE_PAD_M = 2.0
 
 
 def _sha256_file(path: str) -> str:
@@ -224,24 +242,63 @@ def main():
     print(f"[merge] fixpoint: {n_blocks} → {len(uniq_roots)} blocks "
           f"({v1_total} stub merges, {v2_total} junction dissolves)", flush=True)
 
+    # ── Final edge membership per merged group (root-keyed) ─────────────────
+    edge_root = np.where(ebid >= 0, roots[np.maximum(ebid, 0)], -1)
+    e_order = np.argsort(edge_root, kind="stable")
+    e_sorted = edge_root[e_order]
+    first_valid = np.searchsorted(e_sorted, 0, side="left")
+    r_uniq, r_starts = np.unique(e_sorted[first_valid:], return_index=True)
+    r_starts = np.append(r_starts + first_valid, len(e_sorted))
+    edges_of_root: dict[int, np.ndarray] = {
+        int(r_uniq[k]): e_order[r_starts[k]:r_starts[k + 1]]
+        for k in range(len(r_uniq))
+    }
+    rc_of_edge = np.array([str(e[3]) if len(e) > 3 else "" for e in g.edges])
+    ex = (nodes[:, 1] - w_) * mlon
+    ey = (nodes[:, 0] - s_) * mlat
+
+    def member_tube(eids: np.ndarray):
+        """Union of the member edges' class-width buffers (metres frame) —
+        the edges-as-source-of-truth geometry for a phantom block."""
+        lines = np.empty(len(eids), dtype=object)
+        radii = np.empty(len(eids))
+        for k, eid in enumerate(eids):
+            u, v = ends[eid]
+            lines[k] = shapely.LineString([(ex[u], ey[u]), (ex[v], ey[v])])
+            radii[k] = HALF_WIDTH.get(rc_of_edge[eid], DEFAULT_HALF_WIDTH) + TUBE_PAD_M
+        return union_all(shapely.buffer(lines, radii, quad_segs=4))
+
+    to_ll = lambda a: np.column_stack((a[:, 0] / mlon + w_, a[:, 1] / mlat + s_))
+
     # ── Rebuild features: union member geometries per merged group ──────────
-    new_id_of_root = {int(r): i for i, r in enumerate(uniq_roots)}
     members_of_root: dict[int, list[int]] = {}
     for bid in range(n_blocks):
         members_of_root.setdefault(int(roots[bid]), []).append(bid)
 
-    out_feats = []
+    out_feats = []          # (root, props, geometry) — ids assigned after drops
     merged_geoms = 0
+    dropped_empty = 0
+    regenerated = 0
     for r in uniq_roots:
         members = members_of_root[int(r)]
         fs = [feat_by_id[m] for m in members if m in feat_by_id]
         if not fs:
             continue
+
+        eids = edges_of_root.get(int(r))
+        # Zero member edges → nothing can ever light, hover or select this
+        # feature; drop it (phantom drive-graph geometry, punched node cells
+        # with no captured edges, fully-swallowed slivers).
+        if eids is None or len(eids) == 0:
+            dropped_empty += 1
+            continue
+
         if len(fs) == 1:
             geom = fs[0]["geometry"]
         else:
             geom = mapping(union_all([shp_shape(f["geometry"]) for f in fs]))
             merged_geoms += 1
+
         # Representative properties: node-kind keeps junction identity; a
         # corridor takes the largest street member's naming.
         r_kind_node = bool(kind_node[find(int(r))])
@@ -252,34 +309,67 @@ def main():
             rep = max(fs, key=lambda f: (f["properties"].get("road_class") != "node",
                                          f["properties"].get("area_m2") or 0))
         props = dict(rep["properties"])
-        props["block_id"] = new_id_of_root[int(r)]
         props["n_merged"] = len(fs)
         props["area_m2"] = round(sum(f["properties"].get("area_m2") or 0 for f in fs), 1)
-        out_feats.append({"type": "Feature", "properties": props, "geometry": geom})
+
+        # Phantom guard (non-node features): polygon must not sprawl far past
+        # its member edges — a drive-only corridor (motorway ROW) can carry a
+        # huge polygon whose only members are an overpass. Regenerate such
+        # geometry from the edges themselves.
+        if not r_kind_node:
+            u_ids = ends[eids].ravel()
+            e_diag = math.hypot(ex[u_ids].max() - ex[u_ids].min(),
+                                ey[u_ids].max() - ey[u_ids].min())
+            gsh = shp_shape(geom)
+            bx = gsh.bounds
+            p_diag = math.hypot((bx[2] - bx[0]) * mlon, (bx[3] - bx[1]) * mlat)
+            if p_diag > e_diag + TRIM_SLACK_M:
+                tube = member_tube(eids)
+                geom = mapping(shapely.transform(tube, to_ll))
+                props["area_m2"] = round(tube.area, 1)
+                props["regen"] = "edges"
+                regenerated += 1
+
+        out_feats.append((int(r), props, geom))
+
+    print(f"[merge] edges-as-truth pass: {dropped_empty} zero-member features "
+          f"dropped, {regenerated} phantom geometries regenerated from edges",
+          flush=True)
+
+    # ── Dense renumber over the survivors, then write ────────────────────────
+    new_id_of_root = {r: i for i, (r, _, _) in enumerate(out_feats)}
+    feats_json = []
+    for r, props, geom in out_feats:
+        props["block_id"] = new_id_of_root[r]
+        feats_json.append({"type": "Feature", "properties": props, "geometry": geom})
 
     dst_path = os.path.join(blocks_dir, f"blocks_final_{CITY}.geojson")
     tmp = f"{dst_path}.tmp{os.getpid()}"
     with open(tmp, "w") as fh:
-        json.dump({"type": "FeatureCollection", "features": out_feats}, fh)
+        json.dump({"type": "FeatureCollection", "features": feats_json}, fh)
     os.replace(tmp, dst_path)
     print(f"[merge] wrote {os.path.basename(dst_path)} "
-          f"({len(out_feats)} features, {merged_geoms} unions) "
+          f"({len(feats_json)} features, {merged_geoms} unions) "
           f"({time.time()-t0:.0f}s)", flush=True)
 
     # ── Remap the bake to final ids ──────────────────────────────────────────
     remap = np.full(n_blocks, -1, dtype=np.int32)
-    remap[uniq_roots] = [new_id_of_root[int(r)] for r in uniq_roots]
-    new_ebid = np.where(ebid >= 0, remap[roots[np.maximum(ebid, 0)]], -1).astype(np.int32)
+    for r, i in new_id_of_root.items():
+        remap[r] = i
+    new_ebid = np.where(edge_root >= 0, remap[np.maximum(edge_root, 0)], -1).astype(np.int32)
     np.save(npy_path, new_ebid)
 
     meta.update({
-        "n_blocks": len(out_feats),
+        "n_blocks": len(feats_json),
         "blocks_sha256": _sha256_file(dst_path),
         "blocks_file": os.path.basename(dst_path),
         "merged_from_blocks": int(n_blocks),
         "merge_stubs": int(v1_total),
         "merge_junction_dissolves": int(v2_total),
         "stub_max_m": STUB_MAX_M,
+        "dropped_zero_member": int(dropped_empty),
+        "regenerated_from_edges": int(regenerated),
+        "trim_slack_m": TRIM_SLACK_M,
     })
     json.dump(meta, open(meta_path, "w"), indent=2)
     print(f"[merge] remapped {os.path.basename(npy_path)} + meta "

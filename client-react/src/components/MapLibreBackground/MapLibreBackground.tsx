@@ -27,7 +27,7 @@ const LEAFLET_TO_MAPLIBRE_ZOOM = 1;
 // Block-vote payload broadcast by GraphLayer (which owns the /api/graph-votes
 // fetch). MapLibreBackground colors the block fills from it via feature-state.
 export interface BlockVotesDetail {
-  blockVotes: number[]; // net deduped votes per block_id
+  blockVotes: number[]; // total deduped votes (up + down) per block_id
   max: number;          // normalization ceiling (floored so quiet maps don't saturate)
 }
 export const BLOCK_VOTES_EVENT = "city-edit:block-votes";
@@ -39,6 +39,21 @@ export interface BlockSelectDetail {
   blockIds: number[];
 }
 export const BLOCK_SELECT_EVENT = "city-edit:block-select";
+
+// ── Block hit-test bridge ───────────────────────────────────────────────────
+// GraphLayer's hover/selection resolver constrains its nearest-edge/node search
+// to the block whose polygon is under the cursor (the block defines the
+// eligible member set; no block → unrestricted). Only this component owns the
+// MapLibre instance, so it registers the point→block resolver here;
+// module-scoped so the Leaflet-side GraphLayer can call it synchronously on
+// every mousemove without a React bridge.
+let blockAtResolver: ((lat: number, lng: number) => number | null) | null = null;
+
+/** Block id whose polygon contains the point, or null (no block there, or the
+ *  MapLibre style isn't ready — callers treat null as "unrestricted"). */
+export function blockIdAtLatLng(lat: number, lng: number): number | null {
+  return blockAtResolver ? blockAtResolver(lat, lng) : null;
+}
 
 /** fill-color / fill-opacity expressions driven by feature-state "heat" ∈ [0,1].
  *  At heat 0 the block is fully transparent (no votes → invisible); it ramps up
@@ -251,9 +266,23 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         (window as unknown as Record<string, unknown>).__ml = map;
       }
 
+      // Point→block resolver for GraphLayer's hover constraint. Fill layers
+      // are queryable regardless of their (heat-driven, possibly 0) opacity;
+      // guard on the layer existing so a not-yet-loaded style reads as null.
+      blockAtResolver = (lat: number, lng: number) => {
+        const ml = mapRef.current;
+        if (!ml || !ml.getLayer("block-heat")) return null;
+        const feats = ml.queryRenderedFeatures(ml.project([lng, lat]), {
+          layers: ["block-heat"],
+        });
+        const id = feats[0]?.id;
+        return typeof id === "number" ? id : null;
+      };
+
       return () => {
         map.remove();
         mapRef.current = null;
+        blockAtResolver = null;
       };
     } catch (err) {
       dwarn("maplibre", "GL JS unavailable (WebGL required) — raster fallback stays:", err);
