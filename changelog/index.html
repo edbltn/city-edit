@@ -29,6 +29,44 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-07-node-cluster-blocks.html">
+    <div class="date">2026-07-07</div>
+    <h2>Junction clusters, capture mapping, and the stale-heat guards</h2>
+    <p>Round two on junction blocks, from live screenshots: intersections drew as stacked overlapping
+    circles (a physical intersection is many OSM junction nodes — 94% of NYC's junctions have a neighbour
+    within 24&nbsp;m), band cutouts looked misaligned (bites from invisible sibling discs), and voted node
+    blocks stayed dark on the heatmap. Overlapping discs now merge into one multi-node block per junction
+    cluster (415,967 discs → 99,535 blobs, radius 12&nbsp;→&nbsp;9&nbsp;m), and nodes get their own mapping
+    rule: the bake's new junction-capture pass maps any edge midpoint within 12&nbsp;m of a junction to that
+    junction's block by graph distance — 5,351/5,351 midtown crossing stubs land in junction blocks, 0
+    perpendicular, 0 unmapped. The dark heatmap was a stale-cache class, not rendering: block ids renumber
+    on re-bake under the same topology etag AND revision, so the boot painted a pre-re-bake IndexedDB votes
+    body and deltas layered onto it — closed by an n_blocks/blocks_version guard on the votes cache, a
+    blocks-mtime stamp in the graph-votes ETag, and a pid-unique tmp for the geojson writers (two pipeline
+    runs interleaving one shared .tmp corrupted 300&nbsp;MB of blocks mid-rebuild).</p>
+  </a>
+
+  <a class="entry" href="./2026-07-07-rbtp-parity.html">
+    <div class="date">2026-07-07</div>
+    <h2>RBTP parity — mixed cluster fan-out, corridor drops, people-not-blocks vote counts, and a route ✕</h2>
+    <p>Five requests bringing the route-proposal diamonds to full parity with the point pins. Diamonds now
+    fan out with crowded point-pin clusters (one mixed grid; diamond clicks explode-before-select like the
+    squares); dropping any waypoint — a dragged mid, a fresh path-drag ghost, or an exploded-proposal drag —
+    onto a diamond threads the route through the WHOLE corridor, inserting its two anchors in whichever
+    order gives the shorter prev→anchor→…→anchor→next chain, and the selected diamond carries the same [×]
+    the matched point pins have (removes both anchors atomically). The route card's vote rows now count
+    distinct people via a new <code>POST /api/route-votes</code> (<code>COUNT(DISTINCT device_id)</code>
+    per vote type and direction — a route cast used to count once per block it fanned across; verified
+    against the DB: 912 fanned rows → up 2 / down 1); the meta line reads “Selects N blocks”; and a new ✕
+    on the card deselects the entire route in one tap. Round 2: a slow unmoved press is a TAP again
+    (time-only gesture detection was turning careful diamond clicks into zero-distance drag-drops that
+    threaded corridors repeatedly — new TAP_MAX_DRIFT_PX, max-drift-tracked), taps landing on a diamond's
+    box select it, re-taps of a selected diamond are no-ops, and a selected RBTP now routes through its
+    corridor VERBATIM — the proposal's stored path replaces the OSRM leg between its anchors
+    (corridorCoordinates + a registered anchors→corridor resolver consulted by every segment calc), so the
+    drawn route, heat/hover highlight, coverage ring, and vote target all trace the same corridor.</p>
+  </a>
+
   <a class="entry" href="./2026-07-07-node-block-discs.html">
     <div class="date">2026-07-07</div>
     <h2>Junction-node disc blocks — killing the cross-street ladder</h2>

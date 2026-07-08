@@ -1,0 +1,1162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Junction clusters, capture mapping, and the stale-heat guards — 2026-07-07</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Junction clusters, capture mapping, and the stale-heat guards</h1>
+    <div class="dateline">2026-07-07 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#clusters">1</a>
+<a href="#capture">2</a>
+<a href="#staleheat">3</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Round two on junction blocks, driven by three live findings: intersections drew as
+  stacked overlapping circles (a physical intersection is many OSM junction nodes — 94% of NYC's junctions
+  have a neighbour within 24 m); the street-band cutouts seemed misaligned (they were bites from invisible
+  sibling discs); and voted node blocks stayed dark on the heatmap. Per your design: overlapping discs now
+  MERGE into one multi-node block per cluster at a smaller 9 m radius, and nodes get their own MAPPING rule —
+  the bake captures any edge midpoint within 12 m of a junction into that junction's block by graph distance,
+  which is what keeps the ladder at exactly zero while the drawn shape shrinks. The dark heatmap was the
+  best find of the session: not rendering at all, but a stale-votes-cache class — block ids renumber on
+  re-bake under the same topology etag AND revision, and three separate caches (IndexedDB body, WS deltas
+  layering on it, and the rev-scoped HTTP ETag) all conspired to keep painting the previous block era.</p>
+
+  
+    <section class="card" id="clusters">
+      <div class="tag">Blocks pipeline · merged clusters</div>
+      <h2>1 · Overlapping discs merge into one block per junction cluster</h2>
+      <h3>Symptom</h3>
+      <p>At high zoom, intersections drew as 2-3 STACKED circles, and the street bands showed bite marks that lined up with no visible circle (your two screenshots).</p>
+      <h3>Root cause</h3>
+      <ul><li>A physical intersection is MANY OSM junction nodes — centerline node, crossing ends, sidewalk corners: 94% of NYC's 415,967 junctions have another within 24 m (1.24M overlapping pairs). One 12 m disc per node meant stacks of overlapping circles.</li>
+<li>The “misaligned cutouts” were the same bug seen from the other side: a street band's notch was cut by an INVISIBLE sibling disc of the same intersection (unselected blocks draw nothing), so the bite appeared to belong to nobody.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Per your design: discs whose radii overlap map to the SAME block — union-find over centre pairs &lt; 2R, one merged blob per cluster (<code>road_class="node"</code>, <code>n_nodes</code>), radius down from 12 m to <strong>9 m</strong>. NYC: 415,967 discs → <strong>99,535 cluster blocks</strong>; 248,428 blocks total.</li>
+<li>Whole-intersection blobs also fix the visual: one knot per intersection, and every cutout is filled by its own (selectable, lightable) blob.</li>
+<li>Streets were re-generated from the pristine step-1 output before re-punching — the previous 12 m holes would otherwise have left a 3 m dead ring around every 9 m blob (the in-place geojson edit is destructive; noted in the runbook).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/streetscape_blocks/build_node_blocks.py</li>
+<li>server/streetscape_blocks/README.md</li>
+<li>docs/three-layer-model.md</li></ul>
+    </section>
+    
+
+    <section class="card" id="capture">
+      <div class="tag">Blocks pipeline · bake</div>
+      <h2>2 · Nodes get their own mapping rule: 12 m junction capture</h2>
+      <h3>Symptom</h3>
+      <p>Shrinking the drawn radius to 9 m would have brought the ladder back: crossing-stub midpoints run to 11.9 m from the junction (measured, midtown), so pure midpoint-containment would leak ~4% of them into perpendicular street bands.</p>
+      <h3>Root cause</h3>
+      <ul><li>One geometry was doing two jobs: the drawn block shape AND the mapping boundary. The user's third ask — separate mapping logic for nodes vs edges — is exactly the decoupling needed.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The bake gains pass 0, JUNCTION CAPTURE: any edge whose midpoint lies within <code>NODE_CAPTURE_M</code> (12 m) of a junction maps to that junction's cluster block by GRAPH distance (cKDTree over junction centres), independent of the 9 m drawn rim. The generator writes a <code>node_clusters_&lt;network&gt;.npz</code> sidecar (junction node idx → block id) for it.</li>
+<li>Result on the re-bake: 2,073,106 edges junction-captured; 5,351/5,351 midtown-avenue crossing stubs land in junction blocks — <strong>0 perpendicular</strong>; the mapping is total (0 unmapped of 3.3M).</li>
+<li>Central Park keeps the per-segment grain (179 foot blocks + 1,643 junction blobs; largest foot block 5,186 m²).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/streetscape_blocks/build_edge_blocks.py</li>
+<li>server/streetscape_blocks/build_node_blocks.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="staleheat">
+      <div class="tag">Client + server · stale heat</div>
+      <h2>3 · “Nodes not appearing on the heatmap” was a stale-cache class, not rendering</h2>
+      <h3>Symptom</h3>
+      <p>Voted junction blocks stayed dark on the heatmap — the corridor heat read as a dashed line with gaps at every intersection — even though the server's block_votes carried positive counts for them (verified: 111 positive node blocks in the payload while the map showed none).</p>
+      <h3>Root cause</h3>
+      <ul><li>The boot painted block heat from a PRE-RE-BAKE IndexedDB votes body: block ids renumber on every re-bake under the SAME topology etag and SAME revision, and the votes cache was validated by etag alone. The stale body (147,349 old block ids — node blocks didn't exist in it) painted streets correctly (street ids happened to be preserved) and nothing else.</li>
+<li>Live WS deltas then applied on TOP of the stale array instead of healing it (27 lit + 45 from the delta = the 72 we kept observing), and the day's graph-votes HTTP cache could 304 a client back onto the same stale body since the ETag was rev-scoped only.</li>
+<li>Diagnosis rabbit-holes worth recording: the tiles were fine (a dense z14 tile decodes 2,343 node features, zero coalesced), the render path was fine (a debug solid-fill layer painted 8,552 discs), and setFeatureState was fine — the array feeding it was simply from another block era.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>votesMatchTopology</code> also rejects <code>block_votes.length ≠ topology.nBlocks</code>, and the boot cache path additionally requires <code>blocks_version</code> equality with the live <code>/api/graph-version</code> blocks hash (mismatch logs and falls through to the authoritative fetch).</li>
+<li><code>/api/graph-votes</code>' ETag folds in a blocks mtime stamp (<code>graph_registry.blocks_stamp()</code> — a stat, no graph load), so a re-bake busts the HTTP validator even though rev didn't change.</li>
+<li><code>build_foot_blocks</code> writes through a pid-unique tmp file: two pipeline runs fighting over one shared <code>.tmp</code> interleaved writes and corrupted the 300&nbsp;MB geojson mid-rebuild (NUL runs at byte 308,050,886 — found the hard way).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx</li>
+<li>server/app.py</li>
+<li>server/graph_registry.py</li>
+<li>server/streetscape_blocks/build_foot_blocks.py</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Ladder metric on the re-baked mapping (now also a checked-in eval, <code>eval/eval_ladder.py</code>): 5,351/5,351 midtown-avenue crossing stubs → junction blocks, 0 perpendicular, 0 unmapped city-wide.</li>
+<li>Cluster stats: 415,967 junctions → 99,535 cluster blobs (largest 1,607 nodes — a park mesh); 248,428 blocks total; blocks.pmtiles 39.5 MB.</li>
+<li>Central Park bbox: 179 per-segment foot blocks (max 5,186 m²) + 1,643 junction blobs.</li>
+<li>Live on <code>/m/nyc-walkways</code>: the 7th Ave route selects a clean 94-block corridor with single knots at intersections (no stacked circles); the 6th Ave heat trail is CONTINUOUS — junction blobs lit between street segments where the dashes used to be (screenshots in-session).</li>
+<li>Boot staleness: fresh topology fetched under the new blocks hash (248,428 blocks logged), the earlier cast re-projected onto the new ids by the bver-marker bagg rebuild (route card still shows the +1, + button pressed), and mode buckets self-heal (walkways=2 rebuilds on its next fetch).</li>
+<li>Suites green: server 47/47, client 195/195, tsc clean.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Zoom deep into any Manhattan intersection: ONE merged knot, no stacked circles, and the street bands should end exactly at the knot's rim (no floating bite marks, no dead ring).</li>
+<li>Re-run your two screenshot views (Flatbush/Grand Army Plaza and the midtown corridor): both should read as single blobs per intersection.</li>
+<li>Cast + on a route, then Clear: the heat trail must be CONTINUOUS through intersections — lit junction knots between lit street segments, no dashes.</li>
+<li>Hard-reload once and watch the console: <code>[topo] ready … 248428 blocks</code>, and if an old votes body was cached you should see <code>ignoring cached votes: stale block set</code> once, then the authoritative heat.</li>
+<li>Hover a lit junction knot: the whole intersection highlights as one block; its tooltip sums the cluster's votes.</li>
+<li>Other cities still need <code>./build_city_blocks.sh &lt;city&gt;</code> re-runs before deploy (their bakes predate clusters + capture).</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Green is added, red removed.</p>
+    
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+20</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">topology load, votes, selection, cards</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~4k LOC — this commit touches only the votes-cache guards</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">votesMatchTopology</span><span class="ol-sum">also rejects block_votes.length ≠ topology.nBlocks</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">boot cached-votes path</span><span class="ol-sum">requires blocks_version equality; dwarn + fall through when stale</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">markers / proposals</span><span class="ol-sum">unchanged in this commit</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>n_blocks dimension guard — same class as the n_edges mobile-crash guard</li><li>blocksMatch = cached.blocks_version === live blocks + votesMatchTopology(cached, topo)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 6176072..779a446 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -532,13 +532,20 @@ function targetLatLng(</span>
+<span class="d-ctx">  * edge_votes length when the dimensions aren&#x27;t present (older server).</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> function votesMatchTopology(</span>
+<span class="d-del">-  voteData: { n_edges?: number; n_nodes?: number; edge_votes?: unknown[] },</span>
+<span class="d-add">+  voteData: { n_edges?: number; n_nodes?: number; n_blocks?: number;</span>
+<span class="d-add">+    edge_votes?: unknown[]; block_votes?: unknown[] },</span>
+<span class="d-ctx">   topology: GraphTopology | null,</span>
+<span class="d-ctx"> ): boolean {</span>
+<span class="d-ctx">   if (!topology) return false;</span>
+<span class="d-ctx">   const nEdges = voteData.n_edges ?? voteData.edge_votes?.length;</span>
+<span class="d-ctx">   if (nEdges != null &amp;&amp; nEdges !== topology.nEdges) return false;</span>
+<span class="d-ctx">   if (voteData.n_nodes != null &amp;&amp; voteData.n_nodes !== topology.nNodes) return false;</span>
+<span class="d-add">+  // Block ids renumber on every blocks re-bake (SAME topology etag), so a body</span>
+<span class="d-add">+  // built against a different block set colors the wrong polygons.</span>
+<span class="d-add">+  const nBlocks = voteData.n_blocks ?? voteData.block_votes?.length;</span>
+<span class="d-add">+  if (nBlocks != null &amp;&amp; topology.nBlocks != null &amp;&amp; nBlocks !== topology.nBlocks) {</span>
+<span class="d-add">+    return false;</span>
+<span class="d-add">+  }</span>
+<span class="d-ctx">   return true;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1744,16 +1751,27 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       // 2. Paint immediately from cached votes (same graph version only) so the</span>
+<span class="d-ctx">       //    heatmap appears without waiting on the network. Skipped when the</span>
+<span class="d-ctx">       //    topology was freshly downloaded, since edge indices may have shifted.</span>
+<span class="d-add">+      //    The body must also match the CURRENT block set — block ids renumber</span>
+<span class="d-add">+      //    on every blocks re-bake under the SAME topology etag, and a</span>
+<span class="d-add">+      //    pre-re-bake body paints the wrong polygons (node blocks dark, e.g.)</span>
+<span class="d-add">+      //    which live deltas then layer onto instead of healing.</span>
+<span class="d-ctx">       if (usedCachedTopology &amp;&amp; version) {</span>
+<span class="d-ctx">         const cachedVotes = await getCachedVotes&lt;Partial&lt;GraphData&gt;&gt;(getMapSlug() || themeMode, version);</span>
+<span class="d-ctx">         if (cancelled) return;</span>
+<span class="d-del">-        if (cachedVotes) {</span>
+<span class="d-add">+        const blocksMatch = cachedVotes</span>
+<span class="d-add">+          &amp;&amp; (cachedVotes.blocks_version ?? null) === blocksVersion</span>
+<span class="d-add">+          &amp;&amp; votesMatchTopology(cachedVotes, topology);</span>
+<span class="d-add">+        if (cachedVotes &amp;&amp; blocksMatch) {</span>
+<span class="d-ctx">           graphDataRef.current = { ...topology, ...cachedVotes };</span>
+<span class="d-ctx">           lastRevRef.current = cachedVotes.rev ?? 0;</span>
+<span class="d-ctx">           setVoteTypeMap(cachedVotes.vote_types);</span>
+<span class="d-ctx">           broadcastBlockVotes(cachedVotes);</span>
+<span class="d-ctx">           refreshGraphDisplayRef.current();</span>
+<span class="d-ctx">           setHeatmapLoaded();</span>
+<span class="d-add">+        } else if (cachedVotes) {</span>
+<span class="d-add">+          dwarn(&quot;votes&quot;, &quot;ignoring cached votes: stale block set&quot;, {</span>
+<span class="d-add">+            cached: cachedVotes.blocks_version, live: blocksVersion,</span>
+<span class="d-add">+          });</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">docs/three-layer-model.md</span>
+            <span class="stat"><span class="d-add">+21</span> / <span class="d-del">-10</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">docs</span>
+        <span class="ctx-sum">the source-of-truth spec</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">three-layer-model.md</span>
+        <span class="ctx-sum">layer definitions + block semantics</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">§2.1 What a block is</span><span class="ol-sum">merged multi-node junction blocks</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§2.2 Generation</span><span class="ol-sum">cluster step + sidecar + capture pass</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>§2.1 — separate block-forming logic for nodes (clustered discs) vs edges (segment Voronoi)</li><li>§2.2 item 4 — the three-pass bake with junction capture first</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/three-layer-model.md b/docs/three-layer-model.md</span>
+<span class="d-meta">index c94ca20..e587c4a 100644</span>
+<span class="d-meta">--- a/docs/three-layer-model.md</span>
+<span class="d-meta">+++ b/docs/three-layer-model.md</span>
+<span class="d-hunk">@@ -47,9 +47,13 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored</span>
+<span class="d-ctx"> ### 2.1 What a block is</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> One polygon per street segment between intersections (a &quot;streetscape block&quot;),</span>
+<span class="d-del">-covering the roadbed + sidewalk right-of-way — plus one small **disc block per</span>
+<span class="d-del">-junction node** (12 m, `build_node_blocks.py`), punched out of the street/foot</span>
+<span class="d-del">-polygons so blocks never overlap. Junction discs exist because street polygons</span>
+<span class="d-add">+covering the roadbed + sidewalk right-of-way — plus one **junction block per</span>
+<span class="d-add">+junction cluster** (`build_node_blocks.py`), punched out of the street/foot</span>
+<span class="d-add">+polygons so blocks never overlap. Nodes and edges get SEPARATE block-forming</span>
+<span class="d-add">+logic: each walk-graph junction contributes a 9 m disc, and **overlapping discs</span>
+<span class="d-add">+merge into one multi-node block** (a physical intersection is several OSM</span>
+<span class="d-add">+junction nodes — centerline node, crossing ends, sidewalk corners — so per-node</span>
+<span class="d-add">+discs drew as stacked circles). Junction blocks exist because street polygons</span>
+<span class="d-ctx"> otherwise extend across intersections (Voronoi flare): the short edges crossing</span>
+<span class="d-ctx"> an intersection would bake into a PERPENDICULAR street&#x27;s block, so a route down</span>
+<span class="d-ctx"> an avenue would select — and cast onto — every cross street it passes (the</span>
+<span class="d-hunk">@@ -57,7 +61,7 @@ an avenue would select — and cast onto — every cross street it passes (the</span>
+<span class="d-ctx"> exactly one block** (strict many-to-one), and a node belongs to the block of its</span>
+<span class="d-ctx"> **shortest** incident edge (deterministic, matching the client&#x27;s `adjShortest`</span>
+<span class="d-ctx"> node→edge upgrade rule — the shortest incident edge is the one whose midpoint</span>
+<span class="d-del">-falls inside the junction&#x27;s own disc).</span>
+<span class="d-add">+falls inside the junction&#x27;s own block).</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ### 2.2 Generation — procedural, per city, at graph-build time</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -69,19 +73,26 @@ be added without city-specific open data (`server/streetscape_blocks/`):</span>
+<span class="d-ctx">    half-width → seed points every 6 m → Voronoi partition by nearest segment →</span>
+<span class="d-ctx">    dissolve + clip. One polygon per street segment.</span>
+<span class="d-ctx"> 2. `build_node_blocks.py` — every walk-graph junction (unique-neighbour degree</span>
+<span class="d-del">-   ≥ 3) becomes its own 12 m disc block (`road_class=&quot;node&quot;`), subtracted from</span>
+<span class="d-del">-   every street block it touches so blocks stay disjoint.</span>
+<span class="d-add">+   ≥ 3) contributes a 9 m disc; overlapping discs union-find into clusters and</span>
+<span class="d-add">+   each cluster becomes ONE block (`road_class=&quot;node&quot;`, `n_nodes` members),</span>
+<span class="d-add">+   subtracted from every street block it touches so blocks stay disjoint. Also</span>
+<span class="d-add">+   writes the junction→block sidecar `node_clusters_&lt;network&gt;.npz` that the</span>
+<span class="d-add">+   bake&#x27;s capture pass reads.</span>
+<span class="d-ctx"> 3. `build_foot_blocks.py` — edges not covered by any street block (park paths,</span>
+<span class="d-ctx">    plazas, boardwalks — ~18% in NYC) are buffered (6 m), merged, and **severed</span>
+<span class="d-del">-   at the junction discs** (12 m &gt; 6 m, so the mesh disconnects there): one</span>
+<span class="d-add">+   at the junction blocks** (9 m &gt; 6 m, so the mesh disconnects there): one</span>
+<span class="d-ctx">    block per path segment between junctions — the same grain as streets, not</span>
+<span class="d-ctx">    one giant block per connected park network. Appended with continuing</span>
+<span class="d-ctx">    `block_id`s; this is what makes the edge→block mapping **total**.</span>
+<span class="d-ctx"> 4. `build_edge_blocks.py` — bakes `edge_block_id: int32[n_edges]`</span>
+<span class="d-ctx">    (`osm_data/&lt;city&gt;/edge_blocks_&lt;network&gt;.npy` + a meta JSON stamping</span>
+<span class="d-del">-   `topology_etag` + `blocks_sha256`). Assignment: polygon containment of the</span>
+<span class="d-del">-   edge midpoint, else nearest block within 30 m (see `eval/RESULTS.md` — nearest</span>
+<span class="d-del">-   -polygon is exact where containment leaves ~20% unmapped).</span>
+<span class="d-add">+   `topology_etag` + `blocks_sha256`). Assignment, in order: **junction</span>
+<span class="d-add">+   capture** — a midpoint within `NODE_CAPTURE_M` (12 m) of a junction maps to</span>
+<span class="d-add">+   that junction&#x27;s node block by GRAPH distance, not containment (crossing-stub</span>
+<span class="d-add">+   midpoints run to ~12 m, past the 9 m drawn rim; this is what holds the</span>
+<span class="d-add">+   ladder at zero while the drawn blobs stay small); then polygon containment</span>
+<span class="d-add">+   of the midpoint; else nearest block within 30 m (see `eval/RESULTS.md` —</span>
+<span class="d-add">+   nearest-polygon is exact where containment leaves ~20% unmapped).</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> **Evaluation against ground truth**: `compare_blocks.py` scores the procedural</span>
+<span class="d-ctx"> output against Brook&#x27;s NYC planimetric blocks (`build_nyc_blocks.py`, from NYC</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+5</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">server · Flask app</span>
+        <span class="ctx-sum">routes: votes, topology, tiles, maps</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~3.3k LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">graph_votes ETag</span><span class="ol-sum">now rev + blocks mtime stamp</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">bver bagg rebuild</span><span class="ol-sum">from the previous commit — unchanged here</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>etag = v-&lt;slug&gt;-&lt;mode&gt;-&lt;rev&gt;-b&lt;blocks_stamp&gt; — a re-bake can never 304 old block ids</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index 8b74840..310b3ee 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -1687,7 +1687,11 @@ def graph_votes():</span>
+<span class="d-ctx">     # the graph — ensure_loaded() on a cold instance took 10s+ and rode P95.</span>
+<span class="d-ctx">     mode = request.args.get(&quot;mode&quot;) or None</span>
+<span class="d-ctx">     rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)</span>
+<span class="d-del">-    etag = f&#x27;&quot;v-{rmap.slug}-{mode or &quot;all&quot;}-{rev}&quot;&#x27;</span>
+<span class="d-add">+    # blocks_stamp (a stat, no graph load) rides in the validator: a blocks</span>
+<span class="d-add">+    # re-bake renumbers block ids WITHOUT bumping rev, and a 304 would pin</span>
+<span class="d-add">+    # clients on a body whose block_votes index the previous block set.</span>
+<span class="d-add">+    bstamp = rmap.graph.blocks_stamp()</span>
+<span class="d-add">+    etag = f&#x27;&quot;v-{rmap.slug}-{mode or &quot;all&quot;}-{rev}{f&quot;-b{bstamp}&quot; if bstamp else &quot;&quot;}&quot;&#x27;</span>
+<span class="d-ctx">     if request.headers.get(&quot;If-None-Match&quot;) == etag:</span>
+<span class="d-ctx">         resp = app.response_class(status=304)</span>
+<span class="d-ctx">         resp.headers[&quot;ETag&quot;] = etag</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/graph_registry.py</span>
+            <span class="stat"><span class="d-add">+13</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">server · graph registry</span>
+        <span class="ctx-sum">CityGraph: topology, blocks, binary blob</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">graph_registry.py</span>
+        <span class="ctx-sum">~260 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">blocks_stamp</span><span class="ol-sum">NEW — mapping npy mtime via stat, usable without loading the graph</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>blocks_stamp() → int mtime | None — the graph-votes validator&#x27;s blocks component</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/graph_registry.py b/server/graph_registry.py</span>
+<span class="d-meta">index a2dcb5f..bc644d1 100644</span>
+<span class="d-meta">--- a/server/graph_registry.py</span>
+<span class="d-meta">+++ b/server/graph_registry.py</span>
+<span class="d-hunk">@@ -219,6 +219,19 @@ class CityGraph:</span>
+<span class="d-ctx">     def has_blocks(self) -&gt; bool:</span>
+<span class="d-ctx">         return self.edge_block_id is not None</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    def blocks_stamp(self) -&gt; int | None:</span>
+<span class="d-add">+        &quot;&quot;&quot;Cheap block-set version usable WITHOUT loading the graph: the baked</span>
+<span class="d-add">+        mapping&#x27;s mtime (a stat). Block ids renumber on every re-bake under the</span>
+<span class="d-add">+        SAME topology etag and revision, so anything HTTP-cached that carries</span>
+<span class="d-add">+        block arrays must fold this into its validator — else a re-bake 304s</span>
+<span class="d-add">+        clients onto a body whose block ids color the wrong polygons.&quot;&quot;&quot;</span>
+<span class="d-add">+        npy = os.path.join(os.path.dirname(__file__), self.city.data_dir,</span>
+<span class="d-add">+                           f&quot;edge_blocks_{self.network}.npy&quot;)</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            return int(os.stat(npy).st_mtime)</span>
+<span class="d-add">+        except OSError:</span>
+<span class="d-add">+            return None</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     def topology_binary(self) -&gt; bytes:</span>
+<span class="d-ctx">         &quot;&quot;&quot;Compact little-endian binary topology — the mobile-safe wire format.</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/streetscape_blocks/README.md</span>
+            <span class="stat"><span class="d-add">+12</span> / <span class="d-del">-6</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">server · streetscape_blocks</span>
+        <span class="ctx-sum">generator docs</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">README.md</span>
+        <span class="ctx-sum">adding-a-city + pipeline description</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">pipeline paragraph</span><span class="ol-sum">clusters + capture rule documented</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>capture is called out as the ladder-holding rule, separate from the drawn 9 m rim</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/README.md b/server/streetscape_blocks/README.md</span>
+<span class="d-meta">index 3c34d65..8204cc7 100644</span>
+<span class="d-meta">--- a/server/streetscape_blocks/README.md</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/README.md</span>
+<span class="d-hunk">@@ -29,12 +29,18 @@ brew install tippecanoe</span>
+<span class="d-ctx"> ./build_city_blocks.sh &lt;city-id&gt;            # or: refresh_osm.py --city &lt;id&gt; --blocks</span>
+<span class="d-ctx"> ```</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-The script runs: procedural street blocks → `build_node_blocks.py` (one 12 m</span>
+<span class="d-del">-disc block per walk-graph junction, punched out of the street blocks so a route</span>
+<span class="d-del">-never selects a perpendicular street&#x27;s block at an intersection) → edge→block</span>
+<span class="d-del">-bake (pass 1) → `build_foot_blocks.py` for the uncovered edges (park paths,</span>
+<span class="d-del">-plazas — severed at the junction discs so each path segment is its own block;</span>
+<span class="d-del">-makes the mapping **total**) → final bake → `blocks.pmtiles`. Artifacts land</span>
+<span class="d-add">+The script runs: procedural street blocks → `build_node_blocks.py` (a 9 m disc</span>
+<span class="d-add">+per walk-graph junction, overlapping discs merged into one multi-node block per</span>
+<span class="d-add">+junction cluster, punched out of the street blocks so a route never selects a</span>
+<span class="d-add">+perpendicular street&#x27;s block at an intersection; also writes the</span>
+<span class="d-add">+junction→block sidecar `node_clusters_&lt;network&gt;.npz`) → edge→block bake</span>
+<span class="d-add">+(pass 1) → `build_foot_blocks.py` for the uncovered edges (park paths, plazas —</span>
+<span class="d-add">+severed at the junction blocks so each path segment is its own block; makes the</span>
+<span class="d-add">+mapping **total**) → final bake → `blocks.pmtiles`. Node blocks get their own</span>
+<span class="d-add">+MAPPING rule in the bake, separate from the polygons: any edge whose midpoint</span>
+<span class="d-add">+is within `NODE_CAPTURE_M` (12 m) of a junction maps to that junction&#x27;s block</span>
+<span class="d-add">+by graph distance — stub midpoints run past the 9 m drawn rim, and capture is</span>
+<span class="d-add">+what holds the ladder at zero. Artifacts land</span>
+<span class="d-ctx"> next to the graph (`osm_data/&lt;city&gt;/edge_blocks_&lt;network&gt;.npy/.json`,</span>
+<span class="d-ctx"> `blocks.pmtiles`); the bake stamps the graph&#x27;s `topology_etag`, so rebuilding</span>
+<span class="d-ctx"> the graph invalidates the mapping and the script must re-run.</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/streetscape_blocks/build_edge_blocks.py</span>
+            <span class="stat"><span class="d-add">+60</span> / <span class="d-del">-14</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">server · streetscape_blocks</span>
+        <span class="ctx-sum">the edge→block bake</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_edge_blocks.py</span>
+        <span class="ctx-sum">~180 LOC — now a three-pass assignment</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">docstring</span><span class="ol-sum">three passes documented</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">pass 0 — junction capture</span><span class="ol-sum">NEW — cKDTree over junction centres, ≤12 m → cluster block</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">pass 1 — containment</span><span class="ol-sum">unchanged logic, now only over uncaptured midpoints</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">pass 2 — nearest ≤30 m</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">meta</span><span class="ol-sum">captured_junction + node_capture_m stamped</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>NODE_CAPTURE_M = 12 (env) — measured stub-midpoint p99 = 10.9 m, max 11.9 m</li><li>capture: dist, j = cKDTree(jxy).query(midpoints, workers=-1); cap = dist &lt;= 12</li><li>meta counts: 2,073,106 captured + 723,532 contained + 502,514 snapped, 0 unmapped</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_edge_blocks.py b/server/streetscape_blocks/build_edge_blocks.py</span>
+<span class="d-meta">index f73c931..2834759 100644</span>
+<span class="d-meta">--- a/server/streetscape_blocks/build_edge_blocks.py</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_edge_blocks.py</span>
+<span class="d-hunk">@@ -2,10 +2,20 @@</span>
+<span class="d-ctx"> &quot;&quot;&quot;Build the edge → block mapping that powers block-level vote display.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> Loads the SAME city graph the server votes on (via graph_registry, so edge_id</span>
+<span class="d-del">-ordering is identical to the vote store), takes each edge&#x27;s midpoint, and assigns</span>
+<span class="d-del">-it to the block polygon that contains it (nearest block within a small threshold</span>
+<span class="d-del">-when no polygon contains the midpoint — sidewalks sit a few metres off the</span>
+<span class="d-del">-centerline). Writes a dense int32 array `edge_block_id[edge_id] = block_id` (−1 if</span>
+<span class="d-add">+ordering is identical to the vote store), and assigns each edge a block in</span>
+<span class="d-add">+three passes:</span>
+<span class="d-add">+</span>
+<span class="d-add">+  0. JUNCTION CAPTURE (nodes&#x27; own mapping logic, separate from the polygons):</span>
+<span class="d-add">+     an edge whose midpoint lies within NODE_CAPTURE_M (default 12 m) of a</span>
+<span class="d-add">+     junction maps to that junction&#x27;s node block (node_clusters_&lt;network&gt;.npz,</span>
+<span class="d-add">+     written by build_node_blocks.py). The drawn node blobs are deliberately</span>
+<span class="d-add">+     smaller (9 m) — capture by graph distance is what keeps intersection-</span>
+<span class="d-add">+     crossing stubs out of PERPENDICULAR street blocks (the &quot;ladder&quot;).</span>
+<span class="d-add">+  1. containment: the block polygon containing the midpoint;</span>
+<span class="d-add">+  2. nearest block within BLOCK_SNAP_M (30 m) — sidewalks sit a few metres off</span>
+<span class="d-add">+     the centerline.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Writes a dense int32 array `edge_block_id[edge_id] = block_id` (−1 if</span>
+<span class="d-ctx"> unmapped) plus a meta file stamping the topology etag + blocks hash so the server</span>
+<span class="d-ctx"> (and the deploy cache) can tell when it must be rebuilt.</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -46,6 +56,11 @@ BLOCKS_FILE = os.environ.get(</span>
+<span class="d-ctx"> # within this many metres (a sidewalk edge sits ~a few m off the centerline; a</span>
+<span class="d-ctx"> # foot edge far from any street block legitimately gets no block).</span>
+<span class="d-ctx"> NEAREST_THRESHOLD_M = float(os.environ.get(&quot;BLOCK_SNAP_M&quot;, &quot;30&quot;))</span>
+<span class="d-add">+# Pass-0 junction capture radius: midpoints this close to a junction map to the</span>
+<span class="d-add">+# junction&#x27;s node block regardless of which polygon contains them. Crossing</span>
+<span class="d-add">+# stubs&#x27; midpoints run to ~12 m from the junction (measured, NYC midtown), past</span>
+<span class="d-add">+# the 9 m drawn blob rim — capture must reach them or the ladder comes back.</span>
+<span class="d-add">+NODE_CAPTURE_M = float(os.environ.get(&quot;NODE_CAPTURE_M&quot;, &quot;12&quot;))</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def _sha256_file(path: str) -&gt; str:</span>
+<span class="d-hunk">@@ -79,18 +94,47 @@ def main():</span>
+<span class="d-ctx">     print(f&quot;[edge_blocks] {len(polys)} block polygons from {os.path.basename(BLOCKS_FILE)}&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     edge_block = np.full(n_edges, -1, dtype=np.int32)</span>
+<span class="d-add">+    seen = np.zeros(n_edges, dtype=bool)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # 0) Junction capture — nodes&#x27; own mapping rule (see module docstring).</span>
+<span class="d-add">+    captured = 0</span>
+<span class="d-add">+    sidecar = os.path.join(</span>
+<span class="d-add">+        _SERVER, city.data_dir, f&quot;node_clusters_{NETWORK}.npz&quot;)</span>
+<span class="d-add">+    if os.path.exists(sidecar):</span>
+<span class="d-add">+        from scipy.spatial import cKDTree</span>
+<span class="d-add">+        nc = np.load(sidecar)</span>
+<span class="d-add">+        jn_idx, jn_block = nc[&quot;node_idx&quot;], nc[&quot;block_id&quot;]</span>
+<span class="d-add">+        # Same local-metres frame as the generators.</span>
+<span class="d-add">+        s_, w_, n_, e_ = city.bbox</span>
+<span class="d-add">+        mlat = 111_320.0</span>
+<span class="d-add">+        mlon = 111_320.0 * math.cos(math.radians((s_ + n_) / 2))</span>
+<span class="d-add">+        nodes_arr = np.asarray(nodes, dtype=np.float64)</span>
+<span class="d-add">+        jxy = np.column_stack(((nodes_arr[jn_idx, 1] - w_) * mlon,</span>
+<span class="d-add">+                               (nodes_arr[jn_idx, 0] - s_) * mlat))</span>
+<span class="d-add">+        mxy = np.column_stack(((lon - w_) * mlon, (lat - s_) * mlat))</span>
+<span class="d-add">+        dist, nearest_j = cKDTree(jxy).query(mxy, workers=-1)</span>
+<span class="d-add">+        cap = dist &lt;= NODE_CAPTURE_M</span>
+<span class="d-add">+        edge_block[cap] = jn_block[nearest_j[cap]]</span>
+<span class="d-add">+        seen |= cap</span>
+<span class="d-add">+        captured = int(cap.sum())</span>
+<span class="d-add">+        print(f&quot;[edge_blocks] junction capture: {captured} edges &quot;</span>
+<span class="d-add">+              f&quot;(&lt;= {NODE_CAPTURE_M:.0f}m of a junction)&quot;)</span>
+<span class="d-add">+    else:</span>
+<span class="d-add">+        print(f&quot;[edge_blocks] no node-cluster sidecar ({os.path.basename(sidecar)}) &quot;</span>
+<span class="d-add">+              &quot;— skipping junction capture&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # 1) Containment: polygon that contains the midpoint (vectorized). shapely&#x27;s</span>
+<span class="d-ctx">     # STRtree applies the predicate as input.predicate(tree_geom), so a point is</span>
+<span class="d-ctx">     # &quot;within&quot; the polygon (NOT polygon &quot;contains&quot; point, which would be false).</span>
+<span class="d-del">-    in_idx, tree_idx = tree.query(pts, predicate=&quot;within&quot;)</span>
+<span class="d-add">+    in_idx, tree_idx = tree.query(pts[~seen], predicate=&quot;within&quot;)</span>
+<span class="d-ctx">     # If a midpoint is in multiple blocks (shared boundary), first wins.</span>
+<span class="d-del">-    seen = np.zeros(n_edges, dtype=bool)</span>
+<span class="d-add">+    uncap_ids = np.where(~seen)[0]</span>
+<span class="d-ctx">     for pi, ti in zip(in_idx, tree_idx):</span>
+<span class="d-del">-        if not seen[pi]:</span>
+<span class="d-del">-            edge_block[pi] = block_ids[ti]</span>
+<span class="d-del">-            seen[pi] = True</span>
+<span class="d-del">-    contained = int(seen.sum())</span>
+<span class="d-add">+        ei = uncap_ids[pi]</span>
+<span class="d-add">+        if not seen[ei]:</span>
+<span class="d-add">+            edge_block[ei] = block_ids[ti]</span>
+<span class="d-add">+            seen[ei] = True</span>
+<span class="d-add">+    contained = int(seen.sum()) - captured</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # 2) Nearest-within-threshold for the rest.</span>
+<span class="d-ctx">     missing = np.where(~seen)[0]</span>
+<span class="d-hunk">@@ -117,17 +161,19 @@ def main():</span>
+<span class="d-ctx">         &quot;blocks_sha256&quot;: _sha256_file(BLOCKS_FILE),</span>
+<span class="d-ctx">         &quot;blocks_file&quot;: os.path.basename(BLOCKS_FILE),</span>
+<span class="d-ctx">         &quot;mapped_edges&quot;: snapped,</span>
+<span class="d-add">+        &quot;captured_junction&quot;: captured,</span>
+<span class="d-ctx">         &quot;contained&quot;: contained,</span>
+<span class="d-del">-        &quot;snapped_nearest&quot;: snapped - contained,</span>
+<span class="d-add">+        &quot;snapped_nearest&quot;: snapped - contained - captured,</span>
+<span class="d-ctx">         &quot;unmapped&quot;: n_edges - snapped,</span>
+<span class="d-ctx">         &quot;block_snap_m&quot;: NEAREST_THRESHOLD_M,</span>
+<span class="d-add">+        &quot;node_capture_m&quot;: NODE_CAPTURE_M,</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     json.dump(meta, open(os.path.join(out_dir, f&quot;edge_blocks_{NETWORK}.json&quot;), &quot;w&quot;), indent=2)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     print(f&quot;[edge_blocks] mapped {snapped}/{n_edges} edges &quot;</span>
+<span class="d-del">-          f&quot;({100*snapped/n_edges:.1f}%): {contained} contained + &quot;</span>
+<span class="d-del">-          f&quot;{snapped-contained} snapped(&lt;{NEAREST_THRESHOLD_M:.0f}m); &quot;</span>
+<span class="d-del">-          f&quot;{n_edges-snapped} unmapped&quot;)</span>
+<span class="d-add">+          f&quot;({100*snapped/n_edges:.1f}%): {captured} junction-captured + &quot;</span>
+<span class="d-add">+          f&quot;{contained} contained + {snapped-contained-captured} &quot;</span>
+<span class="d-add">+          f&quot;snapped(&lt;{NEAREST_THRESHOLD_M:.0f}m); {n_edges-snapped} unmapped&quot;)</span>
+<span class="d-ctx">     print(f&quot;[edge_blocks] wrote {npy}&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/streetscape_blocks/build_foot_blocks.py</span>
+            <span class="stat"><span class="d-add">+6</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">server · streetscape_blocks</span>
+        <span class="ctx-sum">foot-path fill for uncovered edges</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_foot_blocks.py</span>
+        <span class="ctx-sum">~140 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">severing</span><span class="ol-sum">subtracts node blobs (9 m &gt; 6 m tube) — unchanged behavior</span></li><li class="changed"><span class="ol-label">atomic write</span><span class="ol-sum">pid-unique tmp file</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>tmp = f&quot;{path}.tmp{os.getpid()}&quot; — concurrent runs can no longer interleave into one .tmp</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_foot_blocks.py b/server/streetscape_blocks/build_foot_blocks.py</span>
+<span class="d-meta">index 6120618..c219589 100644</span>
+<span class="d-meta">--- a/server/streetscape_blocks/build_foot_blocks.py</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_foot_blocks.py</span>
+<span class="d-hunk">@@ -125,8 +125,12 @@ def main():</span>
+<span class="d-ctx">         })</span>
+<span class="d-ctx">         next_id += 1</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    tmp = blocks_path + &quot;.tmp&quot;</span>
+<span class="d-del">-    json.dump(fc, open(tmp, &quot;w&quot;)); os.replace(tmp, blocks_path)</span>
+<span class="d-add">+    # pid-unique tmp: a stale sibling process fighting over one shared &quot;.tmp&quot;</span>
+<span class="d-add">+    # interleaves writes and corrupts the output on os.replace.</span>
+<span class="d-add">+    tmp = f&quot;{blocks_path}.tmp{os.getpid()}&quot;</span>
+<span class="d-add">+    with open(tmp, &quot;w&quot;) as fh:</span>
+<span class="d-add">+        json.dump(fc, fh)</span>
+<span class="d-add">+    os.replace(tmp, blocks_path)</span>
+<span class="d-ctx">     print(f&quot;[foot] appended {len(parts)} foot blocks → {os.path.basename(blocks_path)} &quot;</span>
+<span class="d-ctx">           f&quot;(now {len(feats)} total)&quot;)</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/streetscape_blocks/build_node_blocks.py</span>
+            <span class="stat"><span class="d-add">+113</span> / <span class="d-del">-36</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">server · streetscape_blocks</span>
+        <span class="ctx-sum">Layer-2 block generators: street Voronoi, junction clusters, foot fill, edge→block bake</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_node_blocks.py</span>
+        <span class="ctx-sum">~200 LOC — one merged blob per junction cluster + the capture sidecar</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module docstring</span><span class="ol-sum">REWRITTEN — separate node/edge block-forming logic</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">junction_nodes</span><span class="ol-sum">unique-neighbour degree ≥ 3 (unchanged)</span></li><li class="changed"><span class="ol-label">cluster_junctions</span><span class="ol-sum">NEW — union-find over centre pairs &lt; 2R</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">blob build</span><span class="ol-sum">NEW — union_all per cluster, r=9 m, n_nodes property</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">clip + append</span><span class="ol-sum">subtract blobs from street blocks; one feature per cluster</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">sidecar write</span><span class="ol-sum">NEW — node_clusters_&lt;network&gt;.npz (node_idx → block_id)</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>cluster_junctions — path-compressed union-find over cKDTree.query_pairs(2R)</li><li>per-cluster union_all of member discs; lowest member node idx as node_id</li><li>np.savez sidecar aligned blob-order → first_blob_id + k</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_node_blocks.py b/server/streetscape_blocks/build_node_blocks.py</span>
+<span class="d-meta">index c3c9308..5d7e458 100644</span>
+<span class="d-meta">--- a/server/streetscape_blocks/build_node_blocks.py</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_node_blocks.py</span>
+<span class="d-hunk">@@ -1,27 +1,38 @@</span>
+<span class="d-ctx"> #!/usr/bin/env python3</span>
+<span class="d-del">-&quot;&quot;&quot;Give every junction node its own block — a small disc punched out of the</span>
+<span class="d-del">-street/foot blocks (docs/three-layer-model.md §2).</span>
+<span class="d-add">+&quot;&quot;&quot;Give every junction its own block — one merged blob per junction CLUSTER,</span>
+<span class="d-add">+punched out of the street/foot blocks (docs/three-layer-model.md §2).</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> Why: block polygons extend across intersections (the Voronoi assigns the</span>
+<span class="d-ctx"> intersection flare to ONE of the crossing segments), so the short graph edges</span>
+<span class="d-ctx"> that cross an intersection get baked into a PERPENDICULAR street&#x27;s block. A</span>
+<span class="d-ctx"> route down an avenue then selects — and block-scoped casting votes on — every</span>
+<span class="d-del">-cross street it passes (&quot;ladder&quot; selections). Discs at junction nodes catch</span>
+<span class="d-del">-those edges&#x27; midpoints instead, so a path only ever touches blocks that share</span>
+<span class="d-del">-its orientation, plus the intersections themselves.</span>
+<span class="d-add">+cross street it passes (&quot;ladder&quot; selections). Junction blocks catch those</span>
+<span class="d-add">+edges&#x27; midpoints instead, so a path only ever touches blocks that share its</span>
+<span class="d-add">+orientation, plus the intersections themselves.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Nodes and edges get SEPARATE block-forming logic: edges partition the ROW by</span>
+<span class="d-add">+segment-Voronoi (build_blocks_generic.py); junction nodes each contribute a</span>
+<span class="d-add">+disc of NODE_BLOCK_RADIUS_M, and discs that OVERLAP merge into one multi-node</span>
+<span class="d-add">+block (a physical intersection is several OSM junction nodes — centerline</span>
+<span class="d-add">+node, crossing ends, sidewalk corners — one per ~5-15 m; per-node discs drew</span>
+<span class="d-add">+as stacked circles). Union-find over center pairs closer than 2R, then</span>
+<span class="d-add">+union_all per cluster.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> What it does, given blocks_generic_&lt;city&gt;.geojson:</span>
+<span class="d-ctx">   1. drops any road_class in {&quot;node&quot;,&quot;foot&quot;} features (idempotent re-runs; foot</span>
+<span class="d-ctx">      blocks are rebuilt afterwards by build_foot_blocks.py);</span>
+<span class="d-ctx">   2. finds junction nodes of the city walk graph — unique-neighbour degree &gt;= 3</span>
+<span class="d-ctx">      (degree-2 geometry nodes and dead ends stay part of their street block);</span>
+<span class="d-del">-  3. buffers each into a disc of NODE_BLOCK_RADIUS_M (default 12 m ~ the client&#x27;s</span>
+<span class="d-del">-     3 px node hover/snap affordance at z≈15, and &gt; build_foot_blocks&#x27; 6 m tube</span>
+<span class="d-del">-     radius so foot components sever at junctions);</span>
+<span class="d-del">-  4. subtracts the discs from every street block they intersect (blocks and</span>
+<span class="d-del">-     discs never overlap — containment in the bake stays unambiguous);</span>
+<span class="d-del">-  5. appends the discs as features: road_class=&quot;node&quot;, seg_id=-1, node_id=&lt;idx&gt;,</span>
+<span class="d-del">-     block_id continuing after the street blocks.</span>
+<span class="d-add">+  3. buffers each into a disc of NODE_BLOCK_RADIUS_M (default 9 m — small</span>
+<span class="d-add">+     enough that same-intersection blobs stay intersection-sized, still &gt; the</span>
+<span class="d-add">+     6 m foot tube so build_foot_blocks&#x27; mesh severs at junctions);</span>
+<span class="d-add">+  4. merges overlapping discs into one polygon per connected cluster;</span>
+<span class="d-add">+  5. subtracts the cluster blobs from every street block they intersect</span>
+<span class="d-add">+     (blocks and node blobs never overlap — bake containment stays</span>
+<span class="d-add">+     unambiguous);</span>
+<span class="d-add">+  6. appends the blobs as features: road_class=&quot;node&quot;, seg_id=-1,</span>
+<span class="d-add">+     node_id=&lt;lowest member node idx&gt;, n_nodes=&lt;cluster size&gt;, block_id</span>
+<span class="d-add">+     continuing after the street blocks.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> Run in the SERVER venv, then re-run build_edge_blocks.py (see</span>
+<span class="d-ctx"> build_city_blocks.sh, which orders the whole pipeline):</span>
+<span class="d-hunk">@@ -43,15 +54,16 @@ if _SERVER not in sys.path:</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> import shapely  # noqa: E402</span>
+<span class="d-ctx"> from shapely import STRtree, buffer as shp_buffer, points as shp_points, union_all  # noqa: E402</span>
+<span class="d-del">-from shapely.geometry import shape, mapping  # noqa: E402</span>
+<span class="d-add">+from shapely.geometry import mapping  # noqa: E402</span>
+<span class="d-add">+from scipy.spatial import cKDTree  # noqa: E402</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> from cities import CITIES  # noqa: E402</span>
+<span class="d-ctx"> from graph_registry import CityGraph  # noqa: E402</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> CITY = os.environ.get(&quot;CITY&quot;, &quot;nyc&quot;)</span>
+<span class="d-ctx"> NETWORK = os.environ.get(&quot;NETWORK&quot;, &quot;streets&quot;)</span>
+<span class="d-del">-RADIUS_M = float(os.environ.get(&quot;NODE_BLOCK_RADIUS_M&quot;, &quot;12&quot;))</span>
+<span class="d-del">-# Discs are 16-gons: plenty round at 12 m, keeps the geojson/tiles small.</span>
+<span class="d-add">+RADIUS_M = float(os.environ.get(&quot;NODE_BLOCK_RADIUS_M&quot;, &quot;9&quot;))</span>
+<span class="d-add">+# Discs are 16-gons: plenty round at 9 m, keeps the geojson/tiles small.</span>
+<span class="d-ctx"> QUAD_SEGS = int(os.environ.get(&quot;NODE_BLOCK_QUAD_SEGS&quot;, &quot;4&quot;))</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -65,6 +77,25 @@ def junction_nodes(g) -&gt; np.ndarray:</span>
+<span class="d-ctx">     return np.where(deg &gt;= 3)[0]</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+def cluster_junctions(xy: np.ndarray, link_dist: float) -&gt; np.ndarray:</span>
+<span class="d-add">+    &quot;&quot;&quot;Union-find label per junction: centers closer than link_dist (= 2R,</span>
+<span class="d-add">+    i.e. overlapping discs) share a cluster. Returns int labels, one per row.&quot;&quot;&quot;</span>
+<span class="d-add">+    parent = np.arange(len(xy))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def find(a):</span>
+<span class="d-add">+        while parent[a] != a:</span>
+<span class="d-add">+            parent[a] = parent[parent[a]]</span>
+<span class="d-add">+            a = parent[a]</span>
+<span class="d-add">+        return a</span>
+<span class="d-add">+</span>
+<span class="d-add">+    pairs = cKDTree(xy).query_pairs(r=link_dist, output_type=&quot;ndarray&quot;)</span>
+<span class="d-add">+    for a, b in pairs:</span>
+<span class="d-add">+        ra, rb = find(a), find(b)</span>
+<span class="d-add">+        if ra != rb:</span>
+<span class="d-add">+            parent[rb] = ra</span>
+<span class="d-add">+    return np.array([find(i) for i in range(len(xy))])</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> def main():</span>
+<span class="d-ctx">     t0 = time.time()</span>
+<span class="d-ctx">     city = CITIES[CITY]</span>
+<span class="d-hunk">@@ -77,17 +108,44 @@ def main():</span>
+<span class="d-ctx">           f&quot;(deg&gt;=3) of {len(nodes)} — r={RADIUS_M}m&quot;, flush=True)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # Same local equirectangular frame as build_foot_blocks.py so both scripts</span>
+<span class="d-del">-    # agree exactly on where a disc&#x27;s boundary falls.</span>
+<span class="d-add">+    # agree exactly on where a blob&#x27;s boundary falls.</span>
+<span class="d-ctx">     s, w, n, e = city.bbox</span>
+<span class="d-ctx">     mlat = 111_320.0</span>
+<span class="d-ctx">     mlon = 111_320.0 * math.cos(math.radians((s + n) / 2))</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     xs = (nodes[junctions, 1] - w) * mlon</span>
+<span class="d-ctx">     ys = (nodes[junctions, 0] - s) * mlat</span>
+<span class="d-add">+    xy = np.column_stack((xs, ys))</span>
+<span class="d-add">+    labels = cluster_junctions(xy, link_dist=2 * RADIUS_M)</span>
+<span class="d-add">+    n_clusters = len(np.unique(labels))</span>
+<span class="d-add">+    print(f&quot;[node_blocks] {n_clusters} clusters from {len(junctions)} junctions &quot;</span>
+<span class="d-add">+          f&quot;({time.time()-t0:.0f}s)&quot;, flush=True)</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     discs_m = shp_buffer(shp_points(xs, ys), RADIUS_M, quad_segs=QUAD_SEGS)</span>
+<span class="d-ctx">     to_ll = lambda a: np.column_stack((a[:, 0] / mlon + w, a[:, 1] / mlat + s))</span>
+<span class="d-del">-    discs = shapely.transform(discs_m, to_ll)</span>
+<span class="d-del">-    print(f&quot;[node_blocks] built {len(discs)} discs in {time.time()-t0:.0f}s&quot;, flush=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # One blob per cluster: union of the member discs, converted to lon/lat.</span>
+<span class="d-add">+    order = np.argsort(labels, kind=&quot;stable&quot;)</span>
+<span class="d-add">+    blobs = []          # (blob_lonlat, node_id, n_nodes)</span>
+<span class="d-add">+    blob_members = []   # graph node indices per blob, aligned with `blobs`</span>
+<span class="d-add">+    i = 0</span>
+<span class="d-add">+    sorted_labels = labels[order]</span>
+<span class="d-add">+    while i &lt; len(order):</span>
+<span class="d-add">+        j = i</span>
+<span class="d-add">+        while j &lt; len(order) and sorted_labels[j] == sorted_labels[i]:</span>
+<span class="d-add">+            j += 1</span>
+<span class="d-add">+        members = order[i:j]</span>
+<span class="d-add">+        geom = discs_m[members[0]] if len(members) == 1 else union_all(discs_m[members])</span>
+<span class="d-add">+        blobs.append((</span>
+<span class="d-add">+            shapely.transform(geom, to_ll),</span>
+<span class="d-add">+            int(junctions[members.min()]),</span>
+<span class="d-add">+            len(members),</span>
+<span class="d-add">+        ))</span>
+<span class="d-add">+        blob_members.append(junctions[members])</span>
+<span class="d-add">+        i = j</span>
+<span class="d-add">+    max_n = max(b[2] for b in blobs)</span>
+<span class="d-add">+    print(f&quot;[node_blocks] built {len(blobs)} blobs (largest cluster: {max_n} &quot;</span>
+<span class="d-add">+          f&quot;nodes) in {time.time()-t0:.0f}s&quot;, flush=True)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     out_dir = os.environ.get(&quot;BLOCKS_OUT&quot;, os.path.join(_HERE, &quot;output&quot;))</span>
+<span class="d-ctx">     blocks_path = os.path.join(out_dir, f&quot;blocks_generic_{CITY}.geojson&quot;)</span>
+<span class="d-hunk">@@ -99,45 +157,64 @@ def main():</span>
+<span class="d-ctx">         print(f&quot;[node_blocks] dropped {dropped} stale node/foot features &quot;</span>
+<span class="d-ctx">               f&quot;(rebuilt downstream)&quot;, flush=True)</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    # Subtract every disc from every street block it intersects.</span>
+<span class="d-add">+    # Subtract every blob from every street block it intersects.</span>
+<span class="d-ctx">     geoms = shapely.from_geojson(</span>
+<span class="d-ctx">         json.dumps({&quot;type&quot;: &quot;GeometryCollection&quot;,</span>
+<span class="d-ctx">                     &quot;geometries&quot;: [f[&quot;geometry&quot;] for f in feats]}))</span>
+<span class="d-ctx">     polys = np.asarray(shapely.get_parts(geoms) if geoms.geom_type == &quot;GeometryCollection&quot;</span>
+<span class="d-ctx">                        else [geoms], dtype=object)</span>
+<span class="d-del">-    tree = STRtree(discs)</span>
+<span class="d-del">-    block_idx, disc_idx = tree.query(polys, predicate=&quot;intersects&quot;)</span>
+<span class="d-add">+    blob_geoms = np.array([b[0] for b in blobs], dtype=object)</span>
+<span class="d-add">+    tree = STRtree(blob_geoms)</span>
+<span class="d-add">+    block_idx, blob_idx = tree.query(polys, predicate=&quot;intersects&quot;)</span>
+<span class="d-ctx">     print(f&quot;[node_blocks] clipping {len(np.unique(block_idx))} street blocks &quot;</span>
+<span class="d-del">-          f&quot;touched by discs…&quot;, flush=True)</span>
+<span class="d-add">+          f&quot;touched by node blobs…&quot;, flush=True)</span>
+<span class="d-ctx">     cut = 0</span>
+<span class="d-ctx">     for bi in np.unique(block_idx):</span>
+<span class="d-del">-        d_union = union_all(discs[disc_idx[block_idx == bi]])</span>
+<span class="d-del">-        # area_m2 is left as-is: informational only, and the removed disc area</span>
+<span class="d-del">-        # (~450 m² per touched corner) is small against a block&#x27;s ROW.</span>
+<span class="d-del">-        feats[bi][&quot;geometry&quot;] = mapping(shapely.difference(polys[bi], d_union))</span>
+<span class="d-add">+        cutter = union_all(blob_geoms[blob_idx[block_idx == bi]])</span>
+<span class="d-add">+        # area_m2 is left as-is: informational only, and the removed area is</span>
+<span class="d-add">+        # small against a block&#x27;s ROW.</span>
+<span class="d-add">+        feats[bi][&quot;geometry&quot;] = mapping(shapely.difference(polys[bi], cutter))</span>
+<span class="d-ctx">         cut += 1</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     next_id = max((f[&quot;properties&quot;][&quot;block_id&quot;] for f in feats), default=-1) + 1</span>
+<span class="d-del">-    disc_area = math.pi * RADIUS_M * RADIUS_M</span>
+<span class="d-del">-    for k, poly in enumerate(discs):</span>
+<span class="d-add">+    first_blob_id = next_id</span>
+<span class="d-add">+    for geom_ll, node_id, n_nodes in blobs:</span>
+<span class="d-ctx">         feats.append({</span>
+<span class="d-ctx">             &quot;type&quot;: &quot;Feature&quot;,</span>
+<span class="d-ctx">             &quot;properties&quot;: {</span>
+<span class="d-ctx">                 &quot;block_id&quot;: next_id, &quot;seg_id&quot;: -1, &quot;road_class&quot;: &quot;node&quot;,</span>
+<span class="d-del">-                &quot;road_name&quot;: None, &quot;area_m2&quot;: round(disc_area, 1),</span>
+<span class="d-del">-                &quot;node_id&quot;: int(junctions[k]),</span>
+<span class="d-add">+                &quot;road_name&quot;: None,</span>
+<span class="d-add">+                &quot;area_m2&quot;: round(shapely.area(geom_ll) * mlat * mlon, 1),</span>
+<span class="d-add">+                &quot;node_id&quot;: node_id, &quot;n_nodes&quot;: n_nodes,</span>
+<span class="d-ctx">             },</span>
+<span class="d-del">-            &quot;geometry&quot;: mapping(poly),</span>
+<span class="d-add">+            &quot;geometry&quot;: mapping(geom_ll),</span>
+<span class="d-ctx">         })</span>
+<span class="d-ctx">         next_id += 1</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     fc[&quot;features&quot;] = feats</span>
+<span class="d-del">-    tmp = blocks_path + &quot;.tmp&quot;</span>
+<span class="d-del">-    json.dump(fc, open(tmp, &quot;w&quot;))</span>
+<span class="d-add">+    # pid-unique tmp: a stale sibling process fighting over one shared &quot;.tmp&quot;</span>
+<span class="d-add">+    # interleaves writes and corrupts the output on os.replace.</span>
+<span class="d-add">+    tmp = f&quot;{blocks_path}.tmp{os.getpid()}&quot;</span>
+<span class="d-add">+    with open(tmp, &quot;w&quot;) as fh:</span>
+<span class="d-add">+        json.dump(fc, fh)</span>
+<span class="d-ctx">     os.replace(tmp, blocks_path)</span>
+<span class="d-del">-    print(f&quot;[node_blocks] clipped {cut} blocks, appended {len(discs)} node discs &quot;</span>
+<span class="d-del">-          f&quot;→ {os.path.basename(blocks_path)} ({len(feats)} features, &quot;</span>
+<span class="d-del">-          f&quot;{time.time()-t0:.0f}s)&quot;, flush=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # Sidecar for the bake&#x27;s junction-capture pass (SEPARATE node mapping logic:</span>
+<span class="d-add">+    # the drawn blobs are 9 m, but any edge whose midpoint is within</span>
+<span class="d-add">+    # NODE_CAPTURE_M of a junction maps to that junction&#x27;s block by GRAPH</span>
+<span class="d-add">+    # distance — stub midpoints run to ~12 m, past the drawn rim).</span>
+<span class="d-add">+    sidecar = os.path.join(_SERVER, city.data_dir, f&quot;node_clusters_{NETWORK}.npz&quot;)</span>
+<span class="d-add">+    np.savez(</span>
+<span class="d-add">+        sidecar,</span>
+<span class="d-add">+        node_idx=np.concatenate(blob_members).astype(np.int64),</span>
+<span class="d-add">+        block_id=np.concatenate([</span>
+<span class="d-add">+            np.full(len(m), first_blob_id + k, dtype=np.int32)</span>
+<span class="d-add">+            for k, m in enumerate(blob_members)</span>
+<span class="d-add">+        ]),</span>
+<span class="d-add">+    )</span>
+<span class="d-add">+    print(f&quot;[node_blocks] clipped {cut} blocks, appended {len(blobs)} node blobs &quot;</span>
+<span class="d-add">+          f&quot;→ {os.path.basename(blocks_path)} ({len(feats)} features); &quot;</span>
+<span class="d-add">+          f&quot;sidecar {os.path.basename(sidecar)} ({time.time()-t0:.0f}s)&quot;, flush=True)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> if __name__ == &quot;__main__&quot;:</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/streetscape_blocks/eval/eval_ladder.py</span>
+            <span class="stat"><span class="d-add">+93</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">server · streetscape_blocks/eval</span>
+        <span class="ctx-sum">mapping-quality harnesses</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">eval_ladder.py</span>
+        <span class="ctx-sum">NEW — the ladder metric as a repeatable eval</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">stub scan</span><span class="ol-sum">midtown avenue crossing stubs → block class distribution</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>run after any re-bake: PERPENDICULAR must be 0</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/eval/eval_ladder.py b/server/streetscape_blocks/eval/eval_ladder.py</span>
+<span class="d-ctx">new file mode 100644</span>
+<span class="d-meta">index 0000000..60dd88c</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/eval/eval_ladder.py</span>
+<span class="d-hunk">@@ -0,0 +1,93 @@</span>
+<span class="d-add">+#!/usr/bin/env python3</span>
+<span class="d-add">+&quot;&quot;&quot;Ladder metric: do intersection-crossing stubs map to perpendicular blocks?</span>
+<span class="d-add">+</span>
+<span class="d-add">+Samples named-avenue edges in midtown that (a) touch a junction node and</span>
+<span class="d-add">+(b) are shorter than 24 m — the crossing stubs whose midpoints used to bake</span>
+<span class="d-add">+into a PERPENDICULAR street&#x27;s block (the &quot;ladder&quot; bug). Reports where they map</span>
+<span class="d-add">+now. Target: 0 perpendicular.</span>
+<span class="d-add">+</span>
+<span class="d-add">+  CITY=nyc NETWORK=streets ./env/bin/python streetscape_blocks/eval/eval_ladder.py</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+import json</span>
+<span class="d-add">+import math</span>
+<span class="d-add">+import os</span>
+<span class="d-add">+import sys</span>
+<span class="d-add">+</span>
+<span class="d-add">+import numpy as np</span>
+<span class="d-add">+</span>
+<span class="d-add">+_HERE = os.path.dirname(os.path.abspath(__file__))</span>
+<span class="d-add">+_SERVER = os.path.abspath(os.path.join(_HERE, &quot;..&quot;, &quot;..&quot;))</span>
+<span class="d-add">+sys.path.insert(0, _SERVER)</span>
+<span class="d-add">+sys.path.insert(0, os.path.join(_SERVER, &quot;streetscape_blocks&quot;))</span>
+<span class="d-add">+</span>
+<span class="d-add">+from cities import CITIES  # noqa: E402</span>
+<span class="d-add">+from graph_registry import CityGraph  # noqa: E402</span>
+<span class="d-add">+from build_node_blocks import junction_nodes  # noqa: E402</span>
+<span class="d-add">+</span>
+<span class="d-add">+CITY = os.environ.get(&quot;CITY&quot;, &quot;nyc&quot;)</span>
+<span class="d-add">+NETWORK = os.environ.get(&quot;NETWORK&quot;, &quot;streets&quot;)</span>
+<span class="d-add">+BLOCKS_FILE = os.environ.get(</span>
+<span class="d-add">+    &quot;BLOCKS_FILE&quot;,</span>
+<span class="d-add">+    os.path.join(_SERVER, &quot;streetscape_blocks&quot;, &quot;output&quot;, f&quot;blocks_generic_{CITY}.geojson&quot;),</span>
+<span class="d-add">+)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def main():</span>
+<span class="d-add">+    g = CityGraph(CITIES[CITY], redis_client=None, network=NETWORK)</span>
+<span class="d-add">+    g.ensure_loaded()</span>
+<span class="d-add">+    ebid = np.asarray(g.edge_block_id)</span>
+<span class="d-add">+    fc = json.load(open(BLOCKS_FILE))</span>
+<span class="d-add">+    cls, name = {}, {}</span>
+<span class="d-add">+    for f in fc[&quot;features&quot;]:</span>
+<span class="d-add">+        p = f[&quot;properties&quot;]</span>
+<span class="d-add">+        cls[p[&quot;block_id&quot;]] = p[&quot;road_class&quot;]</span>
+<span class="d-add">+        name[p[&quot;block_id&quot;]] = p[&quot;road_name&quot;]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    nodes = np.asarray(g.nodes)</span>
+<span class="d-add">+    deg_junction = np.zeros(len(nodes), dtype=bool)</span>
+<span class="d-add">+    deg_junction[junction_nodes(g)] = True</span>
+<span class="d-add">+</span>
+<span class="d-add">+    mlat = 111_320.0</span>
+<span class="d-add">+    mlon = 111_320.0 * math.cos(math.radians(40.7))</span>
+<span class="d-add">+    bad = ok_node = ok_same = other = 0</span>
+<span class="d-add">+    samples = []</span>
+<span class="d-add">+    for i, e in enumerate(g.edges):</span>
+<span class="d-add">+        nm = e[2]</span>
+<span class="d-add">+        if not nm or &quot;Avenue&quot; not in nm:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        a, b = e[0], e[1]</span>
+<span class="d-add">+        la1, lo1 = nodes[a]</span>
+<span class="d-add">+        la2, lo2 = nodes[b]</span>
+<span class="d-add">+        if not (40.73 &lt; la1 &lt; 40.78 and -74.01 &lt; lo1 &lt; -73.96):</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        if not (deg_junction[a] or deg_junction[b]):</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        if math.hypot((la1 - la2) * mlat, (lo1 - lo2) * mlon) &gt;= 24:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        bl = int(ebid[i])</span>
+<span class="d-add">+        if bl &lt; 0:</span>
+<span class="d-add">+            other += 1</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        c = cls.get(bl)</span>
+<span class="d-add">+        if c == &quot;node&quot;:</span>
+<span class="d-add">+            ok_node += 1</span>
+<span class="d-add">+        elif name.get(bl) == nm:</span>
+<span class="d-add">+            ok_same += 1</span>
+<span class="d-add">+        elif c == &quot;foot&quot;:</span>
+<span class="d-add">+            other += 1</span>
+<span class="d-add">+        else:</span>
+<span class="d-add">+            bad += 1</span>
+<span class="d-add">+            if len(samples) &lt; 5:</span>
+<span class="d-add">+                samples.append((i, nm, &quot;-&gt;&quot;, name.get(bl), c))</span>
+<span class="d-add">+    tot = bad + ok_node + ok_same + other</span>
+<span class="d-add">+    print(f&quot;crossing-stub edges on midtown avenues: {tot}&quot;)</span>
+<span class="d-add">+    print(f&quot;  -&gt; node block: {ok_node} ({100*ok_node/tot:.1f}%)&quot;)</span>
+<span class="d-add">+    print(f&quot;  -&gt; same-street block: {ok_same} ({100*ok_same/tot:.1f}%)&quot;)</span>
+<span class="d-add">+    print(f&quot;  -&gt; PERPENDICULAR street block: {bad} ({100*bad/tot:.1f}%)&quot;)</span>
+<span class="d-add">+    print(f&quot;  -&gt; other (foot/unmapped): {other}&quot;)</span>
+<span class="d-add">+    if samples:</span>
+<span class="d-add">+        print(&quot;sample offenders:&quot;, samples)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+if __name__ == &quot;__main__&quot;:</span>
+<span class="d-add">+    main()</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes-routeprop-ui.diff</code> by <code>changelog/build_routeprop_ui_report.py</code>.
+    Regenerate after further edits with
+    <code>git diff 12475e6^ -- &lt;files&gt; &gt; changelog/changes-routeprop-ui.diff &amp;&amp; python changelog/build_routeprop_ui_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
