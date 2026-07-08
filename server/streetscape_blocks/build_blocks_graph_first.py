@@ -20,22 +20,25 @@ edge∩polygon overlap hold by construction:
      is a crosswalk stub and joins the nearer one; every other edge joins a
      CORRIDOR — connected components linked through non-junction endpoints,
      i.e. one component per path segment between junctions.
-  3. DEGENERACY FIXPOINT (topological, from merge_degenerate_blocks.py's V1/V2):
+  3. DEGENERACY + EQUIVALENCE FIXPOINT (topological): four rules iterate to
+     convergence — A) corridors with the SAME two endpoint clusters merge
+     (both sidewalks + the roadway of one street segment = one block); V1)
      driveway-class stubs (extent ≤ STUB_MAX_M, one junction) melt into their
-     junction; a junction left touching ≤ 1 corridor isn't a junction — it
-     dissolves into that corridor (or, isolated, stays a node-only cell).
-  4. GEOMETRY FROM MEMBERSHIP: a junction cell is the union of discs at its
-     member nodes plus the tubes of its captured edges — every member sits
-     inside its own polygon by construction (the old clipped-Voronoi discs
-     cut ~15% of members out via the radius cap + bisector clipping); a
-     corridor is the union of its member-edge tubes (per-class half-width)
-     minus the junction cells, so corridor-vs-junction stays disjoint
-     (junctions win). A corridor edge left entirely inside junction cells is
-     REASSIGNED to the cell containing its midpoint — membership follows the
-     final geometry, so edge∩polygon overlap is total. Adjacent junction
-     cells may overlap slightly (a crosswalk tube reaching its partner
-     corner); with membership decided topologically that ambiguity is only
-     visual.
+     junction; V2) a junction touching ≤ 1 corridor isn't a junction and
+     dissolves into that corridor; B) clusters with the SAME incident-corridor
+     set (≥ 2 corridors) merge (an over-split intersection becomes one
+     junction). A and B feed each other, hence the loop; every rule strictly
+     shrinks a count, so it terminates.
+  4. GEOMETRY FROM MEMBERSHIP: a junction cell is the CONVEX HULL of its
+     member nodes (⊕ pad) unioned with its captured edges' tubes — a compact
+     intersection footprint, not a bulbous disc union — then bisector-trimmed
+     (Voronoi-style) against overlapping neighbour cells, skipping any cut
+     that would evict a member node or detach a captured edge; a corridor is
+     the union of its member-edge tubes (per-class half-width) minus the
+     junction cells, so corridor-vs-junction stays disjoint (junctions win).
+     A corridor edge left entirely inside junction cells is REASSIGNED to the
+     cell containing its midpoint — membership follows the final geometry, so
+     edge∩polygon overlap is total.
 
 Outputs (same contract the server + tippecanoe already consume):
   output/blocks_final_<city>.geojson       display polygons, dense block_id
@@ -63,7 +66,7 @@ if _SERVER not in sys.path:
 
 import shapely  # noqa: E402
 from shapely import STRtree, LineString, union_all, buffer as shp_buffer  # noqa: E402
-from shapely.geometry import mapping  # noqa: E402
+from shapely.geometry import Polygon, mapping  # noqa: E402
 from scipy.spatial import cKDTree  # noqa: E402
 
 from cities import CITIES  # noqa: E402
@@ -250,69 +253,142 @@ def main():
           f"{int(cross_short.sum())} crosswalk stubs + {len(corr_edges)} corridor "
           f"edges in {n_corr} corridors ({time.time()-t0:.0f}s)", flush=True)
 
-    # ── 3. Degeneracy fixpoint (V1 stubs, V2 fake junctions) ────────────────
-    # corridor → set of touching clusters (via member-edge endpoints).
+    # ── 3. Degeneracy + equivalence fixpoint ────────────────────────────────
+    # Four rules iterate to convergence — each strictly shrinks the corridor
+    # or cluster count, so termination is guaranteed (MAX_ROUNDS is a
+    # backstop). Each round does ONE O(E) incidence sweep and groups by
+    # frozenset signature (dict buckets, no pairwise comparisons):
+    #   A   parallel corridors: corridors with the SAME two endpoint clusters
+    #       merge — the two sidewalks + roadway of one street segment (or the
+    #       two sides of a path loop) become ONE block;
+    #   V1  stub: a driveway-class corridor ≤ STUB_MAX_M touching exactly one
+    #       junction melts into it;
+    #   V2  fake junction: a cluster touching ≤ 1 live corridor dissolves
+    #       into that corridor;
+    #   B   equivalent junctions: clusters with the SAME incident-corridor
+    #       set (≥ 2 corridors) merge — an intersection the link/extent
+    #       clustering split into several sub-clusters becomes one junction.
+    # A and B feed each other (merging sidewalk pairs makes the two corner
+    # clusters' corridor sets equal; merging those clusters keys more
+    # corridors onto the same endpoint pair), hence the loop.
     corr_alive = [True] * n_corr
     cluster_alive = [len(m) > 0 for m in cl_members]
 
-    def corr_clusters(members):
-        cs = set()
-        for eid in members:
-            for nd in ends[eid]:
-                if node_cluster[nd] >= 0:
-                    cs.add(int(node_cluster[nd]))
-        return cs
-
     stubs_merged = 0
     junctions_dissolved = 0
+    corridors_merged = 0
+    clusters_merged = 0
+    rounds = 0
     for _ in range(MAX_ROUNDS):
+        rounds += 1
         changed = False
-        # V1: driveway-class stub corridors melt into their only junction.
+
+        # One incidence sweep: corridor → set of live clusters it touches.
+        corr_cl: list[set[int]] = [set() for _ in range(n_corr)]
         for c in range(n_corr):
             if not corr_alive[c]:
                 continue
-            members = corridors[c]
-            touching = [k for k in corr_clusters(members) if cluster_alive[k]]
-            if len(touching) != 1:
+            for eid in corridors[c]:
+                for nd in ends[eid]:
+                    k = int(node_cluster[nd])
+                    if k >= 0 and cluster_alive[k]:
+                        corr_cl[c].add(k)
+
+        # A) Same endpoint-cluster pair → one corridor. (Merging same-key
+        # corridors leaves the survivor's cluster set == the key, so corr_cl
+        # stays valid for the passes below.)
+        by_ends: dict[frozenset, list[int]] = {}
+        for c in range(n_corr):
+            if corr_alive[c] and len(corr_cl[c]) == 2:
+                by_ends.setdefault(frozenset(corr_cl[c]), []).append(c)
+        for cs in by_ends.values():
+            if len(cs) > 1:
+                root = cs[0]
+                for c in cs[1:]:
+                    corridors[root].extend(corridors[c])
+                    corridors[c] = []
+                    corr_alive[c] = False
+                corridors_merged += len(cs) - 1
+                changed = True
+
+        # V1) driveway-class stub corridors melt into their only junction.
+        for c in range(n_corr):
+            if not corr_alive[c] or len(corr_cl[c]) != 1:
                 continue
+            members = corridors[c]
             pts = node_xy[ends[members].ravel()]
             diag = float(np.hypot(*(pts.max(axis=0) - pts.min(axis=0))))
             if diag > STUB_MAX_M:
                 continue
             if not all(rc in STUBBY_CLASSES for rc in rclass[members]):
                 continue
-            k = touching[0]
+            k = next(iter(corr_cl[c]))
             edge_cluster[members] = k
             corr_alive[c] = False
             corridors[c] = []
             stubs_merged += 1
             changed = True
-        # V2: a cluster touching ≤ 1 live corridor isn't a junction. Dissolve
-        # it into that corridor (its captured edges + member nodes go there);
-        # an isolated cluster (0 corridors) stays as a node-only cell.
-        cl_corrs: list[set[int]] = [set() for _ in range(n_clusters)]
+
+        # Cluster → set of live incident corridors (reflects A/V1 above).
+        cl_corrs: dict[int, set[int]] = {}
         for c in range(n_corr):
             if not corr_alive[c]:
                 continue
-            for k in corr_clusters(corridors[c]):
-                if cluster_alive[k]:
-                    cl_corrs[k].add(c)
+            for k in corr_cl[c]:
+                cl_corrs.setdefault(k, set()).add(c)
+
+        # V2) A cluster touching ≤ 1 live corridor isn't a junction. Dissolve
+        # it into that corridor (its captured edges + member nodes go there);
+        # an isolated cluster (0 corridors) keeps its members and is skipped.
         for k in range(n_clusters):
-            if not cluster_alive[k] or len(cl_corrs[k]) != 1:
+            if not cluster_alive[k]:
                 continue
-            c = next(iter(cl_corrs[k]))
+            cs = cl_corrs.get(k, set())
+            if len(cs) != 1:
+                continue
+            c = next(iter(cs))
             captured = np.where(edge_cluster == k)[0]
             corridors[c].extend(int(x) for x in captured)
             edge_cluster[captured] = -1
             node_cluster[cl_members[k]] = -1
             cluster_alive[k] = False
+            cl_corrs.pop(k, None)
             junctions_dissolved += 1
             changed = True
+
+        # B) Same incident-corridor set (≥ 2 corridors) → one cluster. The
+        # remap is applied vectorized once per round.
+        by_corrs: dict[frozenset, list[int]] = {}
+        for k in range(n_clusters):
+            if cluster_alive[k]:
+                sig = frozenset(cl_corrs.get(k, set()))
+                if len(sig) >= 2:
+                    by_corrs.setdefault(sig, []).append(k)
+        remap = None
+        for ks in by_corrs.values():
+            if len(ks) > 1:
+                if remap is None:
+                    remap = np.arange(n_clusters)
+                root = ks[0]
+                for k in ks[1:]:
+                    remap[k] = root
+                    cl_members[root] = np.concatenate([cl_members[root], cl_members[k]])
+                    cl_members[k] = cl_members[k][:0]
+                    cluster_alive[k] = False
+                clusters_merged += len(ks) - 1
+                changed = True
+        if remap is not None:
+            m = edge_cluster >= 0
+            edge_cluster[m] = remap[edge_cluster[m]]
+            m = node_cluster >= 0
+            node_cluster[m] = remap[node_cluster[m]]
+
         if not changed:
             break
-    print(f"[gf] degeneracy fixpoint: {stubs_merged} stubs → junctions, "
-          f"{junctions_dissolved} fake junctions → corridors "
-          f"({time.time()-t0:.0f}s)", flush=True)
+    print(f"[gf] fixpoint ({rounds} rounds): {corridors_merged} parallel "
+          f"corridors merged, {clusters_merged} equivalent clusters merged, "
+          f"{stubs_merged} stubs → junctions, {junctions_dissolved} fake "
+          f"junctions → corridors ({time.time()-t0:.0f}s)", flush=True)
 
     # ── 4. Geometry from membership ─────────────────────────────────────────
     widths = np.array([HALF_WIDTH.get(rc, DEFAULT_HALF_WIDTH) * WIDTH_SCALE
@@ -327,27 +403,73 @@ def main():
                                     widths[list(eids)],
                                     cap_style="round", join_style="round"))
 
-    # Junction cells: member-node discs ∪ captured-edge tubes — every member
-    # is inside its own cell by construction. A cluster that captured NO edges
-    # gets no cell at all: an empty cell could never hold or display a vote
-    # (votes live on edges), so any interaction inside it would resolve to a
-    # NEIGHBOURING block's edge — a polygon that says "no votes" while its
-    # corridors sit lit around it. The surrounding corridors' own tubes cover
-    # the fork instead (they meet at the shared endpoint), so the junction
-    # area lights with whichever corridor actually holds the votes.
+    # Junction cells: CONVEX HULL of the member nodes (⊕ NODE_R_M pad) ∪ the
+    # captured edges' tubes — one compact shape that follows the intersection's
+    # own footprint instead of the bulbous per-node disc unions (which drew as
+    # 4-lobed clovers at street corners). Every member is still inside its own
+    # cell by construction. A cluster that captured NO edges gets no cell at
+    # all: an empty cell could never hold or display a vote (votes live on
+    # edges), so any interaction inside it would resolve to a NEIGHBOURING
+    # block's edge — the surrounding corridors' own tubes cover the fork
+    # instead, and the junction area lights with whichever corridor actually
+    # holds the votes.
     cap_count = np.bincount(edge_cluster[edge_cluster >= 0], minlength=n_clusters)
     empty_junctions = sum(1 for k in range(n_clusters)
                           if cluster_alive[k] and cap_count[k] == 0)
     live_cl = [k for k in range(n_clusters) if cluster_alive[k] and cap_count[k] > 0]
     cells = []
+    cell_ctr = []
     for k in live_cl:
-        discs = shp_buffer(shapely.points(node_xy[cl_members[k]]), NODE_R_M,
-                           quad_segs=6)
+        pts = node_xy[cl_members[k]]
+        hull = shapely.convex_hull(shapely.multipoints(pts)).buffer(
+            NODE_R_M, quad_segs=4)
         captured = np.where(edge_cluster == k)[0]
-        parts = list(discs)
-        if len(captured):
-            parts.append(tube_of(captured))
-        cells.append(union_all(parts))
+        cells.append(union_all([hull, tube_of(captured)]) if len(captured)
+                     else hull)
+        cell_ctr.append(pts.mean(axis=0))
+
+    # Voronoi trim: where two cells overlap, cut each at the perpendicular
+    # bisector of the two clusters' member centroids — abutting junctions get
+    # a straight shared boundary instead of stacked blobs. A cut that would
+    # evict a member node or detach a captured edge is skipped: the audit
+    # invariants (every member touches its polygon) win over aesthetics.
+    def halfplane(c, nb, span=200.0):
+        """Rectangle covering c's side of the perpendicular bisector toward nb."""
+        d = float(np.hypot(*(nb - c)))
+        if d < 1e-9:
+            return None
+        u = (nb - c) / d
+        v = np.array([-u[1], u[0]])
+        m = (c + nb) / 2.0
+        return Polygon([m + span * v, m - span * v,
+                        m - span * v - 2 * span * u,
+                        m + span * v - 2 * span * u])
+
+    cells_trimmed = 0
+    if len(cells) > 1:
+        pre_tree = STRtree(cells)
+        qi, qj = pre_tree.query(np.array(cells, dtype=object),
+                                predicate="intersects")
+        for a, b in zip(qi, qj):
+            if a >= b:
+                continue
+            for i, j in ((int(a), int(b)), (int(b), int(a))):
+                hp = halfplane(cell_ctr[i], cell_ctr[j])
+                if hp is None:
+                    continue
+                cut = cells[i].intersection(hp)
+                if cut.is_empty or cut.area < 1.0:
+                    continue
+                k = live_cl[i]
+                if not shapely.dwithin(
+                        shapely.points(node_xy[cl_members[k]]), cut, 0.01).all():
+                    continue
+                captured = np.where(edge_cluster == k)[0]
+                if len(captured) and any(cut.distance(l) > 1e-6
+                                         for l in edge_lines(captured)):
+                    continue
+                cells[i] = cut
+                cells_trimmed += 1
     cell_tree = STRtree(cells) if cells else None
 
     # Corridor tubes minus junction cells (junctions win where they meet, so
@@ -388,10 +510,10 @@ def main():
         if not stay and c in corr_polys:
             del corr_polys[c]
     print(f"[gf] geometry: {len(corr_polys)} corridor tubes, {len(cells)} "
-          f"junction cells ({empty_junctions} edge-less clusters skipped — "
-          f"corridor tubes cover those forks); {reassigned} intersection-"
-          f"interior edges moved to their junction cell "
-          f"({time.time()-t0:.0f}s)", flush=True)
+          f"junction cells ({cells_trimmed} bisector-trimmed; "
+          f"{empty_junctions} edge-less clusters skipped — corridor tubes "
+          f"cover those forks); {reassigned} intersection-interior edges "
+          f"moved to their junction cell ({time.time()-t0:.0f}s)", flush=True)
 
     # ── 5. Emit: dense block ids, geojson + npy + meta ─────────────────────
     def to_ll(geom):
@@ -478,6 +600,9 @@ def main():
         "junction_cells": len(cells),
         "stubs_merged": stubs_merged,
         "junctions_dissolved": junctions_dissolved,
+        "parallel_corridors_merged": corridors_merged,
+        "equivalent_clusters_merged": clusters_merged,
+        "cells_bisector_trimmed": cells_trimmed,
         "edges_reassigned_to_cells": reassigned,
         "empty_junctions_skipped": empty_junctions,
         "edges_overlap_ok": overlapping, "edges_overlap_checked": checked,

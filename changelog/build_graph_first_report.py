@@ -97,9 +97,42 @@ SECTIONS = [
         ],
     },
     {
+        "id": "equiv",
+        "tag": "Pipeline · equivalence fixpoint + cell shapes",
+        "title": "2 · Parallel corridors and equivalent junctions merge; cells are hulls with Voronoi boundaries",
+        "symptom": (
+            "On the street grid every segment rendered as TWO parallel sidewalk corridors (plus the "
+            "roadway), and every intersection drew as a bulbous 4-lobed “clover” — the union of 8 m discs "
+            "at each corner node (Eric's 5th Avenue screenshot)."
+        ),
+        "cause": [
+            "Corridors were keyed only by connectivity, so each sidewalk of a street was its own block; "
+            "junction-cell geometry was a per-node disc union, which reads as stacked circles wherever a "
+            "cluster has several member nodes.",
+        ],
+        "fixes": [
+            "The degeneracy fixpoint gained two equivalence rules, iterated with V1/V2 to convergence "
+            "(each rule strictly shrinks the corridor or cluster count, so it terminates; one O(E) "
+            "incidence sweep per round, frozenset-signature dict grouping — no pairwise scans): "
+            "<strong>A</strong> corridors with the SAME two endpoint clusters merge (both sidewalks + "
+            "roadway of one street segment become ONE block — 4,843 merged on test-cp, 4 rounds); "
+            "<strong>B</strong> clusters with the SAME incident-corridor set (≥ 2 corridors) merge (an "
+            "over-split intersection becomes one junction; 0 fired on test-cp — the splitter didn't "
+            "over-split here, but A→B→A feedback is what the loop is for).",
+            "Junction cells are now the CONVEX HULL of the member nodes (⊕ 8 m pad) unioned with the "
+            "captured edges' tubes — one compact intersection footprint instead of the clover — and "
+            "overlapping cells are cut at the perpendicular bisector of their member centroids "
+            "(Voronoi-style shared boundaries, 889 trims). A cut that would evict a member node or detach "
+            "a captured edge is skipped: the 100% audit invariants win over aesthetics.",
+            "test-cp: 9,552 → 4,849 blocks (3,461 corridors + 1,388 junction cells), audit still "
+            "100% mapped / 100% edge∩polygon.",
+        ],
+        "files": ["server/streetscape_blocks/build_blocks_graph_first.py"],
+    },
+    {
         "id": "ids",
         "tag": "Pipeline · feature ids",
-        "title": "2 · block_ids are 1-based — MVT can't carry feature id 0",
+        "title": "3 · block_ids are 1-based — MVT can't carry feature id 0",
         "symptom": (
             "tippecanoe warned <em>“Can't represent too-large feature ID 0”</em> and dropped the native "
             "id from block 0's tile feature — so block 0 could never light (heat) or ring (selection): "
@@ -120,7 +153,7 @@ SECTIONS = [
     {
         "id": "resolver",
         "tag": "Client · hover/click/drag",
-        "title": "3 · Every hover and click resolves to the closest node/edge and its block",
+        "title": "4 · Every hover and click resolves to the closest node/edge and its block",
         "symptom": (
             "Gaps you could hover or click with nothing appearing selected: wherever the cursor wasn't "
             "over a block polygon, hover/click fell back to a 4px radius-bounded hit-test — so any hole "
@@ -150,7 +183,7 @@ SECTIONS = [
     {
         "id": "docs",
         "tag": "Docs",
-        "title": "4 · three-layer-model.md §2.1–2.2 describe the graph-first pipeline",
+        "title": "5 · three-layer-model.md §2.1–2.2 describe the graph-first pipeline",
         "symptom": (
             "The spec still described the five-script generate→map→patch→merge chain (and a 12 m "
             "midpoint-capture rule that predated even the previous redesign)."
@@ -172,6 +205,10 @@ VERIFY = [
     "after visual review; still 100% / 100%) → v4 (edge-less junction clusters get no cell; still "
     "100% / 100%, 9,552 blocks). Audit numbers are stamped in "
     "<code>edge_blocks_streets.json</code> (<code>edges_overlap_ok / edges_overlap_checked</code>).",
+    "Equivalence round (request 3): fixpoint converges in 4 rounds on test-cp — 4,843 parallel corridors "
+    "merged, 889 cells bisector-trimmed, 9,552 → 4,849 blocks, audit still 100% / 100%; street-grid and "
+    "park-interior geometry rendered offline (matplotlib over <code>blocks_final</code>) — one solid band "
+    "per street segment, compact hull cells, no clovers; Flask serves n_blocks 4,850 with 1,995 blocks lit.",
     "Empty-cell fix verified at the reported fork (40.76830, −73.97823, node 5979): before — pin inside "
     "block 8746 (<code>road_class=node, n_edges=0</code>), tooltip “No votes yet”, ring on a corridor "
     "outside the blob; after — the point sits inside the three corridor tubes (513/519/541) that own the "

@@ -109,15 +109,24 @@ mapped edges into them geometrically, which left unmapped edges — heatmap gaps
    connected components linked through non-junction endpoints, i.e. one
    component per segment between junctions (the same grain for streets and
    park paths).
-3. **Degeneracy fixpoint** — driveway-class stubs (extent ≤ 25 m, one
-   junction) melt into their junction; a junction left touching ≤ 1 corridor
-   isn't a junction and dissolves into that corridor.
-4. **Geometry from membership** — a junction cell is the union of 8 m discs at
-   its member nodes plus its captured edges' tubes; a corridor is the union of
-   its member edges buffered by per-road-class half-width, minus the junction
-   cells (junctions win where they meet). A corridor edge left entirely inside
-   junction cells is reassigned to the cell containing its midpoint —
-   membership follows the final geometry.
+3. **Degeneracy + equivalence fixpoint** — four rules iterate to convergence:
+   corridors with the SAME two endpoint clusters merge (both sidewalks + the
+   roadway of one street segment become one block); driveway-class stubs
+   (extent ≤ 25 m, one junction) melt into their junction; a junction left
+   touching ≤ 1 corridor isn't a junction and dissolves into that corridor;
+   clusters with the SAME incident-corridor set (≥ 2 corridors) merge (an
+   over-split intersection becomes one junction). Each rule strictly shrinks
+   a count, so the loop terminates.
+4. **Geometry from membership** — a junction cell is the convex hull of its
+   member nodes (⊕ 8 m pad) unioned with its captured edges' tubes, then cut
+   at the perpendicular bisector against overlapping neighbour cells
+   (Voronoi-style shared boundaries; a cut that would evict a member is
+   skipped). A cluster that captured no edges gets no cell — the corridors'
+   own tubes cover the fork. A corridor is the union of its member edges
+   buffered by per-road-class half-width, minus the junction cells (junctions
+   win where they meet). A corridor edge left entirely inside junction cells
+   is reassigned to the cell containing its midpoint — membership follows the
+   final geometry.
 5. Bakes `edge_block_id: int32[n_edges]`
    (`osm_data/<city>/edge_blocks_<network>.npy` + a meta JSON stamping
    `topology_etag` + `blocks_sha256`) and writes
