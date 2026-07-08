@@ -1447,20 +1447,27 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     return set;
   }, [midEdgeIdxs]);
 
-  // Does the current route still run through BOTH of this RBTP's anchors (as
-  // start/end/mid waypoints)? Governs how long an explicitly-tapped diamond
-  // stays selected: the tap inserted these exact anchor coords as waypoints, so
-  // a tight meters match (they only move if the user edits them) is the right
+  // Does the current route still run its corridor leg through this RBTP's
+  // anchors — i.e. are both anchors waypoints AND consecutive ones (no mid
+  // between them)? Governs how long an explicitly-tapped diamond stays
+  // selected: the tap inserted these exact anchor coords as waypoints, so a
+  // tight meters match (they only move if the user edits them) is the right
   // "still my selection" test — not path-edge coverage, which OSRM's routing
-  // between the anchors rarely satisfies.
+  // between the anchors rarely satisfies. Adjacency matters because inserting
+  // a mid BETWEEN the anchors un-forces the corridor segment (reducer
+  // insertMid → clearForcedAt): the leg reverts to OSRM and stops selecting
+  // the corridor's blocks, so the proposal must read deselected too.
   const anchorsAreWaypoints = useCallback((p: RouteProposal): boolean => {
     const wps: { lat: number; lng: number }[] = [];
     if (startLat !== null && startLng !== null) wps.push({ lat: startLat, lng: startLng });
-    if (endLat !== null && endLng !== null) wps.push({ lat: endLat, lng: endLng });
     wps.push(...ghostWaypointsRef.current);
+    if (endLat !== null && endLng !== null) wps.push({ lat: endLat, lng: endLng });
     if (wps.length < 2) return false;
-    return p.anchorCoords.every((a) =>
-      wps.some((w) => map.distance([a.lat, a.lng], [w.lat, w.lng]) < 5));
+    // Route-ordered list (start, mids…, end): each anchor must match a
+    // waypoint, and the two matches must be neighbors.
+    const idx = p.anchorCoords.map((a) =>
+      wps.findIndex((w) => map.distance([a.lat, a.lng], [w.lat, w.lng]) < 5));
+    return idx[0] >= 0 && idx[1] >= 0 && Math.abs(idx[0] - idx[1]) === 1;
     // ghostKey stands in for the mids (read via ref; the array identity churns).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startLat, startLng, endLat, endLng, ghostKey, map]);
