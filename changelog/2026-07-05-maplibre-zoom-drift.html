@@ -112,7 +112,7 @@
   <nav class="toc"><a href="#offbyone">1</a>
 <a href="#zoomride">2</a>
 <a href="#overzoom">3</a>
-    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a>
   </nav>
 
   <p class="lede">The “position drift” after the icons + heatmap zoom-rescale work was two separate
@@ -134,69 +134,9 @@
       <h3>What changed</h3>
       <ul><li>New module constant <code>LEAFLET_TO_MAPLIBRE_ZOOM = 1</code> with the why, subtracted in both places that drive the MapLibre camera: the map constructor and <code>syncCamera</code>'s <code>jumpTo</code>.</li>
 <li>Verified live: leaflet&nbsp;14&nbsp;/&nbsp;maplibre&nbsp;13, and the projection residual for off-center probe points dropped from hundreds of px to &lt;&nbsp;1&nbsp;px (float rounding), before and after pan/zoom.</li></ul>
-      <h3>Files touched</h3>
-      <ul class="files"><li>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</li></ul>
-    </section>
-    
-
-    <section class="card" id="zoomride">
-      <div class="tag">Client · zoom animation</div>
-      <h2>2 · Mid-zoom drift: the GL map froze while Leaflet glided</h2>
-      <h3>Symptom</h3>
-      <p>During a wheel/button zoom, the icons and heat canvas rescale smoothly (last workstream) but the MapLibre base map + block heat stayed FROZEN for the 250&nbsp;ms animation, then snapped to the target view — the layers visibly drifted apart mid-zoom on every single zoom step.</p>
-      <h3>Root cause</h3>
-      <ul><li>During its animated zoom Leaflet suppresses <code>move</code> events: <code>_animateZoom</code> calls <code>_move(center, zoom, undefined, supressEvent=true)</code> at animation start, and the only real <code>move</code> fires 250&nbsp;ms later in <code>_onZoomTransitionEnd</code>.</li>
-<li><code>syncCamera</code> only listens to <code>move</code>, so the GL camera held the OLD view for the whole transition while every <code>.leaflet-zoom-animated</code> element rode a CSS transform transition to the new one.</li>
-<li>(Pinch zoom was never affected: Leaflet's TouchZoom fires per-frame <code>move</code> events, which keep <code>jumpTo</code> live.)</li></ul>
-      <h3>What changed</h3>
-      <ul><li>New <code>zoomanim</code> handler rides the animation the same way the heat canvas does: it maps every current container point <code>p</code> to its target-frame position <code>q + p·scale</code> (where <code>q = project(nw, z') − project(center', z') + size/2</code> and <code>scale = 2^Δz</code>) and sets that as a CSS transform on the GL container with Leaflet's exact transition — <code>transform 0.25s cubic-bezier(0, 0, 0.25, 1)</code> — so base map, block heat, heat canvas and icons all tween on the identical curve.</li>
-<li>On <code>zoomend</code> the transform is cleared in the same tick as the final <code>move</code>'s <code>jumpTo</code>: MapLibre re-renders in its own rAF (before paint), so the crisp final frame and the cleared transform land in the same compositor frame — no flash.</li>
-<li>Guarded by Leaflet's <code>_animatingZoom</code> flag so pinch-zoom and <code>flyTo</code> (which sync per-frame via <code>move</code>) never fight the transition.</li>
-<li><code>transformOrigin: "0 0"</code> added to the container so the scale is about the viewport's top-left corner, matching the transform math.</li></ul>
-      <h3>Files touched</h3>
-      <ul class="files"><li>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</li></ul>
-    </section>
-    
-
-    <section class="card" id="overzoom">
-      <div class="tag">Client · deep zoom</div>
-      <h2>3 · Follow-on: don't lose the base map at deep zoom</h2>
-      <h3>Symptom</h3>
-      <p>With the camera now offset by −1, the old <code>maxzoom: 19</code> on the raster LAYER would have blanked the base map at Leaflet zooms ≥ 20 (the app allows 21) — a MapLibre layer-maxzoom HIDES the layer once the camera passes it.</p>
-      <h3>Root cause</h3>
-      <ul><li>CartoDB serves tiles up to z19. The cap belongs on the SOURCE, where it means “overzoom (stretch) z19 tiles beyond this” — the GL equivalent of Leaflet's <code>maxNativeZoom</code> — not on the layer, where it means “hide me”.</li></ul>
-      <h3>What changed</h3>
-      <ul><li>Moved <code>maxzoom: 19</code> from the <code>carto-tiles</code> layer onto the <code>carto-base</code> source (and dropped the layer's redundant <code>minzoom: 0</code>).</li></ul>
-      <h3>Files touched</h3>
-      <ul class="files"><li>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</li></ul>
-    </section>
-    
-
-  <section class="card verify" id="verify">
-    <div class="tag">Verification</div>
-    <h2>What was run</h2>
-    <ul><li>Quantified the bug before fixing: injected probe points via the browser console — dx/dy between <code>lm.latLngToContainerPoint</code> and <code>ml.project</code> was 0 at center, 116/-154&nbsp;px at +0.01°, -350/-461&nbsp;px at ±0.03° (exactly 2× slope). After the fix: &lt;&nbsp;1&nbsp;px everywhere.</li>
-<li>Exercised zoom in the live app (zoom control + reloads): cameras stay locked (leaflet z / maplibre z−1) and the projection residual stays sub-pixel after every zoom.</li>
-<li>Caught the ride mid-flight: during the 250&nbsp;ms animation the GL container carries <code>translate3d(…) scale(2)</code> with the Leaflet curve, and the transform reads back cleared (<code>""</code>) once settled; mid-animation screenshot shows pins tracking the scaled base map.</li>
-<li><code>npx tsc --noEmit</code> clean; full client suite green — 186/186 tests.</li>
-<li>A dev-only <code>window.__lmap</code> handle was added to MapView (committed meanwhile in <code>401db4b</code>) alongside the existing <code>window.__ml</code>, so both cameras stay measurable.</li></ul>
-  </section>
-
-  <section class="card checklist" id="checklist">
-    <div class="tag">For you</div>
-    <h2>Manual checklist</h2>
-    <ul><li>Open <a href='http://localhost:3000/m/nyc-walkways'>http://localhost:3000/m/nyc-walkways</a>, pan around at several zooms: pins and route lines should sit exactly on their streets everywhere on screen, not just at the center.</li>
-<li>Zoom with the +/− control and the mouse wheel: the base map + block heat should glide and rescale in lockstep with the icons through the whole animation — no freeze, no end-of-zoom snap.</li>
-<li>On a touch device (or DevTools touch emulation), pinch-zoom: should stay live and aligned per-frame.</li>
-<li>Zoom all the way in (Leaflet z20–21): the base map should stay visible (stretched z19 tiles), not blank.</li>
-<li>Cast a vote and confirm the block heat still lights the block under the edge you voted on (feature-state still keyed correctly after the camera change).</li></ul>
-  </section>
-
-  <section id="diff">
-    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
-    <p style="color:var(--muted);font-size:14px;margin-top:0;">Green is added, red removed.</p>
-    
-        <details open>
+      <h3>Diffs — files touched (click to expand)</h3>
+      
+        <details>
           <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
             <span class="stat"><span class="d-add">+51</span> / <span class="d-del">-4</span></span>
           </summary>
@@ -337,7 +277,345 @@
 <span class="d-ctx">   );</span></pre>
         </details>
         
+    </section>
+    
+
+    <section class="card" id="zoomride">
+      <div class="tag">Client · zoom animation</div>
+      <h2>2 · Mid-zoom drift: the GL map froze while Leaflet glided</h2>
+      <h3>Symptom</h3>
+      <p>During a wheel/button zoom, the icons and heat canvas rescale smoothly (last workstream) but the MapLibre base map + block heat stayed FROZEN for the 250&nbsp;ms animation, then snapped to the target view — the layers visibly drifted apart mid-zoom on every single zoom step.</p>
+      <h3>Root cause</h3>
+      <ul><li>During its animated zoom Leaflet suppresses <code>move</code> events: <code>_animateZoom</code> calls <code>_move(center, zoom, undefined, supressEvent=true)</code> at animation start, and the only real <code>move</code> fires 250&nbsp;ms later in <code>_onZoomTransitionEnd</code>.</li>
+<li><code>syncCamera</code> only listens to <code>move</code>, so the GL camera held the OLD view for the whole transition while every <code>.leaflet-zoom-animated</code> element rode a CSS transform transition to the new one.</li>
+<li>(Pinch zoom was never affected: Leaflet's TouchZoom fires per-frame <code>move</code> events, which keep <code>jumpTo</code> live.)</li></ul>
+      <h3>What changed</h3>
+      <ul><li>New <code>zoomanim</code> handler rides the animation the same way the heat canvas does: it maps every current container point <code>p</code> to its target-frame position <code>q + p·scale</code> (where <code>q = project(nw, z') − project(center', z') + size/2</code> and <code>scale = 2^Δz</code>) and sets that as a CSS transform on the GL container with Leaflet's exact transition — <code>transform 0.25s cubic-bezier(0, 0, 0.25, 1)</code> — so base map, block heat, heat canvas and icons all tween on the identical curve.</li>
+<li>On <code>zoomend</code> the transform is cleared in the same tick as the final <code>move</code>'s <code>jumpTo</code>: MapLibre re-renders in its own rAF (before paint), so the crisp final frame and the cleared transform land in the same compositor frame — no flash.</li>
+<li>Guarded by Leaflet's <code>_animatingZoom</code> flag so pinch-zoom and <code>flyTo</code> (which sync per-frame via <code>move</code>) never fight the transition.</li>
+<li><code>transformOrigin: "0 0"</code> added to the container so the scale is about the viewport's top-left corner, matching the transform math.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+      
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+            <span class="stat"><span class="d-add">+51</span> / <span class="d-del">-4</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/MapLibreBackground</span>
+        <span class="ctx-sum">the GL base map + block-heat renderer that sits UNDER the interactive Leaflet overlay</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapLibreBackground.tsx</span>
+        <span class="ctx-sum">~410 LOC — builds the GL style (carto raster + PMTiles blocks), mirrors the Leaflet camera, colors blocks via feature-state</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Module setup</span><span class="ol-sum">pmtiles protocol · NEW LEAFLET_TO_MAPLIBRE_ZOOM constant</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Block-event contracts</span><span class="ol-sum">BLOCK_VOTES_EVENT / BLOCK_SELECT_EVENT payloads</span></li><li class="dim"><span class="ol-label">blockFillPaint / blockLinePaint</span><span class="ol-sum">heat-driven fill + outline ramps</span></li><li class="changed"><span class="ol-label">buildStyle</span><span class="ol-sum">sources (carto raster · pmtiles blocks) + layers; maxzoom moved layer→source</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Map init effect</span><span class="ol-sum">constructor now offsets the initial zoom by −1</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Camera-sync effect</span><span class="ol-sum">jumpTo on move (−1) + NEW zoomanim CSS ride + zoomend clear</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Block feature-state effect</span><span class="ol-sum">heat + selection painting, sourcedata re-apply</span></li><li class="changed"><span class="ol-label">Container div</span><span class="ol-sum">absolute-fill; NEW transformOrigin: 0 0</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>LEAFLET_TO_MAPLIBRE_ZOOM = 1 — the 256px- vs 512px-tile zoom conversion, documented</li><li>carto-base source — maxzoom: 19 (overzoom/stretch, like Leaflet maxNativeZoom)</li><li>carto-tiles layer — minzoom/maxzoom removed (layer maxzoom would HIDE the base map)</li><li>map constructor — zoom: CONFIG.initialView.zoom - LEAFLET_TO_MAPLIBRE_ZOOM</li><li>syncCamera — jumpTo at leafletZoom - LEAFLET_TO_MAPLIBRE_ZOOM</li><li>handleZoomAnim — container transform translate(q) scale(2^dz), Leaflet&#x27;s 0.25s cubic-bezier</li><li>handleZoomEnd — clear transform in the same tick as the final jumpTo (same compositor frame)</li><li>container style — transformOrigin: &#x27;0 0&#x27; for the ride&#x27;s scale math</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index 17fae88..5fde0e4 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -102,6 +102,11 @@ function buildStyle(</span>
+<span class="d-ctx">         <span class="s-kw">type</span>: <span class="s-str">&quot;raster&quot;</span>,</span>
+<span class="d-ctx">         tiles,</span>
+<span class="d-ctx">         tileSize: <span class="s-num">256</span>,</span>
+<span class="d-add">+        <span class="s-com">// CartoDB serves tiles up to z19; capping the SOURCE makes MapLibre</span></span>
+<span class="d-add">+        <span class="s-com">// overzoom (stretch) z19 tiles beyond that, like Leaflet&#x27;s</span></span>
+<span class="d-add">+        <span class="s-com">// maxNativeZoom. A maxzoom on the LAYER would instead hide the base</span></span>
+<span class="d-add">+        <span class="s-com">// map entirely once the camera passes it.</span></span>
+<span class="d-add">+        maxzoom: <span class="s-num">19</span>,</span>
+<span class="d-ctx">         attribution:</span>
+<span class="d-ctx">           <span class="s-str">&#x27;&amp;copy; &lt;a href=&quot;https://www.openstreetmap.org/copyright&quot;&gt;OpenStreetMap&lt;/a&gt; &amp;copy; &lt;a href=&quot;https://carto.com/attributions&quot;&gt;CARTO&lt;/a&gt;&#x27;</span>,</span>
+<span class="d-ctx">       },</span>
+<span class="d-hunk">@@ -128,8 +133,6 @@ function buildStyle(</span>
+<span class="d-ctx">         id: <span class="s-str">&quot;carto-tiles&quot;</span>,</span>
+<span class="d-ctx">         <span class="s-kw">type</span>: <span class="s-str">&quot;raster&quot;</span>,</span>
+<span class="d-ctx">         source: <span class="s-str">&quot;carto-base&quot;</span>,</span>
+<span class="d-del">-        minzoom: <span class="s-num">0</span>,</span>
+<span class="d-del">-        maxzoom: <span class="s-num">19</span>,</span>
+<span class="d-ctx">       },</span>
+<span class="d-ctx">       <span class="s-com">// Block heat — the primary vote display, colored from feature-state:</span></span>
+<span class="d-ctx">       <span class="s-com">// a translucent fill plus a thin bright outline (brightness without bulk).</span></span>
+<span class="d-hunk">@@ -212,7 +215,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">           mapStyle,</span>
+<span class="d-ctx">         ),</span>
+<span class="d-ctx">         center: [<span class="s-type">CONFIG</span>.initialView.lon, <span class="s-type">CONFIG</span>.initialView.lat],</span>
+<span class="d-del">-        zoom: <span class="s-type">CONFIG</span>.initialView.zoom,</span>
+<span class="d-add">+        zoom: <span class="s-type">CONFIG</span>.initialView.zoom - <span class="s-type">LEAFLET_TO_MAPLIBRE_ZOOM</span>,</span>
+<span class="d-ctx">         interactive: <span class="s-lit">false</span>,</span>
+<span class="d-ctx">         attributionControl: <span class="s-lit">false</span>,</span>
+<span class="d-ctx">       });</span>
+<span class="d-hunk">@@ -252,7 +255,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">       <span class="s-kw">const</span> ml = mapRef.current;</span>
+<span class="d-ctx">       <span class="s-kw">if</span> (!ml) <span class="s-kw">return</span>;</span>
+<span class="d-ctx">       <span class="s-kw">const</span> center = leafletMap.<span class="s-fn">getCenter</span>();</span>
+<span class="d-del">-      <span class="s-kw">const</span> zoom = leafletMap.<span class="s-fn">getZoom</span>();</span>
+<span class="d-add">+      <span class="s-kw">const</span> zoom = leafletMap.<span class="s-fn">getZoom</span>() - <span class="s-type">LEAFLET_TO_MAPLIBRE_ZOOM</span>;</span>
+<span class="d-ctx">       ml.<span class="s-fn">jumpTo</span>({</span>
+<span class="d-ctx">         center: [center.lng, center.lat],</span>
+<span class="d-ctx">         zoom,</span>
+<span class="d-hunk">@@ -261,13 +264,54 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">       });</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    <span class="s-com">// During Leaflet&#x27;s ANIMATED zoom (wheel / zoom buttons) no `move` events</span></span>
+<span class="d-add">+    <span class="s-com">// fire until the 250ms CSS transition ends — Leaflet suppresses them</span></span>
+<span class="d-add">+    <span class="s-com">// (`_move(…, supressEvent=true)`) — so jumpTo alone leaves the GL base map</span></span>
+<span class="d-add">+    <span class="s-com">// + block heat frozen mid-zoom while the Leaflet layers glide, then snaps.</span></span>
+<span class="d-add">+    <span class="s-com">// Ride the animation instead: transition the GL container with the SAME</span></span>
+<span class="d-add">+    <span class="s-com">// duration/curve Leaflet gives `.leaflet-zoom-animated` layers, mapping</span></span>
+<span class="d-add">+    <span class="s-com">// every current container point p to `q + p·scale` (its position in the</span></span>
+<span class="d-add">+    <span class="s-com">// target frame). Pinch-zoom is untouched: it fires per-frame `move` events</span></span>
+<span class="d-add">+    <span class="s-com">// and stays live through syncCamera.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> handleZoomAnim = (e: <span class="s-type">L</span>.<span class="s-type">ZoomAnimEvent</span>) =&gt; {</span>
+<span class="d-add">+      <span class="s-kw">const</span> el = containerRef.current;</span>
+<span class="d-add">+      <span class="s-kw">const</span> animating = (leafletMap <span class="s-kw">as</span> unknown <span class="s-kw">as</span> { _animatingZoom?: boolean })._animatingZoom;</span>
+<span class="d-add">+      <span class="s-kw">if</span> (!el || !mapRef.current || !animating) <span class="s-kw">return</span>;</span>
+<span class="d-add">+      <span class="s-kw">const</span> scale = leafletMap.<span class="s-fn">getZoomScale</span>(e.zoom, leafletMap.<span class="s-fn">getZoom</span>());</span>
+<span class="d-add">+      <span class="s-com">// Where the viewport&#x27;s current top-left corner lands in the target frame</span></span>
+<span class="d-add">+      <span class="s-com">// (container coords): project() scales linearly with zoom, so the whole</span></span>
+<span class="d-add">+      <span class="s-com">// current frame maps into the target one by translate(q) scale(scale).</span></span>
+<span class="d-add">+      <span class="s-kw">const</span> nw = leafletMap.<span class="s-fn">containerPointToLatLng</span>([<span class="s-num">0</span>, <span class="s-num">0</span>]);</span>
+<span class="d-add">+      <span class="s-kw">const</span> q = leafletMap</span>
+<span class="d-add">+        .<span class="s-fn">project</span>(nw, e.zoom)</span>
+<span class="d-add">+        .<span class="s-fn">subtract</span>(leafletMap.<span class="s-fn">project</span>(e.center, e.zoom))</span>
+<span class="d-add">+        .<span class="s-fn">add</span>(leafletMap.<span class="s-fn">getSize</span>().<span class="s-fn">divideBy</span>(<span class="s-num">2</span>));</span>
+<span class="d-add">+      el.style.transition = <span class="s-str">&quot;transform 0.25s cubic-bezier(0, 0, 0.25, 1)&quot;</span>;</span>
+<span class="d-add">+      el.style.transform = <span class="s-str">`translate3d(${q.x}px, ${q.y}px, 0) scale(${scale})`</span>;</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com">// At transition end Leaflet fires `move` (→ syncCamera jumpTo) then</span></span>
+<span class="d-add">+    <span class="s-com">// `zoomend`, in the same tick. Clearing the transform here lands in the</span></span>
+<span class="d-add">+    <span class="s-com">// same compositor frame as MapLibre&#x27;s re-render of the final camera (its</span></span>
+<span class="d-add">+    <span class="s-com">// rAF runs before paint), so the crisp frame swaps in without a flash.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> handleZoomEnd = () =&gt; {</span>
+<span class="d-add">+      <span class="s-kw">const</span> el = containerRef.current;</span>
+<span class="d-add">+      <span class="s-kw">if</span> (!el || !el.style.transform) <span class="s-kw">return</span>;</span>
+<span class="d-add">+      el.style.transition = <span class="s-str">&quot;&quot;</span>;</span>
+<span class="d-add">+      el.style.transform = <span class="s-str">&quot;&quot;</span>;</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     <span class="s-com">// Sync on every move frame for smooth panning</span></span>
+<span class="d-ctx">     leafletMap.<span class="s-fn">on</span>(<span class="s-str">&quot;move&quot;</span>, syncCamera);</span>
+<span class="d-add">+    leafletMap.<span class="s-fn">on</span>(<span class="s-str">&quot;zoomanim&quot;</span>, handleZoomAnim);</span>
+<span class="d-add">+    leafletMap.<span class="s-fn">on</span>(<span class="s-str">&quot;zoomend&quot;</span>, handleZoomEnd);</span>
+<span class="d-ctx">     <span class="s-com">// Initial sync</span></span>
+<span class="d-ctx">     <span class="s-fn">syncCamera</span>();</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-kw">return</span> () =&gt; {</span>
+<span class="d-ctx">       leafletMap.<span class="s-fn">off</span>(<span class="s-str">&quot;move&quot;</span>, syncCamera);</span>
+<span class="d-add">+      leafletMap.<span class="s-fn">off</span>(<span class="s-str">&quot;zoomanim&quot;</span>, handleZoomAnim);</span>
+<span class="d-add">+      leafletMap.<span class="s-fn">off</span>(<span class="s-str">&quot;zoomend&quot;</span>, handleZoomEnd);</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx">   }, [leafletMap]);</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -357,6 +401,9 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">         width: <span class="s-str">&quot;100%&quot;</span>,</span>
+<span class="d-ctx">         height: <span class="s-str">&quot;100%&quot;</span>,</span>
+<span class="d-ctx">         zIndex: <span class="s-num">0</span>,</span>
+<span class="d-add">+        <span class="s-com">// The zoom-animation ride scales this element about the viewport&#x27;s</span></span>
+<span class="d-add">+        <span class="s-com">// top-left corner (see handleZoomAnim).</span></span>
+<span class="d-add">+        transformOrigin: <span class="s-str">&quot;0 0&quot;</span>,</span>
+<span class="d-ctx">       }}</span>
+<span class="d-ctx">     /&gt;</span>
+<span class="d-ctx">   );</span></pre>
+        </details>
+        
+    </section>
+    
+
+    <section class="card" id="overzoom">
+      <div class="tag">Client · deep zoom</div>
+      <h2>3 · Follow-on: don't lose the base map at deep zoom</h2>
+      <h3>Symptom</h3>
+      <p>With the camera now offset by −1, the old <code>maxzoom: 19</code> on the raster LAYER would have blanked the base map at Leaflet zooms ≥ 20 (the app allows 21) — a MapLibre layer-maxzoom HIDES the layer once the camera passes it.</p>
+      <h3>Root cause</h3>
+      <ul><li>CartoDB serves tiles up to z19. The cap belongs on the SOURCE, where it means “overzoom (stretch) z19 tiles beyond this” — the GL equivalent of Leaflet's <code>maxNativeZoom</code> — not on the layer, where it means “hide me”.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Moved <code>maxzoom: 19</code> from the <code>carto-tiles</code> layer onto the <code>carto-base</code> source (and dropped the layer's redundant <code>minzoom: 0</code>).</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+      
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+            <span class="stat"><span class="d-add">+51</span> / <span class="d-del">-4</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/MapLibreBackground</span>
+        <span class="ctx-sum">the GL base map + block-heat renderer that sits UNDER the interactive Leaflet overlay</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapLibreBackground.tsx</span>
+        <span class="ctx-sum">~410 LOC — builds the GL style (carto raster + PMTiles blocks), mirrors the Leaflet camera, colors blocks via feature-state</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Module setup</span><span class="ol-sum">pmtiles protocol · NEW LEAFLET_TO_MAPLIBRE_ZOOM constant</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Block-event contracts</span><span class="ol-sum">BLOCK_VOTES_EVENT / BLOCK_SELECT_EVENT payloads</span></li><li class="dim"><span class="ol-label">blockFillPaint / blockLinePaint</span><span class="ol-sum">heat-driven fill + outline ramps</span></li><li class="changed"><span class="ol-label">buildStyle</span><span class="ol-sum">sources (carto raster · pmtiles blocks) + layers; maxzoom moved layer→source</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Map init effect</span><span class="ol-sum">constructor now offsets the initial zoom by −1</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Camera-sync effect</span><span class="ol-sum">jumpTo on move (−1) + NEW zoomanim CSS ride + zoomend clear</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Block feature-state effect</span><span class="ol-sum">heat + selection painting, sourcedata re-apply</span></li><li class="changed"><span class="ol-label">Container div</span><span class="ol-sum">absolute-fill; NEW transformOrigin: 0 0</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>LEAFLET_TO_MAPLIBRE_ZOOM = 1 — the 256px- vs 512px-tile zoom conversion, documented</li><li>carto-base source — maxzoom: 19 (overzoom/stretch, like Leaflet maxNativeZoom)</li><li>carto-tiles layer — minzoom/maxzoom removed (layer maxzoom would HIDE the base map)</li><li>map constructor — zoom: CONFIG.initialView.zoom - LEAFLET_TO_MAPLIBRE_ZOOM</li><li>syncCamera — jumpTo at leafletZoom - LEAFLET_TO_MAPLIBRE_ZOOM</li><li>handleZoomAnim — container transform translate(q) scale(2^dz), Leaflet&#x27;s 0.25s cubic-bezier</li><li>handleZoomEnd — clear transform in the same tick as the final jumpTo (same compositor frame)</li><li>container style — transformOrigin: &#x27;0 0&#x27; for the ride&#x27;s scale math</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index 17fae88..5fde0e4 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -102,6 +102,11 @@ function buildStyle(</span>
+<span class="d-ctx">         <span class="s-kw">type</span>: <span class="s-str">&quot;raster&quot;</span>,</span>
+<span class="d-ctx">         tiles,</span>
+<span class="d-ctx">         tileSize: <span class="s-num">256</span>,</span>
+<span class="d-add">+        <span class="s-com">// CartoDB serves tiles up to z19; capping the SOURCE makes MapLibre</span></span>
+<span class="d-add">+        <span class="s-com">// overzoom (stretch) z19 tiles beyond that, like Leaflet&#x27;s</span></span>
+<span class="d-add">+        <span class="s-com">// maxNativeZoom. A maxzoom on the LAYER would instead hide the base</span></span>
+<span class="d-add">+        <span class="s-com">// map entirely once the camera passes it.</span></span>
+<span class="d-add">+        maxzoom: <span class="s-num">19</span>,</span>
+<span class="d-ctx">         attribution:</span>
+<span class="d-ctx">           <span class="s-str">&#x27;&amp;copy; &lt;a href=&quot;https://www.openstreetmap.org/copyright&quot;&gt;OpenStreetMap&lt;/a&gt; &amp;copy; &lt;a href=&quot;https://carto.com/attributions&quot;&gt;CARTO&lt;/a&gt;&#x27;</span>,</span>
+<span class="d-ctx">       },</span>
+<span class="d-hunk">@@ -128,8 +133,6 @@ function buildStyle(</span>
+<span class="d-ctx">         id: <span class="s-str">&quot;carto-tiles&quot;</span>,</span>
+<span class="d-ctx">         <span class="s-kw">type</span>: <span class="s-str">&quot;raster&quot;</span>,</span>
+<span class="d-ctx">         source: <span class="s-str">&quot;carto-base&quot;</span>,</span>
+<span class="d-del">-        minzoom: <span class="s-num">0</span>,</span>
+<span class="d-del">-        maxzoom: <span class="s-num">19</span>,</span>
+<span class="d-ctx">       },</span>
+<span class="d-ctx">       <span class="s-com">// Block heat — the primary vote display, colored from feature-state:</span></span>
+<span class="d-ctx">       <span class="s-com">// a translucent fill plus a thin bright outline (brightness without bulk).</span></span>
+<span class="d-hunk">@@ -212,7 +215,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">           mapStyle,</span>
+<span class="d-ctx">         ),</span>
+<span class="d-ctx">         center: [<span class="s-type">CONFIG</span>.initialView.lon, <span class="s-type">CONFIG</span>.initialView.lat],</span>
+<span class="d-del">-        zoom: <span class="s-type">CONFIG</span>.initialView.zoom,</span>
+<span class="d-add">+        zoom: <span class="s-type">CONFIG</span>.initialView.zoom - <span class="s-type">LEAFLET_TO_MAPLIBRE_ZOOM</span>,</span>
+<span class="d-ctx">         interactive: <span class="s-lit">false</span>,</span>
+<span class="d-ctx">         attributionControl: <span class="s-lit">false</span>,</span>
+<span class="d-ctx">       });</span>
+<span class="d-hunk">@@ -252,7 +255,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">       <span class="s-kw">const</span> ml = mapRef.current;</span>
+<span class="d-ctx">       <span class="s-kw">if</span> (!ml) <span class="s-kw">return</span>;</span>
+<span class="d-ctx">       <span class="s-kw">const</span> center = leafletMap.<span class="s-fn">getCenter</span>();</span>
+<span class="d-del">-      <span class="s-kw">const</span> zoom = leafletMap.<span class="s-fn">getZoom</span>();</span>
+<span class="d-add">+      <span class="s-kw">const</span> zoom = leafletMap.<span class="s-fn">getZoom</span>() - <span class="s-type">LEAFLET_TO_MAPLIBRE_ZOOM</span>;</span>
+<span class="d-ctx">       ml.<span class="s-fn">jumpTo</span>({</span>
+<span class="d-ctx">         center: [center.lng, center.lat],</span>
+<span class="d-ctx">         zoom,</span>
+<span class="d-hunk">@@ -261,13 +264,54 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">       });</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    <span class="s-com">// During Leaflet&#x27;s ANIMATED zoom (wheel / zoom buttons) no `move` events</span></span>
+<span class="d-add">+    <span class="s-com">// fire until the 250ms CSS transition ends — Leaflet suppresses them</span></span>
+<span class="d-add">+    <span class="s-com">// (`_move(…, supressEvent=true)`) — so jumpTo alone leaves the GL base map</span></span>
+<span class="d-add">+    <span class="s-com">// + block heat frozen mid-zoom while the Leaflet layers glide, then snaps.</span></span>
+<span class="d-add">+    <span class="s-com">// Ride the animation instead: transition the GL container with the SAME</span></span>
+<span class="d-add">+    <span class="s-com">// duration/curve Leaflet gives `.leaflet-zoom-animated` layers, mapping</span></span>
+<span class="d-add">+    <span class="s-com">// every current container point p to `q + p·scale` (its position in the</span></span>
+<span class="d-add">+    <span class="s-com">// target frame). Pinch-zoom is untouched: it fires per-frame `move` events</span></span>
+<span class="d-add">+    <span class="s-com">// and stays live through syncCamera.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> handleZoomAnim = (e: <span class="s-type">L</span>.<span class="s-type">ZoomAnimEvent</span>) =&gt; {</span>
+<span class="d-add">+      <span class="s-kw">const</span> el = containerRef.current;</span>
+<span class="d-add">+      <span class="s-kw">const</span> animating = (leafletMap <span class="s-kw">as</span> unknown <span class="s-kw">as</span> { _animatingZoom?: boolean })._animatingZoom;</span>
+<span class="d-add">+      <span class="s-kw">if</span> (!el || !mapRef.current || !animating) <span class="s-kw">return</span>;</span>
+<span class="d-add">+      <span class="s-kw">const</span> scale = leafletMap.<span class="s-fn">getZoomScale</span>(e.zoom, leafletMap.<span class="s-fn">getZoom</span>());</span>
+<span class="d-add">+      <span class="s-com">// Where the viewport&#x27;s current top-left corner lands in the target frame</span></span>
+<span class="d-add">+      <span class="s-com">// (container coords): project() scales linearly with zoom, so the whole</span></span>
+<span class="d-add">+      <span class="s-com">// current frame maps into the target one by translate(q) scale(scale).</span></span>
+<span class="d-add">+      <span class="s-kw">const</span> nw = leafletMap.<span class="s-fn">containerPointToLatLng</span>([<span class="s-num">0</span>, <span class="s-num">0</span>]);</span>
+<span class="d-add">+      <span class="s-kw">const</span> q = leafletMap</span>
+<span class="d-add">+        .<span class="s-fn">project</span>(nw, e.zoom)</span>
+<span class="d-add">+        .<span class="s-fn">subtract</span>(leafletMap.<span class="s-fn">project</span>(e.center, e.zoom))</span>
+<span class="d-add">+        .<span class="s-fn">add</span>(leafletMap.<span class="s-fn">getSize</span>().<span class="s-fn">divideBy</span>(<span class="s-num">2</span>));</span>
+<span class="d-add">+      el.style.transition = <span class="s-str">&quot;transform 0.25s cubic-bezier(0, 0, 0.25, 1)&quot;</span>;</span>
+<span class="d-add">+      el.style.transform = <span class="s-str">`translate3d(${q.x}px, ${q.y}px, 0) scale(${scale})`</span>;</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com">// At transition end Leaflet fires `move` (→ syncCamera jumpTo) then</span></span>
+<span class="d-add">+    <span class="s-com">// `zoomend`, in the same tick. Clearing the transform here lands in the</span></span>
+<span class="d-add">+    <span class="s-com">// same compositor frame as MapLibre&#x27;s re-render of the final camera (its</span></span>
+<span class="d-add">+    <span class="s-com">// rAF runs before paint), so the crisp frame swaps in without a flash.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> handleZoomEnd = () =&gt; {</span>
+<span class="d-add">+      <span class="s-kw">const</span> el = containerRef.current;</span>
+<span class="d-add">+      <span class="s-kw">if</span> (!el || !el.style.transform) <span class="s-kw">return</span>;</span>
+<span class="d-add">+      el.style.transition = <span class="s-str">&quot;&quot;</span>;</span>
+<span class="d-add">+      el.style.transform = <span class="s-str">&quot;&quot;</span>;</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     <span class="s-com">// Sync on every move frame for smooth panning</span></span>
+<span class="d-ctx">     leafletMap.<span class="s-fn">on</span>(<span class="s-str">&quot;move&quot;</span>, syncCamera);</span>
+<span class="d-add">+    leafletMap.<span class="s-fn">on</span>(<span class="s-str">&quot;zoomanim&quot;</span>, handleZoomAnim);</span>
+<span class="d-add">+    leafletMap.<span class="s-fn">on</span>(<span class="s-str">&quot;zoomend&quot;</span>, handleZoomEnd);</span>
+<span class="d-ctx">     <span class="s-com">// Initial sync</span></span>
+<span class="d-ctx">     <span class="s-fn">syncCamera</span>();</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-kw">return</span> () =&gt; {</span>
+<span class="d-ctx">       leafletMap.<span class="s-fn">off</span>(<span class="s-str">&quot;move&quot;</span>, syncCamera);</span>
+<span class="d-add">+      leafletMap.<span class="s-fn">off</span>(<span class="s-str">&quot;zoomanim&quot;</span>, handleZoomAnim);</span>
+<span class="d-add">+      leafletMap.<span class="s-fn">off</span>(<span class="s-str">&quot;zoomend&quot;</span>, handleZoomEnd);</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx">   }, [leafletMap]);</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -357,6 +401,9 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">         width: <span class="s-str">&quot;100%&quot;</span>,</span>
+<span class="d-ctx">         height: <span class="s-str">&quot;100%&quot;</span>,</span>
+<span class="d-ctx">         zIndex: <span class="s-num">0</span>,</span>
+<span class="d-add">+        <span class="s-com">// The zoom-animation ride scales this element about the viewport&#x27;s</span></span>
+<span class="d-add">+        <span class="s-com">// top-left corner (see handleZoomAnim).</span></span>
+<span class="d-add">+        transformOrigin: <span class="s-str">&quot;0 0&quot;</span>,</span>
+<span class="d-ctx">       }}</span>
+<span class="d-ctx">     /&gt;</span>
+<span class="d-ctx">   );</span></pre>
+        </details>
+        
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Quantified the bug before fixing: injected probe points via the browser console — dx/dy between <code>lm.latLngToContainerPoint</code> and <code>ml.project</code> was 0 at center, 116/-154&nbsp;px at +0.01°, -350/-461&nbsp;px at ±0.03° (exactly 2× slope). After the fix: &lt;&nbsp;1&nbsp;px everywhere.</li>
+<li>Exercised zoom in the live app (zoom control + reloads): cameras stay locked (leaflet z / maplibre z−1) and the projection residual stays sub-pixel after every zoom.</li>
+<li>Caught the ride mid-flight: during the 250&nbsp;ms animation the GL container carries <code>translate3d(…) scale(2)</code> with the Leaflet curve, and the transform reads back cleared (<code>""</code>) once settled; mid-animation screenshot shows pins tracking the scaled base map.</li>
+<li><code>npx tsc --noEmit</code> clean; full client suite green — 186/186 tests.</li>
+<li>A dev-only <code>window.__lmap</code> handle was added to MapView (committed meanwhile in <code>401db4b</code>) alongside the existing <code>window.__ml</code>, so both cameras stay measurable.</li></ul>
   </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <a href='http://localhost:3000/m/nyc-walkways'>http://localhost:3000/m/nyc-walkways</a>, pan around at several zooms: pins and route lines should sit exactly on their streets everywhere on screen, not just at the center.</li>
+<li>Zoom with the +/− control and the mouse wheel: the base map + block heat should glide and rescale in lockstep with the icons through the whole animation — no freeze, no end-of-zoom snap.</li>
+<li>On a touch device (or DevTools touch emulation), pinch-zoom: should stay live and aligned per-frame.</li>
+<li>Zoom all the way in (Leaflet z20–21): the base map should stay visible (stretched z19 tiles), not blank.</li>
+<li>Cast a vote and confirm the block heat still lights the block under the edge you voted on (feature-state still keyed correctly after the camera change).</li></ul>
+  </section>
+
+
 
   <footer>
     Generated from <code>changelog/changes-zoomdrift.diff</code> by <code>changelog/build_zoomdrift_report.py</code>.

@@ -164,7 +164,28 @@ def li(items):
     return "\n".join(f"<li>{x}</li>" for x in items)
 
 
-def section_html(s):
+def file_detail_html(name, chunk, open_=False):
+    added = sum(1 for ln in chunk.splitlines() if ln.startswith("+") and not ln.startswith("+++"))
+    removed = sum(1 for ln in chunk.splitlines() if ln.startswith("-") and not ln.startswith("---"))
+    return f"""
+        <details{" open" if open_ else ""}>
+          <summary><span class="fname">{html.escape(name)}</span>
+            <span class="stat"><span class="d-add">+{added}</span> / <span class="d-del">-{removed}</span></span>
+          </summary>
+          {context_html(name)}
+          <pre class="diff">{colorize_diff(chunk, name)}</pre>
+        </details>
+        """
+
+
+def section_html(s, diff_by_file):
+    file_rows = []
+    for f in s["files"]:
+        chunk = diff_by_file.get(f)
+        if chunk is not None:
+            file_rows.append(file_detail_html(f, chunk))
+        else:
+            file_rows.append(f'<ul class="files"><li>{html.escape(f)}</li></ul>')
     return f"""
     <section class="card" id="{s['id']}">
       <div class="tag">{s['tag']}</div>
@@ -175,8 +196,8 @@ def section_html(s):
       <ul>{li(s['cause'])}</ul>
       <h3>What changed</h3>
       <ul>{li(s['fixes'])}</ul>
-      <h3>Files touched</h3>
-      <ul class="files">{li(html.escape(f) for f in s['files'])}</ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+      {''.join(file_rows)}
     </section>
     """
 
@@ -264,22 +285,20 @@ def main():
     with open(DIFF_PATH) as f:
         diff_text = f.read()
     files = split_by_file(diff_text)
+    diff_by_file = dict(files)
+    claimed = {f for s in SECTIONS for f in s["files"]}
+    leftover_blocks = "".join(
+        file_detail_html(name, chunk) for name, chunk in files if name not in claimed
+    )
+    leftover_html = f"""
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Other files in this diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Changes not tied to a section above.</p>
+    {leftover_blocks}
+  </section>""" if leftover_blocks else ""
+    diff_link = '<a href="#diff">Other diffs</a>' if leftover_blocks else ""
 
-    diff_blocks = []
-    for name, chunk in files:
-        added = sum(1 for ln in chunk.splitlines() if ln.startswith("+") and not ln.startswith("+++"))
-        removed = sum(1 for ln in chunk.splitlines() if ln.startswith("-") and not ln.startswith("---"))
-        diff_blocks.append(f"""
-        <details open>
-          <summary><span class="fname">{html.escape(name)}</span>
-            <span class="stat"><span class="d-add">+{added}</span> / <span class="d-del">-{removed}</span></span>
-          </summary>
-          {context_html(name)}
-          <pre class="diff">{colorize_diff(chunk, name)}</pre>
-        </details>
-        """)
-
-    sections_html = "\n".join(section_html(s) for s in SECTIONS)
+    sections_html = "\n".join(section_html(s, diff_by_file) for s in SECTIONS)
     nav = "\n".join(f'<a href="#{s["id"]}">{s["title"].split("·")[0].strip()}</a>' for s in SECTIONS)
 
     doc = f"""<!doctype html>
@@ -382,7 +401,7 @@ def main():
   </header>
 
   <nav class="toc">{nav}
-    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a>{diff_link}
   </nav>
 
   <p class="lede">The “position drift” after the icons + heatmap zoom-rescale work was two separate
@@ -405,11 +424,7 @@ def main():
     <ul>{li(CHECKLIST)}</ul>
   </section>
 
-  <section id="diff">
-    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
-    <p style="color:var(--muted);font-size:14px;margin-top:0;">Green is added, red removed.</p>
-    {''.join(diff_blocks)}
-  </section>
+{leftover_html}
 
   <footer>
     Generated from <code>changelog/changes-zoomdrift.diff</code> by <code>changelog/build_zoomdrift_report.py</code>.
