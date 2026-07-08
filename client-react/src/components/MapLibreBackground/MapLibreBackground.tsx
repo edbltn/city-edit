@@ -11,7 +11,7 @@ import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { CONFIG } from "../../config";
 import { dlog, dwarn, debugState } from "../../utils/debugLog";
-import { maplibreRasterTiles, type MapStyle } from "../../mapStyles";
+import { maplibreRasterTiles, heatTip, type MapStyle } from "../../mapStyles";
 
 // Register PMTiles protocol once at module level
 const protocol = new Protocol();
@@ -44,46 +44,58 @@ export const BLOCK_SELECT_EVENT = "city-edit:block-select";
  *  At heat 0 the block is fully transparent (no votes → invisible); it ramps up
  *  through the active style's heat colors. Blocks ARE the heat display, so there
  *  is no baseline edge layer (edges show only on Leaflet hover/selection). */
-function blockFillPaint(heat: MapStyle["heat"]): maplibregl.FillLayerSpecification["paint"] {
+function blockFillPaint(style: MapStyle): maplibregl.FillLayerSpecification["paint"] {
+  const heat = style.heat;
   const h = ["coalesce", ["feature-state", "heat"], 0] as const;
   return {
     // Start the ramp at `warm` (not halo) so even a single vote reads clearly,
     // and keep the fill translucent — the outline layer below carries the
     // brightness, so a voted block doesn't render as a solid slab.
+    // Stops span the FULL heat domain, ending in the incandescent tip: votes
+    // are heavy-tailed, so the log-normalized top of a busy map piles up near
+    // 1.0 — a ramp that plateaus early (the old 0.6 → peak flat top) painted
+    // every hot corridor the same color. Now peak→tip keeps resolving there.
     "fill-color": [
       "interpolate", ["linear"], h,
       0.0, heat.warm,
-      0.2, heat.hot,
-      0.6, heat.peak,
-      1.0, heat.peak,
+      0.35, heat.hot,
+      0.7, heat.peak,
+      1.0, heatTip(heat, style.basemap),
     ],
     "fill-opacity": [
       "interpolate", ["linear"], h,
       0.0, 0.0,
-      0.001, 0.42,
-      1.0, 0.58,
+      0.001, 0.38,
+      1.0, 0.66,
     ],
   };
 }
 
 /** Thin bright outline tracing a voted block — the crisp edge that makes the
- *  heat pop without thickening the fill. Same ramp, heat-driven opacity. */
-function blockLinePaint(heat: MapStyle["heat"]): maplibregl.LineLayerSpecification["paint"] {
+ *  heat pop without thickening the fill. Same ramp, heat-driven opacity, and a
+ *  width that grows with heat so the hottest blocks read etched, not just lit. */
+function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification["paint"] {
+  const heat = style.heat;
   const h = ["coalesce", ["feature-state", "heat"], 0] as const;
   return {
     "line-color": [
       "interpolate", ["linear"], h,
       0.0, heat.warm,
-      0.2, heat.hot,
-      0.6, heat.peak,
-      1.0, heat.peak,
+      0.35, heat.hot,
+      0.7, heat.peak,
+      1.0, heatTip(heat, style.basemap),
     ],
-    "line-width": 1.25,
+    "line-width": [
+      "interpolate", ["linear"], h,
+      0.0, 1.1,
+      0.7, 1.4,
+      1.0, 2.0,
+    ],
     "line-opacity": [
       "interpolate", ["linear"], h,
       0.0, 0.0,
-      0.001, 0.75,
-      1.0, 0.95,
+      0.001, 0.72,
+      1.0, 1.0,
     ],
   };
 }
@@ -142,14 +154,14 @@ function buildStyle(
         type: "fill",
         source: "blocks",
         "source-layer": "blocks",
-        paint: blockFillPaint(mapStyle.heat),
+        paint: blockFillPaint(mapStyle),
       },
       {
         id: "block-heat-line",
         type: "line",
         source: "blocks",
         "source-layer": "blocks",
-        paint: blockLinePaint(mapStyle.heat),
+        paint: blockLinePaint(mapStyle),
       },
       // Block selection — feature-state { selected } lights the block polygons
       // covering the current selection/hover: a subtle translucent fill plus a

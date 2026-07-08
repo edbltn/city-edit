@@ -211,17 +211,33 @@ export function maplibreRasterTiles(style: MapStyle): string[] {
 }
 
 /**
+ * The incandescent tip of a ramp — the color reserved for the very hottest
+ * intensities, ABOVE `peak`. Votes are heavy-tailed (log-normalized heat piles
+ * up near 1.0 on busy maps), and a ramp that ends at `peak` renders that whole
+ * tail as one flat color. The tip extends the ramp past `peak`: toward
+ * white-hot on dark basemaps (additive blending — hotter = brighter) and
+ * toward near-black ink on light ones (multiply — hotter = darker), so the
+ * hottest corridor visibly outburns a merely-busy one.
+ */
+export function heatTip(heat: HeatRamp, basemap: Basemap): string {
+  const [r, g, b] = parseRgb(heat.peak);
+  const [tr, tg, tb] = basemap === "light" ? [10, 12, 18] : [255, 252, 242];
+  const mix = 0.68;
+  return `rgb(${Math.round(r + (tr - r) * mix)}, ${Math.round(g + (tg - g) * mix)}, ${Math.round(b + (tb - b) * mix)})`;
+}
+
+/**
  * Build the CSS `linear-gradient(...)` for the heatmap legend swatch from a
  * style's ramp, so the legend always matches the map.
  */
-export function heatGradientCss(heat: HeatRamp): string {
-  return `linear-gradient(to right, ${heat.halo}, ${heat.warm} 40%, ${heat.hot} 75%, ${heat.peak})`;
+export function heatGradientCss(heat: HeatRamp, basemap: Basemap): string {
+  return `linear-gradient(to right, ${heat.halo}, ${heat.warm} 35%, ${heat.hot} 65%, ${heat.peak} 85%, ${heatTip(heat, basemap)})`;
 }
 
 // A heat ramp expanded to positioned RGB stops, ready for interpolation. The
-// stop positions (0 / 0.4 / 0.75 / 1) mirror heatGradientCss so the legend, the
-// canvas heatmap, and the proposal pins all read the same color at a given
-// intensity. Built once per style and sampled many times.
+// stop positions (0 / 0.35 / 0.65 / 0.85 / 1) mirror heatGradientCss so the
+// legend, the canvas heatmap, and the proposal pins all read the same color at
+// a given intensity. Built once per style and sampled many times.
 export interface HeatRampStop {
   pos: number;
   rgb: [number, number, number];
@@ -232,13 +248,17 @@ function parseRgb(s: string): [number, number, number] {
   return m ? [Number(m[0]), Number(m[1]), Number(m[2])] : [0, 0, 0];
 }
 
-/** Expand a HeatRamp into the positioned stops `sampleHeatRamp` interpolates. */
-export function buildHeatRampStops(heat: HeatRamp): HeatRampStop[] {
+/** Expand a HeatRamp into the positioned stops `sampleHeatRamp` interpolates.
+ *  `peak` sits at 0.85 (not 1) with the incandescent tip above it, so the
+ *  log-crushed top of a busy map's vote distribution still resolves into
+ *  visibly different colors instead of one flat band. */
+export function buildHeatRampStops(heat: HeatRamp, basemap: Basemap): HeatRampStop[] {
   return [
     { pos: 0, rgb: parseRgb(heat.halo) },
-    { pos: 0.4, rgb: parseRgb(heat.warm) },
-    { pos: 0.75, rgb: parseRgb(heat.hot) },
-    { pos: 1, rgb: parseRgb(heat.peak) },
+    { pos: 0.35, rgb: parseRgb(heat.warm) },
+    { pos: 0.65, rgb: parseRgb(heat.hot) },
+    { pos: 0.85, rgb: parseRgb(heat.peak) },
+    { pos: 1, rgb: parseRgb(heatTip(heat, basemap)) },
   ];
 }
 

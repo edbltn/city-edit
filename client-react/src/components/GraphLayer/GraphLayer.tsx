@@ -2176,8 +2176,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // Stops mirror heatGradientCss (mapStyles.ts) so the legend matches the map.
     // The same ramp feeds the top-proposal pins (see indicatorMarkers), so a pin
     // glows the exact hue the heatmap paints at its vote count.
-    const rampStops = buildHeatRampStops(heat);
+    const rampStops = buildHeatRampStops(heat, mapStyle.basemap);
     const sampleRamp = (t: number): string => sampleHeatRamp(rampStops, t);
+    // The ramp's incandescent tip (sampled at 1.0) — used for the hottest-edge
+    // accent pass so the very top of the scale reads white-hot, not flat peak.
+    const tipColor = sampleRamp(1);
 
     for (const i of voted) {
       const norm = Math.log((edgeVotes[i] ?? 0) + 1) / Math.log(maxVotes + 1);
@@ -2201,7 +2204,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         const t = (norm - 0.7) / 0.3;
         ctx.lineWidth = Math.max(0.3, 0.5 * zoomScale);
         ctx.globalAlpha = 0.18 * t;
-        ctx.strokeStyle = heat.peak;
+        ctx.strokeStyle = tipColor;
         drawSeg(i);
       }
     }
@@ -2214,7 +2217,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     drawStateRef.current = { zoom, nw: map.containerPointToLatLng([0, 0]) };
 
     redrawHoverHighlightRef.current();
-  }, [map, mapStyle.heat, mapStyle.heatComposite, mapStyle.selection]);
+  }, [map, mapStyle.heat, mapStyle.basemap, mapStyle.heatComposite, mapStyle.selection]);
 
   // Schedule redraw
   const scheduleRedraw = useCallback(() => {
@@ -3059,7 +3062,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // intensity. The pin glows + tints to that color, as hot as its votes. The
     // bucketed color keys the icon cache so equally-hot pins of a label still
     // share one divIcon (and so a re-render doesn't churn setIcon every frame).
-    const rampStops = buildHeatRampStops(mapStyle.heat);
+    const rampStops = buildHeatRampStops(mapStyle.heat, mapStyle.basemap);
     const maxCount = source.reduce((m, w) => Math.max(m, w.count), 0);
     const heatOf = (count: number): number =>
       maxCount > 0 && count > 0
@@ -3364,7 +3367,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // re-runs once topology+votes arrive so stations appear even with zero votes.
   }, [winners, currentZoom, map, spread, collapseSpread, clearSpreadTimer, applySpread,
       selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,
-      isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, isStationNetwork, stationLabel, isHeatmapLoading, canHover]);
+      isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, mapStyle.basemap, isStationNetwork, stationLabel, isHeatmapLoading, canHover]);
 
   // Cast a directional vote on a single proposal (edge, vote type) through the
   // SAME unified path the top-bar route cast uses. castVotes() handles the
