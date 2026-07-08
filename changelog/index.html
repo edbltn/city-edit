@@ -29,6 +29,20 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-08-ghost-hover-phantom.html">
+    <div class="date">2026-07-08</div>
+    <h2>Phantom path-hover pockets + the Top Route Proposal that wouldn't let go</h2>
+    <p>The “ghost waypoint hover triggers far from the route” dead zones were SVG hit-testing:
+    pointer-events: all on the desire path's invisible 20px interactive stroke also hit-tests the
+    path's unpainted interior fill, so a zigzagging/looping route (a threaded corridor) turned every
+    enclosed pocket into a spot where the hover UI vanished — and the pocket reshaped with each zoom
+    because Leaflet re-clips the path per view. Fixed with pointer-events: stroke (90 phantom grid
+    points → 0 in a DOM hit-map, on-line hover intact). Also: a tapped Top Route Proposal now
+    deselects when a ghost waypoint splits its corridor — anchorsAreWaypoints requires the anchors to
+    be CONSECUTIVE waypoints, mirroring the reducer's insertMid un-force rule, so the ✕ badge and
+    “Top Route Proposal” header can no longer outlive the corridor they describe.</p>
+  </a>
+
   <a class="entry" href="./2026-07-08-block-graph-redesign.html">
     <div class="date">2026-07-08</div>
     <h2>Block-graph redesign — absolute-vote heat, Voronoi junction cells, graph-first foot blocks, degenerate-block merging</h2>
