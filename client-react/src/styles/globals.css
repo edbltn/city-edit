@@ -1622,10 +1622,11 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   transform-origin: 17px 36px;
   transition: transform 0.15s ease;
   /* Heat (0–1, set inline per proposal by makeVoteTypeIcon, in `--heat-color`
-     sampled from the map's heat ramp) renders as INK, not glow: the pin's paper
-     fill warms toward the ramp color and the outline burns hotter and slightly
-     thicker (rules below). Crisp at every heat — no blur/halo — so a hot
-     proposal reads like a stamped, inked marker instead of a glowing sprite. */
+     sampled from the map's heat ramp) renders as a SOLID GLOW RING — a hard,
+     fully-opaque band of the ramp color hugging the outside of the pin (the
+     -glow path below) — plus a subtle warm stain on the paper fill. Never the
+     outline itself: that channel belongs to hover (→ ink) and the selected
+     double ring, and heat-burned outlines read as a map full of hovered pins. */
   --heat: 0;
 }
 
@@ -1635,6 +1636,19 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   height: 42px;
   overflow: visible;
 }
+/* The heat glow ring: the pin's own path stroked WIDE and painted first, so
+   the inner half of the stroke hides under the paper fill and the outer half
+   reads as a solid band outside the hairline — following the square + tail and
+   the diamond exactly. No blur, no alpha: a flat ring of the sampled ramp
+   color, up to ≈1.75px past the hairline on the hottest pin. `--heat-color` is
+   only set when heat > 0, so cold pins paint nothing (transparent fallback). */
+.vote-type-indicator-glow {
+  fill: none;
+  stroke: var(--heat-color, transparent);
+  stroke-width: calc(2px + var(--heat, 0) * 3px);
+  stroke-linejoin: round;
+  transition: stroke-width 0.15s ease;
+}
 /* Paper fill, warmed toward the heat color by `--heat` (capped well short of
    full so the glyph stays legible on the hottest pin). */
 .vote-type-indicator-fill {
@@ -1642,13 +1656,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   transition: fill 0.15s ease;
 }
 /* Outer outline (square + tail). Idle = thin hairline; pin states thicken it.
-   Heat burns the hairline toward the ramp color and up to +0.75px thicker, so a
-   hot pin reads as a heavier, warmer stamp while a cold one stays neutral. */
+   Deliberately heat-blind: the outline is hover's channel (→ ink below) and the
+   selected states' (double ring), so heat must not touch it. */
 .vote-type-indicator-outer {
   fill: none;
-  stroke: color-mix(in srgb, var(--heat-color, transparent) calc(var(--heat, 0) * 100%), var(--hairline));
-  stroke-width: calc(1.5px + var(--heat, 0) * 0.75px);
-  transition: stroke 0.15s ease, stroke-width 0.15s ease;
+  stroke: var(--hairline);
+  stroke-width: 1.5;
+  transition: stroke 0.15s ease;
 }
 /* Inner square border — only shown in the double-border (pin) states. */
 .vote-type-indicator-inner {
