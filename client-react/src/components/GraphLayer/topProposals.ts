@@ -6,27 +6,35 @@
 // is the RBTP (a hot corridor, diamond pin) in routeProposals.ts.
 //
 // Pure logic (no React/Leaflet) for choosing which segments get a "Top
-// Proposal" indicator. The path is four explicit steps:
+// Proposal" indicator. The path is five explicit steps:
 //
-//   1. computeVoteTypeWinners — for each vote type, the top `perTypeLimit`
-//      edges by NET (up − down) support. Net ≤ 0 is excluded.
+//   1. computeVoteTypeWinners — for each POINT-kind vote type, the top
+//      `perTypeLimit` edges by NET (up − down) support. Net ≤ 0 is excluded,
+//      and so are ROUTE-kind types (they surface as RBTPs; a route type's hot
+//      edge is a corridor fragment, not a point proposal). Types of unknown
+//      kind (legacy suggestions never flagged) stay eligible.
 //   2. dedupeWinnersByEdge   — collapse winners that share an edge to a single
 //      representative (tiebreak), so one edge shows one indicator and occupies
 //      one slot.
-//   3. spaceOutWinners       — greedy per-type non-max suppression: keep a
+//   3. dedupeWinnersByBlock  — at most ONE pin per street block, across ALL
+//      vote types (tiebreak keeps the strongest). Blocks are the interaction
+//      grain (docs/three-layer-model.md §2); two pins on one block read as
+//      clutter even when their types differ.
+//   4. spaceOutWinners       — greedy per-type non-max suppression: keep a
 //      winner only if no STRONGER same-type winner already sits within
 //      `minSpacingMeters`. Collapses a hot corridor (its top edges are
 //      adjacent segments) to a single pin instead of a stack of identical ones.
-//   4. applyTopProposalLimit — sort by net (tiebreak) and cap at `limit`.
+//      Same-type spacing is deliberately WIDER than the cross-type block grain.
+//   5. applyTopProposalLimit — sort by net (tiebreak) and cap at `limit`.
 //
-// `selectTopProposals` runs all four. See topProposals.test.ts.
+// `selectTopProposals` runs all five. See topProposals.test.ts.
 //
-// Steps 1–2 scan the full edge list; 3–4 operate only on the handful of
+// Steps 1–2 scan the full edge list; 3–5 operate only on the handful of
 // surviving candidates, so the spacing pass is O(candidates²) over a few dozen
 // — negligible even though selection re-runs on every incoming vote.
 
 import type { GraphData } from "../../types";
-import { type GraphTopology, nodeLat, nodeLon, edgeFrom, edgeTo } from "./graphTopology";
+import { type GraphTopology, blockKeyOf, nodeLat, nodeLon, edgeFrom, edgeTo } from "./graphTopology";
 
 export interface VoteTypeWinner {
   legendIdx: number;
@@ -59,14 +67,25 @@ export function compareWinners(
 }
 
 /**
+ * A label's route/point kind, or null when unknown. Point-based selection
+ * excludes "route" labels (they belong to the RBTP family); route-based
+ * extraction excludes "point" labels. Null (a legacy suggestion the DB never
+ * flagged) stays eligible for BOTH — dropping it from both would hide real
+ * votes from every proposal surface.
+ */
+export type VoteTypeKindResolver = (label: string) => "route" | "point" | null;
+
+/**
  * Step 1 — for each vote type, the top `perTypeLimit` edges by net support
  * (highest first). Vote types whose best edge is net ≤ 0 are dropped (a
- * net-downvoted proposal is not a "top proposal").
+ * net-downvoted proposal is not a "top proposal"), as are ROUTE-kind types
+ * when a `kindOf` resolver is supplied — their corridors surface as RBTPs.
  */
 export function computeVoteTypeWinners(
   legend: string[],
   edgeVoteTypes: [number, number, number][][],
-  perTypeLimit = 1
+  perTypeLimit = 1,
+  kindOf?: VoteTypeKindResolver
 ): VoteTypeWinner[] {
   if (!legend.length || !edgeVoteTypes.length) return [];
 
@@ -87,6 +106,7 @@ export function computeVoteTypeWinners(
   for (const [legendIdx, edges] of edgesByType) {
     const label = legend[legendIdx];
     if (!label) continue;
+    if (kindOf && kindOf(label) === "route") continue;
     edges.sort((a, b) => b.count - a.count);
     for (const { edgeIdx, count } of edges.slice(0, perTypeLimit)) {
       winners.push({ legendIdx, label, edgeIdx, count });
@@ -148,6 +168,40 @@ export function dedupeWinnersByEdge(
 }
 
 /**
+ * Maps an edge index to its street-block key, or a negative value when the
+ * edge is unmapped (no block layer, or an edge outside every block).
+ * `dedupeWinnersByBlock` uses this without knowing the topology layout.
+ */
+export type EdgeBlockKey = (edgeIdx: number) => number;
+
+/**
+ * Step 3 — at most ONE winner per street block, across ALL vote types
+ * (tiebreak: higher net, then shuffle). Blocks are the unit users see and vote
+ * on, so two pins on one block — even of different types — read as a stack.
+ * Winners on unmapped edges (key < 0) are kept: no block layer, no constraint.
+ */
+export function dedupeWinnersByBlock(
+  winners: VoteTypeWinner[],
+  salt: number,
+  blockKeyOfEdge: EdgeBlockKey
+): VoteTypeWinner[] {
+  const bestByBlock = new Map<number, VoteTypeWinner>();
+  const unmapped: VoteTypeWinner[] = [];
+  for (const w of winners) {
+    const key = blockKeyOfEdge(w.edgeIdx);
+    if (key < 0) {
+      unmapped.push(w);
+      continue;
+    }
+    const cur = bestByBlock.get(key);
+    if (!cur || compareWinners(w, cur, salt) < 0) {
+      bestByBlock.set(key, w);
+    }
+  }
+  return [...bestByBlock.values(), ...unmapped];
+}
+
+/**
  * Maps an edge index to its midpoint `[lat, lng]`, or null when the edge/nodes
  * can't be resolved. `spaceOutWinners` uses this to measure spacing without the
  * pure module needing to know the GraphData layout.
@@ -187,11 +241,12 @@ export function edgeMidpointResolver(
 }
 
 /**
- * Step 3 — greedy per-type non-max suppression. Processes winners strongest
+ * Step 4 — greedy per-type non-max suppression. Processes winners strongest
  * first (net, then shuffle) and drops any whose edge midpoint lies within
  * `minSpacingMeters` of an already-kept winner of the SAME vote type. Different
- * types never suppress each other (a bike-lane pin and a tree pin can sit side
- * by side — they're genuinely distinct proposals). Winners whose position can't
+ * types never radius-suppress each other (a bike-lane pin and a tree pin can
+ * sit on nearby corners — they're genuinely distinct proposals; only sharing a
+ * BLOCK collapses them, see dedupeWinnersByBlock). Winners whose position can't
  * be resolved are kept (never silently dropped on missing geometry).
  */
 export function spaceOutWinners(
@@ -229,7 +284,7 @@ export function spaceOutWinners(
   return kept;
 }
 
-/** Step 4 — sort by net (tiebreak shuffle) and cap at `limit`. */
+/** Step 5 — sort by net (tiebreak shuffle) and cap at `limit`. */
 export function applyTopProposalLimit(
   winners: VoteTypeWinner[],
   salt: number,
@@ -246,15 +301,20 @@ export function applyTopProposalLimit(
 // spacing pass then collapses any that land on the same corridor.
 export const TOP_PROPOSALS_PER_TYPE = 6;
 
-// Two top proposals of the same vote type closer than this collapse to the
-// stronger one — kills the "3 identical pins stacked on one avenue" look. ~one
-// long NYC avenue block; tune for denser/sparser networks.
-export const TOP_PROPOSAL_MIN_SPACING_M = 300;
+// Two top proposals of the SAME vote type closer than this collapse to the
+// stronger one — kills the "3 identical pins stacked on one avenue" look.
+// Deliberately much wider than the cross-type grain (one pin per block, see
+// dedupeWinnersByBlock): identical pins carry zero extra information nearby,
+// while different-type pins are distinct proposals and only collapse when they
+// share a block. ~7–8 NYC avenue blocks; tune for denser/sparser networks.
+export const TOP_PROPOSAL_MIN_SPACING_M = 600;
 
 /**
- * Full selection path: top-N-per-type winners → one per edge (tiebreak) →
- * per-type spatial spacing → top `limit` by net. Each surviving edge appears
- * once and consumes one slot.
+ * Full selection path: top-N-per-POINT-type winners → one per edge (tiebreak)
+ * → one per street block across all types → per-type spatial spacing → top
+ * `limit` by net. Each surviving edge appears once and consumes one slot.
+ * `kindOf` (label → kind) keeps ROUTE-kind vote types out of the point family;
+ * omit it (e.g. station networks, where every vote is a point) to admit all.
  */
 export function selectTopProposals(
   data:
@@ -262,17 +322,22 @@ export function selectTopProposals(
     | null,
   salt: number,
   limit: number,
-  minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M
+  minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M,
+  kindOf?: VoteTypeKindResolver
 ): VoteTypeWinner[] {
   if (!data) return [];
   const perType = computeVoteTypeWinners(
     data.vote_type_legend ?? [],
     data.edge_vote_types ?? [],
-    TOP_PROPOSALS_PER_TYPE
+    TOP_PROPOSALS_PER_TYPE,
+    kindOf
   );
   const perEdge = dedupeWinnersByEdge(perType, salt);
+  const perBlock = dedupeWinnersByBlock(
+    perEdge, salt, (edgeIdx) => blockKeyOf(data, edgeIdx)
+  );
   const spaced = spaceOutWinners(
-    perEdge, salt, edgeMidpointResolver(data), minSpacingMeters
+    perBlock, salt, edgeMidpointResolver(data), minSpacingMeters
   );
   return applyTopProposalLimit(spaced, salt, limit);
 }

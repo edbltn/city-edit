@@ -36,13 +36,21 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
 
   // Custom vote types already voted on this map. They surface only while the
   // user is typing — never in the default list — and carry no themed icon, so
-  // they render with the colorized suggestion glyph.
+  // they render with the colorized suggestion glyph. Kind-filtered like the
+  // default suggestions (a route-kind custom type shouldn't offer itself for a
+  // point selection); unknown kind (legacy rows) shows in both modes, and
+  // station networks skip the filter entirely (mapVoteTypesForPointType rule:
+  // stations only vote points, whatever kind the type was authored as).
+  const isStationNetwork = (map?.network ?? "streets") !== "streets";
   const extraLabels = inputLower
-    ? (map?.searchVoteTypes ?? []).filter(
-        (lbl) =>
-          lbl.toLowerCase().includes(inputLower) &&
-          !suggestions.some((s) => s.label.toLowerCase() === lbl.toLowerCase())
-      )
+    ? (map?.searchVoteTypes ?? [])
+        .filter((vt) => isStationNetwork || !vt.pointType || vt.pointType === pointType)
+        .map((vt) => vt.label)
+        .filter(
+          (lbl) =>
+            lbl.toLowerCase().includes(inputLower) &&
+            !suggestions.some((s) => s.label.toLowerCase() === lbl.toLowerCase())
+        )
     : [];
 
   const hasExactMatch =

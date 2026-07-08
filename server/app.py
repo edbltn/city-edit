@@ -34,7 +34,8 @@ from database import (
     get_voter_edge_directions, get_voter_type_rows,
     count_devices_per_ip_for_edges, count_unique_voters_for_edges,
     evict_lru_devices_for_edges,
-    seed_presets, list_maps, get_map, get_map_by_subdomain, slug_available,
+    seed_presets, backfill_vote_type_kinds, normalize_point_type,
+    list_maps, get_map, get_map_by_subdomain, slug_available,
     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,
     promote_vote_types, fetch_voted_vote_type_labels,
     DATABASE_URL,
@@ -114,6 +115,7 @@ osrm_registry = OsrmRegistry()
 
 init_db()
 seed_presets()
+backfill_vote_type_kinds()  # repair route/point kinds missing on legacy rows
 
 if DATABASE_URL:
     try:
@@ -694,10 +696,12 @@ def _map_response(m: dict):
         m["city"] = city.to_public()
     # Custom vote types people have already voted here — surfaced by the selector
     # only when searched, never in the default list. Drop the map's own defaults.
+    # Each entry is {label, pointType: 'route'|'point'|null} so the client can
+    # kind-filter proposals and the selector (null = legacy row, kind unknown).
     default_labels = {vt.get("label") for vt in (m.get("voteTypes") or [])}
     m["searchVoteTypes"] = [
-        lbl for lbl in fetch_voted_vote_type_labels(m["slug"])
-        if lbl not in default_labels
+        vt for vt in fetch_voted_vote_type_labels(m["slug"])
+        if vt["label"] not in default_labels
     ]
     resp = jsonify(m)
     # This is the prod page-load entry point (resolved per load by slug/subdomain)
@@ -804,6 +808,17 @@ def map_create():
         return jsonify({"error": "Provide vote_type_list_id or custom_vote_types"}), 400
     if custom_vote_types and not isinstance(custom_vote_types, list):
         return jsonify({"error": "custom_vote_types must be a list"}), 400
+    # Every authored vote type must declare its route/point kind — the top-
+    # proposal split (PBTP vs RBTP) and the selector's mode filter key off it,
+    # and a kindless entry would silently fall into "unknown" forever.
+    if custom_vote_types:
+        for vt in custom_vote_types:
+            if not isinstance(vt, dict) or not (vt.get("label") or "").strip():
+                return jsonify({"error": "Each custom vote type needs a label"}), 400
+            if not normalize_point_type(vt.get("pointType")):
+                return jsonify({
+                    "error": "Each custom vote type needs pointType 'route' or 'point'"
+                }), 400
 
     # Subtitle defaults to "<city> · <vote-type-list name>". The custom-list name
     # defaults to its first vote type's label.
@@ -835,6 +850,11 @@ def map_create():
 
     # A pre-creation probe of this slug may have cached a miss.
     invalidate_map_cache(slug)
+
+    # Stamp the authored kinds into the global registry now, so a later cast
+    # (whose selection kind may differ) isn't the first to flag these labels.
+    for vt in (custom_vote_types or []):
+        vote_store.get_vote_type_id(vt["label"].strip(), vt.get("pointType"))
 
     city = get_city(city_id)
     if city:
@@ -1051,6 +1071,11 @@ def cast_vote():
     point = data.get("point")
     mode = data.get("mode", "walk")
     vt_label = (data.get("vote_type", "") or "").strip()
+    # Kind of the cast's target — 'route' (corridor selection) or 'point'. Only
+    # consulted when vt_label is a brand-new suggestion: the creating cast is the
+    # one witness of the kind a free-text type was suggested as. Existing labels
+    # keep their stored kind.
+    vt_point_type = normalize_point_type(data.get("point_type"))
 
     # Reject unknown vote types when the map disallows user suggestions.
     if (vt_label and not rmap.allow_suggestions
@@ -1076,7 +1101,7 @@ def cast_vote():
     slug = rmap.slug
 
     try:
-        vt_id = vote_store.get_vote_type_id(vt_label) if vt_label else 0
+        vt_id = vote_store.get_vote_type_id(vt_label, vt_point_type) if vt_label else 0
 
         # Soft per-IP cap: how many OTHER devices this IP already has on each
         # edge+type. A brand-new vote from a fresh device is dropped once the IP

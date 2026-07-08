@@ -1,0 +1,1213 @@
+diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
+index b996c87..7823538 100644
+--- a/client-react/src/components/GraphLayer/GraphLayer.tsx
++++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -28,7 +28,7 @@ import {
+ } from "../MapLibreBackground/MapLibreBackground";
+ import { makeVoteTypeIcon } from "./voteTypeIcon";
+ import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
+-import { selectTopProposals, topLabelForEdges, type VoteTypeWinner } from "./topProposals";
++import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, type VoteTypeWinner } from "./topProposals";
+ import {
+   computeRouteProposals, corridorCoordinates, corridorFromEdgeIds, routeBlockEdges, isRouteCovered,
+   expandSelectionToUndirected,
+@@ -54,7 +54,7 @@ import {
+   adjShortest,
+ } from "./graphTopology";
+ import { materializeBlocks, selectionVoteRows } from "../../utils/blockSelection";
+-import { iconForLabel, iconSrc, mapStyleForTheme } from "../../themes";
++import { iconForLabel, iconSrc, mapStyleForTheme, pointTypeForLabel } from "../../themes";
+ import { buildHeatRampStops, sampleHeatRamp, HEAT_PEAK_POS } from "../../mapStyles";
+ import {
+   getCachedTopology,
+@@ -1256,6 +1256,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     setWinners(next);
+   }, []);
+ 
++  // Label → route/point kind, resolved against the active map's vote types and
++  // its search-only custom types (see pointTypeForLabel). Splits the proposal
++  // families: PBTPs exclude route-kind labels, RBTPs exclude point-kind ones.
++  // Station networks vote only on fixed points, so every kind is admitted there
++  // (no resolver — same rule as mapVoteTypesForPointType).
++  const voteTypeKindOf = useCallback((label: string) => {
++    const cfg = getCurrentMap();
++    return pointTypeForLabel(label, cfg?.voteTypes, cfg?.searchVoteTypes);
++  }, []);
++
+   const refreshGraphDisplay = useCallback(() => {
+     const data = graphDataRef.current;
+     if (!data) return;
+@@ -1264,10 +1274,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     lastLegendLenRef.current = legendLen;
+     setStableWinners(selectTopProposals(
+       data, tiebreakSaltRef.current, TOP_PROPOSAL_LIMIT,
++      TOP_PROPOSAL_MIN_SPACING_M,
++      isStationNetwork ? undefined : voteTypeKindOf,
+     ), legendChanged);
+     setGraphVoteVersion((v) => v + 1);
+     scheduleRedrawRef.current();
+-  }, [setStableWinners]);
++  }, [setStableWinners, isStationNetwork, voteTypeKindOf]);
+ 
+   const refreshGraphDisplayRef = useRef(refreshGraphDisplay);
+   useEffect(() => { refreshGraphDisplayRef.current = refreshGraphDisplay; }, [refreshGraphDisplay]);
+@@ -1858,7 +1870,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     const data = graphDataRef.current;
+     if (!topo || !adj || !data?.edge_vote_types) return;
+     const t0 = performance.now();
+-    const next = computeRouteProposals(topo, adj, data);
++    // kindOf keeps POINT-kind vote types out of the corridor family (their
++    // votes surface as PBTP pins instead) — the mirror of the PBTP filter.
++    const next = computeRouteProposals(topo, adj, data, { kindOf: voteTypeKindOf });
+     dlog("proposals", `recompute: ${next.length} corridors in ${(performance.now() - t0).toFixed(1)}ms`,
+       next.map((p) => `${p.label}#${p.id}(${p.score})`));
+     debugState("routeProposals", next.length);
+@@ -1868,7 +1882,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       prev.length === next.length
+         && prev.every((p, i) => p.id === next[i].id && p.score === next[i].score)
+         ? prev : next);
+-  }, []);
++  }, [voteTypeKindOf]);
+ 
+   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);
+   useEffect(() => { recomputeRouteProposalsRef.current = recomputeRouteProposals; }, [recomputeRouteProposals]);
+diff --git a/client-react/src/components/GraphLayer/graphTopology.ts b/client-react/src/components/GraphLayer/graphTopology.ts
+index 1d2a374..c7b54d7 100644
+--- a/client-react/src/components/GraphLayer/graphTopology.ts
++++ b/client-react/src/components/GraphLayer/graphTopology.ts
+@@ -231,6 +231,26 @@ export function adjShortest(
+   return best;
+ }
+ 
++const EARTH_RADIUS_M = 6_371_000;
++
++/**
++ * An edge's straight-line length in meters (fast equirectangular — exact
++ * enough at city scale; graph edges are short and mostly straight). Shared by
++ * the route-proposal length cap and anything else that budgets in meters.
++ */
++export function edgeLengthMeters(d: GraphTopology, edgeId: number): number {
++  const a = d.ends[2 * edgeId];
++  const b = d.ends[2 * edgeId + 1];
++  const aLat = d.coords[2 * a] / COORD_SCALE;
++  const aLon = d.coords[2 * a + 1] / COORD_SCALE;
++  const bLat = d.coords[2 * b] / COORD_SCALE;
++  const bLon = d.coords[2 * b + 1] / COORD_SCALE;
++  const meanLatRad = (((aLat + bLat) / 2) * Math.PI) / 180;
++  const dLat = ((bLat - aLat) * Math.PI) / 180;
++  const dLon = (((bLon - aLon) * Math.PI) / 180) * Math.cos(meanLatRad);
++  return EARTH_RADIUS_M * Math.hypot(dLat, dLon);
++}
++
+ // ── Block index (CSR) ───────────────────────────────────────────────────────
+ // Blocks are the aggregation/interaction grain (docs/three-layer-model.md §2):
+ // every edge maps to at most one block via edgeBlockId. Same CSR layout as
+diff --git a/client-react/src/components/GraphLayer/routeProposals.test.ts b/client-react/src/components/GraphLayer/routeProposals.test.ts
+index fb0ddbd..4a9a4e4 100644
+--- a/client-react/src/components/GraphLayer/routeProposals.test.ts
++++ b/client-react/src/components/GraphLayer/routeProposals.test.ts
+@@ -12,8 +12,14 @@ import {
+   corridorCoordinates,
+   corridorFromEdgeIds,
+   dedupeRoutes,
++  capPathToLengthBudget,
++  routeLengthBudgetM,
+   MIN_ROUTE_SCORE,
+   MIN_ROUTE_EDGES,
++  ROUTE_LENGTH_BASE_M,
++  ROUTE_LENGTH_PER_SQRT_SCORE_M,
++  ROUTE_LENGTH_MAX_M,
++  type PathResult,
+   type RouteProposal,
+   type RouteProposalOptions,
+ } from "./routeProposals";
+@@ -531,3 +537,117 @@ describe("chooseAnchorOrderBefore (start dropped onto a diamond)", () => {
+     expect(chooseAnchorOrderBefore(ll(0, -5), A, B, durationOf)).toEqual([B, A]);
+   });
+ });
++
++// ==========================================================================
++// Corridor length budget — routeLengthBudgetM + capPathToLengthBudget
++// ==========================================================================
++
++describe("routeLengthBudgetM", () => {
++  it("grows with support from the base, sublinearly", () => {
++    expect(routeLengthBudgetM(0)).toBe(ROUTE_LENGTH_BASE_M);
++    expect(routeLengthBudgetM(4)).toBe(ROUTE_LENGTH_BASE_M + 2 * ROUTE_LENGTH_PER_SQRT_SCORE_M);
++    expect(routeLengthBudgetM(16)).toBe(ROUTE_LENGTH_BASE_M + 4 * ROUTE_LENGTH_PER_SQRT_SCORE_M);
++  });
++
++  it("is clamped to the ceiling regardless of support", () => {
++    expect(routeLengthBudgetM(1e9)).toBe(ROUTE_LENGTH_MAX_M);
++    expect(routeLengthBudgetM(1e9, 1000)).toBe(1000);
++  });
++});
++
++describe("capPathToLengthBudget", () => {
++  // Path of 5 edges, 100m each; per-edge weights below.
++  const path = (weights: number[]): { p: PathResult; weightOf: (e: number) => number } => ({
++    p: {
++      edges: weights.map((_, i) => i),
++      nodes: weights.map((_, i) => i).concat(weights.length),
++      weight: weights.reduce((a, b) => a + b, 0),
++    },
++    weightOf: (e: number) => weights[e],
++  });
++  const len100 = () => 100;
++
++  it("returns the path unchanged when it fits the budget", () => {
++    const { p, weightOf } = path([1, 1, 1]);
++    expect(capPathToLengthBudget(p, 300, len100, weightOf)).toBe(p);
++  });
++
++  it("trims to the hottest contiguous window under the budget", () => {
++    // 500m total, budget 200m (2 edges). Hot stretch is edges 2–3.
++    const { p, weightOf } = path([1, 1, 9, 8, 1]);
++    const out = capPathToLengthBudget(p, 200, len100, weightOf);
++    expect(out.edges).toEqual([2, 3]);
++    expect(out.nodes).toEqual([2, 3, 4]); // endpoints of the kept window
++    expect(out.weight).toBe(17);
++  });
++
++  it("prefers the shorter window on equal weight, then the earliest", () => {
++    const { p, weightOf } = path([5, 0, 5, 5]);
++    // Budget 200: windows [2,3] (weight 10, 200m) beat [0,1] (5) and [1,2] (5).
++    expect(capPathToLengthBudget(p, 200, len100, weightOf).edges).toEqual([2, 3]);
++    // Budget 100: [0], [2], [3] all weigh 5 — earliest wins.
++    expect(capPathToLengthBudget(p, 100, len100, weightOf).edges).toEqual([0]);
++  });
++
++  it("keeps a single over-budget edge rather than trimming to nothing", () => {
++    const { p, weightOf } = path([1, 50, 1]);
++    const out = capPathToLengthBudget(p, 60, len100, weightOf);
++    expect(out.edges).toEqual([1]);
++    expect(out.weight).toBe(50);
++  });
++});
++
++describe("computeRouteProposals — corridor length cap", () => {
++  it("caps a long corridor to its best-supported stretch", () => {
++    // A 12-edge chain (~84m/edge ≈ 1.0km) with a hot 4-edge core. A 400m
++    // ceiling keeps only the core (4 edges ≈ 338m; a 5th would exceed 400m).
++    const edges: [number, number][] = Array.from({ length: 12 }, (_, i) => [i, i + 1]);
++    const votes = edges.map((_, i): [number, number, number][] =>
++      [[BIKE, i >= 4 && i <= 7 ? 5 : 1, 0]]);
++    const ps = compute(edges, evt(...votes), { maxRouteLengthM: 400 });
++    expect(ps).toHaveLength(1);
++    expect(ps[0].edgeIds).toEqual([4, 5, 6, 7]);
++    expect(ps[0].score).toBe(20);
++    // Anchors follow the trimmed window, not the original path ends.
++    expect(ps[0].anchors).toEqual([4, 8]);
++  });
++
++  it("leaves short corridors untouched by the default budget", () => {
++    const ps = compute(
++      [[0, 1], [1, 2], [2, 3]],
++      evt([[BIKE, 5, 0]], [[BIKE, 4, 0]], [[BIKE, 3, 0]]),
++    );
++    expect(ps).toHaveLength(1);
++    expect(ps[0].edgeIds).toEqual(expect.arrayContaining([0, 1, 2]));
++  });
++});
++
++describe("computeRouteProposals — route/point kind filter", () => {
++  const kindOf = (label: string) =>
++    label === "Bike lane" ? "point" as const
++    : label === "Tree" ? "route" as const
++    : null;
++
++  it("skips POINT-kind vote types (their votes are PBTPs, not corridors)", () => {
++    const ps = compute(
++      [[0, 1], [1, 2], [10, 11], [11, 12]],
++      evt([[BIKE, 9, 0]], [[BIKE, 8, 0]], [[TREE, 7, 0]], [[TREE, 6, 0]]),
++      { kindOf },
++    );
++    expect(ps.map((p) => p.label)).toEqual(["Tree"]);
++  });
++
++  it("keeps unknown-kind labels eligible and admits all without a resolver", () => {
++    const both = compute(
++      [[0, 1], [1, 2]],
++      evt([[BIKE, 9, 0]], [[BIKE, 8, 0]]),
++    );
++    expect(both.map((p) => p.label)).toEqual(["Bike lane"]);
++    const unknownKind = compute(
++      [[0, 1], [1, 2]],
++      evt([[BIKE, 9, 0]], [[BIKE, 8, 0]]),
++      { kindOf: () => null },
++    );
++    expect(unknownKind.map((p) => p.label)).toEqual(["Bike lane"]);
++  });
++});
+diff --git a/client-react/src/components/GraphLayer/routeProposals.ts b/client-react/src/components/GraphLayer/routeProposals.ts
+index 7edf569..2a98849 100644
+--- a/client-react/src/components/GraphLayer/routeProposals.ts
++++ b/client-react/src/components/GraphLayer/routeProposals.ts
+@@ -29,12 +29,14 @@ import {
+   adjEdgesOf,
+   blockKeyOf,
+   buildBlockIndex,
++  edgeLengthMeters,
+   edgesOfBlockKey,
+   nodeLatLng,
+   type BlockIndex,
+   type GraphTopology,
+   type NodeAdj,
+ } from "./graphTopology";
++import type { VoteTypeKindResolver } from "./topProposals";
+ 
+ export interface RouteProposal {
+   id: string;
+@@ -302,11 +304,13 @@ export function chooseAnchorOrderBefore(
+ // ==========================================================================
+ // Client-side deterministic clustering (port of server/route_proposals.py)
+ // ==========================================================================
+-// Pipeline per vote type (docs/three-layer-model.md §3.2): net-positive
++// Pipeline per ROUTE-kind vote type (docs/three-layer-model.md §3.2; point-
++// kind types are skipped — their votes surface as PBTP pins): net-positive
+ // subgraph → connected components (the deterministic replacement for the
+ // server's Leiden step — components localize; path peeling separates parallel
+-// corridors inside one component) → peel heaviest simple paths → activity
+-// gates → block projection → same-type dedupe → rank + cap.
++// corridors inside one component) → peel heaviest simple paths → trim each to
++// its support-earned meter budget (capPathToLengthBudget) → activity gates →
++// block projection → same-type dedupe → rank + cap.
+ //
+ // Determinism contract: NO randomness, NO clock. Every iteration order and
+ // tie-break is by ascending edge/node id, so the same (topology, vote state)
+@@ -330,12 +334,39 @@ export const DEFAULT_LIMIT = 20;
+ /** Same-type edge-set Jaccard at/above which two routes are duplicates. */
+ export const DEFAULT_JACCARD = 0.5;
+ 
++// ── Corridor length budget ──────────────────────────────────────────────────
++// A peeled path can snake for miles (greedy extension keeps going while ANY
++// net-positive arc exists), which reads as an absurd proposal. Instead of a
++// blunt truncation, each path gets a meter budget that GROWS with its support
++// — a corridor earns length with votes — and is trimmed to its best-supported
++// contiguous window under that budget (see capPathToLengthBudget).
++/** Budget floor: every corridor may span at least this many meters. */
++export const ROUTE_LENGTH_BASE_M = 600;
++/** Budget growth: meters added per √(path score). √ keeps a corridor with 4×
++ *  the votes at 2× the earned length — support buys reach, sublinearly. */
++export const ROUTE_LENGTH_PER_SQRT_SCORE_M = 150;
++/** Budget ceiling, whatever the support. */
++export const ROUTE_LENGTH_MAX_M = 2500;
++
++/** The meter budget a path of `score` (sum of nets) has earned. */
++export function routeLengthBudgetM(score: number, maxM = ROUTE_LENGTH_MAX_M): number {
++  const earned = ROUTE_LENGTH_BASE_M
++    + ROUTE_LENGTH_PER_SQRT_SCORE_M * Math.sqrt(Math.max(score, 0));
++  return Math.min(maxM, earned);
++}
++
+ export interface RouteProposalOptions {
+   limit?: number;
+   jaccardThreshold?: number;
+   minNet?: number;
+   minRouteScore?: number;
+   minRouteEdges?: number;
++  /** Hard ceiling override for the corridor length budget (meters). */
++  maxRouteLengthM?: number;
++  /** Label → route/point kind. POINT-kind vote types are skipped — their votes
++   *  surface as PBTP pins (topProposals.ts), not corridors. Unknown (null)
++   *  kinds stay eligible. Omit to admit every type. */
++  kindOf?: VoteTypeKindResolver;
+ }
+ 
+ /** Arc of the per-type subgraph: neighbor node, original edge id, net weight. */
+@@ -451,7 +482,7 @@ function connectedComponents(typeAdj: TypeAdj): TypeAdj[] {
+   return comps;
+ }
+ 
+-type PathResult = { edges: number[]; nodes: number[]; weight: number };
++export type PathResult = { edges: number[]; nodes: number[]; weight: number };
+ 
+ /** Exact heaviest simple path by DFS from every node (small components only).
+  *  Strictly-greater comparisons keep the FIRST best found — ties resolve to the
+@@ -551,9 +582,12 @@ function greedyHeaviestPath(adj: TypeAdj): PathResult {
+ 
+   // Extend from b away from a, and from a away from b, then splice into one
+   // path joined on the seed edge (the bwd half reversed, seed edge kept once).
++  // The bwd half contributes everything BEFORE seedA (drop its trailing
++  // seedA+seedB after reversing — fwd starts at seedA), keeping nodes aligned
++  // with edges (nodes[i] is the node entering edges[i]) for window slicing.
+   const fwd = extend(seedA, seedB, seedE);
+   const bwd = extend(seedB, seedA, seedE);
+-  const leftNodes = [...bwd.nodes].reverse().slice(0, -1); // … → seedA (drop trailing seedB)
++  const leftNodes = [...bwd.nodes].reverse().slice(0, -2);
+   const leftEdges = [...bwd.edges.slice(1)].reverse(); // edges past the seed, reversed
+   const nodes = [...leftNodes, ...fwd.nodes];
+   const edges = [...leftEdges, ...fwd.edges];
+@@ -595,6 +629,57 @@ function peelPaths(adj: TypeAdj): PathResult[] {
+   return paths;
+ }
+ 
++/**
++ * Trim an ordered path to its best-supported contiguous window within a meter
++ * budget. Slides a window over the path's edges keeping total length ≤
++ * `budgetM` and returns the window with the highest weight sum — the hottest
++ * stretch survives, straggly low-support reach is dropped. Deterministic ties:
++ * equal weight prefers the shorter window, then the earliest along the path.
++ * A single edge longer than the whole budget is kept (a corridor is never
++ * trimmed to nothing); paths already within budget return unchanged.
++ */
++export function capPathToLengthBudget(
++  path: PathResult,
++  budgetM: number,
++  lengthOf: (edgeId: number) => number,
++  weightOf: (edgeId: number) => number,
++): PathResult {
++  const n = path.edges.length;
++  if (n <= 1) return path;
++  const lens = path.edges.map(lengthOf);
++  if (lens.reduce((a, b) => a + b, 0) <= budgetM) return path;
++
++  let bestI = 0;
++  let bestJ = 0;
++  let bestW = -Infinity;
++  let bestLen = Infinity;
++  let i = 0;
++  let sumW = 0;
++  let sumL = 0;
++  for (let j = 0; j < n; j++) {
++    sumW += weightOf(path.edges[j]);
++    sumL += lens[j];
++    // Shrink from the left until within budget — but never below one edge, so
++    // an over-budget single edge (a long bridge) still yields a window.
++    while (sumL > budgetM && i < j) {
++      sumW -= weightOf(path.edges[i]);
++      sumL -= lens[i];
++      i++;
++    }
++    if (sumW > bestW || (sumW === bestW && sumL < bestLen)) {
++      bestI = i;
++      bestJ = j;
++      bestW = sumW;
++      bestLen = sumL;
++    }
++  }
++  return {
++    edges: path.edges.slice(bestI, bestJ + 1),
++    nodes: path.nodes.slice(bestI, bestJ + 2),
++    weight: bestW,
++  };
++}
++
+ /** Expand an ordered path into its distinct blocks (in path order) + the union
+  *  of every block edge — the voting set. Singleton fallback where unmapped. */
+ function groupBlocks(
+@@ -682,17 +767,29 @@ export function computeRouteProposals(
+   const minNet = opts.minNet ?? MIN_NET;
+   const minRouteScore = opts.minRouteScore ?? MIN_ROUTE_SCORE;
+   const minRouteEdges = opts.minRouteEdges ?? MIN_ROUTE_EDGES;
++  const maxRouteLengthM = opts.maxRouteLengthM ?? ROUTE_LENGTH_MAX_M;
+   const blockIndex = buildBlockIndex(topo);
+ 
+   const all: RouteProposal[] = [];
+   for (let legendIdx = 0; legendIdx < legend.length; legendIdx++) {
+     const label = legend[legendIdx];
+     if (!label) continue;
++    // POINT-kind vote types never form corridors — their votes are PBTP pins
++    // (topProposals.ts). Unknown kind (null) stays eligible for both families.
++    if (opts.kindOf && opts.kindOf(label) === "point") continue;
+     const nets = netsForType(edgeVoteTypes, topo.nEdges, legendIdx);
+     const typeAdj = buildTypeAdj(topo, adj, nets, minNet);
+     const typeProposals: RouteProposal[] = [];
+     for (const compAdj of connectedComponents(typeAdj)) {
+-      for (const path of peelPaths(compAdj)) {
++      for (const peeled of peelPaths(compAdj)) {
++        // Trim to the support-earned meter budget BEFORE the activity gates,
++        // so the gates judge the corridor that will actually be shown.
++        const path = capPathToLengthBudget(
++          peeled,
++          routeLengthBudgetM(peeled.weight, maxRouteLengthM),
++          (e) => edgeLengthMeters(topo, e),
++          (e) => nets[e],
++        );
+         if (path.weight < minRouteScore || path.edges.length < minRouteEdges) continue;
+         const { blocks, blockEdgeIds } = groupBlocks(path.edges, topo, blockIndex);
+         const a = path.nodes[0];
+diff --git a/client-react/src/components/GraphLayer/topProposals.test.ts b/client-react/src/components/GraphLayer/topProposals.test.ts
+index b497536..87f0517 100644
+--- a/client-react/src/components/GraphLayer/topProposals.test.ts
++++ b/client-react/src/components/GraphLayer/topProposals.test.ts
+@@ -3,6 +3,7 @@ import {
+   shuffleKey,
+   computeVoteTypeWinners,
+   dedupeWinnersByEdge,
++  dedupeWinnersByBlock,
+   spaceOutWinners,
+   edgeMidpointResolver,
+   applyTopProposalLimit,
+@@ -263,3 +264,107 @@ describe("topLabelForEdges (vote-type fallback ranking)", () => {
+     expect(topLabelForEdges([], evt, [0])).toBeNull();
+   });
+ });
++
++describe("computeVoteTypeWinners — route/point kind filter", () => {
++  const legend = ["Add bike greenway", "Add bike parking", "Fix the thing"];
++  const evt: [number, number, number][][] = [
++    [[0, 9, 0]], // edge 0: greenway (route kind) net 9
++    [[1, 5, 0]], // edge 1: parking (point kind) net 5
++    [[2, 3, 0]], // edge 2: unknown-kind custom label net 3
++  ];
++  const kindOf = (label: string) =>
++    label === "Add bike greenway" ? "route" as const
++    : label === "Add bike parking" ? "point" as const
++    : null;
++
++  it("excludes ROUTE-kind vote types from point-based winners", () => {
++    const out = computeVoteTypeWinners(legend, evt, 1, kindOf);
++    expect(out.map((w) => w.label).sort()).toEqual(["Add bike parking", "Fix the thing"]);
++  });
++
++  it("keeps unknown-kind labels eligible (legacy suggestions)", () => {
++    const out = computeVoteTypeWinners(legend, evt, 1, kindOf);
++    expect(out.some((w) => w.label === "Fix the thing")).toBe(true);
++  });
++
++  it("admits every kind when no resolver is given", () => {
++    expect(computeVoteTypeWinners(legend, evt, 1)).toHaveLength(3);
++  });
++});
++
++describe("dedupeWinnersByBlock", () => {
++  const mk = (label: string, legendIdx: number, count: number, edgeIdx: number): VoteTypeWinner => ({
++    legendIdx, label, edgeIdx, count,
++  });
++
++  it("keeps a single winner per block ACROSS vote types (strongest wins)", () => {
++    // Edges 0 and 1 share block 4; different vote types.
++    const keyOf = (e: number) => (e === 0 || e === 1 ? 4 : 7);
++    const out = dedupeWinnersByBlock(
++      [mk("Bike", 0, 3, 0), mk("Tree", 1, 8, 1), mk("Bench", 2, 2, 2)],
++      SALT,
++      keyOf,
++    );
++    expect(out).toHaveLength(2);
++    expect(out.find((w) => keyOf(w.edgeIdx) === 4)!.label).toBe("Tree");
++    expect(out.some((w) => w.edgeIdx === 2)).toBe(true);
++  });
++
++  it("keeps winners on unmapped edges (negative keys) unconstrained", () => {
++    // Singleton keys (≤ -2) mean "no block layer" — nothing collapses.
++    const out = dedupeWinnersByBlock(
++      [mk("Bike", 0, 3, 0), mk("Tree", 1, 8, 1)],
++      SALT,
++      (e) => -(e + 2),
++    );
++    expect(out).toHaveLength(2);
++  });
++
++  it("tiebreaks equal-net same-block winners deterministically by salt", () => {
++    const winners = [mk("Alpha", 0, 5, 0), mk("Bravo", 1, 5, 1)];
++    const first = dedupeWinnersByBlock(winners, SALT, () => 1)[0].label;
++    expect(dedupeWinnersByBlock(winners, SALT, () => 1)[0].label).toBe(first);
++    const expected = shuffleKey("Alpha", SALT) <= shuffleKey("Bravo", SALT) ? "Alpha" : "Bravo";
++    expect(first).toBe(expected);
++  });
++});
++
++describe("selectTopProposals — block uniqueness + kind filter (full path)", () => {
++  it("allows at most one pin per street block, across vote types", () => {
++    // Edges 0 and 1 both map to block 0 (a two-direction street); edge 2 is
++    // its own block. Bike (net 8) and Tree (net 6) sit on the same block →
++    // only Bike survives there; Bench keeps its own block.
++    const nodes: [number, number][] = [
++      [40.7000, -74.0000], [40.7001, -74.0000],
++      [40.7000, -74.0001], [40.7001, -74.0001],
++      [40.7100, -74.0000], [40.7101, -74.0000],
++    ];
++    const edges: [number, number, string][] = [[0, 1, ""], [2, 3, ""], [4, 5, ""]];
++    const data = { 
++      vote_type_legend: ["Bike", "Tree", "Bench"],
++      edge_vote_types: [
++        [[0, 8, 0]], [[1, 6, 0]], [[2, 4, 0]],
++      ] as [number, number, number][][],
++      ...topo(nodes, edges),
++    };
++    data.edgeBlockId = Int32Array.from([0, 0, 1]);
++    data.nBlocks = 2;
++    const out = selectTopProposals(data, SALT, 10);
++    expect(out.map((w) => w.label).sort()).toEqual(["Bench", "Bike"]);
++  });
++
++  it("keeps ROUTE-kind labels out of the point-based top proposals", () => {
++    const data = {
++      vote_type_legend: ["Add bike greenway", "Add bike parking"],
++      edge_vote_types: [
++        [[0, 9, 0]], // greenway on edge 0 — route kind, must not pin
++        [[1, 5, 0]], // parking on edge 1 — point kind, pins
++      ] as [number, number, number][][],
++      ...topo([], []),
++    };
++    const kindOf = (label: string) =>
++      label === "Add bike greenway" ? "route" as const : "point" as const;
++    const out = selectTopProposals(data, SALT, 10, 600, kindOf);
++    expect(out.map((w) => w.label)).toEqual(["Add bike parking"]);
++  });
++});
+diff --git a/client-react/src/components/GraphLayer/topProposals.ts b/client-react/src/components/GraphLayer/topProposals.ts
+index 61810a3..46a9b47 100644
+--- a/client-react/src/components/GraphLayer/topProposals.ts
++++ b/client-react/src/components/GraphLayer/topProposals.ts
+@@ -6,27 +6,35 @@
+ // is the RBTP (a hot corridor, diamond pin) in routeProposals.ts.
+ //
+ // Pure logic (no React/Leaflet) for choosing which segments get a "Top
+-// Proposal" indicator. The path is four explicit steps:
++// Proposal" indicator. The path is five explicit steps:
+ //
+-//   1. computeVoteTypeWinners — for each vote type, the top `perTypeLimit`
+-//      edges by NET (up − down) support. Net ≤ 0 is excluded.
++//   1. computeVoteTypeWinners — for each POINT-kind vote type, the top
++//      `perTypeLimit` edges by NET (up − down) support. Net ≤ 0 is excluded,
++//      and so are ROUTE-kind types (they surface as RBTPs; a route type's hot
++//      edge is a corridor fragment, not a point proposal). Types of unknown
++//      kind (legacy suggestions never flagged) stay eligible.
+ //   2. dedupeWinnersByEdge   — collapse winners that share an edge to a single
+ //      representative (tiebreak), so one edge shows one indicator and occupies
+ //      one slot.
+-//   3. spaceOutWinners       — greedy per-type non-max suppression: keep a
++//   3. dedupeWinnersByBlock  — at most ONE pin per street block, across ALL
++//      vote types (tiebreak keeps the strongest). Blocks are the interaction
++//      grain (docs/three-layer-model.md §2); two pins on one block read as
++//      clutter even when their types differ.
++//   4. spaceOutWinners       — greedy per-type non-max suppression: keep a
+ //      winner only if no STRONGER same-type winner already sits within
+ //      `minSpacingMeters`. Collapses a hot corridor (its top edges are
+ //      adjacent segments) to a single pin instead of a stack of identical ones.
+-//   4. applyTopProposalLimit — sort by net (tiebreak) and cap at `limit`.
++//      Same-type spacing is deliberately WIDER than the cross-type block grain.
++//   5. applyTopProposalLimit — sort by net (tiebreak) and cap at `limit`.
+ //
+-// `selectTopProposals` runs all four. See topProposals.test.ts.
++// `selectTopProposals` runs all five. See topProposals.test.ts.
+ //
+-// Steps 1–2 scan the full edge list; 3–4 operate only on the handful of
++// Steps 1–2 scan the full edge list; 3–5 operate only on the handful of
+ // surviving candidates, so the spacing pass is O(candidates²) over a few dozen
+ // — negligible even though selection re-runs on every incoming vote.
+ 
+ import type { GraphData } from "../../types";
+-import { type GraphTopology, nodeLat, nodeLon, edgeFrom, edgeTo } from "./graphTopology";
++import { type GraphTopology, blockKeyOf, nodeLat, nodeLon, edgeFrom, edgeTo } from "./graphTopology";
+ 
+ export interface VoteTypeWinner {
+   legendIdx: number;
+@@ -58,15 +66,26 @@ export function compareWinners(
+   return shuffleKey(a.label, salt) - shuffleKey(b.label, salt);
+ }
+ 
++/**
++ * A label's route/point kind, or null when unknown. Point-based selection
++ * excludes "route" labels (they belong to the RBTP family); route-based
++ * extraction excludes "point" labels. Null (a legacy suggestion the DB never
++ * flagged) stays eligible for BOTH — dropping it from both would hide real
++ * votes from every proposal surface.
++ */
++export type VoteTypeKindResolver = (label: string) => "route" | "point" | null;
++
+ /**
+  * Step 1 — for each vote type, the top `perTypeLimit` edges by net support
+  * (highest first). Vote types whose best edge is net ≤ 0 are dropped (a
+- * net-downvoted proposal is not a "top proposal").
++ * net-downvoted proposal is not a "top proposal"), as are ROUTE-kind types
++ * when a `kindOf` resolver is supplied — their corridors surface as RBTPs.
+  */
+ export function computeVoteTypeWinners(
+   legend: string[],
+   edgeVoteTypes: [number, number, number][][],
+-  perTypeLimit = 1
++  perTypeLimit = 1,
++  kindOf?: VoteTypeKindResolver
+ ): VoteTypeWinner[] {
+   if (!legend.length || !edgeVoteTypes.length) return [];
+ 
+@@ -87,6 +106,7 @@ export function computeVoteTypeWinners(
+   for (const [legendIdx, edges] of edgesByType) {
+     const label = legend[legendIdx];
+     if (!label) continue;
++    if (kindOf && kindOf(label) === "route") continue;
+     edges.sort((a, b) => b.count - a.count);
+     for (const { edgeIdx, count } of edges.slice(0, perTypeLimit)) {
+       winners.push({ legendIdx, label, edgeIdx, count });
+@@ -147,6 +167,40 @@ export function dedupeWinnersByEdge(
+   return [...bestByEdge.values()];
+ }
+ 
++/**
++ * Maps an edge index to its street-block key, or a negative value when the
++ * edge is unmapped (no block layer, or an edge outside every block).
++ * `dedupeWinnersByBlock` uses this without knowing the topology layout.
++ */
++export type EdgeBlockKey = (edgeIdx: number) => number;
++
++/**
++ * Step 3 — at most ONE winner per street block, across ALL vote types
++ * (tiebreak: higher net, then shuffle). Blocks are the unit users see and vote
++ * on, so two pins on one block — even of different types — read as a stack.
++ * Winners on unmapped edges (key < 0) are kept: no block layer, no constraint.
++ */
++export function dedupeWinnersByBlock(
++  winners: VoteTypeWinner[],
++  salt: number,
++  blockKeyOfEdge: EdgeBlockKey
++): VoteTypeWinner[] {
++  const bestByBlock = new Map<number, VoteTypeWinner>();
++  const unmapped: VoteTypeWinner[] = [];
++  for (const w of winners) {
++    const key = blockKeyOfEdge(w.edgeIdx);
++    if (key < 0) {
++      unmapped.push(w);
++      continue;
++    }
++    const cur = bestByBlock.get(key);
++    if (!cur || compareWinners(w, cur, salt) < 0) {
++      bestByBlock.set(key, w);
++    }
++  }
++  return [...bestByBlock.values(), ...unmapped];
++}
++
+ /**
+  * Maps an edge index to its midpoint `[lat, lng]`, or null when the edge/nodes
+  * can't be resolved. `spaceOutWinners` uses this to measure spacing without the
+@@ -187,11 +241,12 @@ export function edgeMidpointResolver(
+ }
+ 
+ /**
+- * Step 3 — greedy per-type non-max suppression. Processes winners strongest
++ * Step 4 — greedy per-type non-max suppression. Processes winners strongest
+  * first (net, then shuffle) and drops any whose edge midpoint lies within
+  * `minSpacingMeters` of an already-kept winner of the SAME vote type. Different
+- * types never suppress each other (a bike-lane pin and a tree pin can sit side
+- * by side — they're genuinely distinct proposals). Winners whose position can't
++ * types never radius-suppress each other (a bike-lane pin and a tree pin can
++ * sit on nearby corners — they're genuinely distinct proposals; only sharing a
++ * BLOCK collapses them, see dedupeWinnersByBlock). Winners whose position can't
+  * be resolved are kept (never silently dropped on missing geometry).
+  */
+ export function spaceOutWinners(
+@@ -229,7 +284,7 @@ export function spaceOutWinners(
+   return kept;
+ }
+ 
+-/** Step 4 — sort by net (tiebreak shuffle) and cap at `limit`. */
++/** Step 5 — sort by net (tiebreak shuffle) and cap at `limit`. */
+ export function applyTopProposalLimit(
+   winners: VoteTypeWinner[],
+   salt: number,
+@@ -246,15 +301,20 @@ export function applyTopProposalLimit(
+ // spacing pass then collapses any that land on the same corridor.
+ export const TOP_PROPOSALS_PER_TYPE = 6;
+ 
+-// Two top proposals of the same vote type closer than this collapse to the
+-// stronger one — kills the "3 identical pins stacked on one avenue" look. ~one
+-// long NYC avenue block; tune for denser/sparser networks.
+-export const TOP_PROPOSAL_MIN_SPACING_M = 300;
++// Two top proposals of the SAME vote type closer than this collapse to the
++// stronger one — kills the "3 identical pins stacked on one avenue" look.
++// Deliberately much wider than the cross-type grain (one pin per block, see
++// dedupeWinnersByBlock): identical pins carry zero extra information nearby,
++// while different-type pins are distinct proposals and only collapse when they
++// share a block. ~7–8 NYC avenue blocks; tune for denser/sparser networks.
++export const TOP_PROPOSAL_MIN_SPACING_M = 600;
+ 
+ /**
+- * Full selection path: top-N-per-type winners → one per edge (tiebreak) →
+- * per-type spatial spacing → top `limit` by net. Each surviving edge appears
+- * once and consumes one slot.
++ * Full selection path: top-N-per-POINT-type winners → one per edge (tiebreak)
++ * → one per street block across all types → per-type spatial spacing → top
++ * `limit` by net. Each surviving edge appears once and consumes one slot.
++ * `kindOf` (label → kind) keeps ROUTE-kind vote types out of the point family;
++ * omit it (e.g. station networks, where every vote is a point) to admit all.
+  */
+ export function selectTopProposals(
+   data:
+@@ -262,17 +322,22 @@ export function selectTopProposals(
+     | null,
+   salt: number,
+   limit: number,
+-  minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M
++  minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M,
++  kindOf?: VoteTypeKindResolver
+ ): VoteTypeWinner[] {
+   if (!data) return [];
+   const perType = computeVoteTypeWinners(
+     data.vote_type_legend ?? [],
+     data.edge_vote_types ?? [],
+-    TOP_PROPOSALS_PER_TYPE
++    TOP_PROPOSALS_PER_TYPE,
++    kindOf
+   );
+   const perEdge = dedupeWinnersByEdge(perType, salt);
++  const perBlock = dedupeWinnersByBlock(
++    perEdge, salt, (edgeIdx) => blockKeyOf(data, edgeIdx)
++  );
+   const spaced = spaceOutWinners(
+-    perEdge, salt, edgeMidpointResolver(data), minSpacingMeters
++    perBlock, salt, edgeMidpointResolver(data), minSpacingMeters
+   );
+   return applyTopProposalLimit(spaced, salt, limit);
+ }
+diff --git a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx
+index 4a940a5..e77bd70 100644
+--- a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx
++++ b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx
+@@ -36,13 +36,21 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+ 
+   // Custom vote types already voted on this map. They surface only while the
+   // user is typing — never in the default list — and carry no themed icon, so
+-  // they render with the colorized suggestion glyph.
++  // they render with the colorized suggestion glyph. Kind-filtered like the
++  // default suggestions (a route-kind custom type shouldn't offer itself for a
++  // point selection); unknown kind (legacy rows) shows in both modes, and
++  // station networks skip the filter entirely (mapVoteTypesForPointType rule:
++  // stations only vote points, whatever kind the type was authored as).
++  const isStationNetwork = (map?.network ?? "streets") !== "streets";
+   const extraLabels = inputLower
+-    ? (map?.searchVoteTypes ?? []).filter(
+-        (lbl) =>
+-          lbl.toLowerCase().includes(inputLower) &&
+-          !suggestions.some((s) => s.label.toLowerCase() === lbl.toLowerCase())
+-      )
++    ? (map?.searchVoteTypes ?? [])
++        .filter((vt) => isStationNetwork || !vt.pointType || vt.pointType === pointType)
++        .map((vt) => vt.label)
++        .filter(
++          (lbl) =>
++            lbl.toLowerCase().includes(inputLower) &&
++            !suggestions.some((s) => s.label.toLowerCase() === lbl.toLowerCase())
++        )
+     : [];
+ 
+   const hasExactMatch =
+diff --git a/client-react/src/context/RouteContext.tsx b/client-react/src/context/RouteContext.tsx
+index 8173695..51702aa 100644
+--- a/client-react/src/context/RouteContext.tsx
++++ b/client-react/src/context/RouteContext.tsx
+@@ -1474,8 +1474,11 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+       // Blocks of the selection (castVotes falls back to singletons when the
+       // materializer isn't registered yet — pre-topology, or no block layer).
+       blocks: blockMaterializerRef.current?.(edges),
++      // Selection kind — lets the server record whether a brand-new suggestion
++      // label was proposed on a route or a point (see vote_types.point_type).
++      pointType,
+     });
+-  }, [currentEdgeIds, effectiveVoteType, voteDirection, theme.mode]);
++  }, [currentEdgeIds, effectiveVoteType, voteDirection, theme.mode, pointType]);
+ 
+   // Block coverage of the current target for a (voteType, direction): pressed
+   // ("active") iff EVERY touched block already holds my vote in that direction
+diff --git a/client-react/src/map/runtime.ts b/client-react/src/map/runtime.ts
+index e516eae..be149de 100644
+--- a/client-react/src/map/runtime.ts
++++ b/client-react/src/map/runtime.ts
+@@ -34,8 +34,9 @@ export interface MapConfig {
+   locked?: boolean;
+   voteTypes: MapVoteType[];
+   /** Custom vote types already voted here — shown by the selector only when
+-   *  searched, never in the default suggestion list. Labels only (no pointType). */
+-  searchVoteTypes?: string[];
++   *  searched, never in the default suggestion list. pointType is the kind the
++   *  creating cast recorded; null on legacy rows flagged before kinds existed. */
++  searchVoteTypes?: { label: string; pointType: "route" | "point" | null }[];
+   subdomain?: string | null;
+   voteCount?: number;
+   city?: CityConfig;
+diff --git a/client-react/src/themes.ts b/client-react/src/themes.ts
+index faab881..e57c749 100644
+--- a/client-react/src/themes.ts
++++ b/client-react/src/themes.ts
+@@ -153,6 +153,30 @@ export function iconForLabel(
+   return null;
+ }
+ 
++/**
++ * Resolve a label's route/point kind, mirroring iconForLabel's precedence: the
++ * map's own vote types win, then the map's search-only custom types (kind
++ * recorded server-side by the cast that created them; null on legacy rows),
++ * then the preset theme suggestions. Null = unknown — callers must treat an
++ * unknown-kind label as eligible for BOTH proposal families, never drop it.
++ */
++export function pointTypeForLabel(
++  label: string,
++  voteTypes?: readonly { label: string; pointType: "route" | "point" }[],
++  searchVoteTypes?: readonly { label: string; pointType?: "route" | "point" | null }[]
++): "route" | "point" | null {
++  const own = voteTypes?.find((s) => s.label === label)?.pointType;
++  if (own) return own;
++  const voted = searchVoteTypes?.find((s) => s.label === label)?.pointType;
++  if (voted) return voted;
++  for (const theme of Object.values(THEMES)) {
++    for (const s of theme.suggestions) {
++      if (s.label === label) return s.pointType;
++    }
++  }
++  return null;
++}
++
+ /**
+  * Display order for the mode switcher and landing page cards.
+  */
+diff --git a/client-react/src/utils/castVote.ts b/client-react/src/utils/castVote.ts
+index e12ec09..697e9ec 100644
+--- a/client-react/src/utils/castVote.ts
++++ b/client-react/src/utils/castVote.ts
+@@ -143,6 +143,11 @@ export async function castVotes(params: {
+   label: string;
+   direction: VoteDirection;
+   blocks?: ArrayLike<number>[];
++  /** Kind of the selection being voted ("route" corridor vs single "point").
++   *  Sent so the server can record the kind of a brand-new suggestion label —
++   *  the creating cast is the only witness. Optional: casts on existing labels
++   *  (proposal pins, route cards) don't need it. */
++  pointType?: "route" | "point";
+ }): Promise<CastResult> {
+   const { mode, label, direction } = params;
+   const edges = [...new Set(params.edgeIds)].filter((e) => e != null);
+@@ -186,6 +191,7 @@ export async function castVotes(params: {
+       edge_ids: edges, // the selection — the server expands to blocks itself
+       voter_id: getVoterId(),
+     };
++    if (params.pointType) body.point_type = params.pointType;
+     const token = getPasscodeToken(slug);
+     if (token) body.passcode_token = token;
+ 
+diff --git a/docs/three-layer-model.md b/docs/three-layer-model.md
+index 4357427..c794d6a 100644
+--- a/docs/three-layer-model.md
++++ b/docs/three-layer-model.md
+@@ -29,7 +29,9 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored
+ >
+ > - **PBTP** — **point-based top proposal**: one hot edge, rendered as a
+ >   **square** pin at the edge midpoint. Selected by
+->   `topProposals.selectTopProposals` (client), drawn by GraphLayer's
++>   `topProposals.selectTopProposals` (client) — at most **one pin per block**
++>   across all vote types, and same-type pins at least
++>   `TOP_PROPOSAL_MIN_SPACING_M` (600 m) apart — drawn by GraphLayer's
+ >   `indicatorMarkers`.
+ > - **RBTP** — **route-based top proposal**: a hot **corridor** (Layer 3 below),
+ >   rendered as a **diamond** pin at its middle path edge. Computed by
+@@ -39,6 +41,17 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored
+ > Same-type PBTPs subsumed by an RBTP's blocks are dropped
+ > (`dropPointsCoveredByRoutes`); both kinds share one icon system
+ > (`makeVoteTypeIcon`: square vs `diamond`, same tint/heat/selected states).
++>
++> **Kind split.** Every vote type carries a **route/point kind**
++> (`pointType`), declared where the type is authored (preset lists, a map's
++> custom list) or recorded by the cast that creates a free-text suggestion
++> (`vote_types.point_type` in Postgres; served per map via `voteTypes` +
++> `searchVoteTypes`). The families are disjoint by kind: **point**-kind types
++> surface only as PBTPs, **route**-kind types only as RBTPs
++> (`pointTypeForLabel` resolves label → kind; unknown kind — a legacy
++> suggestion never flagged — stays eligible for both). Station networks skip
++> the split (every vote there is a point). `backfill_vote_type_kinds()`
++> repairs legacy rows from the authored lists on every startup.
+ 
+ ---
+ 
+@@ -194,14 +207,21 @@ Per vote type `T`, over edges with net(T) ≥ `MIN_NET` (high-activity gate #1):
+    scoring ≥ `PEEL_DOMINANCE` × the first. All iteration orders and tie-breaks
+    are by ascending edge/node id — same vote state ⇒ same proposals on every
+    client.
+-4. **High-activity gate #2** — a path survives only with score ≥
++4. **Length budget** — a peeled path is trimmed to its **best-supported
++   contiguous window** within a meter budget that grows with support:
++   `min(ROUTE_LENGTH_MAX_M, ROUTE_LENGTH_BASE_M +
++   ROUTE_LENGTH_PER_SQRT_SCORE_M · √score)` (600 + 150·√score, ≤ 2500 m). A
++   corridor *earns* length with votes; greedy extension can no longer snake
++   for miles on chains of net-1 edges (`capPathToLengthBudget` — sliding
++   window, deterministic ties: shorter then earliest).
++5. **High-activity gate #2** — the trimmed path survives only with score ≥
+    `MIN_ROUTE_SCORE` and ≥ `MIN_ROUTE_EDGES` edges.
+-5. **Blocks projection** — each path edge expands to its block:
++6. **Blocks projection** — each path edge expands to its block:
+    `blocks: number[][]` (ordered distinct blocks along the path),
+    `blockEdgeIds` = their union. **Proposals are displayed as their blocks**
+    (block highlight + diamond marker at the path midpoint); `pathEdgeIds` stays
+    the verbatim corridor for routing (ghost-waypoint insertion).
+-6. **Dedupe + rank** — same-type Jaccard ≥ 0.5 collapses near-duplicates;
++7. **Dedupe + rank** — same-type Jaccard ≥ 0.5 collapses near-duplicates;
+    rank by score; global cap.
+ 
+ Edge → proposal is many-to-one *within a type* (peeling removes used edges), so
+diff --git a/server/app.py b/server/app.py
+index 310b3ee..a3ffda3 100644
+--- a/server/app.py
++++ b/server/app.py
+@@ -34,7 +34,8 @@ from database import (
+     get_voter_edge_directions, get_voter_type_rows,
+     count_devices_per_ip_for_edges, count_unique_voters_for_edges,
+     evict_lru_devices_for_edges,
+-    seed_presets, list_maps, get_map, get_map_by_subdomain, slug_available,
++    seed_presets, backfill_vote_type_kinds, normalize_point_type,
++    list_maps, get_map, get_map_by_subdomain, slug_available,
+     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,
+     promote_vote_types, fetch_voted_vote_type_labels,
+     DATABASE_URL,
+@@ -114,6 +115,7 @@ osrm_registry = OsrmRegistry()
+ 
+ init_db()
+ seed_presets()
++backfill_vote_type_kinds()  # repair route/point kinds missing on legacy rows
+ 
+ if DATABASE_URL:
+     try:
+@@ -694,10 +696,12 @@ def _map_response(m: dict):
+         m["city"] = city.to_public()
+     # Custom vote types people have already voted here — surfaced by the selector
+     # only when searched, never in the default list. Drop the map's own defaults.
++    # Each entry is {label, pointType: 'route'|'point'|null} so the client can
++    # kind-filter proposals and the selector (null = legacy row, kind unknown).
+     default_labels = {vt.get("label") for vt in (m.get("voteTypes") or [])}
+     m["searchVoteTypes"] = [
+-        lbl for lbl in fetch_voted_vote_type_labels(m["slug"])
+-        if lbl not in default_labels
++        vt for vt in fetch_voted_vote_type_labels(m["slug"])
++        if vt["label"] not in default_labels
+     ]
+     resp = jsonify(m)
+     # This is the prod page-load entry point (resolved per load by slug/subdomain)
+@@ -804,6 +808,17 @@ def map_create():
+         return jsonify({"error": "Provide vote_type_list_id or custom_vote_types"}), 400
+     if custom_vote_types and not isinstance(custom_vote_types, list):
+         return jsonify({"error": "custom_vote_types must be a list"}), 400
++    # Every authored vote type must declare its route/point kind — the top-
++    # proposal split (PBTP vs RBTP) and the selector's mode filter key off it,
++    # and a kindless entry would silently fall into "unknown" forever.
++    if custom_vote_types:
++        for vt in custom_vote_types:
++            if not isinstance(vt, dict) or not (vt.get("label") or "").strip():
++                return jsonify({"error": "Each custom vote type needs a label"}), 400
++            if not normalize_point_type(vt.get("pointType")):
++                return jsonify({
++                    "error": "Each custom vote type needs pointType 'route' or 'point'"
++                }), 400
+ 
+     # Subtitle defaults to "<city> · <vote-type-list name>". The custom-list name
+     # defaults to its first vote type's label.
+@@ -836,6 +851,11 @@ def map_create():
+     # A pre-creation probe of this slug may have cached a miss.
+     invalidate_map_cache(slug)
+ 
++    # Stamp the authored kinds into the global registry now, so a later cast
++    # (whose selection kind may differ) isn't the first to flag these labels.
++    for vt in (custom_vote_types or []):
++        vote_store.get_vote_type_id(vt["label"].strip(), vt.get("pointType"))
++
+     city = get_city(city_id)
+     if city:
+         created["city"] = city.to_public()
+@@ -1051,6 +1071,11 @@ def cast_vote():
+     point = data.get("point")
+     mode = data.get("mode", "walk")
+     vt_label = (data.get("vote_type", "") or "").strip()
++    # Kind of the cast's target — 'route' (corridor selection) or 'point'. Only
++    # consulted when vt_label is a brand-new suggestion: the creating cast is the
++    # one witness of the kind a free-text type was suggested as. Existing labels
++    # keep their stored kind.
++    vt_point_type = normalize_point_type(data.get("point_type"))
+ 
+     # Reject unknown vote types when the map disallows user suggestions.
+     if (vt_label and not rmap.allow_suggestions
+@@ -1076,7 +1101,7 @@ def cast_vote():
+     slug = rmap.slug
+ 
+     try:
+-        vt_id = vote_store.get_vote_type_id(vt_label) if vt_label else 0
++        vt_id = vote_store.get_vote_type_id(vt_label, vt_point_type) if vt_label else 0
+ 
+         # Soft per-IP cap: how many OTHER devices this IP already has on each
+         # edge+type. A brand-new vote from a fresh device is dropped once the IP
+diff --git a/server/database.py b/server/database.py
+index 01cc543..33ecb89 100644
+--- a/server/database.py
++++ b/server/database.py
+@@ -164,6 +164,14 @@ def init_db():
+                     label TEXT UNIQUE NOT NULL
+                 )
+             """)
++            # Whether the type describes a ROUTE (corridor) or a POINT (spot)
++            # proposal: 'route' | 'point' | NULL (unknown — pre-flag rows).
++            # Preset labels are stamped by seed_presets(); user suggestions get
++            # theirs from the cast that creates them; legacy NULLs are repaired
++            # by backfill_vote_type_kinds().
++            cursor.execute(
++                "ALTER TABLE vote_types ADD COLUMN IF NOT EXISTS point_type TEXT"
++            )
+ 
+             # ── edge_votes: the canonical vote record ──
+             # One row per (map, graph entity, vote type, voter). Identity:
+@@ -535,8 +543,9 @@ def fetch_all_vote_types() -> list[tuple[int, str]]:
+         return []
+ 
+ 
+-def fetch_voted_vote_type_labels(map_slug: str) -> list[str]:
+-    """Distinct vote-type labels actually voted on a map (newest activity first).
++def fetch_voted_vote_type_labels(map_slug: str) -> list[dict]:
++    """Distinct vote types actually voted on a map (newest activity first), each
++    as {"label", "pointType"} — pointType is 'route' | 'point' | None (unknown).
+ 
+     Backs the selector's *search-only* suggestions: a custom vote type surfaces
+     when searched for once someone has voted it, but never joins the default
+@@ -546,30 +555,43 @@ def fetch_voted_vote_type_labels(map_slug: str) -> list[str]:
+     try:
+         with get_cursor() as cursor:
+             cursor.execute(
+-                """SELECT vt.label
++                """SELECT vt.label, vt.point_type
+                      FROM edge_votes ev
+                      JOIN vote_types vt ON vt.id = ev.vote_type_id
+                     WHERE ev.map_slug = %s AND ev.vote_type_id <> 0
+-                    GROUP BY vt.label
++                    GROUP BY vt.label, vt.point_type
+                     ORDER BY MAX(ev.created_at) DESC""",
+                 (map_slug,),
+             )
+-            return [r[0] for r in cursor.fetchall() if r[0]]
++            return [
++                {"label": r[0], "pointType": r[1]}
++                for r in cursor.fetchall() if r[0]
++            ]
+     except Exception as e:
+         logger.error(f"[DB] Failed to fetch voted vote types for '{map_slug}': {e}")
+         return []
+ 
+ 
+-def get_or_create_vote_type_id(label: str) -> int:
+-    """Return the id for a vote-type label, creating the row if needed."""
++def normalize_point_type(value) -> Optional[str]:
++    """'route' / 'point' pass through; anything else (including None) → None."""
++    return value if value in ("route", "point") else None
++
++
++def get_or_create_vote_type_id(label: str, point_type: Optional[str] = None) -> int:
++    """Return the id for a vote-type label, creating the row if needed.
++
++    `point_type` ('route' | 'point') stamps a NEW row's kind and fills a NULL on
++    an existing row — it never overwrites a kind already on record, so the first
++    authoritative flag (preset seed, map creation, or the creating cast) wins."""
+     if not DATABASE_URL or not label:
+         return 0
+     try:
+         with get_cursor() as cursor:
+             cursor.execute(
+-                "INSERT INTO vote_types (label) VALUES (%s) "
+-                "ON CONFLICT (label) DO UPDATE SET label = EXCLUDED.label RETURNING id",
+-                (label,),
++                "INSERT INTO vote_types (label, point_type) VALUES (%s, %s) "
++                "ON CONFLICT (label) DO UPDATE SET point_type = "
++                "COALESCE(vote_types.point_type, EXCLUDED.point_type) RETURNING id",
++                (label, normalize_point_type(point_type)),
+             )
+             return cursor.fetchone()[0]
+     except Exception as e:
+@@ -800,21 +822,73 @@ def seed_presets():
+             # here (idempotent on the unique label) guarantees a preset type
+             # always resolves to its name instead of falling back to "#<id>" —
+             # e.g. after a DB reset that renumbered the registry while Redis still
+-            # holds the old packed ids. Existing labels keep their ids.
++            # holds the old packed ids. Existing labels keep their ids, but the
++            # preset's route/point kind is authoritative and overwrites — a
++            # preset label that predates the point_type column (or was mis-
++            # flagged) gets repaired on every startup.
+             for spec in PRESET_LISTS.values():
+                 for vt in spec["vote_types"]:
+                     label = vt.get("label")
+                     if label:
+                         cursor.execute(
+-                            "INSERT INTO vote_types (label) VALUES (%s) "
+-                            "ON CONFLICT (label) DO NOTHING",
+-                            (label,),
++                            "INSERT INTO vote_types (label, point_type) "
++                            "VALUES (%s, %s) ON CONFLICT (label) DO UPDATE "
++                            "SET point_type = EXCLUDED.point_type",
++                            (label, normalize_point_type(vt.get("pointType"))),
+                         )
+         logger.info("[DB] Seeded preset vote-type lists and maps")
+     except Exception as e:
+         logger.error(f"[DB] Failed to seed presets: {e}")
+ 
+ 
++def backfill_vote_type_kinds() -> int:
++    """Repair vote_types rows with an unknown route/point kind (point_type NULL).
++
++    Every authored vote-type set already declares each entry's kind — the preset
++    lists, promoted community lists (vote_type_lists.vote_types JSONB), and each
++    map's inline custom_vote_types. Only the global vote_types registry predates
++    the flag, so NULL rows there are filled by label match against every authored
++    set. Rows still NULL afterwards are true free-text suggestions cast before
++    kinds were recorded; they stay NULL (clients treat unknown as either kind).
++    Idempotent — runs on every startup after seed_presets(). Returns the number
++    of rows repaired."""
++    if not DATABASE_URL:
++        return 0
++    try:
++        with get_cursor() as cursor:
++            cursor.execute("SELECT vote_types FROM vote_type_lists")
++            authored = [r[0] for r in cursor.fetchall()]
++            cursor.execute(
++                "SELECT custom_vote_types FROM maps WHERE custom_vote_types IS NOT NULL"
++            )
++            authored += [r[0] for r in cursor.fetchall()]
++
++            # First authored kind per label wins (presets sort ahead only by
++            # insertion; conflicts across sets are rare and arbitrary anyway).
++            kind_by_label: dict[str, str] = {}
++            for vts in authored:
++                for vt in vts or []:
++                    label = (vt.get("label") or "").strip()
++                    kind = normalize_point_type(vt.get("pointType"))
++                    if label and kind and label not in kind_by_label:
++                        kind_by_label[label] = kind
++
++            repaired = 0
++            for label, kind in kind_by_label.items():
++                cursor.execute(
++                    "UPDATE vote_types SET point_type = %s "
++                    "WHERE label = %s AND point_type IS NULL",
++                    (kind, label),
++                )
++                repaired += cursor.rowcount
++            if repaired:
++                logger.info(f"[DB] Backfilled point_type on {repaired} vote type(s)")
++            return repaired
++    except Exception as e:
++        logger.error(f"[DB] Failed to backfill vote-type kinds: {e}")
++        return 0
++
++
+ def list_vote_type_lists() -> list[dict]:
+     """Return the featured vote-type lists shown in the Propose-a-Map picker.
+     Featured = the curated set offered to map proposers (system presets plus any
+diff --git a/server/vote_store.py b/server/vote_store.py
+index 9fd4d15..e829389 100644
+--- a/server/vote_store.py
++++ b/server/vote_store.py
+@@ -117,15 +117,20 @@ def load_vote_types() -> None:
+     logger.info(f"[VOTES] Loaded {len(rows)} vote types into cache")
+ 
+ 
+-def get_vote_type_id(label: str) -> int:
+-    """Return the id for a label, creating + caching it on first use."""
++def get_vote_type_id(label: str, point_type: str | None = None) -> int:
++    """Return the id for a label, creating + caching it on first use.
++
++    `point_type` ('route' | 'point') records the kind when the label is NEW —
++    the creating cast is the only witness of whether a free-text suggestion was
++    made on a route or a point. Cached/existing labels keep their stored kind
++    (get_or_create only fills NULL)."""
+     if not label:
+         return 0
+     cached = _vt_label.get(label)
+     if cached is not None:
+         return cached
+     import database
+-    vid = database.get_or_create_vote_type_id(label)
++    vid = database.get_or_create_vote_type_id(label, point_type)
+     if vid:
+         _vt_label[label] = vid
+         _vt_id[vid] = label

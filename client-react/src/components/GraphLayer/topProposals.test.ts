@@ -3,6 +3,7 @@ import {
   shuffleKey,
   computeVoteTypeWinners,
   dedupeWinnersByEdge,
+  dedupeWinnersByBlock,
   spaceOutWinners,
   edgeMidpointResolver,
   applyTopProposalLimit,
@@ -261,5 +262,109 @@ describe("topLabelForEdges (vote-type fallback ranking)", () => {
   it("returns null for empty inputs", () => {
     expect(topLabelForEdges(legend, evt, [])).toBeNull();
     expect(topLabelForEdges([], evt, [0])).toBeNull();
+  });
+});
+
+describe("computeVoteTypeWinners — route/point kind filter", () => {
+  const legend = ["Add bike greenway", "Add bike parking", "Fix the thing"];
+  const evt: [number, number, number][][] = [
+    [[0, 9, 0]], // edge 0: greenway (route kind) net 9
+    [[1, 5, 0]], // edge 1: parking (point kind) net 5
+    [[2, 3, 0]], // edge 2: unknown-kind custom label net 3
+  ];
+  const kindOf = (label: string) =>
+    label === "Add bike greenway" ? "route" as const
+    : label === "Add bike parking" ? "point" as const
+    : null;
+
+  it("excludes ROUTE-kind vote types from point-based winners", () => {
+    const out = computeVoteTypeWinners(legend, evt, 1, kindOf);
+    expect(out.map((w) => w.label).sort()).toEqual(["Add bike parking", "Fix the thing"]);
+  });
+
+  it("keeps unknown-kind labels eligible (legacy suggestions)", () => {
+    const out = computeVoteTypeWinners(legend, evt, 1, kindOf);
+    expect(out.some((w) => w.label === "Fix the thing")).toBe(true);
+  });
+
+  it("admits every kind when no resolver is given", () => {
+    expect(computeVoteTypeWinners(legend, evt, 1)).toHaveLength(3);
+  });
+});
+
+describe("dedupeWinnersByBlock", () => {
+  const mk = (label: string, legendIdx: number, count: number, edgeIdx: number): VoteTypeWinner => ({
+    legendIdx, label, edgeIdx, count,
+  });
+
+  it("keeps a single winner per block ACROSS vote types (strongest wins)", () => {
+    // Edges 0 and 1 share block 4; different vote types.
+    const keyOf = (e: number) => (e === 0 || e === 1 ? 4 : 7);
+    const out = dedupeWinnersByBlock(
+      [mk("Bike", 0, 3, 0), mk("Tree", 1, 8, 1), mk("Bench", 2, 2, 2)],
+      SALT,
+      keyOf,
+    );
+    expect(out).toHaveLength(2);
+    expect(out.find((w) => keyOf(w.edgeIdx) === 4)!.label).toBe("Tree");
+    expect(out.some((w) => w.edgeIdx === 2)).toBe(true);
+  });
+
+  it("keeps winners on unmapped edges (negative keys) unconstrained", () => {
+    // Singleton keys (≤ -2) mean "no block layer" — nothing collapses.
+    const out = dedupeWinnersByBlock(
+      [mk("Bike", 0, 3, 0), mk("Tree", 1, 8, 1)],
+      SALT,
+      (e) => -(e + 2),
+    );
+    expect(out).toHaveLength(2);
+  });
+
+  it("tiebreaks equal-net same-block winners deterministically by salt", () => {
+    const winners = [mk("Alpha", 0, 5, 0), mk("Bravo", 1, 5, 1)];
+    const first = dedupeWinnersByBlock(winners, SALT, () => 1)[0].label;
+    expect(dedupeWinnersByBlock(winners, SALT, () => 1)[0].label).toBe(first);
+    const expected = shuffleKey("Alpha", SALT) <= shuffleKey("Bravo", SALT) ? "Alpha" : "Bravo";
+    expect(first).toBe(expected);
+  });
+});
+
+describe("selectTopProposals — block uniqueness + kind filter (full path)", () => {
+  it("allows at most one pin per street block, across vote types", () => {
+    // Edges 0 and 1 both map to block 0 (a two-direction street); edge 2 is
+    // its own block. Bike (net 8) and Tree (net 6) sit on the same block →
+    // only Bike survives there; Bench keeps its own block.
+    const nodes: [number, number][] = [
+      [40.7000, -74.0000], [40.7001, -74.0000],
+      [40.7000, -74.0001], [40.7001, -74.0001],
+      [40.7100, -74.0000], [40.7101, -74.0000],
+    ];
+    const edges: [number, number, string][] = [[0, 1, ""], [2, 3, ""], [4, 5, ""]];
+    const data = { 
+      vote_type_legend: ["Bike", "Tree", "Bench"],
+      edge_vote_types: [
+        [[0, 8, 0]], [[1, 6, 0]], [[2, 4, 0]],
+      ] as [number, number, number][][],
+      ...topo(nodes, edges),
+    };
+    data.edgeBlockId = Int32Array.from([0, 0, 1]);
+    data.nBlocks = 2;
+    const out = selectTopProposals(data, SALT, 10);
+    expect(out.map((w) => w.label).sort()).toEqual(["Bench", "Bike"]);
+  });
+
+  it("keeps ROUTE-kind labels out of the point-based top proposals", () => {
+    const data = {
+      vote_type_legend: ["Add bike greenway", "Add bike parking"],
+      edge_vote_types: [
+        [[0, 9, 0]], // greenway on edge 0 — route kind, must not pin
+        [[1, 5, 0]], // parking on edge 1 — point kind, pins
+      ] as [number, number, number][][],
+      ...topo([], []),
+    };
+    const kindOf = (label: string) =>
+      label === "Add bike greenway" ? "route" as const : "point" as const;
+    const out = selectTopProposals(data, SALT, 10, 600, kindOf);
+    expect(out.map((w) => w.label)).toEqual(["Add bike parking"]);
   });
 });

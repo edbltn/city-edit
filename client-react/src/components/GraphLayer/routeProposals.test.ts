@@ -12,8 +12,14 @@ import {
   corridorCoordinates,
   corridorFromEdgeIds,
   dedupeRoutes,
+  capPathToLengthBudget,
+  routeLengthBudgetM,
   MIN_ROUTE_SCORE,
   MIN_ROUTE_EDGES,
+  ROUTE_LENGTH_BASE_M,
+  ROUTE_LENGTH_PER_SQRT_SCORE_M,
+  ROUTE_LENGTH_MAX_M,
+  type PathResult,
   type RouteProposal,
   type RouteProposalOptions,
 } from "./routeProposals";
@@ -529,5 +535,119 @@ describe("chooseAnchorOrderBefore (start dropped onto a diamond)", () => {
     expect(chooseAnchorOrderBefore(ll(0, 15), A, B, durationOf)).toEqual([A, B]);
     // next(-5) is nearer A(0) → chain B→A→next: [B, A].
     expect(chooseAnchorOrderBefore(ll(0, -5), A, B, durationOf)).toEqual([B, A]);
+  });
+});
+
+// ==========================================================================
+// Corridor length budget — routeLengthBudgetM + capPathToLengthBudget
+// ==========================================================================
+
+describe("routeLengthBudgetM", () => {
+  it("grows with support from the base, sublinearly", () => {
+    expect(routeLengthBudgetM(0)).toBe(ROUTE_LENGTH_BASE_M);
+    expect(routeLengthBudgetM(4)).toBe(ROUTE_LENGTH_BASE_M + 2 * ROUTE_LENGTH_PER_SQRT_SCORE_M);
+    expect(routeLengthBudgetM(16)).toBe(ROUTE_LENGTH_BASE_M + 4 * ROUTE_LENGTH_PER_SQRT_SCORE_M);
+  });
+
+  it("is clamped to the ceiling regardless of support", () => {
+    expect(routeLengthBudgetM(1e9)).toBe(ROUTE_LENGTH_MAX_M);
+    expect(routeLengthBudgetM(1e9, 1000)).toBe(1000);
+  });
+});
+
+describe("capPathToLengthBudget", () => {
+  // Path of 5 edges, 100m each; per-edge weights below.
+  const path = (weights: number[]): { p: PathResult; weightOf: (e: number) => number } => ({
+    p: {
+      edges: weights.map((_, i) => i),
+      nodes: weights.map((_, i) => i).concat(weights.length),
+      weight: weights.reduce((a, b) => a + b, 0),
+    },
+    weightOf: (e: number) => weights[e],
+  });
+  const len100 = () => 100;
+
+  it("returns the path unchanged when it fits the budget", () => {
+    const { p, weightOf } = path([1, 1, 1]);
+    expect(capPathToLengthBudget(p, 300, len100, weightOf)).toBe(p);
+  });
+
+  it("trims to the hottest contiguous window under the budget", () => {
+    // 500m total, budget 200m (2 edges). Hot stretch is edges 2–3.
+    const { p, weightOf } = path([1, 1, 9, 8, 1]);
+    const out = capPathToLengthBudget(p, 200, len100, weightOf);
+    expect(out.edges).toEqual([2, 3]);
+    expect(out.nodes).toEqual([2, 3, 4]); // endpoints of the kept window
+    expect(out.weight).toBe(17);
+  });
+
+  it("prefers the shorter window on equal weight, then the earliest", () => {
+    const { p, weightOf } = path([5, 0, 5, 5]);
+    // Budget 200: windows [2,3] (weight 10, 200m) beat [0,1] (5) and [1,2] (5).
+    expect(capPathToLengthBudget(p, 200, len100, weightOf).edges).toEqual([2, 3]);
+    // Budget 100: [0], [2], [3] all weigh 5 — earliest wins.
+    expect(capPathToLengthBudget(p, 100, len100, weightOf).edges).toEqual([0]);
+  });
+
+  it("keeps a single over-budget edge rather than trimming to nothing", () => {
+    const { p, weightOf } = path([1, 50, 1]);
+    const out = capPathToLengthBudget(p, 60, len100, weightOf);
+    expect(out.edges).toEqual([1]);
+    expect(out.weight).toBe(50);
+  });
+});
+
+describe("computeRouteProposals — corridor length cap", () => {
+  it("caps a long corridor to its best-supported stretch", () => {
+    // A 12-edge chain (~84m/edge ≈ 1.0km) with a hot 4-edge core. A 400m
+    // ceiling keeps only the core (4 edges ≈ 338m; a 5th would exceed 400m).
+    const edges: [number, number][] = Array.from({ length: 12 }, (_, i) => [i, i + 1]);
+    const votes = edges.map((_, i): [number, number, number][] =>
+      [[BIKE, i >= 4 && i <= 7 ? 5 : 1, 0]]);
+    const ps = compute(edges, evt(...votes), { maxRouteLengthM: 400 });
+    expect(ps).toHaveLength(1);
+    expect(ps[0].edgeIds).toEqual([4, 5, 6, 7]);
+    expect(ps[0].score).toBe(20);
+    // Anchors follow the trimmed window, not the original path ends.
+    expect(ps[0].anchors).toEqual([4, 8]);
+  });
+
+  it("leaves short corridors untouched by the default budget", () => {
+    const ps = compute(
+      [[0, 1], [1, 2], [2, 3]],
+      evt([[BIKE, 5, 0]], [[BIKE, 4, 0]], [[BIKE, 3, 0]]),
+    );
+    expect(ps).toHaveLength(1);
+    expect(ps[0].edgeIds).toEqual(expect.arrayContaining([0, 1, 2]));
+  });
+});
+
+describe("computeRouteProposals — route/point kind filter", () => {
+  const kindOf = (label: string) =>
+    label === "Bike lane" ? "point" as const
+    : label === "Tree" ? "route" as const
+    : null;
+
+  it("skips POINT-kind vote types (their votes are PBTPs, not corridors)", () => {
+    const ps = compute(
+      [[0, 1], [1, 2], [10, 11], [11, 12]],
+      evt([[BIKE, 9, 0]], [[BIKE, 8, 0]], [[TREE, 7, 0]], [[TREE, 6, 0]]),
+      { kindOf },
+    );
+    expect(ps.map((p) => p.label)).toEqual(["Tree"]);
+  });
+
+  it("keeps unknown-kind labels eligible and admits all without a resolver", () => {
+    const both = compute(
+      [[0, 1], [1, 2]],
+      evt([[BIKE, 9, 0]], [[BIKE, 8, 0]]),
+    );
+    expect(both.map((p) => p.label)).toEqual(["Bike lane"]);
+    const unknownKind = compute(
+      [[0, 1], [1, 2]],
+      evt([[BIKE, 9, 0]], [[BIKE, 8, 0]]),
+      { kindOf: () => null },
+    );
+    expect(unknownKind.map((p) => p.label)).toEqual(["Bike lane"]);
   });
 });

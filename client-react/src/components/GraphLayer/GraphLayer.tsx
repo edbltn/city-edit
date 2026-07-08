@@ -28,7 +28,7 @@ import {
 } from "../MapLibreBackground/MapLibreBackground";
 import { makeVoteTypeIcon } from "./voteTypeIcon";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
-import { selectTopProposals, topLabelForEdges, type VoteTypeWinner } from "./topProposals";
+import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, type VoteTypeWinner } from "./topProposals";
 import {
   computeRouteProposals, corridorCoordinates, corridorFromEdgeIds, routeBlockEdges, isRouteCovered,
   expandSelectionToUndirected,
@@ -54,7 +54,7 @@ import {
   adjShortest,
 } from "./graphTopology";
 import { materializeBlocks, selectionVoteRows } from "../../utils/blockSelection";
-import { iconForLabel, iconSrc, mapStyleForTheme } from "../../themes";
+import { iconForLabel, iconSrc, mapStyleForTheme, pointTypeForLabel } from "../../themes";
 import { buildHeatRampStops, sampleHeatRamp, HEAT_PEAK_POS } from "../../mapStyles";
 import {
   getCachedTopology,
@@ -1256,6 +1256,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     setWinners(next);
   }, []);
 
+  // Label → route/point kind, resolved against the active map's vote types and
+  // its search-only custom types (see pointTypeForLabel). Splits the proposal
+  // families: PBTPs exclude route-kind labels, RBTPs exclude point-kind ones.
+  // Station networks vote only on fixed points, so every kind is admitted there
+  // (no resolver — same rule as mapVoteTypesForPointType).
+  const voteTypeKindOf = useCallback((label: string) => {
+    const cfg = getCurrentMap();
+    return pointTypeForLabel(label, cfg?.voteTypes, cfg?.searchVoteTypes);
+  }, []);
+
   const refreshGraphDisplay = useCallback(() => {
     const data = graphDataRef.current;
     if (!data) return;
@@ -1264,10 +1274,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     lastLegendLenRef.current = legendLen;
     setStableWinners(selectTopProposals(
       data, tiebreakSaltRef.current, TOP_PROPOSAL_LIMIT,
+      TOP_PROPOSAL_MIN_SPACING_M,
+      isStationNetwork ? undefined : voteTypeKindOf,
     ), legendChanged);
     setGraphVoteVersion((v) => v + 1);
     scheduleRedrawRef.current();
-  }, [setStableWinners]);
+  }, [setStableWinners, isStationNetwork, voteTypeKindOf]);
 
   const refreshGraphDisplayRef = useRef(refreshGraphDisplay);
   useEffect(() => { refreshGraphDisplayRef.current = refreshGraphDisplay; }, [refreshGraphDisplay]);
@@ -1858,7 +1870,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const data = graphDataRef.current;
     if (!topo || !adj || !data?.edge_vote_types) return;
     const t0 = performance.now();
-    const next = computeRouteProposals(topo, adj, data);
+    // kindOf keeps POINT-kind vote types out of the corridor family (their
+    // votes surface as PBTP pins instead) — the mirror of the PBTP filter.
+    const next = computeRouteProposals(topo, adj, data, { kindOf: voteTypeKindOf });
     dlog("proposals", `recompute: ${next.length} corridors in ${(performance.now() - t0).toFixed(1)}ms`,
       next.map((p) => `${p.label}#${p.id}(${p.score})`));
     debugState("routeProposals", next.length);
@@ -1868,7 +1882,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       prev.length === next.length
         && prev.every((p, i) => p.id === next[i].id && p.score === next[i].score)
         ? prev : next);
-  }, []);
+  }, [voteTypeKindOf]);
 
   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);
   useEffect(() => { recomputeRouteProposalsRef.current = recomputeRouteProposals; }, [recomputeRouteProposals]);

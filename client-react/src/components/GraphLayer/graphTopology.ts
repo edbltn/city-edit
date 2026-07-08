@@ -231,6 +231,26 @@ export function adjShortest(
   return best;
 }
 
+const EARTH_RADIUS_M = 6_371_000;
+
+/**
+ * An edge's straight-line length in meters (fast equirectangular — exact
+ * enough at city scale; graph edges are short and mostly straight). Shared by
+ * the route-proposal length cap and anything else that budgets in meters.
+ */
+export function edgeLengthMeters(d: GraphTopology, edgeId: number): number {
+  const a = d.ends[2 * edgeId];
+  const b = d.ends[2 * edgeId + 1];
+  const aLat = d.coords[2 * a] / COORD_SCALE;
+  const aLon = d.coords[2 * a + 1] / COORD_SCALE;
+  const bLat = d.coords[2 * b] / COORD_SCALE;
+  const bLon = d.coords[2 * b + 1] / COORD_SCALE;
+  const meanLatRad = (((aLat + bLat) / 2) * Math.PI) / 180;
+  const dLat = ((bLat - aLat) * Math.PI) / 180;
+  const dLon = (((bLon - aLon) * Math.PI) / 180) * Math.cos(meanLatRad);
+  return EARTH_RADIUS_M * Math.hypot(dLat, dLon);
+}
+
 // ── Block index (CSR) ───────────────────────────────────────────────────────
 // Blocks are the aggregation/interaction grain (docs/three-layer-model.md §2):
 // every edge maps to at most one block via edgeBlockId. Same CSR layout as

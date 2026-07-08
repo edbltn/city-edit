@@ -154,6 +154,30 @@ export function iconForLabel(
 }
 
 /**
+ * Resolve a label's route/point kind, mirroring iconForLabel's precedence: the
+ * map's own vote types win, then the map's search-only custom types (kind
+ * recorded server-side by the cast that created them; null on legacy rows),
+ * then the preset theme suggestions. Null = unknown — callers must treat an
+ * unknown-kind label as eligible for BOTH proposal families, never drop it.
+ */
+export function pointTypeForLabel(
+  label: string,
+  voteTypes?: readonly { label: string; pointType: "route" | "point" }[],
+  searchVoteTypes?: readonly { label: string; pointType?: "route" | "point" | null }[]
+): "route" | "point" | null {
+  const own = voteTypes?.find((s) => s.label === label)?.pointType;
+  if (own) return own;
+  const voted = searchVoteTypes?.find((s) => s.label === label)?.pointType;
+  if (voted) return voted;
+  for (const theme of Object.values(THEMES)) {
+    for (const s of theme.suggestions) {
+      if (s.label === label) return s.pointType;
+    }
+  }
+  return null;
+}
+
+/**
  * Display order for the mode switcher and landing page cards.
  */
 export const THEME_ORDER: Theme[] = [

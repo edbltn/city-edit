@@ -164,6 +164,14 @@ def init_db():
                     label TEXT UNIQUE NOT NULL
                 )
             """)
+            # Whether the type describes a ROUTE (corridor) or a POINT (spot)
+            # proposal: 'route' | 'point' | NULL (unknown — pre-flag rows).
+            # Preset labels are stamped by seed_presets(); user suggestions get
+            # theirs from the cast that creates them; legacy NULLs are repaired
+            # by backfill_vote_type_kinds().
+            cursor.execute(
+                "ALTER TABLE vote_types ADD COLUMN IF NOT EXISTS point_type TEXT"
+            )
 
             # ── edge_votes: the canonical vote record ──
             # One row per (map, graph entity, vote type, voter). Identity:
@@ -535,8 +543,9 @@ def fetch_all_vote_types() -> list[tuple[int, str]]:
         return []
 
 
-def fetch_voted_vote_type_labels(map_slug: str) -> list[str]:
-    """Distinct vote-type labels actually voted on a map (newest activity first).
+def fetch_voted_vote_type_labels(map_slug: str) -> list[dict]:
+    """Distinct vote types actually voted on a map (newest activity first), each
+    as {"label", "pointType"} — pointType is 'route' | 'point' | None (unknown).
 
     Backs the selector's *search-only* suggestions: a custom vote type surfaces
     when searched for once someone has voted it, but never joins the default
@@ -546,30 +555,43 @@ def fetch_voted_vote_type_labels(map_slug: str) -> list[str]:
     try:
         with get_cursor() as cursor:
             cursor.execute(
-                """SELECT vt.label
+                """SELECT vt.label, vt.point_type
                      FROM edge_votes ev
                      JOIN vote_types vt ON vt.id = ev.vote_type_id
                     WHERE ev.map_slug = %s AND ev.vote_type_id <> 0
-                    GROUP BY vt.label
+                    GROUP BY vt.label, vt.point_type
                     ORDER BY MAX(ev.created_at) DESC""",
                 (map_slug,),
             )
-            return [r[0] for r in cursor.fetchall() if r[0]]
+            return [
+                {"label": r[0], "pointType": r[1]}
+                for r in cursor.fetchall() if r[0]
+            ]
     except Exception as e:
         logger.error(f"[DB] Failed to fetch voted vote types for '{map_slug}': {e}")
         return []
 
 
-def get_or_create_vote_type_id(label: str) -> int:
-    """Return the id for a vote-type label, creating the row if needed."""
+def normalize_point_type(value) -> Optional[str]:
+    """'route' / 'point' pass through; anything else (including None) → None."""
+    return value if value in ("route", "point") else None
+
+
+def get_or_create_vote_type_id(label: str, point_type: Optional[str] = None) -> int:
+    """Return the id for a vote-type label, creating the row if needed.
+
+    `point_type` ('route' | 'point') stamps a NEW row's kind and fills a NULL on
+    an existing row — it never overwrites a kind already on record, so the first
+    authoritative flag (preset seed, map creation, or the creating cast) wins."""
     if not DATABASE_URL or not label:
         return 0
     try:
         with get_cursor() as cursor:
             cursor.execute(
-                "INSERT INTO vote_types (label) VALUES (%s) "
-                "ON CONFLICT (label) DO UPDATE SET label = EXCLUDED.label RETURNING id",
-                (label,),
+                "INSERT INTO vote_types (label, point_type) VALUES (%s, %s) "
+                "ON CONFLICT (label) DO UPDATE SET point_type = "
+                "COALESCE(vote_types.point_type, EXCLUDED.point_type) RETURNING id",
+                (label, normalize_point_type(point_type)),
             )
             return cursor.fetchone()[0]
     except Exception as e:
@@ -800,19 +822,71 @@ def seed_presets():
             # here (idempotent on the unique label) guarantees a preset type
             # always resolves to its name instead of falling back to "#<id>" —
             # e.g. after a DB reset that renumbered the registry while Redis still
-            # holds the old packed ids. Existing labels keep their ids.
+            # holds the old packed ids. Existing labels keep their ids, but the
+            # preset's route/point kind is authoritative and overwrites — a
+            # preset label that predates the point_type column (or was mis-
+            # flagged) gets repaired on every startup.
             for spec in PRESET_LISTS.values():
                 for vt in spec["vote_types"]:
                     label = vt.get("label")
                     if label:
                         cursor.execute(
-                            "INSERT INTO vote_types (label) VALUES (%s) "
-                            "ON CONFLICT (label) DO NOTHING",
-                            (label,),
+                            "INSERT INTO vote_types (label, point_type) "
+                            "VALUES (%s, %s) ON CONFLICT (label) DO UPDATE "
+                            "SET point_type = EXCLUDED.point_type",
+                            (label, normalize_point_type(vt.get("pointType"))),
                         )
         logger.info("[DB] Seeded preset vote-type lists and maps")
     except Exception as e:
         logger.error(f"[DB] Failed to seed presets: {e}")
+
+
+def backfill_vote_type_kinds() -> int:
+    """Repair vote_types rows with an unknown route/point kind (point_type NULL).
+
+    Every authored vote-type set already declares each entry's kind — the preset
+    lists, promoted community lists (vote_type_lists.vote_types JSONB), and each
+    map's inline custom_vote_types. Only the global vote_types registry predates
+    the flag, so NULL rows there are filled by label match against every authored
+    set. Rows still NULL afterwards are true free-text suggestions cast before
+    kinds were recorded; they stay NULL (clients treat unknown as either kind).
+    Idempotent — runs on every startup after seed_presets(). Returns the number
+    of rows repaired."""
+    if not DATABASE_URL:
+        return 0
+    try:
+        with get_cursor() as cursor:
+            cursor.execute("SELECT vote_types FROM vote_type_lists")
+            authored = [r[0] for r in cursor.fetchall()]
+            cursor.execute(
+                "SELECT custom_vote_types FROM maps WHERE custom_vote_types IS NOT NULL"
+            )
+            authored += [r[0] for r in cursor.fetchall()]
+
+            # First authored kind per label wins (presets sort ahead only by
+            # insertion; conflicts across sets are rare and arbitrary anyway).
+            kind_by_label: dict[str, str] = {}
+            for vts in authored:
+                for vt in vts or []:
+                    label = (vt.get("label") or "").strip()
+                    kind = normalize_point_type(vt.get("pointType"))
+                    if label and kind and label not in kind_by_label:
+                        kind_by_label[label] = kind
+
+            repaired = 0
+            for label, kind in kind_by_label.items():
+                cursor.execute(
+                    "UPDATE vote_types SET point_type = %s "
+                    "WHERE label = %s AND point_type IS NULL",
+                    (kind, label),
+                )
+                repaired += cursor.rowcount
+            if repaired:
+                logger.info(f"[DB] Backfilled point_type on {repaired} vote type(s)")
+            return repaired
+    except Exception as e:
+        logger.error(f"[DB] Failed to backfill vote-type kinds: {e}")
+        return 0
 
 
 def list_vote_type_lists() -> list[dict]:

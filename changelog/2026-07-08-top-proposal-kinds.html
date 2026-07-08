@@ -1,0 +1,1922 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Top-proposal rework — route/point kinds end-to-end, one pin per block, corridors earn their length — 2026-07-08</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Top-proposal rework — route/point kinds end-to-end, one pin per block, corridors earn their length</h1>
+    <div class="dateline">2026-07-08 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#kinds">1</a>
+<a href="#pbtp">2</a>
+<a href="#rbtp">3</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Top proposals now respect what a vote type IS. Every vote type carries a
+  <strong>route/point kind</strong> end-to-end — declared where it's authored, recorded by the cast
+  that creates a free-text suggestion, stored in <code>vote_types.point_type</code>, served in the map
+  config, and repaired on startup for legacy rows — so route-flavored types (“Add bike greenway”)
+  can no longer masquerade as square point pins. Point pins additionally obey the block grain
+  (<strong>one pin per street block</strong>, across all types) and same-type pins spread to
+  <strong>600&nbsp;m</strong>. Route corridors get a <strong>support-scaled length budget</strong>
+  (600&nbsp;+&nbsp;150·√score, ≤&nbsp;2.5&nbsp;km): a peeled path is trimmed to its hottest
+  contiguous stretch, so a chain of stray net-1 edges can't stretch a corridor across the borough.</p>
+
+  
+    <section class="card" id="kinds">
+      <div class="tag">Data model · vote-type kinds</div>
+      <h2>1 · Every vote type now carries a route/point kind — recorded, served, repaired</h2>
+      <h3>Symptom</h3>
+      <p>On NYC Bikes, ROUTE-flavored vote types (“Add bike greenway”, “Add bike lane”) showed up as square POINT top-proposal pins. Presets always declared a pointType, but the flag died at the config boundary: the global vote_types registry (which backs free-text suggestions and the searched custom types) never stored it, the cast that creates a suggestion never sent it, and the proposal selectors never looked at it.</p>
+      <h3>Root cause</h3>
+      <ul><li>Four half-unified code paths: preset lists carried <code>pointType</code> in JSONB; the <code>vote_types</code> table had only (id, label); <code>/api/vote</code> dropped the kind on the floor; <code>searchVoteTypes</code> served bare label strings.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>vote_types.point_type</code> column ('route' | 'point' | NULL). <code>get_or_create_vote_type_id(label, point_type)</code> stamps NEW rows and fills NULLs (<code>COALESCE</code> — an existing kind is never overwritten by a later cast).</li>
+<li><code>seed_presets()</code> force-stamps preset labels (presets are authoritative — this is the startup repair for mis-flagged/legacy preset rows like “Add bike greenway”).</li>
+<li>NEW <code>backfill_vote_type_kinds()</code> (runs on every startup): fills NULL rows by label match against every authored set — preset lists, promoted community lists, and each map's inline <code>custom_vote_types</code>. Local run: 50 rows stamped, 4 true free-text legacy suggestions remain NULL (unknown kind ⇒ eligible for both families, never hidden).</li>
+<li><code>/api/vote</code> accepts <code>point_type</code>; the client sends the selection's kind (<code>castVotes({pointType})</code> from RouteContext) — the creating cast is the only witness of what a free-text suggestion was suggested as.</li>
+<li><code>searchVoteTypes</code> upgraded from <code>string[]</code> to <code>{label, pointType}[]</code>; map creation 400s on custom vote types without a valid <code>pointType</code> and registers the authored kinds immediately.</li>
+<li>NEW client resolver <code>pointTypeForLabel(label, voteTypes, searchVoteTypes)</code> — mirrors <code>iconForLabel</code>'s precedence (map's own list → searched customs → preset themes → null). The selector's searched suggestions are now kind-filtered too (a route-kind custom type no longer offers itself for a point selection).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/database.py</li>
+<li>server/app.py</li>
+<li>server/vote_store.py</li>
+<li>client-react/src/themes.ts</li>
+<li>client-react/src/map/runtime.ts</li>
+<li>client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx</li>
+<li>client-react/src/utils/castVote.ts</li>
+<li>client-react/src/context/RouteContext.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="pbtp">
+      <div class="tag">PBTP · selection</div>
+      <h2>2 · Point pins: point-kind only, one per block, same-type pins 600 m apart</h2>
+      <h3>Symptom</h3>
+      <p>Two (or more) square pins could stack on a single street block when their vote types differed, same-type pins could sit one avenue block apart (300 m), and route-kind types competed for point pins at all.</p>
+      <h3>Root cause</h3>
+      <ul><li>selectTopProposals had no notion of kind, no block awareness (only exact-edge dedupe), and a single 300 m same-type radius.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Step 1 filter: <code>computeVoteTypeWinners(…, kindOf)</code> skips ROUTE-kind labels — their support surfaces as RBTP diamonds instead. Unknown-kind labels stay eligible. Station networks pass no resolver (every vote there is a point).</li>
+<li>NEW step 3 <code>dedupeWinnersByBlock</code>: at most ONE pin per street block ACROSS all vote types (strongest wins, salted tiebreak). Uses <code>blockKeyOf</code>, so maps without block artifacts degrade to per-edge singleton keys — no behavior change there.</li>
+<li>Same-type spacing raised 300 → 600 m (<code>TOP_PROPOSAL_MIN_SPACING_M</code>): identical pins carry zero information nearby, while different-type pins only collapse when they share a block — the cross-type grain is deliberately finer than the same-type radius.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/topProposals.ts</li>
+<li>client-react/src/components/GraphLayer/topProposals.test.ts</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="rbtp">
+      <div class="tag">RBTP · corridor length</div>
+      <h2>3 · Route corridors earn their length — support-scaled meter budget</h2>
+      <h3>Symptom</h3>
+      <p>Route-based top proposals could snake for miles: greedy path extension keeps going while ANY net-positive arc exists, so one seed vote plus a chain of stray net-1 edges produced an absurdly long “corridor”.</p>
+      <h3>Root cause</h3>
+      <ul><li>No length limit anywhere in the peel pipeline — the only gates were score and edge COUNT minimums, which long paths pass trivially.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Each peeled path gets a meter budget that grows with support: <code>min(2500, 600 + 150·√score)</code> (<code>routeLengthBudgetM</code>). One block of votes ⇒ a short corridor; 4× the votes ⇒ 2× the earned reach.</li>
+<li>NEW <code>capPathToLengthBudget</code>: sliding window over the path's edges keeping total length ≤ budget, returning the max-weight window — the hottest contiguous stretch survives, straggly tails drop. Deterministic ties (shorter, then earliest); a single over-budget edge (a bridge) is kept rather than trimming to nothing. Activity gates run on the TRIMMED path.</li>
+<li>Point-kind vote types are skipped by the corridor extraction (<code>opts.kindOf</code>) — the mirror of the PBTP filter.</li>
+<li>NEW <code>edgeLengthMeters</code> in graphTopology (equirectangular, shared helper).</li>
+<li>Fixed a latent bug the window slicing exposed: <code>greedyHeaviestPath</code>'s splice duplicated the seed node in <code>nodes</code>, misaligning <code>nodes[i]</code> ↔ <code>edges[i]</code>. Harmless before (only the endpoints were read), wrong anchors after trimming.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/routeProposals.ts</li>
+<li>client-react/src/components/GraphLayer/routeProposals.test.ts</li>
+<li>client-react/src/components/GraphLayer/graphTopology.ts</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Client: <code>tsc --noEmit</code> clean; full vitest suite 231/231 green (12 files) — including 16 new tests: kind filters both families, block dedupe (cross-type collapse, singleton-key degrade, salted ties), budget growth/clamp, window trimming (hot core kept, anchors follow the trim, ties, over-budget single edge).</li>
+<li>Server: <code>pytest tests/unit</code> 47/47 green; app.py/database.py/vote_store.py parse clean.</li>
+<li>Live migration on local dev DB: startup stamped point_type on 50 vote_types rows (25 route / 25 point); 4 legacy free-text suggestions remain NULL by design (unknown ⇒ both-eligible). “Add bike greenway” reads <code>route</code>, “Add bike parking” <code>point</code>.</li>
+<li>Live cast path: POST /api/vote with a brand-new label + <code>point_type: "route"</code> created the vote_types row with kind <code>route</code> (then cleaned up).</li>
+<li><code>/api/maps/nyc-bikes</code> serves voteTypes with pointType and the new object-shaped searchVoteTypes.</li>
+<li>Prod note: the same startup hook repairs the prod DB on next deploy — no manual migration. (Remember the standing rule: pg_dump backup before deploying.)</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <a href='http://localhost:3000/m/nyc-bikes'>http://localhost:3000/m/nyc-bikes</a> — no square PBTP pin should carry a route-flavored label (“Add bike greenway”, “Add bike lane”, …); those should only ever appear as diamonds.</li>
+<li>Zoom to a dense vote area: no two square pins should sit on the same street block, and two same-type squares should never be closer than ~6 city blocks.</li>
+<li>Check the longest diamond corridor on nyc-bikes / nyc-walkways: hovering should highlight a corridor of roughly ≤ 1–2.5 km (scaled to its votes), not a multi-mile snake.</li>
+<li>In point mode, type a brand-new suggestion and vote it; then check <code>curl -s 'localhost:5001/api/maps/&lt;slug&gt;' | jq .searchVoteTypes</code> — the new label should carry <code>"pointType": "point"</code>.</li>
+<li>In the vote-type selector while a ROUTE is drawn, search for a custom type that was suggested as a point — it should not appear (and vice versa).</li>
+<li>On the e-bikes map (station network) confirm top-proposal pins still appear for all vote types.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Green is added, red removed.</p>
+    
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+19</span> / <span class="d-del">-5</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">GraphLayer</span>
+        <span class="ctx-sum">topology + votes + proposal indicators</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~4000 LOC — resolver + two call sites</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">voteTypeKindOf</span><span class="ol-sum">NEW — pointTypeForLabel over the active map config</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">refreshGraphDisplay</span><span class="ol-sum">passes spacing + kindOf (station networks: no resolver)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">recomputeRouteProposals</span><span class="ol-sum">passes kindOf to the corridor extraction</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">everything else</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>voteTypeKindOf useCallback</li><li>selectTopProposals(…, TOP_PROPOSAL_MIN_SPACING_M, kindOf)</li><li>computeRouteProposals(…, {kindOf})</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index b996c87..7823538 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -28,7 +28,7 @@ import {</span>
+<span class="d-ctx"> } from &quot;../MapLibreBackground/MapLibreBackground&quot;;</span>
+<span class="d-ctx"> import { makeVoteTypeIcon } from &quot;./voteTypeIcon&quot;;</span>
+<span class="d-ctx"> import { suggestionGlyphForLabel } from &quot;../../utils/suggestionIcon&quot;;</span>
+<span class="d-del">-import { selectTopProposals, topLabelForEdges, type VoteTypeWinner } from &quot;./topProposals&quot;;</span>
+<span class="d-add">+import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, type VoteTypeWinner } from &quot;./topProposals&quot;;</span>
+<span class="d-ctx"> import {</span>
+<span class="d-ctx">   computeRouteProposals, corridorCoordinates, corridorFromEdgeIds, routeBlockEdges, isRouteCovered,</span>
+<span class="d-ctx">   expandSelectionToUndirected,</span>
+<span class="d-hunk">@@ -54,7 +54,7 @@ import {</span>
+<span class="d-ctx">   adjShortest,</span>
+<span class="d-ctx"> } from &quot;./graphTopology&quot;;</span>
+<span class="d-ctx"> import { materializeBlocks, selectionVoteRows } from &quot;../../utils/blockSelection&quot;;</span>
+<span class="d-del">-import { iconForLabel, iconSrc, mapStyleForTheme } from &quot;../../themes&quot;;</span>
+<span class="d-add">+import { iconForLabel, iconSrc, mapStyleForTheme, pointTypeForLabel } from &quot;../../themes&quot;;</span>
+<span class="d-ctx"> import { buildHeatRampStops, sampleHeatRamp, HEAT_PEAK_POS } from &quot;../../mapStyles&quot;;</span>
+<span class="d-ctx"> import {</span>
+<span class="d-ctx">   getCachedTopology,</span>
+<span class="d-hunk">@@ -1256,6 +1256,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     setWinners(next);</span>
+<span class="d-ctx">   }, []);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // Label → route/point kind, resolved against the active map&#x27;s vote types and</span>
+<span class="d-add">+  // its search-only custom types (see pointTypeForLabel). Splits the proposal</span>
+<span class="d-add">+  // families: PBTPs exclude route-kind labels, RBTPs exclude point-kind ones.</span>
+<span class="d-add">+  // Station networks vote only on fixed points, so every kind is admitted there</span>
+<span class="d-add">+  // (no resolver — same rule as mapVoteTypesForPointType).</span>
+<span class="d-add">+  const voteTypeKindOf = useCallback((label: string) =&gt; {</span>
+<span class="d-add">+    const cfg = getCurrentMap();</span>
+<span class="d-add">+    return pointTypeForLabel(label, cfg?.voteTypes, cfg?.searchVoteTypes);</span>
+<span class="d-add">+  }, []);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   const refreshGraphDisplay = useCallback(() =&gt; {</span>
+<span class="d-ctx">     const data = graphDataRef.current;</span>
+<span class="d-ctx">     if (!data) return;</span>
+<span class="d-hunk">@@ -1264,10 +1274,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     lastLegendLenRef.current = legendLen;</span>
+<span class="d-ctx">     setStableWinners(selectTopProposals(</span>
+<span class="d-ctx">       data, tiebreakSaltRef.current, TOP_PROPOSAL_LIMIT,</span>
+<span class="d-add">+      TOP_PROPOSAL_MIN_SPACING_M,</span>
+<span class="d-add">+      isStationNetwork ? undefined : voteTypeKindOf,</span>
+<span class="d-ctx">     ), legendChanged);</span>
+<span class="d-ctx">     setGraphVoteVersion((v) =&gt; v + 1);</span>
+<span class="d-ctx">     scheduleRedrawRef.current();</span>
+<span class="d-del">-  }, [setStableWinners]);</span>
+<span class="d-add">+  }, [setStableWinners, isStationNetwork, voteTypeKindOf]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const refreshGraphDisplayRef = useRef(refreshGraphDisplay);</span>
+<span class="d-ctx">   useEffect(() =&gt; { refreshGraphDisplayRef.current = refreshGraphDisplay; }, [refreshGraphDisplay]);</span>
+<span class="d-hunk">@@ -1858,7 +1870,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     const data = graphDataRef.current;</span>
+<span class="d-ctx">     if (!topo || !adj || !data?.edge_vote_types) return;</span>
+<span class="d-ctx">     const t0 = performance.now();</span>
+<span class="d-del">-    const next = computeRouteProposals(topo, adj, data);</span>
+<span class="d-add">+    // kindOf keeps POINT-kind vote types out of the corridor family (their</span>
+<span class="d-add">+    // votes surface as PBTP pins instead) — the mirror of the PBTP filter.</span>
+<span class="d-add">+    const next = computeRouteProposals(topo, adj, data, { kindOf: voteTypeKindOf });</span>
+<span class="d-ctx">     dlog(&quot;proposals&quot;, `recompute: ${next.length} corridors in ${(performance.now() - t0).toFixed(1)}ms`,</span>
+<span class="d-ctx">       next.map((p) =&gt; `${p.label}#${p.id}(${p.score})`));</span>
+<span class="d-ctx">     debugState(&quot;routeProposals&quot;, next.length);</span>
+<span class="d-hunk">@@ -1868,7 +1882,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       prev.length === next.length</span>
+<span class="d-ctx">         &amp;&amp; prev.every((p, i) =&gt; p.id === next[i].id &amp;&amp; p.score === next[i].score)</span>
+<span class="d-ctx">         ? prev : next);</span>
+<span class="d-del">-  }, []);</span>
+<span class="d-add">+  }, [voteTypeKindOf]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);</span>
+<span class="d-ctx">   useEffect(() =&gt; { recomputeRouteProposalsRef.current = recomputeRouteProposals; }, [recomputeRouteProposals]);</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/graphTopology.ts</span>
+            <span class="stat"><span class="d-add">+20</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">GraphLayer · topology</span>
+        <span class="ctx-sum">typed-array graph + CSR indexes + block keys</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">graphTopology.ts</span>
+        <span class="ctx-sum">~340 LOC — one new helper</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">decode / adjacency / block index</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">edgeLengthMeters</span><span class="ol-sum">NEW — equirectangular edge length, shared</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>edgeLengthMeters</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/graphTopology.ts b/client-react/src/components/GraphLayer/graphTopology.ts</span>
+<span class="d-meta">index 1d2a374..c7b54d7 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/graphTopology.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/graphTopology.ts</span>
+<span class="d-hunk">@@ -231,6 +231,26 @@ export function adjShortest(</span>
+<span class="d-ctx">   return best;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+const EARTH_RADIUS_M = 6_371_000;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * An edge&#x27;s straight-line length in meters (fast equirectangular — exact</span>
+<span class="d-add">+ * enough at city scale; graph edges are short and mostly straight). Shared by</span>
+<span class="d-add">+ * the route-proposal length cap and anything else that budgets in meters.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function edgeLengthMeters(d: GraphTopology, edgeId: number): number {</span>
+<span class="d-add">+  const a = d.ends[2 * edgeId];</span>
+<span class="d-add">+  const b = d.ends[2 * edgeId + 1];</span>
+<span class="d-add">+  const aLat = d.coords[2 * a] / COORD_SCALE;</span>
+<span class="d-add">+  const aLon = d.coords[2 * a + 1] / COORD_SCALE;</span>
+<span class="d-add">+  const bLat = d.coords[2 * b] / COORD_SCALE;</span>
+<span class="d-add">+  const bLon = d.coords[2 * b + 1] / COORD_SCALE;</span>
+<span class="d-add">+  const meanLatRad = (((aLat + bLat) / 2) * Math.PI) / 180;</span>
+<span class="d-add">+  const dLat = ((bLat - aLat) * Math.PI) / 180;</span>
+<span class="d-add">+  const dLon = (((bLon - aLon) * Math.PI) / 180) * Math.cos(meanLatRad);</span>
+<span class="d-add">+  return EARTH_RADIUS_M * Math.hypot(dLat, dLon);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> // ── Block index (CSR) ───────────────────────────────────────────────────────</span>
+<span class="d-ctx"> // Blocks are the aggregation/interaction grain (docs/three-layer-model.md §2):</span>
+<span class="d-ctx"> // every edge maps to at most one block via edgeBlockId. Same CSR layout as</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+            <span class="stat"><span class="d-add">+120</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">GraphLayer · RBTPs</span>
+        <span class="ctx-sum">pure-logic tests</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">routeProposals.test.ts</span>
+        <span class="ctx-sum">53 tests — +10 for budget/cap/kind</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">existing clustering/corridor tests</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">routeLengthBudgetM / capPathToLengthBudget</span><span class="ol-sum">NEW — growth, clamp, window, ties, floor</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">length cap + kind filter through computeRouteProposals</span><span class="ol-sum">NEW — trimmed anchors asserted</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>budget growth/clamp</li><li>window trimming unit cases</li><li>12-edge chain capped to its 4-edge hot core (anchors [4,8])</li><li>point-kind skip / unknown-kind keep</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeProposals.test.ts b/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+<span class="d-meta">index fb0ddbd..4a9a4e4 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+<span class="d-hunk">@@ -12,8 +12,14 @@ import {</span>
+<span class="d-ctx">   corridorCoordinates,</span>
+<span class="d-ctx">   corridorFromEdgeIds,</span>
+<span class="d-ctx">   dedupeRoutes,</span>
+<span class="d-add">+  capPathToLengthBudget,</span>
+<span class="d-add">+  routeLengthBudgetM,</span>
+<span class="d-ctx">   MIN_ROUTE_SCORE,</span>
+<span class="d-ctx">   MIN_ROUTE_EDGES,</span>
+<span class="d-add">+  ROUTE_LENGTH_BASE_M,</span>
+<span class="d-add">+  ROUTE_LENGTH_PER_SQRT_SCORE_M,</span>
+<span class="d-add">+  ROUTE_LENGTH_MAX_M,</span>
+<span class="d-add">+  type PathResult,</span>
+<span class="d-ctx">   type RouteProposal,</span>
+<span class="d-ctx">   type RouteProposalOptions,</span>
+<span class="d-ctx"> } from &quot;./routeProposals&quot;;</span>
+<span class="d-hunk">@@ -531,3 +537,117 @@ describe(&quot;chooseAnchorOrderBefore (start dropped onto a diamond)&quot;, () =&gt; {</span>
+<span class="d-ctx">     expect(chooseAnchorOrderBefore(ll(0, -5), A, B, durationOf)).toEqual([B, A]);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// Corridor length budget — routeLengthBudgetM + capPathToLengthBudget</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;routeLengthBudgetM&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;grows with support from the base, sublinearly&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(routeLengthBudgetM(0)).toBe(ROUTE_LENGTH_BASE_M);</span>
+<span class="d-add">+    expect(routeLengthBudgetM(4)).toBe(ROUTE_LENGTH_BASE_M + 2 * ROUTE_LENGTH_PER_SQRT_SCORE_M);</span>
+<span class="d-add">+    expect(routeLengthBudgetM(16)).toBe(ROUTE_LENGTH_BASE_M + 4 * ROUTE_LENGTH_PER_SQRT_SCORE_M);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;is clamped to the ceiling regardless of support&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(routeLengthBudgetM(1e9)).toBe(ROUTE_LENGTH_MAX_M);</span>
+<span class="d-add">+    expect(routeLengthBudgetM(1e9, 1000)).toBe(1000);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;capPathToLengthBudget&quot;, () =&gt; {</span>
+<span class="d-add">+  // Path of 5 edges, 100m each; per-edge weights below.</span>
+<span class="d-add">+  const path = (weights: number[]): { p: PathResult; weightOf: (e: number) =&gt; number } =&gt; ({</span>
+<span class="d-add">+    p: {</span>
+<span class="d-add">+      edges: weights.map((_, i) =&gt; i),</span>
+<span class="d-add">+      nodes: weights.map((_, i) =&gt; i).concat(weights.length),</span>
+<span class="d-add">+      weight: weights.reduce((a, b) =&gt; a + b, 0),</span>
+<span class="d-add">+    },</span>
+<span class="d-add">+    weightOf: (e: number) =&gt; weights[e],</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+  const len100 = () =&gt; 100;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;returns the path unchanged when it fits the budget&quot;, () =&gt; {</span>
+<span class="d-add">+    const { p, weightOf } = path([1, 1, 1]);</span>
+<span class="d-add">+    expect(capPathToLengthBudget(p, 300, len100, weightOf)).toBe(p);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;trims to the hottest contiguous window under the budget&quot;, () =&gt; {</span>
+<span class="d-add">+    // 500m total, budget 200m (2 edges). Hot stretch is edges 2–3.</span>
+<span class="d-add">+    const { p, weightOf } = path([1, 1, 9, 8, 1]);</span>
+<span class="d-add">+    const out = capPathToLengthBudget(p, 200, len100, weightOf);</span>
+<span class="d-add">+    expect(out.edges).toEqual([2, 3]);</span>
+<span class="d-add">+    expect(out.nodes).toEqual([2, 3, 4]); // endpoints of the kept window</span>
+<span class="d-add">+    expect(out.weight).toBe(17);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;prefers the shorter window on equal weight, then the earliest&quot;, () =&gt; {</span>
+<span class="d-add">+    const { p, weightOf } = path([5, 0, 5, 5]);</span>
+<span class="d-add">+    // Budget 200: windows [2,3] (weight 10, 200m) beat [0,1] (5) and [1,2] (5).</span>
+<span class="d-add">+    expect(capPathToLengthBudget(p, 200, len100, weightOf).edges).toEqual([2, 3]);</span>
+<span class="d-add">+    // Budget 100: [0], [2], [3] all weigh 5 — earliest wins.</span>
+<span class="d-add">+    expect(capPathToLengthBudget(p, 100, len100, weightOf).edges).toEqual([0]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps a single over-budget edge rather than trimming to nothing&quot;, () =&gt; {</span>
+<span class="d-add">+    const { p, weightOf } = path([1, 50, 1]);</span>
+<span class="d-add">+    const out = capPathToLengthBudget(p, 60, len100, weightOf);</span>
+<span class="d-add">+    expect(out.edges).toEqual([1]);</span>
+<span class="d-add">+    expect(out.weight).toBe(50);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;computeRouteProposals — corridor length cap&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;caps a long corridor to its best-supported stretch&quot;, () =&gt; {</span>
+<span class="d-add">+    // A 12-edge chain (~84m/edge ≈ 1.0km) with a hot 4-edge core. A 400m</span>
+<span class="d-add">+    // ceiling keeps only the core (4 edges ≈ 338m; a 5th would exceed 400m).</span>
+<span class="d-add">+    const edges: [number, number][] = Array.from({ length: 12 }, (_, i) =&gt; [i, i + 1]);</span>
+<span class="d-add">+    const votes = edges.map((_, i): [number, number, number][] =&gt;</span>
+<span class="d-add">+      [[BIKE, i &gt;= 4 &amp;&amp; i &lt;= 7 ? 5 : 1, 0]]);</span>
+<span class="d-add">+    const ps = compute(edges, evt(...votes), { maxRouteLengthM: 400 });</span>
+<span class="d-add">+    expect(ps).toHaveLength(1);</span>
+<span class="d-add">+    expect(ps[0].edgeIds).toEqual([4, 5, 6, 7]);</span>
+<span class="d-add">+    expect(ps[0].score).toBe(20);</span>
+<span class="d-add">+    // Anchors follow the trimmed window, not the original path ends.</span>
+<span class="d-add">+    expect(ps[0].anchors).toEqual([4, 8]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;leaves short corridors untouched by the default budget&quot;, () =&gt; {</span>
+<span class="d-add">+    const ps = compute(</span>
+<span class="d-add">+      [[0, 1], [1, 2], [2, 3]],</span>
+<span class="d-add">+      evt([[BIKE, 5, 0]], [[BIKE, 4, 0]], [[BIKE, 3, 0]]),</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+    expect(ps).toHaveLength(1);</span>
+<span class="d-add">+    expect(ps[0].edgeIds).toEqual(expect.arrayContaining([0, 1, 2]));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;computeRouteProposals — route/point kind filter&quot;, () =&gt; {</span>
+<span class="d-add">+  const kindOf = (label: string) =&gt;</span>
+<span class="d-add">+    label === &quot;Bike lane&quot; ? &quot;point&quot; as const</span>
+<span class="d-add">+    : label === &quot;Tree&quot; ? &quot;route&quot; as const</span>
+<span class="d-add">+    : null;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;skips POINT-kind vote types (their votes are PBTPs, not corridors)&quot;, () =&gt; {</span>
+<span class="d-add">+    const ps = compute(</span>
+<span class="d-add">+      [[0, 1], [1, 2], [10, 11], [11, 12]],</span>
+<span class="d-add">+      evt([[BIKE, 9, 0]], [[BIKE, 8, 0]], [[TREE, 7, 0]], [[TREE, 6, 0]]),</span>
+<span class="d-add">+      { kindOf },</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+    expect(ps.map((p) =&gt; p.label)).toEqual([&quot;Tree&quot;]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps unknown-kind labels eligible and admits all without a resolver&quot;, () =&gt; {</span>
+<span class="d-add">+    const both = compute(</span>
+<span class="d-add">+      [[0, 1], [1, 2]],</span>
+<span class="d-add">+      evt([[BIKE, 9, 0]], [[BIKE, 8, 0]]),</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+    expect(both.map((p) =&gt; p.label)).toEqual([&quot;Bike lane&quot;]);</span>
+<span class="d-add">+    const unknownKind = compute(</span>
+<span class="d-add">+      [[0, 1], [1, 2]],</span>
+<span class="d-add">+      evt([[BIKE, 9, 0]], [[BIKE, 8, 0]]),</span>
+<span class="d-add">+      { kindOf: () =&gt; null },</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+    expect(unknownKind.map((p) =&gt; p.label)).toEqual([&quot;Bike lane&quot;]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/routeProposals.ts</span>
+            <span class="stat"><span class="d-add">+103</span> / <span class="d-del">-6</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">GraphLayer · RBTPs</span>
+        <span class="ctx-sum">pure route-based top-proposal logic (clustering, corridors, anchors)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">routeProposals.ts</span>
+        <span class="ctx-sum">~880 LOC — computeRouteProposals + corridor helpers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">parse / shape / coverage / corridor geometry</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">length-budget constants + routeLengthBudgetM</span><span class="ol-sum">NEW — min(2500, 600 + 150·√score)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">RouteProposalOptions</span><span class="ol-sum">gains kindOf + maxRouteLengthM</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">greedyHeaviestPath</span><span class="ol-sum">splice fix — no more duplicated seed node in nodes[]</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">capPathToLengthBudget</span><span class="ol-sum">NEW — max-weight sliding window under the budget</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">computeRouteProposals</span><span class="ol-sum">point-kind skip; trim before the activity gates</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>ROUTE_LENGTH_* constants + routeLengthBudgetM</li><li>RouteProposalOptions.kindOf / maxRouteLengthM</li><li>greedyHeaviestPath — leftNodes slice(0,-2) alignment fix</li><li>capPathToLengthBudget — window scan, tie rules, single-edge floor</li><li>computeRouteProposals — kind gate + cap wiring</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeProposals.ts b/client-react/src/components/GraphLayer/routeProposals.ts</span>
+<span class="d-meta">index 7edf569..2a98849 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/routeProposals.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeProposals.ts</span>
+<span class="d-hunk">@@ -29,12 +29,14 @@ import {</span>
+<span class="d-ctx">   adjEdgesOf,</span>
+<span class="d-ctx">   blockKeyOf,</span>
+<span class="d-ctx">   buildBlockIndex,</span>
+<span class="d-add">+  edgeLengthMeters,</span>
+<span class="d-ctx">   edgesOfBlockKey,</span>
+<span class="d-ctx">   nodeLatLng,</span>
+<span class="d-ctx">   type BlockIndex,</span>
+<span class="d-ctx">   type GraphTopology,</span>
+<span class="d-ctx">   type NodeAdj,</span>
+<span class="d-ctx"> } from &quot;./graphTopology&quot;;</span>
+<span class="d-add">+import type { VoteTypeKindResolver } from &quot;./topProposals&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> export interface RouteProposal {</span>
+<span class="d-ctx">   id: string;</span>
+<span class="d-hunk">@@ -302,11 +304,13 @@ export function chooseAnchorOrderBefore(</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-ctx"> // Client-side deterministic clustering (port of server/route_proposals.py)</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-del">-// Pipeline per vote type (docs/three-layer-model.md §3.2): net-positive</span>
+<span class="d-add">+// Pipeline per ROUTE-kind vote type (docs/three-layer-model.md §3.2; point-</span>
+<span class="d-add">+// kind types are skipped — their votes surface as PBTP pins): net-positive</span>
+<span class="d-ctx"> // subgraph → connected components (the deterministic replacement for the</span>
+<span class="d-ctx"> // server&#x27;s Leiden step — components localize; path peeling separates parallel</span>
+<span class="d-del">-// corridors inside one component) → peel heaviest simple paths → activity</span>
+<span class="d-del">-// gates → block projection → same-type dedupe → rank + cap.</span>
+<span class="d-add">+// corridors inside one component) → peel heaviest simple paths → trim each to</span>
+<span class="d-add">+// its support-earned meter budget (capPathToLengthBudget) → activity gates →</span>
+<span class="d-add">+// block projection → same-type dedupe → rank + cap.</span>
+<span class="d-ctx"> //</span>
+<span class="d-ctx"> // Determinism contract: NO randomness, NO clock. Every iteration order and</span>
+<span class="d-ctx"> // tie-break is by ascending edge/node id, so the same (topology, vote state)</span>
+<span class="d-hunk">@@ -330,12 +334,39 @@ export const DEFAULT_LIMIT = 20;</span>
+<span class="d-ctx"> /** Same-type edge-set Jaccard at/above which two routes are duplicates. */</span>
+<span class="d-ctx"> export const DEFAULT_JACCARD = 0.5;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+// ── Corridor length budget ──────────────────────────────────────────────────</span>
+<span class="d-add">+// A peeled path can snake for miles (greedy extension keeps going while ANY</span>
+<span class="d-add">+// net-positive arc exists), which reads as an absurd proposal. Instead of a</span>
+<span class="d-add">+// blunt truncation, each path gets a meter budget that GROWS with its support</span>
+<span class="d-add">+// — a corridor earns length with votes — and is trimmed to its best-supported</span>
+<span class="d-add">+// contiguous window under that budget (see capPathToLengthBudget).</span>
+<span class="d-add">+/** Budget floor: every corridor may span at least this many meters. */</span>
+<span class="d-add">+export const ROUTE_LENGTH_BASE_M = 600;</span>
+<span class="d-add">+/** Budget growth: meters added per √(path score). √ keeps a corridor with 4×</span>
+<span class="d-add">+ *  the votes at 2× the earned length — support buys reach, sublinearly. */</span>
+<span class="d-add">+export const ROUTE_LENGTH_PER_SQRT_SCORE_M = 150;</span>
+<span class="d-add">+/** Budget ceiling, whatever the support. */</span>
+<span class="d-add">+export const ROUTE_LENGTH_MAX_M = 2500;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** The meter budget a path of `score` (sum of nets) has earned. */</span>
+<span class="d-add">+export function routeLengthBudgetM(score: number, maxM = ROUTE_LENGTH_MAX_M): number {</span>
+<span class="d-add">+  const earned = ROUTE_LENGTH_BASE_M</span>
+<span class="d-add">+    + ROUTE_LENGTH_PER_SQRT_SCORE_M * Math.sqrt(Math.max(score, 0));</span>
+<span class="d-add">+  return Math.min(maxM, earned);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> export interface RouteProposalOptions {</span>
+<span class="d-ctx">   limit?: number;</span>
+<span class="d-ctx">   jaccardThreshold?: number;</span>
+<span class="d-ctx">   minNet?: number;</span>
+<span class="d-ctx">   minRouteScore?: number;</span>
+<span class="d-ctx">   minRouteEdges?: number;</span>
+<span class="d-add">+  /** Hard ceiling override for the corridor length budget (meters). */</span>
+<span class="d-add">+  maxRouteLengthM?: number;</span>
+<span class="d-add">+  /** Label → route/point kind. POINT-kind vote types are skipped — their votes</span>
+<span class="d-add">+   *  surface as PBTP pins (topProposals.ts), not corridors. Unknown (null)</span>
+<span class="d-add">+   *  kinds stay eligible. Omit to admit every type. */</span>
+<span class="d-add">+  kindOf?: VoteTypeKindResolver;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** Arc of the per-type subgraph: neighbor node, original edge id, net weight. */</span>
+<span class="d-hunk">@@ -451,7 +482,7 @@ function connectedComponents(typeAdj: TypeAdj): TypeAdj[] {</span>
+<span class="d-ctx">   return comps;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-type PathResult = { edges: number[]; nodes: number[]; weight: number };</span>
+<span class="d-add">+export type PathResult = { edges: number[]; nodes: number[]; weight: number };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** Exact heaviest simple path by DFS from every node (small components only).</span>
+<span class="d-ctx">  *  Strictly-greater comparisons keep the FIRST best found — ties resolve to the</span>
+<span class="d-hunk">@@ -551,9 +582,12 @@ function greedyHeaviestPath(adj: TypeAdj): PathResult {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Extend from b away from a, and from a away from b, then splice into one</span>
+<span class="d-ctx">   // path joined on the seed edge (the bwd half reversed, seed edge kept once).</span>
+<span class="d-add">+  // The bwd half contributes everything BEFORE seedA (drop its trailing</span>
+<span class="d-add">+  // seedA+seedB after reversing — fwd starts at seedA), keeping nodes aligned</span>
+<span class="d-add">+  // with edges (nodes[i] is the node entering edges[i]) for window slicing.</span>
+<span class="d-ctx">   const fwd = extend(seedA, seedB, seedE);</span>
+<span class="d-ctx">   const bwd = extend(seedB, seedA, seedE);</span>
+<span class="d-del">-  const leftNodes = [...bwd.nodes].reverse().slice(0, -1); // … → seedA (drop trailing seedB)</span>
+<span class="d-add">+  const leftNodes = [...bwd.nodes].reverse().slice(0, -2);</span>
+<span class="d-ctx">   const leftEdges = [...bwd.edges.slice(1)].reverse(); // edges past the seed, reversed</span>
+<span class="d-ctx">   const nodes = [...leftNodes, ...fwd.nodes];</span>
+<span class="d-ctx">   const edges = [...leftEdges, ...fwd.edges];</span>
+<span class="d-hunk">@@ -595,6 +629,57 @@ function peelPaths(adj: TypeAdj): PathResult[] {</span>
+<span class="d-ctx">   return paths;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Trim an ordered path to its best-supported contiguous window within a meter</span>
+<span class="d-add">+ * budget. Slides a window over the path&#x27;s edges keeping total length ≤</span>
+<span class="d-add">+ * `budgetM` and returns the window with the highest weight sum — the hottest</span>
+<span class="d-add">+ * stretch survives, straggly low-support reach is dropped. Deterministic ties:</span>
+<span class="d-add">+ * equal weight prefers the shorter window, then the earliest along the path.</span>
+<span class="d-add">+ * A single edge longer than the whole budget is kept (a corridor is never</span>
+<span class="d-add">+ * trimmed to nothing); paths already within budget return unchanged.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function capPathToLengthBudget(</span>
+<span class="d-add">+  path: PathResult,</span>
+<span class="d-add">+  budgetM: number,</span>
+<span class="d-add">+  lengthOf: (edgeId: number) =&gt; number,</span>
+<span class="d-add">+  weightOf: (edgeId: number) =&gt; number,</span>
+<span class="d-add">+): PathResult {</span>
+<span class="d-add">+  const n = path.edges.length;</span>
+<span class="d-add">+  if (n &lt;= 1) return path;</span>
+<span class="d-add">+  const lens = path.edges.map(lengthOf);</span>
+<span class="d-add">+  if (lens.reduce((a, b) =&gt; a + b, 0) &lt;= budgetM) return path;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  let bestI = 0;</span>
+<span class="d-add">+  let bestJ = 0;</span>
+<span class="d-add">+  let bestW = -Infinity;</span>
+<span class="d-add">+  let bestLen = Infinity;</span>
+<span class="d-add">+  let i = 0;</span>
+<span class="d-add">+  let sumW = 0;</span>
+<span class="d-add">+  let sumL = 0;</span>
+<span class="d-add">+  for (let j = 0; j &lt; n; j++) {</span>
+<span class="d-add">+    sumW += weightOf(path.edges[j]);</span>
+<span class="d-add">+    sumL += lens[j];</span>
+<span class="d-add">+    // Shrink from the left until within budget — but never below one edge, so</span>
+<span class="d-add">+    // an over-budget single edge (a long bridge) still yields a window.</span>
+<span class="d-add">+    while (sumL &gt; budgetM &amp;&amp; i &lt; j) {</span>
+<span class="d-add">+      sumW -= weightOf(path.edges[i]);</span>
+<span class="d-add">+      sumL -= lens[i];</span>
+<span class="d-add">+      i++;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    if (sumW &gt; bestW || (sumW === bestW &amp;&amp; sumL &lt; bestLen)) {</span>
+<span class="d-add">+      bestI = i;</span>
+<span class="d-add">+      bestJ = j;</span>
+<span class="d-add">+      bestW = sumW;</span>
+<span class="d-add">+      bestLen = sumL;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return {</span>
+<span class="d-add">+    edges: path.edges.slice(bestI, bestJ + 1),</span>
+<span class="d-add">+    nodes: path.nodes.slice(bestI, bestJ + 2),</span>
+<span class="d-add">+    weight: bestW,</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /** Expand an ordered path into its distinct blocks (in path order) + the union</span>
+<span class="d-ctx">  *  of every block edge — the voting set. Singleton fallback where unmapped. */</span>
+<span class="d-ctx"> function groupBlocks(</span>
+<span class="d-hunk">@@ -682,17 +767,29 @@ export function computeRouteProposals(</span>
+<span class="d-ctx">   const minNet = opts.minNet ?? MIN_NET;</span>
+<span class="d-ctx">   const minRouteScore = opts.minRouteScore ?? MIN_ROUTE_SCORE;</span>
+<span class="d-ctx">   const minRouteEdges = opts.minRouteEdges ?? MIN_ROUTE_EDGES;</span>
+<span class="d-add">+  const maxRouteLengthM = opts.maxRouteLengthM ?? ROUTE_LENGTH_MAX_M;</span>
+<span class="d-ctx">   const blockIndex = buildBlockIndex(topo);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const all: RouteProposal[] = [];</span>
+<span class="d-ctx">   for (let legendIdx = 0; legendIdx &lt; legend.length; legendIdx++) {</span>
+<span class="d-ctx">     const label = legend[legendIdx];</span>
+<span class="d-ctx">     if (!label) continue;</span>
+<span class="d-add">+    // POINT-kind vote types never form corridors — their votes are PBTP pins</span>
+<span class="d-add">+    // (topProposals.ts). Unknown kind (null) stays eligible for both families.</span>
+<span class="d-add">+    if (opts.kindOf &amp;&amp; opts.kindOf(label) === &quot;point&quot;) continue;</span>
+<span class="d-ctx">     const nets = netsForType(edgeVoteTypes, topo.nEdges, legendIdx);</span>
+<span class="d-ctx">     const typeAdj = buildTypeAdj(topo, adj, nets, minNet);</span>
+<span class="d-ctx">     const typeProposals: RouteProposal[] = [];</span>
+<span class="d-ctx">     for (const compAdj of connectedComponents(typeAdj)) {</span>
+<span class="d-del">-      for (const path of peelPaths(compAdj)) {</span>
+<span class="d-add">+      for (const peeled of peelPaths(compAdj)) {</span>
+<span class="d-add">+        // Trim to the support-earned meter budget BEFORE the activity gates,</span>
+<span class="d-add">+        // so the gates judge the corridor that will actually be shown.</span>
+<span class="d-add">+        const path = capPathToLengthBudget(</span>
+<span class="d-add">+          peeled,</span>
+<span class="d-add">+          routeLengthBudgetM(peeled.weight, maxRouteLengthM),</span>
+<span class="d-add">+          (e) =&gt; edgeLengthMeters(topo, e),</span>
+<span class="d-add">+          (e) =&gt; nets[e],</span>
+<span class="d-add">+        );</span>
+<span class="d-ctx">         if (path.weight &lt; minRouteScore || path.edges.length &lt; minRouteEdges) continue;</span>
+<span class="d-ctx">         const { blocks, blockEdgeIds } = groupBlocks(path.edges, topo, blockIndex);</span>
+<span class="d-ctx">         const a = path.nodes[0];</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/topProposals.test.ts</span>
+            <span class="stat"><span class="d-add">+105</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">GraphLayer · PBTPs</span>
+        <span class="ctx-sum">selection tests</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">topProposals.test.ts</span>
+        <span class="ctx-sum">34 tests — +8 for kinds + block dedupe</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">existing steps</span><span class="ol-sum">unchanged (600 m default still satisfies the 110 m/1.1 km fixtures)</span></li><li class="changed"><span class="ol-label">kind filter / dedupeWinnersByBlock / full path</span><span class="ol-sum">NEW describes</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>route-kind exclusion + unknown-kind eligibility</li><li>cross-type block collapse + salted tie + singleton degrade</li><li>full-path block uniqueness with edgeBlockId</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/topProposals.test.ts b/client-react/src/components/GraphLayer/topProposals.test.ts</span>
+<span class="d-meta">index b497536..87f0517 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/topProposals.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/topProposals.test.ts</span>
+<span class="d-hunk">@@ -3,6 +3,7 @@ import {</span>
+<span class="d-ctx">   shuffleKey,</span>
+<span class="d-ctx">   computeVoteTypeWinners,</span>
+<span class="d-ctx">   dedupeWinnersByEdge,</span>
+<span class="d-add">+  dedupeWinnersByBlock,</span>
+<span class="d-ctx">   spaceOutWinners,</span>
+<span class="d-ctx">   edgeMidpointResolver,</span>
+<span class="d-ctx">   applyTopProposalLimit,</span>
+<span class="d-hunk">@@ -263,3 +264,107 @@ describe(&quot;topLabelForEdges (vote-type fallback ranking)&quot;, () =&gt; {</span>
+<span class="d-ctx">     expect(topLabelForEdges([], evt, [0])).toBeNull();</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;computeVoteTypeWinners — route/point kind filter&quot;, () =&gt; {</span>
+<span class="d-add">+  const legend = [&quot;Add bike greenway&quot;, &quot;Add bike parking&quot;, &quot;Fix the thing&quot;];</span>
+<span class="d-add">+  const evt: [number, number, number][][] = [</span>
+<span class="d-add">+    [[0, 9, 0]], // edge 0: greenway (route kind) net 9</span>
+<span class="d-add">+    [[1, 5, 0]], // edge 1: parking (point kind) net 5</span>
+<span class="d-add">+    [[2, 3, 0]], // edge 2: unknown-kind custom label net 3</span>
+<span class="d-add">+  ];</span>
+<span class="d-add">+  const kindOf = (label: string) =&gt;</span>
+<span class="d-add">+    label === &quot;Add bike greenway&quot; ? &quot;route&quot; as const</span>
+<span class="d-add">+    : label === &quot;Add bike parking&quot; ? &quot;point&quot; as const</span>
+<span class="d-add">+    : null;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;excludes ROUTE-kind vote types from point-based winners&quot;, () =&gt; {</span>
+<span class="d-add">+    const out = computeVoteTypeWinners(legend, evt, 1, kindOf);</span>
+<span class="d-add">+    expect(out.map((w) =&gt; w.label).sort()).toEqual([&quot;Add bike parking&quot;, &quot;Fix the thing&quot;]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps unknown-kind labels eligible (legacy suggestions)&quot;, () =&gt; {</span>
+<span class="d-add">+    const out = computeVoteTypeWinners(legend, evt, 1, kindOf);</span>
+<span class="d-add">+    expect(out.some((w) =&gt; w.label === &quot;Fix the thing&quot;)).toBe(true);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;admits every kind when no resolver is given&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(computeVoteTypeWinners(legend, evt, 1)).toHaveLength(3);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;dedupeWinnersByBlock&quot;, () =&gt; {</span>
+<span class="d-add">+  const mk = (label: string, legendIdx: number, count: number, edgeIdx: number): VoteTypeWinner =&gt; ({</span>
+<span class="d-add">+    legendIdx, label, edgeIdx, count,</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps a single winner per block ACROSS vote types (strongest wins)&quot;, () =&gt; {</span>
+<span class="d-add">+    // Edges 0 and 1 share block 4; different vote types.</span>
+<span class="d-add">+    const keyOf = (e: number) =&gt; (e === 0 || e === 1 ? 4 : 7);</span>
+<span class="d-add">+    const out = dedupeWinnersByBlock(</span>
+<span class="d-add">+      [mk(&quot;Bike&quot;, 0, 3, 0), mk(&quot;Tree&quot;, 1, 8, 1), mk(&quot;Bench&quot;, 2, 2, 2)],</span>
+<span class="d-add">+      SALT,</span>
+<span class="d-add">+      keyOf,</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+    expect(out).toHaveLength(2);</span>
+<span class="d-add">+    expect(out.find((w) =&gt; keyOf(w.edgeIdx) === 4)!.label).toBe(&quot;Tree&quot;);</span>
+<span class="d-add">+    expect(out.some((w) =&gt; w.edgeIdx === 2)).toBe(true);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps winners on unmapped edges (negative keys) unconstrained&quot;, () =&gt; {</span>
+<span class="d-add">+    // Singleton keys (≤ -2) mean &quot;no block layer&quot; — nothing collapses.</span>
+<span class="d-add">+    const out = dedupeWinnersByBlock(</span>
+<span class="d-add">+      [mk(&quot;Bike&quot;, 0, 3, 0), mk(&quot;Tree&quot;, 1, 8, 1)],</span>
+<span class="d-add">+      SALT,</span>
+<span class="d-add">+      (e) =&gt; -(e + 2),</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+    expect(out).toHaveLength(2);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;tiebreaks equal-net same-block winners deterministically by salt&quot;, () =&gt; {</span>
+<span class="d-add">+    const winners = [mk(&quot;Alpha&quot;, 0, 5, 0), mk(&quot;Bravo&quot;, 1, 5, 1)];</span>
+<span class="d-add">+    const first = dedupeWinnersByBlock(winners, SALT, () =&gt; 1)[0].label;</span>
+<span class="d-add">+    expect(dedupeWinnersByBlock(winners, SALT, () =&gt; 1)[0].label).toBe(first);</span>
+<span class="d-add">+    const expected = shuffleKey(&quot;Alpha&quot;, SALT) &lt;= shuffleKey(&quot;Bravo&quot;, SALT) ? &quot;Alpha&quot; : &quot;Bravo&quot;;</span>
+<span class="d-add">+    expect(first).toBe(expected);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;selectTopProposals — block uniqueness + kind filter (full path)&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;allows at most one pin per street block, across vote types&quot;, () =&gt; {</span>
+<span class="d-add">+    // Edges 0 and 1 both map to block 0 (a two-direction street); edge 2 is</span>
+<span class="d-add">+    // its own block. Bike (net 8) and Tree (net 6) sit on the same block →</span>
+<span class="d-add">+    // only Bike survives there; Bench keeps its own block.</span>
+<span class="d-add">+    const nodes: [number, number][] = [</span>
+<span class="d-add">+      [40.7000, -74.0000], [40.7001, -74.0000],</span>
+<span class="d-add">+      [40.7000, -74.0001], [40.7001, -74.0001],</span>
+<span class="d-add">+      [40.7100, -74.0000], [40.7101, -74.0000],</span>
+<span class="d-add">+    ];</span>
+<span class="d-add">+    const edges: [number, number, string][] = [[0, 1, &quot;&quot;], [2, 3, &quot;&quot;], [4, 5, &quot;&quot;]];</span>
+<span class="d-add">+    const data = { </span>
+<span class="d-add">+      vote_type_legend: [&quot;Bike&quot;, &quot;Tree&quot;, &quot;Bench&quot;],</span>
+<span class="d-add">+      edge_vote_types: [</span>
+<span class="d-add">+        [[0, 8, 0]], [[1, 6, 0]], [[2, 4, 0]],</span>
+<span class="d-add">+      ] as [number, number, number][][],</span>
+<span class="d-add">+      ...topo(nodes, edges),</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+    data.edgeBlockId = Int32Array.from([0, 0, 1]);</span>
+<span class="d-add">+    data.nBlocks = 2;</span>
+<span class="d-add">+    const out = selectTopProposals(data, SALT, 10);</span>
+<span class="d-add">+    expect(out.map((w) =&gt; w.label).sort()).toEqual([&quot;Bench&quot;, &quot;Bike&quot;]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps ROUTE-kind labels out of the point-based top proposals&quot;, () =&gt; {</span>
+<span class="d-add">+    const data = {</span>
+<span class="d-add">+      vote_type_legend: [&quot;Add bike greenway&quot;, &quot;Add bike parking&quot;],</span>
+<span class="d-add">+      edge_vote_types: [</span>
+<span class="d-add">+        [[0, 9, 0]], // greenway on edge 0 — route kind, must not pin</span>
+<span class="d-add">+        [[1, 5, 0]], // parking on edge 1 — point kind, pins</span>
+<span class="d-add">+      ] as [number, number, number][][],</span>
+<span class="d-add">+      ...topo([], []),</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+    const kindOf = (label: string) =&gt;</span>
+<span class="d-add">+      label === &quot;Add bike greenway&quot; ? &quot;route&quot; as const : &quot;point&quot; as const;</span>
+<span class="d-add">+    const out = selectTopProposals(data, SALT, 10, 600, kindOf);</span>
+<span class="d-add">+    expect(out.map((w) =&gt; w.label)).toEqual([&quot;Add bike parking&quot;]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/topProposals.ts</span>
+            <span class="stat"><span class="d-add">+89</span> / <span class="d-del">-24</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">GraphLayer · PBTPs</span>
+        <span class="ctx-sum">pure point-based top-proposal selection</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">topProposals.ts</span>
+        <span class="ctx-sum">~330 LOC — the five-step selection pipeline</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">computeVoteTypeWinners</span><span class="ol-sum">kindOf filter — route-kind labels excluded</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">dedupeWinnersByEdge</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">dedupeWinnersByBlock</span><span class="ol-sum">NEW — one pin per block across ALL types</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">spaceOutWinners</span><span class="ol-sum">unchanged mechanics; now step 4, same-type only by design</span></li><li class="changed"><span class="ol-label">constants + selectTopProposals</span><span class="ol-sum">spacing 300→600 m; wires kindOf + block step</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>VoteTypeKindResolver type + step-1 route-kind skip</li><li>EdgeBlockKey + dedupeWinnersByBlock (singleton keys pass through)</li><li>TOP_PROPOSAL_MIN_SPACING_M = 600 + rationale</li><li>selectTopProposals — five-step wiring (blockKeyOf resolver)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/topProposals.ts b/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-meta">index 61810a3..46a9b47 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-hunk">@@ -6,27 +6,35 @@</span>
+<span class="d-ctx"> // is the RBTP (a hot corridor, diamond pin) in routeProposals.ts.</span>
+<span class="d-ctx"> //</span>
+<span class="d-ctx"> // Pure logic (no React/Leaflet) for choosing which segments get a &quot;Top</span>
+<span class="d-del">-// Proposal&quot; indicator. The path is four explicit steps:</span>
+<span class="d-add">+// Proposal&quot; indicator. The path is five explicit steps:</span>
+<span class="d-ctx"> //</span>
+<span class="d-del">-//   1. computeVoteTypeWinners — for each vote type, the top `perTypeLimit`</span>
+<span class="d-del">-//      edges by NET (up − down) support. Net ≤ 0 is excluded.</span>
+<span class="d-add">+//   1. computeVoteTypeWinners — for each POINT-kind vote type, the top</span>
+<span class="d-add">+//      `perTypeLimit` edges by NET (up − down) support. Net ≤ 0 is excluded,</span>
+<span class="d-add">+//      and so are ROUTE-kind types (they surface as RBTPs; a route type&#x27;s hot</span>
+<span class="d-add">+//      edge is a corridor fragment, not a point proposal). Types of unknown</span>
+<span class="d-add">+//      kind (legacy suggestions never flagged) stay eligible.</span>
+<span class="d-ctx"> //   2. dedupeWinnersByEdge   — collapse winners that share an edge to a single</span>
+<span class="d-ctx"> //      representative (tiebreak), so one edge shows one indicator and occupies</span>
+<span class="d-ctx"> //      one slot.</span>
+<span class="d-del">-//   3. spaceOutWinners       — greedy per-type non-max suppression: keep a</span>
+<span class="d-add">+//   3. dedupeWinnersByBlock  — at most ONE pin per street block, across ALL</span>
+<span class="d-add">+//      vote types (tiebreak keeps the strongest). Blocks are the interaction</span>
+<span class="d-add">+//      grain (docs/three-layer-model.md §2); two pins on one block read as</span>
+<span class="d-add">+//      clutter even when their types differ.</span>
+<span class="d-add">+//   4. spaceOutWinners       — greedy per-type non-max suppression: keep a</span>
+<span class="d-ctx"> //      winner only if no STRONGER same-type winner already sits within</span>
+<span class="d-ctx"> //      `minSpacingMeters`. Collapses a hot corridor (its top edges are</span>
+<span class="d-ctx"> //      adjacent segments) to a single pin instead of a stack of identical ones.</span>
+<span class="d-del">-//   4. applyTopProposalLimit — sort by net (tiebreak) and cap at `limit`.</span>
+<span class="d-add">+//      Same-type spacing is deliberately WIDER than the cross-type block grain.</span>
+<span class="d-add">+//   5. applyTopProposalLimit — sort by net (tiebreak) and cap at `limit`.</span>
+<span class="d-ctx"> //</span>
+<span class="d-del">-// `selectTopProposals` runs all four. See topProposals.test.ts.</span>
+<span class="d-add">+// `selectTopProposals` runs all five. See topProposals.test.ts.</span>
+<span class="d-ctx"> //</span>
+<span class="d-del">-// Steps 1–2 scan the full edge list; 3–4 operate only on the handful of</span>
+<span class="d-add">+// Steps 1–2 scan the full edge list; 3–5 operate only on the handful of</span>
+<span class="d-ctx"> // surviving candidates, so the spacing pass is O(candidates²) over a few dozen</span>
+<span class="d-ctx"> // — negligible even though selection re-runs on every incoming vote.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> import type { GraphData } from &quot;../../types&quot;;</span>
+<span class="d-del">-import { type GraphTopology, nodeLat, nodeLon, edgeFrom, edgeTo } from &quot;./graphTopology&quot;;</span>
+<span class="d-add">+import { type GraphTopology, blockKeyOf, nodeLat, nodeLon, edgeFrom, edgeTo } from &quot;./graphTopology&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> export interface VoteTypeWinner {</span>
+<span class="d-ctx">   legendIdx: number;</span>
+<span class="d-hunk">@@ -58,15 +66,26 @@ export function compareWinners(</span>
+<span class="d-ctx">   return shuffleKey(a.label, salt) - shuffleKey(b.label, salt);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * A label&#x27;s route/point kind, or null when unknown. Point-based selection</span>
+<span class="d-add">+ * excludes &quot;route&quot; labels (they belong to the RBTP family); route-based</span>
+<span class="d-add">+ * extraction excludes &quot;point&quot; labels. Null (a legacy suggestion the DB never</span>
+<span class="d-add">+ * flagged) stays eligible for BOTH — dropping it from both would hide real</span>
+<span class="d-add">+ * votes from every proposal surface.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export type VoteTypeKindResolver = (label: string) =&gt; &quot;route&quot; | &quot;point&quot; | null;</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /**</span>
+<span class="d-ctx">  * Step 1 — for each vote type, the top `perTypeLimit` edges by net support</span>
+<span class="d-ctx">  * (highest first). Vote types whose best edge is net ≤ 0 are dropped (a</span>
+<span class="d-del">- * net-downvoted proposal is not a &quot;top proposal&quot;).</span>
+<span class="d-add">+ * net-downvoted proposal is not a &quot;top proposal&quot;), as are ROUTE-kind types</span>
+<span class="d-add">+ * when a `kindOf` resolver is supplied — their corridors surface as RBTPs.</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> export function computeVoteTypeWinners(</span>
+<span class="d-ctx">   legend: string[],</span>
+<span class="d-ctx">   edgeVoteTypes: [number, number, number][][],</span>
+<span class="d-del">-  perTypeLimit = 1</span>
+<span class="d-add">+  perTypeLimit = 1,</span>
+<span class="d-add">+  kindOf?: VoteTypeKindResolver</span>
+<span class="d-ctx"> ): VoteTypeWinner[] {</span>
+<span class="d-ctx">   if (!legend.length || !edgeVoteTypes.length) return [];</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -87,6 +106,7 @@ export function computeVoteTypeWinners(</span>
+<span class="d-ctx">   for (const [legendIdx, edges] of edgesByType) {</span>
+<span class="d-ctx">     const label = legend[legendIdx];</span>
+<span class="d-ctx">     if (!label) continue;</span>
+<span class="d-add">+    if (kindOf &amp;&amp; kindOf(label) === &quot;route&quot;) continue;</span>
+<span class="d-ctx">     edges.sort((a, b) =&gt; b.count - a.count);</span>
+<span class="d-ctx">     for (const { edgeIdx, count } of edges.slice(0, perTypeLimit)) {</span>
+<span class="d-ctx">       winners.push({ legendIdx, label, edgeIdx, count });</span>
+<span class="d-hunk">@@ -147,6 +167,40 @@ export function dedupeWinnersByEdge(</span>
+<span class="d-ctx">   return [...bestByEdge.values()];</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Maps an edge index to its street-block key, or a negative value when the</span>
+<span class="d-add">+ * edge is unmapped (no block layer, or an edge outside every block).</span>
+<span class="d-add">+ * `dedupeWinnersByBlock` uses this without knowing the topology layout.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export type EdgeBlockKey = (edgeIdx: number) =&gt; number;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Step 3 — at most ONE winner per street block, across ALL vote types</span>
+<span class="d-add">+ * (tiebreak: higher net, then shuffle). Blocks are the unit users see and vote</span>
+<span class="d-add">+ * on, so two pins on one block — even of different types — read as a stack.</span>
+<span class="d-add">+ * Winners on unmapped edges (key &lt; 0) are kept: no block layer, no constraint.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function dedupeWinnersByBlock(</span>
+<span class="d-add">+  winners: VoteTypeWinner[],</span>
+<span class="d-add">+  salt: number,</span>
+<span class="d-add">+  blockKeyOfEdge: EdgeBlockKey</span>
+<span class="d-add">+): VoteTypeWinner[] {</span>
+<span class="d-add">+  const bestByBlock = new Map&lt;number, VoteTypeWinner&gt;();</span>
+<span class="d-add">+  const unmapped: VoteTypeWinner[] = [];</span>
+<span class="d-add">+  for (const w of winners) {</span>
+<span class="d-add">+    const key = blockKeyOfEdge(w.edgeIdx);</span>
+<span class="d-add">+    if (key &lt; 0) {</span>
+<span class="d-add">+      unmapped.push(w);</span>
+<span class="d-add">+      continue;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    const cur = bestByBlock.get(key);</span>
+<span class="d-add">+    if (!cur || compareWinners(w, cur, salt) &lt; 0) {</span>
+<span class="d-add">+      bestByBlock.set(key, w);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return [...bestByBlock.values(), ...unmapped];</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /**</span>
+<span class="d-ctx">  * Maps an edge index to its midpoint `[lat, lng]`, or null when the edge/nodes</span>
+<span class="d-ctx">  * can&#x27;t be resolved. `spaceOutWinners` uses this to measure spacing without the</span>
+<span class="d-hunk">@@ -187,11 +241,12 @@ export function edgeMidpointResolver(</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /**</span>
+<span class="d-del">- * Step 3 — greedy per-type non-max suppression. Processes winners strongest</span>
+<span class="d-add">+ * Step 4 — greedy per-type non-max suppression. Processes winners strongest</span>
+<span class="d-ctx">  * first (net, then shuffle) and drops any whose edge midpoint lies within</span>
+<span class="d-ctx">  * `minSpacingMeters` of an already-kept winner of the SAME vote type. Different</span>
+<span class="d-del">- * types never suppress each other (a bike-lane pin and a tree pin can sit side</span>
+<span class="d-del">- * by side — they&#x27;re genuinely distinct proposals). Winners whose position can&#x27;t</span>
+<span class="d-add">+ * types never radius-suppress each other (a bike-lane pin and a tree pin can</span>
+<span class="d-add">+ * sit on nearby corners — they&#x27;re genuinely distinct proposals; only sharing a</span>
+<span class="d-add">+ * BLOCK collapses them, see dedupeWinnersByBlock). Winners whose position can&#x27;t</span>
+<span class="d-ctx">  * be resolved are kept (never silently dropped on missing geometry).</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> export function spaceOutWinners(</span>
+<span class="d-hunk">@@ -229,7 +284,7 @@ export function spaceOutWinners(</span>
+<span class="d-ctx">   return kept;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/** Step 4 — sort by net (tiebreak shuffle) and cap at `limit`. */</span>
+<span class="d-add">+/** Step 5 — sort by net (tiebreak shuffle) and cap at `limit`. */</span>
+<span class="d-ctx"> export function applyTopProposalLimit(</span>
+<span class="d-ctx">   winners: VoteTypeWinner[],</span>
+<span class="d-ctx">   salt: number,</span>
+<span class="d-hunk">@@ -246,15 +301,20 @@ export function applyTopProposalLimit(</span>
+<span class="d-ctx"> // spacing pass then collapses any that land on the same corridor.</span>
+<span class="d-ctx"> export const TOP_PROPOSALS_PER_TYPE = 6;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-// Two top proposals of the same vote type closer than this collapse to the</span>
+<span class="d-del">-// stronger one — kills the &quot;3 identical pins stacked on one avenue&quot; look. ~one</span>
+<span class="d-del">-// long NYC avenue block; tune for denser/sparser networks.</span>
+<span class="d-del">-export const TOP_PROPOSAL_MIN_SPACING_M = 300;</span>
+<span class="d-add">+// Two top proposals of the SAME vote type closer than this collapse to the</span>
+<span class="d-add">+// stronger one — kills the &quot;3 identical pins stacked on one avenue&quot; look.</span>
+<span class="d-add">+// Deliberately much wider than the cross-type grain (one pin per block, see</span>
+<span class="d-add">+// dedupeWinnersByBlock): identical pins carry zero extra information nearby,</span>
+<span class="d-add">+// while different-type pins are distinct proposals and only collapse when they</span>
+<span class="d-add">+// share a block. ~7–8 NYC avenue blocks; tune for denser/sparser networks.</span>
+<span class="d-add">+export const TOP_PROPOSAL_MIN_SPACING_M = 600;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /**</span>
+<span class="d-del">- * Full selection path: top-N-per-type winners → one per edge (tiebreak) →</span>
+<span class="d-del">- * per-type spatial spacing → top `limit` by net. Each surviving edge appears</span>
+<span class="d-del">- * once and consumes one slot.</span>
+<span class="d-add">+ * Full selection path: top-N-per-POINT-type winners → one per edge (tiebreak)</span>
+<span class="d-add">+ * → one per street block across all types → per-type spatial spacing → top</span>
+<span class="d-add">+ * `limit` by net. Each surviving edge appears once and consumes one slot.</span>
+<span class="d-add">+ * `kindOf` (label → kind) keeps ROUTE-kind vote types out of the point family;</span>
+<span class="d-add">+ * omit it (e.g. station networks, where every vote is a point) to admit all.</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> export function selectTopProposals(</span>
+<span class="d-ctx">   data:</span>
+<span class="d-hunk">@@ -262,17 +322,22 @@ export function selectTopProposals(</span>
+<span class="d-ctx">     | null,</span>
+<span class="d-ctx">   salt: number,</span>
+<span class="d-ctx">   limit: number,</span>
+<span class="d-del">-  minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M</span>
+<span class="d-add">+  minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M,</span>
+<span class="d-add">+  kindOf?: VoteTypeKindResolver</span>
+<span class="d-ctx"> ): VoteTypeWinner[] {</span>
+<span class="d-ctx">   if (!data) return [];</span>
+<span class="d-ctx">   const perType = computeVoteTypeWinners(</span>
+<span class="d-ctx">     data.vote_type_legend ?? [],</span>
+<span class="d-ctx">     data.edge_vote_types ?? [],</span>
+<span class="d-del">-    TOP_PROPOSALS_PER_TYPE</span>
+<span class="d-add">+    TOP_PROPOSALS_PER_TYPE,</span>
+<span class="d-add">+    kindOf</span>
+<span class="d-ctx">   );</span>
+<span class="d-ctx">   const perEdge = dedupeWinnersByEdge(perType, salt);</span>
+<span class="d-add">+  const perBlock = dedupeWinnersByBlock(</span>
+<span class="d-add">+    perEdge, salt, (edgeIdx) =&gt; blockKeyOf(data, edgeIdx)</span>
+<span class="d-add">+  );</span>
+<span class="d-ctx">   const spaced = spaceOutWinners(</span>
+<span class="d-del">-    perEdge, salt, edgeMidpointResolver(data), minSpacingMeters</span>
+<span class="d-add">+    perBlock, salt, edgeMidpointResolver(data), minSpacingMeters</span>
+<span class="d-ctx">   );</span>
+<span class="d-ctx">   return applyTopProposalLimit(spaced, salt, limit);</span>
+<span class="d-ctx"> }</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx</span>
+            <span class="stat"><span class="d-add">+14</span> / <span class="d-del">-6</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">VoteTypeSelector</span>
+        <span class="ctx-sum">the top-bar vote-type combobox</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">VoteTypeSelector.tsx</span>
+        <span class="ctx-sum">~325 LOC — suggestions, search, custom entry</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">extraLabels (searched customs)</span><span class="ol-sum">kind-filtered like the default suggestions; station networks skip</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">dropdown / frozen chip / handlers</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>extraLabels — filter by vt.pointType (null shows in both modes)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx</span>
+<span class="d-meta">index 4a940a5..e77bd70 100644</span>
+<span class="d-meta">--- a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx</span>
+<span class="d-hunk">@@ -36,13 +36,21 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Custom vote types already voted on this map. They surface only while the</span>
+<span class="d-ctx">   // user is typing — never in the default list — and carry no themed icon, so</span>
+<span class="d-del">-  // they render with the colorized suggestion glyph.</span>
+<span class="d-add">+  // they render with the colorized suggestion glyph. Kind-filtered like the</span>
+<span class="d-add">+  // default suggestions (a route-kind custom type shouldn&#x27;t offer itself for a</span>
+<span class="d-add">+  // point selection); unknown kind (legacy rows) shows in both modes, and</span>
+<span class="d-add">+  // station networks skip the filter entirely (mapVoteTypesForPointType rule:</span>
+<span class="d-add">+  // stations only vote points, whatever kind the type was authored as).</span>
+<span class="d-add">+  const isStationNetwork = (map?.network ?? &quot;streets&quot;) !== &quot;streets&quot;;</span>
+<span class="d-ctx">   const extraLabels = inputLower</span>
+<span class="d-del">-    ? (map?.searchVoteTypes ?? []).filter(</span>
+<span class="d-del">-        (lbl) =&gt;</span>
+<span class="d-del">-          lbl.toLowerCase().includes(inputLower) &amp;&amp;</span>
+<span class="d-del">-          !suggestions.some((s) =&gt; s.label.toLowerCase() === lbl.toLowerCase())</span>
+<span class="d-del">-      )</span>
+<span class="d-add">+    ? (map?.searchVoteTypes ?? [])</span>
+<span class="d-add">+        .filter((vt) =&gt; isStationNetwork || !vt.pointType || vt.pointType === pointType)</span>
+<span class="d-add">+        .map((vt) =&gt; vt.label)</span>
+<span class="d-add">+        .filter(</span>
+<span class="d-add">+          (lbl) =&gt;</span>
+<span class="d-add">+            lbl.toLowerCase().includes(inputLower) &amp;&amp;</span>
+<span class="d-add">+            !suggestions.some((s) =&gt; s.label.toLowerCase() === lbl.toLowerCase())</span>
+<span class="d-add">+        )</span>
+<span class="d-ctx">     : [];</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const hasExactMatch =</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/context/RouteContext.tsx</span>
+            <span class="stat"><span class="d-add">+4</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">RouteContext</span>
+        <span class="ctx-sum">selection state + the top-bar cast</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">RouteContext.tsx</span>
+        <span class="ctx-sum">~1700 LOC — one call-site change</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">castVote</span><span class="ol-sum">passes the selection&#x27;s pointType to castVotes</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">everything else</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>castVotes({ …, pointType }) + dep</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/context/RouteContext.tsx b/client-react/src/context/RouteContext.tsx</span>
+<span class="d-meta">index 8173695..51702aa 100644</span>
+<span class="d-meta">--- a/client-react/src/context/RouteContext.tsx</span>
+<span class="d-meta">+++ b/client-react/src/context/RouteContext.tsx</span>
+<span class="d-hunk">@@ -1474,8 +1474,11 @@ export function RouteProvider({ children }: { children: ReactNode }) {</span>
+<span class="d-ctx">       // Blocks of the selection (castVotes falls back to singletons when the</span>
+<span class="d-ctx">       // materializer isn&#x27;t registered yet — pre-topology, or no block layer).</span>
+<span class="d-ctx">       blocks: blockMaterializerRef.current?.(edges),</span>
+<span class="d-add">+      // Selection kind — lets the server record whether a brand-new suggestion</span>
+<span class="d-add">+      // label was proposed on a route or a point (see vote_types.point_type).</span>
+<span class="d-add">+      pointType,</span>
+<span class="d-ctx">     });</span>
+<span class="d-del">-  }, [currentEdgeIds, effectiveVoteType, voteDirection, theme.mode]);</span>
+<span class="d-add">+  }, [currentEdgeIds, effectiveVoteType, voteDirection, theme.mode, pointType]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Block coverage of the current target for a (voteType, direction): pressed</span>
+<span class="d-ctx">   // (&quot;active&quot;) iff EVERY touched block already holds my vote in that direction</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/map/runtime.ts</span>
+            <span class="stat"><span class="d-add">+3</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Map runtime · map/runtime.ts</span>
+        <span class="ctx-sum">resolved map config — the client&#x27;s view of /api/maps</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">runtime.ts</span>
+        <span class="ctx-sum">~245 LOC — MapConfig, slug/subdomain resolution, passcode</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">MapConfig.searchVoteTypes</span><span class="ol-sum">string[] → {label, pointType}[]</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">mapVoteTypesForPointType / resolution / passcode</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>searchVoteTypes type + doc</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/map/runtime.ts b/client-react/src/map/runtime.ts</span>
+<span class="d-meta">index e516eae..be149de 100644</span>
+<span class="d-meta">--- a/client-react/src/map/runtime.ts</span>
+<span class="d-meta">+++ b/client-react/src/map/runtime.ts</span>
+<span class="d-hunk">@@ -34,8 +34,9 @@ export interface MapConfig {</span>
+<span class="d-ctx">   locked?: boolean;</span>
+<span class="d-ctx">   voteTypes: MapVoteType[];</span>
+<span class="d-ctx">   /** Custom vote types already voted here — shown by the selector only when</span>
+<span class="d-del">-   *  searched, never in the default suggestion list. Labels only (no pointType). */</span>
+<span class="d-del">-  searchVoteTypes?: string[];</span>
+<span class="d-add">+   *  searched, never in the default suggestion list. pointType is the kind the</span>
+<span class="d-add">+   *  creating cast recorded; null on legacy rows flagged before kinds existed. */</span>
+<span class="d-add">+  searchVoteTypes?: { label: string; pointType: &quot;route&quot; | &quot;point&quot; | null }[];</span>
+<span class="d-ctx">   subdomain?: string | null;</span>
+<span class="d-ctx">   voteCount?: number;</span>
+<span class="d-ctx">   city?: CityConfig;</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/themes.ts</span>
+            <span class="stat"><span class="d-add">+24</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Themes · themes.ts</span>
+        <span class="ctx-sum">preset theme definitions + shared label resolvers</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">themes.ts</span>
+        <span class="ctx-sum">~250 LOC — THEMES, iconForLabel, subdomain detection</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">THEMES / iconForLabel</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">pointTypeForLabel</span><span class="ol-sum">NEW — label → route|point|null; map list → searched customs → presets</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>pointTypeForLabel — the single kind resolver (mirrors iconForLabel precedence)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/themes.ts b/client-react/src/themes.ts</span>
+<span class="d-meta">index faab881..e57c749 100644</span>
+<span class="d-meta">--- a/client-react/src/themes.ts</span>
+<span class="d-meta">+++ b/client-react/src/themes.ts</span>
+<span class="d-hunk">@@ -153,6 +153,30 @@ export function iconForLabel(</span>
+<span class="d-ctx">   return null;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Resolve a label&#x27;s route/point kind, mirroring iconForLabel&#x27;s precedence: the</span>
+<span class="d-add">+ * map&#x27;s own vote types win, then the map&#x27;s search-only custom types (kind</span>
+<span class="d-add">+ * recorded server-side by the cast that created them; null on legacy rows),</span>
+<span class="d-add">+ * then the preset theme suggestions. Null = unknown — callers must treat an</span>
+<span class="d-add">+ * unknown-kind label as eligible for BOTH proposal families, never drop it.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function pointTypeForLabel(</span>
+<span class="d-add">+  label: string,</span>
+<span class="d-add">+  voteTypes?: readonly { label: string; pointType: &quot;route&quot; | &quot;point&quot; }[],</span>
+<span class="d-add">+  searchVoteTypes?: readonly { label: string; pointType?: &quot;route&quot; | &quot;point&quot; | null }[]</span>
+<span class="d-add">+): &quot;route&quot; | &quot;point&quot; | null {</span>
+<span class="d-add">+  const own = voteTypes?.find((s) =&gt; s.label === label)?.pointType;</span>
+<span class="d-add">+  if (own) return own;</span>
+<span class="d-add">+  const voted = searchVoteTypes?.find((s) =&gt; s.label === label)?.pointType;</span>
+<span class="d-add">+  if (voted) return voted;</span>
+<span class="d-add">+  for (const theme of Object.values(THEMES)) {</span>
+<span class="d-add">+    for (const s of theme.suggestions) {</span>
+<span class="d-add">+      if (s.label === label) return s.pointType;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return null;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /**</span>
+<span class="d-ctx">  * Display order for the mode switcher and landing page cards.</span>
+<span class="d-ctx">  */</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/utils/castVote.ts</span>
+            <span class="stat"><span class="d-add">+6</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Vote cast · castVote.ts</span>
+        <span class="ctx-sum">the single client cast path (block-scoped clear-then-cast)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">castVote.ts</span>
+        <span class="ctx-sum">~265 LOC — planBlockVote, optimistic apply, POST</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">castVotes params</span><span class="ol-sum">optional pointType — the selection&#x27;s kind rides the POST</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">plan / optimistic / rollback</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>params.pointType + body.point_type</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/castVote.ts b/client-react/src/utils/castVote.ts</span>
+<span class="d-meta">index e12ec09..697e9ec 100644</span>
+<span class="d-meta">--- a/client-react/src/utils/castVote.ts</span>
+<span class="d-meta">+++ b/client-react/src/utils/castVote.ts</span>
+<span class="d-hunk">@@ -143,6 +143,11 @@ export async function castVotes(params: {</span>
+<span class="d-ctx">   label: string;</span>
+<span class="d-ctx">   direction: VoteDirection;</span>
+<span class="d-ctx">   blocks?: ArrayLike&lt;number&gt;[];</span>
+<span class="d-add">+  /** Kind of the selection being voted (&quot;route&quot; corridor vs single &quot;point&quot;).</span>
+<span class="d-add">+   *  Sent so the server can record the kind of a brand-new suggestion label —</span>
+<span class="d-add">+   *  the creating cast is the only witness. Optional: casts on existing labels</span>
+<span class="d-add">+   *  (proposal pins, route cards) don&#x27;t need it. */</span>
+<span class="d-add">+  pointType?: &quot;route&quot; | &quot;point&quot;;</span>
+<span class="d-ctx"> }): Promise&lt;CastResult&gt; {</span>
+<span class="d-ctx">   const { mode, label, direction } = params;</span>
+<span class="d-ctx">   const edges = [...new Set(params.edgeIds)].filter((e) =&gt; e != null);</span>
+<span class="d-hunk">@@ -186,6 +191,7 @@ export async function castVotes(params: {</span>
+<span class="d-ctx">       edge_ids: edges, // the selection — the server expands to blocks itself</span>
+<span class="d-ctx">       voter_id: getVoterId(),</span>
+<span class="d-ctx">     };</span>
+<span class="d-add">+    if (params.pointType) body.point_type = params.pointType;</span>
+<span class="d-ctx">     const token = getPasscodeToken(slug);</span>
+<span class="d-ctx">     if (token) body.passcode_token = token;</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">docs/three-layer-model.md</span>
+            <span class="stat"><span class="d-add">+24</span> / <span class="d-del">-4</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs</span>
+        <span class="ctx-sum">the three-layer model reference</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">three-layer-model.md</span>
+        <span class="ctx-sum">PBTP/RBTP terminology + §3.2 pipeline</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Terminology box</span><span class="ol-sum">kind split + block uniqueness + 600 m spacing documented</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§3.2 pipeline</span><span class="ol-sum">length budget inserted as step 4 (gates renumbered)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">§4 vote semantics</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Kind-split paragraph</li><li>PBTP bullet — one pin per block</li><li>§3.2 step 4 — length budget</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/three-layer-model.md b/docs/three-layer-model.md</span>
+<span class="d-meta">index 4357427..c794d6a 100644</span>
+<span class="d-meta">--- a/docs/three-layer-model.md</span>
+<span class="d-meta">+++ b/docs/three-layer-model.md</span>
+<span class="d-hunk">@@ -29,7 +29,9 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored</span>
+<span class="d-ctx"> &gt;</span>
+<span class="d-ctx"> &gt; - **PBTP** — **point-based top proposal**: one hot edge, rendered as a</span>
+<span class="d-ctx"> &gt;   **square** pin at the edge midpoint. Selected by</span>
+<span class="d-del">-&gt;   `topProposals.selectTopProposals` (client), drawn by GraphLayer&#x27;s</span>
+<span class="d-add">+&gt;   `topProposals.selectTopProposals` (client) — at most **one pin per block**</span>
+<span class="d-add">+&gt;   across all vote types, and same-type pins at least</span>
+<span class="d-add">+&gt;   `TOP_PROPOSAL_MIN_SPACING_M` (600 m) apart — drawn by GraphLayer&#x27;s</span>
+<span class="d-ctx"> &gt;   `indicatorMarkers`.</span>
+<span class="d-ctx"> &gt; - **RBTP** — **route-based top proposal**: a hot **corridor** (Layer 3 below),</span>
+<span class="d-ctx"> &gt;   rendered as a **diamond** pin at its middle path edge. Computed by</span>
+<span class="d-hunk">@@ -39,6 +41,17 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored</span>
+<span class="d-ctx"> &gt; Same-type PBTPs subsumed by an RBTP&#x27;s blocks are dropped</span>
+<span class="d-ctx"> &gt; (`dropPointsCoveredByRoutes`); both kinds share one icon system</span>
+<span class="d-ctx"> &gt; (`makeVoteTypeIcon`: square vs `diamond`, same tint/heat/selected states).</span>
+<span class="d-add">+&gt;</span>
+<span class="d-add">+&gt; **Kind split.** Every vote type carries a **route/point kind**</span>
+<span class="d-add">+&gt; (`pointType`), declared where the type is authored (preset lists, a map&#x27;s</span>
+<span class="d-add">+&gt; custom list) or recorded by the cast that creates a free-text suggestion</span>
+<span class="d-add">+&gt; (`vote_types.point_type` in Postgres; served per map via `voteTypes` +</span>
+<span class="d-add">+&gt; `searchVoteTypes`). The families are disjoint by kind: **point**-kind types</span>
+<span class="d-add">+&gt; surface only as PBTPs, **route**-kind types only as RBTPs</span>
+<span class="d-add">+&gt; (`pointTypeForLabel` resolves label → kind; unknown kind — a legacy</span>
+<span class="d-add">+&gt; suggestion never flagged — stays eligible for both). Station networks skip</span>
+<span class="d-add">+&gt; the split (every vote there is a point). `backfill_vote_type_kinds()`</span>
+<span class="d-add">+&gt; repairs legacy rows from the authored lists on every startup.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ---</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -194,14 +207,21 @@ Per vote type `T`, over edges with net(T) ≥ `MIN_NET` (high-activity gate #1):</span>
+<span class="d-ctx">    scoring ≥ `PEEL_DOMINANCE` × the first. All iteration orders and tie-breaks</span>
+<span class="d-ctx">    are by ascending edge/node id — same vote state ⇒ same proposals on every</span>
+<span class="d-ctx">    client.</span>
+<span class="d-del">-4. **High-activity gate #2** — a path survives only with score ≥</span>
+<span class="d-add">+4. **Length budget** — a peeled path is trimmed to its **best-supported</span>
+<span class="d-add">+   contiguous window** within a meter budget that grows with support:</span>
+<span class="d-add">+   `min(ROUTE_LENGTH_MAX_M, ROUTE_LENGTH_BASE_M +</span>
+<span class="d-add">+   ROUTE_LENGTH_PER_SQRT_SCORE_M · √score)` (600 + 150·√score, ≤ 2500 m). A</span>
+<span class="d-add">+   corridor *earns* length with votes; greedy extension can no longer snake</span>
+<span class="d-add">+   for miles on chains of net-1 edges (`capPathToLengthBudget` — sliding</span>
+<span class="d-add">+   window, deterministic ties: shorter then earliest).</span>
+<span class="d-add">+5. **High-activity gate #2** — the trimmed path survives only with score ≥</span>
+<span class="d-ctx">    `MIN_ROUTE_SCORE` and ≥ `MIN_ROUTE_EDGES` edges.</span>
+<span class="d-del">-5. **Blocks projection** — each path edge expands to its block:</span>
+<span class="d-add">+6. **Blocks projection** — each path edge expands to its block:</span>
+<span class="d-ctx">    `blocks: number[][]` (ordered distinct blocks along the path),</span>
+<span class="d-ctx">    `blockEdgeIds` = their union. **Proposals are displayed as their blocks**</span>
+<span class="d-ctx">    (block highlight + diamond marker at the path midpoint); `pathEdgeIds` stays</span>
+<span class="d-ctx">    the verbatim corridor for routing (ghost-waypoint insertion).</span>
+<span class="d-del">-6. **Dedupe + rank** — same-type Jaccard ≥ 0.5 collapses near-duplicates;</span>
+<span class="d-add">+7. **Dedupe + rank** — same-type Jaccard ≥ 0.5 collapses near-duplicates;</span>
+<span class="d-ctx">    rank by score; global cap.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> Edge → proposal is many-to-one *within a type* (peeling removes used edges), so</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+29</span> / <span class="d-del">-4</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">API · app.py</span>
+        <span class="ctx-sum">route handlers — maps config, vote cast, admin</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~1900 LOC — this diff touches startup, /api/vote, /api/maps</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">startup</span><span class="ol-sum">backfill_vote_type_kinds() after seed_presets()</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_map_response</span><span class="ol-sum">searchVoteTypes now {label, pointType} objects</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">map_create</span><span class="ol-sum">custom_vote_types must declare a valid pointType (400); kinds registered at creation</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">cast_vote</span><span class="ol-sum">reads point_type from the body → get_vote_type_id(label, kind)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">routing / websocket / admin</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>imports + startup backfill call</li><li>_map_response — object-shaped searchVoteTypes</li><li>map_create — per-entry label/pointType validation + registry stamp after create</li><li>cast_vote — vt_point_type = normalize_point_type(data.get(&#x27;point_type&#x27;))</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index 310b3ee..a3ffda3 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -34,7 +34,8 @@ from database import (</span>
+<span class="d-ctx">     get_voter_edge_directions, get_voter_type_rows,</span>
+<span class="d-ctx">     count_devices_per_ip_for_edges, count_unique_voters_for_edges,</span>
+<span class="d-ctx">     evict_lru_devices_for_edges,</span>
+<span class="d-del">-    seed_presets, list_maps, get_map, get_map_by_subdomain, slug_available,</span>
+<span class="d-add">+    seed_presets, backfill_vote_type_kinds, normalize_point_type,</span>
+<span class="d-add">+    list_maps, get_map, get_map_by_subdomain, slug_available,</span>
+<span class="d-ctx">     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,</span>
+<span class="d-ctx">     promote_vote_types, fetch_voted_vote_type_labels,</span>
+<span class="d-ctx">     DATABASE_URL,</span>
+<span class="d-hunk">@@ -114,6 +115,7 @@ osrm_registry = OsrmRegistry()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> init_db()</span>
+<span class="d-ctx"> seed_presets()</span>
+<span class="d-add">+backfill_vote_type_kinds()  # repair route/point kinds missing on legacy rows</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> if DATABASE_URL:</span>
+<span class="d-ctx">     try:</span>
+<span class="d-hunk">@@ -694,10 +696,12 @@ def _map_response(m: dict):</span>
+<span class="d-ctx">         m[&quot;city&quot;] = city.to_public()</span>
+<span class="d-ctx">     # Custom vote types people have already voted here — surfaced by the selector</span>
+<span class="d-ctx">     # only when searched, never in the default list. Drop the map&#x27;s own defaults.</span>
+<span class="d-add">+    # Each entry is {label, pointType: &#x27;route&#x27;|&#x27;point&#x27;|null} so the client can</span>
+<span class="d-add">+    # kind-filter proposals and the selector (null = legacy row, kind unknown).</span>
+<span class="d-ctx">     default_labels = {vt.get(&quot;label&quot;) for vt in (m.get(&quot;voteTypes&quot;) or [])}</span>
+<span class="d-ctx">     m[&quot;searchVoteTypes&quot;] = [</span>
+<span class="d-del">-        lbl for lbl in fetch_voted_vote_type_labels(m[&quot;slug&quot;])</span>
+<span class="d-del">-        if lbl not in default_labels</span>
+<span class="d-add">+        vt for vt in fetch_voted_vote_type_labels(m[&quot;slug&quot;])</span>
+<span class="d-add">+        if vt[&quot;label&quot;] not in default_labels</span>
+<span class="d-ctx">     ]</span>
+<span class="d-ctx">     resp = jsonify(m)</span>
+<span class="d-ctx">     # This is the prod page-load entry point (resolved per load by slug/subdomain)</span>
+<span class="d-hunk">@@ -804,6 +808,17 @@ def map_create():</span>
+<span class="d-ctx">         return jsonify({&quot;error&quot;: &quot;Provide vote_type_list_id or custom_vote_types&quot;}), 400</span>
+<span class="d-ctx">     if custom_vote_types and not isinstance(custom_vote_types, list):</span>
+<span class="d-ctx">         return jsonify({&quot;error&quot;: &quot;custom_vote_types must be a list&quot;}), 400</span>
+<span class="d-add">+    # Every authored vote type must declare its route/point kind — the top-</span>
+<span class="d-add">+    # proposal split (PBTP vs RBTP) and the selector&#x27;s mode filter key off it,</span>
+<span class="d-add">+    # and a kindless entry would silently fall into &quot;unknown&quot; forever.</span>
+<span class="d-add">+    if custom_vote_types:</span>
+<span class="d-add">+        for vt in custom_vote_types:</span>
+<span class="d-add">+            if not isinstance(vt, dict) or not (vt.get(&quot;label&quot;) or &quot;&quot;).strip():</span>
+<span class="d-add">+                return jsonify({&quot;error&quot;: &quot;Each custom vote type needs a label&quot;}), 400</span>
+<span class="d-add">+            if not normalize_point_type(vt.get(&quot;pointType&quot;)):</span>
+<span class="d-add">+                return jsonify({</span>
+<span class="d-add">+                    &quot;error&quot;: &quot;Each custom vote type needs pointType &#x27;route&#x27; or &#x27;point&#x27;&quot;</span>
+<span class="d-add">+                }), 400</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # Subtitle defaults to &quot;&lt;city&gt; · &lt;vote-type-list name&gt;&quot;. The custom-list name</span>
+<span class="d-ctx">     # defaults to its first vote type&#x27;s label.</span>
+<span class="d-hunk">@@ -836,6 +851,11 @@ def map_create():</span>
+<span class="d-ctx">     # A pre-creation probe of this slug may have cached a miss.</span>
+<span class="d-ctx">     invalidate_map_cache(slug)</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    # Stamp the authored kinds into the global registry now, so a later cast</span>
+<span class="d-add">+    # (whose selection kind may differ) isn&#x27;t the first to flag these labels.</span>
+<span class="d-add">+    for vt in (custom_vote_types or []):</span>
+<span class="d-add">+        vote_store.get_vote_type_id(vt[&quot;label&quot;].strip(), vt.get(&quot;pointType&quot;))</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     city = get_city(city_id)</span>
+<span class="d-ctx">     if city:</span>
+<span class="d-ctx">         created[&quot;city&quot;] = city.to_public()</span>
+<span class="d-hunk">@@ -1051,6 +1071,11 @@ def cast_vote():</span>
+<span class="d-ctx">     point = data.get(&quot;point&quot;)</span>
+<span class="d-ctx">     mode = data.get(&quot;mode&quot;, &quot;walk&quot;)</span>
+<span class="d-ctx">     vt_label = (data.get(&quot;vote_type&quot;, &quot;&quot;) or &quot;&quot;).strip()</span>
+<span class="d-add">+    # Kind of the cast&#x27;s target — &#x27;route&#x27; (corridor selection) or &#x27;point&#x27;. Only</span>
+<span class="d-add">+    # consulted when vt_label is a brand-new suggestion: the creating cast is the</span>
+<span class="d-add">+    # one witness of the kind a free-text type was suggested as. Existing labels</span>
+<span class="d-add">+    # keep their stored kind.</span>
+<span class="d-add">+    vt_point_type = normalize_point_type(data.get(&quot;point_type&quot;))</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # Reject unknown vote types when the map disallows user suggestions.</span>
+<span class="d-ctx">     if (vt_label and not rmap.allow_suggestions</span>
+<span class="d-hunk">@@ -1076,7 +1101,7 @@ def cast_vote():</span>
+<span class="d-ctx">     slug = rmap.slug</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     try:</span>
+<span class="d-del">-        vt_id = vote_store.get_vote_type_id(vt_label) if vt_label else 0</span>
+<span class="d-add">+        vt_id = vote_store.get_vote_type_id(vt_label, vt_point_type) if vt_label else 0</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         # Soft per-IP cap: how many OTHER devices this IP already has on each</span>
+<span class="d-ctx">         # edge+type. A brand-new vote from a fresh device is dropped once the IP</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/database.py</span>
+            <span class="stat"><span class="d-add">+88</span> / <span class="d-del">-14</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Persistence · database.py</span>
+        <span class="ctx-sum">all Postgres SQL — schema, votes, maps, vote-type registry</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">database.py</span>
+        <span class="ctx-sum">~1100 LOC — schema init, vote CRUD, maps/lists, aggregates</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">init_db</span><span class="ol-sum">vote_types gains point_type TEXT (route|point|NULL)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">edge_votes schema / migrations</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">fetch_voted_vote_type_labels</span><span class="ol-sum">returns {label, pointType} dicts (was bare labels)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">normalize_point_type / get_or_create_vote_type_id</span><span class="ol-sum">NEW normalizer; insert stamps kind, COALESCE fills NULLs only</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">seed_presets</span><span class="ol-sum">preset labels force-stamp their kind (authoritative repair)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">backfill_vote_type_kinds</span><span class="ol-sum">NEW — label-match repair from every authored list, idempotent</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">maps / promote / aggregates</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>init_db — ALTER TABLE vote_types ADD COLUMN point_type</li><li>fetch_voted_vote_type_labels — SELECT label, point_type</li><li>normalize_point_type + get_or_create_vote_type_id(label, point_type) with COALESCE upsert</li><li>seed_presets — DO UPDATE SET point_type = EXCLUDED.point_type</li><li>backfill_vote_type_kinds — authored lists → UPDATE … WHERE point_type IS NULL</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/database.py b/server/database.py</span>
+<span class="d-meta">index 01cc543..33ecb89 100644</span>
+<span class="d-meta">--- a/server/database.py</span>
+<span class="d-meta">+++ b/server/database.py</span>
+<span class="d-hunk">@@ -164,6 +164,14 @@ def init_db():</span>
+<span class="d-ctx">                     label TEXT UNIQUE NOT NULL</span>
+<span class="d-ctx">                 )</span>
+<span class="d-ctx">             &quot;&quot;&quot;)</span>
+<span class="d-add">+            # Whether the type describes a ROUTE (corridor) or a POINT (spot)</span>
+<span class="d-add">+            # proposal: &#x27;route&#x27; | &#x27;point&#x27; | NULL (unknown — pre-flag rows).</span>
+<span class="d-add">+            # Preset labels are stamped by seed_presets(); user suggestions get</span>
+<span class="d-add">+            # theirs from the cast that creates them; legacy NULLs are repaired</span>
+<span class="d-add">+            # by backfill_vote_type_kinds().</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;ALTER TABLE vote_types ADD COLUMN IF NOT EXISTS point_type TEXT&quot;</span>
+<span class="d-add">+            )</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">             # ── edge_votes: the canonical vote record ──</span>
+<span class="d-ctx">             # One row per (map, graph entity, vote type, voter). Identity:</span>
+<span class="d-hunk">@@ -535,8 +543,9 @@ def fetch_all_vote_types() -&gt; list[tuple[int, str]]:</span>
+<span class="d-ctx">         return []</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-def fetch_voted_vote_type_labels(map_slug: str) -&gt; list[str]:</span>
+<span class="d-del">-    &quot;&quot;&quot;Distinct vote-type labels actually voted on a map (newest activity first).</span>
+<span class="d-add">+def fetch_voted_vote_type_labels(map_slug: str) -&gt; list[dict]:</span>
+<span class="d-add">+    &quot;&quot;&quot;Distinct vote types actually voted on a map (newest activity first), each</span>
+<span class="d-add">+    as {&quot;label&quot;, &quot;pointType&quot;} — pointType is &#x27;route&#x27; | &#x27;point&#x27; | None (unknown).</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     Backs the selector&#x27;s *search-only* suggestions: a custom vote type surfaces</span>
+<span class="d-ctx">     when searched for once someone has voted it, but never joins the default</span>
+<span class="d-hunk">@@ -546,30 +555,43 @@ def fetch_voted_vote_type_labels(map_slug: str) -&gt; list[str]:</span>
+<span class="d-ctx">     try:</span>
+<span class="d-ctx">         with get_cursor() as cursor:</span>
+<span class="d-ctx">             cursor.execute(</span>
+<span class="d-del">-                &quot;&quot;&quot;SELECT vt.label</span>
+<span class="d-add">+                &quot;&quot;&quot;SELECT vt.label, vt.point_type</span>
+<span class="d-ctx">                      FROM edge_votes ev</span>
+<span class="d-ctx">                      JOIN vote_types vt ON vt.id = ev.vote_type_id</span>
+<span class="d-ctx">                     WHERE ev.map_slug = %s AND ev.vote_type_id &lt;&gt; 0</span>
+<span class="d-del">-                    GROUP BY vt.label</span>
+<span class="d-add">+                    GROUP BY vt.label, vt.point_type</span>
+<span class="d-ctx">                     ORDER BY MAX(ev.created_at) DESC&quot;&quot;&quot;,</span>
+<span class="d-ctx">                 (map_slug,),</span>
+<span class="d-ctx">             )</span>
+<span class="d-del">-            return [r[0] for r in cursor.fetchall() if r[0]]</span>
+<span class="d-add">+            return [</span>
+<span class="d-add">+                {&quot;label&quot;: r[0], &quot;pointType&quot;: r[1]}</span>
+<span class="d-add">+                for r in cursor.fetchall() if r[0]</span>
+<span class="d-add">+            ]</span>
+<span class="d-ctx">     except Exception as e:</span>
+<span class="d-ctx">         logger.error(f&quot;[DB] Failed to fetch voted vote types for &#x27;{map_slug}&#x27;: {e}&quot;)</span>
+<span class="d-ctx">         return []</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-def get_or_create_vote_type_id(label: str) -&gt; int:</span>
+<span class="d-del">-    &quot;&quot;&quot;Return the id for a vote-type label, creating the row if needed.&quot;&quot;&quot;</span>
+<span class="d-add">+def normalize_point_type(value) -&gt; Optional[str]:</span>
+<span class="d-add">+    &quot;&quot;&quot;&#x27;route&#x27; / &#x27;point&#x27; pass through; anything else (including None) → None.&quot;&quot;&quot;</span>
+<span class="d-add">+    return value if value in (&quot;route&quot;, &quot;point&quot;) else None</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def get_or_create_vote_type_id(label: str, point_type: Optional[str] = None) -&gt; int:</span>
+<span class="d-add">+    &quot;&quot;&quot;Return the id for a vote-type label, creating the row if needed.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    `point_type` (&#x27;route&#x27; | &#x27;point&#x27;) stamps a NEW row&#x27;s kind and fills a NULL on</span>
+<span class="d-add">+    an existing row — it never overwrites a kind already on record, so the first</span>
+<span class="d-add">+    authoritative flag (preset seed, map creation, or the creating cast) wins.&quot;&quot;&quot;</span>
+<span class="d-ctx">     if not DATABASE_URL or not label:</span>
+<span class="d-ctx">         return 0</span>
+<span class="d-ctx">     try:</span>
+<span class="d-ctx">         with get_cursor() as cursor:</span>
+<span class="d-ctx">             cursor.execute(</span>
+<span class="d-del">-                &quot;INSERT INTO vote_types (label) VALUES (%s) &quot;</span>
+<span class="d-del">-                &quot;ON CONFLICT (label) DO UPDATE SET label = EXCLUDED.label RETURNING id&quot;,</span>
+<span class="d-del">-                (label,),</span>
+<span class="d-add">+                &quot;INSERT INTO vote_types (label, point_type) VALUES (%s, %s) &quot;</span>
+<span class="d-add">+                &quot;ON CONFLICT (label) DO UPDATE SET point_type = &quot;</span>
+<span class="d-add">+                &quot;COALESCE(vote_types.point_type, EXCLUDED.point_type) RETURNING id&quot;,</span>
+<span class="d-add">+                (label, normalize_point_type(point_type)),</span>
+<span class="d-ctx">             )</span>
+<span class="d-ctx">             return cursor.fetchone()[0]</span>
+<span class="d-ctx">     except Exception as e:</span>
+<span class="d-hunk">@@ -800,21 +822,73 @@ def seed_presets():</span>
+<span class="d-ctx">             # here (idempotent on the unique label) guarantees a preset type</span>
+<span class="d-ctx">             # always resolves to its name instead of falling back to &quot;#&lt;id&gt;&quot; —</span>
+<span class="d-ctx">             # e.g. after a DB reset that renumbered the registry while Redis still</span>
+<span class="d-del">-            # holds the old packed ids. Existing labels keep their ids.</span>
+<span class="d-add">+            # holds the old packed ids. Existing labels keep their ids, but the</span>
+<span class="d-add">+            # preset&#x27;s route/point kind is authoritative and overwrites — a</span>
+<span class="d-add">+            # preset label that predates the point_type column (or was mis-</span>
+<span class="d-add">+            # flagged) gets repaired on every startup.</span>
+<span class="d-ctx">             for spec in PRESET_LISTS.values():</span>
+<span class="d-ctx">                 for vt in spec[&quot;vote_types&quot;]:</span>
+<span class="d-ctx">                     label = vt.get(&quot;label&quot;)</span>
+<span class="d-ctx">                     if label:</span>
+<span class="d-ctx">                         cursor.execute(</span>
+<span class="d-del">-                            &quot;INSERT INTO vote_types (label) VALUES (%s) &quot;</span>
+<span class="d-del">-                            &quot;ON CONFLICT (label) DO NOTHING&quot;,</span>
+<span class="d-del">-                            (label,),</span>
+<span class="d-add">+                            &quot;INSERT INTO vote_types (label, point_type) &quot;</span>
+<span class="d-add">+                            &quot;VALUES (%s, %s) ON CONFLICT (label) DO UPDATE &quot;</span>
+<span class="d-add">+                            &quot;SET point_type = EXCLUDED.point_type&quot;,</span>
+<span class="d-add">+                            (label, normalize_point_type(vt.get(&quot;pointType&quot;))),</span>
+<span class="d-ctx">                         )</span>
+<span class="d-ctx">         logger.info(&quot;[DB] Seeded preset vote-type lists and maps&quot;)</span>
+<span class="d-ctx">     except Exception as e:</span>
+<span class="d-ctx">         logger.error(f&quot;[DB] Failed to seed presets: {e}&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+def backfill_vote_type_kinds() -&gt; int:</span>
+<span class="d-add">+    &quot;&quot;&quot;Repair vote_types rows with an unknown route/point kind (point_type NULL).</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Every authored vote-type set already declares each entry&#x27;s kind — the preset</span>
+<span class="d-add">+    lists, promoted community lists (vote_type_lists.vote_types JSONB), and each</span>
+<span class="d-add">+    map&#x27;s inline custom_vote_types. Only the global vote_types registry predates</span>
+<span class="d-add">+    the flag, so NULL rows there are filled by label match against every authored</span>
+<span class="d-add">+    set. Rows still NULL afterwards are true free-text suggestions cast before</span>
+<span class="d-add">+    kinds were recorded; they stay NULL (clients treat unknown as either kind).</span>
+<span class="d-add">+    Idempotent — runs on every startup after seed_presets(). Returns the number</span>
+<span class="d-add">+    of rows repaired.&quot;&quot;&quot;</span>
+<span class="d-add">+    if not DATABASE_URL:</span>
+<span class="d-add">+        return 0</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        with get_cursor() as cursor:</span>
+<span class="d-add">+            cursor.execute(&quot;SELECT vote_types FROM vote_type_lists&quot;)</span>
+<span class="d-add">+            authored = [r[0] for r in cursor.fetchall()]</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;SELECT custom_vote_types FROM maps WHERE custom_vote_types IS NOT NULL&quot;</span>
+<span class="d-add">+            )</span>
+<span class="d-add">+            authored += [r[0] for r in cursor.fetchall()]</span>
+<span class="d-add">+</span>
+<span class="d-add">+            # First authored kind per label wins (presets sort ahead only by</span>
+<span class="d-add">+            # insertion; conflicts across sets are rare and arbitrary anyway).</span>
+<span class="d-add">+            kind_by_label: dict[str, str] = {}</span>
+<span class="d-add">+            for vts in authored:</span>
+<span class="d-add">+                for vt in vts or []:</span>
+<span class="d-add">+                    label = (vt.get(&quot;label&quot;) or &quot;&quot;).strip()</span>
+<span class="d-add">+                    kind = normalize_point_type(vt.get(&quot;pointType&quot;))</span>
+<span class="d-add">+                    if label and kind and label not in kind_by_label:</span>
+<span class="d-add">+                        kind_by_label[label] = kind</span>
+<span class="d-add">+</span>
+<span class="d-add">+            repaired = 0</span>
+<span class="d-add">+            for label, kind in kind_by_label.items():</span>
+<span class="d-add">+                cursor.execute(</span>
+<span class="d-add">+                    &quot;UPDATE vote_types SET point_type = %s &quot;</span>
+<span class="d-add">+                    &quot;WHERE label = %s AND point_type IS NULL&quot;,</span>
+<span class="d-add">+                    (kind, label),</span>
+<span class="d-add">+                )</span>
+<span class="d-add">+                repaired += cursor.rowcount</span>
+<span class="d-add">+            if repaired:</span>
+<span class="d-add">+                logger.info(f&quot;[DB] Backfilled point_type on {repaired} vote type(s)&quot;)</span>
+<span class="d-add">+            return repaired</span>
+<span class="d-add">+    except Exception as e:</span>
+<span class="d-add">+        logger.error(f&quot;[DB] Failed to backfill vote-type kinds: {e}&quot;)</span>
+<span class="d-add">+        return 0</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> def list_vote_type_lists() -&gt; list[dict]:</span>
+<span class="d-ctx">     &quot;&quot;&quot;Return the featured vote-type lists shown in the Propose-a-Map picker.</span>
+<span class="d-ctx">     Featured = the curated set offered to map proposers (system presets plus any</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">server/vote_store.py</span>
+            <span class="stat"><span class="d-add">+8</span> / <span class="d-del">-3</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Votes · vote_store.py</span>
+        <span class="ctx-sum">Redis vote state + the in-memory label↔id cache</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">vote_store.py</span>
+        <span class="ctx-sum">~700 LOC — codec, counts, pubsub, vote-type cache</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">get_vote_type_id</span><span class="ol-sum">passes point_type through on first-use creation</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">codec / counts / pubsub</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>get_vote_type_id(label, point_type=None) → database.get_or_create_vote_type_id</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/vote_store.py b/server/vote_store.py</span>
+<span class="d-meta">index 9fd4d15..e829389 100644</span>
+<span class="d-meta">--- a/server/vote_store.py</span>
+<span class="d-meta">+++ b/server/vote_store.py</span>
+<span class="d-hunk">@@ -117,15 +117,20 @@ def load_vote_types() -&gt; None:</span>
+<span class="d-ctx">     logger.info(f&quot;[VOTES] Loaded {len(rows)} vote types into cache&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-def get_vote_type_id(label: str) -&gt; int:</span>
+<span class="d-del">-    &quot;&quot;&quot;Return the id for a label, creating + caching it on first use.&quot;&quot;&quot;</span>
+<span class="d-add">+def get_vote_type_id(label: str, point_type: str | None = None) -&gt; int:</span>
+<span class="d-add">+    &quot;&quot;&quot;Return the id for a label, creating + caching it on first use.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    `point_type` (&#x27;route&#x27; | &#x27;point&#x27;) records the kind when the label is NEW —</span>
+<span class="d-add">+    the creating cast is the only witness of whether a free-text suggestion was</span>
+<span class="d-add">+    made on a route or a point. Cached/existing labels keep their stored kind</span>
+<span class="d-add">+    (get_or_create only fills NULL).&quot;&quot;&quot;</span>
+<span class="d-ctx">     if not label:</span>
+<span class="d-ctx">         return 0</span>
+<span class="d-ctx">     cached = _vt_label.get(label)</span>
+<span class="d-ctx">     if cached is not None:</span>
+<span class="d-ctx">         return cached</span>
+<span class="d-ctx">     import database</span>
+<span class="d-del">-    vid = database.get_or_create_vote_type_id(label)</span>
+<span class="d-add">+    vid = database.get_or_create_vote_type_id(label, point_type)</span>
+<span class="d-ctx">     if vid:</span>
+<span class="d-ctx">         _vt_label[label] = vid</span>
+<span class="d-ctx">         _vt_id[vid] = label</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes-top-proposal-kinds.diff</code> by <code>changelog/build_top_proposal_kinds_report.py</code>.
+    Regenerate with <code>git diff HEAD &gt; changelog/changes-top-proposal-kinds.diff &amp;&amp; python changelog/build_top_proposal_kinds_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

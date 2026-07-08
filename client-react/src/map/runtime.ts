@@ -34,8 +34,9 @@ export interface MapConfig {
   locked?: boolean;
   voteTypes: MapVoteType[];
   /** Custom vote types already voted here — shown by the selector only when
-   *  searched, never in the default suggestion list. Labels only (no pointType). */
-  searchVoteTypes?: string[];
+   *  searched, never in the default suggestion list. pointType is the kind the
+   *  creating cast recorded; null on legacy rows flagged before kinds existed. */
+  searchVoteTypes?: { label: string; pointType: "route" | "point" | null }[];
   subdomain?: string | null;
   voteCount?: number;
   city?: CityConfig;

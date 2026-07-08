@@ -29,6 +29,23 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-08-top-proposal-kinds.html">
+    <div class="date">2026-07-08</div>
+    <h2>Top-proposal rework — route/point kinds end-to-end, one pin per block, corridors earn their length</h2>
+    <p>Route-flavored vote types (“Add bike greenway”) could masquerade as square point pins because the
+    route/point kind died at the config boundary: presets declared pointType but the global vote_types
+    registry, the suggestion-creating cast, and the searched custom types all dropped it — and the
+    proposal selectors never looked. Now the kind rides end-to-end (vote_types.point_type column, cast
+    records the kind of a brand-new suggestion, searchVoteTypes serves {label, pointType}, startup
+    backfill repairs legacy rows from every authored list — 50 stamped locally) and the families are
+    disjoint: point-kind → PBTP squares only, route-kind → RBTP diamonds only, unknown legacy kinds stay
+    eligible for both. Point pins also obey the block grain (one pin per street block across ALL types)
+    with same-type spacing widened 300→600 m. Route corridors get a support-scaled meter budget
+    (600 + 150·√score, ≤ 2.5 km): each peeled path is trimmed to its hottest contiguous window, so a
+    chain of stray net-1 edges can't stretch a proposal across the borough. Plus a latent
+    greedyHeaviestPath splice bug (duplicated seed node) the trimming exposed.</p>
+  </a>
+
   <a class="entry" href="./2026-07-08-agent-load-test.html">
     <div class="date">2026-07-08</div>
     <h2>Agent load test — the vote pipeline saturates at ~9 votes/s</h2>

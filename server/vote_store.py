@@ -117,15 +117,20 @@ def load_vote_types() -> None:
     logger.info(f"[VOTES] Loaded {len(rows)} vote types into cache")
 
 
-def get_vote_type_id(label: str) -> int:
-    """Return the id for a label, creating + caching it on first use."""
+def get_vote_type_id(label: str, point_type: str | None = None) -> int:
+    """Return the id for a label, creating + caching it on first use.
+
+    `point_type` ('route' | 'point') records the kind when the label is NEW —
+    the creating cast is the only witness of whether a free-text suggestion was
+    made on a route or a point. Cached/existing labels keep their stored kind
+    (get_or_create only fills NULL)."""
     if not label:
         return 0
     cached = _vt_label.get(label)
     if cached is not None:
         return cached
     import database
-    vid = database.get_or_create_vote_type_id(label)
+    vid = database.get_or_create_vote_type_id(label, point_type)
     if vid:
         _vt_label[label] = vid
         _vt_id[vid] = label

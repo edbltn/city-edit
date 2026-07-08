@@ -29,7 +29,9 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored
 >
 > - **PBTP** — **point-based top proposal**: one hot edge, rendered as a
 >   **square** pin at the edge midpoint. Selected by
->   `topProposals.selectTopProposals` (client), drawn by GraphLayer's
+>   `topProposals.selectTopProposals` (client) — at most **one pin per block**
+>   across all vote types, and same-type pins at least
+>   `TOP_PROPOSAL_MIN_SPACING_M` (600 m) apart — drawn by GraphLayer's
 >   `indicatorMarkers`.
 > - **RBTP** — **route-based top proposal**: a hot **corridor** (Layer 3 below),
 >   rendered as a **diamond** pin at its middle path edge. Computed by
@@ -39,6 +41,17 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored
 > Same-type PBTPs subsumed by an RBTP's blocks are dropped
 > (`dropPointsCoveredByRoutes`); both kinds share one icon system
 > (`makeVoteTypeIcon`: square vs `diamond`, same tint/heat/selected states).
+>
+> **Kind split.** Every vote type carries a **route/point kind**
+> (`pointType`), declared where the type is authored (preset lists, a map's
+> custom list) or recorded by the cast that creates a free-text suggestion
+> (`vote_types.point_type` in Postgres; served per map via `voteTypes` +
+> `searchVoteTypes`). The families are disjoint by kind: **point**-kind types
+> surface only as PBTPs, **route**-kind types only as RBTPs
+> (`pointTypeForLabel` resolves label → kind; unknown kind — a legacy
+> suggestion never flagged — stays eligible for both). Station networks skip
+> the split (every vote there is a point). `backfill_vote_type_kinds()`
+> repairs legacy rows from the authored lists on every startup.
 
 ---
 
@@ -194,14 +207,21 @@ Per vote type `T`, over edges with net(T) ≥ `MIN_NET` (high-activity gate #1):
    scoring ≥ `PEEL_DOMINANCE` × the first. All iteration orders and tie-breaks
    are by ascending edge/node id — same vote state ⇒ same proposals on every
    client.
-4. **High-activity gate #2** — a path survives only with score ≥
+4. **Length budget** — a peeled path is trimmed to its **best-supported
+   contiguous window** within a meter budget that grows with support:
+   `min(ROUTE_LENGTH_MAX_M, ROUTE_LENGTH_BASE_M +
+   ROUTE_LENGTH_PER_SQRT_SCORE_M · √score)` (600 + 150·√score, ≤ 2500 m). A
+   corridor *earns* length with votes; greedy extension can no longer snake
+   for miles on chains of net-1 edges (`capPathToLengthBudget` — sliding
+   window, deterministic ties: shorter then earliest).
+5. **High-activity gate #2** — the trimmed path survives only with score ≥
    `MIN_ROUTE_SCORE` and ≥ `MIN_ROUTE_EDGES` edges.
-5. **Blocks projection** — each path edge expands to its block:
+6. **Blocks projection** — each path edge expands to its block:
    `blocks: number[][]` (ordered distinct blocks along the path),
    `blockEdgeIds` = their union. **Proposals are displayed as their blocks**
    (block highlight + diamond marker at the path midpoint); `pathEdgeIds` stays
    the verbatim corridor for routing (ghost-waypoint insertion).
-6. **Dedupe + rank** — same-type Jaccard ≥ 0.5 collapses near-duplicates;
+7. **Dedupe + rank** — same-type Jaccard ≥ 0.5 collapses near-duplicates;
    rank by score; global cap.
 
 Edge → proposal is many-to-one *within a type* (peeling removes used edges), so

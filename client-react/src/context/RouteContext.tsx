@@ -1474,8 +1474,11 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       // Blocks of the selection (castVotes falls back to singletons when the
       // materializer isn't registered yet — pre-topology, or no block layer).
       blocks: blockMaterializerRef.current?.(edges),
+      // Selection kind — lets the server record whether a brand-new suggestion
+      // label was proposed on a route or a point (see vote_types.point_type).
+      pointType,
     });
-  }, [currentEdgeIds, effectiveVoteType, voteDirection, theme.mode]);
+  }, [currentEdgeIds, effectiveVoteType, voteDirection, theme.mode, pointType]);
 
   // Block coverage of the current target for a (voteType, direction): pressed
   // ("active") iff EVERY touched block already holds my vote in that direction

@@ -29,12 +29,14 @@ import {
   adjEdgesOf,
   blockKeyOf,
   buildBlockIndex,
+  edgeLengthMeters,
   edgesOfBlockKey,
   nodeLatLng,
   type BlockIndex,
   type GraphTopology,
   type NodeAdj,
 } from "./graphTopology";
+import type { VoteTypeKindResolver } from "./topProposals";
 
 export interface RouteProposal {
   id: string;
@@ -302,11 +304,13 @@ export function chooseAnchorOrderBefore(
 // ==========================================================================
 // Client-side deterministic clustering (port of server/route_proposals.py)
 // ==========================================================================
-// Pipeline per vote type (docs/three-layer-model.md §3.2): net-positive
+// Pipeline per ROUTE-kind vote type (docs/three-layer-model.md §3.2; point-
+// kind types are skipped — their votes surface as PBTP pins): net-positive
 // subgraph → connected components (the deterministic replacement for the
 // server's Leiden step — components localize; path peeling separates parallel
-// corridors inside one component) → peel heaviest simple paths → activity
-// gates → block projection → same-type dedupe → rank + cap.
+// corridors inside one component) → peel heaviest simple paths → trim each to
+// its support-earned meter budget (capPathToLengthBudget) → activity gates →
+// block projection → same-type dedupe → rank + cap.
 //
 // Determinism contract: NO randomness, NO clock. Every iteration order and
 // tie-break is by ascending edge/node id, so the same (topology, vote state)
@@ -330,12 +334,39 @@ export const DEFAULT_LIMIT = 20;
 /** Same-type edge-set Jaccard at/above which two routes are duplicates. */
 export const DEFAULT_JACCARD = 0.5;
 
+// ── Corridor length budget ──────────────────────────────────────────────────
+// A peeled path can snake for miles (greedy extension keeps going while ANY
+// net-positive arc exists), which reads as an absurd proposal. Instead of a
+// blunt truncation, each path gets a meter budget that GROWS with its support
+// — a corridor earns length with votes — and is trimmed to its best-supported
+// contiguous window under that budget (see capPathToLengthBudget).
+/** Budget floor: every corridor may span at least this many meters. */
+export const ROUTE_LENGTH_BASE_M = 600;
+/** Budget growth: meters added per √(path score). √ keeps a corridor with 4×
+ *  the votes at 2× the earned length — support buys reach, sublinearly. */
+export const ROUTE_LENGTH_PER_SQRT_SCORE_M = 150;
+/** Budget ceiling, whatever the support. */
+export const ROUTE_LENGTH_MAX_M = 2500;
+
+/** The meter budget a path of `score` (sum of nets) has earned. */
+export function routeLengthBudgetM(score: number, maxM = ROUTE_LENGTH_MAX_M): number {
+  const earned = ROUTE_LENGTH_BASE_M
+    + ROUTE_LENGTH_PER_SQRT_SCORE_M * Math.sqrt(Math.max(score, 0));
+  return Math.min(maxM, earned);
+}
+
 export interface RouteProposalOptions {
   limit?: number;
   jaccardThreshold?: number;
   minNet?: number;
   minRouteScore?: number;
   minRouteEdges?: number;
+  /** Hard ceiling override for the corridor length budget (meters). */
+  maxRouteLengthM?: number;
+  /** Label → route/point kind. POINT-kind vote types are skipped — their votes
+   *  surface as PBTP pins (topProposals.ts), not corridors. Unknown (null)
+   *  kinds stay eligible. Omit to admit every type. */
+  kindOf?: VoteTypeKindResolver;
 }
 
 /** Arc of the per-type subgraph: neighbor node, original edge id, net weight. */
@@ -451,7 +482,7 @@ function connectedComponents(typeAdj: TypeAdj): TypeAdj[] {
   return comps;
 }
 
-type PathResult = { edges: number[]; nodes: number[]; weight: number };
+export type PathResult = { edges: number[]; nodes: number[]; weight: number };
 
 /** Exact heaviest simple path by DFS from every node (small components only).
  *  Strictly-greater comparisons keep the FIRST best found — ties resolve to the
@@ -551,9 +582,12 @@ function greedyHeaviestPath(adj: TypeAdj): PathResult {
 
   // Extend from b away from a, and from a away from b, then splice into one
   // path joined on the seed edge (the bwd half reversed, seed edge kept once).
+  // The bwd half contributes everything BEFORE seedA (drop its trailing
+  // seedA+seedB after reversing — fwd starts at seedA), keeping nodes aligned
+  // with edges (nodes[i] is the node entering edges[i]) for window slicing.
   const fwd = extend(seedA, seedB, seedE);
   const bwd = extend(seedB, seedA, seedE);
-  const leftNodes = [...bwd.nodes].reverse().slice(0, -1); // … → seedA (drop trailing seedB)
+  const leftNodes = [...bwd.nodes].reverse().slice(0, -2);
   const leftEdges = [...bwd.edges.slice(1)].reverse(); // edges past the seed, reversed
   const nodes = [...leftNodes, ...fwd.nodes];
   const edges = [...leftEdges, ...fwd.edges];
@@ -593,6 +627,57 @@ function peelPaths(adj: TypeAdj): PathResult[] {
     work = removeEdges(work, new Set(path.edges));
   }
   return paths;
+}
+
+/**
+ * Trim an ordered path to its best-supported contiguous window within a meter
+ * budget. Slides a window over the path's edges keeping total length ≤
+ * `budgetM` and returns the window with the highest weight sum — the hottest
+ * stretch survives, straggly low-support reach is dropped. Deterministic ties:
+ * equal weight prefers the shorter window, then the earliest along the path.
+ * A single edge longer than the whole budget is kept (a corridor is never
+ * trimmed to nothing); paths already within budget return unchanged.
+ */
+export function capPathToLengthBudget(
+  path: PathResult,
+  budgetM: number,
+  lengthOf: (edgeId: number) => number,
+  weightOf: (edgeId: number) => number,
+): PathResult {
+  const n = path.edges.length;
+  if (n <= 1) return path;
+  const lens = path.edges.map(lengthOf);
+  if (lens.reduce((a, b) => a + b, 0) <= budgetM) return path;
+
+  let bestI = 0;
+  let bestJ = 0;
+  let bestW = -Infinity;
+  let bestLen = Infinity;
+  let i = 0;
+  let sumW = 0;
+  let sumL = 0;
+  for (let j = 0; j < n; j++) {
+    sumW += weightOf(path.edges[j]);
+    sumL += lens[j];
+    // Shrink from the left until within budget — but never below one edge, so
+    // an over-budget single edge (a long bridge) still yields a window.
+    while (sumL > budgetM && i < j) {
+      sumW -= weightOf(path.edges[i]);
+      sumL -= lens[i];
+      i++;
+    }
+    if (sumW > bestW || (sumW === bestW && sumL < bestLen)) {
+      bestI = i;
+      bestJ = j;
+      bestW = sumW;
+      bestLen = sumL;
+    }
+  }
+  return {
+    edges: path.edges.slice(bestI, bestJ + 1),
+    nodes: path.nodes.slice(bestI, bestJ + 2),
+    weight: bestW,
+  };
 }
 
 /** Expand an ordered path into its distinct blocks (in path order) + the union
@@ -682,17 +767,29 @@ export function computeRouteProposals(
   const minNet = opts.minNet ?? MIN_NET;
   const minRouteScore = opts.minRouteScore ?? MIN_ROUTE_SCORE;
   const minRouteEdges = opts.minRouteEdges ?? MIN_ROUTE_EDGES;
+  const maxRouteLengthM = opts.maxRouteLengthM ?? ROUTE_LENGTH_MAX_M;
   const blockIndex = buildBlockIndex(topo);
 
   const all: RouteProposal[] = [];
   for (let legendIdx = 0; legendIdx < legend.length; legendIdx++) {
     const label = legend[legendIdx];
     if (!label) continue;
+    // POINT-kind vote types never form corridors — their votes are PBTP pins
+    // (topProposals.ts). Unknown kind (null) stays eligible for both families.
+    if (opts.kindOf && opts.kindOf(label) === "point") continue;
     const nets = netsForType(edgeVoteTypes, topo.nEdges, legendIdx);
     const typeAdj = buildTypeAdj(topo, adj, nets, minNet);
     const typeProposals: RouteProposal[] = [];
     for (const compAdj of connectedComponents(typeAdj)) {
-      for (const path of peelPaths(compAdj)) {
+      for (const peeled of peelPaths(compAdj)) {
+        // Trim to the support-earned meter budget BEFORE the activity gates,
+        // so the gates judge the corridor that will actually be shown.
+        const path = capPathToLengthBudget(
+          peeled,
+          routeLengthBudgetM(peeled.weight, maxRouteLengthM),
+          (e) => edgeLengthMeters(topo, e),
+          (e) => nets[e],
+        );
         if (path.weight < minRouteScore || path.edges.length < minRouteEdges) continue;
         const { blocks, blockEdgeIds } = groupBlocks(path.edges, topo, blockIndex);
         const a = path.nodes[0];

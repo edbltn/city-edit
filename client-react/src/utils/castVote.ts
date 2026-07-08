@@ -143,6 +143,11 @@ export async function castVotes(params: {
   label: string;
   direction: VoteDirection;
   blocks?: ArrayLike<number>[];
+  /** Kind of the selection being voted ("route" corridor vs single "point").
+   *  Sent so the server can record the kind of a brand-new suggestion label —
+   *  the creating cast is the only witness. Optional: casts on existing labels
+   *  (proposal pins, route cards) don't need it. */
+  pointType?: "route" | "point";
 }): Promise<CastResult> {
   const { mode, label, direction } = params;
   const edges = [...new Set(params.edgeIds)].filter((e) => e != null);
@@ -186,6 +191,7 @@ export async function castVotes(params: {
       edge_ids: edges, // the selection — the server expands to blocks itself
       voter_id: getVoterId(),
     };
+    if (params.pointType) body.point_type = params.pointType;
     const token = getPasscodeToken(slug);
     if (token) body.passcode_token = token;
 
