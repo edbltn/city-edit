@@ -70,7 +70,7 @@ import {
   type VoteDirection,
 } from "../../utils/voteStore";
 import { castVotes, voteButtonState } from "../../utils/castVote";
-import { dlog, dwarn, derror, debugState } from "../../utils/debugLog";
+import { dlog, dwarn, derror, debugState, debugProbe } from "../../utils/debugLog";
 import { useVotesVersion } from "../../utils/useVotesVersion";
 import { getVoterId } from "../../utils/voterIdentity";
 import { isHoverSuppressed } from "../../utils/touchHover";
@@ -498,6 +498,36 @@ function hitTest(
 }
 
 /**
+ * The block-constraint filters for a point: which block polygon is under it,
+ * and the edge/node eligibility predicates for that block. ONE construction
+ * shared by hover/selection (resolveSelection) AND the waypoint snap — the
+ * two must agree or a click selects something different from what hover
+ * showed. Null when no block is under the point (or MapLibre isn't ready).
+ */
+function blockFiltersAt(
+  data: GraphData,
+  adj: NodeAdj | null,
+  lat: number,
+  lng: number,
+): { blockId: number; edgeInBlock: (i: number) => boolean; nodeInBlock: (n: number) => boolean } | null {
+  const ebi = data.edgeBlockId;
+  if (!ebi) return null;
+  const blockId = blockIdAtLatLng(lat, lng);
+  if (blockId == null) return null;
+  return {
+    blockId,
+    edgeInBlock: (i: number) => ebi[i] === blockId,
+    nodeInBlock: (n: number) => {
+      if (!adj) return false;
+      for (let k = adj.start[n]; k < adj.start[n + 1]; k++) {
+        if (ebi[adj.edges[k]] === blockId) return true;
+      }
+      return false;
+    },
+  };
+}
+
+/**
  * The shortest edge adjacent to `nid` that belongs to `blockId` — the
  * block-constrained twin of graphTopology.adjShortest, so a node picked under
  * a hovered block votes/highlights within THAT block, not a neighbour the
@@ -921,16 +951,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // MapLibre not ready) → unrestricted, as before.
     const ebi = data.edgeBlockId;
     const adj = nodeAdjRef.current;
-    const hoveredBlock = ebi ? blockIdAtLatLng(lat, lng) : null;
-    if (hoveredBlock != null && ebi) {
-      const edgeInBlock = (i: number) => ebi[i] === hoveredBlock;
-      const nodeInBlock = (n: number) => {
-        if (!adj) return false;
-        for (let k = adj.start[n]; k < adj.start[n + 1]; k++) {
-          if (ebi[adj.edges[k]] === hoveredBlock) return true;
-        }
-        return false;
-      };
+    const filters = blockFiltersAt(data, adj, lat, lng);
+    if (filters && ebi) {
+      const { edgeInBlock, nodeInBlock } = filters;
       const hit = hitTest(
         data, map, pt.x, pt.y, lat, lng,
         edgeIndexRef.current, nodeIndexRef.current, edgeInBlock, nodeInBlock
@@ -938,7 +961,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       if (hit) {
         const voteEdgeId = hit.target.kind === "edge"
           ? hit.target.index
-          : adjShortestInBlock(data, adj, hit.target.index, hoveredBlock);
+          : adjShortestInBlock(data, adj, hit.target.index, filters.blockId);
         return { target: hit.target, snapLat: hit.snapLat, snapLng: hit.snapLng, voteEdgeId };
       }
       // Nothing in radius — the hovered block still names the intent, so
@@ -989,6 +1012,25 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const resolveSelectionRef = useRef(resolveSelection);
   useEffect(() => { resolveSelectionRef.current = resolveSelection; }, [resolveSelection]);
 
+  // Console/headless probe: cityedit.resolveAt(lat, lng) interrogates the live
+  // resolver so a debugging session can see exactly what a point resolves to
+  // (hovered block, target kind/index, vote edge) without synthetic mouse events.
+  useEffect(() => {
+    debugProbe("resolveAt", (lat: number, lng: number) => {
+      const sel = resolveSelectionRef.current(lat, lng);
+      const data = graphDataRef.current;
+      return {
+        hoveredBlock: data?.edgeBlockId ? blockIdAtLatLng(lat, lng) : null,
+        target: sel?.target ?? null,
+        snapLat: sel?.snapLat ?? null,
+        snapLng: sel?.snapLng ?? null,
+        voteEdgeId: sel?.voteEdgeId ?? null,
+        voteEdgeBlock: sel && data?.edgeBlockId && sel.voteEdgeId != null
+          ? data.edgeBlockId[sel.voteEdgeId] : null,
+      };
+    });
+  }, []);
+
   // Register graph snap function for use by path drag. Uses hitTest directly
   // (in-radius only, null when out of range) so dragging stays free when far
   // from the graph — unlike resolveSelection, which always resolves to an edge.
@@ -1000,10 +1042,24 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       const data = graphDataRef.current;
       if (!data) return null;
       const pt = m.latLngToContainerPoint([lat, lng]);
-      const result = hitTest(
-        data, m, pt.x, pt.y, lat, lng,
-        edgeIndexRef.current, nodeIndexRef.current
-      );
+      // Same block constraint as resolveSelection: the click's stored
+      // coordinate must land on the SAME target hover showed (a node snap
+      // stores the node's exact position, so later re-resolution — at any
+      // zoom — finds the node again, not a nearby edge).
+      const filters = blockFiltersAt(data, nodeAdjRef.current, lat, lng);
+      let result = filters
+        ? hitTest(
+            data, m, pt.x, pt.y, lat, lng,
+            edgeIndexRef.current, nodeIndexRef.current,
+            filters.edgeInBlock, filters.nodeInBlock
+          )
+        : null;
+      if (!result) {
+        result = hitTest(
+          data, m, pt.x, pt.y, lat, lng,
+          edgeIndexRef.current, nodeIndexRef.current
+        );
+      }
       if (!result) return null;
       return { lat: result.snapLat, lng: result.snapLng };
     });
@@ -1088,6 +1144,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const hoverTargetRef = useRef<HoverTarget | null>(null);
   const hoverRafRef = useRef<number | null>(null);
+  // The hovered RBTP diamond — drives the route-flavored hover card (the
+  // diamond counterpart of the squares' hoverTarget card; shares tooltipPos).
+  // Ref mirrors state so stable handlers/effects can clear it without a dep.
+  const [hoverRbtp, setHoverRbtp] = useState<RouteProposal | null>(null);
+  const hoverRbtpRef = useRef<RouteProposal | null>(null);
   // True while the cursor is over a top-proposal icon, so the map hover handler
   // yields the highlight to the icon (hierarchy rule #1).
   const overIndicatorRef = useRef(false);
@@ -2848,11 +2909,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   useEffect(() => {
     const clearStaleHover = () => {
       overIndicatorRef.current = false;
+      if (hoverRbtpRef.current) {
+        hoverRbtpRef.current = null;
+        setHoverRbtp(null);
+        routeHighlightEdgesRef.current = null;
+      }
       if (hoverTargetRef.current) {
         hoverTargetRef.current = null;
         setHoverTarget(null);
-        redrawHoverHighlightRef.current();
       }
+      redrawHoverHighlightRef.current();
     };
     map.on("click", clearStaleHover);
     return () => { map.off("click", clearStaleHover); };
@@ -2886,6 +2952,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const sel = resolveSelection(pinnedLat, pinnedLng, pinnedEdgeOverrideRef.current);
     pinnedEdgeOverrideRef.current = null;
     let target = sel?.target ?? null;
+    dlog("cast", `pinned resolve @${pinnedLat.toFixed(5)},${pinnedLng.toFixed(5)}`,
+      { hadOverride, target, voteEdgeId: sel?.voteEdgeId });
+    debugState("pinnedTarget", target);
 
     // Drop the edge-lock the moment the point itself moves (a click/drag sets new
     // coords); a re-run at the SAME coords (vote tick / winners load) keeps it.
@@ -3229,18 +3298,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     return materializeBlocks(topo, blockIndexRef.current, pathEdgeIds);
   }, [pathEdgeIds, graphVoteVersion, isHeatmapLoading]);
 
-  // Vote rows summed over the whole selection — block-grain (deduped per-block
-  // counts) when the map has blocks, per-edge sums otherwise.
-  const routeVoteRows = useMemo<VoteTypeRow[]>(() => {
-    void graphVoteVersion;
-    void votesVersion;
+  // Vote rows over an edge set — block-grain (deduped per-block counts) when
+  // the map has blocks, per-edge sums otherwise. Shared by the route-summary
+  // card (the selection's path) and the diamond hover card (a corridor).
+  const voteRowsForEdges = useCallback((edgeIds: readonly number[]): VoteTypeRow[] => {
     const d = graphDataRef.current;
-    if (!d || !pathEdgeIds || pathEdgeIds.length === 0) return [];
-    const rows = selectionVoteRows(d, pathEdgeIds);
+    if (!d || edgeIds.length === 0) return [];
+    const rows = selectionVoteRows(d, edgeIds as number[]);
     if (rows) return rows;
     const legendNow = d.vote_type_legend ?? [];
     const sums = new Map<string, { up: number; down: number }>();
-    for (const eid of pathEdgeIds) {
+    for (const eid of edgeIds) {
       for (const [li, up, down] of (d.edge_vote_types ?? [])[eid] ?? []) {
         const label = legendNow[li];
         if (!label) continue;
@@ -3253,7 +3321,25 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     return [...sums.entries()]
       .map(([label, v]) => ({ label, ...v }))
       .sort((a, b) => (b.up - b.down) - (a.up - a.down));
-  }, [pathEdgeIds, graphVoteVersion, votesVersion, isHeatmapLoading]);
+  }, []);
+
+  const routeVoteRows = useMemo<VoteTypeRow[]>(() => {
+    void graphVoteVersion;
+    void votesVersion;
+    if (!pathEdgeIds) return [];
+    return voteRowsForEdges(pathEdgeIds);
+  }, [pathEdgeIds, voteRowsForEdges, graphVoteVersion, votesVersion, isHeatmapLoading]);
+
+  // Rows for the HOVERED diamond's corridor (its block-edge union). Same
+  // safety net as the PBTP hover card: a live top proposal never reads
+  // "No votes yet" even if the breakdown momentarily decodes empty.
+  const hoverRbtpRows = useMemo<VoteTypeRow[]>(() => {
+    void graphVoteVersion;
+    void votesVersion;
+    if (!hoverRbtp) return [];
+    const rows = voteRowsForEdges(hoverRbtp.blockEdgeIds);
+    return rows.length ? rows : [{ label: hoverRbtp.label, up: hoverRbtp.score, down: 0 }];
+  }, [hoverRbtp, voteRowsForEdges, graphVoteVersion, votesVersion]);
 
   // Server-truth rows for the route card: DISTINCT devices per (vote type,
   // direction) across the selection's block edges (/api/route-votes). A route
@@ -4021,17 +4107,39 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       });
 
       const activate = () => {
+        // The diamond owns the hover while the cursor is on it — same
+        // hierarchy rule #1 as the point squares. Without this the map
+        // mousemove keeps resolving whatever segment/block sits under the
+        // icon, popping a competing street-segment card over the corridor
+        // preview (the "diamond hover doesn't show the proposal" bug).
+        overIndicatorRef.current = true;
         routeHighlightEdgesRef.current = routeBlockEdges(p);
         redrawHoverHighlightRef.current();
         dispatchBlockSelectRef.current();
         // Hovering a fanned diamond pauses the open cluster's snap-back, same
         // as a fanned square (a locked spread has no timer to pause).
         if (!spreadLockedRef.current && spreadRef.current?.has(spreadKeyRoute(p.id))) clearSpreadTimer();
+        // Route-flavored hover card, anchored at the icon like a square's.
+        // Pointer-only (touch has no mouseout to clear it) and suppressed for
+        // a beat after any tap — both exactly as activateIndicator does.
+        if (!canHover || isHoverSuppressed()) return;
+        if (hoverTargetRef.current) {
+          hoverTargetRef.current = null;
+          setHoverTarget(null);
+        }
+        const iconPt = map.latLngToContainerPoint([posLat, posLng]);
+        const rect = map.getContainer().getBoundingClientRect();
+        setTooltipPos({ x: rect.left + iconPt.x, y: rect.top + iconPt.y });
+        hoverRbtpRef.current = p;
+        setHoverRbtp(p);
       };
       const deactivate = () => {
+        overIndicatorRef.current = false;
         routeHighlightEdgesRef.current = null;
         redrawHoverHighlightRef.current();
         dispatchBlockSelectRef.current();
+        hoverRbtpRef.current = null;
+        setHoverRbtp(null);
         if (!spreadLockedRef.current && spreadRef.current?.has(spreadKeyRoute(p.id))) armSpreadTimer();
       };
 
@@ -4059,12 +4167,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             if (!override && internalExploderRef.current?.({ lat: posLat, lng: posLng })) return;
             // Drop any hover card sitting at the click point — the route-summary
             // card about to open would otherwise render underneath it until the
-            // next mousemove refreshes the hover.
+            // next mousemove refreshes the hover. The diamond's own hover card
+            // yields for the same reason.
             if (hoverTargetRef.current) {
               hoverTargetRef.current = null;
               setHoverTarget(null);
               redrawHoverHighlightRef.current();
             }
+            hoverRbtpRef.current = null;
+            setHoverRbtp(null);
             // Picking a diamond ends any open fan-out — unlike a point pin it
             // anchors no modal at its grid cell, so nothing needs the spread
             // kept open (the corridor selection is the outcome).
@@ -4079,7 +4190,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     });
   }, [routeProposals, pathEdgeIds, currentZoom, map, theme.suggestions, mapStyle.heat, mapStyle.basemap,
       startLat, startLng, endLat, endLng, ghostKey, selectedRbtpId, anchorsAreWaypoints,
-      spread, dropTargetRbtpId, isRouteMode, clearSpreadTimer, armSpreadTimer, collapseSpread]);
+      spread, dropTargetRbtpId, isRouteMode, clearSpreadTimer, armSpreadTimer, collapseSpread, canHover]);
 
   return (
     <>
@@ -4139,6 +4250,32 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           getAvoidRects={getHoverAvoidRects}
           // The open modal can re-anchor (vote tick, pan) while the hover
           // target stays put — re-place the hover card when that happens.
+          avoidKey={`${pinnedScreenPos?.x},${pinnedScreenPos?.y};${routeCardPos?.x},${routeCardPos?.y}`}
+        />,
+        mapContainer
+      )}
+      {/* Diamond (RBTP) hover card — the route counterpart of the square's
+          hover card above: same anchor (the icon), same transient styling,
+          route-flavored content (corridor block count + block-grain rows).
+          Suppressed while the SAME proposal's interactive route-summary card
+          is open — that card already speaks for it (the diamond mirror of
+          hoverMatchesPinned). */}
+      {hoverRbtp && !(routeCardPos && coveredRouteProposal?.id === hoverRbtp.id) && createPortal(
+        <ProposalCard
+          winner={{
+            legendIdx: hoverRbtp.legendIdx,
+            label: hoverRbtp.label,
+            edgeIdx: hoverRbtp.edgeIds[0],
+            count: hoverRbtp.score,
+          }}
+          eyebrow="Top Route Proposal"
+          screenX={tooltipPos.x}
+          screenY={tooltipPos.y}
+          name=""
+          metaText={`Covers ${hoverRbtp.blocks.length} ${hasBlocksRef.current ? "block" : "segment"}${hoverRbtp.blocks.length !== 1 ? "s" : ""}`}
+          rows={hoverRbtpRows}
+          voteTypes={theme.suggestions}
+          getAvoidRects={getHoverAvoidRects}
           avoidKey={`${pinnedScreenPos?.x},${pinnedScreenPos?.y};${routeCardPos?.x},${routeCardPos?.y}`}
         />,
         mapContainer

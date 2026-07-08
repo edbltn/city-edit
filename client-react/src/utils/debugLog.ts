@@ -81,6 +81,15 @@ export function debugState(key: string, value: unknown): void {
   state[key] = value;
 }
 
+/** Attach a callable probe to window.cityedit (e.g. resolveAt(lat, lng) — the
+ *  live selection resolver) so headless sessions can interrogate app logic
+ *  directly instead of synthesizing mouse events. */
+export function debugProbe(key: string, fn: (...args: never[]) => unknown): void {
+  if (typeof window === "undefined") return;
+  const w = window as unknown as Record<string, Record<string, unknown>>;
+  if (w.cityedit) w.cityedit[key] = fn;
+}
+
 function dumpState(): Record<string, unknown> {
   return { tab: getTabName(), channels: [...enabled], ...state };
 }
