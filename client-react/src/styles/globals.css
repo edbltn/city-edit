@@ -877,7 +877,12 @@ body.maplibre-active .leaflet-container {
 .desire-path-interactive,
 .split-path-interactive {
   cursor: grab !important;
-  pointer-events: all !important;
+  /* `stroke`, NOT `all`: on SVG, `all` also hit-tests the path's unpainted
+     interior fill, so a zigzagging/looping route (threaded corridors!) turns
+     its whole enclosed pocket into a phantom "hovering the path" zone — and
+     the pocket reshapes with every zoom/pan (Leaflet re-clips + simplifies).
+     `stroke` keeps the 20px grab stroke hoverable despite its 0.01 opacity. */
+  pointer-events: stroke !important;
   touch-action: none !important;
   -webkit-tap-highlight-color: transparent;
 }
