@@ -1,0 +1,283 @@
+diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
+index 779a446..0313e74 100644
+--- a/client-react/src/components/GraphLayer/GraphLayer.tsx
++++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -2176,8 +2176,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     // Stops mirror heatGradientCss (mapStyles.ts) so the legend matches the map.
+     // The same ramp feeds the top-proposal pins (see indicatorMarkers), so a pin
+     // glows the exact hue the heatmap paints at its vote count.
+-    const rampStops = buildHeatRampStops(heat);
++    const rampStops = buildHeatRampStops(heat, mapStyle.basemap);
+     const sampleRamp = (t: number): string => sampleHeatRamp(rampStops, t);
++    // The ramp's incandescent tip (sampled at 1.0) — used for the hottest-edge
++    // accent pass so the very top of the scale reads white-hot, not flat peak.
++    const tipColor = sampleRamp(1);
+ 
+     for (const i of voted) {
+       const norm = Math.log((edgeVotes[i] ?? 0) + 1) / Math.log(maxVotes + 1);
+@@ -2201,7 +2204,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+         const t = (norm - 0.7) / 0.3;
+         ctx.lineWidth = Math.max(0.3, 0.5 * zoomScale);
+         ctx.globalAlpha = 0.18 * t;
+-        ctx.strokeStyle = heat.peak;
++        ctx.strokeStyle = tipColor;
+         drawSeg(i);
+       }
+     }
+@@ -2214,7 +2217,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     drawStateRef.current = { zoom, nw: map.containerPointToLatLng([0, 0]) };
+ 
+     redrawHoverHighlightRef.current();
+-  }, [map, mapStyle.heat, mapStyle.heatComposite, mapStyle.selection]);
++  }, [map, mapStyle.heat, mapStyle.basemap, mapStyle.heatComposite, mapStyle.selection]);
+ 
+   // Schedule redraw
+   const scheduleRedraw = useCallback(() => {
+@@ -3059,7 +3062,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     // intensity. The pin glows + tints to that color, as hot as its votes. The
+     // bucketed color keys the icon cache so equally-hot pins of a label still
+     // share one divIcon (and so a re-render doesn't churn setIcon every frame).
+-    const rampStops = buildHeatRampStops(mapStyle.heat);
++    const rampStops = buildHeatRampStops(mapStyle.heat, mapStyle.basemap);
+     const maxCount = source.reduce((m, w) => Math.max(m, w.count), 0);
+     const heatOf = (count: number): number =>
+       maxCount > 0 && count > 0
+@@ -3364,7 +3367,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     // re-runs once topology+votes arrive so stations appear even with zero votes.
+   }, [winners, currentZoom, map, spread, collapseSpread, clearSpreadTimer, applySpread,
+       selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,
+-      isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, isStationNetwork, stationLabel, isHeatmapLoading, canHover]);
++      isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, mapStyle.basemap, isStationNetwork, stationLabel, isHeatmapLoading, canHover]);
+ 
+   // Cast a directional vote on a single proposal (edge, vote type) through the
+   // SAME unified path the top-bar route cast uses. castVotes() handles the
+diff --git a/client-react/src/components/GraphLayer/voteTypeIcon.ts b/client-react/src/components/GraphLayer/voteTypeIcon.ts
+index 27e2124..559eb14 100644
+--- a/client-react/src/components/GraphLayer/voteTypeIcon.ts
++++ b/client-react/src/components/GraphLayer/voteTypeIcon.ts
+@@ -46,28 +46,32 @@ export interface VoteTypeIconOptions {
+ //   square  : (3,3)→(31,31)               — 28px box
+ //   tail tip: (17,36)                      — the Leaflet anchor, on the location
+ //                                            (a wide, shallow tail reads blunt)
+-//   inner   : (6,6) 22×22 square           — the inner border, set out a touch
+-//                                            so it doesn't crowd the icon
++//   inner   : (5.25,5.25) 23.5×23.5 square  — the inner border, hugging the
++//                                            outer so the double ring reads slim
+ // Idle = a single hairline outline. selected/start/end add the inner square and
+ // thicken the outline (CSS in globals.css drives colors + widths per state).
+ const SVG_W = 34;
+ const SVG_H = 42;
+ const OUTER_PATH = "M3,3 H31 V31 H23 L17,36 L11,31 H3 Z";
+-// Inner border: a true 3px inward offset (contour) of the outer pin — every edge
+-// moved in by the same perpendicular distance, so the apex angle is preserved
+-// and the gap to the outer reads as a constant width. The tail tip therefore
+-// rises by gap/sin(halfAngle) (≈3.9) and the base narrows to match, rather than
+-// being a naively-scaled (and visibly sharper) V. Shown only in pin states.
+-const INNER_PATH = "M6,6 H28 V28 H21.9 L17,32.1 L12.1,28 H6 Z";
++// Inner border: a true 2.25px inward offset (contour) of the outer pin — every
++// edge moved in by the same perpendicular distance, so the apex angle is
++// preserved and the gap to the outer reads as a constant width. The tail tip
++// therefore rises by gap/sin(halfAngle) (≈2.9) and the base narrows to match,
++// rather than being a naively-scaled (and visibly sharper) V. Shown only in pin
++// states. The same 2.25px contour is used on every shape below, so the square
++// pin and the route diamond carry identical-weight double borders.
++const INNER_PATH = "M5.25,5.25 H28.75 V28.75 H22.2 L17,33.1 L11.8,28.75 H5.25 Z";
+ // Square variants (no tail) for fanned-out icons: the anchor/viewBox stay
+ // identical so dropping the divot doesn't shift the icon; it just loses its point.
+ const SQUARE_PATH = "M3,3 H31 V31 H3 Z";
+-const INNER_SQUARE_PATH = "M6,6 H28 V28 H6 Z";
++const INNER_SQUARE_PATH = "M5.25,5.25 H28.75 V28.75 H5.25 Z";
+ // Diamond variant (route proposals): the square rotated 45° within the same box,
+ // its bottom vertex pulled down to the tail tip so the kite points at the spot.
+ // Vertices: top (17,3) · right (31,17) · bottom-tip (17,36) · left (3,17).
++// The inner is the same true 2.25px contour (45° vertices rise 2.25·√2 ≈ 3.18;
++// the kite's side vertices land at y 17.2 because its lower edges are steeper).
+ const DIAMOND_PATH = "M17,3 L31,17 L17,36 L3,17 Z";
+-const INNER_DIAMOND_PATH = "M17,9 L26,17 L17,30 L8,17 Z";
++const INNER_DIAMOND_PATH = "M17,6.2 L28,17.2 L17,32.2 L6,17.2 Z";
+ const TIP: [number, number] = [17, 36];
+ 
+ /**
+diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+index a42f69f..0ccf037 100644
+--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
++++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+@@ -11,7 +11,7 @@ import maplibregl from "maplibre-gl";
+ import { Protocol } from "pmtiles";
+ import { CONFIG } from "../../config";
+ import { dlog, dwarn, debugState } from "../../utils/debugLog";
+-import { maplibreRasterTiles, type MapStyle } from "../../mapStyles";
++import { maplibreRasterTiles, heatTip, type MapStyle } from "../../mapStyles";
+ 
+ // Register PMTiles protocol once at module level
+ const protocol = new Protocol();
+@@ -44,46 +44,58 @@ export const BLOCK_SELECT_EVENT = "city-edit:block-select";
+  *  At heat 0 the block is fully transparent (no votes → invisible); it ramps up
+  *  through the active style's heat colors. Blocks ARE the heat display, so there
+  *  is no baseline edge layer (edges show only on Leaflet hover/selection). */
+-function blockFillPaint(heat: MapStyle["heat"]): maplibregl.FillLayerSpecification["paint"] {
++function blockFillPaint(style: MapStyle): maplibregl.FillLayerSpecification["paint"] {
++  const heat = style.heat;
+   const h = ["coalesce", ["feature-state", "heat"], 0] as const;
+   return {
+     // Start the ramp at `warm` (not halo) so even a single vote reads clearly,
+     // and keep the fill translucent — the outline layer below carries the
+     // brightness, so a voted block doesn't render as a solid slab.
++    // Stops span the FULL heat domain, ending in the incandescent tip: votes
++    // are heavy-tailed, so the log-normalized top of a busy map piles up near
++    // 1.0 — a ramp that plateaus early (the old 0.6 → peak flat top) painted
++    // every hot corridor the same color. Now peak→tip keeps resolving there.
+     "fill-color": [
+       "interpolate", ["linear"], h,
+       0.0, heat.warm,
+-      0.2, heat.hot,
+-      0.6, heat.peak,
+-      1.0, heat.peak,
++      0.35, heat.hot,
++      0.7, heat.peak,
++      1.0, heatTip(heat, style.basemap),
+     ],
+     "fill-opacity": [
+       "interpolate", ["linear"], h,
+       0.0, 0.0,
+-      0.001, 0.42,
+-      1.0, 0.58,
++      0.001, 0.38,
++      1.0, 0.66,
+     ],
+   };
+ }
+ 
+ /** Thin bright outline tracing a voted block — the crisp edge that makes the
+- *  heat pop without thickening the fill. Same ramp, heat-driven opacity. */
+-function blockLinePaint(heat: MapStyle["heat"]): maplibregl.LineLayerSpecification["paint"] {
++ *  heat pop without thickening the fill. Same ramp, heat-driven opacity, and a
++ *  width that grows with heat so the hottest blocks read etched, not just lit. */
++function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification["paint"] {
++  const heat = style.heat;
+   const h = ["coalesce", ["feature-state", "heat"], 0] as const;
+   return {
+     "line-color": [
+       "interpolate", ["linear"], h,
+       0.0, heat.warm,
+-      0.2, heat.hot,
+-      0.6, heat.peak,
+-      1.0, heat.peak,
++      0.35, heat.hot,
++      0.7, heat.peak,
++      1.0, heatTip(heat, style.basemap),
++    ],
++    "line-width": [
++      "interpolate", ["linear"], h,
++      0.0, 1.1,
++      0.7, 1.4,
++      1.0, 2.0,
+     ],
+-    "line-width": 1.25,
+     "line-opacity": [
+       "interpolate", ["linear"], h,
+       0.0, 0.0,
+-      0.001, 0.75,
+-      1.0, 0.95,
++      0.001, 0.72,
++      1.0, 1.0,
+     ],
+   };
+ }
+@@ -142,14 +154,14 @@ function buildStyle(
+         type: "fill",
+         source: "blocks",
+         "source-layer": "blocks",
+-        paint: blockFillPaint(mapStyle.heat),
++        paint: blockFillPaint(mapStyle),
+       },
+       {
+         id: "block-heat-line",
+         type: "line",
+         source: "blocks",
+         "source-layer": "blocks",
+-        paint: blockLinePaint(mapStyle.heat),
++        paint: blockLinePaint(mapStyle),
+       },
+       // Block selection — feature-state { selected } lights the block polygons
+       // covering the current selection/hover: a subtle translucent fill plus a
+diff --git a/client-react/src/context/ThemeContext.tsx b/client-react/src/context/ThemeContext.tsx
+index 04472f3..e28e0e2 100644
+--- a/client-react/src/context/ThemeContext.tsx
++++ b/client-react/src/context/ThemeContext.tsx
+@@ -28,7 +28,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
+     root.dataset.basemap = style.basemap;
+     root.style.setProperty("--accent", style.accent);
+     root.style.setProperty("--selection", style.selection);
+-    root.style.setProperty("--heat-gradient", heatGradientCss(style.heat));
++    root.style.setProperty("--heat-gradient", heatGradientCss(style.heat, style.basemap));
+   }, [theme]);
+ 
+   return (
+diff --git a/client-react/src/mapStyles.ts b/client-react/src/mapStyles.ts
+index cb6a113..f6aa6ff 100644
+--- a/client-react/src/mapStyles.ts
++++ b/client-react/src/mapStyles.ts
+@@ -210,18 +210,34 @@ export function maplibreRasterTiles(style: MapStyle): string[] {
+   );
+ }
+ 
++/**
++ * The incandescent tip of a ramp — the color reserved for the very hottest
++ * intensities, ABOVE `peak`. Votes are heavy-tailed (log-normalized heat piles
++ * up near 1.0 on busy maps), and a ramp that ends at `peak` renders that whole
++ * tail as one flat color. The tip extends the ramp past `peak`: toward
++ * white-hot on dark basemaps (additive blending — hotter = brighter) and
++ * toward near-black ink on light ones (multiply — hotter = darker), so the
++ * hottest corridor visibly outburns a merely-busy one.
++ */
++export function heatTip(heat: HeatRamp, basemap: Basemap): string {
++  const [r, g, b] = parseRgb(heat.peak);
++  const [tr, tg, tb] = basemap === "light" ? [10, 12, 18] : [255, 252, 242];
++  const mix = 0.68;
++  return `rgb(${Math.round(r + (tr - r) * mix)}, ${Math.round(g + (tg - g) * mix)}, ${Math.round(b + (tb - b) * mix)})`;
++}
++
+ /**
+  * Build the CSS `linear-gradient(...)` for the heatmap legend swatch from a
+  * style's ramp, so the legend always matches the map.
+  */
+-export function heatGradientCss(heat: HeatRamp): string {
+-  return `linear-gradient(to right, ${heat.halo}, ${heat.warm} 40%, ${heat.hot} 75%, ${heat.peak})`;
++export function heatGradientCss(heat: HeatRamp, basemap: Basemap): string {
++  return `linear-gradient(to right, ${heat.halo}, ${heat.warm} 35%, ${heat.hot} 65%, ${heat.peak} 85%, ${heatTip(heat, basemap)})`;
+ }
+ 
+ // A heat ramp expanded to positioned RGB stops, ready for interpolation. The
+-// stop positions (0 / 0.4 / 0.75 / 1) mirror heatGradientCss so the legend, the
+-// canvas heatmap, and the proposal pins all read the same color at a given
+-// intensity. Built once per style and sampled many times.
++// stop positions (0 / 0.35 / 0.65 / 0.85 / 1) mirror heatGradientCss so the
++// legend, the canvas heatmap, and the proposal pins all read the same color at
++// a given intensity. Built once per style and sampled many times.
+ export interface HeatRampStop {
+   pos: number;
+   rgb: [number, number, number];
+@@ -232,13 +248,17 @@ function parseRgb(s: string): [number, number, number] {
+   return m ? [Number(m[0]), Number(m[1]), Number(m[2])] : [0, 0, 0];
+ }
+ 
+-/** Expand a HeatRamp into the positioned stops `sampleHeatRamp` interpolates. */
+-export function buildHeatRampStops(heat: HeatRamp): HeatRampStop[] {
++/** Expand a HeatRamp into the positioned stops `sampleHeatRamp` interpolates.
++ *  `peak` sits at 0.85 (not 1) with the incandescent tip above it, so the
++ *  log-crushed top of a busy map's vote distribution still resolves into
++ *  visibly different colors instead of one flat band. */
++export function buildHeatRampStops(heat: HeatRamp, basemap: Basemap): HeatRampStop[] {
+   return [
+     { pos: 0, rgb: parseRgb(heat.halo) },
+-    { pos: 0.4, rgb: parseRgb(heat.warm) },
+-    { pos: 0.75, rgb: parseRgb(heat.hot) },
+-    { pos: 1, rgb: parseRgb(heat.peak) },
++    { pos: 0.35, rgb: parseRgb(heat.warm) },
++    { pos: 0.65, rgb: parseRgb(heat.hot) },
++    { pos: 0.85, rgb: parseRgb(heat.peak) },
++    { pos: 1, rgb: parseRgb(heatTip(heat, basemap)) },
+   ];
+ }
+ 

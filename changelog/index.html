@@ -29,6 +29,21 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-08-heat-tip-border-inset.html">
+    <div class="date">2026-07-08</div>
+    <h2>Aesthetic fixes — slimmer selection rings, and an incandescent tip for the heat ramp</h2>
+    <p>Two visual fixes, verified live: the selected double border on top-proposal markers is now a true
+    2.25px contour of the outer shape on every marker kind — replacing the point pin's 3px inset and the
+    route diamond's uneven hand-placed ≈3.5–4.2px one, so diamonds and pins carry identical-weight rings
+    with more air around the glyph. And the heat display keeps resolving at the top of the scale: the
+    intensity math was already logarithmic, but the block fill flat-topped its color ramp at heat 0.6 —
+    on nyc-bikes every block from 46 to 617 votes (4,152 blocks, exactly the hottest parts of the map)
+    painted one identical gold. Every ramp now extends past peak into a computed incandescent tip
+    (white-hot on dark basemaps, ink-dark on light ones), stops respaced to 0/.35/.65/.85/1, the block
+    fill spans the full heat domain with a heat-driven outline width, and the canvas hottest-edge accent
+    strokes the tip — legend, canvas heatmap, proposal pins, and block fill all still agree.</p>
+  </a>
+
   <a class="entry" href="./2026-07-07-node-cluster-blocks.html">
     <div class="date">2026-07-07</div>
     <h2>Junction clusters, capture mapping, and the stale-heat guards</h2>
