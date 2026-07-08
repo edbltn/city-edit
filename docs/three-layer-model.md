@@ -47,9 +47,13 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored
 ### 2.1 What a block is
 
 One polygon per street segment between intersections (a "streetscape block"),
-covering the roadbed + sidewalk right-of-way — plus one small **disc block per
-junction node** (12 m, `build_node_blocks.py`), punched out of the street/foot
-polygons so blocks never overlap. Junction discs exist because street polygons
+covering the roadbed + sidewalk right-of-way — plus one **junction block per
+junction cluster** (`build_node_blocks.py`), punched out of the street/foot
+polygons so blocks never overlap. Nodes and edges get SEPARATE block-forming
+logic: each walk-graph junction contributes a 9 m disc, and **overlapping discs
+merge into one multi-node block** (a physical intersection is several OSM
+junction nodes — centerline node, crossing ends, sidewalk corners — so per-node
+discs drew as stacked circles). Junction blocks exist because street polygons
 otherwise extend across intersections (Voronoi flare): the short edges crossing
 an intersection would bake into a PERPENDICULAR street's block, so a route down
 an avenue would select — and cast onto — every cross street it passes (the
@@ -57,7 +61,7 @@ an avenue would select — and cast onto — every cross street it passes (the
 exactly one block** (strict many-to-one), and a node belongs to the block of its
 **shortest** incident edge (deterministic, matching the client's `adjShortest`
 node→edge upgrade rule — the shortest incident edge is the one whose midpoint
-falls inside the junction's own disc).
+falls inside the junction's own block).
 
 ### 2.2 Generation — procedural, per city, at graph-build time
 
@@ -69,19 +73,26 @@ be added without city-specific open data (`server/streetscape_blocks/`):
    half-width → seed points every 6 m → Voronoi partition by nearest segment →
    dissolve + clip. One polygon per street segment.
 2. `build_node_blocks.py` — every walk-graph junction (unique-neighbour degree
-   ≥ 3) becomes its own 12 m disc block (`road_class="node"`), subtracted from
-   every street block it touches so blocks stay disjoint.
+   ≥ 3) contributes a 9 m disc; overlapping discs union-find into clusters and
+   each cluster becomes ONE block (`road_class="node"`, `n_nodes` members),
+   subtracted from every street block it touches so blocks stay disjoint. Also
+   writes the junction→block sidecar `node_clusters_<network>.npz` that the
+   bake's capture pass reads.
 3. `build_foot_blocks.py` — edges not covered by any street block (park paths,
    plazas, boardwalks — ~18% in NYC) are buffered (6 m), merged, and **severed
-   at the junction discs** (12 m > 6 m, so the mesh disconnects there): one
+   at the junction blocks** (9 m > 6 m, so the mesh disconnects there): one
    block per path segment between junctions — the same grain as streets, not
    one giant block per connected park network. Appended with continuing
    `block_id`s; this is what makes the edge→block mapping **total**.
 4. `build_edge_blocks.py` — bakes `edge_block_id: int32[n_edges]`
    (`osm_data/<city>/edge_blocks_<network>.npy` + a meta JSON stamping
-   `topology_etag` + `blocks_sha256`). Assignment: polygon containment of the
-   edge midpoint, else nearest block within 30 m (see `eval/RESULTS.md` — nearest
-   -polygon is exact where containment leaves ~20% unmapped).
+   `topology_etag` + `blocks_sha256`). Assignment, in order: **junction
+   capture** — a midpoint within `NODE_CAPTURE_M` (12 m) of a junction maps to
+   that junction's node block by GRAPH distance, not containment (crossing-stub
+   midpoints run to ~12 m, past the 9 m drawn rim; this is what holds the
+   ladder at zero while the drawn blobs stay small); then polygon containment
+   of the midpoint; else nearest block within 30 m (see `eval/RESULTS.md` —
+   nearest-polygon is exact where containment leaves ~20% unmapped).
 
 **Evaluation against ground truth**: `compare_blocks.py` scores the procedural
 output against Brook's NYC planimetric blocks (`build_nyc_blocks.py`, from NYC

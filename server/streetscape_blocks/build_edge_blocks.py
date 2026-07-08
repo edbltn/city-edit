@@ -2,10 +2,20 @@
 """Build the edge → block mapping that powers block-level vote display.
 
 Loads the SAME city graph the server votes on (via graph_registry, so edge_id
-ordering is identical to the vote store), takes each edge's midpoint, and assigns
-it to the block polygon that contains it (nearest block within a small threshold
-when no polygon contains the midpoint — sidewalks sit a few metres off the
-centerline). Writes a dense int32 array `edge_block_id[edge_id] = block_id` (−1 if
+ordering is identical to the vote store), and assigns each edge a block in
+three passes:
+
+  0. JUNCTION CAPTURE (nodes' own mapping logic, separate from the polygons):
+     an edge whose midpoint lies within NODE_CAPTURE_M (default 12 m) of a
+     junction maps to that junction's node block (node_clusters_<network>.npz,
+     written by build_node_blocks.py). The drawn node blobs are deliberately
+     smaller (9 m) — capture by graph distance is what keeps intersection-
+     crossing stubs out of PERPENDICULAR street blocks (the "ladder").
+  1. containment: the block polygon containing the midpoint;
+  2. nearest block within BLOCK_SNAP_M (30 m) — sidewalks sit a few metres off
+     the centerline.
+
+Writes a dense int32 array `edge_block_id[edge_id] = block_id` (−1 if
 unmapped) plus a meta file stamping the topology etag + blocks hash so the server
 (and the deploy cache) can tell when it must be rebuilt.
 
@@ -46,6 +56,11 @@ BLOCKS_FILE = os.environ.get(
 # within this many metres (a sidewalk edge sits ~a few m off the centerline; a
 # foot edge far from any street block legitimately gets no block).
 NEAREST_THRESHOLD_M = float(os.environ.get("BLOCK_SNAP_M", "30"))
+# Pass-0 junction capture radius: midpoints this close to a junction map to the
+# junction's node block regardless of which polygon contains them. Crossing
+# stubs' midpoints run to ~12 m from the junction (measured, NYC midtown), past
+# the 9 m drawn blob rim — capture must reach them or the ladder comes back.
+NODE_CAPTURE_M = float(os.environ.get("NODE_CAPTURE_M", "12"))
 
 
 def _sha256_file(path: str) -> str:
@@ -79,18 +94,47 @@ def main():
     print(f"[edge_blocks] {len(polys)} block polygons from {os.path.basename(BLOCKS_FILE)}")
 
     edge_block = np.full(n_edges, -1, dtype=np.int32)
+    seen = np.zeros(n_edges, dtype=bool)
+
+    # 0) Junction capture — nodes' own mapping rule (see module docstring).
+    captured = 0
+    sidecar = os.path.join(
+        _SERVER, city.data_dir, f"node_clusters_{NETWORK}.npz")
+    if os.path.exists(sidecar):
+        from scipy.spatial import cKDTree
+        nc = np.load(sidecar)
+        jn_idx, jn_block = nc["node_idx"], nc["block_id"]
+        # Same local-metres frame as the generators.
+        s_, w_, n_, e_ = city.bbox
+        mlat = 111_320.0
+        mlon = 111_320.0 * math.cos(math.radians((s_ + n_) / 2))
+        nodes_arr = np.asarray(nodes, dtype=np.float64)
+        jxy = np.column_stack(((nodes_arr[jn_idx, 1] - w_) * mlon,
+                               (nodes_arr[jn_idx, 0] - s_) * mlat))
+        mxy = np.column_stack(((lon - w_) * mlon, (lat - s_) * mlat))
+        dist, nearest_j = cKDTree(jxy).query(mxy, workers=-1)
+        cap = dist <= NODE_CAPTURE_M
+        edge_block[cap] = jn_block[nearest_j[cap]]
+        seen |= cap
+        captured = int(cap.sum())
+        print(f"[edge_blocks] junction capture: {captured} edges "
+              f"(<= {NODE_CAPTURE_M:.0f}m of a junction)")
+    else:
+        print(f"[edge_blocks] no node-cluster sidecar ({os.path.basename(sidecar)}) "
+              "— skipping junction capture")
 
     # 1) Containment: polygon that contains the midpoint (vectorized). shapely's
     # STRtree applies the predicate as input.predicate(tree_geom), so a point is
     # "within" the polygon (NOT polygon "contains" point, which would be false).
-    in_idx, tree_idx = tree.query(pts, predicate="within")
+    in_idx, tree_idx = tree.query(pts[~seen], predicate="within")
     # If a midpoint is in multiple blocks (shared boundary), first wins.
-    seen = np.zeros(n_edges, dtype=bool)
+    uncap_ids = np.where(~seen)[0]
     for pi, ti in zip(in_idx, tree_idx):
-        if not seen[pi]:
-            edge_block[pi] = block_ids[ti]
-            seen[pi] = True
-    contained = int(seen.sum())
+        ei = uncap_ids[pi]
+        if not seen[ei]:
+            edge_block[ei] = block_ids[ti]
+            seen[ei] = True
+    contained = int(seen.sum()) - captured
 
     # 2) Nearest-within-threshold for the rest.
     missing = np.where(~seen)[0]
@@ -117,17 +161,19 @@ def main():
         "blocks_sha256": _sha256_file(BLOCKS_FILE),
         "blocks_file": os.path.basename(BLOCKS_FILE),
         "mapped_edges": snapped,
+        "captured_junction": captured,
         "contained": contained,
-        "snapped_nearest": snapped - contained,
+        "snapped_nearest": snapped - contained - captured,
         "unmapped": n_edges - snapped,
         "block_snap_m": NEAREST_THRESHOLD_M,
+        "node_capture_m": NODE_CAPTURE_M,
     }
     json.dump(meta, open(os.path.join(out_dir, f"edge_blocks_{NETWORK}.json"), "w"), indent=2)
 
     print(f"[edge_blocks] mapped {snapped}/{n_edges} edges "
-          f"({100*snapped/n_edges:.1f}%): {contained} contained + "
-          f"{snapped-contained} snapped(<{NEAREST_THRESHOLD_M:.0f}m); "
-          f"{n_edges-snapped} unmapped")
+          f"({100*snapped/n_edges:.1f}%): {captured} junction-captured + "
+          f"{contained} contained + {snapped-contained-captured} "
+          f"snapped(<{NEAREST_THRESHOLD_M:.0f}m); {n_edges-snapped} unmapped")
     print(f"[edge_blocks] wrote {npy}")
 
 

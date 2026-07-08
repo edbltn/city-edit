@@ -29,12 +29,18 @@ brew install tippecanoe
 ./build_city_blocks.sh <city-id>            # or: refresh_osm.py --city <id> --blocks
 ```
 
-The script runs: procedural street blocks → `build_node_blocks.py` (one 12 m
-disc block per walk-graph junction, punched out of the street blocks so a route
-never selects a perpendicular street's block at an intersection) → edge→block
-bake (pass 1) → `build_foot_blocks.py` for the uncovered edges (park paths,
-plazas — severed at the junction discs so each path segment is its own block;
-makes the mapping **total**) → final bake → `blocks.pmtiles`. Artifacts land
+The script runs: procedural street blocks → `build_node_blocks.py` (a 9 m disc
+per walk-graph junction, overlapping discs merged into one multi-node block per
+junction cluster, punched out of the street blocks so a route never selects a
+perpendicular street's block at an intersection; also writes the
+junction→block sidecar `node_clusters_<network>.npz`) → edge→block bake
+(pass 1) → `build_foot_blocks.py` for the uncovered edges (park paths, plazas —
+severed at the junction blocks so each path segment is its own block; makes the
+mapping **total**) → final bake → `blocks.pmtiles`. Node blocks get their own
+MAPPING rule in the bake, separate from the polygons: any edge whose midpoint
+is within `NODE_CAPTURE_M` (12 m) of a junction maps to that junction's block
+by graph distance — stub midpoints run past the 9 m drawn rim, and capture is
+what holds the ladder at zero. Artifacts land
 next to the graph (`osm_data/<city>/edge_blocks_<network>.npy/.json`,
 `blocks.pmtiles`); the bake stamps the graph's `topology_etag`, so rebuilding
 the graph invalidates the mapping and the script must re-run.

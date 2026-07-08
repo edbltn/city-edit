@@ -125,8 +125,12 @@ def main():
         })
         next_id += 1
 
-    tmp = blocks_path + ".tmp"
-    json.dump(fc, open(tmp, "w")); os.replace(tmp, blocks_path)
+    # pid-unique tmp: a stale sibling process fighting over one shared ".tmp"
+    # interleaves writes and corrupts the output on os.replace.
+    tmp = f"{blocks_path}.tmp{os.getpid()}"
+    with open(tmp, "w") as fh:
+        json.dump(fc, fh)
+    os.replace(tmp, blocks_path)
     print(f"[foot] appended {len(parts)} foot blocks → {os.path.basename(blocks_path)} "
           f"(now {len(feats)} total)")
 

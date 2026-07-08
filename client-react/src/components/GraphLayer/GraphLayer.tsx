@@ -532,13 +532,20 @@ function targetLatLng(
  * edge_votes length when the dimensions aren't present (older server).
  */
 function votesMatchTopology(
-  voteData: { n_edges?: number; n_nodes?: number; edge_votes?: unknown[] },
+  voteData: { n_edges?: number; n_nodes?: number; n_blocks?: number;
+    edge_votes?: unknown[]; block_votes?: unknown[] },
   topology: GraphTopology | null,
 ): boolean {
   if (!topology) return false;
   const nEdges = voteData.n_edges ?? voteData.edge_votes?.length;
   if (nEdges != null && nEdges !== topology.nEdges) return false;
   if (voteData.n_nodes != null && voteData.n_nodes !== topology.nNodes) return false;
+  // Block ids renumber on every blocks re-bake (SAME topology etag), so a body
+  // built against a different block set colors the wrong polygons.
+  const nBlocks = voteData.n_blocks ?? voteData.block_votes?.length;
+  if (nBlocks != null && topology.nBlocks != null && nBlocks !== topology.nBlocks) {
+    return false;
+  }
   return true;
 }
 
@@ -1744,16 +1751,27 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       // 2. Paint immediately from cached votes (same graph version only) so the
       //    heatmap appears without waiting on the network. Skipped when the
       //    topology was freshly downloaded, since edge indices may have shifted.
+      //    The body must also match the CURRENT block set — block ids renumber
+      //    on every blocks re-bake under the SAME topology etag, and a
+      //    pre-re-bake body paints the wrong polygons (node blocks dark, e.g.)
+      //    which live deltas then layer onto instead of healing.
       if (usedCachedTopology && version) {
         const cachedVotes = await getCachedVotes<Partial<GraphData>>(getMapSlug() || themeMode, version);
         if (cancelled) return;
-        if (cachedVotes) {
+        const blocksMatch = cachedVotes
+          && (cachedVotes.blocks_version ?? null) === blocksVersion
+          && votesMatchTopology(cachedVotes, topology);
+        if (cachedVotes && blocksMatch) {
           graphDataRef.current = { ...topology, ...cachedVotes };
           lastRevRef.current = cachedVotes.rev ?? 0;
           setVoteTypeMap(cachedVotes.vote_types);
           broadcastBlockVotes(cachedVotes);
           refreshGraphDisplayRef.current();
           setHeatmapLoaded();
+        } else if (cachedVotes) {
+          dwarn("votes", "ignoring cached votes: stale block set", {
+            cached: cachedVotes.blocks_version, live: blocksVersion,
+          });
         }
       }
 

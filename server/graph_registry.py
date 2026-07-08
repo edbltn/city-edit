@@ -219,6 +219,19 @@ class CityGraph:
     def has_blocks(self) -> bool:
         return self.edge_block_id is not None
 
+    def blocks_stamp(self) -> int | None:
+        """Cheap block-set version usable WITHOUT loading the graph: the baked
+        mapping's mtime (a stat). Block ids renumber on every re-bake under the
+        SAME topology etag and revision, so anything HTTP-cached that carries
+        block arrays must fold this into its validator — else a re-bake 304s
+        clients onto a body whose block ids color the wrong polygons."""
+        npy = os.path.join(os.path.dirname(__file__), self.city.data_dir,
+                           f"edge_blocks_{self.network}.npy")
+        try:
+            return int(os.stat(npy).st_mtime)
+        except OSError:
+            return None
+
     def topology_binary(self) -> bytes:
         """Compact little-endian binary topology — the mobile-safe wire format.
 

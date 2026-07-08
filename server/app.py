@@ -1687,7 +1687,11 @@ def graph_votes():
     # the graph — ensure_loaded() on a cold instance took 10s+ and rode P95.
     mode = request.args.get("mode") or None
     rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
-    etag = f'"v-{rmap.slug}-{mode or "all"}-{rev}"'
+    # blocks_stamp (a stat, no graph load) rides in the validator: a blocks
+    # re-bake renumbers block ids WITHOUT bumping rev, and a 304 would pin
+    # clients on a body whose block_votes index the previous block set.
+    bstamp = rmap.graph.blocks_stamp()
+    etag = f'"v-{rmap.slug}-{mode or "all"}-{rev}{f"-b{bstamp}" if bstamp else ""}"'
     if request.headers.get("If-None-Match") == etag:
         resp = app.response_class(status=304)
         resp.headers["ETag"] = etag
