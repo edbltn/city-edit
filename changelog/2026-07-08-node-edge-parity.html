@@ -92,11 +92,12 @@
   <header class="masthead">
     <div class="kicker">City Edit · Change log</div>
     <h1>Node/edge parity — the ends of every segment belong to their nodes</h1>
-    <div class="dateline">2026-07-08 · branch <code>fix/unify-voting</code> · commit <code>b47a197</code></div>
+    <div class="dateline">2026-07-08 · branch <code>fix/unify-voting</code> · commits <code>b47a197</code> + <code>52a567b</code></div>
   </header>
 
   <nav class="toc"><a href="#parity">1</a>
 <a href="#hoverclick">2</a>
+<a href="#hijack">3</a>
     <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
   </nav>
 
@@ -145,6 +146,25 @@
     </section>
     
 
+    <section class="card" id="hijack">
+      <div class="tag">GraphLayer · pinned effect</div>
+      <h2>3 · The pinned effect's transforms hijacked interactive clicks (Eric's junction)</h2>
+      <h3>Symptom</h3>
+      <p>Field-caught after the parity work shipped: hovering the 72nd Street Transverse &amp; East Drive junction showed the node (“No votes yet”), but clicking it pinned “East Drive &amp; 72nd Street Transverse · 1 proposal · Improve sidewalk” and highlighted the neighbouring street's whole block corridor in white. The resolver had carried the hovered node correctly — something AFTER it swapped the selection.</p>
+      <h3>Root cause</h3>
+      <ul><li>The pinned effect applies post-resolution transforms meant for deep links: proposal reconciliation (a target that isn't a winner edge re-snaps to the nearest winner MIDPOINT within 8 m — built for shared URLs that name a proposal only by its midpoint coords) and the node→strongest-proposal-edge upgrade. The junction node sat within 8 m of the East Drive proposal's midpoint, so reconciliation replaced it.</li>
+<li>They fired on interactive clicks because a plain map click stores the RAW click latlng (the snap path only records drags), so nothing marked the pin as user-made.</li>
+<li>The acceptance harness was blind to all of it: <code>debugState("pinnedTarget")</code> recorded the PRE-transform resolution, so the probe said “node” while the UI showed the hijacked proposal. The 20/20 pass was real for the resolver layer only.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Interactive-pin detection: a new map <code>click</code> listener records the raw click coords verbatim; a pin at exactly those coords is a live click (<code>clickMatch</code>), alongside the existing drag-carried <code>snapMatch</code>. Link-derived pins (URL parse → different doubles) can never match.</li>
+<li>Both transforms now run for link-derived pins ONLY. An interactive pin resolves through the SAME gated resolver hover uses — including “nothing far from the graph”, so a click on open parkland places a free waypoint and pins no card, exactly what hover showed.</li>
+<li>Sticky reselection near an open card is now touch-only for interactive pins: with a cursor, hover already showed the new target, so keeping the old one would contradict it.</li>
+<li><code>debugState("pinnedTarget")</code> moved to AFTER all transforms — the probe now reports what the card and highlight actually show, so no harness can be fooled the same way again.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
   <section class="card verify" id="verify">
     <div class="tag">Verification</div>
     <h2>What was run</h2>
@@ -153,7 +173,8 @@
 <li>28/30 exact-on-junction hovers resolve to that junction node; the 2 exceptions are cross-block-boundary re-derivations (the sampled point and the node's own coordinate sit in different block polygons) — the documented reason selection carries its target instead of re-resolving stored coordinates. Hover=click is unaffected.</li>
 <li>Deterministic replay of the one run-3 miss proved the sticky-annulus divergence: the click URL gained a <code>,f73b5cd68</code> forced-corridor token — a proposal link, not a failed pin.</li>
 <li>Chrome 148 headless is frame-dead on this machine (rAF never ticks → MapLibre never fires load); the harness pins Chrome 138. In-tab synthetic clicks in a hidden window are untrustworthy (intensive timer throttling froze commits and produced 15 bogus "mismatches" — all with the pin frozen at one stale value).</li>
-<li><code>tsc --noEmit</code> clean.</li></ul>
+<li><code>tsc --noEmit</code> clean.</li>
+<li>Follow-up (52a567b), after Eric field-caught the junction hijack: his exact flow replayed headless (z18, <code>vt=Improve+sidewalk</code>, click the 72nd St Transverse &amp; East Drive junction) — hover node 15956 → pin node 15956; his slat/slng deep link still reconciles to proposal edge 37544; 20-click acceptance re-run with the now-honest post-transform probe: 20/20 hover=pin, 3/3 in-bounds far-from-graph clicks pin nothing. Pooled node/edge split across honest runs: 32/28.</li></ul>
   </section>
 
   <section class="card checklist" id="checklist">
@@ -173,7 +194,7 @@
     
         <details open>
           <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
-            <span class="stat"><span class="d-add">+176</span> / <span class="d-del">-184</span></span>
+            <span class="stat"><span class="d-add">+243</span> / <span class="d-del">-202</span></span>
           </summary>
           
     <div class="ctx">
@@ -203,7 +224,7 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
-<span class="d-meta">index e0a4d52..5e325cd 100644</span>
+<span class="d-meta">index e0a4d52..cb149f5 100644</span>
 <span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
 <span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
 <span class="d-hunk">@@ -206,14 +206,23 @@ function resolveAddress(</span>
@@ -304,14 +325,14 @@
 <span class="d-add">+ *   2. maxEdgeDistPx === Infinity (always-resolve callers) with no eligible</span>
 <span class="d-add">+ *      edge: the nearest eligible node, uncapped — a block whose only</span>
 <span class="d-add">+ *      member is a node is still selectable from anywhere in its polygon.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Radius-bounded callers (the off-polygon waypoint snap and drag preview)</span>
+<span class="d-add">+ * use the SNAP_EDGE_PX default so dragging stays free far from the graph;</span>
+<span class="d-add">+ * resolveSelection passes Infinity so a selection always resolves.</span>
 <span class="d-ctx">  *</span>
 <span class="d-del">- * With spatial indices: each loop runs over the top-k bbox-nearest candidates</span>
 <span class="d-del">- * (typically &lt;30 per call) instead of all nodes/edges. Path-drag fires this</span>
 <span class="d-del">- * on every mousemove via the snap closure, so this is the hot path.</span>
-<span class="d-add">+ * Radius-bounded callers (the off-polygon waypoint snap and drag preview)</span>
-<span class="d-add">+ * use the SNAP_EDGE_PX default so dragging stays free far from the graph;</span>
-<span class="d-add">+ * resolveSelection passes Infinity so a selection always resolves.</span>
-<span class="d-add">+ *</span>
 <span class="d-add">+ * With spatial indices each scan touches only the top-k bbox-nearest</span>
 <span class="d-add">+ * candidates (typically &lt;30 per call) instead of all nodes/edges. Path-drag</span>
 <span class="d-add">+ * fires this on every mousemove via the snap closure, so this is the hot path.</span>
@@ -338,7 +359,11 @@
 <span class="d-del">-      bestNode = i;</span>
 <span class="d-del">-    }</span>
 <span class="d-del">-  };</span>
-<span class="d-del">-</span>
+<span class="d-add">+  const nodeResult = (i: number): HitResult =&gt; ({</span>
+<span class="d-add">+    target: { kind: &quot;node&quot;, index: i },</span>
+<span class="d-add">+    snapLat: nodeLat(data, i), snapLng: nodeLon(data, i),</span>
+<span class="d-add">+  });</span>
+<span class="d-ctx"> </span>
 <span class="d-del">-  if (nodeIndex) {</span>
 <span class="d-del">-    const candidates = nodeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K, Infinity, allowNode);</span>
 <span class="d-del">-    for (const i of candidates) checkNode(i);</span>
@@ -348,11 +373,7 @@
 <span class="d-del">-      checkNode(i);</span>
 <span class="d-del">-    }</span>
 <span class="d-del">-  }</span>
-<span class="d-add">+  const nodeResult = (i: number): HitResult =&gt; ({</span>
-<span class="d-add">+    target: { kind: &quot;node&quot;, index: i },</span>
-<span class="d-add">+    snapLat: nodeLat(data, i), snapLng: nodeLon(data, i),</span>
-<span class="d-add">+  });</span>
-<span class="d-ctx"> </span>
+<span class="d-del">-</span>
 <span class="d-del">-  // 2. Edges — project onto segment for snap position</span>
 <span class="d-add">+  // 1. Nearest edge within maxEdgeDistPx.</span>
 <span class="d-ctx">   let bestEdge: number | null = null;</span>
@@ -715,14 +736,147 @@
 <span class="d-add">+        const hit = resolveDragSnapRef.current(e.latlng.lat, e.latlng.lng);</span>
 <span class="d-ctx">         if (hit) {</span>
 <span class="d-ctx">           const snapPos = { lat: hit.snapLat, lng: hit.snapLng };</span>
-<span class="d-ctx">           onSnapRef.current?.(snapPos);</span></pre>
+<span class="d-ctx">           onSnapRef.current?.(snapPos);</span>
+<span class="d-hunk">@@ -2943,6 +2935,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   }, [map]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Track pinned tooltip screen position on map pan/zoom</span>
+<span class="d-add">+  // The last live map click, recorded verbatim. A pinned point whose coords</span>
+<span class="d-add">+  // equal it was placed by an in-app click (plain clicks store the RAW click</span>
+<span class="d-add">+  // latlng — the snap path only records drags), as opposed to a deep link /</span>
+<span class="d-add">+  // history restore, whose coords come from URL parsing and can never be the</span>
+<span class="d-add">+  // same doubles. The pinned effect uses this to tell interactive pins (hover</span>
+<span class="d-add">+  // already told the user what they&#x27;re selecting — honour it verbatim) from</span>
+<span class="d-add">+  // link-derived pins (a bare lat/lng that may need proposal reconciliation).</span>
+<span class="d-add">+  const lastMapClickRef = useRef&lt;{ lat: number; lng: number } | null&gt;(null);</span>
+<span class="d-add">+  useEffect(() =&gt; {</span>
+<span class="d-add">+    const onClick = (e: L.LeafletMouseEvent) =&gt; {</span>
+<span class="d-add">+      lastMapClickRef.current = { lat: e.latlng.lat, lng: e.latlng.lng };</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+    map.on(&quot;click&quot;, onClick);</span>
+<span class="d-add">+    return () =&gt; { map.off(&quot;click&quot;, onClick); };</span>
+<span class="d-add">+  }, [map]);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   const pinnedLat = pinnedPoint?.lat ?? null;</span>
+<span class="d-ctx">   const pinnedLng = pinnedPoint?.lng ?? null;</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -2973,14 +2981,27 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     const snapMatch = !hadOverride &amp;&amp; lastSnap != null &amp;&amp;</span>
+<span class="d-ctx">       Math.abs(lastSnap.snapLat - pinnedLat) &lt; 1e-9 &amp;&amp;</span>
+<span class="d-ctx">       Math.abs(lastSnap.snapLng - pinnedLng) &lt; 1e-9;</span>
+<span class="d-add">+    // Interactive = this point was placed by a live gesture in THIS session: a</span>
+<span class="d-add">+    // drag that recorded its snap resolution, or a plain click whose raw coords</span>
+<span class="d-add">+    // the map click listener recorded. Everything else (deep link, history</span>
+<span class="d-add">+    // restore, address search) is link-derived.</span>
+<span class="d-add">+    const lastClick = lastMapClickRef.current;</span>
+<span class="d-add">+    const clickMatch = !hadOverride &amp;&amp; lastClick != null &amp;&amp;</span>
+<span class="d-add">+      lastClick.lat === pinnedLat &amp;&amp; lastClick.lng === pinnedLng;</span>
+<span class="d-add">+    const interactive = snapMatch || clickMatch;</span>
+<span class="d-add">+    // Interactive pins resolve through the SAME gated resolver hover uses —</span>
+<span class="d-add">+    // including its &quot;nothing far from the graph&quot; answer, where the click</span>
+<span class="d-add">+    // placed a free waypoint and hover showed nothing, so nothing may pin.</span>
+<span class="d-add">+    // Only link-derived pins use resolveSelection&#x27;s always-resolve contract.</span>
+<span class="d-ctx">     const sel = snapMatch</span>
+<span class="d-ctx">       ? lastSnap</span>
+<span class="d-del">-      : resolveSelection(pinnedLat, pinnedLng, pinnedEdgeOverrideRef.current);</span>
+<span class="d-add">+      : clickMatch</span>
+<span class="d-add">+        ? resolveDragSnapRef.current(pinnedLat, pinnedLng)</span>
+<span class="d-add">+        : resolveSelection(pinnedLat, pinnedLng, pinnedEdgeOverrideRef.current);</span>
+<span class="d-ctx">     pinnedEdgeOverrideRef.current = null;</span>
+<span class="d-ctx">     let target = sel?.target ?? null;</span>
+<span class="d-ctx">     dlog(&quot;cast&quot;, `pinned resolve @${pinnedLat.toFixed(5)},${pinnedLng.toFixed(5)}`,</span>
+<span class="d-del">-      { hadOverride, snapMatch, target, voteEdgeId: sel?.voteEdgeId });</span>
+<span class="d-del">-    debugState(&quot;pinnedTarget&quot;, target);</span>
+<span class="d-add">+      { hadOverride, snapMatch, clickMatch, target, voteEdgeId: sel?.voteEdgeId });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     // Drop the edge-lock the moment the point itself moves (a click/drag sets new</span>
+<span class="d-ctx">     // coords); a re-run at the SAME coords (vote tick / winners load) keeps it.</span>
+<span class="d-hunk">@@ -3000,28 +3021,39 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     // includes every station on a station network, where each station IS a top</span>
+<span class="d-ctx">     // proposal even with no net-positive votes (so it isn&#x27;t in `winners`).</span>
+<span class="d-ctx">     //</span>
+<span class="d-del">-    // Skip entirely when an override was set: an indicator click and the</span>
+<span class="d-del">-    // re-pin in castProposalVote both name an EXACT edge to keep selected. A</span>
+<span class="d-del">-    // vote can momentarily drop that edge out of the spaced `winners` list, so</span>
+<span class="d-del">-    // without this guard isProposalTarget reads false and reconciliation re-snaps</span>
+<span class="d-del">-    // the modal onto a neighbouring winner — the selection appears to jump to a</span>
+<span class="d-add">+    // Skip when an override was set: an indicator click and the re-pin in</span>
+<span class="d-add">+    // castProposalVote both name an EXACT edge to keep selected. A vote can</span>
+<span class="d-add">+    // momentarily drop that edge out of the spaced `winners` list, so without</span>
+<span class="d-add">+    // this guard isProposalTarget reads false and reconciliation re-snaps the</span>
+<span class="d-add">+    // modal onto a neighbouring winner — the selection appears to jump to a</span>
+<span class="d-ctx">     // different proposal the instant you vote.</span>
+<span class="d-add">+    //</span>
+<span class="d-add">+    // Skip equally for INTERACTIVE pins (a live click or drag): hover already</span>
+<span class="d-add">+    // told the user exactly what they are selecting — hover must equal the</span>
+<span class="d-add">+    // pin, verbatim. Reconciliation is for link-derived pins only, where a</span>
+<span class="d-add">+    // bare lat/lng is all the URL gives us: a point that was shared AS a</span>
+<span class="d-add">+    // proposal midpoint should reconcile to that proposal even if the raw</span>
+<span class="d-add">+    // resolve lands elsewhere. (Regression this guards against: clicking a</span>
+<span class="d-add">+    // junction node within 8 m of a winner&#x27;s midpoint hijacked the selection</span>
+<span class="d-add">+    // onto the neighbouring street&#x27;s proposal — flipped-name card, wrong</span>
+<span class="d-add">+    // block highlighted.)</span>
+<span class="d-ctx">     const isProposalTarget = target?.kind === &quot;edge&quot;</span>
+<span class="d-ctx">       &amp;&amp; (isStationNetwork || winners.some((w) =&gt; w.edgeIdx === target!.index));</span>
+<span class="d-del">-    if (!hadOverride &amp;&amp; !isProposalTarget) {</span>
+<span class="d-add">+    if (!hadOverride &amp;&amp; !interactive &amp;&amp; !isProposalTarget) {</span>
+<span class="d-ctx">       const snapped = nearestProposalEdgeIndex(pinnedLat, pinnedLng, 8);</span>
+<span class="d-ctx">       if (snapped !== null) target = { kind: &quot;edge&quot;, index: snapped };</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    // Node → proposal-edge upgrade. A node modal merges the proposals of every</span>
+<span class="d-del">-    // incident edge, but a vote lands on one edge — so selecting an intersection</span>
+<span class="d-del">-    // (a map click that snaps to a node, or a deep link whose slat/slng IS a</span>
+<span class="d-del">-    // node&#x27;s coords) voted an arbitrary incident edge and then collapsed onto it.</span>
+<span class="d-del">-    // Resolve a node that has proposals to the edge owning its strongest one, so</span>
+<span class="d-del">-    // the selection is an edge throughout. Bare intersections (no proposals) stay</span>
+<span class="d-del">-    // a node — their modal is just an unvotable &quot;No votes yet&quot; preview.</span>
+<span class="d-add">+    // Node → proposal-edge upgrade — link-derived pins only, same reasoning.</span>
+<span class="d-add">+    // A shared link whose slat/slng IS a node&#x27;s coords was probably minted from</span>
+<span class="d-add">+    // a proposal view, so resolve the node to the edge owning its strongest</span>
+<span class="d-add">+    // proposal (a node modal merges incident proposals but a vote lands on one</span>
+<span class="d-add">+    // edge). An INTERACTIVE click on a node pins the node exactly as hovered —</span>
+<span class="d-add">+    // its vote still lands on voteEdgeId (adjShortestInBlock) by the per-edge</span>
+<span class="d-add">+    // storage rule; only the TARGET must match hover. Bare intersections stay</span>
+<span class="d-add">+    // a node either way — their modal is an unvotable &quot;No votes yet&quot; preview.</span>
+<span class="d-ctx">     let didNodeUpgrade = false;</span>
+<span class="d-del">-    if (target?.kind === &quot;node&quot;) {</span>
+<span class="d-add">+    if (!interactive &amp;&amp; target?.kind === &quot;node&quot;) {</span>
+<span class="d-ctx">       const up = strongestProposalEdgeForNode(target.index);</span>
+<span class="d-ctx">       if (up !== null) { target = { kind: &quot;edge&quot;, index: up }; didNodeUpgrade = true; }</span>
+<span class="d-ctx">     }</span>
+<span class="d-hunk">@@ -3034,7 +3066,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     // within STICKY_RESELECT_PX of the currently-pinned feature (point-to-segment</span>
+<span class="d-ctx">     // for edges), keep that feature. A direct indicator click (override) always</span>
+<span class="d-ctx">     // wins, so you can still jump to another proposal by tapping its icon.</span>
+<span class="d-del">-    if (!hadOverride &amp;&amp; prevTarget &amp;&amp; target &amp;&amp;</span>
+<span class="d-add">+    // TOUCH ONLY: on a hover-capable device an interactive click means hover</span>
+<span class="d-add">+    // already showed the user the new target — keeping the old one would make</span>
+<span class="d-add">+    // the pin contradict hover. Touch has no hover to honour, so sloppy re-taps</span>
+<span class="d-add">+    // near the open card still stick to it there.</span>
+<span class="d-add">+    const canHover = window.matchMedia(&quot;(hover: hover)&quot;).matches;</span>
+<span class="d-add">+    if (!hadOverride &amp;&amp; !(interactive &amp;&amp; canHover) &amp;&amp; prevTarget &amp;&amp; target &amp;&amp;</span>
+<span class="d-ctx">         (prevTarget.kind !== target.kind || prevTarget.index !== target.index)) {</span>
+<span class="d-ctx">       const gd = graphDataRef.current;</span>
+<span class="d-ctx">       const onFeature = gd &amp;&amp; (prevTarget.kind === &quot;edge&quot;</span>
+<span class="d-hunk">@@ -3061,6 +3098,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     pinnedTargetRef.current = target;</span>
+<span class="d-add">+    // The probe records the FINAL target, after reconciliation/upgrade/sticky/</span>
+<span class="d-add">+    // lock — what the card and highlight actually show. Recording the raw</span>
+<span class="d-add">+    // resolution here once masked a hover≠pin hijack from the test harness.</span>
+<span class="d-add">+    debugState(&quot;pinnedTarget&quot;, target);</span>
+<span class="d-ctx">     // Lock once settled on a proposal edge (override pin, a winner, or a node</span>
+<span class="d-ctx">     // upgraded to its strongest proposal edge), so subsequent vote-driven</span>
+<span class="d-ctx">     // re-resolves hold this exact edge. A node-upgrade target may not be a spaced</span></pre>
         </details>
         
   </section>
 
   <footer>
     Generated from <code>changelog/changes-node-parity.diff</code> by <code>changelog/build_node_parity_report.py</code>.
-    Regenerate with <code>git diff b47a197^..b47a197 &gt; changelog/changes-node-parity.diff &amp;&amp;
+    Regenerate with <code>git diff b47a197^..52a567b -- client-react &gt; changelog/changes-node-parity.diff &amp;&amp;
     python changelog/build_node_parity_report.py</code>.
   </footer>
 </div>

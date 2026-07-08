@@ -40,8 +40,14 @@
     and the node index left the hot path. Hover and click also share one gated resolver end to end
     (sticky proposal → block hierarchy → radius-bounded → nothing far from the graph), closing two
     hover≠click gaps: far-from-graph hover highlighting what a click can't pin, and the top-proposal
-    sticky annulus showing a graph node while the click links to the proposal. Acceptance: 20 random
-    clicks on test-central-park → 10 nodes / 10 edges, 20/20 pins identical to hover.</p>
+    sticky annulus showing a graph node while the click links to the proposal. Follow-up, field-caught
+    at the 72nd St Transverse junction: the pinned effect's deep-link transforms (8m proposal-midpoint
+    reconciliation, node→proposal-edge upgrade) hijacked interactive clicks after the resolver had
+    carried the hovered node correctly — and the harness missed it because the probe recorded the
+    pre-transform target. Transforms are now link-derived-pins only (a live click or drag is detected
+    via recorded raw click coords / snap coords and pins verbatim through the gated hover resolver),
+    and the probe reports the final post-transform target. Acceptance: 20/20 pins identical to hover,
+    far-from-graph clicks pin nothing, pooled node/edge split 32/28.</p>
   </a>
 
   <a class="entry" href="./2026-07-08-top-proposal-kinds.html">

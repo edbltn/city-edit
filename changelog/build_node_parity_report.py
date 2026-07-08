@@ -129,6 +129,45 @@ SECTIONS = [
         ],
         "files": ["client-react/src/components/GraphLayer/GraphLayer.tsx"],
     },
+    {
+        "id": "hijack",
+        "tag": "GraphLayer · pinned effect",
+        "title": "3 · The pinned effect's transforms hijacked interactive clicks (Eric's junction)",
+        "symptom": (
+            "Field-caught after the parity work shipped: hovering the 72nd Street Transverse &amp; East "
+            "Drive junction showed the node (“No votes yet”), but clicking it pinned “East Drive &amp; "
+            "72nd Street Transverse · 1 proposal · Improve sidewalk” and highlighted the neighbouring "
+            "street's whole block corridor in white. The resolver had carried the hovered node "
+            "correctly — something AFTER it swapped the selection."
+        ),
+        "cause": [
+            "The pinned effect applies post-resolution transforms meant for deep links: proposal "
+            "reconciliation (a target that isn't a winner edge re-snaps to the nearest winner MIDPOINT "
+            "within 8 m — built for shared URLs that name a proposal only by its midpoint coords) and "
+            "the node→strongest-proposal-edge upgrade. The junction node sat within 8 m of the East "
+            "Drive proposal's midpoint, so reconciliation replaced it.",
+            "They fired on interactive clicks because a plain map click stores the RAW click latlng "
+            "(the snap path only records drags), so nothing marked the pin as user-made.",
+            "The acceptance harness was blind to all of it: <code>debugState(\"pinnedTarget\")</code> "
+            "recorded the PRE-transform resolution, so the probe said “node” while the UI showed the "
+            "hijacked proposal. The 20/20 pass was real for the resolver layer only.",
+        ],
+        "fixes": [
+            "Interactive-pin detection: a new map <code>click</code> listener records the raw click "
+            "coords verbatim; a pin at exactly those coords is a live click (<code>clickMatch</code>), "
+            "alongside the existing drag-carried <code>snapMatch</code>. Link-derived pins (URL parse "
+            "→ different doubles) can never match.",
+            "Both transforms now run for link-derived pins ONLY. An interactive pin resolves through "
+            "the SAME gated resolver hover uses — including “nothing far from the graph”, so a click "
+            "on open parkland places a free waypoint and pins no card, exactly what hover showed.",
+            "Sticky reselection near an open card is now touch-only for interactive pins: with a "
+            "cursor, hover already showed the new target, so keeping the old one would contradict it.",
+            "<code>debugState(\"pinnedTarget\")</code> moved to AFTER all transforms — the probe now "
+            "reports what the card and highlight actually show, so no harness can be fooled the same "
+            "way again.",
+        ],
+        "files": ["client-react/src/components/GraphLayer/GraphLayer.tsx"],
+    },
 ]
 
 VERIFY = [
@@ -147,6 +186,12 @@ VERIFY = [
     "(intensive timer throttling froze commits and produced 15 bogus \"mismatches\" — all with the "
     "pin frozen at one stale value).",
     "<code>tsc --noEmit</code> clean.",
+    "Follow-up (52a567b), after Eric field-caught the junction hijack: his exact flow replayed "
+    "headless (z18, <code>vt=Improve+sidewalk</code>, click the 72nd St Transverse &amp; East Drive "
+    "junction) — hover node 15956 → pin node 15956; his slat/slng deep link still reconciles to "
+    "proposal edge 37544; 20-click acceptance re-run with the now-honest post-transform probe: "
+    "20/20 hover=pin, 3/3 in-bounds far-from-graph clicks pin nothing. Pooled node/edge split across "
+    "honest runs: 32/28.",
 ]
 
 CHECKLIST = [
@@ -385,7 +430,7 @@ def main():
   <header class="masthead">
     <div class="kicker">City Edit · Change log</div>
     <h1>{TITLE}</h1>
-    <div class="dateline">{DATE} · branch <code>fix/unify-voting</code> · commit <code>b47a197</code></div>
+    <div class="dateline">{DATE} · branch <code>fix/unify-voting</code> · commits <code>b47a197</code> + <code>52a567b</code></div>
   </header>
 
   <nav class="toc">{nav}
@@ -424,7 +469,7 @@ def main():
 
   <footer>
     Generated from <code>changelog/changes-node-parity.diff</code> by <code>changelog/build_node_parity_report.py</code>.
-    Regenerate with <code>git diff b47a197^..b47a197 &gt; changelog/changes-node-parity.diff &amp;&amp;
+    Regenerate with <code>git diff b47a197^..52a567b -- client-react &gt; changelog/changes-node-parity.diff &amp;&amp;
     python changelog/build_node_parity_report.py</code>.
   </footer>
 </div>
