@@ -141,12 +141,13 @@
 <li>The degenerate cases the old merge pass fixed post-hoc run as a topological fixpoint before any geometry: driveway-class stubs (≤ 25 m, one junction) melt into their junction; a junction touching ≤ 1 corridor isn't a junction and dissolves into it.</li>
 <li><strong>Geometry is generated FROM the groups</strong>: a junction cell is the union of 8 m discs at its member nodes plus its captured edges' tubes; a corridor is the union of its member edges buffered by per-road-class half-width, minus the junction cells (junctions win). A corridor edge left entirely inside junction cells is reassigned to the cell containing its midpoint — membership follows the final geometry.</li>
 <li>A build-time audit proves both invariants and stamps them into the meta: test-cp bakes <strong>72,924/72,924 edges mapped (100%)</strong> and <strong>72,924/72,924 member edges touching their polygon (100%)</strong> — was 96.6% / 85.5%. Runs in the server venv alone (no osmnx/geopandas geo venv needed).</li>
-<li>First iteration used the old clipped-Voronoi discs for junction cells and audited at 85.5% overlap — the radius cap + bisector clipping cut members out of their own cells. That measured failure is what drove cells to be generated from their members too.</li></ul>
+<li>First iteration used the old clipped-Voronoi discs for junction cells and audited at 85.5% overlap — the radius cap + bisector clipping cut members out of their own cells. That measured failure is what drove cells to be generated from their members too.</li>
+<li><strong>Field-caught follow-up (Eric's screenshot at Terrace/West Drive):</strong> a junction cluster that captures NO edges (a simple path fork — all incident edges belong to corridors) used to still get a cell polygon. An edge-less cell can never hold or display a vote, so the pin's tooltip said “No votes yet” while the selection ring and proposal card belonged to a corridor outside the blob. Such clusters (484 on test-cp) now get no cell — the corridors' own tubes cover the fork, so the junction area lights with whichever corridor actually holds the votes, and hovering there resolves inside the polygon you're pointing at. Zero edge-less blocks remain (counted as <code>empty_junctions_skipped</code> in the meta).</li></ul>
       <h3>Diffs — files touched (click to expand)</h3>
       
         <details>
           <summary><span class="fname">server/streetscape_blocks/build_blocks_graph_first.py</span>
-            <span class="stat"><span class="d-add">+482</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+494</span> / <span class="d-del">-0</span></span>
           </summary>
           
     <div class="ctx">
@@ -177,10 +178,10 @@
     
           <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_blocks_graph_first.py b/server/streetscape_blocks/build_blocks_graph_first.py</span>
 <span class="d-meta">new file mode 100644</span>
-<span class="d-meta">index 0000000..fc973ed</span>
+<span class="d-meta">index 0000000..8e25dd7</span>
 <span class="d-meta">--- /dev/null</span>
 <span class="d-meta">+++ b/server/streetscape_blocks/build_blocks_graph_first.py</span>
-<span class="d-hunk">@@ -0,0 +1,482 @@</span>
+<span class="d-hunk">@@ -0,0 +1,494 @@</span>
 <span class="d-add">+<span class="s-com">#!/usr/bin/env python3</span></span>
 <span class="d-add">+<span class="s-str">&quot;&quot;&quot;Graph-first block builder — grouping first, geometry from the groups.</span></span>
 <span class="d-add">+</span>
@@ -511,8 +512,17 @@
 <span class="d-add">+                                    cap_style=<span class="s-str">&quot;round&quot;</span>, join_style=<span class="s-str">&quot;round&quot;</span>))</span>
 <span class="d-add">+</span>
 <span class="d-add">+    <span class="s-com"># Junction cells: member-node discs ∪ captured-edge tubes — every member</span></span>
-<span class="d-add">+    <span class="s-com"># is inside its own cell by construction.</span></span>
-<span class="d-add">+    live_cl = [k <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters) <span class="s-kw">if</span> cluster_alive[k]]</span>
+<span class="d-add">+    <span class="s-com"># is inside its own cell by construction. A cluster that captured NO edges</span></span>
+<span class="d-add">+    <span class="s-com"># gets no cell at all: an empty cell could never hold or display a vote</span></span>
+<span class="d-add">+    <span class="s-com"># (votes live on edges), so any interaction inside it would resolve to a</span></span>
+<span class="d-add">+    <span class="s-com"># NEIGHBOURING block&#x27;s edge — a polygon that says &quot;no votes&quot; while its</span></span>
+<span class="d-add">+    <span class="s-com"># corridors sit lit around it. The surrounding corridors&#x27; own tubes cover</span></span>
+<span class="d-add">+    <span class="s-com"># the fork instead (they meet at the shared endpoint), so the junction</span></span>
+<span class="d-add">+    <span class="s-com"># area lights with whichever corridor actually holds the votes.</span></span>
+<span class="d-add">+    cap_count = np.<span class="s-fn">bincount</span>(edge_cluster[edge_cluster &gt;= <span class="s-num">0</span>], minlength=n_clusters)</span>
+<span class="d-add">+    empty_junctions = <span class="s-fn">sum</span>(<span class="s-num">1</span> <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters)</span>
+<span class="d-add">+                          <span class="s-kw">if</span> cluster_alive[k] <span class="s-kw">and</span> cap_count[k] == <span class="s-num">0</span>)</span>
+<span class="d-add">+    live_cl = [k <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters) <span class="s-kw">if</span> cluster_alive[k] <span class="s-kw">and</span> cap_count[k] &gt; <span class="s-num">0</span>]</span>
 <span class="d-add">+    cells = []</span>
 <span class="d-add">+    <span class="s-kw">for</span> k <span class="s-kw">in</span> live_cl:</span>
 <span class="d-add">+        discs = <span class="s-fn">shp_buffer</span>(shapely.<span class="s-fn">points</span>(node_xy[cl_members[k]]), <span class="s-type">NODE_R_M</span>,</span>
@@ -562,8 +572,10 @@
 <span class="d-add">+        <span class="s-kw">if</span> <span class="s-kw">not</span> stay <span class="s-kw">and</span> c <span class="s-kw">in</span> corr_polys:</span>
 <span class="d-add">+            <span class="s-kw">del</span> corr_polys[c]</span>
 <span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] geometry: {len(corr_polys)} corridor tubes, {len(cells)} &quot;</span></span>
-<span class="d-add">+          <span class="s-str">f&quot;junction cells; {reassigned} intersection-interior edges moved to &quot;</span></span>
-<span class="d-add">+          <span class="s-str">f&quot;their junction cell ({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+          <span class="s-str">f&quot;junction cells ({empty_junctions} edge-less clusters skipped — &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;corridor tubes cover those forks); {reassigned} intersection-&quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;interior edges moved to their junction cell &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
 <span class="d-add">+</span>
 <span class="d-add">+    <span class="s-com"># ── 5. Emit: dense block ids, geojson + npy + meta ─────────────────────</span></span>
 <span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">to_ll</span>(geom):</span>
@@ -651,6 +663,7 @@
 <span class="d-add">+        <span class="s-str">&quot;stubs_merged&quot;</span>: stubs_merged,</span>
 <span class="d-add">+        <span class="s-str">&quot;junctions_dissolved&quot;</span>: junctions_dissolved,</span>
 <span class="d-add">+        <span class="s-str">&quot;edges_reassigned_to_cells&quot;</span>: reassigned,</span>
+<span class="d-add">+        <span class="s-str">&quot;empty_junctions_skipped&quot;</span>: empty_junctions,</span>
 <span class="d-add">+        <span class="s-str">&quot;edges_overlap_ok&quot;</span>: overlapping, <span class="s-str">&quot;edges_overlap_checked&quot;</span>: checked,</span>
 <span class="d-add">+        <span class="s-str">&quot;node_capture_len_m&quot;</span>: <span class="s-type">NODE_CAPTURE_LEN_M</span>, <span class="s-str">&quot;stub_max_m&quot;</span>: <span class="s-type">STUB_MAX_M</span>,</span>
 <span class="d-add">+        <span class="s-str">&quot;width_scale&quot;</span>: <span class="s-type">WIDTH_SCALE</span>,</span>
@@ -810,7 +823,7 @@
       
         <details>
           <summary><span class="fname">server/streetscape_blocks/build_blocks_graph_first.py</span>
-            <span class="stat"><span class="d-add">+482</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+494</span> / <span class="d-del">-0</span></span>
           </summary>
           
     <div class="ctx">
@@ -841,10 +854,10 @@
     
           <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_blocks_graph_first.py b/server/streetscape_blocks/build_blocks_graph_first.py</span>
 <span class="d-meta">new file mode 100644</span>
-<span class="d-meta">index 0000000..fc973ed</span>
+<span class="d-meta">index 0000000..8e25dd7</span>
 <span class="d-meta">--- /dev/null</span>
 <span class="d-meta">+++ b/server/streetscape_blocks/build_blocks_graph_first.py</span>
-<span class="d-hunk">@@ -0,0 +1,482 @@</span>
+<span class="d-hunk">@@ -0,0 +1,494 @@</span>
 <span class="d-add">+<span class="s-com">#!/usr/bin/env python3</span></span>
 <span class="d-add">+<span class="s-str">&quot;&quot;&quot;Graph-first block builder — grouping first, geometry from the groups.</span></span>
 <span class="d-add">+</span>
@@ -1175,8 +1188,17 @@
 <span class="d-add">+                                    cap_style=<span class="s-str">&quot;round&quot;</span>, join_style=<span class="s-str">&quot;round&quot;</span>))</span>
 <span class="d-add">+</span>
 <span class="d-add">+    <span class="s-com"># Junction cells: member-node discs ∪ captured-edge tubes — every member</span></span>
-<span class="d-add">+    <span class="s-com"># is inside its own cell by construction.</span></span>
-<span class="d-add">+    live_cl = [k <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters) <span class="s-kw">if</span> cluster_alive[k]]</span>
+<span class="d-add">+    <span class="s-com"># is inside its own cell by construction. A cluster that captured NO edges</span></span>
+<span class="d-add">+    <span class="s-com"># gets no cell at all: an empty cell could never hold or display a vote</span></span>
+<span class="d-add">+    <span class="s-com"># (votes live on edges), so any interaction inside it would resolve to a</span></span>
+<span class="d-add">+    <span class="s-com"># NEIGHBOURING block&#x27;s edge — a polygon that says &quot;no votes&quot; while its</span></span>
+<span class="d-add">+    <span class="s-com"># corridors sit lit around it. The surrounding corridors&#x27; own tubes cover</span></span>
+<span class="d-add">+    <span class="s-com"># the fork instead (they meet at the shared endpoint), so the junction</span></span>
+<span class="d-add">+    <span class="s-com"># area lights with whichever corridor actually holds the votes.</span></span>
+<span class="d-add">+    cap_count = np.<span class="s-fn">bincount</span>(edge_cluster[edge_cluster &gt;= <span class="s-num">0</span>], minlength=n_clusters)</span>
+<span class="d-add">+    empty_junctions = <span class="s-fn">sum</span>(<span class="s-num">1</span> <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters)</span>
+<span class="d-add">+                          <span class="s-kw">if</span> cluster_alive[k] <span class="s-kw">and</span> cap_count[k] == <span class="s-num">0</span>)</span>
+<span class="d-add">+    live_cl = [k <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters) <span class="s-kw">if</span> cluster_alive[k] <span class="s-kw">and</span> cap_count[k] &gt; <span class="s-num">0</span>]</span>
 <span class="d-add">+    cells = []</span>
 <span class="d-add">+    <span class="s-kw">for</span> k <span class="s-kw">in</span> live_cl:</span>
 <span class="d-add">+        discs = <span class="s-fn">shp_buffer</span>(shapely.<span class="s-fn">points</span>(node_xy[cl_members[k]]), <span class="s-type">NODE_R_M</span>,</span>
@@ -1226,8 +1248,10 @@
 <span class="d-add">+        <span class="s-kw">if</span> <span class="s-kw">not</span> stay <span class="s-kw">and</span> c <span class="s-kw">in</span> corr_polys:</span>
 <span class="d-add">+            <span class="s-kw">del</span> corr_polys[c]</span>
 <span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] geometry: {len(corr_polys)} corridor tubes, {len(cells)} &quot;</span></span>
-<span class="d-add">+          <span class="s-str">f&quot;junction cells; {reassigned} intersection-interior edges moved to &quot;</span></span>
-<span class="d-add">+          <span class="s-str">f&quot;their junction cell ({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+          <span class="s-str">f&quot;junction cells ({empty_junctions} edge-less clusters skipped — &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;corridor tubes cover those forks); {reassigned} intersection-&quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;interior edges moved to their junction cell &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
 <span class="d-add">+</span>
 <span class="d-add">+    <span class="s-com"># ── 5. Emit: dense block ids, geojson + npy + meta ─────────────────────</span></span>
 <span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">to_ll</span>(geom):</span>
@@ -1315,6 +1339,7 @@
 <span class="d-add">+        <span class="s-str">&quot;stubs_merged&quot;</span>: stubs_merged,</span>
 <span class="d-add">+        <span class="s-str">&quot;junctions_dissolved&quot;</span>: junctions_dissolved,</span>
 <span class="d-add">+        <span class="s-str">&quot;edges_reassigned_to_cells&quot;</span>: reassigned,</span>
+<span class="d-add">+        <span class="s-str">&quot;empty_junctions_skipped&quot;</span>: empty_junctions,</span>
 <span class="d-add">+        <span class="s-str">&quot;edges_overlap_ok&quot;</span>: overlapping, <span class="s-str">&quot;edges_overlap_checked&quot;</span>: checked,</span>
 <span class="d-add">+        <span class="s-str">&quot;node_capture_len_m&quot;</span>: <span class="s-type">NODE_CAPTURE_LEN_M</span>, <span class="s-str">&quot;stub_max_m&quot;</span>: <span class="s-type">STUB_MAX_M</span>,</span>
 <span class="d-add">+        <span class="s-str">&quot;width_scale&quot;</span>: <span class="s-type">WIDTH_SCALE</span>,</span>
@@ -1671,7 +1696,8 @@
   <section class="card verify" id="verify">
     <div class="tag">Verification</div>
     <h2>What was run</h2>
-    <ul><li>Three build iterations on <code>test-cp</code>: v1 (clipped-Voronoi junction cells) audited 100% mapped / <strong>85.5%</strong> overlap → v2 (cells from member discs + captured tubes, corridor-edge reassignment) → <strong>100% / 100%</strong> → v3 (junction disc radius 10 m → 8 m after visual review; still 100% / 100%). Audit numbers are stamped in <code>edge_blocks_streets.json</code> (<code>edges_overlap_ok / edges_overlap_checked</code>).</li>
+    <ul><li>Four build iterations on <code>test-cp</code>: v1 (clipped-Voronoi junction cells) audited 100% mapped / <strong>85.5%</strong> overlap → v2 (cells from member discs + captured tubes, corridor-edge reassignment) → <strong>100% / 100%</strong> → v3 (junction disc radius 10 m → 8 m after visual review; still 100% / 100%) → v4 (edge-less junction clusters get no cell; still 100% / 100%, 9,552 blocks). Audit numbers are stamped in <code>edge_blocks_streets.json</code> (<code>edges_overlap_ok / edges_overlap_checked</code>).</li>
+<li>Empty-cell fix verified at the reported fork (40.76830, −73.97823, node 5979): before — pin inside block 8746 (<code>road_class=node, n_edges=0</code>), tooltip “No votes yet”, ring on a corridor outside the blob; after — the point sits inside the three corridor tubes (513/519/541) that own the fork's edges, zero <code>n_edges=0</code> features in the whole set, and the pin's card shows the fork's proposal with its votes.</li>
 <li>tippecanoe runs clean after the 1-based ids (the <em>“Can't represent too-large feature ID 0”</em> warning is gone); a decoded z15 tile shows every feature carrying its native id == block_id.</li>
 <li>Flask restarted on the new artifacts: <code>/api/graph-votes?map=test-central-park</code> serves <code>n_blocks 10035</code>, new <code>blocks_version 4e80935f…</code>, and the block aggregate auto-rebuilt (2,199 blocks lit from existing votes — every voted edge now has a lit block).</li>
 <li>Browser (the request's URL): heat renders as continuous corridor tubes + junction cells along voted routes; console <code>[topo] ready … 9948 blocks</code> → 10035 after the radius iteration.</li>

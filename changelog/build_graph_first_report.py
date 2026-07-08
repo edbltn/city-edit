@@ -82,6 +82,14 @@ SECTIONS = [
             "First iteration used the old clipped-Voronoi discs for junction cells and audited at 85.5% "
             "overlap — the radius cap + bisector clipping cut members out of their own cells. That measured "
             "failure is what drove cells to be generated from their members too.",
+            "<strong>Field-caught follow-up (Eric's screenshot at Terrace/West Drive):</strong> a junction "
+            "cluster that captures NO edges (a simple path fork — all incident edges belong to corridors) "
+            "used to still get a cell polygon. An edge-less cell can never hold or display a vote, so the "
+            "pin's tooltip said “No votes yet” while the selection ring and proposal card belonged to a "
+            "corridor outside the blob. Such clusters (484 on test-cp) now get no cell — the corridors' own "
+            "tubes cover the fork, so the junction area lights with whichever corridor actually holds the "
+            "votes, and hovering there resolves inside the polygon you're pointing at. Zero edge-less "
+            "blocks remain (counted as <code>empty_junctions_skipped</code> in the meta).",
         ],
         "files": [
             "server/streetscape_blocks/build_blocks_graph_first.py",
@@ -158,11 +166,17 @@ SECTIONS = [
 ]
 
 VERIFY = [
-    "Three build iterations on <code>test-cp</code>: v1 (clipped-Voronoi junction cells) audited "
+    "Four build iterations on <code>test-cp</code>: v1 (clipped-Voronoi junction cells) audited "
     "100% mapped / <strong>85.5%</strong> overlap → v2 (cells from member discs + captured tubes, "
     "corridor-edge reassignment) → <strong>100% / 100%</strong> → v3 (junction disc radius 10 m → 8 m "
-    "after visual review; still 100% / 100%). Audit numbers are stamped in "
+    "after visual review; still 100% / 100%) → v4 (edge-less junction clusters get no cell; still "
+    "100% / 100%, 9,552 blocks). Audit numbers are stamped in "
     "<code>edge_blocks_streets.json</code> (<code>edges_overlap_ok / edges_overlap_checked</code>).",
+    "Empty-cell fix verified at the reported fork (40.76830, −73.97823, node 5979): before — pin inside "
+    "block 8746 (<code>road_class=node, n_edges=0</code>), tooltip “No votes yet”, ring on a corridor "
+    "outside the blob; after — the point sits inside the three corridor tubes (513/519/541) that own the "
+    "fork's edges, zero <code>n_edges=0</code> features in the whole set, and the pin's card shows the "
+    "fork's proposal with its votes.",
     "tippecanoe runs clean after the 1-based ids (the <em>“Can't represent too-large feature ID 0”</em> "
     "warning is gone); a decoded z15 tile shows every feature carrying its native id == block_id.",
     "Flask restarted on the new artifacts: <code>/api/graph-votes?map=test-central-park</code> serves "

@@ -328,8 +328,17 @@ def main():
                                     cap_style="round", join_style="round"))
 
     # Junction cells: member-node discs ∪ captured-edge tubes — every member
-    # is inside its own cell by construction.
-    live_cl = [k for k in range(n_clusters) if cluster_alive[k]]
+    # is inside its own cell by construction. A cluster that captured NO edges
+    # gets no cell at all: an empty cell could never hold or display a vote
+    # (votes live on edges), so any interaction inside it would resolve to a
+    # NEIGHBOURING block's edge — a polygon that says "no votes" while its
+    # corridors sit lit around it. The surrounding corridors' own tubes cover
+    # the fork instead (they meet at the shared endpoint), so the junction
+    # area lights with whichever corridor actually holds the votes.
+    cap_count = np.bincount(edge_cluster[edge_cluster >= 0], minlength=n_clusters)
+    empty_junctions = sum(1 for k in range(n_clusters)
+                          if cluster_alive[k] and cap_count[k] == 0)
+    live_cl = [k for k in range(n_clusters) if cluster_alive[k] and cap_count[k] > 0]
     cells = []
     for k in live_cl:
         discs = shp_buffer(shapely.points(node_xy[cl_members[k]]), NODE_R_M,
@@ -379,8 +388,10 @@ def main():
         if not stay and c in corr_polys:
             del corr_polys[c]
     print(f"[gf] geometry: {len(corr_polys)} corridor tubes, {len(cells)} "
-          f"junction cells; {reassigned} intersection-interior edges moved to "
-          f"their junction cell ({time.time()-t0:.0f}s)", flush=True)
+          f"junction cells ({empty_junctions} edge-less clusters skipped — "
+          f"corridor tubes cover those forks); {reassigned} intersection-"
+          f"interior edges moved to their junction cell "
+          f"({time.time()-t0:.0f}s)", flush=True)
 
     # ── 5. Emit: dense block ids, geojson + npy + meta ─────────────────────
     def to_ll(geom):
@@ -468,6 +479,7 @@ def main():
         "stubs_merged": stubs_merged,
         "junctions_dissolved": junctions_dissolved,
         "edges_reassigned_to_cells": reassigned,
+        "empty_junctions_skipped": empty_junctions,
         "edges_overlap_ok": overlapping, "edges_overlap_checked": checked,
         "node_capture_len_m": NODE_CAPTURE_LEN_M, "stub_max_m": STUB_MAX_M,
         "width_scale": WIDTH_SCALE,
