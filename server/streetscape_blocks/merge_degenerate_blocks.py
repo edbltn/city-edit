@@ -401,11 +401,58 @@ def main():
           f"dropped, {regenerated} phantom geometries regenerated from edges",
           flush=True)
 
-    # ── Dense renumber over the survivors, then write ────────────────────────
-    new_id_of_root = {r: i for i, (r, _, _) in enumerate(out_feats)}
-    feats_json = []
+    # ── Contiguity pass: a block is ALWAYS one connected polygon ─────────────
+    # Disjoint geometry (a band severed by a punched cell, a tube cut by a
+    # street cell, satellite pieces from merges) EXPLODES into one block per
+    # part; member edges are re-partitioned by midpoint (containment, else
+    # nearest part); parts left with no members drop.
+    mid_lon_deg = (nodes[ends[:, 0], 1] + nodes[ends[:, 1], 1]) / 2.0
+    mid_lat_deg = (nodes[ends[:, 0], 0] + nodes[ends[:, 1], 0]) / 2.0
+    final_entries = []   # (props, geom_mapping, member_edge_ids ndarray)
+    split_blocks = 0
+    split_parts_dropped = 0
     for r, props, geom in out_feats:
-        props["block_id"] = new_id_of_root[r]
+        eids = edges_of_root[int(r)]
+        shp = make_valid(shp_shape(geom))
+        parts = [p for p in shapely.get_parts(shp)
+                 if p.geom_type == "Polygon" and p.area > 0]
+        if len(parts) == 0:
+            continue  # degenerate geometry, nothing real to draw
+        if len(parts) == 1:
+            # Normalize: even a "single-part" original can be a MultiPolygon
+            # JSON with zero-area siblings — always emit the one real Polygon.
+            final_entries.append((props, mapping(parts[0]), eids))
+            continue
+        split_blocks += 1
+        pts = shapely.points(mid_lon_deg[eids], mid_lat_deg[eids])
+        # containment first, nearest part for the rest — every edge stays owned
+        part_of = np.full(len(eids), -1, dtype=np.int64)
+        tree_p = shapely.STRtree(parts)
+        got_i, got_p = tree_p.query(pts, predicate="within")
+        part_of[got_i] = got_p
+        rest = np.where(part_of < 0)[0]
+        if len(rest):
+            part_of[rest] = tree_p.nearest(pts[rest])
+        for k, part in enumerate(parts):
+            members = eids[part_of == k]
+            if len(members) == 0:
+                split_parts_dropped += 1
+                continue
+            p2 = dict(props)
+            p2["n_split"] = len(parts)
+            p2["area_m2"] = round(part.area * mlat * mlon, 1)
+            final_entries.append((p2, mapping(part), members))
+    if split_blocks:
+        print(f"[merge] contiguity pass: {split_blocks} disjoint blocks "
+              f"exploded into parts ({split_parts_dropped} empty parts "
+              f"dropped)", flush=True)
+
+    # ── Dense renumber; edge mapping comes straight from feature membership ──
+    feats_json = []
+    new_ebid = np.full(len(ebid), -1, dtype=np.int32)
+    for i, (props, geom, eids) in enumerate(final_entries):
+        props["block_id"] = i
+        new_ebid[eids] = i
         feats_json.append({"type": "Feature", "properties": props, "geometry": geom})
 
     dst_path = os.path.join(blocks_dir, f"blocks_final_{CITY}.geojson")
@@ -417,11 +464,6 @@ def main():
           f"({len(feats_json)} features, {merged_geoms} unions) "
           f"({time.time()-t0:.0f}s)", flush=True)
 
-    # ── Remap the bake to final ids ──────────────────────────────────────────
-    remap = np.full(n_blocks, -1, dtype=np.int32)
-    for r, i in new_id_of_root.items():
-        remap[r] = i
-    new_ebid = np.where(edge_root >= 0, remap[np.maximum(edge_root, 0)], -1).astype(np.int32)
     np.save(npy_path, new_ebid)
 
     meta.update({

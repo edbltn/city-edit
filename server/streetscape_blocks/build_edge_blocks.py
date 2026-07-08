@@ -53,6 +53,7 @@ from shapely.geometry import shape  # noqa: E402
 
 from cities import CITIES  # noqa: E402
 from graph_registry import CityGraph  # noqa: E402
+from road_classes import STREET_CLASSES  # noqa: E402
 
 CITY = os.environ.get("CITY", "nyc")
 NETWORK = os.environ.get("NETWORK", "streets")
@@ -62,8 +63,13 @@ BLOCKS_FILE = os.environ.get(
 )
 # Assign an edge to the nearest block when none contains its midpoint, but only
 # within this many metres (a sidewalk edge sits ~a few m off the centerline; a
-# foot edge far from any street block legitimately gets no block).
+# foot edge far from any street block legitimately gets no block). Foot-class
+# edges get a much tighter radius: a park path running parallel to (or bridging
+# over) a road 15-30 m away is NOT part of that street — 30 m snapping stole
+# those paths into street bands (and their forks then adopted in as detached
+# satellite bubbles, breaking block contiguity).
 NEAREST_THRESHOLD_M = float(os.environ.get("BLOCK_SNAP_M", "30"))
+NEAREST_FOOT_M = float(os.environ.get("BLOCK_SNAP_FOOT_M", "12"))
 # Pass-0 cross-cluster capture length: an edge between members of two DIFFERENT
 # clusters is captured only when this short (crosswalks over a wide avenue run
 # ~15-30 m corner to corner; anything longer is a real segment, not a stub).
@@ -234,7 +240,8 @@ def main():
             print(f"[edge_blocks] cluster fallback: {cluster_fallback} "
                   "leftover intra-junction edges")
 
-    # 4) Nearest-within-threshold for the rest.
+    # 4) Nearest-within-threshold for the rest (class-aware radius).
+    rc_arr = np.array([str(e[3]) if len(e) > 3 else "" for e in edges])
     missing = np.where(~seen)[0]
     if len(missing):
         nearest = tree.nearest(pts[missing])
@@ -244,7 +251,9 @@ def main():
             d_deg = poly.distance(pts[pi])  # degrees
             # convert to metres at this latitude
             m_per_deg = 111_320 * max(0.1, math.cos(math.radians(lat[pi])))
-            if d_deg * m_per_deg <= NEAREST_THRESHOLD_M:
+            limit = (NEAREST_THRESHOLD_M if rc_arr[pi] in STREET_CLASSES
+                     else NEAREST_FOOT_M)
+            if d_deg * m_per_deg <= limit:
                 edge_block[pi] = block_ids[ti]
     snapped = int((edge_block >= 0).sum())
 

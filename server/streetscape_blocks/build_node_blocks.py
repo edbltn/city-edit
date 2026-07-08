@@ -81,22 +81,10 @@ MAX_RADIUS_M = float(os.environ.get("NODE_BLOCK_MAX_RADIUS_M", "28"))
 # Disc base is a 24-gon: plenty round at these radii, keeps the tiles small.
 DISC_SEGS = int(os.environ.get("NODE_BLOCK_DISC_SEGS", "24"))
 
-# Road classes that make a junction a STREET junction. Junction capture (the
-# "ladder" fix — see build_edge_blocks.py) only applies at street junctions:
-# capturing at pure-foot forks (park paths, greenways) shredded the path
-# network into node-cell confetti — a fork between two footpaths has no
-# perpendicular street block to protect. The flag ships per cluster in the
+# Road classes that make a junction a STREET junction (shared with the bake —
+# see road_classes.py for the rationale). The flag ships per cluster in the
 # node_clusters sidecar.
-STREET_CLASSES = {
-    "motorway", "motorway_link", "trunk", "trunk_link", "primary",
-    "primary_link", "secondary", "secondary_link", "tertiary", "tertiary_link",
-    "residential", "living_street", "unclassified", "service", "busway",
-    # NOT "pedestrian": plaza streets (Broadway through Flatiron/Times Sq) are
-    # walking fabric — flagging their forks as street junctions turned the
-    # plazas into captured-junction mush instead of a path network. A real
-    # cross street at a plaza still flags its own junctions (it has
-    # street-class edges), so the ladder guard is preserved where it matters.
-}
+from road_classes import STREET_CLASSES  # noqa: E402
 
 _DISC_ANGLES = np.linspace(0.0, 2.0 * np.pi, DISC_SEGS, endpoint=False)
 
