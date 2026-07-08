@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the junction-node disc blocks changelog report.
+"""Generate the junction-cluster blocks (round 2) changelog report.
 
 Run from repo root: python changelog/build_node_blocks_report.py
 Reads changelog/changes-node-clusters.diff
@@ -64,27 +64,30 @@ SECTIONS = [
         "tag": "Blocks pipeline · merged clusters",
         "title": "1 · Overlapping discs merge into one block per junction cluster",
         "symptom": (
-            "At high zoom, intersections drew as 2-3 STACKED circles, and the street bands showed bite "
-            "marks that lined up with no visible circle (your two screenshots)."
+            "At high zoom, intersections drew as 2–3 stacked circles (your screenshots on Flatbush Ave), "
+            "and the street bands showed bite-marks that lined up with no visible circle."
         ),
         "cause": [
             "A physical intersection is MANY OSM junction nodes — centerline node, crossing ends, sidewalk "
-            "corners: 94% of NYC's 415,967 junctions have another within 24 m (1.24M overlapping pairs). One "
-            "12 m disc per node meant stacks of overlapping circles.",
-            "The “misaligned cutouts” were the same bug seen from the other side: a street band's notch was "
-            "cut by an INVISIBLE sibling disc of the same intersection (unselected blocks draw nothing), so "
-            "the bite appeared to belong to nobody.",
+            "corners: measured on the NYC walk graph, <strong>94.2%</strong> of junctions have another "
+            "junction within 24 m (1.24M overlapping pairs), so one 12 m disc per node stacked several "
+            "circles per corner.",
+            "The “misaligned cutouts” were the SAME bug seen from the other side: bites cut by invisible "
+            "sibling discs (unselected, transparent fill) of the same intersection — the notch never had a "
+            "visible circle to line up with.",
         ],
         "fixes": [
-            "Per your design: discs whose radii overlap map to the SAME block — union-find over centre pairs "
-            "&lt; 2R, one merged blob per cluster (<code>road_class=\"node\"</code>, <code>n_nodes</code>), "
-            "radius down from 12 m to <strong>9 m</strong>. NYC: 415,967 discs → <strong>99,535 cluster "
-            "blocks</strong>; 248,428 blocks total.",
-            "Whole-intersection blobs also fix the visual: one knot per intersection, and every cutout is "
-            "filled by its own (selectable, lightable) blob.",
-            "Streets were re-generated from the pristine step-1 output before re-punching — the previous 12 m "
-            "holes would otherwise have left a 3 m dead ring around every 9 m blob (the in-place geojson edit "
-            "is destructive; noted in the runbook).",
+            "Nodes and edges now have separate block-FORMING logic: each junction contributes a 9 m disc "
+            "(down from 12 — “a bit smaller”), and discs whose centres sit closer than 2R union-find into "
+            "one cluster; each cluster becomes ONE multi-node block (union of member discs, "
+            "<code>n_nodes</code> property). NYC: 415,967 discs → <strong>99,535 cluster blobs</strong> "
+            "(248,428 blocks total).",
+            "Cluster sizes: p50 = 2 nodes, p99 = 19 (an intersection complex), 61 clusters &gt; 50. The 3 "
+            "giants (up to 1,607 nodes, ~300×400 m) are real dense-plaza meshes — WTC/Oculus and Governors "
+            "Island — where junctions genuinely sit &lt; 18 m apart everywhere.",
+            "The blobs are subtracted from the street/foot polygons exactly as before, so blocks stay "
+            "disjoint — but now the subtraction matches ONE drawn shape per intersection: street segments "
+            "end at the blob rim, chain-link style.",
         ],
         "files": [
             "server/streetscape_blocks/build_node_blocks.py",
@@ -94,105 +97,135 @@ SECTIONS = [
     },
     {
         "id": "capture",
-        "tag": "Blocks pipeline · bake",
-        "title": "2 · Nodes get their own mapping rule: 12 m junction capture",
+        "tag": "Bake · junction capture",
+        "title": "2 · Separate node/edge MAPPING logic — capture by graph distance",
         "symptom": (
-            "Shrinking the drawn radius to 9 m would have brought the ladder back: crossing-stub midpoints "
-            "run to 11.9 m from the junction (measured, midtown), so pure midpoint-containment would leak "
-            "~4% of them into perpendicular street bands."
+            "Shrinking the drawn radius to 9 m would have re-admitted the ladder: crossing-stub midpoints "
+            "run to ~12 m from the junction, past the new rim, so midpoint-containment would bake them back "
+            "into perpendicular street blocks."
         ),
         "cause": [
-            "One geometry was doing two jobs: the drawn block shape AND the mapping boundary. The user's "
-            "third ask — separate mapping logic for nodes vs edges — is exactly the decoupling needed.",
+            "The drawn polygon and the mapping rule were the same thing (containment), so the blob size had "
+            "to serve two masters: small enough to look right, big enough to catch stubs.",
         ],
         "fixes": [
-            "The bake gains pass 0, JUNCTION CAPTURE: any edge whose midpoint lies within "
-            "<code>NODE_CAPTURE_M</code> (12 m) of a junction maps to that junction's cluster block by GRAPH "
-            "distance (cKDTree over junction centres), independent of the 9 m drawn rim. The generator writes "
-            "a <code>node_clusters_&lt;network&gt;.npz</code> sidecar (junction node idx → block id) for it.",
-            "Result on the re-bake: 2,073,106 edges junction-captured; 5,351/5,351 midtown-avenue crossing "
-            "stubs land in junction blocks — <strong>0 perpendicular</strong>; the mapping is total "
-            "(0 unmapped of 3.3M).",
-            "Central Park keeps the per-segment grain (179 foot blocks + 1,643 junction blobs; largest foot "
-            "block 5,186 m²).",
+            "The bake now runs a pass-0 <strong>junction capture</strong> BEFORE containment: any edge whose "
+            "midpoint lies within <code>NODE_CAPTURE_M</code> (12 m) of a junction maps to that junction's "
+            "cluster block — by distance to the node, not polygon containment. "
+            "<code>build_node_blocks.py</code> writes the junction→block sidecar "
+            "(<code>node_clusters_&lt;network&gt;.npz</code>) the bake reads.",
+            "Re-measured ladder metric: <strong>5,351 / 5,351</strong> midtown-avenue crossing stubs map to "
+            "their junction's block — 100.0%, 0 perpendicular (was 99.9% under r=12 containment). The "
+            "metric is now a reusable script: <code>eval/eval_ladder.py</code>.",
+            "Final NYC bake is total: 3,299,152 / 3,299,152 mapped (2,073,106 junction-captured + 723,532 "
+            "contained + 502,514 snapped), 0 unmapped.",
         ],
         "files": [
             "server/streetscape_blocks/build_edge_blocks.py",
             "server/streetscape_blocks/build_node_blocks.py",
+            "server/streetscape_blocks/eval/eval_ladder.py",
         ],
     },
     {
         "id": "staleheat",
         "tag": "Client + server · stale heat",
-        "title": "3 · “Nodes not appearing on the heatmap” was a stale-cache class, not rendering",
+        "title": "3 · “Nodes not on the heatmap” was three stale caches, not a paint bug",
         "symptom": (
-            "Voted junction blocks stayed dark on the heatmap — the corridor heat read as a dashed line with "
-            "gaps at every intersection — even though the server's block_votes carried positive counts for "
-            "them (verified: 111 positive node blocks in the payload while the map showed none)."
+            "Node blocks with positive votes stayed dark on the heatmap — the voted corridor drew as dashed "
+            "street rectangles with black gaps at every intersection — while the same discs rendered fine "
+            "when selected."
         ),
         "cause": [
-            "The boot painted block heat from a PRE-RE-BAKE IndexedDB votes body: block ids renumber on every "
-            "re-bake under the SAME topology etag and SAME revision, and the votes cache was validated by "
-            "etag alone. The stale body (147,349 old block ids — node blocks didn't exist in it) painted "
-            "streets correctly (street ids happened to be preserved) and nothing else.",
-            "Live WS deltas then applied on TOP of the stale array instead of healing it (27 lit + 45 from "
-            "the delta = the 72 we kept observing), and the day's graph-votes HTTP cache could 304 a client "
-            "back onto the same stale body since the ETag was rev-scoped only.",
-            "Diagnosis rabbit-holes worth recording: the tiles were fine (a dense z14 tile decodes 2,343 node "
-            "features, zero coalesced), the render path was fine (a debug solid-fill layer painted 8,552 "
-            "discs), and setFeatureState was fine — the array feeding it was simply from another block era.",
+            "Boot painted a PRE-re-bake vote body from IndexedDB: the votes cache is keyed by (slug, "
+            "topology version) and the topology etag doesn't change on a blocks re-bake — the cached "
+            "<code>block_votes</code> (old ids, 147,349 slots, no node blocks) painted streets and left "
+            "every node block dark. Live WS deltas then layered onto the stale array (27 stale + 45 delta = "
+            "the 72 we watched) instead of healing it.",
+            "The authoritative refetch couldn't heal it either: <code>/api/graph-votes</code>' ETag is "
+            "<code>v-&lt;slug&gt;-&lt;mode&gt;-&lt;rev&gt;</code> and rev doesn't bump on a re-bake — the "
+            "browser revalidated, got a <strong>304</strong>, and reused the pre-re-bake body. Verified in "
+            "the tab: in-page fetches returned 171 positive blocks while the app broadcast 72.",
+            "A third copy hid under a drifted IndexedDB key (<code>votes:walkways</code> vs "
+            "<code>votes:nyc-walkways</code> — the boot read resolves <code>getMapSlug() || themeMode</code> "
+            "before the slug settles), so the fresh write never overwrote the stale entry.",
         ],
         "fixes": [
-            "<code>votesMatchTopology</code> also rejects <code>block_votes.length ≠ topology.nBlocks</code>, "
-            "and the boot cache path additionally requires <code>blocks_version</code> equality with the "
-            "live <code>/api/graph-version</code> blocks hash (mismatch logs and falls through to the "
-            "authoritative fetch).",
-            "<code>/api/graph-votes</code>' ETag folds in a blocks mtime stamp "
-            "(<code>graph_registry.blocks_stamp()</code> — a stat, no graph load), so a re-bake busts the "
-            "HTTP validator even though rev didn't change.",
-            "<code>build_foot_blocks</code> writes through a pid-unique tmp file: two pipeline runs fighting "
-            "over one shared <code>.tmp</code> interleaved writes and corrupted the 300&nbsp;MB geojson "
-            "mid-rebuild (NUL runs at byte 308,050,886 — found the hard way).",
+            "<code>votesMatchTopology</code> now also compares <code>n_blocks</code> against the topology, "
+            "and the boot paint additionally requires the cached body's <code>blocks_version</code> to equal "
+            "the live one from /graph-version — stale entries are ignored with a "
+            "<code>[votes] ignoring cached votes: stale block set</code> warning instead of painted.",
+            "The graph-votes ETag now carries a blocks stamp: <code>CityGraph.blocks_stamp()</code> — the "
+            "baked npy's mtime, a stat, so the etag-before-ensure_loaded latency optimization survives — "
+            "producing <code>v-…-16-b1783468989</code>. A re-bake busts every HTTP-cached vote body.",
+            "Verified on a fresh boot: no stale broadcast, one heat broadcast of 117 blocks lit — exactly "
+            "the server's count, node blocks included; the 6th Ave heat trail is a continuous chain "
+            "(junction blobs lit between segments).",
         ],
         "files": [
             "client-react/src/components/GraphLayer/GraphLayer.tsx",
             "server/app.py",
             "server/graph_registry.py",
+        ],
+    },
+    {
+        "id": "ops",
+        "tag": "Pipeline ops",
+        "title": "4 · Two pipeline landmines found the hard way",
+        "symptom": (
+            "One aborted run + one concurrent run corrupted blocks_generic_nyc.geojson (valid JSON followed "
+            "by trailing garbage), and a re-run against the already-punched file clipped 0 street blocks — "
+            "leaving 3 m dead rings between the old 12 m holes and the new 9 m blobs."
+        ),
+        "cause": [
+            "Both generator scripts wrote through ONE shared <code>.tmp</code> path — a stopped run's "
+            "surviving python interleaved with the new run's writer on the same file, and os.replace raced.",
+            "<code>build_node_blocks.py</code> punches holes into the street features IN PLACE: it can drop "
+            "stale node/foot FEATURES on re-run, but it cannot restore street geometry — so a radius change "
+            "requires re-running from step 1's pristine output.",
+        ],
+        "fixes": [
+            "Atomic writes hardened: pid-unique tmp names + explicit close in both generators.",
+            "Recovered the pristine June-18 geojson from the 17:29 APFS local snapshot (Time Machine) — "
+            "twice — and re-ran clean. The in-place gotcha is documented in the module docstring, README, "
+            "and the project memory.",
+        ],
+        "files": [
+            "server/streetscape_blocks/build_node_blocks.py",
             "server/streetscape_blocks/build_foot_blocks.py",
         ],
     },
 ]
 
 VERIFY = [
-    "Ladder metric on the re-baked mapping (now also a checked-in eval, "
-    "<code>eval/eval_ladder.py</code>): 5,351/5,351 midtown-avenue crossing stubs → junction blocks, "
-    "0 perpendicular, 0 unmapped city-wide.",
-    "Cluster stats: 415,967 junctions → 99,535 cluster blobs (largest 1,607 nodes — a park mesh); "
-    "248,428 blocks total; blocks.pmtiles 39.5 MB.",
-    "Central Park bbox: 179 per-segment foot blocks (max 5,186 m²) + 1,643 junction blobs.",
-    "Live on <code>/m/nyc-walkways</code>: the 7th Ave route selects a clean 94-block corridor with single "
-    "knots at intersections (no stacked circles); the 6th Ave heat trail is CONTINUOUS — junction blobs lit "
-    "between street segments where the dashes used to be (screenshots in-session).",
-    "Boot staleness: fresh topology fetched under the new blocks hash (248,428 blocks logged), the earlier "
-    "cast re-projected onto the new ids by the bver-marker bagg rebuild (route card still shows the +1, "
-    "+ button pressed), and mode buckets self-heal (walkways=2 rebuilds on its next fetch).",
-    "Suites green: server 47/47, client 195/195, tsc clean.",
+    "Ladder metric (now <code>eval/eval_ladder.py</code>): 5,351 / 5,351 midtown-avenue crossing stubs → "
+    "their junction's block; 0 perpendicular, 0 same-street leakage.",
+    "Cluster stats: 99,535 blobs from 415,967 junctions (p50 = 2, p99 = 19 nodes); final bake total — "
+    "3,299,152 / 3,299,152 edges (2,073,106 captured / 723,532 contained / 502,514 snapped, 0 unmapped); "
+    "248,428 blocks.",
+    "Fresh boot console: topology 248,428 blocks under the new <code>-bin2-7b5f927a521aeb95</code> cache "
+    "key; NO stale vote broadcast; a single heat broadcast of 117 blocks lit = the server's positive count "
+    "(57 node blocks among them).",
+    "Live screenshots: the 6th Ave voted corridor renders as a continuous chain — lit street segments with "
+    "lit junction blobs between them (the dashes are gone); the 7th Ave selection shows ONE knot per "
+    "intersection, street bands ending exactly at the blob rims (no stacked circles, no orphan bites).",
+    "graph-votes ETag observed as <code>\"v-nyc-walkways-walk-16-b1783468989\"</code> — the blocks stamp "
+    "busts 304s after any re-bake.",
+    "Suites green: client 191/191 (tsc clean), server unit 47/47.",
 ]
 
 CHECKLIST = [
-    "Zoom deep into any Manhattan intersection: ONE merged knot, no stacked circles, and the street bands "
-    "should end exactly at the knot's rim (no floating bite marks, no dead ring).",
-    "Re-run your two screenshot views (Flatbush/Grand Army Plaza and the midtown corridor): both should "
-    "read as single blobs per intersection.",
-    "Cast + on a route, then Clear: the heat trail must be CONTINUOUS through intersections — lit junction "
-    "knots between lit street segments, no dashes.",
-    "Hard-reload once and watch the console: <code>[topo] ready … 248428 blocks</code>, and if an old votes "
-    "body was cached you should see <code>ignoring cached votes: stale block set</code> once, then the "
-    "authoritative heat.",
-    "Hover a lit junction knot: the whole intersection highlights as one block; its tooltip sums the "
-    "cluster's votes.",
-    "Other cities still need <code>./build_city_blocks.sh &lt;city&gt;</code> re-runs before deploy (their "
-    "bakes predate clusters + capture).",
+    "Reload your open tab WITHOUT clearing anything: the heat corridor on 6th Ave must render as a "
+    "continuous chain (segments + junction blobs), not dashes — the stale caches should self-heal.",
+    "Zoom into any intersection on Flatbush (your screenshot spot): ONE blob per intersection, no stacked "
+    "circles, and every bite in the street band should trace the rim of that single blob.",
+    "Cast + on a fresh route and watch the intersections light along with the segments in real time (the "
+    "delta path now lands on cluster ids).",
+    "Hover the WTC/Oculus area: expect a plaza-sized junction block (1,607-node cluster) — flag it if that "
+    "grain bothers you; a max-extent split is the follow-up knob.",
+    "If you ever change NODE_BLOCK_RADIUS_M, re-run from step 1 (build_blocks_generic) — the hole-punching "
+    "is in-place and a smaller radius inside old holes leaves dead rings (documented gotcha).",
+    "Other cities still predate junction blocks entirely — re-run ./build_city_blocks.sh &lt;city&gt; before "
+    "deploying them.",
 ]
 
 
@@ -224,105 +257,107 @@ FILE_CONTEXT = {
     "server/streetscape_blocks/build_node_blocks.py": {
         "on": ["Flask API"],
         "module": ("server · streetscape_blocks", "Layer-2 block generators: street Voronoi, junction clusters, foot fill, edge→block bake"),
-        "file": ("build_node_blocks.py", "~200 LOC — one merged blob per junction cluster + the capture sidecar"),
+        "file": ("build_node_blocks.py", "~215 LOC — junction clusters: discs → union-find merge → clip → sidecar"),
         "outline": [
-            ("module docstring", "REWRITTEN — separate node/edge block-forming logic", True),
+            ("module docstring", "cluster rationale + separate node/edge logic + in-place gotcha", True),
             ("junction_nodes", "unique-neighbour degree ≥ 3 (unchanged)", False),
-            ("cluster_junctions", "NEW — union-find over centre pairs < 2R", True),
-            ("blob build", "NEW — union_all per cluster, r=9 m, n_nodes property", True),
-            ("clip + append", "subtract blobs from street blocks; one feature per cluster", True),
-            ("sidecar write", "NEW — node_clusters_<network>.npz (node_idx → block_id)", True),
+            ("cluster_junctions", "NEW — union-find over cKDTree pairs < 2R", True),
+            ("main — blobs", "9 m discs, union per cluster, n_nodes prop", True),
+            ("main — clip + append + sidecar", "subtract blobs; write node_clusters_<network>.npz", True),
         ],
         "blocks": [
-            "cluster_junctions — path-compressed union-find over cKDTree.query_pairs(2R)",
-            "per-cluster union_all of member discs; lowest member node idx as node_id",
-            "np.savez sidecar aligned blob-order → first_blob_id + k",
+            "cluster_junctions — path-compressed union-find over query_pairs(r=2R)",
+            "one blob per cluster: union_all(member discs) → road_class=node, node_id, n_nodes",
+            "sidecar npz: node_idx[junctions] → block_id (the bake's capture table)",
+            "pid-unique tmp + explicit close on the atomic write",
         ],
     },
     "server/streetscape_blocks/build_edge_blocks.py": {
         "on": ["Flask API"],
         "module": ("server · streetscape_blocks", "the edge→block bake"),
-        "file": ("build_edge_blocks.py", "~180 LOC — now a three-pass assignment"),
+        "file": ("build_edge_blocks.py", "~200 LOC — now a three-pass assignment"),
         "outline": [
-            ("docstring", "three passes documented", True),
-            ("pass 0 — junction capture", "NEW — cKDTree over junction centres, ≤12 m → cluster block", True),
-            ("pass 1 — containment", "unchanged logic, now only over uncaptured midpoints", True),
-            ("pass 2 — nearest ≤30 m", "unchanged", False),
+            ("module docstring", "pass order: capture → containment → nearest", True),
+            ("pass 0 — junction capture", "NEW — cKDTree midpoint→junction, ≤ NODE_CAPTURE_M (12 m)", True),
+            ("pass 1 — containment", "unchanged logic, runs on the uncaptured remainder", True),
+            ("pass 2 — nearest ≤ 30 m", "unchanged", False),
             ("meta", "captured_junction + node_capture_m stamped", True),
         ],
         "blocks": [
-            "NODE_CAPTURE_M = 12 (env) — measured stub-midpoint p99 = 10.9 m, max 11.9 m",
-            "capture: dist, j = cKDTree(jxy).query(midpoints, workers=-1); cap = dist <= 12",
-            "meta counts: 2,073,106 captured + 723,532 contained + 502,514 snapped, 0 unmapped",
+            "sidecar load + same local-metres frame as the generators",
+            "capture: dist,idx = cKDTree(junctions).query(midpoints); cap = dist ≤ 12 → jn_block",
+            "meta records captured/contained/snapped separately",
         ],
     },
     "server/streetscape_blocks/build_foot_blocks.py": {
         "on": ["Flask API"],
-        "module": ("server · streetscape_blocks", "foot-path fill for uncovered edges"),
-        "file": ("build_foot_blocks.py", "~140 LOC"),
+        "module": ("server · streetscape_blocks", "foot fill for uncovered edges"),
+        "file": ("build_foot_blocks.py", "~145 LOC — severed at junction blobs (unchanged rule, 9 m > 6 m)"),
         "outline": [
-            ("severing", "subtracts node blobs (9 m > 6 m tube) — unchanged behavior", False),
-            ("atomic write", "pid-unique tmp file", True),
+            ("disc subtraction", "now subtracts merged blobs (same road_class=node features)", False),
+            ("atomic write", "pid-unique tmp + explicit close", True),
         ],
-        "blocks": ["tmp = f\"{path}.tmp{os.getpid()}\" — concurrent runs can no longer interleave into one .tmp"],
+        "blocks": ["tmp = f\"{path}.tmp{os.getpid()}\" — no shared tmp path between sibling runs"],
+    },
+    "server/streetscape_blocks/eval/eval_ladder.py": {
+        "on": ["Flask API"],
+        "module": ("server · streetscape_blocks/eval", "block-mapping evaluation harness"),
+        "file": ("eval_ladder.py", "NEW ~95 LOC — the ladder metric as a reusable script"),
+        "outline": [
+            ("stub selection", "named-avenue midtown edges, junction endpoint, < 24 m", True),
+            ("classification", "node block / same-street / PERPENDICULAR / other", True),
+        ],
+        "blocks": ["run after any bake: CITY=nyc NETWORK=streets ./env/bin/python streetscape_blocks/eval/eval_ladder.py"],
     },
     "server/streetscape_blocks/README.md": {
         "on": ["Flask API"],
         "module": ("server · streetscape_blocks", "generator docs"),
-        "file": ("README.md", "adding-a-city + pipeline description"),
+        "file": ("README.md", "adding-a-city + evaluation instructions"),
         "outline": [("pipeline paragraph", "clusters + capture rule documented", True)],
-        "blocks": ["capture is called out as the ladder-holding rule, separate from the drawn 9 m rim"],
+        "blocks": ["node blocks' separate MAPPING rule (capture ≤ 12 m) spelled out next to the 9 m drawn radius"],
     },
     "server/app.py": {
         "on": ["Flask API", "Redis"],
         "module": ("server · Flask app", "routes: votes, topology, tiles, maps"),
-        "file": ("app.py", "~3.3k LOC"),
+        "file": ("app.py", "~3.4k LOC — the API surface"),
         "outline": [
-            ("graph_votes ETag", "now rev + blocks mtime stamp", True),
-            ("bver bagg rebuild", "from the previous commit — unchanged here", False),
+            ("graph_votes ETag", "blocks stamp folded into the validator (still no graph load)", True),
         ],
-        "blocks": ["etag = v-<slug>-<mode>-<rev>-b<blocks_stamp> — a re-bake can never 304 old block ids"],
+        "blocks": [
+            "etag = v-<slug>-<mode>-<rev>-b<npy mtime> — a re-bake can never 304 a stale vote body again",
+        ],
     },
     "server/graph_registry.py": {
         "on": ["Flask API"],
-        "module": ("server · graph registry", "CityGraph: topology, blocks, binary blob"),
+        "module": ("server · graph registry", "CityGraph loading + topology serving"),
         "file": ("graph_registry.py", "~260 LOC"),
-        "outline": [("blocks_stamp", "NEW — mapping npy mtime via stat, usable without loading the graph", True)],
-        "blocks": ["blocks_stamp() → int mtime | None — the graph-votes validator's blocks component"],
+        "outline": [
+            ("blocks_stamp", "NEW — baked npy mtime via os.stat; usable before ensure_loaded", True),
+        ],
+        "blocks": ["keeps the etag-first / load-second latency optimization intact"],
     },
     "client-react/src/components/GraphLayer/GraphLayer.tsx": {
         "on": ["React / Leaflet client"],
-        "module": ("React client · components/GraphLayer", "topology load, votes, selection, cards"),
-        "file": ("GraphLayer.tsx", "~4k LOC — this commit touches only the votes-cache guards"),
+        "module": ("React client · components/GraphLayer", "topology + votes loading, selection, cards"),
+        "file": ("GraphLayer.tsx", "~4k LOC — this commit touches only the vote-staleness guards"),
         "outline": [
-            ("votesMatchTopology", "also rejects block_votes.length ≠ topology.nBlocks", True),
-            ("boot cached-votes path", "requires blocks_version equality; dwarn + fall through when stale", True),
-            ("markers / proposals", "unchanged in this commit", False),
+            ("votesMatchTopology", "n_blocks joins the dimension check", True),
+            ("boot cached-votes paint", "requires blocks_version match; warns + skips otherwise", True),
         ],
         "blocks": [
-            "n_blocks dimension guard — same class as the n_edges mobile-crash guard",
-            "blocksMatch = cached.blocks_version === live blocks + votesMatchTopology(cached, topo)",
+            "blocksMatch = cached.blocks_version === live blocks && votesMatchTopology(cached, topo)",
+            "dwarn '[votes] ignoring cached votes: stale block set' on rejection",
         ],
     },
     "docs/three-layer-model.md": {
         "on": ["React / Leaflet client", "Flask API"],
         "module": ("docs", "the source-of-truth spec"),
-        "file": ("three-layer-model.md", "layer definitions + block semantics"),
+        "file": ("three-layer-model.md", "layer definitions + block-scoped vote semantics"),
         "outline": [
-            ("§2.1 What a block is", "merged multi-node junction blocks", True),
-            ("§2.2 Generation", "cluster step + sidecar + capture pass", True),
+            ("§2.1 What a block is", "junction clusters + separate node/edge forming logic", True),
+            ("§2.2 Generation", "cluster step + sidecar + capture-first bake order", True),
         ],
-        "blocks": [
-            "§2.1 — separate block-forming logic for nodes (clustered discs) vs edges (segment Voronoi)",
-            "§2.2 item 4 — the three-pass bake with junction capture first",
-        ],
-    },
-    "server/streetscape_blocks/eval/eval_ladder.py": {
-        "on": ["Flask API"],
-        "module": ("server · streetscape_blocks/eval", "mapping-quality harnesses"),
-        "file": ("eval_ladder.py", "NEW — the ladder metric as a repeatable eval"),
-        "outline": [("stub scan", "midtown avenue crossing stubs → block class distribution", True)],
-        "blocks": ["run after any re-bake: PERPENDICULAR must be 0"],
+        "blocks": ["§2.2 item 4 now specifies the three-pass bake: capture → containment → nearest"],
     },
 }
 
@@ -497,16 +532,15 @@ def main():
     <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
   </nav>
 
-  <p class="lede">Round two on junction blocks, driven by three live findings: intersections drew as
-  stacked overlapping circles (a physical intersection is many OSM junction nodes — 94% of NYC's junctions
-  have a neighbour within 24 m); the street-band cutouts seemed misaligned (they were bites from invisible
-  sibling discs); and voted node blocks stayed dark on the heatmap. Per your design: overlapping discs now
-  MERGE into one multi-node block per cluster at a smaller 9 m radius, and nodes get their own MAPPING rule —
-  the bake captures any edge midpoint within 12 m of a junction into that junction's block by graph distance,
-  which is what keeps the ladder at exactly zero while the drawn shape shrinks. The dark heatmap was the
-  best find of the session: not rendering at all, but a stale-votes-cache class — block ids renumber on
-  re-bake under the same topology etag AND revision, and three separate caches (IndexedDB body, WS deltas
-  layering on it, and the rev-scoped HTTP ETag) all conspired to keep painting the previous block era.</p>
+  <p class="lede">Round two on junction blocks, driven by three live reports: intersections drew as
+  stacked overlapping circles, the street bands showed bite-marks aligned with nothing visible, and voted
+  node blocks stayed dark on the heatmap. The first two were one geometry bug — a physical intersection is
+  many OSM junction nodes, each of which got its own disc — fixed by merging overlapping discs into one
+  multi-node block per cluster (9&nbsp;m radius, union-find), with a new pass-0 <em>junction capture</em> in
+  the bake so the ladder stays at zero (now 100.0%) while the drawn blobs shrink. The dark heatmap was no
+  paint bug at all but three stacked stale caches — the IndexedDB vote body, a 304-pinned HTTP vote body
+  (rev-only ETag), and a drifted cache key — each now guarded or version-stamped. Plus two pipeline
+  landmines (shared .tmp corruption, in-place hole-punching) found the hard way and documented.</p>
 
   {sections_html}
 
