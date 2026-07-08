@@ -214,6 +214,45 @@ SECTIONS = [
         ],
         "files": ["server/streetscape_blocks/build_city_blocks.sh"],
     },
+    {
+        "id": "edgetruth",
+        "tag": "Round 2 · phantom blocks + hover",
+        "title": "7 · Edges are the source of truth — phantom polygons regenerated, hover constrained to the hovered block",
+        "symptom": (
+            "Field report at 69th St &amp; Queens-Midtown Expressway (nyc-bikes): a block whose polygon ran "
+            "1,282 m along the LIE could only be selected by hovering one small diagonal stub — semantically "
+            "irrelevant to the corridor it appeared to be."
+        ),
+        "cause": [
+            "The LIE is a motorway — excluded from the walk/bike graph — so its drive-graph ROW polygon had "
+            "NO on-corridor votable edges; the only members baked into it were 8 footway overpass edges "
+            "(137 m) whose midpoints fell inside the band. Polygon shape came from the drive centerline, not "
+            "from the member edges.",
+            "Hover resolved to the globally nearest edge/node with no notion of which block the cursor was "
+            "inside, so hovering the band anywhere else picked a neighbouring street's edges.",
+        ],
+        "fixes": [
+            "New edges-as-truth pass in the merge: features with ZERO member edges are dropped outright "
+            "(56,143 — inert node cells and drive-only geometry that could never light, hover or select), "
+            "and a non-node block whose polygon bbox diagonal exceeds its member edges' by more than "
+            "<code>TRIM_SLACK_M</code> (60 m) has its geometry REGENERATED as the buffered union of exactly "
+            "its member edges (class half-widths + 2 m pad; 1,449 regenerated). The LIE block now wraps its "
+            "overpass edges — 194 m diagonal, was 1,282 m. Final NYC set: 179,626 features, sha "
+            "<code>0b672e369971ede9</code>.",
+            "Hover/selection is block-scoped: <code>resolveSelection</code> asks MapLibre which block "
+            "polygon is under the cursor (new <code>blockIdAtLatLng</code> bridge — fill layers are "
+            "queryable at any opacity) and constrains the node/edge search to that block's members via "
+            "flatbush filtered kNN; a node picked inside a block votes through its shortest adjacent edge "
+            "IN that block; and when no member is within snap radius the block's nearest member resolves "
+            "with no radius cap — every block is selectable from anywhere inside its polygon and never "
+            "steals a neighbour's edges. No block under the cursor → unrestricted, exactly as before.",
+        ],
+        "files": [
+            "server/streetscape_blocks/merge_degenerate_blocks.py",
+            "client-react/src/components/MapLibreBackground/MapLibreBackground.tsx",
+            "client-react/src/components/GraphLayer/GraphLayer.tsx",
+        ],
+    },
 ]
 
 VERIFY = [
@@ -235,6 +274,9 @@ VERIFY = [
     "“West 46th Street” block held Broadway/7th Ave/W 44th/W 45th edges; after, every street is its own "
     "block and the junctions hold only crossing edges.",
     "Heat sanity over the live API: 425 blocks lit, zero negative values (absolute totals).",
+    "Round 2: LIE phantom verified in data before/after — block polygon diagonal 1,282 m → 194 m "
+    "(regen=edges), member footway edges unchanged; client suite 213/213 and <code>tsc -b</code> clean in "
+    "all touched files (the only errors are the 6 pre-existing MapLibreBackground expression ones).",
     "NOT verified visually by me: Central Park's new tube polygons and overall heat aesthetics — Chrome "
     "kept losing MapLibre to the occluded-window rAF trap while Eric was using the browser, so the visual "
     "pass is on the manual checklist.",
@@ -253,6 +295,10 @@ CHECKLIST = [
     "should read as 2, not 0.",
     "Route down an avenue for ~10 blocks and check the touched blocks (route card / highlight): avenue "
     "blocks + intersections only — no perpendicular side-street blocks (the ladder).",
+    "Round 2 — open <a href='http://localhost:3000/m/nyc-bikes?w=40.725291%2C-73.895009&vt=Improve+bike+lane'>"
+    "69th St &amp; Queens-Midtown Expressway</a>: the ex-phantom block should now hug the footway overpass "
+    "(not the whole expressway band), hovering anywhere inside a block polygon should highlight THAT "
+    "block's own edges, and hovering the gaps between polygons behaves as before.",
     "Re-run knobs if visuals suggest tuning: <code>NODE_BLOCK_MAX_RADIUS_M</code> (28), "
     "<code>NODE_CLUSTER_MAX_EXTENT_M</code> (40), <code>STUB_MAX_M</code> (40), "
     "<code>NODE_CAPTURE_LEN_M</code> (30) — the merge re-runs from <code>.premerge.npy</code> without a "
@@ -610,7 +656,7 @@ def main():
   <header class="masthead">
     <div class="kicker">City Edit · Change log</div>
     <h1>{TITLE}</h1>
-    <div class="dateline">{DATE} · branch <code>fix/unify-voting</code> · commits <code>451b9f0</code> + <code>edfc716</code></div>
+    <div class="dateline">{DATE} · branch <code>fix/unify-voting</code> · commits <code>451b9f0</code> + <code>edfc716</code> + <code>75e8955</code></div>
   </header>
 
   <nav class="toc">{nav}
