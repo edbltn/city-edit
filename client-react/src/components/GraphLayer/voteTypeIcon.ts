@@ -46,28 +46,32 @@ export interface VoteTypeIconOptions {
 //   square  : (3,3)→(31,31)               — 28px box
 //   tail tip: (17,36)                      — the Leaflet anchor, on the location
 //                                            (a wide, shallow tail reads blunt)
-//   inner   : (6,6) 22×22 square           — the inner border, set out a touch
-//                                            so it doesn't crowd the icon
+//   inner   : (5.25,5.25) 23.5×23.5 square  — the inner border, hugging the
+//                                            outer so the double ring reads slim
 // Idle = a single hairline outline. selected/start/end add the inner square and
 // thicken the outline (CSS in globals.css drives colors + widths per state).
 const SVG_W = 34;
 const SVG_H = 42;
 const OUTER_PATH = "M3,3 H31 V31 H23 L17,36 L11,31 H3 Z";
-// Inner border: a true 3px inward offset (contour) of the outer pin — every edge
-// moved in by the same perpendicular distance, so the apex angle is preserved
-// and the gap to the outer reads as a constant width. The tail tip therefore
-// rises by gap/sin(halfAngle) (≈3.9) and the base narrows to match, rather than
-// being a naively-scaled (and visibly sharper) V. Shown only in pin states.
-const INNER_PATH = "M6,6 H28 V28 H21.9 L17,32.1 L12.1,28 H6 Z";
+// Inner border: a true 2.25px inward offset (contour) of the outer pin — every
+// edge moved in by the same perpendicular distance, so the apex angle is
+// preserved and the gap to the outer reads as a constant width. The tail tip
+// therefore rises by gap/sin(halfAngle) (≈2.9) and the base narrows to match,
+// rather than being a naively-scaled (and visibly sharper) V. Shown only in pin
+// states. The same 2.25px contour is used on every shape below, so the square
+// pin and the route diamond carry identical-weight double borders.
+const INNER_PATH = "M5.25,5.25 H28.75 V28.75 H22.2 L17,33.1 L11.8,28.75 H5.25 Z";
 // Square variants (no tail) for fanned-out icons: the anchor/viewBox stay
 // identical so dropping the divot doesn't shift the icon; it just loses its point.
 const SQUARE_PATH = "M3,3 H31 V31 H3 Z";
-const INNER_SQUARE_PATH = "M6,6 H28 V28 H6 Z";
+const INNER_SQUARE_PATH = "M5.25,5.25 H28.75 V28.75 H5.25 Z";
 // Diamond variant (route proposals): the square rotated 45° within the same box,
 // its bottom vertex pulled down to the tail tip so the kite points at the spot.
 // Vertices: top (17,3) · right (31,17) · bottom-tip (17,36) · left (3,17).
+// The inner is the same true 2.25px contour (45° vertices rise 2.25·√2 ≈ 3.18;
+// the kite's side vertices land at y 17.2 because its lower edges are steeper).
 const DIAMOND_PATH = "M17,3 L31,17 L17,36 L3,17 Z";
-const INNER_DIAMOND_PATH = "M17,9 L26,17 L17,30 L8,17 Z";
+const INNER_DIAMOND_PATH = "M17,6.2 L28,17.2 L17,32.2 L6,17.2 Z";
 const TIP: [number, number] = [17, 36];
 
 /**
