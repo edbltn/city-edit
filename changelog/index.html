@@ -29,6 +29,23 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-08-block-graph-redesign.html">
+    <div class="date">2026-07-08</div>
+    <h2>Block-graph redesign — absolute-vote heat, Voronoi junction cells, graph-first foot blocks, degenerate-block merging</h2>
+    <p>The heatmap now shows total absolute votes (up + down — downvoted blocks read hot, not silent),
+    and the Layer-2 block pipeline was redesigned end-to-end. Junction blocks are Voronoi cells at
+    cluster centroids clipped to a max radius (no more stacked-disc gloops), with oversized
+    single-linkage clusters split along their principal axis (worst NYC chain: 1,607 junctions / 483m).
+    Junction capture went topological — both endpoints in clusters, same cluster or a ≤30m crosswalk —
+    freeing the 62.8% of all NYC edges the old midpoint-≤12m rule swallowed, which is why Central Park
+    rendered as node gloops. Foot blocks are graph-first: components severed at junction clusters,
+    polygons buffered from exactly their member edges, membership shipped by construction. A new
+    fixpoint merge pass absorbs degenerate blocks — the W 31st &amp; PPS 100 LLC garage entrance now
+    dissolves into the West 31st Street block — and a field-reported Times Square weld (corridor merges
+    fusing Broadway + 7th Ave + three cross streets into one 404m block) tightened the junction-dissolve
+    rule to single-neighbour junctions only. NYC re-baked: 3.3M edges 100% mapped, 235,769 blocks.</p>
+  </a>
+
   <a class="entry" href="./2026-07-08-heat-tip-border-inset.html">
     <div class="date">2026-07-08</div>
     <h2>Aesthetic fixes — slimmer selection rings, and an incandescent tip for the heat ramp</h2>

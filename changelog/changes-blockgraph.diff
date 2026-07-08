@@ -1,0 +1,1397 @@
+diff --git a/client-react/src/components/GraphLayer/voteApply.test.ts b/client-react/src/components/GraphLayer/voteApply.test.ts
+index 2362940..dc88af6 100644
+--- a/client-react/src/components/GraphLayer/voteApply.test.ts
++++ b/client-react/src/components/GraphLayer/voteApply.test.ts
+@@ -145,12 +145,12 @@ describe("applyBlockCounts (SET, idempotent, block twin of vtCounts)", () => {
+     };
+   }
+ 
+-  it("SETs deduped counts, updates net, and registers the label", () => {
++  it("SETs deduped counts, updates total activity, and registers the label", () => {
+     const d = makeBlockData();
+     expect(applyBlockCounts(d, "X", { "1": [3, 1] })).toBe(true);
+     expect(d.block_vote_type_legend).toEqual(["X"]);
+     expect(d.block_vote_types![1]).toEqual([[0, 3, 1]]);
+-    expect(d.block_votes![1]).toBe(2);
++    expect(d.block_votes![1]).toBe(4); // heat = up + down (downvotes read hot)
+   });
+ 
+   it("is idempotent and reports no change on re-apply", () => {
+@@ -160,7 +160,7 @@ describe("applyBlockCounts (SET, idempotent, block twin of vtCounts)", () => {
+     expect(d.block_votes![1]).toBe(2);
+   });
+ 
+-  it("drops a type that reaches 0/0 and adjusts the net down", () => {
++  it("drops a type that reaches 0/0 and adjusts the total down", () => {
+     const d = makeBlockData();
+     applyBlockCounts(d, "X", { "0": [1, 0] });
+     applyBlockCounts(d, "X", { "0": [0, 0] });
+diff --git a/client-react/src/components/GraphLayer/voteApply.ts b/client-react/src/components/GraphLayer/voteApply.ts
+index bddb189..76e5e68 100644
+--- a/client-react/src/components/GraphLayer/voteApply.ts
++++ b/client-react/src/components/GraphLayer/voteApply.ts
+@@ -200,14 +200,16 @@ export function applyBlockCounts(
+ 
+     const pairs = blockVoteTypes[bid] || [];
+     const existing = pairs.find(([l]) => l === li);
+-    const oldNet = existing ? existing[1] - existing[2] : 0;
++    // Heat is TOTAL deduped activity (up + down): downvotes are engagement,
++    // so they read hot too — mirrors server block_votes.build_block_arrays.
++    const oldTotal = existing ? existing[1] + existing[2] : 0;
+     if (existing && existing[1] === up && existing[2] === down) continue;
+ 
+     let next = pairs.filter(([l]) => l !== li);
+     if (up !== 0 || down !== 0) next.push([li, up, down]);
+-    next.sort((a, b) => b[1] - b[2] - (a[1] - a[2]));
++    next.sort((a, b) => b[1] + b[2] - (a[1] + a[2]));
+     blockVoteTypes[bid] = next;
+-    blockVotes[bid] = (blockVotes[bid] || 0) + (up - down - oldNet);
++    blockVotes[bid] = (blockVotes[bid] || 0) + (up + down - oldTotal);
+     changed = true;
+   }
+   return changed;
+diff --git a/client-react/src/types/index.ts b/client-react/src/types/index.ts
+index cca5cb9..e799a8c 100644
+--- a/client-react/src/types/index.ts
++++ b/client-react/src/types/index.ts
+@@ -122,7 +122,7 @@ export interface GraphData {
+   edge_vote_types?: [number, number, number][][];
+   node_vote_types?: [number, number, number][][];
+   // Block layer (docs/three-layer-model.md §2.4) — deduped per-block counts:
+-  // block_votes[b] = net (up − down); block_vote_types[b] = [legendIdx, up,
++  // block_votes[b] = total activity (up + down); block_vote_types[b] = [legendIdx, up,
+   // down][] indexing block_vote_type_legend (its own legend, not vote_type_legend).
+   block_votes?: number[];
+   block_vote_types?: [number, number, number][][];
+diff --git a/docs/three-layer-model.md b/docs/three-layer-model.md
+index e587c4a..1ead585 100644
+--- a/docs/three-layer-model.md
++++ b/docs/three-layer-model.md
+@@ -133,7 +133,7 @@ so each user counts once:
+ - Served from the Redis structures in `server/block_votes.py`
+   (`bd:<slug>:<mode>:<block>:<vt>:<dir>` device-multiplicity hashes +
+   `bagg:<slug>:<mode>` aggregate; rebuilt from Postgres on cold start / resnap)
+-  as `block_votes[]` (net = up − down) and `block_vote_types[]`
++  as `block_votes[]` (total activity = up + down — downvotes read hot too) and `block_vote_types[]`
+   (`[legendIdx, up, down]` per block) on `/api/graph-votes`.
+ - The **heat display is the block fill** (MapLibre feature-state on the blocks
+   PMTiles); the per-edge canvas heat is the fallback for maps without blocks.
+diff --git a/server/block_votes.py b/server/block_votes.py
+index 5b2b2a5..910b39d 100644
+--- a/server/block_votes.py
++++ b/server/block_votes.py
+@@ -118,8 +118,9 @@ def build_block_arrays(redis_client, slug: str, mode: int, n_blocks: int) -> dic
+ 
+     Returns the same shape as vote_store.build_arrays' edge fields, keyed by
+     block_id:
+-      block_votes[b]      = up − down  (net deduped, for the heat ramp)
+-      block_vote_types[b] = [[legendIdx, up, down], …]  sorted by net desc
++      block_votes[b]      = up + down  (total deduped activity, for the heat
++                            ramp — downvotes are engagement, so they read hot)
++      block_vote_types[b] = [[legendIdx, up, down], …]  sorted by total desc
+     """
+     from vote_store import resolve_vote_type
+     raw = redis_client.hgetall(bagg_key(slug, mode))
+@@ -149,14 +150,14 @@ def build_block_arrays(redis_client, slug: str, mode: int, n_blocks: int) -> dic
+ 
+     def encode(vt_map):
+         enc = []
+-        for vt_id, (u, dn) in sorted(vt_map.items(), key=lambda x: -(x[1][0] - x[1][1])):
++        for vt_id, (u, dn) in sorted(vt_map.items(), key=lambda x: -(x[1][0] + x[1][1])):
+             if vt_id not in li:
+                 li[vt_id] = len(legend)
+                 legend.append(resolve_vote_type(vt_id))
+             enc.append([li[vt_id], u, dn])
+         return enc
+ 
+-    block_votes = [up[i] - down[i] for i in range(n_blocks)]
++    block_votes = [up[i] + down[i] for i in range(n_blocks)]
+     block_vote_types: list[list] = [[] for _ in range(n_blocks)]
+     for b, vt_map in bvt.items():
+         block_vote_types[b] = encode(vt_map)
+diff --git a/server/tests/unit/test_block_votes.py b/server/tests/unit/test_block_votes.py
+index ea9b33d..902ae50 100644
+--- a/server/tests/unit/test_block_votes.py
++++ b/server/tests/unit/test_block_votes.py
+@@ -19,7 +19,8 @@ EDGE_BLOCK = [10, 10, 20, -1]
+ N_BLOCKS = 30
+ 
+ 
+-def net(redis_client, block_id):
++def total(redis_client, block_id):
++    """block_votes is TOTAL deduped activity (up + down) — the heat value."""
+     arr = bv.build_block_arrays(redis_client, SLUG, MODE, N_BLOCKS)
+     return arr["block_votes"][block_id]
+ 
+@@ -28,7 +29,7 @@ def test_same_user_multiple_edges_counts_once(redis_client):
+     # One device votes UP on both edges of block 10.
+     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d1")
+     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d1")
+-    assert net(redis_client, 10) == 1  # deduped, not 2
++    assert total(redis_client, 10) == 1  # deduped, not 2
+     # multiplicity is tracked even though the deduped count is 1
+     assert redis_client.hget(bv.bd_key(SLUG, MODE, 10, VT, 0), "d1") == "2"
+     assert redis_client.hlen(bv.bd_key(SLUG, MODE, 10, VT, 0)) == 1
+@@ -37,29 +38,29 @@ def test_same_user_multiple_edges_counts_once(redis_client):
+ def test_distinct_users_accumulate(redis_client):
+     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d1")
+     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d2")
+-    assert net(redis_client, 10) == 2
++    assert total(redis_client, 10) == 2
+ 
+ 
+ def test_removal_is_exact(redis_client):
+     # d1 on both edges of block 10 → count 1
+     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d1")
+     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d1")
+-    assert net(redis_client, 10) == 1
++    assert total(redis_client, 10) == 1
+     # remove one edge → still present (multiplicity 2→1)
+     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, 0, UP, "d1")
+-    assert net(redis_client, 10) == 1
++    assert total(redis_client, 10) == 1
+     # remove the other edge → gone
+     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, 0, UP, "d1")
+-    assert net(redis_client, 10) == 0
++    assert total(redis_client, 10) == 0
+     # the device hash field is cleaned up
+     assert redis_client.hget(bv.bd_key(SLUG, MODE, 10, VT, 0), "d1") is None
+ 
+ 
+ def test_reversal_moves_device(redis_client):
+     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "d1")
+-    assert net(redis_client, 10) == 1
++    assert total(redis_client, 10) == 1
+     bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, DOWN, UP, "d1")
+-    assert net(redis_client, 10) == -1  # up 0, down 1
++    assert total(redis_client, 10) == 1  # up 0, down 1 → total 1 (downvotes read hot)
+     arr = bv.build_block_arrays(redis_client, SLUG, MODE, N_BLOCKS)
+     # vote-type breakdown reflects the down vote: [legendIdx, up, down]
+     assert arr["block_vote_types"][10] == [[0, 0, 1]]
+@@ -76,8 +77,8 @@ def test_apply_deltas_dedups_across_block_edges(redis_client):
+     # A route votes both edges of block 10 + the single edge of block 20.
+     prev = {0: 0, 1: 0, 2: 0}
+     bv.apply_block_deltas(redis_client, SLUG, MODE, EDGE_BLOCK, [0, 1, 2], VT, UP, prev, "d1")
+-    assert net(redis_client, 10) == 1   # two edges, one user → 1
+-    assert net(redis_client, 20) == 1
++    assert total(redis_client, 10) == 1   # two edges, one user → 1
++    assert total(redis_client, 20) == 1
+ 
+ 
+ def test_rebuild_matches_incremental(redis_client):
+@@ -101,8 +102,8 @@ def test_rebuild_matches_incremental(redis_client):
+     inc = {k: v for k, v in incremental.items() if int(v) != 0}
+     reb = {k: v for k, v in rebuilt.items() if int(v) != 0}
+     assert inc == reb
+-    assert net(redis_client, 10) == 1
+-    assert net(redis_client, 20) == -1
++    assert total(redis_client, 10) == 1
++    assert total(redis_client, 20) == 1  # one DOWN vote → total 1
+ 
+ 
+ def test_rebuild_warns_on_both_directions_in_a_block(redis_client, caplog):
+diff --git a/server/streetscape_blocks/build_city_blocks.sh b/server/streetscape_blocks/build_city_blocks.sh
+index f9cc06d..db2a711 100755
+--- a/server/streetscape_blocks/build_city_blocks.sh
++++ b/server/streetscape_blocks/build_city_blocks.sh
+@@ -4,17 +4,23 @@
+ #   ./build_city_blocks.sh <city-id> [network]      # e.g. ./build_city_blocks.sh philly
+ #
+ # Pipeline:
+-#   1. build_blocks_generic.py   procedural street blocks from OSM alone (geo venv)
+-#   2. build_node_blocks.py      junction-node discs, punched out of street blocks
+-#   3. build_edge_blocks.py      bake edge→block (server venv; marks gaps as −1)
+-#   4. build_foot_blocks.py      blocks for the −1 edges (park paths, plazas),
+-#                                severed at the junction discs
+-#   5. build_edge_blocks.py      re-bake against the completed block set
+-#   6. tippecanoe                blocks.pmtiles next to the graph (display layer)
++#   1. build_blocks_generic.py    procedural street blocks from OSM alone (geo venv)
++#   2. build_node_blocks.py       junction Voronoi cells (max-radius clipped),
++#                                 punched out of street blocks
++#   3. build_edge_blocks.py       edge→block bake pass 1 (server venv; topological
++#                                 junction capture; marks gaps as −1)
++#   4. build_foot_blocks.py       graph-component foot blocks for the −1 edges
++#                                 (park paths, plazas), membership by construction
++#   5. build_edge_blocks.py       final bake (applies the foot sidecar)
++#   6. merge_degenerate_blocks.py stubs → node blocks; fake junctions → corridors
++#                                 (writes blocks_final_<city>.geojson + remapped npy)
++#   7. tippecanoe                 blocks.pmtiles next to the graph (display layer)
+ #
+ # Run AFTER the city's walk graph exists (refresh_osm.py --city <id>): the bake
+ # stamps the graph's topology_etag, so a graph rebuild invalidates the mapping
+-# and this script must be re-run (refresh_osm.py --blocks does both).
++# and this script must be re-run (refresh_osm.py --blocks does both). Always
++# start from step 1: steps 2+ mutate blocks_generic_<city>.geojson in place
++# (node cells are punched out of street polygons).
+ set -euo pipefail
+ 
+ CITY="${1:?usage: build_city_blocks.sh <city-id> [network]}"
+@@ -24,6 +30,7 @@ SERVER="$(cd "$HERE/.." && pwd)"
+ GEO_PY="$HERE/env/bin/python"       # osmnx/geopandas/shapely venv (heavy geo deps)
+ OUT="${BLOCKS_OUT:-$HERE/output}"
+ BLOCKS_FILE="$OUT/blocks_generic_${CITY}.geojson"
++FINAL_FILE="$OUT/blocks_final_${CITY}.geojson"
+ 
+ [ -x "$GEO_PY" ] || { echo "missing geo venv: $HERE/env (see README.md)"; exit 1; }
+ [ -x "$SERVER/env/bin/python" ] || { echo "missing server venv: $SERVER/env"; exit 1; }
+@@ -41,25 +48,33 @@ from cities import CITIES
+ print(CITIES['$CITY'].data_dir)
+ ")"
+ 
+-echo "== [1/6] procedural street blocks ($CITY, bbox $BBOX)"
++echo "== [1/7] procedural street blocks ($CITY, bbox $BBOX)"
+ CITY="$CITY" BBOX="$BBOX" BLOCKS_OUT="$OUT" "$GEO_PY" "$HERE/build_blocks_generic.py"
+ 
+-echo "== [2/6] junction-node discs (each junction is its own block)"
++echo "== [2/7] junction Voronoi cells (each junction cluster is its own block)"
+ CITY="$CITY" NETWORK="$NETWORK" BLOCKS_OUT="$OUT" \
+   srv_py streetscape_blocks/build_node_blocks.py
+ 
+-echo "== [3/6] edge→block bake (pass 1: find uncovered edges)"
++echo "== [3/7] edge→block bake (pass 1: find uncovered edges)"
++# A stale foot sidecar from a previous run carries dead block ids — never let
++# pass 1 apply it; build_foot_blocks.py rewrites it fresh in step 4.
++rm -f "$DATA_DIR/foot_clusters_${NETWORK}.npz"
+ CITY="$CITY" NETWORK="$NETWORK" BLOCKS_FILE="$BLOCKS_FILE" \
+   srv_py streetscape_blocks/build_edge_blocks.py
+ 
+-echo "== [4/6] foot blocks for uncovered edges"
+-CITY="$CITY" NETWORK="$NETWORK" srv_py streetscape_blocks/build_foot_blocks.py
++echo "== [4/7] foot blocks for uncovered edges (graph components)"
++CITY="$CITY" NETWORK="$NETWORK" BLOCKS_OUT="$OUT" \
++  srv_py streetscape_blocks/build_foot_blocks.py
+ 
+-echo "== [5/6] edge→block bake (final, against completed block set)"
++echo "== [5/7] edge→block bake (final, against completed block set)"
+ CITY="$CITY" NETWORK="$NETWORK" BLOCKS_FILE="$BLOCKS_FILE" \
+   srv_py streetscape_blocks/build_edge_blocks.py
+ 
+-echo "== [6/6] blocks.pmtiles"
++echo "== [6/7] merge degenerate blocks (stubs + fake junctions)"
++CITY="$CITY" NETWORK="$NETWORK" BLOCKS_OUT="$OUT" \
++  srv_py streetscape_blocks/merge_degenerate_blocks.py
++
++echo "== [7/7] blocks.pmtiles"
+ if command -v tippecanoe >/dev/null 2>&1; then
+   # --use-attribute-for-id: block_id becomes the NATIVE feature id (required by
+   # the client's setFeatureState heat/selection; MapLibre reads native ids, no
+@@ -67,7 +82,7 @@ if command -v tippecanoe >/dev/null 2>&1; then
+   tippecanoe -o "$DATA_DIR/blocks.pmtiles" -zg --drop-densest-as-needed \
+     --extend-zooms-if-still-dropping --coalesce-densest-as-needed \
+     --use-attribute-for-id=block_id \
+-    -l blocks --force "$BLOCKS_FILE"
++    -l blocks --force "$FINAL_FILE"
+ else
+   echo "tippecanoe not found — skipping PMTiles (install: brew install tippecanoe)"
+ fi
+diff --git a/server/streetscape_blocks/build_edge_blocks.py b/server/streetscape_blocks/build_edge_blocks.py
+index 2834759..7125e99 100644
+--- a/server/streetscape_blocks/build_edge_blocks.py
++++ b/server/streetscape_blocks/build_edge_blocks.py
+@@ -3,16 +3,24 @@
+ 
+ Loads the SAME city graph the server votes on (via graph_registry, so edge_id
+ ordering is identical to the vote store), and assigns each edge a block in
+-three passes:
+-
+-  0. JUNCTION CAPTURE (nodes' own mapping logic, separate from the polygons):
+-     an edge whose midpoint lies within NODE_CAPTURE_M (default 12 m) of a
+-     junction maps to that junction's node block (node_clusters_<network>.npz,
+-     written by build_node_blocks.py). The drawn node blobs are deliberately
+-     smaller (9 m) — capture by graph distance is what keeps intersection-
+-     crossing stubs out of PERPENDICULAR street blocks (the "ladder").
+-  1. containment: the block polygon containing the midpoint;
+-  2. nearest block within BLOCK_SNAP_M (30 m) — sidewalks sit a few metres off
++four passes:
++
++  0. JUNCTION CAPTURE (topological — nodes' own mapping logic, separate from
++     the polygons): an edge is captured into a junction's node block iff BOTH
++     its endpoints are junction-cluster members (node_clusters_<network>.npz,
++     written by build_node_blocks.py) AND they share a cluster OR the edge is
++     shorter than NODE_CAPTURE_LEN_M (default 30 m — crosswalks between the
++     corner clusters flanking a wide avenue). Same-cluster edges go to that
++     cluster; short cross-cluster edges go to the cluster whose centroid is
++     nearer the edge midpoint. This is what keeps intersection-crossing stubs
++     out of PERPENDICULAR street blocks (the "ladder") without eating long
++     park paths whose midpoints merely pass near a junction (the old
++     midpoint-distance rule captured 63% of all NYC edges).
++  1. FOOT SIDECAR: edges assigned by construction by build_foot_blocks.py
++     (foot_clusters_<network>.npz) — their block membership is the graph
++     component the polygon was generated from, no geometry involved.
++  2. containment: the block polygon containing the midpoint;
++  3. nearest block within BLOCK_SNAP_M (30 m) — sidewalks sit a few metres off
+      the centerline.
+ 
+ Writes a dense int32 array `edge_block_id[edge_id] = block_id` (−1 if
+@@ -56,11 +64,10 @@ BLOCKS_FILE = os.environ.get(
+ # within this many metres (a sidewalk edge sits ~a few m off the centerline; a
+ # foot edge far from any street block legitimately gets no block).
+ NEAREST_THRESHOLD_M = float(os.environ.get("BLOCK_SNAP_M", "30"))
+-# Pass-0 junction capture radius: midpoints this close to a junction map to the
+-# junction's node block regardless of which polygon contains them. Crossing
+-# stubs' midpoints run to ~12 m from the junction (measured, NYC midtown), past
+-# the 9 m drawn blob rim — capture must reach them or the ladder comes back.
+-NODE_CAPTURE_M = float(os.environ.get("NODE_CAPTURE_M", "12"))
++# Pass-0 cross-cluster capture length: an edge between members of two DIFFERENT
++# clusters is captured only when this short (crosswalks over a wide avenue run
++# ~15-30 m corner to corner; anything longer is a real segment, not a stub).
++NODE_CAPTURE_LEN_M = float(os.environ.get("NODE_CAPTURE_LEN_M", "30"))
+ 
+ 
+ def _sha256_file(path: str) -> str:
+@@ -79,12 +86,12 @@ def main():
+     n_edges = len(edges)
+     print(f"[edge_blocks] {CITY}:{NETWORK} — {n_edges} edges, etag={g.topology_etag}")
+ 
++    ends = np.array([(e[0], e[1]) for e in edges], dtype=np.int64)
++    nodes_arr = np.asarray(nodes, dtype=np.float64)
++
+     # Edge midpoints as (lon, lat) for shapely.
+-    lon = np.empty(n_edges); lat = np.empty(n_edges)
+-    for i, e in enumerate(edges):
+-        a, b = nodes[e[0]], nodes[e[1]]
+-        lat[i] = (a[0] + b[0]) / 2.0
+-        lon[i] = (a[1] + b[1]) / 2.0
++    lat = (nodes_arr[ends[:, 0], 0] + nodes_arr[ends[:, 1], 0]) / 2.0
++    lon = (nodes_arr[ends[:, 0], 1] + nodes_arr[ends[:, 1], 1]) / 2.0
+     pts = shp_points(lon, lat)
+ 
+     feats = json.load(open(BLOCKS_FILE))["features"]
+@@ -96,36 +103,78 @@ def main():
+     edge_block = np.full(n_edges, -1, dtype=np.int32)
+     seen = np.zeros(n_edges, dtype=bool)
+ 
+-    # 0) Junction capture — nodes' own mapping rule (see module docstring).
++    # Same local-metres frame as the generators.
++    s_, w_, n_, e_ = city.bbox
++    mlat = 111_320.0
++    mlon = 111_320.0 * math.cos(math.radians((s_ + n_) / 2))
++
++    # 0) Junction capture — topological (see module docstring).
+     captured = 0
+     sidecar = os.path.join(
+         _SERVER, city.data_dir, f"node_clusters_{NETWORK}.npz")
+     if os.path.exists(sidecar):
+-        from scipy.spatial import cKDTree
+         nc = np.load(sidecar)
+         jn_idx, jn_block = nc["node_idx"], nc["block_id"]
+-        # Same local-metres frame as the generators.
+-        s_, w_, n_, e_ = city.bbox
+-        mlat = 111_320.0
+-        mlon = 111_320.0 * math.cos(math.radians((s_ + n_) / 2))
+-        nodes_arr = np.asarray(nodes, dtype=np.float64)
+-        jxy = np.column_stack(((nodes_arr[jn_idx, 1] - w_) * mlon,
+-                               (nodes_arr[jn_idx, 0] - s_) * mlat))
+-        mxy = np.column_stack(((lon - w_) * mlon, (lat - s_) * mlat))
+-        dist, nearest_j = cKDTree(jxy).query(mxy, workers=-1)
+-        cap = dist <= NODE_CAPTURE_M
+-        edge_block[cap] = jn_block[nearest_j[cap]]
+-        seen |= cap
+-        captured = int(cap.sum())
++        # node index → cluster block id (−1 = not a junction-cluster member)
++        node_cluster = np.full(len(nodes), -1, dtype=np.int64)
++        node_cluster[jn_idx] = jn_block
++
++        cu = node_cluster[ends[:, 0]]
++        cv = node_cluster[ends[:, 1]]
++        ex = (nodes_arr[ends[:, 0], 1] - nodes_arr[ends[:, 1], 1]) * mlon
++        ey = (nodes_arr[ends[:, 0], 0] - nodes_arr[ends[:, 1], 0]) * mlat
++        elen = np.hypot(ex, ey)
++        not_self = ends[:, 0] != ends[:, 1]
++        both = (cu >= 0) & (cv >= 0) & not_self
++
++        same = both & (cu == cv)
++        edge_block[same] = cu[same]
++
++        # Short cross-cluster stubs → the cluster whose centroid is nearer the
++        # edge midpoint (crosswalks between an avenue's two corner clusters).
++        cross = both & (cu != cv) & (elen <= NODE_CAPTURE_LEN_M)
++        if cross.any():
++            # cluster centroids from member node coords, in metres
++            jx = (nodes_arr[jn_idx, 1] - w_) * mlon
++            jy = (nodes_arr[jn_idx, 0] - s_) * mlat
++            n_cl = int(jn_block.max()) + 1
++            sums_x = np.bincount(jn_block, weights=jx, minlength=n_cl)
++            sums_y = np.bincount(jn_block, weights=jy, minlength=n_cl)
++            cnt = np.bincount(jn_block, minlength=n_cl).astype(np.float64)
++            cnt[cnt == 0] = 1.0
++            cxs, cys = sums_x / cnt, sums_y / cnt
++            mx = (lon[cross] - w_) * mlon
++            my = (lat[cross] - s_) * mlat
++            du = np.hypot(cxs[cu[cross]] - mx, cys[cu[cross]] - my)
++            dv = np.hypot(cxs[cv[cross]] - mx, cys[cv[cross]] - my)
++            edge_block[cross] = np.where(du <= dv, cu[cross], cv[cross])
++
++        seen |= same | cross
++        captured = int((same | cross).sum())
+         print(f"[edge_blocks] junction capture: {captured} edges "
+-              f"(<= {NODE_CAPTURE_M:.0f}m of a junction)")
++              f"({int(same.sum())} same-cluster + {int(cross.sum())} "
++              f"cross-cluster ≤{NODE_CAPTURE_LEN_M:.0f}m)")
+     else:
+         print(f"[edge_blocks] no node-cluster sidecar ({os.path.basename(sidecar)}) "
+               "— skipping junction capture")
+ 
+-    # 1) Containment: polygon that contains the midpoint (vectorized). shapely's
++    # 1) Foot sidecar — membership by construction (build_foot_blocks.py).
++    foot_assigned = 0
++    foot_sidecar = os.path.join(
++        _SERVER, city.data_dir, f"foot_clusters_{NETWORK}.npz")
++    if os.path.exists(foot_sidecar):
++        fcarr = np.load(foot_sidecar)
++        f_idx, f_block = fcarr["edge_idx"], fcarr["block_id"]
++        fresh = ~seen[f_idx]
++        edge_block[f_idx[fresh]] = f_block[fresh]
++        seen[f_idx[fresh]] = True
++        foot_assigned = int(fresh.sum())
++        print(f"[edge_blocks] foot sidecar: {foot_assigned} edges by construction")
++
++    # 2) Containment: polygon that contains the midpoint (vectorized). shapely's
+     # STRtree applies the predicate as input.predicate(tree_geom), so a point is
+     # "within" the polygon (NOT polygon "contains" point, which would be false).
++    pre_contain = int(seen.sum())
+     in_idx, tree_idx = tree.query(pts[~seen], predicate="within")
+     # If a midpoint is in multiple blocks (shared boundary), first wins.
+     uncap_ids = np.where(~seen)[0]
+@@ -134,9 +183,9 @@ def main():
+         if not seen[ei]:
+             edge_block[ei] = block_ids[ti]
+             seen[ei] = True
+-    contained = int(seen.sum()) - captured
++    contained = int(seen.sum()) - pre_contain
+ 
+-    # 2) Nearest-within-threshold for the rest.
++    # 3) Nearest-within-threshold for the rest.
+     missing = np.where(~seen)[0]
+     if len(missing):
+         nearest = tree.nearest(pts[missing])
+@@ -154,6 +203,7 @@ def main():
+     os.makedirs(out_dir, exist_ok=True)
+     npy = os.path.join(out_dir, f"edge_blocks_{NETWORK}.npy")
+     np.save(npy, edge_block)
++    nearest_n = snapped - contained - captured - foot_assigned
+     meta = {
+         "city": CITY, "network": NETWORK,
+         "n_edges": n_edges, "n_blocks": len(polys),
+@@ -162,18 +212,20 @@ def main():
+         "blocks_file": os.path.basename(BLOCKS_FILE),
+         "mapped_edges": snapped,
+         "captured_junction": captured,
++        "foot_by_construction": foot_assigned,
+         "contained": contained,
+-        "snapped_nearest": snapped - contained - captured,
++        "snapped_nearest": nearest_n,
+         "unmapped": n_edges - snapped,
+         "block_snap_m": NEAREST_THRESHOLD_M,
+-        "node_capture_m": NODE_CAPTURE_M,
++        "node_capture_len_m": NODE_CAPTURE_LEN_M,
+     }
+     json.dump(meta, open(os.path.join(out_dir, f"edge_blocks_{NETWORK}.json"), "w"), indent=2)
+ 
+     print(f"[edge_blocks] mapped {snapped}/{n_edges} edges "
+           f"({100*snapped/n_edges:.1f}%): {captured} junction-captured + "
+-          f"{contained} contained + {snapped-contained-captured} "
+-          f"snapped(<{NEAREST_THRESHOLD_M:.0f}m); {n_edges-snapped} unmapped")
++          f"{foot_assigned} foot-by-construction + {contained} contained + "
++          f"{nearest_n} snapped(<{NEAREST_THRESHOLD_M:.0f}m); "
++          f"{n_edges-snapped} unmapped")
+     print(f"[edge_blocks] wrote {npy}")
+ 
+ 
+diff --git a/server/streetscape_blocks/build_foot_blocks.py b/server/streetscape_blocks/build_foot_blocks.py
+index c219589..8a96e05 100644
+--- a/server/streetscape_blocks/build_foot_blocks.py
++++ b/server/streetscape_blocks/build_foot_blocks.py
+@@ -1,17 +1,26 @@
+ #!/usr/bin/env python3
+ """Add foot-path blocks for areas the drive-centerline street blocks don't reach.
+ 
+-build_blocks_generic.py covers ~82% of foot-graph edges; the rest are foot edges
+->30 m from any drive centerline — park interior paths, pedestrian plazas,
+-boardwalks. This takes those unmapped edges (edge_blocks_<net>.npy == −1), buffers
+-them, MERGES the overlapping buffers, and SUBTRACTS the junction-node discs
+-(road_class="node" features from build_node_blocks.py) before splitting into
+-connected components. The discs (12 m) are wider than the tube radius (6 m), so
+-the merged mesh severs at every junction and each polygon is one path segment
+-between junctions — the same grain as street blocks. (Without the subtraction a
+-whole park's path network union-finds into a handful of giant blocks — the old
+-Central Park behaviour.) Results append to blocks_generic_<city>.geojson
+-(road_class="foot", seg_id=−1, block_ids continuing from the existing features).
++build_blocks_generic.py covers the street grid; foot edges >30 m from any drive
++centerline — park interior paths, pedestrian plazas, boardwalks — stay unmapped
++after the pass-1 bake (edge_blocks_<net>.npy == −1). This groups those edges
++GRAPH-FIRST and generates geometry from the grouping (not the other way around):
++
++  1. connected components of the unmapped edges, SPLIT AT JUNCTION CLUSTERS —
++     traversal never crosses a node that belongs to a junction cluster
++     (node_clusters_<network>.npz), so each component is one path segment
++     between junctions, the same grain as street blocks;
++  2. each component's polygon is the union of ITS OWN buffered edge polylines
++     (purely procedural from the composing edges), minus the junction-node
++     cells so blocks never overlap;
++  3. edge → block membership is recorded BY CONSTRUCTION in a sidecar
++     (foot_clusters_<network>.npz) consumed by build_edge_blocks.py's final
++     pass — no midpoint-in-polygon geometry round-trip for foot blocks.
++
++Results append to blocks_generic_<city>.geojson (road_class="foot", seg_id=−1,
++block_ids continuing from the existing features). Components whose polygon is
++swallowed by node cells (or below MIN_AREA) are not emitted; their edges fall
++through to the final bake's containment/nearest passes.
+ 
+ After running this, re-run build_edge_blocks.py and rebuild blocks.pmtiles.
+ 
+@@ -24,6 +33,7 @@ import json
+ import math
+ import os
+ import sys
++import time
+ 
+ import numpy as np
+ 
+@@ -33,8 +43,8 @@ if _SERVER not in sys.path:
+     sys.path.insert(0, _SERVER)
+ 
+ import shapely  # noqa: E402
+-from shapely import LineString, union_all, get_parts, buffer as shp_buffer  # noqa: E402
+-from shapely.geometry import shape as shp_shape  # noqa: E402
++from shapely import STRtree, LineString, union_all, buffer as shp_buffer  # noqa: E402
++from shapely.geometry import mapping, shape as shp_shape  # noqa: E402
+ 
+ from cities import CITIES  # noqa: E402
+ from graph_registry import CityGraph  # noqa: E402
+@@ -46,6 +56,7 @@ MIN_AREA_M2 = float(os.environ.get("FOOT_MIN_AREA_M2", "120"))   # drop slivers
+ 
+ 
+ def main():
++    t0 = time.time()
+     city = CITIES[CITY]
+     g = CityGraph(city, redis_client=None, network=NETWORK)
+     g.ensure_loaded()
+@@ -53,86 +64,165 @@ def main():
+         raise SystemExit("no edge_blocks mapping — run build_edge_blocks.py first")
+ 
+     nodes = np.asarray(g.nodes, dtype=np.float64)   # [N,2] = (lat, lon)
++    ends = np.array([(e[0], e[1]) for e in g.edges], dtype=np.int64)
+     ebid = np.asarray(g.edge_block_id)
+-    unmapped = np.where(ebid < 0)[0]
++    unmapped = np.where((ebid < 0) & (ends[:, 0] != ends[:, 1]))[0]
+     print(f"[foot] {len(unmapped)} unmapped edges of {len(ebid)} "
+           f"({100*len(unmapped)/len(ebid):.1f}%)")
+ 
++    # Junction-cluster members sever components (same grain as street blocks).
++    sidecar = os.path.join(_SERVER, city.data_dir, f"node_clusters_{NETWORK}.npz")
++    is_junction = np.zeros(len(nodes), dtype=bool)
++    if os.path.exists(sidecar):
++        is_junction[np.load(sidecar)["node_idx"]] = True
++    else:
++        print(f"[foot] WARNING: no node-cluster sidecar — components won't "
++              "sever at junctions")
++
++    # Union-find over nodes, but never THROUGH a junction-cluster member: an
++    # edge with a junction endpoint hangs off the component of its other end.
++    parent = np.arange(len(nodes))
++
++    def find(a):
++        while parent[a] != a:
++            parent[a] = parent[parent[a]]
++            a = parent[a]
++        return a
++
++    for u, v in ends[unmapped]:
++        if is_junction[u] or is_junction[v]:
++            continue
++        ru, rv = find(u), find(v)
++        if ru != rv:
++            parent[rv] = ru
++
++    # Component key per edge: root of a non-junction endpoint; an edge whose
++    # endpoints are BOTH junction members (uncaptured cross-cluster link) is
++    # its own singleton component, keyed negatively by edge id.
++    comp_of_edge = np.empty(len(unmapped), dtype=np.int64)
++    for k, eid in enumerate(unmapped):
++        u, v = ends[eid]
++        if not is_junction[u]:
++            comp_of_edge[k] = find(u)
++        elif not is_junction[v]:
++            comp_of_edge[k] = find(v)
++        else:
++            comp_of_edge[k] = -1 - eid
++    n_comp = len(np.unique(comp_of_edge))
++    print(f"[foot] {n_comp} components (junction-severed) "
++          f"({time.time()-t0:.0f}s)", flush=True)
++
+     # Local equirectangular projection (metres) centred on the city bbox.
+     s, w, n, e = city.bbox
+-    lat0 = math.radians((s + n) / 2)
+     mlat = 111_320.0
+-    mlon = 111_320.0 * math.cos(lat0)
+-
+-    def to_m(latlon):  # [...,2] (lat,lon) -> (x,y) metres
+-        x = (latlon[..., 1] - w) * mlon
+-        y = (latlon[..., 0] - s) * mlat
+-        return x, y
++    mlon = 111_320.0 * math.cos(math.radians((s + n) / 2))
+ 
+     def to_ll_xy(x, y):  # metres -> (lon, lat)
+         return x / mlon + w, y / mlat + s
+ 
+-    # Build LineStrings (in metres) for unmapped edges, vectorized.
+-    lines = []
+-    for eid in unmapped:
+-        a = g.edges[eid]
+-        p, q = nodes[a[0]], nodes[a[1]]
+-        if a[0] == a[1]:
+-            continue
+-        x1, y1 = (p[1] - w) * mlon, (p[0] - s) * mlat
+-        x2, y2 = (q[1] - w) * mlon, (q[0] - s) * mlat
+-        lines.append(LineString([(x1, y1), (x2, y2)]))
+-    print(f"[foot] buffering + merging {len(lines)} segments (r={HALF_WIDTH_M}m)…")
+-
+-    bufs = shp_buffer(np.array(lines, dtype=object), HALF_WIDTH_M,
+-                      cap_style="round", join_style="round")
+-    merged = union_all(bufs)
+-
+-    # Load the existing blocks now: the junction-node discs in them cut the
+-    # merged mesh into per-segment components (and keep foot blocks from
+-    # overlapping the discs — blocks must never overlap).
++    # Buffer every unmapped edge (vectorized), then union per component.
++    lines = np.empty(len(unmapped), dtype=object)
++    for k, eid in enumerate(unmapped):
++        p, q = nodes[ends[eid, 0]], nodes[ends[eid, 1]]
++        lines[k] = LineString([((p[1] - w) * mlon, (p[0] - s) * mlat),
++                               ((q[1] - w) * mlon, (q[0] - s) * mlat)])
++    print(f"[foot] buffering {len(lines)} segments (r={HALF_WIDTH_M}m)…", flush=True)
++    bufs = shp_buffer(lines, HALF_WIDTH_M, cap_style="round", join_style="round")
++
++    order = np.argsort(comp_of_edge, kind="stable")
++    sorted_comp = comp_of_edge[order]
++    comp_polys = []      # metres-frame polygon per component
++    comp_edges = []      # member edge ids per component, aligned
++    i = 0
++    while i < len(order):
++        j = i
++        while j < len(order) and sorted_comp[j] == sorted_comp[i]:
++            j += 1
++        members = order[i:j]
++        geom = bufs[members[0]] if len(members) == 1 else union_all(bufs[members])
++        comp_polys.append(geom)
++        comp_edges.append(unmapped[members])
++        i = j
++    print(f"[foot] unioned {len(comp_polys)} component tubes "
++          f"({time.time()-t0:.0f}s)", flush=True)
++
++    # Load the existing blocks: junction-node cells trim the tubes (blocks
++    # must never overlap), and block ids continue from the existing features.
+     out_dir = os.environ.get("BLOCKS_OUT", os.path.join(_HERE, "output"))
+     blocks_path = os.path.join(out_dir, f"blocks_generic_{CITY}.geojson")
+     fc = json.load(open(blocks_path))
+-    feats = fc["features"]
++    feats = [f for f in fc["features"]
++             if f["properties"].get("road_class") != "foot"]  # idempotent re-runs
++    dropped = len(fc["features"]) - len(feats)
++    if dropped:
++        print(f"[foot] dropped {dropped} stale foot features")
+ 
+-    disc_ll = [shp_shape(f["geometry"]) for f in feats
++    cell_ll = [shp_shape(f["geometry"]) for f in feats
+                if f["properties"].get("road_class") == "node"]
+-    if disc_ll:
++    if cell_ll:
+         def to_m_geom(a):  # (lon,lat) ndarray -> metres in the same local frame
+             return np.column_stack(((a[:, 0] - w) * mlon, (a[:, 1] - s) * mlat))
+-        discs_m = shapely.transform(np.array(disc_ll, dtype=object), to_m_geom)
+-        merged = shapely.difference(merged, union_all(discs_m))
+-        print(f"[foot] subtracted {len(disc_ll)} junction discs")
++        cells_m = shapely.transform(np.array(cell_ll, dtype=object), to_m_geom)
++        tree = STRtree(cells_m)
++        polys_arr = np.array(comp_polys, dtype=object)
++        pi, ci = tree.query(polys_arr, predicate="intersects")
++        for k in np.unique(pi):
++            cutter = union_all(cells_m[ci[pi == k]])
++            comp_polys[k] = shapely.difference(comp_polys[k], cutter)
++        print(f"[foot] trimmed {len(np.unique(pi))} tubes at junction cells")
+ 
+-    parts = [p for p in get_parts(merged) if p.area >= MIN_AREA_M2]
+-    print(f"[foot] merged into {len(parts)} foot blocks (≥{MIN_AREA_M2:.0f} m²)")
+     next_id = max((f["properties"]["block_id"] for f in feats), default=-1) + 1
+-
+-    for poly in parts:
+-        # ring coords (metres) -> (lon, lat); polygon may have holes.
++    emitted = 0
++    skipped = 0
++    sidecar_edges = []
++    sidecar_blocks = []
++    for poly, members in zip(comp_polys, comp_edges):
++        if poly.is_empty or poly.area < MIN_AREA_M2:
++            skipped += 1     # edges fall through to containment/nearest
++            continue
+         def ring_ll(coords):
+             return [list(to_ll_xy(x, y)) for x, y in coords]
+-        ext = ring_ll(poly.exterior.coords)
+-        holes = [ring_ll(r.coords) for r in poly.interiors]
++        parts = shapely.get_parts(poly) if poly.geom_type.startswith("Multi") else [poly]
++        coords = [[ring_ll(p.exterior.coords)] + [ring_ll(r.coords) for r in p.interiors]
++                  for p in parts]
++        geometry = ({"type": "Polygon", "coordinates": coords[0]}
++                    if len(coords) == 1 else
++                    {"type": "MultiPolygon", "coordinates": coords})
+         feats.append({
+             "type": "Feature",
+             "properties": {
+                 "block_id": next_id, "seg_id": -1, "road_class": "foot",
+                 "road_name": None, "area_m2": round(poly.area, 1),
++                "n_edges": int(len(members)),
+             },
+-            "geometry": {"type": "Polygon", "coordinates": [ext] + holes},
++            "geometry": geometry,
+         })
++        sidecar_edges.append(members)
++        sidecar_blocks.append(np.full(len(members), next_id, dtype=np.int32))
+         next_id += 1
++        emitted += 1
+ 
++    fc["features"] = feats
+     # pid-unique tmp: a stale sibling process fighting over one shared ".tmp"
+     # interleaves writes and corrupts the output on os.replace.
+     tmp = f"{blocks_path}.tmp{os.getpid()}"
+     with open(tmp, "w") as fh:
+         json.dump(fc, fh)
+     os.replace(tmp, blocks_path)
+-    print(f"[foot] appended {len(parts)} foot blocks → {os.path.basename(blocks_path)} "
+-          f"(now {len(feats)} total)")
++
++    foot_sidecar = os.path.join(_SERVER, city.data_dir,
++                                f"foot_clusters_{NETWORK}.npz")
++    np.savez(
++        foot_sidecar,
++        edge_idx=(np.concatenate(sidecar_edges).astype(np.int64)
++                  if sidecar_edges else np.empty(0, dtype=np.int64)),
++        block_id=(np.concatenate(sidecar_blocks)
++                  if sidecar_blocks else np.empty(0, dtype=np.int32)),
++    )
++    print(f"[foot] appended {emitted} foot blocks ({skipped} skipped as "
++          f"empty/<{MIN_AREA_M2:.0f}m²) → {os.path.basename(blocks_path)} "
++          f"(now {len(feats)} total); sidecar {os.path.basename(foot_sidecar)} "
++          f"({time.time()-t0:.0f}s)")
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/server/streetscape_blocks/build_node_blocks.py b/server/streetscape_blocks/build_node_blocks.py
+index 5d7e458..e79ec5d 100644
+--- a/server/streetscape_blocks/build_node_blocks.py
++++ b/server/streetscape_blocks/build_node_blocks.py
+@@ -1,36 +1,41 @@
+ #!/usr/bin/env python3
+-"""Give every junction its own block — one merged blob per junction CLUSTER,
+-punched out of the street/foot blocks (docs/three-layer-model.md §2).
++"""Give every junction cluster its own block — a Voronoi cell at the cluster
++centroid, clipped to a max radius — punched out of the street/foot blocks
++(docs/three-layer-model.md §2).
+ 
+ Why: block polygons extend across intersections (the Voronoi assigns the
+ intersection flare to ONE of the crossing segments), so the short graph edges
+ that cross an intersection get baked into a PERPENDICULAR street's block. A
+ route down an avenue then selects — and block-scoped casting votes on — every
+ cross street it passes ("ladder" selections). Junction blocks catch those
+-edges' midpoints instead, so a path only ever touches blocks that share its
+-orientation, plus the intersections themselves.
++edges instead, so a path only ever touches blocks that share its orientation,
++plus the intersections themselves.
+ 
+ Nodes and edges get SEPARATE block-forming logic: edges partition the ROW by
+-segment-Voronoi (build_blocks_generic.py); junction nodes each contribute a
+-disc of NODE_BLOCK_RADIUS_M, and discs that OVERLAP merge into one multi-node
+-block (a physical intersection is several OSM junction nodes — centerline
+-node, crossing ends, sidewalk corners — one per ~5-15 m; per-node discs drew
+-as stacked circles). Union-find over center pairs closer than 2R, then
+-union_all per cluster.
++segment-Voronoi (build_blocks_generic.py); junction nodes cluster by proximity
++(union-find over centers closer than NODE_CLUSTER_LINK_M — a physical
++intersection is several OSM junction nodes: centerline node, crossing ends,
++sidewalk corners, one per ~5-15 m). Each cluster's polygon is:
++
++    voronoi_cell(centroid vs neighbouring cluster centroids) ∩ disc(centroid, R)
++
++with R = clamp(max member distance + PAD, MIN_RADIUS, MAX_RADIUS). The Voronoi
++bisectors keep adjacent intersections from overlapping; the radius cap keeps a
++sprawling cluster from ballooning into a gloop (the old union-of-discs blobs
++read as stacked circles). The cell is computed locally: start from a disc,
++clip by the perpendicular bisector toward every neighbouring centroid closer
++than 2R — exactly the Voronoi cell restricted to that disc.
+ 
+ What it does, given blocks_generic_<city>.geojson:
+   1. drops any road_class in {"node","foot"} features (idempotent re-runs; foot
+      blocks are rebuilt afterwards by build_foot_blocks.py);
+   2. finds junction nodes of the city walk graph — unique-neighbour degree >= 3
+      (degree-2 geometry nodes and dead ends stay part of their street block);
+-  3. buffers each into a disc of NODE_BLOCK_RADIUS_M (default 9 m — small
+-     enough that same-intersection blobs stay intersection-sized, still > the
+-     6 m foot tube so build_foot_blocks' mesh severs at junctions);
+-  4. merges overlapping discs into one polygon per connected cluster;
+-  5. subtracts the cluster blobs from every street block they intersect
+-     (blocks and node blobs never overlap — bake containment stays
+-     unambiguous);
+-  6. appends the blobs as features: road_class="node", seg_id=-1,
++  3. clusters them (union-find, link distance NODE_CLUSTER_LINK_M);
++  4. builds each cluster's clipped-Voronoi cell as above;
++  5. subtracts the cells from every street block they intersect (blocks and
++     node cells never overlap — bake containment stays unambiguous);
++  6. appends the cells as features: road_class="node", seg_id=-1,
+      node_id=<lowest member node idx>, n_nodes=<cluster size>, block_id
+      continuing after the street blocks.
+ 
+@@ -53,8 +58,8 @@ if _SERVER not in sys.path:
+     sys.path.insert(0, _SERVER)
+ 
+ import shapely  # noqa: E402
+-from shapely import STRtree, buffer as shp_buffer, points as shp_points, union_all  # noqa: E402
+-from shapely.geometry import mapping  # noqa: E402
++from shapely import STRtree, union_all  # noqa: E402
++from shapely.geometry import Polygon, mapping  # noqa: E402
+ from scipy.spatial import cKDTree  # noqa: E402
+ 
+ from cities import CITIES  # noqa: E402
+@@ -62,9 +67,21 @@ from graph_registry import CityGraph  # noqa: E402
+ 
+ CITY = os.environ.get("CITY", "nyc")
+ NETWORK = os.environ.get("NETWORK", "streets")
+-RADIUS_M = float(os.environ.get("NODE_BLOCK_RADIUS_M", "9"))
+-# Discs are 16-gons: plenty round at 9 m, keeps the geojson/tiles small.
+-QUAD_SEGS = int(os.environ.get("NODE_BLOCK_QUAD_SEGS", "4"))
++# Junction centers closer than this share a cluster (one physical intersection).
++LINK_M = float(os.environ.get("NODE_CLUSTER_LINK_M", "18"))
++# Single-linkage percolates in dense areas (FiDi chains 1600+ junctions over
++# ~500 m); clusters wider than this are recursively bisected along their
++# principal axis so every cluster stays intersection-sized and its members fit
++# inside the max-radius cell.
++MAX_EXTENT_M = float(os.environ.get("NODE_CLUSTER_MAX_EXTENT_M", "40"))
++# Cell radius: cluster extent + pad, clamped to [MIN, MAX].
++PAD_M = float(os.environ.get("NODE_BLOCK_PAD_M", "6"))
++MIN_RADIUS_M = float(os.environ.get("NODE_BLOCK_MIN_RADIUS_M", "10"))
++MAX_RADIUS_M = float(os.environ.get("NODE_BLOCK_MAX_RADIUS_M", "28"))
++# Disc base is a 24-gon: plenty round at these radii, keeps the tiles small.
++DISC_SEGS = int(os.environ.get("NODE_BLOCK_DISC_SEGS", "24"))
++
++_DISC_ANGLES = np.linspace(0.0, 2.0 * np.pi, DISC_SEGS, endpoint=False)
+ 
+ 
+ def junction_nodes(g) -> np.ndarray:
+@@ -78,8 +95,8 @@ def junction_nodes(g) -> np.ndarray:
+ 
+ 
+ def cluster_junctions(xy: np.ndarray, link_dist: float) -> np.ndarray:
+-    """Union-find label per junction: centers closer than link_dist (= 2R,
+-    i.e. overlapping discs) share a cluster. Returns int labels, one per row."""
++    """Union-find label per junction: centers closer than link_dist share a
++    cluster. Returns int labels, one per row."""
+     parent = np.arange(len(xy))
+ 
+     def find(a):
+@@ -93,7 +110,71 @@ def cluster_junctions(xy: np.ndarray, link_dist: float) -> np.ndarray:
+         ra, rb = find(a), find(b)
+         if ra != rb:
+             parent[rb] = ra
+-    return np.array([find(i) for i in range(len(xy))])
++    return split_oversized(xy, np.array([find(i) for i in range(len(xy))]))
++
++
++def split_oversized(xy: np.ndarray, labels: np.ndarray) -> np.ndarray:
++    """Recursively bisect clusters whose bbox diagonal exceeds MAX_EXTENT_M:
++    project members on the principal axis, cut at the median. Keeps every
++    cluster intersection-sized so its members fit the max-radius cell."""
++    next_label = int(labels.max()) + 1
++    queue = list(np.unique(labels))
++    splits = 0
++    while queue:
++        lb = queue.pop()
++        idx = np.where(labels == lb)[0]
++        if len(idx) < 2:
++            continue
++        pts = xy[idx]
++        span = pts.max(axis=0) - pts.min(axis=0)
++        if float(np.hypot(*span)) <= MAX_EXTENT_M:
++            continue
++        centered = pts - pts.mean(axis=0)
++        # principal axis of the member cloud (2×2 eigenproblem)
++        cov = centered.T @ centered
++        _, vecs = np.linalg.eigh(cov)
++        proj = centered @ vecs[:, -1]
++        half = idx[proj > np.median(proj)]
++        if len(half) == 0 or len(half) == len(idx):
++            half = idx[np.argsort(proj)[len(idx) // 2:]]  # degenerate: split by rank
++        labels[half] = next_label
++        queue.append(lb)
++        queue.append(next_label)
++        next_label += 1
++        splits += 1
++    if splits:
++        print(f"[node_blocks] split {splits} oversized clusters "
++              f"(> {MAX_EXTENT_M:.0f}m extent)", flush=True)
++    return labels
++
++
++def clipped_voronoi_cell(c: np.ndarray, radius: float,
++                         neighbours: np.ndarray) -> Polygon:
++    """Voronoi cell of centroid `c` against `neighbours`, restricted to
++    disc(c, radius): start from the disc, clip by the perpendicular bisector
++    toward every neighbour closer than 2·radius (farther bisectors can't
++    intersect the disc)."""
++    cell = Polygon(np.column_stack((
++        c[0] + radius * np.cos(_DISC_ANGLES),
++        c[1] + radius * np.sin(_DISC_ANGLES),
++    )))
++    for nb in neighbours:
++        d = float(np.hypot(nb[0] - c[0], nb[1] - c[1]))
++        if d >= 2.0 * radius or d == 0.0:
++            continue
++        u = (nb - c) / d                      # unit vector toward the neighbour
++        v = np.array([-u[1], u[0]])           # bisector direction
++        m = (c + nb) / 2.0                    # bisector midpoint
++        span = 4.0 * radius
++        # Rectangle covering our side of the bisector; intersect keeps the
++        # half-plane closer to c.
++        keep = Polygon([m + span * v, m - span * v,
++                        m - span * v - (span + radius) * u,
++                        m + span * v - (span + radius) * u])
++        cell = cell.intersection(keep)
++        if cell.is_empty:
++            break
++    return cell
+ 
+ 
+ def main():
+@@ -105,47 +186,69 @@ def main():
+ 
+     junctions = junction_nodes(g)
+     print(f"[node_blocks] {len(junctions)} junction nodes "
+-          f"(deg>=3) of {len(nodes)} — r={RADIUS_M}m", flush=True)
++          f"(deg>=3) of {len(nodes)} — link={LINK_M}m "
++          f"R∈[{MIN_RADIUS_M},{MAX_RADIUS_M}]m", flush=True)
+ 
+     # Same local equirectangular frame as build_foot_blocks.py so both scripts
+-    # agree exactly on where a blob's boundary falls.
++    # agree exactly on where a cell's boundary falls.
+     s, w, n, e = city.bbox
+     mlat = 111_320.0
+     mlon = 111_320.0 * math.cos(math.radians((s + n) / 2))
+ 
+-    xs = (nodes[junctions, 1] - w) * mlon
+-    ys = (nodes[junctions, 0] - s) * mlat
+-    xy = np.column_stack((xs, ys))
+-    labels = cluster_junctions(xy, link_dist=2 * RADIUS_M)
+-    n_clusters = len(np.unique(labels))
+-    print(f"[node_blocks] {n_clusters} clusters from {len(junctions)} junctions "
++    xy = np.column_stack(((nodes[junctions, 1] - w) * mlon,
++                          (nodes[junctions, 0] - s) * mlat))
++    labels = cluster_junctions(xy, link_dist=LINK_M)
++    uniq = np.unique(labels)
++    print(f"[node_blocks] {len(uniq)} clusters from {len(junctions)} junctions "
+           f"({time.time()-t0:.0f}s)", flush=True)
+ 
+-    discs_m = shp_buffer(shp_points(xs, ys), RADIUS_M, quad_segs=QUAD_SEGS)
+-    to_ll = lambda a: np.column_stack((a[:, 0] / mlon + w, a[:, 1] / mlat + s))
+-
+-    # One blob per cluster: union of the member discs, converted to lon/lat.
++    # Per-cluster centroid + radius (extent + pad, clamped).
+     order = np.argsort(labels, kind="stable")
+-    blobs = []          # (blob_lonlat, node_id, n_nodes)
+-    blob_members = []   # graph node indices per blob, aligned with `blobs`
+-    i = 0
+     sorted_labels = labels[order]
+-    while i < len(order):
+-        j = i
+-        while j < len(order) and sorted_labels[j] == sorted_labels[i]:
+-            j += 1
+-        members = order[i:j]
+-        geom = discs_m[members[0]] if len(members) == 1 else union_all(discs_m[members])
++    starts = np.searchsorted(sorted_labels, uniq, side="left")
++    ends = np.searchsorted(sorted_labels, uniq, side="right")
++
++    centroids = np.empty((len(uniq), 2))
++    radii = np.empty(len(uniq))
++    members_per = []
++    for k in range(len(uniq)):
++        members = order[starts[k]:ends[k]]
++        pts = xy[members]
++        c = pts.mean(axis=0)
++        extent = float(np.hypot(*(pts - c).T).max()) if len(pts) > 1 else 0.0
++        centroids[k] = c
++        radii[k] = min(MAX_RADIUS_M, max(MIN_RADIUS_M, extent + PAD_M))
++        members_per.append(junctions[members])
++
++    # Voronoi neighbours: centroid pairs close enough that a bisector can cut
++    # either cell (dist < 2 · max radius of the pair).
++    ctree = cKDTree(centroids)
++    pairs = ctree.query_pairs(r=2.0 * MAX_RADIUS_M, output_type="ndarray")
++    nb_lists: list[list[int]] = [[] for _ in range(len(uniq))]
++    for a, b in pairs:
++        nb_lists[a].append(b)
++        nb_lists[b].append(a)
++
++    to_ll = lambda a: np.column_stack((a[:, 0] / mlon + w, a[:, 1] / mlat + s))
++    blobs = []          # (cell_lonlat, node_id, n_nodes)
++    blob_members = []   # graph node indices per cell, aligned with `blobs`
++    empty_cells = 0
++    for k in range(len(uniq)):
++        cell = clipped_voronoi_cell(centroids[k], radii[k],
++                                    centroids[nb_lists[k]])
++        if cell.is_empty or cell.area <= 0:
++            empty_cells += 1
++            continue
+         blobs.append((
+-            shapely.transform(geom, to_ll),
+-            int(junctions[members.min()]),
+-            len(members),
++            shapely.transform(cell, to_ll),
++            int(members_per[k].min()),
++            len(members_per[k]),
+         ))
+-        blob_members.append(junctions[members])
+-        i = j
++        blob_members.append(members_per[k])
+     max_n = max(b[2] for b in blobs)
+-    print(f"[node_blocks] built {len(blobs)} blobs (largest cluster: {max_n} "
+-          f"nodes) in {time.time()-t0:.0f}s", flush=True)
++    print(f"[node_blocks] built {len(blobs)} Voronoi cells "
++          f"(largest cluster: {max_n} nodes, {empty_cells} empty) "
++          f"in {time.time()-t0:.0f}s", flush=True)
+ 
+     out_dir = os.environ.get("BLOCKS_OUT", os.path.join(_HERE, "output"))
+     blocks_path = os.path.join(out_dir, f"blocks_generic_{CITY}.geojson")
+@@ -157,7 +260,7 @@ def main():
+         print(f"[node_blocks] dropped {dropped} stale node/foot features "
+               f"(rebuilt downstream)", flush=True)
+ 
+-    # Subtract every blob from every street block it intersects.
++    # Subtract every cell from every street block it intersects.
+     geoms = shapely.from_geojson(
+         json.dumps({"type": "GeometryCollection",
+                     "geometries": [f["geometry"] for f in feats]}))
+@@ -167,7 +270,7 @@ def main():
+     tree = STRtree(blob_geoms)
+     block_idx, blob_idx = tree.query(polys, predicate="intersects")
+     print(f"[node_blocks] clipping {len(np.unique(block_idx))} street blocks "
+-          f"touched by node blobs…", flush=True)
++          f"touched by node cells…", flush=True)
+     cut = 0
+     for bi in np.unique(block_idx):
+         cutter = union_all(blob_geoms[blob_idx[block_idx == bi]])
+@@ -199,10 +302,9 @@ def main():
+         json.dump(fc, fh)
+     os.replace(tmp, blocks_path)
+ 
+-    # Sidecar for the bake's junction-capture pass (SEPARATE node mapping logic:
+-    # the drawn blobs are 9 m, but any edge whose midpoint is within
+-    # NODE_CAPTURE_M of a junction maps to that junction's block by GRAPH
+-    # distance — stub midpoints run to ~12 m, past the drawn rim).
++    # Sidecar for the bake's junction-capture pass (SEPARATE node mapping
++    # logic — capture is topological, by cluster membership; see
++    # build_edge_blocks.py).
+     sidecar = os.path.join(_SERVER, city.data_dir, f"node_clusters_{NETWORK}.npz")
+     np.savez(
+         sidecar,
+@@ -212,7 +314,7 @@ def main():
+             for k, m in enumerate(blob_members)
+         ]),
+     )
+-    print(f"[node_blocks] clipped {cut} blocks, appended {len(blobs)} node blobs "
++    print(f"[node_blocks] clipped {cut} blocks, appended {len(blobs)} node cells "
+           f"→ {os.path.basename(blocks_path)} ({len(feats)} features); "
+           f"sidecar {os.path.basename(sidecar)} ({time.time()-t0:.0f}s)", flush=True)
+ 
+diff --git a/server/streetscape_blocks/merge_degenerate_blocks.py b/server/streetscape_blocks/merge_degenerate_blocks.py
+new file mode 100644
+index 0000000..19f165a
+--- /dev/null
++++ b/server/streetscape_blocks/merge_degenerate_blocks.py
+@@ -0,0 +1,290 @@
++#!/usr/bin/env python3
++"""Merge degenerate blocks until the block graph is well-formed.
++
++Operates on the BLOCK ADJACENCY GRAPH derived purely from the walk graph and
++the baked edge→block mapping (no geometry heuristics): an edge-block and a
++node-block are adjacent iff some member edge of the edge-block has an endpoint
++in the node block's junction cluster.
++
++Two violations are merged away, iterating to a fixpoint:
++
++  V1  STUB: an edge-block adjacent to exactly ONE node-block, with spatial
++      extent ≤ STUB_MAX_M (bbox diagonal of its member-edge endpoints) —
++      garage entrances, driveways, alley stubs — merges INTO that node block.
++      (Long dead-ends — cul-de-sacs — exceed the extent cap and stay.)
++
++  V2  FAKE JUNCTION: a node-block left adjacent to EXACTLY ONE distinct
++      edge-block is not a real junction — it dissolves into that block. (A
++      mid-street garage junction ends up back inside its street's block, stub
++      included — the W 31st case: the driveway isn't in the drive graph, so
++      the street is ONE segment through the junction.) A node between TWO
++      distinct blocks stays: dissolving it would weld two different streets
++      end-to-end into one corridor (seen live where a pedestrian cross street
++      met an avenue — the avenue isn't drive-split there, and the whole cross
++      street fused into the avenue's block).
++
++Result: every edge-block touches ≥ 2 node-blocks (or is a big dead-end /
++isolated component); every node-block touches ≥ 2 distinct edge-blocks.
++
++Inputs (after the FINAL build_edge_blocks.py pass):
++  output/blocks_generic_<city>.geojson   street/node/foot features (pristine)
++  osm_data/<city>/edge_blocks_<net>.npy  baked mapping
++  osm_data/<city>/node_clusters_<net>.npz  junction-cluster membership
++
++Outputs (the generic file + sidecars stay pristine pipeline intermediates):
++  output/blocks_final_<city>.geojson     merged + densely renumbered features
++  osm_data/<city>/edge_blocks_<net>.npy  remapped to final block ids
++  osm_data/<city>/edge_blocks_<net>.json meta stamped with the FINAL file sha
++
++Run in the SERVER venv (see build_city_blocks.sh, which orders the pipeline):
++
++  CITY=nyc NETWORK=streets ./env/bin/python streetscape_blocks/merge_degenerate_blocks.py
++"""
++import hashlib
++import json
++import math
++import os
++import sys
++import time
++
++import numpy as np
++
++_HERE = os.path.dirname(os.path.abspath(__file__))
++_SERVER = os.path.abspath(os.path.join(_HERE, ".."))
++if _SERVER not in sys.path:
++    sys.path.insert(0, _SERVER)
++
++import shapely  # noqa: E402
++from shapely import union_all  # noqa: E402
++from shapely.geometry import mapping, shape as shp_shape  # noqa: E402
++
++from cities import CITIES  # noqa: E402
++from graph_registry import CityGraph  # noqa: E402
++
++CITY = os.environ.get("CITY", "nyc")
++NETWORK = os.environ.get("NETWORK", "streets")
++STUB_MAX_M = float(os.environ.get("STUB_MAX_M", "40"))
++MAX_ROUNDS = int(os.environ.get("MERGE_MAX_ROUNDS", "25"))
++
++
++def _sha256_file(path: str) -> str:
++    h = hashlib.sha256()
++    with open(path, "rb") as f:
++        for chunk in iter(lambda: f.read(1 << 20), b""):
++            h.update(chunk)
++    return h.hexdigest()[:16]
++
++
++def main():
++    t0 = time.time()
++    city = CITIES[CITY]
++    g = CityGraph(city, redis_client=None, network=NETWORK)
++    g.ensure_loaded()
++    nodes = np.asarray(g.nodes, dtype=np.float64)
++    ends = np.array([(e[0], e[1]) for e in g.edges], dtype=np.int64)
++
++    out_dir = os.path.join(_SERVER, "osm_data", CITY)
++    npy_path = os.path.join(out_dir, f"edge_blocks_{NETWORK}.npy")
++    meta_path = os.path.join(out_dir, f"edge_blocks_{NETWORK}.json")
++    meta = json.load(open(meta_path))
++
++    # Merge is destructive on the npy; keep the bake's raw mapping beside it
++    # so the merge can be re-run with different knobs without re-baking. The
++    # premerge copy is refreshed whenever the bake ran after the last merge
++    # (no "merged_from_blocks" stamp in meta yet).
++    premerge_path = os.path.join(out_dir, f"edge_blocks_{NETWORK}.premerge.npy")
++    if "merged_from_blocks" in meta:
++        if not os.path.exists(premerge_path):
++            raise SystemExit("[merge] npy is already merged and no premerge copy "
++                             "exists — re-run build_edge_blocks.py first")
++        print("[merge] npy already merged — re-merging from the premerge copy")
++        ebid = np.load(premerge_path).astype(np.int64)
++    else:
++        ebid = np.load(npy_path).astype(np.int64)
++        np.save(premerge_path, ebid.astype(np.int32))
++
++    blocks_dir = os.environ.get("BLOCKS_OUT", os.path.join(_HERE, "output"))
++    src_path = os.path.join(blocks_dir, f"blocks_generic_{CITY}.geojson")
++    fc = json.load(open(src_path))
++    feats = fc["features"]
++    n_blocks = max(f["properties"]["block_id"] for f in feats) + 1
++    feat_by_id: dict[int, dict] = {f["properties"]["block_id"]: f for f in feats}
++
++    # Which block ids are node blocks (junction clusters).
++    nc = np.load(os.path.join(out_dir, f"node_clusters_{NETWORK}.npz"))
++    jn_idx, jn_block = nc["node_idx"], nc["block_id"]
++    is_node_block = np.zeros(n_blocks, dtype=bool)
++    is_node_block[np.unique(jn_block)] = True
++    node_cluster = np.full(len(nodes), -1, dtype=np.int64)
++    node_cluster[jn_idx] = jn_block
++    print(f"[merge] {n_blocks} blocks ({int(is_node_block.sum())} node blocks), "
++          f"{len(ebid)} edges; stub cap {STUB_MAX_M:.0f}m", flush=True)
++
++    # ── Primitive incidences (fixed; group-level adjacency derives per round) ─
++    # (edge-block, node-block) pairs: a member edge endpoint sits in a cluster.
++    valid = (ebid >= 0) & (ends[:, 0] != ends[:, 1])
++    eb = np.concatenate([ebid[valid], ebid[valid]])
++    cl = np.concatenate([node_cluster[ends[valid, 0]], node_cluster[ends[valid, 1]]])
++    keep = (cl >= 0) & (eb != cl) & ~is_node_block[eb]
++    pairs = np.unique(np.column_stack((eb[keep], cl[keep])), axis=0)
++    print(f"[merge] {len(pairs)} primitive edge-block↔node-block incidences",
++          flush=True)
++
++    # Per-block bbox extent from member edges (endpoints, degrees → metres).
++    s_, w_, n_, e_ = city.bbox
++    mlat = 111_320.0
++    mlon = 111_320.0 * math.cos(math.radians((s_ + n_) / 2))
++    minx = np.full(n_blocks, np.inf); maxx = np.full(n_blocks, -np.inf)
++    miny = np.full(n_blocks, np.inf); maxy = np.full(n_blocks, -np.inf)
++    for col in (0, 1):
++        b = ebid[valid]
++        x = (nodes[ends[valid, col], 1] - w_) * mlon
++        y = (nodes[ends[valid, col], 0] - s_) * mlat
++        np.minimum.at(minx, b, x); np.maximum.at(maxx, b, x)
++        np.minimum.at(miny, b, y); np.maximum.at(maxy, b, y)
++    has_edges = np.isfinite(minx)
++    extent = np.where(has_edges,
++                      np.hypot(maxx - minx, maxy - miny), 0.0)
++
++    # ── Union-find over block ids ────────────────────────────────────────────
++    parent = np.arange(n_blocks)
++
++    def find(a):
++        while parent[a] != a:
++            parent[a] = parent[parent[a]]
++            a = parent[a]
++        return int(a)
++
++    # Group kind: True = node-kind (an intersection block). V1 keeps node kind;
++    # V2 produces edge kind (corridor).
++    kind_node = is_node_block.copy()
++
++    def union(a, b, result_node_kind):
++        ra, rb = find(a), find(b)
++        if ra == rb:
++            return ra
++        parent[rb] = ra
++        kind_node[ra] = result_node_kind
++        # merged extent: combined bbox
++        minx[ra] = min(minx[ra], minx[rb]); maxx[ra] = max(maxx[ra], maxx[rb])
++        miny[ra] = min(miny[ra], miny[rb]); maxy[ra] = max(maxy[ra], maxy[rb])
++        return ra
++
++    v1_total = v2_total = 0
++    for rounds in range(1, MAX_ROUNDS + 1):
++        roots = np.array([find(a) for a in range(n_blocks)])
++        ge = roots[pairs[:, 0]]     # edge-side group
++        gn = roots[pairs[:, 1]]     # node-side group
++        # After V2 an ex-node group is edge-kind: its primitive pairs now
++        # relate two edge-kind groups — drop them. Ditto V1 stubs (node-kind).
++        live = kind_node[gn] & ~kind_node[ge] & (ge != gn)
++        gpairs = np.unique(np.column_stack((ge[live], gn[live])), axis=0)
++
++        changed = 0
++
++        # V1: edge groups adjacent to exactly one node group, extent-capped.
++        eg, counts = np.unique(gpairs[:, 0], return_counts=True)
++        stub_groups = set(eg[counts == 1])
++        ext_now = np.hypot(maxx[roots] - minx[roots], maxy[roots] - miny[roots])
++        for a, b in gpairs:
++            if a in stub_groups and ext_now[a] <= STUB_MAX_M:
++                union(b, a, result_node_kind=True)
++                changed += 1
++                v1_total += 1
++
++        # Recompute groups after V1 so V2 sees the absorbed stubs.
++        roots = np.array([find(a) for a in range(n_blocks)])
++        ge = roots[pairs[:, 0]]
++        gn = roots[pairs[:, 1]]
++        live = kind_node[gn] & ~kind_node[ge] & (ge != gn)
++        gpairs = np.unique(np.column_stack((ge[live], gn[live])), axis=0)
++
++        # V2: a node group adjacent to exactly ONE distinct edge group
++        # dissolves into it. Two or more distinct neighbours = a real junction
++        # between different streets — dissolving would weld them end-to-end.
++        # (gpairs sorted by node column → contiguous slices per node group.)
++        by_node = gpairs[np.argsort(gpairs[:, 1], kind="stable")]
++        ng, starts = np.unique(by_node[:, 1], return_index=True)
++        starts = np.append(starts, len(by_node))
++        for k in range(len(ng)):
++            adj = by_node[starts[k]:starts[k + 1], 0]
++            if len(adj) != 1:
++                continue
++            union(find(int(adj[0])), int(ng[k]), result_node_kind=False)
++            changed += 1
++            v2_total += 1
++
++        print(f"[merge] round {rounds}: {changed} merges "
++              f"({time.time()-t0:.0f}s)", flush=True)
++        if changed == 0:
++            break
++
++    roots = np.array([find(a) for a in range(n_blocks)])
++    uniq_roots = np.unique(roots)
++    print(f"[merge] fixpoint: {n_blocks} → {len(uniq_roots)} blocks "
++          f"({v1_total} stub merges, {v2_total} junction dissolves)", flush=True)
++
++    # ── Rebuild features: union member geometries per merged group ──────────
++    new_id_of_root = {int(r): i for i, r in enumerate(uniq_roots)}
++    members_of_root: dict[int, list[int]] = {}
++    for bid in range(n_blocks):
++        members_of_root.setdefault(int(roots[bid]), []).append(bid)
++
++    out_feats = []
++    merged_geoms = 0
++    for r in uniq_roots:
++        members = members_of_root[int(r)]
++        fs = [feat_by_id[m] for m in members if m in feat_by_id]
++        if not fs:
++            continue
++        if len(fs) == 1:
++            geom = fs[0]["geometry"]
++        else:
++            geom = mapping(union_all([shp_shape(f["geometry"]) for f in fs]))
++            merged_geoms += 1
++        # Representative properties: node-kind keeps junction identity; a
++        # corridor takes the largest street member's naming.
++        r_kind_node = bool(kind_node[find(int(r))])
++        if r_kind_node:
++            node_fs = [f for f in fs if f["properties"].get("road_class") == "node"]
++            rep = node_fs[0] if node_fs else fs[0]
++        else:
++            rep = max(fs, key=lambda f: (f["properties"].get("road_class") != "node",
++                                         f["properties"].get("area_m2") or 0))
++        props = dict(rep["properties"])
++        props["block_id"] = new_id_of_root[int(r)]
++        props["n_merged"] = len(fs)
++        props["area_m2"] = round(sum(f["properties"].get("area_m2") or 0 for f in fs), 1)
++        out_feats.append({"type": "Feature", "properties": props, "geometry": geom})
++
++    dst_path = os.path.join(blocks_dir, f"blocks_final_{CITY}.geojson")
++    tmp = f"{dst_path}.tmp{os.getpid()}"
++    with open(tmp, "w") as fh:
++        json.dump({"type": "FeatureCollection", "features": out_feats}, fh)
++    os.replace(tmp, dst_path)
++    print(f"[merge] wrote {os.path.basename(dst_path)} "
++          f"({len(out_feats)} features, {merged_geoms} unions) "
++          f"({time.time()-t0:.0f}s)", flush=True)
++
++    # ── Remap the bake to final ids ──────────────────────────────────────────
++    remap = np.full(n_blocks, -1, dtype=np.int32)
++    remap[uniq_roots] = [new_id_of_root[int(r)] for r in uniq_roots]
++    new_ebid = np.where(ebid >= 0, remap[roots[np.maximum(ebid, 0)]], -1).astype(np.int32)
++    np.save(npy_path, new_ebid)
++
++    meta.update({
++        "n_blocks": len(out_feats),
++        "blocks_sha256": _sha256_file(dst_path),
++        "blocks_file": os.path.basename(dst_path),
++        "merged_from_blocks": int(n_blocks),
++        "merge_stubs": int(v1_total),
++        "merge_junction_dissolves": int(v2_total),
++        "stub_max_m": STUB_MAX_M,
++    })
++    json.dump(meta, open(meta_path, "w"), indent=2)
++    print(f"[merge] remapped {os.path.basename(npy_path)} + meta "
++          f"(sha {meta['blocks_sha256']}) ({time.time()-t0:.0f}s)", flush=True)
++
++
++if __name__ == "__main__":
++    main()
