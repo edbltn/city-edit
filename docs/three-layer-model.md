@@ -75,63 +75,61 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored
 
 ### 2.1 What a block is
 
-One polygon per street segment between intersections (a "streetscape block"),
-covering the roadbed + sidewalk right-of-way — plus one **junction block per
-junction cluster** (`build_node_blocks.py`), punched out of the street/foot
-polygons so blocks never overlap. Nodes and edges get SEPARATE block-forming
-logic: each walk-graph junction contributes a 9 m disc, and **overlapping discs
-merge into one multi-node block** (a physical intersection is several OSM
-junction nodes — centerline node, crossing ends, sidewalk corners — so per-node
-discs drew as stacked circles). Junction blocks exist because street polygons
-otherwise extend across intersections (Voronoi flare): the short edges crossing
-an intersection would bake into a PERPENDICULAR street's block, so a route down
-an avenue would select — and cast onto — every cross street it passes (the
-"ladder" bug). Blocks partition the votable network: **every edge belongs to
-exactly one block** (strict many-to-one), and a node belongs to the block of its
-**shortest** incident edge (deterministic, matching the client's `adjShortest`
-node→edge upgrade rule — the shortest incident edge is the one whose midpoint
-falls inside the junction's own block).
+One **corridor block** per path/street segment between intersections, plus one
+**junction block per junction cluster** (a physical intersection is several OSM
+junction nodes — centerline node, crossing ends, sidewalk corners — so nearby
+junctions merge into one multi-node block). Junction blocks exist because
+corridor polygons would otherwise extend across intersections: the short edges
+crossing an intersection would land in a PERPENDICULAR street's block, so a
+route down an avenue would select — and cast onto — every cross street it
+passes (the "ladder" bug). Blocks partition the votable network: **every edge
+belongs to exactly one block** (strict many-to-one, total — coverage and
+edge∩polygon overlap are 100% by construction, audited at build time), and a
+node belongs to the block of its **shortest** incident edge (deterministic,
+matching the client's `adjShortest` node→edge upgrade rule).
 
 ### 2.2 Generation — procedural, per city, at graph-build time
 
-Blocks are generated **procedurally from the street graph alone** so any city can
-be added without city-specific open data (`server/streetscape_blocks/`):
+Blocks are generated **graph-first from the walk graph alone** so any city can
+be added without city-specific open data — one pass,
+`server/streetscape_blocks/build_blocks_graph_first.py` (runs in the server
+venv; no osmnx/geopandas geo venv). Membership is decided FIRST, topologically,
+for every edge; each block's polygon is then generated **from its own member
+edges**, so coverage and edge∩polygon overlap hold by construction (the
+previous five-script pipeline generated polygons from drive centerlines and
+mapped edges into them geometrically, which left unmapped edges — heatmap gaps
+— and nearest-snapped edges assigned to polygons they didn't intersect):
 
-1. `build_blocks_generic.py` — consolidated drive-centerline graph (osmnx,
-   intersections merged at 12 m) → buffer each segment by a per-road-class
-   half-width → seed points every 6 m → Voronoi partition by nearest segment →
-   dissolve + clip. One polygon per street segment.
-2. `build_node_blocks.py` — every walk-graph junction (unique-neighbour degree
-   ≥ 3) contributes a 9 m disc; overlapping discs union-find into clusters and
-   each cluster becomes ONE block (`road_class="node"`, `n_nodes` members),
-   subtracted from every street block it touches so blocks stay disjoint. Also
-   writes the junction→block sidecar `node_clusters_<network>.npz` that the
-   bake's capture pass reads.
-3. `build_foot_blocks.py` — edges not covered by any street block (park paths,
-   plazas, boardwalks — ~18% in NYC) are buffered (6 m), merged, and **severed
-   at the junction blocks** (9 m > 6 m, so the mesh disconnects there): one
-   block per path segment between junctions — the same grain as streets, not
-   one giant block per connected park network. Appended with continuing
-   `block_id`s; this is what makes the edge→block mapping **total**.
-4. `build_edge_blocks.py` — bakes `edge_block_id: int32[n_edges]`
+1. **Junction clusters** — walk-graph junctions (unique-neighbour degree ≥ 3),
+   union-found within 18 m, oversized clusters bisected along their principal
+   axis (> 40 m extent).
+2. **Edge grouping (total)** — an edge whose endpoints share a cluster belongs
+   to that junction; a short (≤ 30 m) edge between two clusters is a crosswalk
+   stub and joins the nearer one; every other edge joins a **corridor** —
+   connected components linked through non-junction endpoints, i.e. one
+   component per segment between junctions (the same grain for streets and
+   park paths).
+3. **Degeneracy fixpoint** — driveway-class stubs (extent ≤ 25 m, one
+   junction) melt into their junction; a junction left touching ≤ 1 corridor
+   isn't a junction and dissolves into that corridor.
+4. **Geometry from membership** — a junction cell is the union of 8 m discs at
+   its member nodes plus its captured edges' tubes; a corridor is the union of
+   its member edges buffered by per-road-class half-width, minus the junction
+   cells (junctions win where they meet). A corridor edge left entirely inside
+   junction cells is reassigned to the cell containing its midpoint —
+   membership follows the final geometry.
+5. Bakes `edge_block_id: int32[n_edges]`
    (`osm_data/<city>/edge_blocks_<network>.npy` + a meta JSON stamping
-   `topology_etag` + `blocks_sha256`). Assignment, in order: **junction
-   capture** — a midpoint within `NODE_CAPTURE_M` (12 m) of a junction maps to
-   that junction's node block by GRAPH distance, not containment (crossing-stub
-   midpoints run to ~12 m, past the 9 m drawn rim; this is what holds the
-   ladder at zero while the drawn blobs stay small); then polygon containment
-   of the midpoint; else nearest block within 30 m (see `eval/RESULTS.md` —
-   nearest-polygon is exact where containment leaves ~20% unmapped).
+   `topology_etag` + `blocks_sha256`) and writes
+   `blocks_final_<city>.geojson` → tippecanoe → `blocks.pmtiles`. `block_id`s
+   are **1-based**: MVT can't represent a native feature id of 0 (tippecanoe
+   drops it), which would detach block 0's heat/selection feature-state.
 
-**Evaluation against ground truth**: `compare_blocks.py` scores the procedural
-output against Brook's NYC planimetric blocks (`build_nyc_blocks.py`, from NYC
-open-data roadbed+sidewalk polygons — the reference this algorithm mimics).
-Current numbers (see `COMPARISON.md`): median IoU **0.84**, median area ratio
-**1.00**, median centroid offset ~1 m over ~82k shared segments. **Every city —
-NYC included — serves the procedural output** (`edge_blocks_streets.json` stamps
-`blocks_file: blocks_generic_nyc.geojson`); Brook's planimetric blocks are the
-evaluation reference only. New cities should be spot-checked with the same
-comparison harness when planimetric data exists.
+The old pipeline (`build_blocks_generic.py` → `build_node_blocks.py` →
+`build_foot_blocks.py` → `build_edge_blocks.py` → `merge_degenerate_blocks.py`)
+and its planimetric evaluation harness (`compare_blocks.py`, `COMPARISON.md`)
+remain in the repo for reference but are no longer run by
+`build_city_blocks.sh`.
 
 Generation runs **when a city's graph is built** (alongside
 `refresh_osm.py` / the graph-builder image) and the artifacts are baked next to

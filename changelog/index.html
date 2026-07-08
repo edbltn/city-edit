@@ -29,6 +29,23 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-08-graph-first-blocks.html">
+    <div class="date">2026-07-08</div>
+    <h2>Graph-first blocks — membership decides the polygons, and no point on the map is a dead zone</h2>
+    <p>The central-park test exposed two structural defects in Layer-2 blocks: heatmap gaps (voted edges
+    whose polygon never existed — 2,450 unmapped on test-cp) and edges mapped to polygons they don't even
+    touch (10,336 nearest-snapped). Both came from generating polygons first and mapping edges into them
+    geometrically. A new one-pass builder inverts the premise: edges are grouped topologically first
+    (junction clusters + corridors severed at junctions, with the old merge pass's stub/fake-junction rules
+    run as a pre-geometry fixpoint), and each block's polygon is generated from exactly its own member
+    edges — 100% coverage and 100% edge∩polygon overlap by construction, audited at build time. Block ids
+    are now 1-based (MVT drops feature id 0, so block 0 could never light or select). Client-side, the
+    shared hover/click/drag resolver lost its off-polygon 4px radius gate: every hover and click resolves
+    to the closest node/edge and its encompassing block — verified by a 280-point live grid sweep (280/280
+    resolve, 0 block mismatches) and click tests in former dead zones. The five-script pipeline is down to
+    one script + tippecanoe, in the server venv alone.</p>
+  </a>
+
   <a class="entry" href="./2026-07-08-node-edge-parity.html">
     <div class="date">2026-07-08</div>
     <h2>Node/edge parity — the ends of every segment belong to their nodes</h2>

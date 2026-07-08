@@ -1,0 +1,1704 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graph-first blocks — membership decides the polygons, and no point on the map is a dead zone — 2026-07-08</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.25; }
+  pre.diff span { display: block; white-space: pre; }
+  pre.diff span span { display: inline; }
+
+  .s-kw { color: #a52a5a; }
+  .s-str { color: #0a3069; }
+  .s-com { color: #77716a; font-style: italic; }
+  .s-num { color: #0550ae; }
+  .s-lit { color: #0550ae; }
+  .s-fn { color: #6639ba; }
+  .s-type { color: #953800; }
+  .s-prop { color: #116329; }
+  .s-tag { color: #116329; }
+  .s-attr { color: #0550ae; }
+  .s-dec { color: #6639ba; }
+
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Graph-first blocks — membership decides the polygons, and no point on the map is a dead zone</h1>
+    <div class="dateline">2026-07-08 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#builder">1</a>
+<a href="#ids">2</a>
+<a href="#resolver">3</a>
+<a href="#docs">4</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a>
+  </nav>
+
+  <p class="lede">The central-park test map exposed two structural defects in Layer-2 blocks: heatmap gaps
+  (voted edges whose polygon never existed) and edges mapped to polygons they don't even touch. Both came
+  from the same premise — polygons were generated first (drive-centerline Voronoi) and edges were mapped
+  into them geometrically afterwards. A new one-pass builder inverts that: every edge is grouped
+  topologically FIRST (junction clusters + corridors severed at junctions), and each block's polygon is
+  generated from exactly its own members — so 100% coverage and 100% edge∩polygon overlap hold by
+  construction, audited at build time. Block ids became 1-based because MVT drops feature id 0 (block 0
+  could never light or select). And the client's shared hover/click/drag resolver lost its off-polygon
+  4px radius gate: every hover and click now maps to the closest node/edge and its encompassing block —
+  no dead zones. The old five-script pipeline runs no more; the build is one script + tippecanoe, in the
+  server venv alone.</p>
+
+  
+    <section class="card" id="builder">
+      <div class="tag">Pipeline · NEW single-pass builder</div>
+      <h2>1 · Blocks are built graph-first — coverage and edge∩polygon overlap by construction</h2>
+      <h3>Symptom</h3>
+      <p>On the central-park test map the heatmap had gaps — voted edges whose block never existed (2,450 unmapped edges, 3.4%) — and many edges/nodes mapped to polygons they didn't even touch (10,336 edges assigned by “nearest polygon within 30 m”).</p>
+      <h3>Root cause</h3>
+      <ul><li>The five-script pipeline generated polygons FIRST (drive-centerline Voronoi + junction cells + foot tubes) and then mapped edges INTO them geometrically (containment → nearest-within-30m). Whatever the geometry passes couldn't claim stayed unmapped (gap), and whatever only nearest-snap could claim landed in a polygon up to 30 m away (mismatch). The two defects are structural: geometry and membership were computed independently.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>New <code>build_blocks_graph_first.py</code> replaces the whole chain (generic → node cells → bake → foot → bake → merge) with ONE pass that inverts the premise: <strong>membership first, topologically, for every edge</strong> — junction clusters (deg ≥ 3 nodes union-found within 18 m, oversized clusters principal-axis-bisected), same-cluster edges → that junction, ≤ 30 m cross-cluster crosswalk stubs → the nearer one, everything else → corridors (components linked through non-junction endpoints).</li>
+<li>The degenerate cases the old merge pass fixed post-hoc run as a topological fixpoint before any geometry: driveway-class stubs (≤ 25 m, one junction) melt into their junction; a junction touching ≤ 1 corridor isn't a junction and dissolves into it.</li>
+<li><strong>Geometry is generated FROM the groups</strong>: a junction cell is the union of 8 m discs at its member nodes plus its captured edges' tubes; a corridor is the union of its member edges buffered by per-road-class half-width, minus the junction cells (junctions win). A corridor edge left entirely inside junction cells is reassigned to the cell containing its midpoint — membership follows the final geometry.</li>
+<li>A build-time audit proves both invariants and stamps them into the meta: test-cp bakes <strong>72,924/72,924 edges mapped (100%)</strong> and <strong>72,924/72,924 member edges touching their polygon (100%)</strong> — was 96.6% / 85.5%. Runs in the server venv alone (no osmnx/geopandas geo venv needed).</li>
+<li>First iteration used the old clipped-Voronoi discs for junction cells and audited at 85.5% overlap — the radius cap + bisector clipping cut members out of their own cells. That measured failure is what drove cells to be generated from their members too.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+      
+        <details>
+          <summary><span class="fname">server/streetscape_blocks/build_blocks_graph_first.py</span>
+            <span class="stat"><span class="d-add">+482</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">blocks pipeline · THE builder (new)</span>
+        <span class="ctx-sum">one pass: topological grouping → polygons from the groups → baked mapping</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_blocks_graph_first.py</span>
+        <span class="ctx-sum">~430 LOC — clusters, grouping, fixpoint, geometry, audit, emit</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Constants</span><span class="ol-sum">cluster link/extent · NODE_R_M 8 · capture 30m · stub 25m · class half-widths</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">UnionFind / split_oversized</span><span class="ol-sum">principal-axis bisection of &gt;40m clusters (from build_node_blocks)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">1 · junction clusters</span><span class="ol-sum">deg≥3 union-find within 18m</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">2 · edge grouping (total)</span><span class="ol-sum">same-cluster · ≤30m crosswalk stubs · corridors via non-junction endpoints</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">3 · degeneracy fixpoint</span><span class="ol-sum">V1 stubby corridors → junction; V2 ≤1-corridor junctions dissolve</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">4 · geometry from membership</span><span class="ol-sum">cells = member discs ∪ captured tubes; corridors = member tubes − cells; reassign eaten edges</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">5 · emit (1-based ids)</span><span class="ol-sum">blocks_final geojson + edge_blocks npy + meta</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">6 · audit</span><span class="ol-sum">100% mapped + 100% edge∩polygon, stamped into the meta</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>edge grouping — every non-self edge gets a group BEFORE any geometry exists</li><li>fixpoint — the old merge pass&#x27;s V1/V2, run topologically pre-geometry</li><li>tube_of/cells — polygons generated from exactly the member edges/nodes</li><li>reassignment — a corridor edge fully eaten by junction cells moves to the midpoint cell</li><li>audit — poly.distance(edge line) ≤ ε for every mapped edge, counts in the meta</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_blocks_graph_first.py b/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..fc973ed</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-hunk">@@ -0,0 +1,482 @@</span>
+<span class="d-add">+<span class="s-com">#!/usr/bin/env python3</span></span>
+<span class="d-add">+<span class="s-str">&quot;&quot;&quot;Graph-first block builder — grouping first, geometry from the groups.</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-type">Replaces</span> the five-stage <span class="s-fn">pipeline</span> (build_blocks_generic → build_node_blocks →</span>
+<span class="d-add">+build_edge_blocks → build_foot_blocks → merge_degenerate_blocks) <span class="s-kw">with</span> <span class="s-type">ONE</span> <span class="s-kw">pass</span></span>
+<span class="d-add">+that inverts its core premise. <span class="s-type">The</span> old pipeline generated polygons <span class="s-kw">from</span> drive</span>
+<span class="d-add">+centerlines <span class="s-kw">and</span> then tried to map graph edges <span class="s-type">INTO</span> them geometrically</span>
+<span class="d-add">+(containment + nearest-within-30m), which left two systematic defects:</span>
+<span class="d-add">+edges no polygon <span class="s-fn">claimed</span> (heatmap gaps: <span class="s-num">2</span>,<span class="s-num">450</span> on test-cp) <span class="s-kw">and</span> edges assigned</span>
+<span class="d-add">+to polygons they don<span class="s-str">&#x27;t even intersect (10,336 nearest-snapped on test-cp).</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-type">Here</span> membership <span class="s-kw">is</span> decided <span class="s-type">FIRST</span>, topologically, <span class="s-kw">for</span> every edge — then each</span>
+<span class="d-add">+block<span class="s-str">&#x27;s polygon is generated from its own member edges, so coverage and</span></span>
+<span class="d-add">+edge∩polygon overlap hold by construction:</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-num">1</span>. <span class="s-type">JUNCTION</span> <span class="s-type">CLUSTERS</span>: nodes <span class="s-kw">with</span> unique-neighbour degree ≥ <span class="s-num">3</span>, union-found</span>
+<span class="d-add">+     within <span class="s-type">LINK_M</span>, oversized clusters bisected along their principal axis.</span>
+<span class="d-add">+  <span class="s-num">2</span>. <span class="s-type">EDGE</span> <span class="s-fn">GROUPING</span> (total): an edge whose endpoints share a cluster belongs to</span>
+<span class="d-add">+     that junction; a <span class="s-fn">short</span> (≤ <span class="s-type">NODE_CAPTURE_LEN_M</span>) edge between two clusters</span>
+<span class="d-add">+     <span class="s-kw">is</span> a crosswalk stub <span class="s-kw">and</span> joins the nearer one; every other edge joins a</span>
+<span class="d-add">+     <span class="s-type">CORRIDOR</span> — connected components linked through non-junction endpoints,</span>
+<span class="d-add">+     i.e. one component per path segment between junctions.</span>
+<span class="d-add">+  <span class="s-num">3</span>. <span class="s-type">DEGENERACY</span> <span class="s-fn">FIXPOINT</span> (topological, <span class="s-kw">from</span> merge_degenerate_blocks.py<span class="s-str">&#x27;s V1/V2):</span></span>
+<span class="d-add">+     driveway-<span class="s-kw">class</span> <span class="s-fn">stubs</span> (extent ≤ <span class="s-type">STUB_MAX_M</span>, one junction) melt into their</span>
+<span class="d-add">+     junction; a junction left touching ≤ <span class="s-num">1</span> corridor isn<span class="s-str">&#x27;t a junction — it</span></span>
+<span class="d-add">+     dissolves into that <span class="s-fn">corridor</span> (<span class="s-kw">or</span>, isolated, stays a node-only cell).</span>
+<span class="d-add">+  <span class="s-num">4</span>. <span class="s-type">GEOMETRY</span> <span class="s-type">FROM</span> <span class="s-type">MEMBERSHIP</span>: a junction cell <span class="s-kw">is</span> the union of discs at its</span>
+<span class="d-add">+     member nodes plus the tubes of its captured edges — every member sits</span>
+<span class="d-add">+     inside its own polygon by <span class="s-fn">construction</span> (the old clipped-<span class="s-type">Voronoi</span> discs</span>
+<span class="d-add">+     cut ~<span class="s-num">15</span>% of members out via the radius cap + bisector clipping); a</span>
+<span class="d-add">+     corridor <span class="s-kw">is</span> the union of its member-edge <span class="s-fn">tubes</span> (per-<span class="s-kw">class</span> half-width)</span>
+<span class="d-add">+     minus the junction cells, so corridor-vs-junction stays disjoint</span>
+<span class="d-add">+     (junctions win). <span class="s-type">A</span> corridor edge left entirely inside junction cells <span class="s-kw">is</span></span>
+<span class="d-add">+     <span class="s-type">REASSIGNED</span> to the cell containing its midpoint — membership follows the</span>
+<span class="d-add">+     final geometry, so edge∩polygon overlap <span class="s-kw">is</span> total. <span class="s-type">Adjacent</span> junction</span>
+<span class="d-add">+     cells may overlap <span class="s-fn">slightly</span> (a crosswalk tube reaching its partner</span>
+<span class="d-add">+     corner); <span class="s-kw">with</span> membership decided topologically that ambiguity <span class="s-kw">is</span> only</span>
+<span class="d-add">+     visual.</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-fn">Outputs</span> (same contract the server + tippecanoe already consume):</span>
+<span class="d-add">+  output/blocks_final_&lt;city&gt;.geojson       display polygons, dense block_id</span>
+<span class="d-add">+  osm_data/&lt;city&gt;/edge_blocks_&lt;net&gt;.npy    edge_id → <span class="s-fn">block_id</span> (−<span class="s-num">1</span> only <span class="s-kw">for</span></span>
+<span class="d-add">+                                           <span class="s-lit">self</span>-edges, which have no extent)</span>
+<span class="d-add">+  osm_data/&lt;city&gt;/edge_blocks_&lt;net&gt;.json   meta: n_blocks, topology_etag,</span>
+<span class="d-add">+                                           blocks_sha256 + coverage/overlap audit</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-type">Run</span> <span class="s-kw">in</span> the <span class="s-type">SERVER</span> venv:</span>
+<span class="d-add">+  <span class="s-type">CITY</span>=test-cp <span class="s-type">NETWORK</span>=streets ./env/bin/python streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-add">+<span class="s-str">&quot;&quot;&quot;</span></span>
+<span class="d-add">+<span class="s-kw">import</span> hashlib</span>
+<span class="d-add">+<span class="s-kw">import</span> json</span>
+<span class="d-add">+<span class="s-kw">import</span> math</span>
+<span class="d-add">+<span class="s-kw">import</span> os</span>
+<span class="d-add">+<span class="s-kw">import</span> sys</span>
+<span class="d-add">+<span class="s-kw">import</span> time</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">import</span> numpy <span class="s-kw">as</span> np</span>
+<span class="d-add">+</span>
+<span class="d-add">+_HERE = os.path.<span class="s-fn">dirname</span>(os.path.<span class="s-fn">abspath</span>(__file__))</span>
+<span class="d-add">+_SERVER = os.path.<span class="s-fn">abspath</span>(os.path.<span class="s-fn">join</span>(_HERE, <span class="s-str">&quot;..&quot;</span>))</span>
+<span class="d-add">+<span class="s-kw">if</span> _SERVER <span class="s-kw">not</span> <span class="s-kw">in</span> sys.path:</span>
+<span class="d-add">+    sys.path.<span class="s-fn">insert</span>(<span class="s-num">0</span>, _SERVER)</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">import</span> shapely  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+<span class="s-kw">from</span> shapely <span class="s-kw">import</span> <span class="s-type">STRtree</span>, <span class="s-type">LineString</span>, union_all, buffer <span class="s-kw">as</span> shp_buffer  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+<span class="s-kw">from</span> shapely.geometry <span class="s-kw">import</span> mapping  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+<span class="s-kw">from</span> scipy.spatial <span class="s-kw">import</span> cKDTree  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">from</span> cities <span class="s-kw">import</span> <span class="s-type">CITIES</span>  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+<span class="s-kw">from</span> graph_registry <span class="s-kw">import</span> <span class="s-type">CityGraph</span>  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-type">CITY</span> = os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;CITY&quot;</span>, <span class="s-str">&quot;nyc&quot;</span>)</span>
+<span class="d-add">+<span class="s-type">NETWORK</span> = os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;NETWORK&quot;</span>, <span class="s-str">&quot;streets&quot;</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-com"># Junction clustering (same knobs/values as build_node_blocks.py).</span></span>
+<span class="d-add">+<span class="s-type">LINK_M</span> = <span class="s-fn">float</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;NODE_CLUSTER_LINK_M&quot;</span>, <span class="s-str">&quot;18&quot;</span>))</span>
+<span class="d-add">+<span class="s-type">MAX_EXTENT_M</span> = <span class="s-fn">float</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;NODE_CLUSTER_MAX_EXTENT_M&quot;</span>, <span class="s-str">&quot;40&quot;</span>))</span>
+<span class="d-add">+<span class="s-com"># Disc radius around each junction-cluster member node (the cell is the union</span></span>
+<span class="d-add">+<span class="s-com"># of these discs + the captured edges&#x27; tubes). 8 m keeps junction blobs in</span></span>
+<span class="d-add">+<span class="s-com"># proportion to footway tubes (4 m half-width); 10 read as chunky gloops on</span></span>
+<span class="d-add">+<span class="s-com"># the central-park test map.</span></span>
+<span class="d-add">+<span class="s-type">NODE_R_M</span> = <span class="s-fn">float</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;NODE_BLOCK_RADIUS_M&quot;</span>, <span class="s-str">&quot;8&quot;</span>))</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-com"># Edge grouping / degeneracy (same knobs as the old bake + merge).</span></span>
+<span class="d-add">+<span class="s-type">NODE_CAPTURE_LEN_M</span> = <span class="s-fn">float</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;NODE_CAPTURE_LEN_M&quot;</span>, <span class="s-str">&quot;30&quot;</span>))</span>
+<span class="d-add">+<span class="s-type">STUB_MAX_M</span> = <span class="s-fn">float</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;STUB_MAX_M&quot;</span>, <span class="s-str">&quot;25&quot;</span>))</span>
+<span class="d-add">+<span class="s-type">MAX_ROUNDS</span> = <span class="s-fn">int</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;MERGE_MAX_ROUNDS&quot;</span>, <span class="s-str">&quot;25&quot;</span>))</span>
+<span class="d-add">+<span class="s-type">STUBBY_CLASSES</span> = {<span class="s-str">&quot;service&quot;</span>, <span class="s-str">&quot;footway&quot;</span>, <span class="s-str">&quot;path&quot;</span>, <span class="s-str">&quot;steps&quot;</span>, <span class="s-str">&quot;cycleway&quot;</span>,</span>
+<span class="d-add">+                  <span class="s-str">&quot;pedestrian&quot;</span>, <span class="s-str">&quot;track&quot;</span>, <span class="s-str">&quot;&quot;</span>}</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-com"># Corridor tube half-widths per road class (from build_blocks_generic.py,</span></span>
+<span class="d-add">+<span class="s-com"># NYC-calibrated; classes are universal). Scaled by WIDTH_SCALE for sweeps.</span></span>
+<span class="d-add">+<span class="s-type">WIDTH_SCALE</span> = <span class="s-fn">float</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;WIDTH_SCALE&quot;</span>, <span class="s-str">&quot;1.0&quot;</span>))</span>
+<span class="d-add">+<span class="s-type">HALF_WIDTH</span> = {</span>
+<span class="d-add">+    <span class="s-str">&quot;motorway&quot;</span>: <span class="s-num">18.0</span>, <span class="s-str">&quot;motorway_link&quot;</span>: <span class="s-num">12.0</span>, <span class="s-str">&quot;trunk&quot;</span>: <span class="s-num">16.0</span>, <span class="s-str">&quot;trunk_link&quot;</span>: <span class="s-num">11.0</span>,</span>
+<span class="d-add">+    <span class="s-str">&quot;primary&quot;</span>: <span class="s-num">14.0</span>, <span class="s-str">&quot;primary_link&quot;</span>: <span class="s-num">10.0</span>, <span class="s-str">&quot;secondary&quot;</span>: <span class="s-num">11.0</span>, <span class="s-str">&quot;secondary_link&quot;</span>: <span class="s-num">9.0</span>,</span>
+<span class="d-add">+    <span class="s-str">&quot;tertiary&quot;</span>: <span class="s-num">9.0</span>, <span class="s-str">&quot;tertiary_link&quot;</span>: <span class="s-num">8.0</span>, <span class="s-str">&quot;residential&quot;</span>: <span class="s-num">8.0</span>, <span class="s-str">&quot;living_street&quot;</span>: <span class="s-num">7.0</span>,</span>
+<span class="d-add">+    <span class="s-str">&quot;unclassified&quot;</span>: <span class="s-num">8.0</span>, <span class="s-str">&quot;service&quot;</span>: <span class="s-num">6.0</span>, <span class="s-str">&quot;pedestrian&quot;</span>: <span class="s-num">6.0</span>, <span class="s-str">&quot;footway&quot;</span>: <span class="s-num">4.0</span>,</span>
+<span class="d-add">+    <span class="s-str">&quot;path&quot;</span>: <span class="s-num">4.0</span>, <span class="s-str">&quot;cycleway&quot;</span>: <span class="s-num">4.0</span>, <span class="s-str">&quot;steps&quot;</span>: <span class="s-num">4.0</span>,</span>
+<span class="d-add">+}</span>
+<span class="d-add">+<span class="s-type">DEFAULT_HALF_WIDTH</span> = <span class="s-num">8.0</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">class</span> <span class="s-type">UnionFind</span>:</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">__init__</span>(<span class="s-lit">self</span>, n: int):</span>
+<span class="d-add">+        <span class="s-lit">self</span>.parent = np.<span class="s-fn">arange</span>(n)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">find</span>(<span class="s-lit">self</span>, a: int) -&gt; int:</span>
+<span class="d-add">+        p = <span class="s-lit">self</span>.parent</span>
+<span class="d-add">+        <span class="s-kw">while</span> p[a] != a:</span>
+<span class="d-add">+            p[a] = p[p[a]]</span>
+<span class="d-add">+            a = p[a]</span>
+<span class="d-add">+        <span class="s-kw">return</span> a</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">union</span>(<span class="s-lit">self</span>, a: int, b: int):</span>
+<span class="d-add">+        ra, rb = <span class="s-lit">self</span>.<span class="s-fn">find</span>(a), <span class="s-lit">self</span>.<span class="s-fn">find</span>(b)</span>
+<span class="d-add">+        <span class="s-kw">if</span> ra != rb:</span>
+<span class="d-add">+            <span class="s-lit">self</span>.parent[rb] = ra</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">split_oversized</span>(xy: np.ndarray, labels: np.ndarray) -&gt; np.ndarray:</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Bisect clusters whose bbox diagonal exceeds MAX_EXTENT_M along their</span></span>
+<span class="d-add">+    principal <span class="s-fn">axis</span> (<span class="s-kw">from</span> build_node_blocks.py) so members fit the radius cap.<span class="s-str">&quot;&quot;&quot;</span></span>
+<span class="d-add">+    next_label = <span class="s-fn">int</span>(labels.<span class="s-fn">max</span>()) + <span class="s-num">1</span> <span class="s-kw">if</span> <span class="s-fn">len</span>(labels) <span class="s-kw">else</span> <span class="s-num">0</span></span>
+<span class="d-add">+    queue = <span class="s-fn">list</span>(np.<span class="s-fn">unique</span>(labels))</span>
+<span class="d-add">+    <span class="s-kw">while</span> queue:</span>
+<span class="d-add">+        lb = queue.<span class="s-fn">pop</span>()</span>
+<span class="d-add">+        idx = np.<span class="s-fn">where</span>(labels == lb)[<span class="s-num">0</span>]</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-fn">len</span>(idx) &lt; <span class="s-num">2</span>:</span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        pts = xy[idx]</span>
+<span class="d-add">+        span = pts.<span class="s-fn">max</span>(axis=<span class="s-num">0</span>) - pts.<span class="s-fn">min</span>(axis=<span class="s-num">0</span>)</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-fn">float</span>(np.<span class="s-fn">hypot</span>(*span)) &lt;= <span class="s-type">MAX_EXTENT_M</span>:</span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        centered = pts - pts.<span class="s-fn">mean</span>(axis=<span class="s-num">0</span>)</span>
+<span class="d-add">+        cov = centered.<span class="s-type">T</span> @ centered</span>
+<span class="d-add">+        _, vecs = np.linalg.<span class="s-fn">eigh</span>(cov)</span>
+<span class="d-add">+        proj = centered @ vecs[:, -<span class="s-num">1</span>]</span>
+<span class="d-add">+        half = idx[proj &gt; np.<span class="s-fn">median</span>(proj)]</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-fn">len</span>(half) == <span class="s-num">0</span> <span class="s-kw">or</span> <span class="s-fn">len</span>(half) == <span class="s-fn">len</span>(idx):</span>
+<span class="d-add">+            half = idx[np.<span class="s-fn">argsort</span>(proj)[<span class="s-fn">len</span>(idx) // <span class="s-num">2</span>:]]</span>
+<span class="d-add">+        labels[half] = next_label</span>
+<span class="d-add">+        queue.<span class="s-fn">append</span>(lb)</span>
+<span class="d-add">+        queue.<span class="s-fn">append</span>(next_label)</span>
+<span class="d-add">+        next_label += <span class="s-num">1</span></span>
+<span class="d-add">+    <span class="s-kw">return</span> labels</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">majority</span>(values):</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Most common non-empty value, or None.&quot;&quot;&quot;</span></span>
+<span class="d-add">+    counts = {}</span>
+<span class="d-add">+    <span class="s-kw">for</span> v <span class="s-kw">in</span> values:</span>
+<span class="d-add">+        <span class="s-kw">if</span> v <span class="s-kw">in</span> (<span class="s-lit">None</span>, <span class="s-str">&quot;&quot;</span>, <span class="s-str">&quot;None&quot;</span>):</span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        counts[v] = counts.<span class="s-fn">get</span>(v, <span class="s-num">0</span>) + <span class="s-num">1</span></span>
+<span class="d-add">+    <span class="s-kw">return</span> <span class="s-fn">max</span>(counts, key=counts.get) <span class="s-kw">if</span> counts <span class="s-kw">else</span> <span class="s-lit">None</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">_sha256_file</span>(path: str) -&gt; str:</span>
+<span class="d-add">+    h = hashlib.<span class="s-fn">sha256</span>()</span>
+<span class="d-add">+    <span class="s-kw">with</span> <span class="s-fn">open</span>(path, <span class="s-str">&quot;rb&quot;</span>) <span class="s-kw">as</span> f:</span>
+<span class="d-add">+        <span class="s-kw">for</span> chunk <span class="s-kw">in</span> <span class="s-fn">iter</span>(<span class="s-kw">lambda</span>: f.<span class="s-fn">read</span>(<span class="s-num">1</span> &lt;&lt; <span class="s-num">20</span>), <span class="s-str">b&quot;&quot;</span>):</span>
+<span class="d-add">+            h.<span class="s-fn">update</span>(chunk)</span>
+<span class="d-add">+    <span class="s-kw">return</span> h.<span class="s-fn">hexdigest</span>()[:<span class="s-num">16</span>]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">main</span>():</span>
+<span class="d-add">+    t0 = time.<span class="s-fn">time</span>()</span>
+<span class="d-add">+    city = <span class="s-type">CITIES</span>[<span class="s-type">CITY</span>]</span>
+<span class="d-add">+    g = <span class="s-fn">CityGraph</span>(city, redis_client=<span class="s-lit">None</span>, network=<span class="s-type">NETWORK</span>)</span>
+<span class="d-add">+    g.<span class="s-fn">ensure_loaded</span>()</span>
+<span class="d-add">+    nodes = np.<span class="s-fn">asarray</span>(g.nodes, dtype=np.float64)          <span class="s-com"># [N,2] = (lat, lon)</span></span>
+<span class="d-add">+    n_nodes = <span class="s-fn">len</span>(nodes)</span>
+<span class="d-add">+    ends = np.<span class="s-fn">array</span>([(e[<span class="s-num">0</span>], e[<span class="s-num">1</span>]) <span class="s-kw">for</span> e <span class="s-kw">in</span> g.edges], dtype=np.int64)</span>
+<span class="d-add">+    rclass = np.<span class="s-fn">array</span>([<span class="s-fn">str</span>(e[<span class="s-num">3</span>]) <span class="s-kw">if</span> <span class="s-fn">len</span>(e) &gt; <span class="s-num">3</span> <span class="s-kw">else</span> <span class="s-str">&quot;&quot;</span> <span class="s-kw">for</span> e <span class="s-kw">in</span> g.edges])</span>
+<span class="d-add">+    names = [e[<span class="s-num">2</span>] <span class="s-kw">if</span> <span class="s-fn">len</span>(e) &gt; <span class="s-num">2</span> <span class="s-kw">else</span> <span class="s-lit">None</span> <span class="s-kw">for</span> e <span class="s-kw">in</span> g.edges]</span>
+<span class="d-add">+    n_edges = <span class="s-fn">len</span>(ends)</span>
+<span class="d-add">+    not_self = ends[:, <span class="s-num">0</span>] != ends[:, <span class="s-num">1</span>]</span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] {CITY}:{NETWORK} — {n_nodes} nodes, {n_edges} edges &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;({int((~not_self).sum())} self), etag={g.topology_etag}&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># Local equirectangular metres frame (shared convention with the old scripts).</span></span>
+<span class="d-add">+    s, w, n, e = city.bbox</span>
+<span class="d-add">+    mlat = <span class="s-num">111_320.0</span></span>
+<span class="d-add">+    mlon = <span class="s-num">111_320.0</span> * math.<span class="s-fn">cos</span>(math.<span class="s-fn">radians</span>((s + n) / <span class="s-num">2</span>))</span>
+<span class="d-add">+    node_xy = np.<span class="s-fn">column_stack</span>(((nodes[:, <span class="s-num">1</span>] - w) * mlon, (nodes[:, <span class="s-num">0</span>] - s) * mlat))</span>
+<span class="d-add">+    evec = node_xy[ends[:, <span class="s-num">1</span>]] - node_xy[ends[:, <span class="s-num">0</span>]]</span>
+<span class="d-add">+    elen = np.<span class="s-fn">hypot</span>(evec[:, <span class="s-num">0</span>], evec[:, <span class="s-num">1</span>])</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># ── 1. Junction clusters ────────────────────────────────────────────────</span></span>
+<span class="d-add">+    und = np.<span class="s-fn">unique</span>(np.<span class="s-fn">sort</span>(ends[not_self], axis=<span class="s-num">1</span>), axis=<span class="s-num">0</span>)</span>
+<span class="d-add">+    deg = np.<span class="s-fn">bincount</span>(und.<span class="s-fn">ravel</span>(), minlength=n_nodes)</span>
+<span class="d-add">+    junctions = np.<span class="s-fn">where</span>(deg &gt;= <span class="s-num">3</span>)[<span class="s-num">0</span>]</span>
+<span class="d-add">+    jxy = node_xy[junctions]</span>
+<span class="d-add">+    uf_j = <span class="s-fn">UnionFind</span>(<span class="s-fn">len</span>(junctions))</span>
+<span class="d-add">+    <span class="s-kw">for</span> a, b <span class="s-kw">in</span> <span class="s-fn">cKDTree</span>(jxy).<span class="s-fn">query_pairs</span>(r=<span class="s-type">LINK_M</span>, output_type=<span class="s-str">&quot;ndarray&quot;</span>):</span>
+<span class="d-add">+        uf_j.<span class="s-fn">union</span>(a, b)</span>
+<span class="d-add">+    labels = np.<span class="s-fn">array</span>([uf_j.<span class="s-fn">find</span>(i) <span class="s-kw">for</span> i <span class="s-kw">in</span> <span class="s-fn">range</span>(<span class="s-fn">len</span>(junctions))])</span>
+<span class="d-add">+    labels = <span class="s-fn">split_oversized</span>(jxy, labels)</span>
+<span class="d-add">+    uniq, labels = np.<span class="s-fn">unique</span>(labels, return_inverse=<span class="s-lit">True</span>)</span>
+<span class="d-add">+    n_clusters = <span class="s-fn">len</span>(uniq)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    node_cluster = np.<span class="s-fn">full</span>(n_nodes, -<span class="s-num">1</span>, dtype=np.int64)</span>
+<span class="d-add">+    node_cluster[junctions] = labels</span>
+<span class="d-add">+    cl_members = [junctions[labels == k] <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters)]</span>
+<span class="d-add">+    centroids = np.<span class="s-fn">array</span>([node_xy[m].<span class="s-fn">mean</span>(axis=<span class="s-num">0</span>) <span class="s-kw">for</span> m <span class="s-kw">in</span> cl_members])</span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] {len(junctions)} junction nodes → {n_clusters} clusters &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># ── 2. Edge grouping (total, topological) ───────────────────────────────</span></span>
+<span class="d-add">+    <span class="s-com"># group encoding: cluster k → k ; corridor c → n_clusters + c ; self → −1</span></span>
+<span class="d-add">+    cu = node_cluster[ends[:, <span class="s-num">0</span>]]</span>
+<span class="d-add">+    cv = node_cluster[ends[:, <span class="s-num">1</span>]]</span>
+<span class="d-add">+    edge_cluster = np.<span class="s-fn">full</span>(n_edges, -<span class="s-num">1</span>, dtype=np.int64)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    same = not_self &amp; (cu &gt;= <span class="s-num">0</span>) &amp; (cu == cv)</span>
+<span class="d-add">+    edge_cluster[same] = cu[same]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    cross_short = not_self &amp; (cu &gt;= <span class="s-num">0</span>) &amp; (cv &gt;= <span class="s-num">0</span>) &amp; (cu != cv) &amp; (elen &lt;= <span class="s-type">NODE_CAPTURE_LEN_M</span>)</span>
+<span class="d-add">+    <span class="s-kw">if</span> cross_short.<span class="s-fn">any</span>():</span>
+<span class="d-add">+        mid = (node_xy[ends[cross_short, <span class="s-num">0</span>]] + node_xy[ends[cross_short, <span class="s-num">1</span>]]) / <span class="s-num">2.0</span></span>
+<span class="d-add">+        du = np.<span class="s-fn">hypot</span>(*(centroids[cu[cross_short]] - mid).<span class="s-type">T</span>)</span>
+<span class="d-add">+        dv = np.<span class="s-fn">hypot</span>(*(centroids[cv[cross_short]] - mid).<span class="s-type">T</span>)</span>
+<span class="d-add">+        edge_cluster[cross_short] = np.<span class="s-fn">where</span>(du &lt;= dv, cu[cross_short], cv[cross_short])</span>
+<span class="d-add">+</span>
+<span class="d-add">+    corridor_mask = not_self &amp; (edge_cluster &lt; <span class="s-num">0</span>)</span>
+<span class="d-add">+    corr_edges = np.<span class="s-fn">where</span>(corridor_mask)[<span class="s-num">0</span>]</span>
+<span class="d-add">+    <span class="s-com"># Union-find over NODES, linking only through non-junction endpoints; an</span></span>
+<span class="d-add">+    <span class="s-com"># edge with a junction endpoint hangs off its other end&#x27;s component.</span></span>
+<span class="d-add">+    uf_n = <span class="s-fn">UnionFind</span>(n_nodes)</span>
+<span class="d-add">+    <span class="s-kw">for</span> eid <span class="s-kw">in</span> corr_edges:</span>
+<span class="d-add">+        u, v = ends[eid]</span>
+<span class="d-add">+        <span class="s-kw">if</span> node_cluster[u] &lt; <span class="s-num">0</span> <span class="s-kw">and</span> node_cluster[v] &lt; <span class="s-num">0</span>:</span>
+<span class="d-add">+            uf_n.<span class="s-fn">union</span>(u, v)</span>
+<span class="d-add">+    comp_key = np.<span class="s-fn">empty</span>(<span class="s-fn">len</span>(corr_edges), dtype=np.int64)</span>
+<span class="d-add">+    <span class="s-kw">for</span> i, eid <span class="s-kw">in</span> <span class="s-fn">enumerate</span>(corr_edges):</span>
+<span class="d-add">+        u, v = ends[eid]</span>
+<span class="d-add">+        <span class="s-kw">if</span> node_cluster[u] &lt; <span class="s-num">0</span>:</span>
+<span class="d-add">+            comp_key[i] = uf_n.<span class="s-fn">find</span>(u)</span>
+<span class="d-add">+        <span class="s-kw">elif</span> node_cluster[v] &lt; <span class="s-num">0</span>:</span>
+<span class="d-add">+            comp_key[i] = uf_n.<span class="s-fn">find</span>(v)</span>
+<span class="d-add">+        <span class="s-kw">else</span>:</span>
+<span class="d-add">+            comp_key[i] = n_nodes + eid          <span class="s-com"># both-junction long edge: singleton</span></span>
+<span class="d-add">+    comp_ids, comp_inv = np.<span class="s-fn">unique</span>(comp_key, return_inverse=<span class="s-lit">True</span>)</span>
+<span class="d-add">+    n_corr = <span class="s-fn">len</span>(comp_ids)</span>
+<span class="d-add">+    corridors: list[list[int]] = [[] <span class="s-kw">for</span> _ <span class="s-kw">in</span> <span class="s-fn">range</span>(n_corr)]</span>
+<span class="d-add">+    <span class="s-kw">for</span> i, eid <span class="s-kw">in</span> <span class="s-fn">enumerate</span>(corr_edges):</span>
+<span class="d-add">+        corridors[comp_inv[i]].<span class="s-fn">append</span>(<span class="s-fn">int</span>(eid))</span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] grouped: {int(same.sum())} same-cluster + &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;{int(cross_short.sum())} crosswalk stubs + {len(corr_edges)} corridor &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;edges in {n_corr} corridors ({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># ── 3. Degeneracy fixpoint (V1 stubs, V2 fake junctions) ────────────────</span></span>
+<span class="d-add">+    <span class="s-com"># corridor → set of touching clusters (via member-edge endpoints).</span></span>
+<span class="d-add">+    corr_alive = [<span class="s-lit">True</span>] * n_corr</span>
+<span class="d-add">+    cluster_alive = [<span class="s-fn">len</span>(m) &gt; <span class="s-num">0</span> <span class="s-kw">for</span> m <span class="s-kw">in</span> cl_members]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">corr_clusters</span>(members):</span>
+<span class="d-add">+        cs = <span class="s-fn">set</span>()</span>
+<span class="d-add">+        <span class="s-kw">for</span> eid <span class="s-kw">in</span> members:</span>
+<span class="d-add">+            <span class="s-kw">for</span> nd <span class="s-kw">in</span> ends[eid]:</span>
+<span class="d-add">+                <span class="s-kw">if</span> node_cluster[nd] &gt;= <span class="s-num">0</span>:</span>
+<span class="d-add">+                    cs.<span class="s-fn">add</span>(<span class="s-fn">int</span>(node_cluster[nd]))</span>
+<span class="d-add">+        <span class="s-kw">return</span> cs</span>
+<span class="d-add">+</span>
+<span class="d-add">+    stubs_merged = <span class="s-num">0</span></span>
+<span class="d-add">+    junctions_dissolved = <span class="s-num">0</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> _ <span class="s-kw">in</span> <span class="s-fn">range</span>(<span class="s-type">MAX_ROUNDS</span>):</span>
+<span class="d-add">+        changed = <span class="s-lit">False</span></span>
+<span class="d-add">+        <span class="s-com"># V1: driveway-class stub corridors melt into their only junction.</span></span>
+<span class="d-add">+        <span class="s-kw">for</span> c <span class="s-kw">in</span> <span class="s-fn">range</span>(n_corr):</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-kw">not</span> corr_alive[c]:</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            members = corridors[c]</span>
+<span class="d-add">+            touching = [k <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">corr_clusters</span>(members) <span class="s-kw">if</span> cluster_alive[k]]</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(touching) != <span class="s-num">1</span>:</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            pts = node_xy[ends[members].<span class="s-fn">ravel</span>()]</span>
+<span class="d-add">+            diag = <span class="s-fn">float</span>(np.<span class="s-fn">hypot</span>(*(pts.<span class="s-fn">max</span>(axis=<span class="s-num">0</span>) - pts.<span class="s-fn">min</span>(axis=<span class="s-num">0</span>))))</span>
+<span class="d-add">+            <span class="s-kw">if</span> diag &gt; <span class="s-type">STUB_MAX_M</span>:</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-kw">not</span> <span class="s-fn">all</span>(rc <span class="s-kw">in</span> <span class="s-type">STUBBY_CLASSES</span> <span class="s-kw">for</span> rc <span class="s-kw">in</span> rclass[members]):</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            k = touching[<span class="s-num">0</span>]</span>
+<span class="d-add">+            edge_cluster[members] = k</span>
+<span class="d-add">+            corr_alive[c] = <span class="s-lit">False</span></span>
+<span class="d-add">+            corridors[c] = []</span>
+<span class="d-add">+            stubs_merged += <span class="s-num">1</span></span>
+<span class="d-add">+            changed = <span class="s-lit">True</span></span>
+<span class="d-add">+        <span class="s-com"># V2: a cluster touching ≤ 1 live corridor isn&#x27;t a junction. Dissolve</span></span>
+<span class="d-add">+        <span class="s-com"># it into that corridor (its captured edges + member nodes go there);</span></span>
+<span class="d-add">+        <span class="s-com"># an isolated cluster (0 corridors) stays as a node-only cell.</span></span>
+<span class="d-add">+        cl_corrs: list[set[int]] = [<span class="s-fn">set</span>() <span class="s-kw">for</span> _ <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters)]</span>
+<span class="d-add">+        <span class="s-kw">for</span> c <span class="s-kw">in</span> <span class="s-fn">range</span>(n_corr):</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-kw">not</span> corr_alive[c]:</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">corr_clusters</span>(corridors[c]):</span>
+<span class="d-add">+                <span class="s-kw">if</span> cluster_alive[k]:</span>
+<span class="d-add">+                    cl_corrs[k].<span class="s-fn">add</span>(c)</span>
+<span class="d-add">+        <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters):</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-kw">not</span> cluster_alive[k] <span class="s-kw">or</span> <span class="s-fn">len</span>(cl_corrs[k]) != <span class="s-num">1</span>:</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            c = <span class="s-fn">next</span>(<span class="s-fn">iter</span>(cl_corrs[k]))</span>
+<span class="d-add">+            captured = np.<span class="s-fn">where</span>(edge_cluster == k)[<span class="s-num">0</span>]</span>
+<span class="d-add">+            corridors[c].<span class="s-fn">extend</span>(<span class="s-fn">int</span>(x) <span class="s-kw">for</span> x <span class="s-kw">in</span> captured)</span>
+<span class="d-add">+            edge_cluster[captured] = -<span class="s-num">1</span></span>
+<span class="d-add">+            node_cluster[cl_members[k]] = -<span class="s-num">1</span></span>
+<span class="d-add">+            cluster_alive[k] = <span class="s-lit">False</span></span>
+<span class="d-add">+            junctions_dissolved += <span class="s-num">1</span></span>
+<span class="d-add">+            changed = <span class="s-lit">True</span></span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-kw">not</span> changed:</span>
+<span class="d-add">+            <span class="s-kw">break</span></span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] degeneracy fixpoint: {stubs_merged} stubs → junctions, &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;{junctions_dissolved} fake junctions → corridors &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># ── 4. Geometry from membership ─────────────────────────────────────────</span></span>
+<span class="d-add">+    widths = np.<span class="s-fn">array</span>([<span class="s-type">HALF_WIDTH</span>.<span class="s-fn">get</span>(rc, <span class="s-type">DEFAULT_HALF_WIDTH</span>) * <span class="s-type">WIDTH_SCALE</span></span>
+<span class="d-add">+                       <span class="s-kw">for</span> rc <span class="s-kw">in</span> rclass])</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">edge_lines</span>(eids):</span>
+<span class="d-add">+        <span class="s-kw">return</span> [<span class="s-fn">LineString</span>([node_xy[ends[eid, <span class="s-num">0</span>]], node_xy[ends[eid, <span class="s-num">1</span>]]])</span>
+<span class="d-add">+                <span class="s-kw">for</span> eid <span class="s-kw">in</span> eids]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">tube_of</span>(eids):</span>
+<span class="d-add">+        <span class="s-kw">return</span> <span class="s-fn">union_all</span>(<span class="s-fn">shp_buffer</span>(np.<span class="s-fn">array</span>(<span class="s-fn">edge_lines</span>(eids), dtype=object),</span>
+<span class="d-add">+                                    widths[<span class="s-fn">list</span>(eids)],</span>
+<span class="d-add">+                                    cap_style=<span class="s-str">&quot;round&quot;</span>, join_style=<span class="s-str">&quot;round&quot;</span>))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># Junction cells: member-node discs ∪ captured-edge tubes — every member</span></span>
+<span class="d-add">+    <span class="s-com"># is inside its own cell by construction.</span></span>
+<span class="d-add">+    live_cl = [k <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters) <span class="s-kw">if</span> cluster_alive[k]]</span>
+<span class="d-add">+    cells = []</span>
+<span class="d-add">+    <span class="s-kw">for</span> k <span class="s-kw">in</span> live_cl:</span>
+<span class="d-add">+        discs = <span class="s-fn">shp_buffer</span>(shapely.<span class="s-fn">points</span>(node_xy[cl_members[k]]), <span class="s-type">NODE_R_M</span>,</span>
+<span class="d-add">+                           quad_segs=<span class="s-num">6</span>)</span>
+<span class="d-add">+        captured = np.<span class="s-fn">where</span>(edge_cluster == k)[<span class="s-num">0</span>]</span>
+<span class="d-add">+        parts = <span class="s-fn">list</span>(discs)</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-fn">len</span>(captured):</span>
+<span class="d-add">+            parts.<span class="s-fn">append</span>(<span class="s-fn">tube_of</span>(captured))</span>
+<span class="d-add">+        cells.<span class="s-fn">append</span>(<span class="s-fn">union_all</span>(parts))</span>
+<span class="d-add">+    cell_tree = <span class="s-fn">STRtree</span>(cells) <span class="s-kw">if</span> cells <span class="s-kw">else</span> <span class="s-lit">None</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># Corridor tubes minus junction cells (junctions win where they meet, so</span></span>
+<span class="d-add">+    <span class="s-com"># corridor-vs-junction geometry stays disjoint).</span></span>
+<span class="d-add">+    live_corrs = [c <span class="s-kw">for</span> c <span class="s-kw">in</span> <span class="s-fn">range</span>(n_corr) <span class="s-kw">if</span> corr_alive[c] <span class="s-kw">and</span> corridors[c]]</span>
+<span class="d-add">+    corr_polys: dict[int, object] = {}</span>
+<span class="d-add">+    <span class="s-kw">for</span> c <span class="s-kw">in</span> live_corrs:</span>
+<span class="d-add">+        tube = <span class="s-fn">tube_of</span>(corridors[c])</span>
+<span class="d-add">+        <span class="s-kw">if</span> cell_tree <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span> <span class="s-kw">and</span> <span class="s-kw">not</span> tube.is_empty:</span>
+<span class="d-add">+            hit = cell_tree.<span class="s-fn">query</span>(tube, predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(hit):</span>
+<span class="d-add">+                tube = shapely.<span class="s-fn">difference</span>(tube, <span class="s-fn">union_all</span>([cells[i] <span class="s-kw">for</span> i <span class="s-kw">in</span> hit]))</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-kw">not</span> tube.is_empty <span class="s-kw">and</span> tube.area &gt; <span class="s-num">1.0</span>:</span>
+<span class="d-add">+            corr_polys[c] = tube</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># Membership follows the final geometry: a corridor edge whose tube was</span></span>
+<span class="d-add">+    <span class="s-com"># entirely eaten by junction cells (short link threading an intersection)</span></span>
+<span class="d-add">+    <span class="s-com"># moves to the cell containing its midpoint, so every edge intersects its</span></span>
+<span class="d-add">+    <span class="s-com"># own block polygon. Corridors left with no geometry disappear entirely.</span></span>
+<span class="d-add">+    reassigned = <span class="s-num">0</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> c <span class="s-kw">in</span> live_corrs:</span>
+<span class="d-add">+        poly = corr_polys.<span class="s-fn">get</span>(c)</span>
+<span class="d-add">+        stay = []</span>
+<span class="d-add">+        <span class="s-kw">for</span> eid <span class="s-kw">in</span> corridors[c]:</span>
+<span class="d-add">+            <span class="s-kw">if</span> poly <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+                line = <span class="s-fn">LineString</span>([node_xy[ends[eid, <span class="s-num">0</span>]], node_xy[ends[eid, <span class="s-num">1</span>]]])</span>
+<span class="d-add">+                <span class="s-kw">if</span> line.<span class="s-fn">distance</span>(poly) &lt;= <span class="s-num">1e-6</span>:</span>
+<span class="d-add">+                    stay.<span class="s-fn">append</span>(eid)</span>
+<span class="d-add">+                    <span class="s-kw">continue</span></span>
+<span class="d-add">+            mid = shapely.<span class="s-fn">points</span>((node_xy[ends[eid, <span class="s-num">0</span>]] + node_xy[ends[eid, <span class="s-num">1</span>]]) / <span class="s-num">2.0</span>)</span>
+<span class="d-add">+            hit = cell_tree.<span class="s-fn">query</span>(mid, predicate=<span class="s-str">&quot;intersects&quot;</span>) <span class="s-kw">if</span> cell_tree <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span> <span class="s-kw">else</span> []</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(hit):</span>
+<span class="d-add">+                edge_cluster[eid] = live_cl[<span class="s-fn">int</span>(hit[<span class="s-num">0</span>])]</span>
+<span class="d-add">+                reassigned += <span class="s-num">1</span></span>
+<span class="d-add">+            <span class="s-kw">else</span>:</span>
+<span class="d-add">+                stay.<span class="s-fn">append</span>(eid)     <span class="s-com"># nothing better — keep the corridor mapping</span></span>
+<span class="d-add">+        corridors[c] = stay</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-kw">not</span> stay <span class="s-kw">and</span> c <span class="s-kw">in</span> corr_polys:</span>
+<span class="d-add">+            <span class="s-kw">del</span> corr_polys[c]</span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] geometry: {len(corr_polys)} corridor tubes, {len(cells)} &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;junction cells; {reassigned} intersection-interior edges moved to &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;their junction cell ({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># ── 5. Emit: dense block ids, geojson + npy + meta ─────────────────────</span></span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">to_ll</span>(geom):</span>
+<span class="d-add">+        <span class="s-kw">return</span> shapely.<span class="s-fn">transform</span>(</span>
+<span class="d-add">+            geom, <span class="s-kw">lambda</span> a: np.<span class="s-fn">column_stack</span>((a[:, <span class="s-num">0</span>] / mlon + w, a[:, <span class="s-num">1</span>] / mlat + s)))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># block_id starts at 1: tippecanoe/MVT cannot represent a native feature</span></span>
+<span class="d-add">+    <span class="s-com"># id of 0 (it drops it), which would detach feature-state (heat/selection)</span></span>
+<span class="d-add">+    <span class="s-com"># from block 0. Server arrays are sized n_blocks = len(feats)+1, slot 0 unused.</span></span>
+<span class="d-add">+    feats = []</span>
+<span class="d-add">+    edge_block = np.<span class="s-fn">full</span>(n_edges, -<span class="s-num">1</span>, dtype=np.int32)</span>
+<span class="d-add">+    poly_of_block: dict[int, object] = {}</span>
+<span class="d-add">+    <span class="s-kw">for</span> c, poly <span class="s-kw">in</span> corr_polys.<span class="s-fn">items</span>():</span>
+<span class="d-add">+        members = corridors[c]</span>
+<span class="d-add">+        bid = <span class="s-fn">len</span>(feats) + <span class="s-num">1</span></span>
+<span class="d-add">+        edge_block[members] = bid</span>
+<span class="d-add">+        poly_of_block[bid] = poly</span>
+<span class="d-add">+        feats.<span class="s-fn">append</span>({</span>
+<span class="d-add">+            <span class="s-str">&quot;type&quot;</span>: <span class="s-str">&quot;Feature&quot;</span>,</span>
+<span class="d-add">+            <span class="s-str">&quot;properties&quot;</span>: {</span>
+<span class="d-add">+                <span class="s-str">&quot;block_id&quot;</span>: bid, <span class="s-str">&quot;seg_id&quot;</span>: -<span class="s-num">1</span>,</span>
+<span class="d-add">+                <span class="s-str">&quot;road_class&quot;</span>: <span class="s-fn">majority</span>(rclass[members]) <span class="s-kw">or</span> <span class="s-str">&quot;path&quot;</span>,</span>
+<span class="d-add">+                <span class="s-str">&quot;road_name&quot;</span>: <span class="s-fn">majority</span>([names[i] <span class="s-kw">for</span> i <span class="s-kw">in</span> members]),</span>
+<span class="d-add">+                <span class="s-str">&quot;area_m2&quot;</span>: <span class="s-fn">round</span>(poly.area, <span class="s-num">1</span>), <span class="s-str">&quot;n_edges&quot;</span>: <span class="s-fn">len</span>(members),</span>
+<span class="d-add">+            },</span>
+<span class="d-add">+            <span class="s-str">&quot;geometry&quot;</span>: <span class="s-fn">mapping</span>(<span class="s-fn">to_ll</span>(poly)),</span>
+<span class="d-add">+        })</span>
+<span class="d-add">+    <span class="s-kw">for</span> i, k <span class="s-kw">in</span> <span class="s-fn">enumerate</span>(live_cl):</span>
+<span class="d-add">+        bid = <span class="s-fn">len</span>(feats) + <span class="s-num">1</span></span>
+<span class="d-add">+        captured = np.<span class="s-fn">where</span>(edge_cluster == k)[<span class="s-num">0</span>]</span>
+<span class="d-add">+        edge_block[captured] = bid</span>
+<span class="d-add">+        poly_of_block[bid] = cells[i]</span>
+<span class="d-add">+        feats.<span class="s-fn">append</span>({</span>
+<span class="d-add">+            <span class="s-str">&quot;type&quot;</span>: <span class="s-str">&quot;Feature&quot;</span>,</span>
+<span class="d-add">+            <span class="s-str">&quot;properties&quot;</span>: {</span>
+<span class="d-add">+                <span class="s-str">&quot;block_id&quot;</span>: bid, <span class="s-str">&quot;seg_id&quot;</span>: -<span class="s-num">1</span>, <span class="s-str">&quot;road_class&quot;</span>: <span class="s-str">&quot;node&quot;</span>,</span>
+<span class="d-add">+                <span class="s-str">&quot;road_name&quot;</span>: <span class="s-lit">None</span>, <span class="s-str">&quot;area_m2&quot;</span>: <span class="s-fn">round</span>(cells[i].area, <span class="s-num">1</span>),</span>
+<span class="d-add">+                <span class="s-str">&quot;node_id&quot;</span>: <span class="s-fn">int</span>(cl_members[k].<span class="s-fn">min</span>()), <span class="s-str">&quot;n_nodes&quot;</span>: <span class="s-fn">len</span>(cl_members[k]),</span>
+<span class="d-add">+                <span class="s-str">&quot;n_edges&quot;</span>: <span class="s-fn">int</span>(<span class="s-fn">len</span>(captured)),</span>
+<span class="d-add">+            },</span>
+<span class="d-add">+            <span class="s-str">&quot;geometry&quot;</span>: <span class="s-fn">mapping</span>(<span class="s-fn">to_ll</span>(cells[i])),</span>
+<span class="d-add">+        })</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># ── 6. Audit: coverage + overlap by construction, verified anyway ──────</span></span>
+<span class="d-add">+    mapped = <span class="s-fn">int</span>((edge_block &gt;= <span class="s-num">0</span>).<span class="s-fn">sum</span>())</span>
+<span class="d-add">+    checked = <span class="s-num">0</span></span>
+<span class="d-add">+    overlapping = <span class="s-num">0</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> i <span class="s-kw">in</span> <span class="s-fn">range</span>(n_edges):</span>
+<span class="d-add">+        b = <span class="s-fn">int</span>(edge_block[i])</span>
+<span class="d-add">+        <span class="s-kw">if</span> b &lt; <span class="s-num">0</span> <span class="s-kw">or</span> <span class="s-kw">not</span> not_self[i]:</span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        poly = poly_of_block.<span class="s-fn">get</span>(b)</span>
+<span class="d-add">+        <span class="s-kw">if</span> poly <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        checked += <span class="s-num">1</span></span>
+<span class="d-add">+        <span class="s-kw">if</span> poly.<span class="s-fn">distance</span>(<span class="s-fn">LineString</span>([node_xy[ends[i, <span class="s-num">0</span>]], node_xy[ends[i, <span class="s-num">1</span>]]])) &lt;= <span class="s-num">1e-6</span>:</span>
+<span class="d-add">+            overlapping += <span class="s-num">1</span></span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] audit: {mapped}/{n_edges} mapped &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;({100*mapped/max(1, int(not_self.sum())):.2f}% of non-self); &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;{overlapping}/{checked} member edges touch their polygon &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;({100*overlapping/max(1, checked):.2f}%)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    out_dir = os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;BLOCKS_OUT&quot;</span>, os.path.<span class="s-fn">join</span>(_HERE, <span class="s-str">&quot;output&quot;</span>))</span>
+<span class="d-add">+    os.<span class="s-fn">makedirs</span>(out_dir, exist_ok=<span class="s-lit">True</span>)</span>
+<span class="d-add">+    final_path = os.path.<span class="s-fn">join</span>(out_dir, <span class="s-str">f&quot;blocks_final_{CITY}.geojson&quot;</span>)</span>
+<span class="d-add">+    tmp = <span class="s-str">f&quot;{final_path}.tmp{os.getpid()}&quot;</span></span>
+<span class="d-add">+    <span class="s-kw">with</span> <span class="s-fn">open</span>(tmp, <span class="s-str">&quot;w&quot;</span>) <span class="s-kw">as</span> fh:</span>
+<span class="d-add">+        json.<span class="s-fn">dump</span>({<span class="s-str">&quot;type&quot;</span>: <span class="s-str">&quot;FeatureCollection&quot;</span>, <span class="s-str">&quot;features&quot;</span>: feats}, fh)</span>
+<span class="d-add">+    os.<span class="s-fn">replace</span>(tmp, final_path)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    data_dir = os.path.<span class="s-fn">join</span>(_SERVER, city.data_dir)</span>
+<span class="d-add">+    os.<span class="s-fn">makedirs</span>(data_dir, exist_ok=<span class="s-lit">True</span>)</span>
+<span class="d-add">+    np.<span class="s-fn">save</span>(os.path.<span class="s-fn">join</span>(data_dir, <span class="s-str">f&quot;edge_blocks_{NETWORK}.npy&quot;</span>), edge_block)</span>
+<span class="d-add">+    meta = {</span>
+<span class="d-add">+        <span class="s-str">&quot;city&quot;</span>: <span class="s-type">CITY</span>, <span class="s-str">&quot;network&quot;</span>: <span class="s-type">NETWORK</span>, <span class="s-str">&quot;builder&quot;</span>: <span class="s-str">&quot;graph_first&quot;</span>,</span>
+<span class="d-add">+        <span class="s-str">&quot;n_edges&quot;</span>: n_edges, <span class="s-str">&quot;n_blocks&quot;</span>: <span class="s-fn">len</span>(feats) + <span class="s-num">1</span>,  <span class="s-com"># ids are 1-based</span></span>
+<span class="d-add">+        <span class="s-str">&quot;topology_etag&quot;</span>: g.topology_etag,</span>
+<span class="d-add">+        <span class="s-str">&quot;blocks_sha256&quot;</span>: <span class="s-fn">_sha256_file</span>(final_path),</span>
+<span class="d-add">+        <span class="s-str">&quot;blocks_file&quot;</span>: os.path.<span class="s-fn">basename</span>(final_path),</span>
+<span class="d-add">+        <span class="s-str">&quot;mapped_edges&quot;</span>: mapped,</span>
+<span class="d-add">+        <span class="s-str">&quot;unmapped&quot;</span>: n_edges - mapped,</span>
+<span class="d-add">+        <span class="s-str">&quot;self_edges&quot;</span>: <span class="s-fn">int</span>((~not_self).<span class="s-fn">sum</span>()),</span>
+<span class="d-add">+        <span class="s-str">&quot;corridors&quot;</span>: <span class="s-fn">len</span>(corr_polys),</span>
+<span class="d-add">+        <span class="s-str">&quot;junction_cells&quot;</span>: <span class="s-fn">len</span>(cells),</span>
+<span class="d-add">+        <span class="s-str">&quot;stubs_merged&quot;</span>: stubs_merged,</span>
+<span class="d-add">+        <span class="s-str">&quot;junctions_dissolved&quot;</span>: junctions_dissolved,</span>
+<span class="d-add">+        <span class="s-str">&quot;edges_reassigned_to_cells&quot;</span>: reassigned,</span>
+<span class="d-add">+        <span class="s-str">&quot;edges_overlap_ok&quot;</span>: overlapping, <span class="s-str">&quot;edges_overlap_checked&quot;</span>: checked,</span>
+<span class="d-add">+        <span class="s-str">&quot;node_capture_len_m&quot;</span>: <span class="s-type">NODE_CAPTURE_LEN_M</span>, <span class="s-str">&quot;stub_max_m&quot;</span>: <span class="s-type">STUB_MAX_M</span>,</span>
+<span class="d-add">+        <span class="s-str">&quot;width_scale&quot;</span>: <span class="s-type">WIDTH_SCALE</span>,</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-kw">with</span> <span class="s-fn">open</span>(os.path.<span class="s-fn">join</span>(data_dir, <span class="s-str">f&quot;edge_blocks_{NETWORK}.json&quot;</span>), <span class="s-str">&quot;w&quot;</span>) <span class="s-kw">as</span> fh:</span>
+<span class="d-add">+        json.<span class="s-fn">dump</span>(meta, fh, indent=<span class="s-num">2</span>)</span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] wrote {os.path.basename(final_path)} ({len(feats)} blocks) + &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;edge_blocks_{NETWORK}.npy/.json ({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">if</span> __name__ == <span class="s-str">&quot;__main__&quot;</span>:</span>
+<span class="d-add">+    <span class="s-fn">main</span>()</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/streetscape_blocks/build_city_blocks.sh</span>
+            <span class="stat"><span class="d-add">+13</span> / <span class="d-del">-49</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">blocks pipeline · orchestrator</span>
+        <span class="ctx-sum">one-command Layer-2 build for a city</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_city_blocks.sh</span>
+        <span class="ctx-sum">7 steps → 2</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Step 1</span><span class="ol-sum">build_blocks_graph_first.py (server venv — geo venv requirement dropped)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Step 2</span><span class="ol-sum">tippecanoe from blocks_final_&lt;city&gt;.geojson (unchanged flags)</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>five old steps (generic/node/bake/foot/bake/merge) replaced by the single builder</li><li>no geo-venv check, no foot-sidecar hygiene — those artifacts no longer exist</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_city_blocks.sh b/server/streetscape_blocks/build_city_blocks.sh</span>
+<span class="d-meta">index db2a711..7f961da 100755</span>
+<span class="d-meta">--- a/server/streetscape_blocks/build_city_blocks.sh</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_city_blocks.sh</span>
+<span class="d-hunk">@@ -3,78 +3,42 @@</span>
+<span class="d-ctx"> <span class="s-com">#</span></span>
+<span class="d-ctx"> <span class="s-com">#   ./build_city_blocks.sh &lt;city-id&gt; [network]      # e.g. ./build_city_blocks.sh philly</span></span>
+<span class="d-ctx"> <span class="s-com">#</span></span>
+<span class="d-del">-<span class="s-com"># Pipeline:</span></span>
+<span class="d-del">-<span class="s-com">#   1. build_blocks_generic.py    procedural street blocks from OSM alone (geo venv)</span></span>
+<span class="d-del">-<span class="s-com">#   2. build_node_blocks.py       junction Voronoi cells (max-radius clipped),</span></span>
+<span class="d-del">-<span class="s-com">#                                 punched out of street blocks</span></span>
+<span class="d-del">-<span class="s-com">#   3. build_edge_blocks.py       edge→block bake pass 1 (server venv; topological</span></span>
+<span class="d-del">-<span class="s-com">#                                 junction capture; marks gaps as −1)</span></span>
+<span class="d-del">-<span class="s-com">#   4. build_foot_blocks.py       graph-component foot blocks for the −1 edges</span></span>
+<span class="d-del">-<span class="s-com">#                                 (park paths, plazas), membership by construction</span></span>
+<span class="d-del">-<span class="s-com">#   5. build_edge_blocks.py       final bake (applies the foot sidecar)</span></span>
+<span class="d-del">-<span class="s-com">#   6. merge_degenerate_blocks.py stubs → node blocks; fake junctions → corridors</span></span>
+<span class="d-del">-<span class="s-com">#                                 (writes blocks_final_&lt;city&gt;.geojson + remapped npy)</span></span>
+<span class="d-del">-<span class="s-com">#   7. tippecanoe                 blocks.pmtiles next to the graph (display layer)</span></span>
+<span class="d-add">+<span class="s-com"># Pipeline (graph-first — see build_blocks_graph_first.py, which replaced the</span></span>
+<span class="d-add">+<span class="s-com"># old five-script generate→map→patch→merge chain):</span></span>
+<span class="d-add">+<span class="s-com">#   1. build_blocks_graph_first.py  edges grouped topologically (junction</span></span>
+<span class="d-add">+<span class="s-com">#                                   clusters + corridors), polygons generated</span></span>
+<span class="d-add">+<span class="s-com">#                                   FROM the groups — coverage and edge↔polygon</span></span>
+<span class="d-add">+<span class="s-com">#                                   overlap hold by construction. Writes</span></span>
+<span class="d-add">+<span class="s-com">#                                   blocks_final_&lt;city&gt;.geojson + the baked</span></span>
+<span class="d-add">+<span class="s-com">#                                   edge_blocks_&lt;network&gt;.npy/.json mapping.</span></span>
+<span class="d-add">+<span class="s-com">#   2. tippecanoe                   blocks.pmtiles next to the graph (display).</span></span>
+<span class="d-ctx"> <span class="s-com">#</span></span>
+<span class="d-ctx"> <span class="s-com"># Run AFTER the city&#x27;s walk graph exists (refresh_osm.py --city &lt;id&gt;): the bake</span></span>
+<span class="d-ctx"> <span class="s-com"># stamps the graph&#x27;s topology_etag, so a graph rebuild invalidates the mapping</span></span>
+<span class="d-del">-<span class="s-com"># and this script must be re-run (refresh_osm.py --blocks does both). Always</span></span>
+<span class="d-del">-<span class="s-com"># start from step 1: steps 2+ mutate blocks_generic_&lt;city&gt;.geojson in place</span></span>
+<span class="d-del">-<span class="s-com"># (node cells are punched out of street polygons).</span></span>
+<span class="d-add">+<span class="s-com"># and this script must be re-run (refresh_osm.py --blocks does both).</span></span>
+<span class="d-ctx"> <span class="s-kw">set</span> -euo pipefail</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> CITY=<span class="s-str">&quot;${1:?usage: build_city_blocks.sh &lt;city-id&gt; [network]}&quot;</span></span>
+<span class="d-ctx"> NETWORK=<span class="s-str">&quot;${2:-streets}&quot;</span></span>
+<span class="d-ctx"> HERE=<span class="s-str">&quot;$(cd &quot;</span>$(dirname <span class="s-str">&quot;$0&quot;</span>)<span class="s-str">&quot; &amp;&amp; pwd)&quot;</span></span>
+<span class="d-ctx"> SERVER=<span class="s-str">&quot;$(cd &quot;</span><span class="s-dec">$HERE</span>/..<span class="s-str">&quot; &amp;&amp; pwd)&quot;</span></span>
+<span class="d-del">-GEO_PY=<span class="s-str">&quot;$HERE/env/bin/python&quot;</span>       <span class="s-com"># osmnx/geopandas/shapely venv (heavy geo deps)</span></span>
+<span class="d-ctx"> OUT=<span class="s-str">&quot;${BLOCKS_OUT:-$HERE/output}&quot;</span></span>
+<span class="d-del">-BLOCKS_FILE=<span class="s-str">&quot;$OUT/blocks_generic_${CITY}.geojson&quot;</span></span>
+<span class="d-ctx"> FINAL_FILE=<span class="s-str">&quot;$OUT/blocks_final_${CITY}.geojson&quot;</span></span>
+<span class="d-ctx"> </span>
+<span class="d-del">-[ -x <span class="s-str">&quot;$GEO_PY&quot;</span> ] || { echo <span class="s-str">&quot;missing geo venv: $HERE/env (see README.md)&quot;</span>; exit <span class="s-num">1</span>; }</span>
+<span class="d-ctx"> [ -x <span class="s-str">&quot;$SERVER/env/bin/python&quot;</span> ] || { echo <span class="s-str">&quot;missing server venv: $SERVER/env&quot;</span>; exit <span class="s-num">1</span>; }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-fn">srv_py</span>() { (cd <span class="s-str">&quot;$SERVER&quot;</span> &amp;&amp; ./env/bin/python <span class="s-str">&quot;$@&quot;</span>); }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-<span class="s-com"># cities.py bbox is (south, west, north, east); the generator wants &quot;W,S,E,N&quot;.</span></span>
+<span class="d-del">-BBOX=<span class="s-str">&quot;$(srv_py -c &quot;</span></span>
+<span class="d-del">-from cities import CITIES</span>
+<span class="d-del">-s, w, n, e = CITIES[<span class="s-str">&#x27;$CITY&#x27;</span>].bbox</span>
+<span class="d-del">-<span class="s-fn">print</span>(f<span class="s-str">&#x27;{w},{s},{e},{n}&#x27;</span>)</span>
+<span class="d-del">-<span class="s-str">&quot;)&quot;</span></span>
+<span class="d-ctx"> DATA_DIR=<span class="s-str">&quot;$SERVER/$(srv_py -c &quot;</span></span>
+<span class="d-ctx"> from cities import CITIES</span>
+<span class="d-ctx"> <span class="s-fn">print</span>(CITIES[<span class="s-str">&#x27;$CITY&#x27;</span>].data_dir)</span>
+<span class="d-ctx"> <span class="s-str">&quot;)&quot;</span></span>
+<span class="d-ctx"> </span>
+<span class="d-del">-echo <span class="s-str">&quot;== [1/7] procedural street blocks ($CITY, bbox $BBOX)&quot;</span></span>
+<span class="d-del">-CITY=<span class="s-str">&quot;$CITY&quot;</span> BBOX=<span class="s-str">&quot;$BBOX&quot;</span> BLOCKS_OUT=<span class="s-str">&quot;$OUT&quot;</span> <span class="s-str">&quot;$GEO_PY&quot;</span> <span class="s-str">&quot;$HERE/build_blocks_generic.py&quot;</span></span>
+<span class="d-del">-</span>
+<span class="d-del">-echo <span class="s-str">&quot;== [2/7] junction Voronoi cells (each junction cluster is its own block)&quot;</span></span>
+<span class="d-del">-CITY=<span class="s-str">&quot;$CITY&quot;</span> NETWORK=<span class="s-str">&quot;$NETWORK&quot;</span> BLOCKS_OUT=<span class="s-str">&quot;$OUT&quot;</span> \</span>
+<span class="d-del">-  srv_py streetscape_blocks/build_node_blocks.py</span>
+<span class="d-del">-</span>
+<span class="d-del">-echo <span class="s-str">&quot;== [3/7] edge→block bake (pass 1: find uncovered edges)&quot;</span></span>
+<span class="d-del">-<span class="s-com"># A stale foot sidecar from a previous run carries dead block ids — never let</span></span>
+<span class="d-del">-<span class="s-com"># pass 1 apply it; build_foot_blocks.py rewrites it fresh in step 4.</span></span>
+<span class="d-del">-rm -f <span class="s-str">&quot;$DATA_DIR/foot_clusters_${NETWORK}.npz&quot;</span></span>
+<span class="d-del">-CITY=<span class="s-str">&quot;$CITY&quot;</span> NETWORK=<span class="s-str">&quot;$NETWORK&quot;</span> BLOCKS_FILE=<span class="s-str">&quot;$BLOCKS_FILE&quot;</span> \</span>
+<span class="d-del">-  srv_py streetscape_blocks/build_edge_blocks.py</span>
+<span class="d-del">-</span>
+<span class="d-del">-echo <span class="s-str">&quot;== [4/7] foot blocks for uncovered edges (graph components)&quot;</span></span>
+<span class="d-del">-CITY=<span class="s-str">&quot;$CITY&quot;</span> NETWORK=<span class="s-str">&quot;$NETWORK&quot;</span> BLOCKS_OUT=<span class="s-str">&quot;$OUT&quot;</span> \</span>
+<span class="d-del">-  srv_py streetscape_blocks/build_foot_blocks.py</span>
+<span class="d-del">-</span>
+<span class="d-del">-echo <span class="s-str">&quot;== [5/7] edge→block bake (final, against completed block set)&quot;</span></span>
+<span class="d-del">-CITY=<span class="s-str">&quot;$CITY&quot;</span> NETWORK=<span class="s-str">&quot;$NETWORK&quot;</span> BLOCKS_FILE=<span class="s-str">&quot;$BLOCKS_FILE&quot;</span> \</span>
+<span class="d-del">-  srv_py streetscape_blocks/build_edge_blocks.py</span>
+<span class="d-del">-</span>
+<span class="d-del">-echo <span class="s-str">&quot;== [6/7] merge degenerate blocks (stubs + fake junctions)&quot;</span></span>
+<span class="d-add">+echo <span class="s-str">&quot;== [1/2] graph-first blocks (grouping → polygons → baked mapping)&quot;</span></span>
+<span class="d-ctx"> CITY=<span class="s-str">&quot;$CITY&quot;</span> NETWORK=<span class="s-str">&quot;$NETWORK&quot;</span> BLOCKS_OUT=<span class="s-str">&quot;$OUT&quot;</span> \</span>
+<span class="d-del">-  srv_py streetscape_blocks/merge_degenerate_blocks.py</span>
+<span class="d-add">+  srv_py streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-echo <span class="s-str">&quot;== [7/7] blocks.pmtiles&quot;</span></span>
+<span class="d-add">+echo <span class="s-str">&quot;== [2/2] blocks.pmtiles&quot;</span></span>
+<span class="d-ctx"> <span class="s-kw">if</span> command -v tippecanoe &gt;/dev/null <span class="s-num">2</span>&gt;&amp;<span class="s-num">1</span>; <span class="s-kw">then</span></span>
+<span class="d-ctx">   <span class="s-com"># --use-attribute-for-id: block_id becomes the NATIVE feature id (required by</span></span>
+<span class="d-ctx">   <span class="s-com"># the client&#x27;s setFeatureState heat/selection; MapLibre reads native ids, no</span></span></pre>
+        </details>
+        
+    </section>
+    
+
+    <section class="card" id="ids">
+      <div class="tag">Pipeline · feature ids</div>
+      <h2>2 · block_ids are 1-based — MVT can't carry feature id 0</h2>
+      <h3>Symptom</h3>
+      <p>tippecanoe warned <em>“Can't represent too-large feature ID 0”</em> and dropped the native id from block 0's tile feature — so block 0 could never light (heat) or ring (selection): MapLibre feature-state attaches by native id.</p>
+      <h3>Root cause</h3>
+      <ul><li>The old generators numbered blocks from 0. The Mapbox-Vector-Tile spec makes <code>id</code> an optional field where 0 is indistinguishable from unset, so tippecanoe refuses it. Every prior block set shipped one silently state-less block.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The builder numbers blocks from 1 and sizes <code>n_blocks = len(features) + 1</code> (slot 0 unused). Server vote arrays and the client's typed-array mapping index by block id, so both stay dense.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+      
+        <details>
+          <summary><span class="fname">server/streetscape_blocks/build_blocks_graph_first.py</span>
+            <span class="stat"><span class="d-add">+482</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">blocks pipeline · THE builder (new)</span>
+        <span class="ctx-sum">one pass: topological grouping → polygons from the groups → baked mapping</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_blocks_graph_first.py</span>
+        <span class="ctx-sum">~430 LOC — clusters, grouping, fixpoint, geometry, audit, emit</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Constants</span><span class="ol-sum">cluster link/extent · NODE_R_M 8 · capture 30m · stub 25m · class half-widths</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">UnionFind / split_oversized</span><span class="ol-sum">principal-axis bisection of &gt;40m clusters (from build_node_blocks)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">1 · junction clusters</span><span class="ol-sum">deg≥3 union-find within 18m</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">2 · edge grouping (total)</span><span class="ol-sum">same-cluster · ≤30m crosswalk stubs · corridors via non-junction endpoints</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">3 · degeneracy fixpoint</span><span class="ol-sum">V1 stubby corridors → junction; V2 ≤1-corridor junctions dissolve</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">4 · geometry from membership</span><span class="ol-sum">cells = member discs ∪ captured tubes; corridors = member tubes − cells; reassign eaten edges</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">5 · emit (1-based ids)</span><span class="ol-sum">blocks_final geojson + edge_blocks npy + meta</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">6 · audit</span><span class="ol-sum">100% mapped + 100% edge∩polygon, stamped into the meta</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>edge grouping — every non-self edge gets a group BEFORE any geometry exists</li><li>fixpoint — the old merge pass&#x27;s V1/V2, run topologically pre-geometry</li><li>tube_of/cells — polygons generated from exactly the member edges/nodes</li><li>reassignment — a corridor edge fully eaten by junction cells moves to the midpoint cell</li><li>audit — poly.distance(edge line) ≤ ε for every mapped edge, counts in the meta</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_blocks_graph_first.py b/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..fc973ed</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-hunk">@@ -0,0 +1,482 @@</span>
+<span class="d-add">+<span class="s-com">#!/usr/bin/env python3</span></span>
+<span class="d-add">+<span class="s-str">&quot;&quot;&quot;Graph-first block builder — grouping first, geometry from the groups.</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-type">Replaces</span> the five-stage <span class="s-fn">pipeline</span> (build_blocks_generic → build_node_blocks →</span>
+<span class="d-add">+build_edge_blocks → build_foot_blocks → merge_degenerate_blocks) <span class="s-kw">with</span> <span class="s-type">ONE</span> <span class="s-kw">pass</span></span>
+<span class="d-add">+that inverts its core premise. <span class="s-type">The</span> old pipeline generated polygons <span class="s-kw">from</span> drive</span>
+<span class="d-add">+centerlines <span class="s-kw">and</span> then tried to map graph edges <span class="s-type">INTO</span> them geometrically</span>
+<span class="d-add">+(containment + nearest-within-30m), which left two systematic defects:</span>
+<span class="d-add">+edges no polygon <span class="s-fn">claimed</span> (heatmap gaps: <span class="s-num">2</span>,<span class="s-num">450</span> on test-cp) <span class="s-kw">and</span> edges assigned</span>
+<span class="d-add">+to polygons they don<span class="s-str">&#x27;t even intersect (10,336 nearest-snapped on test-cp).</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-type">Here</span> membership <span class="s-kw">is</span> decided <span class="s-type">FIRST</span>, topologically, <span class="s-kw">for</span> every edge — then each</span>
+<span class="d-add">+block<span class="s-str">&#x27;s polygon is generated from its own member edges, so coverage and</span></span>
+<span class="d-add">+edge∩polygon overlap hold by construction:</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-num">1</span>. <span class="s-type">JUNCTION</span> <span class="s-type">CLUSTERS</span>: nodes <span class="s-kw">with</span> unique-neighbour degree ≥ <span class="s-num">3</span>, union-found</span>
+<span class="d-add">+     within <span class="s-type">LINK_M</span>, oversized clusters bisected along their principal axis.</span>
+<span class="d-add">+  <span class="s-num">2</span>. <span class="s-type">EDGE</span> <span class="s-fn">GROUPING</span> (total): an edge whose endpoints share a cluster belongs to</span>
+<span class="d-add">+     that junction; a <span class="s-fn">short</span> (≤ <span class="s-type">NODE_CAPTURE_LEN_M</span>) edge between two clusters</span>
+<span class="d-add">+     <span class="s-kw">is</span> a crosswalk stub <span class="s-kw">and</span> joins the nearer one; every other edge joins a</span>
+<span class="d-add">+     <span class="s-type">CORRIDOR</span> — connected components linked through non-junction endpoints,</span>
+<span class="d-add">+     i.e. one component per path segment between junctions.</span>
+<span class="d-add">+  <span class="s-num">3</span>. <span class="s-type">DEGENERACY</span> <span class="s-fn">FIXPOINT</span> (topological, <span class="s-kw">from</span> merge_degenerate_blocks.py<span class="s-str">&#x27;s V1/V2):</span></span>
+<span class="d-add">+     driveway-<span class="s-kw">class</span> <span class="s-fn">stubs</span> (extent ≤ <span class="s-type">STUB_MAX_M</span>, one junction) melt into their</span>
+<span class="d-add">+     junction; a junction left touching ≤ <span class="s-num">1</span> corridor isn<span class="s-str">&#x27;t a junction — it</span></span>
+<span class="d-add">+     dissolves into that <span class="s-fn">corridor</span> (<span class="s-kw">or</span>, isolated, stays a node-only cell).</span>
+<span class="d-add">+  <span class="s-num">4</span>. <span class="s-type">GEOMETRY</span> <span class="s-type">FROM</span> <span class="s-type">MEMBERSHIP</span>: a junction cell <span class="s-kw">is</span> the union of discs at its</span>
+<span class="d-add">+     member nodes plus the tubes of its captured edges — every member sits</span>
+<span class="d-add">+     inside its own polygon by <span class="s-fn">construction</span> (the old clipped-<span class="s-type">Voronoi</span> discs</span>
+<span class="d-add">+     cut ~<span class="s-num">15</span>% of members out via the radius cap + bisector clipping); a</span>
+<span class="d-add">+     corridor <span class="s-kw">is</span> the union of its member-edge <span class="s-fn">tubes</span> (per-<span class="s-kw">class</span> half-width)</span>
+<span class="d-add">+     minus the junction cells, so corridor-vs-junction stays disjoint</span>
+<span class="d-add">+     (junctions win). <span class="s-type">A</span> corridor edge left entirely inside junction cells <span class="s-kw">is</span></span>
+<span class="d-add">+     <span class="s-type">REASSIGNED</span> to the cell containing its midpoint — membership follows the</span>
+<span class="d-add">+     final geometry, so edge∩polygon overlap <span class="s-kw">is</span> total. <span class="s-type">Adjacent</span> junction</span>
+<span class="d-add">+     cells may overlap <span class="s-fn">slightly</span> (a crosswalk tube reaching its partner</span>
+<span class="d-add">+     corner); <span class="s-kw">with</span> membership decided topologically that ambiguity <span class="s-kw">is</span> only</span>
+<span class="d-add">+     visual.</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-fn">Outputs</span> (same contract the server + tippecanoe already consume):</span>
+<span class="d-add">+  output/blocks_final_&lt;city&gt;.geojson       display polygons, dense block_id</span>
+<span class="d-add">+  osm_data/&lt;city&gt;/edge_blocks_&lt;net&gt;.npy    edge_id → <span class="s-fn">block_id</span> (−<span class="s-num">1</span> only <span class="s-kw">for</span></span>
+<span class="d-add">+                                           <span class="s-lit">self</span>-edges, which have no extent)</span>
+<span class="d-add">+  osm_data/&lt;city&gt;/edge_blocks_&lt;net&gt;.json   meta: n_blocks, topology_etag,</span>
+<span class="d-add">+                                           blocks_sha256 + coverage/overlap audit</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-type">Run</span> <span class="s-kw">in</span> the <span class="s-type">SERVER</span> venv:</span>
+<span class="d-add">+  <span class="s-type">CITY</span>=test-cp <span class="s-type">NETWORK</span>=streets ./env/bin/python streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-add">+<span class="s-str">&quot;&quot;&quot;</span></span>
+<span class="d-add">+<span class="s-kw">import</span> hashlib</span>
+<span class="d-add">+<span class="s-kw">import</span> json</span>
+<span class="d-add">+<span class="s-kw">import</span> math</span>
+<span class="d-add">+<span class="s-kw">import</span> os</span>
+<span class="d-add">+<span class="s-kw">import</span> sys</span>
+<span class="d-add">+<span class="s-kw">import</span> time</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">import</span> numpy <span class="s-kw">as</span> np</span>
+<span class="d-add">+</span>
+<span class="d-add">+_HERE = os.path.<span class="s-fn">dirname</span>(os.path.<span class="s-fn">abspath</span>(__file__))</span>
+<span class="d-add">+_SERVER = os.path.<span class="s-fn">abspath</span>(os.path.<span class="s-fn">join</span>(_HERE, <span class="s-str">&quot;..&quot;</span>))</span>
+<span class="d-add">+<span class="s-kw">if</span> _SERVER <span class="s-kw">not</span> <span class="s-kw">in</span> sys.path:</span>
+<span class="d-add">+    sys.path.<span class="s-fn">insert</span>(<span class="s-num">0</span>, _SERVER)</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">import</span> shapely  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+<span class="s-kw">from</span> shapely <span class="s-kw">import</span> <span class="s-type">STRtree</span>, <span class="s-type">LineString</span>, union_all, buffer <span class="s-kw">as</span> shp_buffer  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+<span class="s-kw">from</span> shapely.geometry <span class="s-kw">import</span> mapping  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+<span class="s-kw">from</span> scipy.spatial <span class="s-kw">import</span> cKDTree  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">from</span> cities <span class="s-kw">import</span> <span class="s-type">CITIES</span>  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+<span class="s-kw">from</span> graph_registry <span class="s-kw">import</span> <span class="s-type">CityGraph</span>  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-type">CITY</span> = os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;CITY&quot;</span>, <span class="s-str">&quot;nyc&quot;</span>)</span>
+<span class="d-add">+<span class="s-type">NETWORK</span> = os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;NETWORK&quot;</span>, <span class="s-str">&quot;streets&quot;</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-com"># Junction clustering (same knobs/values as build_node_blocks.py).</span></span>
+<span class="d-add">+<span class="s-type">LINK_M</span> = <span class="s-fn">float</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;NODE_CLUSTER_LINK_M&quot;</span>, <span class="s-str">&quot;18&quot;</span>))</span>
+<span class="d-add">+<span class="s-type">MAX_EXTENT_M</span> = <span class="s-fn">float</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;NODE_CLUSTER_MAX_EXTENT_M&quot;</span>, <span class="s-str">&quot;40&quot;</span>))</span>
+<span class="d-add">+<span class="s-com"># Disc radius around each junction-cluster member node (the cell is the union</span></span>
+<span class="d-add">+<span class="s-com"># of these discs + the captured edges&#x27; tubes). 8 m keeps junction blobs in</span></span>
+<span class="d-add">+<span class="s-com"># proportion to footway tubes (4 m half-width); 10 read as chunky gloops on</span></span>
+<span class="d-add">+<span class="s-com"># the central-park test map.</span></span>
+<span class="d-add">+<span class="s-type">NODE_R_M</span> = <span class="s-fn">float</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;NODE_BLOCK_RADIUS_M&quot;</span>, <span class="s-str">&quot;8&quot;</span>))</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-com"># Edge grouping / degeneracy (same knobs as the old bake + merge).</span></span>
+<span class="d-add">+<span class="s-type">NODE_CAPTURE_LEN_M</span> = <span class="s-fn">float</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;NODE_CAPTURE_LEN_M&quot;</span>, <span class="s-str">&quot;30&quot;</span>))</span>
+<span class="d-add">+<span class="s-type">STUB_MAX_M</span> = <span class="s-fn">float</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;STUB_MAX_M&quot;</span>, <span class="s-str">&quot;25&quot;</span>))</span>
+<span class="d-add">+<span class="s-type">MAX_ROUNDS</span> = <span class="s-fn">int</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;MERGE_MAX_ROUNDS&quot;</span>, <span class="s-str">&quot;25&quot;</span>))</span>
+<span class="d-add">+<span class="s-type">STUBBY_CLASSES</span> = {<span class="s-str">&quot;service&quot;</span>, <span class="s-str">&quot;footway&quot;</span>, <span class="s-str">&quot;path&quot;</span>, <span class="s-str">&quot;steps&quot;</span>, <span class="s-str">&quot;cycleway&quot;</span>,</span>
+<span class="d-add">+                  <span class="s-str">&quot;pedestrian&quot;</span>, <span class="s-str">&quot;track&quot;</span>, <span class="s-str">&quot;&quot;</span>}</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-com"># Corridor tube half-widths per road class (from build_blocks_generic.py,</span></span>
+<span class="d-add">+<span class="s-com"># NYC-calibrated; classes are universal). Scaled by WIDTH_SCALE for sweeps.</span></span>
+<span class="d-add">+<span class="s-type">WIDTH_SCALE</span> = <span class="s-fn">float</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;WIDTH_SCALE&quot;</span>, <span class="s-str">&quot;1.0&quot;</span>))</span>
+<span class="d-add">+<span class="s-type">HALF_WIDTH</span> = {</span>
+<span class="d-add">+    <span class="s-str">&quot;motorway&quot;</span>: <span class="s-num">18.0</span>, <span class="s-str">&quot;motorway_link&quot;</span>: <span class="s-num">12.0</span>, <span class="s-str">&quot;trunk&quot;</span>: <span class="s-num">16.0</span>, <span class="s-str">&quot;trunk_link&quot;</span>: <span class="s-num">11.0</span>,</span>
+<span class="d-add">+    <span class="s-str">&quot;primary&quot;</span>: <span class="s-num">14.0</span>, <span class="s-str">&quot;primary_link&quot;</span>: <span class="s-num">10.0</span>, <span class="s-str">&quot;secondary&quot;</span>: <span class="s-num">11.0</span>, <span class="s-str">&quot;secondary_link&quot;</span>: <span class="s-num">9.0</span>,</span>
+<span class="d-add">+    <span class="s-str">&quot;tertiary&quot;</span>: <span class="s-num">9.0</span>, <span class="s-str">&quot;tertiary_link&quot;</span>: <span class="s-num">8.0</span>, <span class="s-str">&quot;residential&quot;</span>: <span class="s-num">8.0</span>, <span class="s-str">&quot;living_street&quot;</span>: <span class="s-num">7.0</span>,</span>
+<span class="d-add">+    <span class="s-str">&quot;unclassified&quot;</span>: <span class="s-num">8.0</span>, <span class="s-str">&quot;service&quot;</span>: <span class="s-num">6.0</span>, <span class="s-str">&quot;pedestrian&quot;</span>: <span class="s-num">6.0</span>, <span class="s-str">&quot;footway&quot;</span>: <span class="s-num">4.0</span>,</span>
+<span class="d-add">+    <span class="s-str">&quot;path&quot;</span>: <span class="s-num">4.0</span>, <span class="s-str">&quot;cycleway&quot;</span>: <span class="s-num">4.0</span>, <span class="s-str">&quot;steps&quot;</span>: <span class="s-num">4.0</span>,</span>
+<span class="d-add">+}</span>
+<span class="d-add">+<span class="s-type">DEFAULT_HALF_WIDTH</span> = <span class="s-num">8.0</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">class</span> <span class="s-type">UnionFind</span>:</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">__init__</span>(<span class="s-lit">self</span>, n: int):</span>
+<span class="d-add">+        <span class="s-lit">self</span>.parent = np.<span class="s-fn">arange</span>(n)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">find</span>(<span class="s-lit">self</span>, a: int) -&gt; int:</span>
+<span class="d-add">+        p = <span class="s-lit">self</span>.parent</span>
+<span class="d-add">+        <span class="s-kw">while</span> p[a] != a:</span>
+<span class="d-add">+            p[a] = p[p[a]]</span>
+<span class="d-add">+            a = p[a]</span>
+<span class="d-add">+        <span class="s-kw">return</span> a</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">union</span>(<span class="s-lit">self</span>, a: int, b: int):</span>
+<span class="d-add">+        ra, rb = <span class="s-lit">self</span>.<span class="s-fn">find</span>(a), <span class="s-lit">self</span>.<span class="s-fn">find</span>(b)</span>
+<span class="d-add">+        <span class="s-kw">if</span> ra != rb:</span>
+<span class="d-add">+            <span class="s-lit">self</span>.parent[rb] = ra</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">split_oversized</span>(xy: np.ndarray, labels: np.ndarray) -&gt; np.ndarray:</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Bisect clusters whose bbox diagonal exceeds MAX_EXTENT_M along their</span></span>
+<span class="d-add">+    principal <span class="s-fn">axis</span> (<span class="s-kw">from</span> build_node_blocks.py) so members fit the radius cap.<span class="s-str">&quot;&quot;&quot;</span></span>
+<span class="d-add">+    next_label = <span class="s-fn">int</span>(labels.<span class="s-fn">max</span>()) + <span class="s-num">1</span> <span class="s-kw">if</span> <span class="s-fn">len</span>(labels) <span class="s-kw">else</span> <span class="s-num">0</span></span>
+<span class="d-add">+    queue = <span class="s-fn">list</span>(np.<span class="s-fn">unique</span>(labels))</span>
+<span class="d-add">+    <span class="s-kw">while</span> queue:</span>
+<span class="d-add">+        lb = queue.<span class="s-fn">pop</span>()</span>
+<span class="d-add">+        idx = np.<span class="s-fn">where</span>(labels == lb)[<span class="s-num">0</span>]</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-fn">len</span>(idx) &lt; <span class="s-num">2</span>:</span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        pts = xy[idx]</span>
+<span class="d-add">+        span = pts.<span class="s-fn">max</span>(axis=<span class="s-num">0</span>) - pts.<span class="s-fn">min</span>(axis=<span class="s-num">0</span>)</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-fn">float</span>(np.<span class="s-fn">hypot</span>(*span)) &lt;= <span class="s-type">MAX_EXTENT_M</span>:</span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        centered = pts - pts.<span class="s-fn">mean</span>(axis=<span class="s-num">0</span>)</span>
+<span class="d-add">+        cov = centered.<span class="s-type">T</span> @ centered</span>
+<span class="d-add">+        _, vecs = np.linalg.<span class="s-fn">eigh</span>(cov)</span>
+<span class="d-add">+        proj = centered @ vecs[:, -<span class="s-num">1</span>]</span>
+<span class="d-add">+        half = idx[proj &gt; np.<span class="s-fn">median</span>(proj)]</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-fn">len</span>(half) == <span class="s-num">0</span> <span class="s-kw">or</span> <span class="s-fn">len</span>(half) == <span class="s-fn">len</span>(idx):</span>
+<span class="d-add">+            half = idx[np.<span class="s-fn">argsort</span>(proj)[<span class="s-fn">len</span>(idx) // <span class="s-num">2</span>:]]</span>
+<span class="d-add">+        labels[half] = next_label</span>
+<span class="d-add">+        queue.<span class="s-fn">append</span>(lb)</span>
+<span class="d-add">+        queue.<span class="s-fn">append</span>(next_label)</span>
+<span class="d-add">+        next_label += <span class="s-num">1</span></span>
+<span class="d-add">+    <span class="s-kw">return</span> labels</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">majority</span>(values):</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Most common non-empty value, or None.&quot;&quot;&quot;</span></span>
+<span class="d-add">+    counts = {}</span>
+<span class="d-add">+    <span class="s-kw">for</span> v <span class="s-kw">in</span> values:</span>
+<span class="d-add">+        <span class="s-kw">if</span> v <span class="s-kw">in</span> (<span class="s-lit">None</span>, <span class="s-str">&quot;&quot;</span>, <span class="s-str">&quot;None&quot;</span>):</span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        counts[v] = counts.<span class="s-fn">get</span>(v, <span class="s-num">0</span>) + <span class="s-num">1</span></span>
+<span class="d-add">+    <span class="s-kw">return</span> <span class="s-fn">max</span>(counts, key=counts.get) <span class="s-kw">if</span> counts <span class="s-kw">else</span> <span class="s-lit">None</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">_sha256_file</span>(path: str) -&gt; str:</span>
+<span class="d-add">+    h = hashlib.<span class="s-fn">sha256</span>()</span>
+<span class="d-add">+    <span class="s-kw">with</span> <span class="s-fn">open</span>(path, <span class="s-str">&quot;rb&quot;</span>) <span class="s-kw">as</span> f:</span>
+<span class="d-add">+        <span class="s-kw">for</span> chunk <span class="s-kw">in</span> <span class="s-fn">iter</span>(<span class="s-kw">lambda</span>: f.<span class="s-fn">read</span>(<span class="s-num">1</span> &lt;&lt; <span class="s-num">20</span>), <span class="s-str">b&quot;&quot;</span>):</span>
+<span class="d-add">+            h.<span class="s-fn">update</span>(chunk)</span>
+<span class="d-add">+    <span class="s-kw">return</span> h.<span class="s-fn">hexdigest</span>()[:<span class="s-num">16</span>]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">main</span>():</span>
+<span class="d-add">+    t0 = time.<span class="s-fn">time</span>()</span>
+<span class="d-add">+    city = <span class="s-type">CITIES</span>[<span class="s-type">CITY</span>]</span>
+<span class="d-add">+    g = <span class="s-fn">CityGraph</span>(city, redis_client=<span class="s-lit">None</span>, network=<span class="s-type">NETWORK</span>)</span>
+<span class="d-add">+    g.<span class="s-fn">ensure_loaded</span>()</span>
+<span class="d-add">+    nodes = np.<span class="s-fn">asarray</span>(g.nodes, dtype=np.float64)          <span class="s-com"># [N,2] = (lat, lon)</span></span>
+<span class="d-add">+    n_nodes = <span class="s-fn">len</span>(nodes)</span>
+<span class="d-add">+    ends = np.<span class="s-fn">array</span>([(e[<span class="s-num">0</span>], e[<span class="s-num">1</span>]) <span class="s-kw">for</span> e <span class="s-kw">in</span> g.edges], dtype=np.int64)</span>
+<span class="d-add">+    rclass = np.<span class="s-fn">array</span>([<span class="s-fn">str</span>(e[<span class="s-num">3</span>]) <span class="s-kw">if</span> <span class="s-fn">len</span>(e) &gt; <span class="s-num">3</span> <span class="s-kw">else</span> <span class="s-str">&quot;&quot;</span> <span class="s-kw">for</span> e <span class="s-kw">in</span> g.edges])</span>
+<span class="d-add">+    names = [e[<span class="s-num">2</span>] <span class="s-kw">if</span> <span class="s-fn">len</span>(e) &gt; <span class="s-num">2</span> <span class="s-kw">else</span> <span class="s-lit">None</span> <span class="s-kw">for</span> e <span class="s-kw">in</span> g.edges]</span>
+<span class="d-add">+    n_edges = <span class="s-fn">len</span>(ends)</span>
+<span class="d-add">+    not_self = ends[:, <span class="s-num">0</span>] != ends[:, <span class="s-num">1</span>]</span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] {CITY}:{NETWORK} — {n_nodes} nodes, {n_edges} edges &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;({int((~not_self).sum())} self), etag={g.topology_etag}&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># Local equirectangular metres frame (shared convention with the old scripts).</span></span>
+<span class="d-add">+    s, w, n, e = city.bbox</span>
+<span class="d-add">+    mlat = <span class="s-num">111_320.0</span></span>
+<span class="d-add">+    mlon = <span class="s-num">111_320.0</span> * math.<span class="s-fn">cos</span>(math.<span class="s-fn">radians</span>((s + n) / <span class="s-num">2</span>))</span>
+<span class="d-add">+    node_xy = np.<span class="s-fn">column_stack</span>(((nodes[:, <span class="s-num">1</span>] - w) * mlon, (nodes[:, <span class="s-num">0</span>] - s) * mlat))</span>
+<span class="d-add">+    evec = node_xy[ends[:, <span class="s-num">1</span>]] - node_xy[ends[:, <span class="s-num">0</span>]]</span>
+<span class="d-add">+    elen = np.<span class="s-fn">hypot</span>(evec[:, <span class="s-num">0</span>], evec[:, <span class="s-num">1</span>])</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># ── 1. Junction clusters ────────────────────────────────────────────────</span></span>
+<span class="d-add">+    und = np.<span class="s-fn">unique</span>(np.<span class="s-fn">sort</span>(ends[not_self], axis=<span class="s-num">1</span>), axis=<span class="s-num">0</span>)</span>
+<span class="d-add">+    deg = np.<span class="s-fn">bincount</span>(und.<span class="s-fn">ravel</span>(), minlength=n_nodes)</span>
+<span class="d-add">+    junctions = np.<span class="s-fn">where</span>(deg &gt;= <span class="s-num">3</span>)[<span class="s-num">0</span>]</span>
+<span class="d-add">+    jxy = node_xy[junctions]</span>
+<span class="d-add">+    uf_j = <span class="s-fn">UnionFind</span>(<span class="s-fn">len</span>(junctions))</span>
+<span class="d-add">+    <span class="s-kw">for</span> a, b <span class="s-kw">in</span> <span class="s-fn">cKDTree</span>(jxy).<span class="s-fn">query_pairs</span>(r=<span class="s-type">LINK_M</span>, output_type=<span class="s-str">&quot;ndarray&quot;</span>):</span>
+<span class="d-add">+        uf_j.<span class="s-fn">union</span>(a, b)</span>
+<span class="d-add">+    labels = np.<span class="s-fn">array</span>([uf_j.<span class="s-fn">find</span>(i) <span class="s-kw">for</span> i <span class="s-kw">in</span> <span class="s-fn">range</span>(<span class="s-fn">len</span>(junctions))])</span>
+<span class="d-add">+    labels = <span class="s-fn">split_oversized</span>(jxy, labels)</span>
+<span class="d-add">+    uniq, labels = np.<span class="s-fn">unique</span>(labels, return_inverse=<span class="s-lit">True</span>)</span>
+<span class="d-add">+    n_clusters = <span class="s-fn">len</span>(uniq)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    node_cluster = np.<span class="s-fn">full</span>(n_nodes, -<span class="s-num">1</span>, dtype=np.int64)</span>
+<span class="d-add">+    node_cluster[junctions] = labels</span>
+<span class="d-add">+    cl_members = [junctions[labels == k] <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters)]</span>
+<span class="d-add">+    centroids = np.<span class="s-fn">array</span>([node_xy[m].<span class="s-fn">mean</span>(axis=<span class="s-num">0</span>) <span class="s-kw">for</span> m <span class="s-kw">in</span> cl_members])</span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] {len(junctions)} junction nodes → {n_clusters} clusters &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># ── 2. Edge grouping (total, topological) ───────────────────────────────</span></span>
+<span class="d-add">+    <span class="s-com"># group encoding: cluster k → k ; corridor c → n_clusters + c ; self → −1</span></span>
+<span class="d-add">+    cu = node_cluster[ends[:, <span class="s-num">0</span>]]</span>
+<span class="d-add">+    cv = node_cluster[ends[:, <span class="s-num">1</span>]]</span>
+<span class="d-add">+    edge_cluster = np.<span class="s-fn">full</span>(n_edges, -<span class="s-num">1</span>, dtype=np.int64)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    same = not_self &amp; (cu &gt;= <span class="s-num">0</span>) &amp; (cu == cv)</span>
+<span class="d-add">+    edge_cluster[same] = cu[same]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    cross_short = not_self &amp; (cu &gt;= <span class="s-num">0</span>) &amp; (cv &gt;= <span class="s-num">0</span>) &amp; (cu != cv) &amp; (elen &lt;= <span class="s-type">NODE_CAPTURE_LEN_M</span>)</span>
+<span class="d-add">+    <span class="s-kw">if</span> cross_short.<span class="s-fn">any</span>():</span>
+<span class="d-add">+        mid = (node_xy[ends[cross_short, <span class="s-num">0</span>]] + node_xy[ends[cross_short, <span class="s-num">1</span>]]) / <span class="s-num">2.0</span></span>
+<span class="d-add">+        du = np.<span class="s-fn">hypot</span>(*(centroids[cu[cross_short]] - mid).<span class="s-type">T</span>)</span>
+<span class="d-add">+        dv = np.<span class="s-fn">hypot</span>(*(centroids[cv[cross_short]] - mid).<span class="s-type">T</span>)</span>
+<span class="d-add">+        edge_cluster[cross_short] = np.<span class="s-fn">where</span>(du &lt;= dv, cu[cross_short], cv[cross_short])</span>
+<span class="d-add">+</span>
+<span class="d-add">+    corridor_mask = not_self &amp; (edge_cluster &lt; <span class="s-num">0</span>)</span>
+<span class="d-add">+    corr_edges = np.<span class="s-fn">where</span>(corridor_mask)[<span class="s-num">0</span>]</span>
+<span class="d-add">+    <span class="s-com"># Union-find over NODES, linking only through non-junction endpoints; an</span></span>
+<span class="d-add">+    <span class="s-com"># edge with a junction endpoint hangs off its other end&#x27;s component.</span></span>
+<span class="d-add">+    uf_n = <span class="s-fn">UnionFind</span>(n_nodes)</span>
+<span class="d-add">+    <span class="s-kw">for</span> eid <span class="s-kw">in</span> corr_edges:</span>
+<span class="d-add">+        u, v = ends[eid]</span>
+<span class="d-add">+        <span class="s-kw">if</span> node_cluster[u] &lt; <span class="s-num">0</span> <span class="s-kw">and</span> node_cluster[v] &lt; <span class="s-num">0</span>:</span>
+<span class="d-add">+            uf_n.<span class="s-fn">union</span>(u, v)</span>
+<span class="d-add">+    comp_key = np.<span class="s-fn">empty</span>(<span class="s-fn">len</span>(corr_edges), dtype=np.int64)</span>
+<span class="d-add">+    <span class="s-kw">for</span> i, eid <span class="s-kw">in</span> <span class="s-fn">enumerate</span>(corr_edges):</span>
+<span class="d-add">+        u, v = ends[eid]</span>
+<span class="d-add">+        <span class="s-kw">if</span> node_cluster[u] &lt; <span class="s-num">0</span>:</span>
+<span class="d-add">+            comp_key[i] = uf_n.<span class="s-fn">find</span>(u)</span>
+<span class="d-add">+        <span class="s-kw">elif</span> node_cluster[v] &lt; <span class="s-num">0</span>:</span>
+<span class="d-add">+            comp_key[i] = uf_n.<span class="s-fn">find</span>(v)</span>
+<span class="d-add">+        <span class="s-kw">else</span>:</span>
+<span class="d-add">+            comp_key[i] = n_nodes + eid          <span class="s-com"># both-junction long edge: singleton</span></span>
+<span class="d-add">+    comp_ids, comp_inv = np.<span class="s-fn">unique</span>(comp_key, return_inverse=<span class="s-lit">True</span>)</span>
+<span class="d-add">+    n_corr = <span class="s-fn">len</span>(comp_ids)</span>
+<span class="d-add">+    corridors: list[list[int]] = [[] <span class="s-kw">for</span> _ <span class="s-kw">in</span> <span class="s-fn">range</span>(n_corr)]</span>
+<span class="d-add">+    <span class="s-kw">for</span> i, eid <span class="s-kw">in</span> <span class="s-fn">enumerate</span>(corr_edges):</span>
+<span class="d-add">+        corridors[comp_inv[i]].<span class="s-fn">append</span>(<span class="s-fn">int</span>(eid))</span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] grouped: {int(same.sum())} same-cluster + &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;{int(cross_short.sum())} crosswalk stubs + {len(corr_edges)} corridor &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;edges in {n_corr} corridors ({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># ── 3. Degeneracy fixpoint (V1 stubs, V2 fake junctions) ────────────────</span></span>
+<span class="d-add">+    <span class="s-com"># corridor → set of touching clusters (via member-edge endpoints).</span></span>
+<span class="d-add">+    corr_alive = [<span class="s-lit">True</span>] * n_corr</span>
+<span class="d-add">+    cluster_alive = [<span class="s-fn">len</span>(m) &gt; <span class="s-num">0</span> <span class="s-kw">for</span> m <span class="s-kw">in</span> cl_members]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">corr_clusters</span>(members):</span>
+<span class="d-add">+        cs = <span class="s-fn">set</span>()</span>
+<span class="d-add">+        <span class="s-kw">for</span> eid <span class="s-kw">in</span> members:</span>
+<span class="d-add">+            <span class="s-kw">for</span> nd <span class="s-kw">in</span> ends[eid]:</span>
+<span class="d-add">+                <span class="s-kw">if</span> node_cluster[nd] &gt;= <span class="s-num">0</span>:</span>
+<span class="d-add">+                    cs.<span class="s-fn">add</span>(<span class="s-fn">int</span>(node_cluster[nd]))</span>
+<span class="d-add">+        <span class="s-kw">return</span> cs</span>
+<span class="d-add">+</span>
+<span class="d-add">+    stubs_merged = <span class="s-num">0</span></span>
+<span class="d-add">+    junctions_dissolved = <span class="s-num">0</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> _ <span class="s-kw">in</span> <span class="s-fn">range</span>(<span class="s-type">MAX_ROUNDS</span>):</span>
+<span class="d-add">+        changed = <span class="s-lit">False</span></span>
+<span class="d-add">+        <span class="s-com"># V1: driveway-class stub corridors melt into their only junction.</span></span>
+<span class="d-add">+        <span class="s-kw">for</span> c <span class="s-kw">in</span> <span class="s-fn">range</span>(n_corr):</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-kw">not</span> corr_alive[c]:</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            members = corridors[c]</span>
+<span class="d-add">+            touching = [k <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">corr_clusters</span>(members) <span class="s-kw">if</span> cluster_alive[k]]</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(touching) != <span class="s-num">1</span>:</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            pts = node_xy[ends[members].<span class="s-fn">ravel</span>()]</span>
+<span class="d-add">+            diag = <span class="s-fn">float</span>(np.<span class="s-fn">hypot</span>(*(pts.<span class="s-fn">max</span>(axis=<span class="s-num">0</span>) - pts.<span class="s-fn">min</span>(axis=<span class="s-num">0</span>))))</span>
+<span class="d-add">+            <span class="s-kw">if</span> diag &gt; <span class="s-type">STUB_MAX_M</span>:</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-kw">not</span> <span class="s-fn">all</span>(rc <span class="s-kw">in</span> <span class="s-type">STUBBY_CLASSES</span> <span class="s-kw">for</span> rc <span class="s-kw">in</span> rclass[members]):</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            k = touching[<span class="s-num">0</span>]</span>
+<span class="d-add">+            edge_cluster[members] = k</span>
+<span class="d-add">+            corr_alive[c] = <span class="s-lit">False</span></span>
+<span class="d-add">+            corridors[c] = []</span>
+<span class="d-add">+            stubs_merged += <span class="s-num">1</span></span>
+<span class="d-add">+            changed = <span class="s-lit">True</span></span>
+<span class="d-add">+        <span class="s-com"># V2: a cluster touching ≤ 1 live corridor isn&#x27;t a junction. Dissolve</span></span>
+<span class="d-add">+        <span class="s-com"># it into that corridor (its captured edges + member nodes go there);</span></span>
+<span class="d-add">+        <span class="s-com"># an isolated cluster (0 corridors) stays as a node-only cell.</span></span>
+<span class="d-add">+        cl_corrs: list[set[int]] = [<span class="s-fn">set</span>() <span class="s-kw">for</span> _ <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters)]</span>
+<span class="d-add">+        <span class="s-kw">for</span> c <span class="s-kw">in</span> <span class="s-fn">range</span>(n_corr):</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-kw">not</span> corr_alive[c]:</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">corr_clusters</span>(corridors[c]):</span>
+<span class="d-add">+                <span class="s-kw">if</span> cluster_alive[k]:</span>
+<span class="d-add">+                    cl_corrs[k].<span class="s-fn">add</span>(c)</span>
+<span class="d-add">+        <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters):</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-kw">not</span> cluster_alive[k] <span class="s-kw">or</span> <span class="s-fn">len</span>(cl_corrs[k]) != <span class="s-num">1</span>:</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            c = <span class="s-fn">next</span>(<span class="s-fn">iter</span>(cl_corrs[k]))</span>
+<span class="d-add">+            captured = np.<span class="s-fn">where</span>(edge_cluster == k)[<span class="s-num">0</span>]</span>
+<span class="d-add">+            corridors[c].<span class="s-fn">extend</span>(<span class="s-fn">int</span>(x) <span class="s-kw">for</span> x <span class="s-kw">in</span> captured)</span>
+<span class="d-add">+            edge_cluster[captured] = -<span class="s-num">1</span></span>
+<span class="d-add">+            node_cluster[cl_members[k]] = -<span class="s-num">1</span></span>
+<span class="d-add">+            cluster_alive[k] = <span class="s-lit">False</span></span>
+<span class="d-add">+            junctions_dissolved += <span class="s-num">1</span></span>
+<span class="d-add">+            changed = <span class="s-lit">True</span></span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-kw">not</span> changed:</span>
+<span class="d-add">+            <span class="s-kw">break</span></span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] degeneracy fixpoint: {stubs_merged} stubs → junctions, &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;{junctions_dissolved} fake junctions → corridors &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># ── 4. Geometry from membership ─────────────────────────────────────────</span></span>
+<span class="d-add">+    widths = np.<span class="s-fn">array</span>([<span class="s-type">HALF_WIDTH</span>.<span class="s-fn">get</span>(rc, <span class="s-type">DEFAULT_HALF_WIDTH</span>) * <span class="s-type">WIDTH_SCALE</span></span>
+<span class="d-add">+                       <span class="s-kw">for</span> rc <span class="s-kw">in</span> rclass])</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">edge_lines</span>(eids):</span>
+<span class="d-add">+        <span class="s-kw">return</span> [<span class="s-fn">LineString</span>([node_xy[ends[eid, <span class="s-num">0</span>]], node_xy[ends[eid, <span class="s-num">1</span>]]])</span>
+<span class="d-add">+                <span class="s-kw">for</span> eid <span class="s-kw">in</span> eids]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">tube_of</span>(eids):</span>
+<span class="d-add">+        <span class="s-kw">return</span> <span class="s-fn">union_all</span>(<span class="s-fn">shp_buffer</span>(np.<span class="s-fn">array</span>(<span class="s-fn">edge_lines</span>(eids), dtype=object),</span>
+<span class="d-add">+                                    widths[<span class="s-fn">list</span>(eids)],</span>
+<span class="d-add">+                                    cap_style=<span class="s-str">&quot;round&quot;</span>, join_style=<span class="s-str">&quot;round&quot;</span>))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># Junction cells: member-node discs ∪ captured-edge tubes — every member</span></span>
+<span class="d-add">+    <span class="s-com"># is inside its own cell by construction.</span></span>
+<span class="d-add">+    live_cl = [k <span class="s-kw">for</span> k <span class="s-kw">in</span> <span class="s-fn">range</span>(n_clusters) <span class="s-kw">if</span> cluster_alive[k]]</span>
+<span class="d-add">+    cells = []</span>
+<span class="d-add">+    <span class="s-kw">for</span> k <span class="s-kw">in</span> live_cl:</span>
+<span class="d-add">+        discs = <span class="s-fn">shp_buffer</span>(shapely.<span class="s-fn">points</span>(node_xy[cl_members[k]]), <span class="s-type">NODE_R_M</span>,</span>
+<span class="d-add">+                           quad_segs=<span class="s-num">6</span>)</span>
+<span class="d-add">+        captured = np.<span class="s-fn">where</span>(edge_cluster == k)[<span class="s-num">0</span>]</span>
+<span class="d-add">+        parts = <span class="s-fn">list</span>(discs)</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-fn">len</span>(captured):</span>
+<span class="d-add">+            parts.<span class="s-fn">append</span>(<span class="s-fn">tube_of</span>(captured))</span>
+<span class="d-add">+        cells.<span class="s-fn">append</span>(<span class="s-fn">union_all</span>(parts))</span>
+<span class="d-add">+    cell_tree = <span class="s-fn">STRtree</span>(cells) <span class="s-kw">if</span> cells <span class="s-kw">else</span> <span class="s-lit">None</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># Corridor tubes minus junction cells (junctions win where they meet, so</span></span>
+<span class="d-add">+    <span class="s-com"># corridor-vs-junction geometry stays disjoint).</span></span>
+<span class="d-add">+    live_corrs = [c <span class="s-kw">for</span> c <span class="s-kw">in</span> <span class="s-fn">range</span>(n_corr) <span class="s-kw">if</span> corr_alive[c] <span class="s-kw">and</span> corridors[c]]</span>
+<span class="d-add">+    corr_polys: dict[int, object] = {}</span>
+<span class="d-add">+    <span class="s-kw">for</span> c <span class="s-kw">in</span> live_corrs:</span>
+<span class="d-add">+        tube = <span class="s-fn">tube_of</span>(corridors[c])</span>
+<span class="d-add">+        <span class="s-kw">if</span> cell_tree <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span> <span class="s-kw">and</span> <span class="s-kw">not</span> tube.is_empty:</span>
+<span class="d-add">+            hit = cell_tree.<span class="s-fn">query</span>(tube, predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(hit):</span>
+<span class="d-add">+                tube = shapely.<span class="s-fn">difference</span>(tube, <span class="s-fn">union_all</span>([cells[i] <span class="s-kw">for</span> i <span class="s-kw">in</span> hit]))</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-kw">not</span> tube.is_empty <span class="s-kw">and</span> tube.area &gt; <span class="s-num">1.0</span>:</span>
+<span class="d-add">+            corr_polys[c] = tube</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># Membership follows the final geometry: a corridor edge whose tube was</span></span>
+<span class="d-add">+    <span class="s-com"># entirely eaten by junction cells (short link threading an intersection)</span></span>
+<span class="d-add">+    <span class="s-com"># moves to the cell containing its midpoint, so every edge intersects its</span></span>
+<span class="d-add">+    <span class="s-com"># own block polygon. Corridors left with no geometry disappear entirely.</span></span>
+<span class="d-add">+    reassigned = <span class="s-num">0</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> c <span class="s-kw">in</span> live_corrs:</span>
+<span class="d-add">+        poly = corr_polys.<span class="s-fn">get</span>(c)</span>
+<span class="d-add">+        stay = []</span>
+<span class="d-add">+        <span class="s-kw">for</span> eid <span class="s-kw">in</span> corridors[c]:</span>
+<span class="d-add">+            <span class="s-kw">if</span> poly <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+                line = <span class="s-fn">LineString</span>([node_xy[ends[eid, <span class="s-num">0</span>]], node_xy[ends[eid, <span class="s-num">1</span>]]])</span>
+<span class="d-add">+                <span class="s-kw">if</span> line.<span class="s-fn">distance</span>(poly) &lt;= <span class="s-num">1e-6</span>:</span>
+<span class="d-add">+                    stay.<span class="s-fn">append</span>(eid)</span>
+<span class="d-add">+                    <span class="s-kw">continue</span></span>
+<span class="d-add">+            mid = shapely.<span class="s-fn">points</span>((node_xy[ends[eid, <span class="s-num">0</span>]] + node_xy[ends[eid, <span class="s-num">1</span>]]) / <span class="s-num">2.0</span>)</span>
+<span class="d-add">+            hit = cell_tree.<span class="s-fn">query</span>(mid, predicate=<span class="s-str">&quot;intersects&quot;</span>) <span class="s-kw">if</span> cell_tree <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span> <span class="s-kw">else</span> []</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(hit):</span>
+<span class="d-add">+                edge_cluster[eid] = live_cl[<span class="s-fn">int</span>(hit[<span class="s-num">0</span>])]</span>
+<span class="d-add">+                reassigned += <span class="s-num">1</span></span>
+<span class="d-add">+            <span class="s-kw">else</span>:</span>
+<span class="d-add">+                stay.<span class="s-fn">append</span>(eid)     <span class="s-com"># nothing better — keep the corridor mapping</span></span>
+<span class="d-add">+        corridors[c] = stay</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-kw">not</span> stay <span class="s-kw">and</span> c <span class="s-kw">in</span> corr_polys:</span>
+<span class="d-add">+            <span class="s-kw">del</span> corr_polys[c]</span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] geometry: {len(corr_polys)} corridor tubes, {len(cells)} &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;junction cells; {reassigned} intersection-interior edges moved to &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;their junction cell ({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># ── 5. Emit: dense block ids, geojson + npy + meta ─────────────────────</span></span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">to_ll</span>(geom):</span>
+<span class="d-add">+        <span class="s-kw">return</span> shapely.<span class="s-fn">transform</span>(</span>
+<span class="d-add">+            geom, <span class="s-kw">lambda</span> a: np.<span class="s-fn">column_stack</span>((a[:, <span class="s-num">0</span>] / mlon + w, a[:, <span class="s-num">1</span>] / mlat + s)))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># block_id starts at 1: tippecanoe/MVT cannot represent a native feature</span></span>
+<span class="d-add">+    <span class="s-com"># id of 0 (it drops it), which would detach feature-state (heat/selection)</span></span>
+<span class="d-add">+    <span class="s-com"># from block 0. Server arrays are sized n_blocks = len(feats)+1, slot 0 unused.</span></span>
+<span class="d-add">+    feats = []</span>
+<span class="d-add">+    edge_block = np.<span class="s-fn">full</span>(n_edges, -<span class="s-num">1</span>, dtype=np.int32)</span>
+<span class="d-add">+    poly_of_block: dict[int, object] = {}</span>
+<span class="d-add">+    <span class="s-kw">for</span> c, poly <span class="s-kw">in</span> corr_polys.<span class="s-fn">items</span>():</span>
+<span class="d-add">+        members = corridors[c]</span>
+<span class="d-add">+        bid = <span class="s-fn">len</span>(feats) + <span class="s-num">1</span></span>
+<span class="d-add">+        edge_block[members] = bid</span>
+<span class="d-add">+        poly_of_block[bid] = poly</span>
+<span class="d-add">+        feats.<span class="s-fn">append</span>({</span>
+<span class="d-add">+            <span class="s-str">&quot;type&quot;</span>: <span class="s-str">&quot;Feature&quot;</span>,</span>
+<span class="d-add">+            <span class="s-str">&quot;properties&quot;</span>: {</span>
+<span class="d-add">+                <span class="s-str">&quot;block_id&quot;</span>: bid, <span class="s-str">&quot;seg_id&quot;</span>: -<span class="s-num">1</span>,</span>
+<span class="d-add">+                <span class="s-str">&quot;road_class&quot;</span>: <span class="s-fn">majority</span>(rclass[members]) <span class="s-kw">or</span> <span class="s-str">&quot;path&quot;</span>,</span>
+<span class="d-add">+                <span class="s-str">&quot;road_name&quot;</span>: <span class="s-fn">majority</span>([names[i] <span class="s-kw">for</span> i <span class="s-kw">in</span> members]),</span>
+<span class="d-add">+                <span class="s-str">&quot;area_m2&quot;</span>: <span class="s-fn">round</span>(poly.area, <span class="s-num">1</span>), <span class="s-str">&quot;n_edges&quot;</span>: <span class="s-fn">len</span>(members),</span>
+<span class="d-add">+            },</span>
+<span class="d-add">+            <span class="s-str">&quot;geometry&quot;</span>: <span class="s-fn">mapping</span>(<span class="s-fn">to_ll</span>(poly)),</span>
+<span class="d-add">+        })</span>
+<span class="d-add">+    <span class="s-kw">for</span> i, k <span class="s-kw">in</span> <span class="s-fn">enumerate</span>(live_cl):</span>
+<span class="d-add">+        bid = <span class="s-fn">len</span>(feats) + <span class="s-num">1</span></span>
+<span class="d-add">+        captured = np.<span class="s-fn">where</span>(edge_cluster == k)[<span class="s-num">0</span>]</span>
+<span class="d-add">+        edge_block[captured] = bid</span>
+<span class="d-add">+        poly_of_block[bid] = cells[i]</span>
+<span class="d-add">+        feats.<span class="s-fn">append</span>({</span>
+<span class="d-add">+            <span class="s-str">&quot;type&quot;</span>: <span class="s-str">&quot;Feature&quot;</span>,</span>
+<span class="d-add">+            <span class="s-str">&quot;properties&quot;</span>: {</span>
+<span class="d-add">+                <span class="s-str">&quot;block_id&quot;</span>: bid, <span class="s-str">&quot;seg_id&quot;</span>: -<span class="s-num">1</span>, <span class="s-str">&quot;road_class&quot;</span>: <span class="s-str">&quot;node&quot;</span>,</span>
+<span class="d-add">+                <span class="s-str">&quot;road_name&quot;</span>: <span class="s-lit">None</span>, <span class="s-str">&quot;area_m2&quot;</span>: <span class="s-fn">round</span>(cells[i].area, <span class="s-num">1</span>),</span>
+<span class="d-add">+                <span class="s-str">&quot;node_id&quot;</span>: <span class="s-fn">int</span>(cl_members[k].<span class="s-fn">min</span>()), <span class="s-str">&quot;n_nodes&quot;</span>: <span class="s-fn">len</span>(cl_members[k]),</span>
+<span class="d-add">+                <span class="s-str">&quot;n_edges&quot;</span>: <span class="s-fn">int</span>(<span class="s-fn">len</span>(captured)),</span>
+<span class="d-add">+            },</span>
+<span class="d-add">+            <span class="s-str">&quot;geometry&quot;</span>: <span class="s-fn">mapping</span>(<span class="s-fn">to_ll</span>(cells[i])),</span>
+<span class="d-add">+        })</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># ── 6. Audit: coverage + overlap by construction, verified anyway ──────</span></span>
+<span class="d-add">+    mapped = <span class="s-fn">int</span>((edge_block &gt;= <span class="s-num">0</span>).<span class="s-fn">sum</span>())</span>
+<span class="d-add">+    checked = <span class="s-num">0</span></span>
+<span class="d-add">+    overlapping = <span class="s-num">0</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> i <span class="s-kw">in</span> <span class="s-fn">range</span>(n_edges):</span>
+<span class="d-add">+        b = <span class="s-fn">int</span>(edge_block[i])</span>
+<span class="d-add">+        <span class="s-kw">if</span> b &lt; <span class="s-num">0</span> <span class="s-kw">or</span> <span class="s-kw">not</span> not_self[i]:</span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        poly = poly_of_block.<span class="s-fn">get</span>(b)</span>
+<span class="d-add">+        <span class="s-kw">if</span> poly <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        checked += <span class="s-num">1</span></span>
+<span class="d-add">+        <span class="s-kw">if</span> poly.<span class="s-fn">distance</span>(<span class="s-fn">LineString</span>([node_xy[ends[i, <span class="s-num">0</span>]], node_xy[ends[i, <span class="s-num">1</span>]]])) &lt;= <span class="s-num">1e-6</span>:</span>
+<span class="d-add">+            overlapping += <span class="s-num">1</span></span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] audit: {mapped}/{n_edges} mapped &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;({100*mapped/max(1, int(not_self.sum())):.2f}% of non-self); &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;{overlapping}/{checked} member edges touch their polygon &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;({100*overlapping/max(1, checked):.2f}%)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    out_dir = os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;BLOCKS_OUT&quot;</span>, os.path.<span class="s-fn">join</span>(_HERE, <span class="s-str">&quot;output&quot;</span>))</span>
+<span class="d-add">+    os.<span class="s-fn">makedirs</span>(out_dir, exist_ok=<span class="s-lit">True</span>)</span>
+<span class="d-add">+    final_path = os.path.<span class="s-fn">join</span>(out_dir, <span class="s-str">f&quot;blocks_final_{CITY}.geojson&quot;</span>)</span>
+<span class="d-add">+    tmp = <span class="s-str">f&quot;{final_path}.tmp{os.getpid()}&quot;</span></span>
+<span class="d-add">+    <span class="s-kw">with</span> <span class="s-fn">open</span>(tmp, <span class="s-str">&quot;w&quot;</span>) <span class="s-kw">as</span> fh:</span>
+<span class="d-add">+        json.<span class="s-fn">dump</span>({<span class="s-str">&quot;type&quot;</span>: <span class="s-str">&quot;FeatureCollection&quot;</span>, <span class="s-str">&quot;features&quot;</span>: feats}, fh)</span>
+<span class="d-add">+    os.<span class="s-fn">replace</span>(tmp, final_path)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    data_dir = os.path.<span class="s-fn">join</span>(_SERVER, city.data_dir)</span>
+<span class="d-add">+    os.<span class="s-fn">makedirs</span>(data_dir, exist_ok=<span class="s-lit">True</span>)</span>
+<span class="d-add">+    np.<span class="s-fn">save</span>(os.path.<span class="s-fn">join</span>(data_dir, <span class="s-str">f&quot;edge_blocks_{NETWORK}.npy&quot;</span>), edge_block)</span>
+<span class="d-add">+    meta = {</span>
+<span class="d-add">+        <span class="s-str">&quot;city&quot;</span>: <span class="s-type">CITY</span>, <span class="s-str">&quot;network&quot;</span>: <span class="s-type">NETWORK</span>, <span class="s-str">&quot;builder&quot;</span>: <span class="s-str">&quot;graph_first&quot;</span>,</span>
+<span class="d-add">+        <span class="s-str">&quot;n_edges&quot;</span>: n_edges, <span class="s-str">&quot;n_blocks&quot;</span>: <span class="s-fn">len</span>(feats) + <span class="s-num">1</span>,  <span class="s-com"># ids are 1-based</span></span>
+<span class="d-add">+        <span class="s-str">&quot;topology_etag&quot;</span>: g.topology_etag,</span>
+<span class="d-add">+        <span class="s-str">&quot;blocks_sha256&quot;</span>: <span class="s-fn">_sha256_file</span>(final_path),</span>
+<span class="d-add">+        <span class="s-str">&quot;blocks_file&quot;</span>: os.path.<span class="s-fn">basename</span>(final_path),</span>
+<span class="d-add">+        <span class="s-str">&quot;mapped_edges&quot;</span>: mapped,</span>
+<span class="d-add">+        <span class="s-str">&quot;unmapped&quot;</span>: n_edges - mapped,</span>
+<span class="d-add">+        <span class="s-str">&quot;self_edges&quot;</span>: <span class="s-fn">int</span>((~not_self).<span class="s-fn">sum</span>()),</span>
+<span class="d-add">+        <span class="s-str">&quot;corridors&quot;</span>: <span class="s-fn">len</span>(corr_polys),</span>
+<span class="d-add">+        <span class="s-str">&quot;junction_cells&quot;</span>: <span class="s-fn">len</span>(cells),</span>
+<span class="d-add">+        <span class="s-str">&quot;stubs_merged&quot;</span>: stubs_merged,</span>
+<span class="d-add">+        <span class="s-str">&quot;junctions_dissolved&quot;</span>: junctions_dissolved,</span>
+<span class="d-add">+        <span class="s-str">&quot;edges_reassigned_to_cells&quot;</span>: reassigned,</span>
+<span class="d-add">+        <span class="s-str">&quot;edges_overlap_ok&quot;</span>: overlapping, <span class="s-str">&quot;edges_overlap_checked&quot;</span>: checked,</span>
+<span class="d-add">+        <span class="s-str">&quot;node_capture_len_m&quot;</span>: <span class="s-type">NODE_CAPTURE_LEN_M</span>, <span class="s-str">&quot;stub_max_m&quot;</span>: <span class="s-type">STUB_MAX_M</span>,</span>
+<span class="d-add">+        <span class="s-str">&quot;width_scale&quot;</span>: <span class="s-type">WIDTH_SCALE</span>,</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-kw">with</span> <span class="s-fn">open</span>(os.path.<span class="s-fn">join</span>(data_dir, <span class="s-str">f&quot;edge_blocks_{NETWORK}.json&quot;</span>), <span class="s-str">&quot;w&quot;</span>) <span class="s-kw">as</span> fh:</span>
+<span class="d-add">+        json.<span class="s-fn">dump</span>(meta, fh, indent=<span class="s-num">2</span>)</span>
+<span class="d-add">+    <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] wrote {os.path.basename(final_path)} ({len(feats)} blocks) + &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;edge_blocks_{NETWORK}.npy/.json ({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">if</span> __name__ == <span class="s-str">&quot;__main__&quot;</span>:</span>
+<span class="d-add">+    <span class="s-fn">main</span>()</span></pre>
+        </details>
+        
+    </section>
+    
+
+    <section class="card" id="resolver">
+      <div class="tag">Client · hover/click/drag</div>
+      <h2>3 · Every hover and click resolves to the closest node/edge and its block</h2>
+      <h3>Symptom</h3>
+      <p>Gaps you could hover or click with nothing appearing selected: wherever the cursor wasn't over a block polygon, hover/click fell back to a 4px radius-bounded hit-test — so any hole in block coverage (and any point a few pixels off a thin path) was a dead zone.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>resolveDragSnap</code> — the shared hover/click/drag resolver — was deliberately gated: over a block polygon it used the full always-resolve hierarchy, off-polygon it used the radius-bounded <code>hitTest</code>, and far from everything it returned null so clicks placed free (unsnapped) waypoints. With imperfect block coverage that design turned every coverage hole into an interaction hole.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>resolveDragSnap</code> now IS <code>resolveSelection</code>: sticky proposal first, then the block polygon under the point constrains the search to that block's members, otherwise the closest node/edge resolves uncapped. Hover, click/pin, the registered snapFn, the drop preview and the live trail all share it, so hover still shows exactly what a click selects — there are just no dead zones anymore.</li>
+<li>The now-unused <code>SNAP_EDGE_PX</code> constant is gone (hitTest's radius default is Infinity; the parameter remains for radius-bounded callers).</li>
+<li>Verified with a 280-point grid sweep over the live viewport via <code>cityedit.resolveAt</code>: 280/280 points resolve to a target, 0 cases where the vote edge's block disagrees with the hovered polygon.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+      
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+24</span> / <span class="d-del">-41</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">graph rendering, hit-testing, hover/click/vote resolution</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~4,780 LOC — the resolver seam is ~40 of them</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Constants</span><span class="ol-sum">SNAP_EDGE_PX deleted (dead)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">hitTest</span><span class="ol-sum">radius default → Infinity; docstring updated</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">resolveSelection</span><span class="ol-sum">unchanged — block-constrained, always resolves</span></li><li class="changed"><span class="ol-label">resolveDragSnap</span><span class="ol-sum">now delegates to resolveSelection — no off-polygon radius gate</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">drop-preview / hover / snap comments</span><span class="ol-sum">reflect always-resolve semantics</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>resolveDragSnap — one-line delegation; hover=click=drag parity preserved, dead zones removed</li><li>hover handler comment — hover shows exactly what a click would select, everywhere</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index cb149f5..a678b3d 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -205,8 +205,6 @@ function resolveAddress(</span>
+<span class="d-ctx"> <span class="s-com">// Constants &amp; hit-testing</span></span>
+<span class="d-ctx"> <span class="s-com">// ---------------------------------------------------------------------------</span></span>
+<span class="d-ctx"> </span>
+<span class="d-del">-<span class="s-com">// Unified radii — used for hover, snap, pinned highlight, and tooltip lookup</span></span>
+<span class="d-del">-<span class="s-kw">const</span> <span class="s-type">SNAP_EDGE_PX</span> = <span class="s-num">4</span>;   <span class="s-com">// hit-test radius for edges (radius-bounded callers only)</span></span>
+<span class="d-ctx"> <span class="s-com">// Node/edge PARITY: the ends of every segment belong to its endpoint NODES.</span></span>
+<span class="d-ctx"> <span class="s-com">// The nearest edge decides the hit, then the projection parameter t decides</span></span>
+<span class="d-ctx"> <span class="s-com">// the final target — t in the outer NODE_END_SHARE of the segment resolves</span></span>
+<span class="d-hunk">@@ -382,9 +380,9 @@ function buildEdgeIndex(data: GraphTopology): Flatbush | null {</span>
+<span class="d-ctx"> <span class="s-com"> *      edge: the nearest eligible node, uncapped — a block whose only</span></span>
+<span class="d-ctx"> <span class="s-com"> *      member is a node is still selectable from anywhere in its polygon.</span></span>
+<span class="d-ctx"> <span class="s-com"> *</span></span>
+<span class="d-del">-<span class="s-com"> * Radius-bounded callers (the off-polygon waypoint snap and drag preview)</span></span>
+<span class="d-del">-<span class="s-com"> * use the SNAP_EDGE_PX default so dragging stays free far from the graph;</span></span>
+<span class="d-del">-<span class="s-com"> * resolveSelection passes Infinity so a selection always resolves.</span></span>
+<span class="d-add">+<span class="s-com"> * Every live caller resolves through resolveSelection, which passes Infinity</span></span>
+<span class="d-add">+<span class="s-com"> * so a selection ALWAYS resolves; maxEdgeDistPx remains a parameter for</span></span>
+<span class="d-add">+<span class="s-com"> * radius-bounded callers.</span></span>
+<span class="d-ctx"> <span class="s-com"> *</span></span>
+<span class="d-ctx"> <span class="s-com"> * With spatial indices each scan touches only the top-k bbox-nearest</span></span>
+<span class="d-ctx"> <span class="s-com"> * candidates (typically &lt;30 per call) instead of all nodes/edges. Path-drag</span></span>
+<span class="d-hunk">@@ -399,7 +397,7 @@ function hitTest(</span>
+<span class="d-ctx">   nodeIndex: <span class="s-type">Flatbush</span> | <span class="s-lit">null</span>,</span>
+<span class="d-ctx">   allowEdge?: (i: number) =&gt; boolean,</span>
+<span class="d-ctx">   allowNode?: (i: number) =&gt; boolean,</span>
+<span class="d-del">-  maxEdgeDistPx: number = <span class="s-type">SNAP_EDGE_PX</span></span>
+<span class="d-add">+  maxEdgeDistPx: number = <span class="s-lit">Infinity</span></span>
+<span class="d-ctx"> ): <span class="s-type">HitResult</span> | <span class="s-lit">null</span> {</span>
+<span class="d-ctx">   <span class="s-kw">const</span> nodeResult = (i: number): <span class="s-type">HitResult</span> =&gt; ({</span>
+<span class="d-ctx">     target: { kind: <span class="s-str">&quot;node&quot;</span>, index: i },</span>
+<span class="d-hunk">@@ -993,32 +991,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   <span class="s-com">// never a re-derivation from the stored point.</span></span>
+<span class="d-ctx">   <span class="s-kw">const</span> lastSnapSelectionRef = useRef&lt;<span class="s-type">ResolvedSelection</span> | <span class="s-lit">null</span>&gt;(<span class="s-lit">null</span>);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  <span class="s-com">// The waypoint-drag resolver — ONE function shared by the registered</span></span>
+<span class="d-del">-  <span class="s-com">// snapFn, the drop-preview highlight, and the live-trail snap so a drag&#x27;s</span></span>
+<span class="d-del">-  <span class="s-com">// preview, trail, and committed drop always agree. Over a block polygon it</span></span>
+<span class="d-del">-  <span class="s-com">// IS the hover resolver (full hierarchy, always resolves); off-polygon</span></span>
+<span class="d-del">-  <span class="s-com">// it&#x27;s the radius-bounded hitTest so dragging stays free far from the</span></span>
+<span class="d-del">-  <span class="s-com">// graph — not resolveSelection&#x27;s always-resolve fallback.</span></span>
+<span class="d-add">+  <span class="s-com">// The shared hover/click/drag resolver — ONE function used by the hover</span></span>
+<span class="d-add">+  <span class="s-com">// highlight, the click pin, the registered snapFn, the drop-preview</span></span>
+<span class="d-add">+  <span class="s-com">// highlight, and the live-trail snap so they always agree. It IS the</span></span>
+<span class="d-add">+  <span class="s-com">// selection resolver: ALWAYS resolves to the closest node/edge (block-</span></span>
+<span class="d-add">+  <span class="s-com">// constrained when a block polygon is under the point), so there are no</span></span>
+<span class="d-add">+  <span class="s-com">// dead zones — any hover or click maps to the nearest component and its</span></span>
+<span class="d-add">+  <span class="s-com">// encompassing block, even off-polygon. (Previously off-polygon points</span></span>
+<span class="d-add">+  <span class="s-com">// fell back to a 4px radius-bounded hit-test, which left unhoverable/</span></span>
+<span class="d-add">+  <span class="s-com">// unclickable gaps wherever block coverage had holes.)</span></span>
+<span class="d-ctx">   <span class="s-kw">const</span> resolveDragSnap = <span class="s-fn">useCallback</span>((</span>
+<span class="d-ctx">     lat: number, lng: number</span>
+<span class="d-ctx">   ): <span class="s-type">ResolvedSelection</span> | <span class="s-lit">null</span> =&gt; {</span>
+<span class="d-del">-    <span class="s-kw">const</span> data = graphDataRef.current;</span>
+<span class="d-del">-    <span class="s-kw">if</span> (!data) <span class="s-kw">return</span> <span class="s-lit">null</span>;</span>
+<span class="d-del">-    <span class="s-kw">const</span> filters = <span class="s-fn">blockFiltersAt</span>(data, nodeAdjRef.current, lat, lng);</span>
+<span class="d-del">-    <span class="s-kw">if</span> (filters) <span class="s-kw">return</span> resolveSelectionRef.<span class="s-fn">current</span>(lat, lng);</span>
+<span class="d-del">-    <span class="s-kw">const</span> pt = map.<span class="s-fn">latLngToContainerPoint</span>([lat, lng]);</span>
+<span class="d-del">-    <span class="s-kw">const</span> result = <span class="s-fn">hitTest</span>(</span>
+<span class="d-del">-      data, map, pt.x, pt.y, lat, lng,</span>
+<span class="d-del">-      edgeIndexRef.current, nodeIndexRef.current</span>
+<span class="d-del">-    );</span>
+<span class="d-del">-    <span class="s-kw">if</span> (!result) <span class="s-kw">return</span> <span class="s-lit">null</span>;</span>
+<span class="d-del">-    <span class="s-kw">const</span> voteEdgeId = result.target.kind === <span class="s-str">&quot;edge&quot;</span></span>
+<span class="d-del">-      ? result.target.index</span>
+<span class="d-del">-      : <span class="s-fn">adjShortest</span>(data, nodeAdjRef.current, result.target.index);</span>
+<span class="d-del">-    <span class="s-kw">return</span> {</span>
+<span class="d-del">-      target: result.target, snapLat: result.snapLat, snapLng: result.snapLng, voteEdgeId,</span>
+<span class="d-del">-    };</span>
+<span class="d-del">-  }, [map]);</span>
+<span class="d-add">+    <span class="s-kw">return</span> resolveSelectionRef.<span class="s-fn">current</span>(lat, lng);</span>
+<span class="d-add">+  }, []);</span>
+<span class="d-ctx">   <span class="s-kw">const</span> resolveDragSnapRef = <span class="s-fn">useRef</span>(resolveDragSnap);</span>
+<span class="d-ctx">   <span class="s-fn">useEffect</span>(() =&gt; { resolveDragSnapRef.current = resolveDragSnap; }, [resolveDragSnap]);</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1754,9 +1740,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-com">// Light the graph edge (or node) a live waypoint drag would snap to — the drop</span></span>
+<span class="d-ctx">   <span class="s-com">// preview. Mirrors the registered snapFn exactly (sticky proposal first, then</span></span>
+<span class="d-del">-  <span class="s-com">// the shared drag-snap resolver) so the highlight matches where the waypoint</span></span>
+<span class="d-del">-  <span class="s-com">// actually lands on release. Out of snap range → no highlight, matching the</span></span>
+<span class="d-del">-  <span class="s-com">// &quot;drag stays free&quot; snap rule.</span></span>
+<span class="d-add">+  <span class="s-com">// the shared resolver, which always resolves to the closest component) so the</span></span>
+<span class="d-add">+  <span class="s-com">// highlight matches where the waypoint actually lands on release.</span></span>
+<span class="d-ctx">   <span class="s-fn">useEffect</span>(() =&gt; {</span>
+<span class="d-ctx">     <span class="s-kw">let</span> next: <span class="s-type">HoverTarget</span> | <span class="s-lit">null</span> = <span class="s-lit">null</span>;</span>
+<span class="d-ctx">     <span class="s-kw">if</span> (dragPoint) {</span>
+<span class="d-hunk">@@ -2800,12 +2785,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         <span class="s-com">// snap below. Otherwise resolve the hover target through the SAME</span></span>
+<span class="d-ctx">         <span class="s-com">// hierarchy a click&#x27;s snap uses — sticky proposal first (a click in a</span></span>
+<span class="d-ctx">         <span class="s-com">// proposal&#x27;s snap annulus links to it, so hover rings the proposal&#x27;s</span></span>
+<span class="d-del">-        <span class="s-com">// edge exactly like the drag drop-preview), then the shared drag-snap</span></span>
+<span class="d-del">-        <span class="s-com">// resolver: over a polygon the full hierarchy, off-polygon</span></span>
+<span class="d-del">-        <span class="s-com">// radius-bounded, and far from everything NO hover — a click there</span></span>
+<span class="d-del">-        <span class="s-com">// places a free (unsnapped) waypoint and pins nothing, so hover must</span></span>
+<span class="d-del">-        <span class="s-com">// show nothing too. resolveSelection&#x27;s always-resolve fallback would</span></span>
+<span class="d-del">-        <span class="s-com">// highlight a component the click can&#x27;t select.</span></span>
+<span class="d-add">+        <span class="s-com">// edge exactly like the drag drop-preview), then the shared resolver,</span></span>
+<span class="d-add">+        <span class="s-com">// which ALWAYS resolves to the closest node/edge (block-constrained</span></span>
+<span class="d-add">+        <span class="s-com">// over a polygon) — hover shows exactly what a click would select,</span></span>
+<span class="d-add">+        <span class="s-com">// and no point on the map is a dead zone.</span></span>
+<span class="d-ctx">         <span class="s-kw">let</span> newTarget: <span class="s-type">HoverTarget</span> | <span class="s-lit">null</span> = <span class="s-lit">null</span>;</span>
+<span class="d-ctx">         <span class="s-kw">if</span> (!dragging) {</span>
+<span class="d-ctx">           <span class="s-kw">const</span> sticky = stickyProposalSnapRef.<span class="s-fn">current</span>(e.latlng.lat, e.latlng.lng);</span>
+<span class="d-hunk">@@ -2842,9 +2825,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         <span class="s-com">// Snap position: only compute when actually dragging (path-drag system</span></span>
+<span class="d-ctx">         <span class="s-com">// is the only consumer). Skipping when idle saves ~100k iterations</span></span>
+<span class="d-del">-        <span class="s-com">// on every mousemove. Uses the shared drag-snap resolver so the live</span></span>
+<span class="d-del">-        <span class="s-com">// trail agrees with the committed drop (block-aware over polygons,</span></span>
+<span class="d-del">-        <span class="s-com">// radius-bounded off them so the drag stays free far from the graph).</span></span>
+<span class="d-add">+        <span class="s-com">// on every mousemove. Uses the shared resolver so the live trail</span></span>
+<span class="d-add">+        <span class="s-com">// agrees with the committed drop (block-aware over polygons, closest</span></span>
+<span class="d-add">+        <span class="s-com">// node/edge everywhere else — a drag always has a snap target).</span></span>
+<span class="d-ctx">         <span class="s-kw">if</span> (!dragging) <span class="s-kw">return</span>;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         <span class="s-com">// Sticky proposal snap wins: snap the live trail to the proposal midpoint</span></span></pre>
+        </details>
+        
+    </section>
+    
+
+    <section class="card" id="docs">
+      <div class="tag">Docs</div>
+      <h2>4 · three-layer-model.md §2.1–2.2 describe the graph-first pipeline</h2>
+      <h3>Symptom</h3>
+      <p>The spec still described the five-script generate→map→patch→merge chain (and a 12 m midpoint-capture rule that predated even the previous redesign).</p>
+      <h3>Root cause</h3>
+      <ul><li>Doc drift.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>§2.1 states the by-construction invariants (total mapping, 100% edge∩polygon overlap); §2.2 documents the one-pass builder, the 1-based ids, and marks the old scripts as reference-only.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+      
+        <details>
+          <summary><span class="fname">docs/three-layer-model.md</span>
+            <span class="stat"><span class="d-add">+51</span> / <span class="d-del">-53</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">docs</span>
+        <span class="ctx-sum">the Layer-1/2/3 source-of-truth spec</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">three-layer-model.md</span>
+        <span class="ctx-sum">§2.1 what a block is · §2.2 generation</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">§2.1</span><span class="ol-sum">corridor+junction blocks; by-construction invariants</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§2.2</span><span class="ol-sum">graph-first one-pass pipeline; 1-based ids; old scripts reference-only</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>§2.2 rewritten around build_blocks_graph_first.py&#x27;s five numbered stages</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/three-layer-model.md b/docs/three-layer-model.md</span>
+<span class="d-meta">index c794d6a..a3ef083 100644</span>
+<span class="d-meta">--- a/docs/three-layer-model.md</span>
+<span class="d-meta">+++ b/docs/three-layer-model.md</span>
+<span class="d-hunk">@@ -75,63 +75,61 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ### 2.1 What a block is</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-One polygon per street segment between intersections (a &quot;streetscape block&quot;),</span>
+<span class="d-del">-covering the roadbed + sidewalk right-of-way — plus one **junction block per</span>
+<span class="d-del">-junction cluster** (`build_node_blocks.py`), punched out of the street/foot</span>
+<span class="d-del">-polygons so blocks never overlap. Nodes and edges get SEPARATE block-forming</span>
+<span class="d-del">-logic: each walk-graph junction contributes a 9 m disc, and **overlapping discs</span>
+<span class="d-del">-merge into one multi-node block** (a physical intersection is several OSM</span>
+<span class="d-del">-junction nodes — centerline node, crossing ends, sidewalk corners — so per-node</span>
+<span class="d-del">-discs drew as stacked circles). Junction blocks exist because street polygons</span>
+<span class="d-del">-otherwise extend across intersections (Voronoi flare): the short edges crossing</span>
+<span class="d-del">-an intersection would bake into a PERPENDICULAR street&#x27;s block, so a route down</span>
+<span class="d-del">-an avenue would select — and cast onto — every cross street it passes (the</span>
+<span class="d-del">-&quot;ladder&quot; bug). Blocks partition the votable network: **every edge belongs to</span>
+<span class="d-del">-exactly one block** (strict many-to-one), and a node belongs to the block of its</span>
+<span class="d-del">-**shortest** incident edge (deterministic, matching the client&#x27;s `adjShortest`</span>
+<span class="d-del">-node→edge upgrade rule — the shortest incident edge is the one whose midpoint</span>
+<span class="d-del">-falls inside the junction&#x27;s own block).</span>
+<span class="d-add">+One **corridor block** per path/street segment between intersections, plus one</span>
+<span class="d-add">+**junction block per junction cluster** (a physical intersection is several OSM</span>
+<span class="d-add">+junction nodes — centerline node, crossing ends, sidewalk corners — so nearby</span>
+<span class="d-add">+junctions merge into one multi-node block). Junction blocks exist because</span>
+<span class="d-add">+corridor polygons would otherwise extend across intersections: the short edges</span>
+<span class="d-add">+crossing an intersection would land in a PERPENDICULAR street&#x27;s block, so a</span>
+<span class="d-add">+route down an avenue would select — and cast onto — every cross street it</span>
+<span class="d-add">+passes (the &quot;ladder&quot; bug). Blocks partition the votable network: **every edge</span>
+<span class="d-add">+belongs to exactly one block** (strict many-to-one, total — coverage and</span>
+<span class="d-add">+edge∩polygon overlap are 100% by construction, audited at build time), and a</span>
+<span class="d-add">+node belongs to the block of its **shortest** incident edge (deterministic,</span>
+<span class="d-add">+matching the client&#x27;s `adjShortest` node→edge upgrade rule).</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ### 2.2 Generation — procedural, per city, at graph-build time</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-Blocks are generated **procedurally from the street graph alone** so any city can</span>
+<span class="d-del">-be added without city-specific open data (`server/streetscape_blocks/`):</span>
+<span class="d-del">-</span>
+<span class="d-del">-1. `build_blocks_generic.py` — consolidated drive-centerline graph (osmnx,</span>
+<span class="d-del">-   intersections merged at 12 m) → buffer each segment by a per-road-class</span>
+<span class="d-del">-   half-width → seed points every 6 m → Voronoi partition by nearest segment →</span>
+<span class="d-del">-   dissolve + clip. One polygon per street segment.</span>
+<span class="d-del">-2. `build_node_blocks.py` — every walk-graph junction (unique-neighbour degree</span>
+<span class="d-del">-   ≥ 3) contributes a 9 m disc; overlapping discs union-find into clusters and</span>
+<span class="d-del">-   each cluster becomes ONE block (`road_class=&quot;node&quot;`, `n_nodes` members),</span>
+<span class="d-del">-   subtracted from every street block it touches so blocks stay disjoint. Also</span>
+<span class="d-del">-   writes the junction→block sidecar `node_clusters_&lt;network&gt;.npz` that the</span>
+<span class="d-del">-   bake&#x27;s capture pass reads.</span>
+<span class="d-del">-3. `build_foot_blocks.py` — edges not covered by any street block (park paths,</span>
+<span class="d-del">-   plazas, boardwalks — ~18% in NYC) are buffered (6 m), merged, and **severed</span>
+<span class="d-del">-   at the junction blocks** (9 m &gt; 6 m, so the mesh disconnects there): one</span>
+<span class="d-del">-   block per path segment between junctions — the same grain as streets, not</span>
+<span class="d-del">-   one giant block per connected park network. Appended with continuing</span>
+<span class="d-del">-   `block_id`s; this is what makes the edge→block mapping **total**.</span>
+<span class="d-del">-4. `build_edge_blocks.py` — bakes `edge_block_id: int32[n_edges]`</span>
+<span class="d-add">+Blocks are generated **graph-first from the walk graph alone** so any city can</span>
+<span class="d-add">+be added without city-specific open data — one pass,</span>
+<span class="d-add">+`server/streetscape_blocks/build_blocks_graph_first.py` (runs in the server</span>
+<span class="d-add">+venv; no osmnx/geopandas geo venv). Membership is decided FIRST, topologically,</span>
+<span class="d-add">+for every edge; each block&#x27;s polygon is then generated **from its own member</span>
+<span class="d-add">+edges**, so coverage and edge∩polygon overlap hold by construction (the</span>
+<span class="d-add">+previous five-script pipeline generated polygons from drive centerlines and</span>
+<span class="d-add">+mapped edges into them geometrically, which left unmapped edges — heatmap gaps</span>
+<span class="d-add">+— and nearest-snapped edges assigned to polygons they didn&#x27;t intersect):</span>
+<span class="d-add">+</span>
+<span class="d-add">+1. **Junction clusters** — walk-graph junctions (unique-neighbour degree ≥ 3),</span>
+<span class="d-add">+   union-found within 18 m, oversized clusters bisected along their principal</span>
+<span class="d-add">+   axis (&gt; 40 m extent).</span>
+<span class="d-add">+2. **Edge grouping (total)** — an edge whose endpoints share a cluster belongs</span>
+<span class="d-add">+   to that junction; a short (≤ 30 m) edge between two clusters is a crosswalk</span>
+<span class="d-add">+   stub and joins the nearer one; every other edge joins a **corridor** —</span>
+<span class="d-add">+   connected components linked through non-junction endpoints, i.e. one</span>
+<span class="d-add">+   component per segment between junctions (the same grain for streets and</span>
+<span class="d-add">+   park paths).</span>
+<span class="d-add">+3. **Degeneracy fixpoint** — driveway-class stubs (extent ≤ 25 m, one</span>
+<span class="d-add">+   junction) melt into their junction; a junction left touching ≤ 1 corridor</span>
+<span class="d-add">+   isn&#x27;t a junction and dissolves into that corridor.</span>
+<span class="d-add">+4. **Geometry from membership** — a junction cell is the union of 8 m discs at</span>
+<span class="d-add">+   its member nodes plus its captured edges&#x27; tubes; a corridor is the union of</span>
+<span class="d-add">+   its member edges buffered by per-road-class half-width, minus the junction</span>
+<span class="d-add">+   cells (junctions win where they meet). A corridor edge left entirely inside</span>
+<span class="d-add">+   junction cells is reassigned to the cell containing its midpoint —</span>
+<span class="d-add">+   membership follows the final geometry.</span>
+<span class="d-add">+5. Bakes `edge_block_id: int32[n_edges]`</span>
+<span class="d-ctx">    (`osm_data/&lt;city&gt;/edge_blocks_&lt;network&gt;.npy` + a meta JSON stamping</span>
+<span class="d-del">-   `topology_etag` + `blocks_sha256`). Assignment, in order: **junction</span>
+<span class="d-del">-   capture** — a midpoint within `NODE_CAPTURE_M` (12 m) of a junction maps to</span>
+<span class="d-del">-   that junction&#x27;s node block by GRAPH distance, not containment (crossing-stub</span>
+<span class="d-del">-   midpoints run to ~12 m, past the 9 m drawn rim; this is what holds the</span>
+<span class="d-del">-   ladder at zero while the drawn blobs stay small); then polygon containment</span>
+<span class="d-del">-   of the midpoint; else nearest block within 30 m (see `eval/RESULTS.md` —</span>
+<span class="d-del">-   nearest-polygon is exact where containment leaves ~20% unmapped).</span>
+<span class="d-del">-</span>
+<span class="d-del">-**Evaluation against ground truth**: `compare_blocks.py` scores the procedural</span>
+<span class="d-del">-output against Brook&#x27;s NYC planimetric blocks (`build_nyc_blocks.py`, from NYC</span>
+<span class="d-del">-open-data roadbed+sidewalk polygons — the reference this algorithm mimics).</span>
+<span class="d-del">-Current numbers (see `COMPARISON.md`): median IoU **0.84**, median area ratio</span>
+<span class="d-del">-**1.00**, median centroid offset ~1 m over ~82k shared segments. **Every city —</span>
+<span class="d-del">-NYC included — serves the procedural output** (`edge_blocks_streets.json` stamps</span>
+<span class="d-del">-`blocks_file: blocks_generic_nyc.geojson`); Brook&#x27;s planimetric blocks are the</span>
+<span class="d-del">-evaluation reference only. New cities should be spot-checked with the same</span>
+<span class="d-del">-comparison harness when planimetric data exists.</span>
+<span class="d-add">+   `topology_etag` + `blocks_sha256`) and writes</span>
+<span class="d-add">+   `blocks_final_&lt;city&gt;.geojson` → tippecanoe → `blocks.pmtiles`. `block_id`s</span>
+<span class="d-add">+   are **1-based**: MVT can&#x27;t represent a native feature id of 0 (tippecanoe</span>
+<span class="d-add">+   drops it), which would detach block 0&#x27;s heat/selection feature-state.</span>
+<span class="d-add">+</span>
+<span class="d-add">+The old pipeline (`build_blocks_generic.py` → `build_node_blocks.py` →</span>
+<span class="d-add">+`build_foot_blocks.py` → `build_edge_blocks.py` → `merge_degenerate_blocks.py`)</span>
+<span class="d-add">+and its planimetric evaluation harness (`compare_blocks.py`, `COMPARISON.md`)</span>
+<span class="d-add">+remain in the repo for reference but are no longer run by</span>
+<span class="d-add">+`build_city_blocks.sh`.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> Generation runs **when a city&#x27;s graph is built** (alongside</span>
+<span class="d-ctx"> `refresh_osm.py` / the graph-builder image) and the artifacts are baked next to</span></pre>
+        </details>
+        
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Three build iterations on <code>test-cp</code>: v1 (clipped-Voronoi junction cells) audited 100% mapped / <strong>85.5%</strong> overlap → v2 (cells from member discs + captured tubes, corridor-edge reassignment) → <strong>100% / 100%</strong> → v3 (junction disc radius 10 m → 8 m after visual review; still 100% / 100%). Audit numbers are stamped in <code>edge_blocks_streets.json</code> (<code>edges_overlap_ok / edges_overlap_checked</code>).</li>
+<li>tippecanoe runs clean after the 1-based ids (the <em>“Can't represent too-large feature ID 0”</em> warning is gone); a decoded z15 tile shows every feature carrying its native id == block_id.</li>
+<li>Flask restarted on the new artifacts: <code>/api/graph-votes?map=test-central-park</code> serves <code>n_blocks 10035</code>, new <code>blocks_version 4e80935f…</code>, and the block aggregate auto-rebuilt (2,199 blocks lit from existing votes — every voted edge now has a lit block).</li>
+<li>Browser (the request's URL): heat renders as continuous corridor tubes + junction cells along voted routes; console <code>[topo] ready … 9948 blocks</code> → 10035 after the radius iteration.</li>
+<li>Grid sweep over the live viewport (<code>cityedit.resolveAt</code>, 20×14 points): 280/280 resolve, 0 hovered-block vs vote-edge-block mismatches.</li>
+<li>Click tests in former dead zones (dark gaps between polygons): both clicks selected the nearest corridor — white highlight ring + <code>[blocks] select: [189]</code> / <code>[189,1078]</code> — and opened the proposal card.</li>
+<li>Client suite 231/231 green, <code>tsc --noEmit</code> clean.</li>
+<li>Visual pass was cut short by the occluded-window rAF trap (Chrome kept re-hiding the tab), so the z18 close-up aesthetics check is on the manual checklist.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <a href='http://localhost:3000/m/test-central-park?z=18&lat=40.77461&lng=-73.96947&slat=40.77374&slng=-73.96927&vt=Improve+sidewalk'>the central-park URL from the request</a>: every voted path segment should show a heat polygon — no dark holes along a voted route between junction cells.</li>
+<li>Hover slowly across a junction and along a path: something is ALWAYS highlighted (edge, node, or a junction's members), and clicking pins exactly what hover showed — including in the dark areas between polygons.</li>
+<li>Check polygons hug their paths: a corridor's tube should trace its own edges (no polygon lighting for a path 20–30 m away), and junction blobs should sit ON the fork, sized ~like the path width.</li>
+<li>Cast a vote on a previously-unvoted path: the new block lights immediately and the modal's block rows match.</li>
+<li>If junction blobs still read too big/small at z18, re-run with <code>NODE_BLOCK_RADIUS_M=&lt;m&gt; ./streetscape_blocks/build_city_blocks.sh test-cp</code> (then restart Flask) — the whole rebuild is ~30 s.</li>
+<li>When happy, rebuild the real cities with the same command (nyc will take a few minutes; deploys need the resnap-on-deploy runbook as usual).</li></ul>
+  </section>
+
+
+
+  <footer>
+    Generated from <code>changelog/changes-graphfirst.diff</code> by <code>changelog/build_graph_first_report.py</code>.
+    Regenerate after further edits with
+    <code>git diff -- server/streetscape_blocks client-react/src/components/GraphLayer/GraphLayer.tsx docs/three-layer-model.md &gt; changelog/changes-graphfirst.diff &amp;&amp; python changelog/build_graph_first_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

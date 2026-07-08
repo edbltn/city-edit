@@ -205,8 +205,6 @@ function resolveAddress(
 // Constants & hit-testing
 // ---------------------------------------------------------------------------
 
-// Unified radii — used for hover, snap, pinned highlight, and tooltip lookup
-const SNAP_EDGE_PX = 4;   // hit-test radius for edges (radius-bounded callers only)
 // Node/edge PARITY: the ends of every segment belong to its endpoint NODES.
 // The nearest edge decides the hit, then the projection parameter t decides
 // the final target — t in the outer NODE_END_SHARE of the segment resolves
@@ -382,9 +380,9 @@ function buildEdgeIndex(data: GraphTopology): Flatbush | null {
  *      edge: the nearest eligible node, uncapped — a block whose only
  *      member is a node is still selectable from anywhere in its polygon.
  *
- * Radius-bounded callers (the off-polygon waypoint snap and drag preview)
- * use the SNAP_EDGE_PX default so dragging stays free far from the graph;
- * resolveSelection passes Infinity so a selection always resolves.
+ * Every live caller resolves through resolveSelection, which passes Infinity
+ * so a selection ALWAYS resolves; maxEdgeDistPx remains a parameter for
+ * radius-bounded callers.
  *
  * With spatial indices each scan touches only the top-k bbox-nearest
  * candidates (typically <30 per call) instead of all nodes/edges. Path-drag
@@ -399,7 +397,7 @@ function hitTest(
   nodeIndex: Flatbush | null,
   allowEdge?: (i: number) => boolean,
   allowNode?: (i: number) => boolean,
-  maxEdgeDistPx: number = SNAP_EDGE_PX
+  maxEdgeDistPx: number = Infinity
 ): HitResult | null {
   const nodeResult = (i: number): HitResult => ({
     target: { kind: "node", index: i },
@@ -993,32 +991,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // never a re-derivation from the stored point.
   const lastSnapSelectionRef = useRef<ResolvedSelection | null>(null);
 
-  // The waypoint-drag resolver — ONE function shared by the registered
-  // snapFn, the drop-preview highlight, and the live-trail snap so a drag's
-  // preview, trail, and committed drop always agree. Over a block polygon it
-  // IS the hover resolver (full hierarchy, always resolves); off-polygon
-  // it's the radius-bounded hitTest so dragging stays free far from the
-  // graph — not resolveSelection's always-resolve fallback.
+  // The shared hover/click/drag resolver — ONE function used by the hover
+  // highlight, the click pin, the registered snapFn, the drop-preview
+  // highlight, and the live-trail snap so they always agree. It IS the
+  // selection resolver: ALWAYS resolves to the closest node/edge (block-
+  // constrained when a block polygon is under the point), so there are no
+  // dead zones — any hover or click maps to the nearest component and its
+  // encompassing block, even off-polygon. (Previously off-polygon points
+  // fell back to a 4px radius-bounded hit-test, which left unhoverable/
+  // unclickable gaps wherever block coverage had holes.)
   const resolveDragSnap = useCallback((
     lat: number, lng: number
   ): ResolvedSelection | null => {
-    const data = graphDataRef.current;
-    if (!data) return null;
-    const filters = blockFiltersAt(data, nodeAdjRef.current, lat, lng);
-    if (filters) return resolveSelectionRef.current(lat, lng);
-    const pt = map.latLngToContainerPoint([lat, lng]);
-    const result = hitTest(
-      data, map, pt.x, pt.y, lat, lng,
-      edgeIndexRef.current, nodeIndexRef.current
-    );
-    if (!result) return null;
-    const voteEdgeId = result.target.kind === "edge"
-      ? result.target.index
-      : adjShortest(data, nodeAdjRef.current, result.target.index);
-    return {
-      target: result.target, snapLat: result.snapLat, snapLng: result.snapLng, voteEdgeId,
-    };
-  }, [map]);
+    return resolveSelectionRef.current(lat, lng);
+  }, []);
   const resolveDragSnapRef = useRef(resolveDragSnap);
   useEffect(() => { resolveDragSnapRef.current = resolveDragSnap; }, [resolveDragSnap]);
 
@@ -1754,9 +1740,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
   // Light the graph edge (or node) a live waypoint drag would snap to — the drop
   // preview. Mirrors the registered snapFn exactly (sticky proposal first, then
-  // the shared drag-snap resolver) so the highlight matches where the waypoint
-  // actually lands on release. Out of snap range → no highlight, matching the
-  // "drag stays free" snap rule.
+  // the shared resolver, which always resolves to the closest component) so the
+  // highlight matches where the waypoint actually lands on release.
   useEffect(() => {
     let next: HoverTarget | null = null;
     if (dragPoint) {
@@ -2800,12 +2785,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         // snap below. Otherwise resolve the hover target through the SAME
         // hierarchy a click's snap uses — sticky proposal first (a click in a
         // proposal's snap annulus links to it, so hover rings the proposal's
-        // edge exactly like the drag drop-preview), then the shared drag-snap
-        // resolver: over a polygon the full hierarchy, off-polygon
-        // radius-bounded, and far from everything NO hover — a click there
-        // places a free (unsnapped) waypoint and pins nothing, so hover must
-        // show nothing too. resolveSelection's always-resolve fallback would
-        // highlight a component the click can't select.
+        // edge exactly like the drag drop-preview), then the shared resolver,
+        // which ALWAYS resolves to the closest node/edge (block-constrained
+        // over a polygon) — hover shows exactly what a click would select,
+        // and no point on the map is a dead zone.
         let newTarget: HoverTarget | null = null;
         if (!dragging) {
           const sticky = stickyProposalSnapRef.current(e.latlng.lat, e.latlng.lng);
@@ -2842,9 +2825,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
         // Snap position: only compute when actually dragging (path-drag system
         // is the only consumer). Skipping when idle saves ~100k iterations
-        // on every mousemove. Uses the shared drag-snap resolver so the live
-        // trail agrees with the committed drop (block-aware over polygons,
-        // radius-bounded off them so the drag stays free far from the graph).
+        // on every mousemove. Uses the shared resolver so the live trail
+        // agrees with the committed drop (block-aware over polygons, closest
+        // node/edge everywhere else — a drag always has a snap target).
         if (!dragging) return;
 
         // Sticky proposal snap wins: snap the live trail to the proposal midpoint
