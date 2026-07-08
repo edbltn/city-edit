@@ -29,6 +29,21 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-08-node-edge-parity.html">
+    <div class="date">2026-07-08</div>
+    <h2>Node/edge parity — the ends of every segment belong to their nodes</h2>
+    <p>Nodes are now as easy to select as edges. A pixel radius structurally can't do it (every node
+    IS an edge endpoint, so the nearest edge is always at least as close), and an absolute-priority
+    disc fails both ways with zoom — so the hit-test now splits each edge's catchment area by the
+    projection parameter: the outer quarter at each end belongs to that end's node, scale-invariant
+    at every zoom. hitTest subsumed the uncapped nearest-edge fallback (findNearestEdgeIndex deleted)
+    and the node index left the hot path. Hover and click also share one gated resolver end to end
+    (sticky proposal → block hierarchy → radius-bounded → nothing far from the graph), closing two
+    hover≠click gaps: far-from-graph hover highlighting what a click can't pin, and the top-proposal
+    sticky annulus showing a graph node while the click links to the proposal. Acceptance: 20 random
+    clicks on test-central-park → 10 nodes / 10 edges, 20/20 pins identical to hover.</p>
+  </a>
+
   <a class="entry" href="./2026-07-08-top-proposal-kinds.html">
     <div class="date">2026-07-08</div>
     <h2>Top-proposal rework — route/point kinds end-to-end, one pin per block, corridors earn their length</h2>

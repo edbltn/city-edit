@@ -1,0 +1,730 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Node/edge parity — the ends of every segment belong to their nodes — 2026-07-08</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Node/edge parity — the ends of every segment belong to their nodes</h1>
+    <div class="dateline">2026-07-08 · branch <code>fix/unify-voting</code> · commit <code>b47a197</code></div>
+  </header>
+
+  <nav class="toc"><a href="#parity">1</a>
+<a href="#hoverclick">2</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Nodes are now genuinely as easy to select as edges — not by a bigger radius (a
+  radius structurally cannot do it: every node is an edge endpoint, so the nearest edge is always
+  at least as close as the nearest node) but by splitting each edge's <em>catchment area</em>: the
+  nearest edge decides the hit, and the outer quarter at each end belongs to that end's node. The
+  split rides the projection parameter, so it holds at every zoom. Alongside it, hover and click
+  now share one gated resolver end to end — sticky proposal, block-constrained hierarchy over a
+  polygon, radius-bounded off it, nothing far from the graph — which closed the last two
+  hover≠click gaps the acceptance harness surfaced. Final run: 20 random clicks →
+  <strong>10 nodes / 10 edges, 20/20 pins identical to their hover</strong>.</p>
+
+  
+    <section class="card" id="parity">
+      <div class="tag">GraphLayer · hit-test</div>
+      <h2>1 · Why a radius rule can never make nodes selectable — and what can</h2>
+      <h3>Symptom</h3>
+      <p>The bar: nodes must be as easy to select as edges — 20 random clicks on /m/test-central-park should pin roughly 50/50 nodes vs edges. The 8px absolute-priority node disc failed it both ways at once: at street zooms random clicks were overwhelmingly edges (the uncapped nearest-edge fallback owned everything outside the discs), while over the park's curvy paths at z15 everything was a node (geometry nodes sit every 4–16px on screen, so the discs pave the whole line).</p>
+      <h3>Root cause</h3>
+      <ul><li>A pixel radius is structurally incapable of parity. Every node IS an endpoint of some edge, so distance-to-nearest-node ≥ distance-to-nearest-edge for every cursor position — any “pick the closer one” rule degenerates to all-edges, and any absolute-priority disc is a zoom-dependent patch: too small and edges win everything, bigger than the on-screen edge length and nodes win everything.</li>
+<li>The catchment areas are the thing to split, not the distances. The only scale-invariant boundary between an edge and its endpoints is the projection parameter t along the edge itself.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>hitTest</code> rebuilt: the nearest edge decides the hit, then t hands the outer <code>NODE_END_SHARE</code> (0.25) of the segment to that end's node — nodes own half of every edge's catchment area at every zoom, plus the clamped region beyond the endpoints. Degenerate self-edges (e-bike stations) are never split.</li>
+<li><code>hitTest</code> grew a <code>maxEdgeDistPx</code> cap (Infinity = always resolve) and subsumed <code>findNearestEdgeIndex</code> — <code>resolveSelection</code> is now one uncapped call per constraint level instead of a radius pass plus a fallback pass. The always-resolve mode falls back to the nearest eligible NODE when a block has no member edges, so capture-only node cells stay selectable from anywhere in their polygon.</li>
+<li>The node index left the hot path entirely: the mousemove-rate hit-test no longer scans nodes at all (the t-split reads the two endpoints of the already-found edge).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="hoverclick">
+      <div class="tag">GraphLayer · hover = click</div>
+      <h2>2 · One resolver for hover, snap, preview, trail — and two divergences it killed</h2>
+      <h3>Symptom</h3>
+      <p>Requirement two: what hover shows must be EXACTLY what a click pins. The acceptance runs surfaced two places where they disagreed: far from the graph (open water / park interior) hover highlighted a component but a click placed a free waypoint and pinned nothing; and inside a top proposal's sticky snap annulus hover showed the underlying graph node while a click linked the route to the proposal (the ,f corridor token) — again pinning nothing.</p>
+      <h3>Root cause</h3>
+      <ul><li>Idle hover used <code>resolveSelection</code> (always resolves, by contract — the point-vote and pinned-override paths need that), but the click's snap path is deliberately radius-bounded off-polygon so waypoint drags stay free far from the graph. Two resolvers, two answers.</li>
+<li>The sticky proposal snap ran only inside the registered snapFn and the drag drop-preview — idle hover never consulted it, so the annulus between the icon's DOM box and its snap radius telegraphed the wrong action.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>New shared <code>resolveDragSnap</code> — over a block polygon it IS the hover resolver (full hierarchy, always resolves); off-polygon it is the radius-bounded hitTest. Used verbatim by idle hover, the registered waypoint snapFn, the drag drop-preview, and the live-trail snap, so all four agree by construction.</li>
+<li>Idle hover now checks the sticky proposal first and rings the proposal's edge — exactly what the drag drop-preview already did — and shows NOTHING far from the graph, matching the free-waypoint click there.</li>
+<li><code>cityedit.resolveAt</code> now also reports <code>hoverTarget</code> (the gated resolver) and <code>sticky</code>/<code>stickyEdgeIdx</code> alongside the always-resolve <code>target</code>, so harnesses measure what the cursor actually sees.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Acceptance run (headless Chrome-for-Testing 138 + puppeteer-core, per-trial page reload so no waypoint state leaks): 20 random viewport clicks on <code>/m/test-central-park</code> → <strong>10 nodes / 10 edges, 20/20 pinned target == hover target</strong>.</li>
+<li>3/3 far-from-graph points: hover shows nothing, click pins nothing (asserted, not skipped).</li>
+<li>28/30 exact-on-junction hovers resolve to that junction node; the 2 exceptions are cross-block-boundary re-derivations (the sampled point and the node's own coordinate sit in different block polygons) — the documented reason selection carries its target instead of re-resolving stored coordinates. Hover=click is unaffected.</li>
+<li>Deterministic replay of the one run-3 miss proved the sticky-annulus divergence: the click URL gained a <code>,f73b5cd68</code> forced-corridor token — a proposal link, not a failed pin.</li>
+<li>Chrome 148 headless is frame-dead on this machine (rAF never ticks → MapLibre never fires load); the harness pins Chrome 138. In-tab synthetic clicks in a hidden window are untrustworthy (intensive timer throttling froze commits and produced 15 bogus "mismatches" — all with the pin frozen at one stale value).</li>
+<li><code>tsc --noEmit</code> clean.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>On <code>/m/test-central-park</code>, click ~20 random spots at a few zooms: pins should feel about half nodes (circle card) / half edges (segment card), and each pin should be exactly what the hover highlight showed at that spot.</li>
+<li>Hover along one street segment end to end: the middle half should ring the edge, the outer quarters should ring the endpoint junctions — at any zoom.</li>
+<li>Hover open water / deep park interior far from any path: NO hover highlight or tooltip; a click there places a free start waypoint and opens no card.</li>
+<li>Hover just OUTSIDE a top-proposal icon (within its snap ring): the proposal's edge should light up — and a click should link/thread to that proposal, not pin a node.</li>
+<li>On <code>/m/e-bikes-3</code>, hover and click stations: still selectable exactly as before (self-edges are never handed to their nodes).</li>
+<li>Drag a waypoint across a block: the live trail, the drop-preview ring, and where the waypoint actually lands on release should all agree.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Green is added, red removed.</p>
+    
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+176</span> / <span class="d-del">-184</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">GraphLayer</span>
+        <span class="ctx-sum">topology + votes + hover/selection resolution; owns the hit-test every pointer interaction flows through</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~4200 LOC — this diff rebuilds the hit-test core and unifies the four pointer resolvers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">constants (SNAP_EDGE_PX · NODE_END_SHARE)</span><span class="ol-sum">SNAP_NODE_PX deleted; NODE_END_SHARE=0.25 parity split + why-comment</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">findNearestEdgeIndex</span><span class="ol-sum">DELETED — subsumed by hitTest&#x27;s maxEdgeDistPx=Infinity mode</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">hitTest</span><span class="ol-sum">REBUILT — nearest edge + t-split hands outer quarters to endpoint nodes; node scan only on the no-edge cold path</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">blockFiltersAt / adjShortestInBlock / projectOntoEdge</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">resolveSelection</span><span class="ol-sum">block-constrained + unrestricted paths each ONE uncapped hitTest call</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">resolveAt debug probe</span><span class="ol-sum">now also reports hoverTarget + sticky/stickyEdgeIdx</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">resolveDragSnap (NEW) + snapFn registration</span><span class="ol-sum">one shared gated resolver; snapFn shrinks to sticky → resolveDragSnap → record</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">drop-preview effect / live-trail snap</span><span class="ol-sum">both now call resolveDragSnap instead of raw hitTest</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">idle hover (mousemove handler)</span><span class="ol-sum">sticky proposal first, then resolveDragSnap — no hover far from graph</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">pinned effect / tooltips / indicators / vote casting</span><span class="ol-sum">unchanged consumers</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>NODE_END_SHARE constant — the parity argument (why a radius can&#x27;t work) lives here</li><li>hitTest — maxEdgeDistPx param; pixel-space t; self-edge guard; nearest-node cold path</li><li>resolveSelection — two uncapped calls, fallback passes deleted</li><li>resolveAt probe — hoverTarget + sticky fields</li><li>resolveDragSnap + resolveDragSnapRef — the shared gated resolver</li><li>setSnapFn — sticky → resolveDragSnap → lastSnapSelectionRef</li><li>drop-preview effect — resolveDragSnapRef</li><li>mousemove: suppressed-hover proposal path + idle hover — sticky-first, gated</li><li>live-trail snap — resolveDragSnapRef</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index e0a4d52..5e325cd 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -206,14 +206,23 @@ function resolveAddress(</span>
+<span class="d-ctx"> // ---------------------------------------------------------------------------</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> // Unified radii — used for hover, snap, pinned highlight, and tooltip lookup</span>
+<span class="d-del">-const SNAP_EDGE_PX = 4;   // hit-test radius for edges</span>
+<span class="d-del">-// Node priority radius — a node within it ALWAYS wins over edges (the original</span>
+<span class="d-del">-// model, just reachable: the old 3px made nodes practically impossible to</span>
+<span class="d-del">-// hover deliberately; edges have a 4px radius PLUS an unlimited nearest-edge</span>
+<span class="d-del">-// fallback, so they won everything). No yield-to-closer-edge games: absolute</span>
+<span class="d-del">-// priority is predictable, and edges stay hoverable along their length (nodes</span>
+<span class="d-del">-// only sit at ends and junctions).</span>
+<span class="d-del">-const SNAP_NODE_PX = 8;</span>
+<span class="d-add">+const SNAP_EDGE_PX = 4;   // hit-test radius for edges (radius-bounded callers only)</span>
+<span class="d-add">+// Node/edge PARITY: the ends of every segment belong to its endpoint NODES.</span>
+<span class="d-add">+// The nearest edge decides the hit, then the projection parameter t decides</span>
+<span class="d-add">+// the final target — t in the outer NODE_END_SHARE of the segment resolves</span>
+<span class="d-add">+// to that end&#x27;s node instead. At 0.25 per end, nodes own half of every</span>
+<span class="d-add">+// edge&#x27;s catchment area (plus the clamped region beyond the endpoints), so</span>
+<span class="d-add">+// random clicks split ~50/50 node/edge. This is deliberately the ONLY node</span>
+<span class="d-add">+// rule — it&#x27;s scale-invariant, so the split holds at every zoom:</span>
+<span class="d-add">+//   - A pixel-radius node disc can never achieve parity: distance-to-nearest-</span>
+<span class="d-add">+//     node is always &gt;= distance-to-nearest-edge (nodes ARE edge endpoints),</span>
+<span class="d-add">+//     so any &quot;pick the closer&quot; rule degenerates to all-edges.</span>
+<span class="d-add">+//   - An absolute-priority disc overshoots the moment edges get short on</span>
+<span class="d-add">+//     screen (park paths at z15 have geometry nodes every 4-16px, so an 8px</span>
+<span class="d-add">+//     disc paves the whole line with node hits).</span>
+<span class="d-add">+// Hovering exactly on a junction still yields the node: the nearest edge is</span>
+<span class="d-add">+// an incident one and t clamps to its node end.</span>
+<span class="d-add">+const NODE_END_SHARE = 0.25;</span>
+<span class="d-ctx"> // While a feature is pinned, a re-click within this screen distance of it keeps</span>
+<span class="d-ctx"> // the SAME selection rather than re-resolving to a neighbour/endpoint. Stops the</span>
+<span class="d-ctx"> // open card — which occludes its own icon — from drifting as you click near it.</span>
+<span class="d-hunk">@@ -360,61 +369,26 @@ function buildEdgeIndex(data: GraphTopology): Flatbush | null {</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /**</span>
+<span class="d-del">- * Find the edge with the minimum pixel distance from (px,py).</span>
+<span class="d-del">- * No radius limit — used to guarantee hover/click always select *some* segment.</span>
+<span class="d-add">+ * Unified hit-test: resolve (px,py) to a node or edge with node/edge PARITY.</span>
+<span class="d-ctx">  *</span>
+<span class="d-del">- * With a spatial index: O(log n + k) — query the index for k nearest bboxes,</span>
+<span class="d-del">- * then compute exact projected-pixel distance for just those candidates.</span>
+<span class="d-del">- * Without: brute-force fallback used during the brief window before the</span>
+<span class="d-del">- * index is built on first topology load.</span>
+<span class="d-del">- */</span>
+<span class="d-del">-function findNearestEdgeIndex(</span>
+<span class="d-del">-  data: GraphData,</span>
+<span class="d-del">-  map: L.Map,</span>
+<span class="d-del">-  px: number, py: number,</span>
+<span class="d-del">-  index: Flatbush | null,</span>
+<span class="d-del">-  queryLng: number,</span>
+<span class="d-del">-  queryLat: number,</span>
+<span class="d-del">-  allowEdge?: (i: number) =&gt; boolean</span>
+<span class="d-del">-): number | null {</span>
+<span class="d-del">-  if (data.nEdges === 0) return null;</span>
+<span class="d-del">-</span>
+<span class="d-del">-  const checkEdge = (i: number, currentBestDist: number, currentBestIdx: number): [number, number] =&gt; {</span>
+<span class="d-del">-    const fromPt = map.latLngToContainerPoint([nodeLat(data, edgeFrom(data, i)), nodeLon(data, edgeFrom(data, i))]);</span>
+<span class="d-del">-    const toPt = map.latLngToContainerPoint([nodeLat(data, edgeTo(data, i)), nodeLon(data, edgeTo(data, i))]);</span>
+<span class="d-del">-    const dist = pointToSegmentDist(px, py, fromPt.x, fromPt.y, toPt.x, toPt.y);</span>
+<span class="d-del">-    return dist &lt; currentBestDist ? [dist, i] : [currentBestDist, currentBestIdx];</span>
+<span class="d-del">-  };</span>
+<span class="d-del">-</span>
+<span class="d-del">-  let bestDist = Infinity;</span>
+<span class="d-del">-  let bestIdx = -1;</span>
+<span class="d-del">-</span>
+<span class="d-del">-  if (index) {</span>
+<span class="d-del">-    // flatbush applies the filter BEFORE counting results, so a constrained</span>
+<span class="d-del">-    // query still returns up to K matching candidates however sparse they are.</span>
+<span class="d-del">-    const candidates = index.neighbors(queryLng, queryLat, INDEX_NEIGHBOR_K, Infinity, allowEdge);</span>
+<span class="d-del">-    for (const i of candidates) {</span>
+<span class="d-del">-      [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);</span>
+<span class="d-del">-    }</span>
+<span class="d-del">-  } else {</span>
+<span class="d-del">-    // Brief fallback while the index is being built</span>
+<span class="d-del">-    for (let i = 0; i &lt; data.nEdges; i++) {</span>
+<span class="d-del">-      if (allowEdge &amp;&amp; !allowEdge(i)) continue;</span>
+<span class="d-del">-      [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);</span>
+<span class="d-del">-    }</span>
+<span class="d-del">-  }</span>
+<span class="d-del">-</span>
+<span class="d-del">-  return bestIdx &gt;= 0 ? bestIdx : null;</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-/**</span>
+<span class="d-del">- * Unified hit-test: find the nearest node or edge within snap radius.</span>
+<span class="d-del">- * Nodes within SNAP_NODE_PX win; otherwise edges within SNAP_EDGE_PX.</span>
+<span class="d-del">- * Returns the target and projected snap position.</span>
+<span class="d-add">+ * Hierarchy:</span>
+<span class="d-add">+ *   1. The nearest edge within `maxEdgeDistPx` decides — but its ends belong</span>
+<span class="d-add">+ *      to its endpoint nodes: a projection parameter t in the outer</span>
+<span class="d-add">+ *      NODE_END_SHARE of the segment resolves to that end&#x27;s node instead of</span>
+<span class="d-add">+ *      the edge (see the constant&#x27;s comment for why this is the ONLY node</span>
+<span class="d-add">+ *      rule). Degenerate self-edges (e-bike stations) are never split —</span>
+<span class="d-add">+ *      they stay edge targets.</span>
+<span class="d-add">+ *   2. maxEdgeDistPx === Infinity (always-resolve callers) with no eligible</span>
+<span class="d-add">+ *      edge: the nearest eligible node, uncapped — a block whose only</span>
+<span class="d-add">+ *      member is a node is still selectable from anywhere in its polygon.</span>
+<span class="d-ctx">  *</span>
+<span class="d-del">- * With spatial indices: each loop runs over the top-k bbox-nearest candidates</span>
+<span class="d-del">- * (typically &lt;30 per call) instead of all nodes/edges. Path-drag fires this</span>
+<span class="d-del">- * on every mousemove via the snap closure, so this is the hot path.</span>
+<span class="d-add">+ * Radius-bounded callers (the off-polygon waypoint snap and drag preview)</span>
+<span class="d-add">+ * use the SNAP_EDGE_PX default so dragging stays free far from the graph;</span>
+<span class="d-add">+ * resolveSelection passes Infinity so a selection always resolves.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * With spatial indices each scan touches only the top-k bbox-nearest</span>
+<span class="d-add">+ * candidates (typically &lt;30 per call) instead of all nodes/edges. Path-drag</span>
+<span class="d-add">+ * fires this on every mousemove via the snap closure, so this is the hot path.</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> function hitTest(</span>
+<span class="d-ctx">   data: GraphData,</span>
+<span class="d-hunk">@@ -424,34 +398,17 @@ function hitTest(</span>
+<span class="d-ctx">   edgeIndex: Flatbush | null,</span>
+<span class="d-ctx">   nodeIndex: Flatbush | null,</span>
+<span class="d-ctx">   allowEdge?: (i: number) =&gt; boolean,</span>
+<span class="d-del">-  allowNode?: (i: number) =&gt; boolean</span>
+<span class="d-add">+  allowNode?: (i: number) =&gt; boolean,</span>
+<span class="d-add">+  maxEdgeDistPx: number = SNAP_EDGE_PX</span>
+<span class="d-ctx"> ): HitResult | null {</span>
+<span class="d-del">-  // 1. Nodes — absolute priority within SNAP_NODE_PX.</span>
+<span class="d-del">-  let bestNode: number | null = null;</span>
+<span class="d-del">-  let bestNodeDist = SNAP_NODE_PX;</span>
+<span class="d-del">-</span>
+<span class="d-del">-  const checkNode = (i: number) =&gt; {</span>
+<span class="d-del">-    const pt = map.latLngToContainerPoint([nodeLat(data, i), nodeLon(data, i)]);</span>
+<span class="d-del">-    const dist = Math.sqrt((px - pt.x) ** 2 + (py - pt.y) ** 2);</span>
+<span class="d-del">-    if (dist &lt; bestNodeDist) {</span>
+<span class="d-del">-      bestNodeDist = dist;</span>
+<span class="d-del">-      bestNode = i;</span>
+<span class="d-del">-    }</span>
+<span class="d-del">-  };</span>
+<span class="d-del">-</span>
+<span class="d-del">-  if (nodeIndex) {</span>
+<span class="d-del">-    const candidates = nodeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K, Infinity, allowNode);</span>
+<span class="d-del">-    for (const i of candidates) checkNode(i);</span>
+<span class="d-del">-  } else {</span>
+<span class="d-del">-    for (let i = 0; i &lt; data.nNodes; i++) {</span>
+<span class="d-del">-      if (allowNode &amp;&amp; !allowNode(i)) continue;</span>
+<span class="d-del">-      checkNode(i);</span>
+<span class="d-del">-    }</span>
+<span class="d-del">-  }</span>
+<span class="d-add">+  const nodeResult = (i: number): HitResult =&gt; ({</span>
+<span class="d-add">+    target: { kind: &quot;node&quot;, index: i },</span>
+<span class="d-add">+    snapLat: nodeLat(data, i), snapLng: nodeLon(data, i),</span>
+<span class="d-add">+  });</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // 2. Edges — project onto segment for snap position</span>
+<span class="d-add">+  // 1. Nearest edge within maxEdgeDistPx.</span>
+<span class="d-ctx">   let bestEdge: number | null = null;</span>
+<span class="d-del">-  let bestEdgeDist = SNAP_EDGE_PX;</span>
+<span class="d-add">+  let bestEdgeDist = maxEdgeDistPx;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const checkEdge = (i: number) =&gt; {</span>
+<span class="d-ctx">     const fromIdx = edgeFrom(data, i), toIdx = edgeTo(data, i);</span>
+<span class="d-hunk">@@ -465,6 +422,8 @@ function hitTest(</span>
+<span class="d-ctx">   };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   if (edgeIndex) {</span>
+<span class="d-add">+    // flatbush applies the filter BEFORE counting results, so a constrained</span>
+<span class="d-add">+    // query still returns up to K matching candidates however sparse they are.</span>
+<span class="d-ctx">     const candidates = edgeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K, Infinity, allowEdge);</span>
+<span class="d-ctx">     for (const i of candidates) checkEdge(i);</span>
+<span class="d-ctx">   } else {</span>
+<span class="d-hunk">@@ -474,19 +433,54 @@ function hitTest(</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // 3. Node in radius wins outright; otherwise the edge.</span>
+<span class="d-del">-  if (bestNode !== null) {</span>
+<span class="d-del">-    return {</span>
+<span class="d-del">-      target: { kind: &quot;node&quot;, index: bestNode },</span>
+<span class="d-del">-      snapLat: nodeLat(data, bestNode), snapLng: nodeLon(data, bestNode),</span>
+<span class="d-del">-    };</span>
+<span class="d-del">-  }</span>
+<span class="d-del">-</span>
+<span class="d-ctx">   if (bestEdge !== null) {</span>
+<span class="d-add">+    // Parity split: t in the outer NODE_END_SHARE hands the hit to that</span>
+<span class="d-add">+    // end&#x27;s node. t is computed in PIXEL space (the same space the distance</span>
+<span class="d-add">+    // ranking uses) — lat/lng space is anisotropic at NYC latitudes.</span>
+<span class="d-add">+    const fromIdx = edgeFrom(data, bestEdge), toIdx = edgeTo(data, bestEdge);</span>
+<span class="d-add">+    const fromPt = map.latLngToContainerPoint([nodeLat(data, fromIdx), nodeLon(data, fromIdx)]);</span>
+<span class="d-add">+    const toPt = map.latLngToContainerPoint([nodeLat(data, toIdx), nodeLon(data, toIdx)]);</span>
+<span class="d-add">+    const dx = toPt.x - fromPt.x, dy = toPt.y - fromPt.y;</span>
+<span class="d-add">+    const lenSq = dx * dx + dy * dy;</span>
+<span class="d-add">+    if (lenSq &gt; 0) {</span>
+<span class="d-add">+      const t = Math.max(0, Math.min(1,</span>
+<span class="d-add">+        ((px - fromPt.x) * dx + (py - fromPt.y) * dy) / lenSq</span>
+<span class="d-add">+      ));</span>
+<span class="d-add">+      if (t &lt; NODE_END_SHARE || t &gt; 1 - NODE_END_SHARE) {</span>
+<span class="d-add">+        const nid = t &lt; 0.5 ? fromIdx : toIdx;</span>
+<span class="d-add">+        if (!allowNode || allowNode(nid)) return nodeResult(nid);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-ctx">     const { lat: snapLat, lng: snapLng } = projectOntoEdge(data, bestEdge, lat, lng);</span>
+<span class="d-ctx">     return { target: { kind: &quot;edge&quot;, index: bestEdge }, snapLat, snapLng };</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // 2. Always-resolve mode with no eligible edge (a capture-only node cell):</span>
+<span class="d-add">+  // the nearest eligible node, uncapped. Node scan only runs on this cold</span>
+<span class="d-add">+  // path — the hot path above never touches the node index.</span>
+<span class="d-add">+  if (maxEdgeDistPx === Infinity) {</span>
+<span class="d-add">+    let bestNode: number | null = null;</span>
+<span class="d-add">+    let bestNodeDist = Infinity;</span>
+<span class="d-add">+    const checkNode = (i: number) =&gt; {</span>
+<span class="d-add">+      const pt = map.latLngToContainerPoint([nodeLat(data, i), nodeLon(data, i)]);</span>
+<span class="d-add">+      const dist = (px - pt.x) ** 2 + (py - pt.y) ** 2;</span>
+<span class="d-add">+      if (dist &lt; bestNodeDist) {</span>
+<span class="d-add">+        bestNodeDist = dist;</span>
+<span class="d-add">+        bestNode = i;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+    if (nodeIndex) {</span>
+<span class="d-add">+      const candidates = nodeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K, Infinity, allowNode);</span>
+<span class="d-add">+      for (const i of candidates) checkNode(i);</span>
+<span class="d-add">+    } else {</span>
+<span class="d-add">+      for (let i = 0; i &lt; data.nNodes; i++) {</span>
+<span class="d-add">+        if (allowNode &amp;&amp; !allowNode(i)) continue;</span>
+<span class="d-add">+        checkNode(i);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    if (bestNode !== null) return nodeResult(bestNode);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   return null;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -921,12 +915,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // highlighted component always equals the vote target. Hierarchy:</span>
+<span class="d-ctx">   //   1. overrideEdgeIdx (a top-proposal icon) dominates everything.</span>
+<span class="d-ctx">   //   2. the block polygon under the point constrains the search to that</span>
+<span class="d-del">-  //      block&#x27;s own members (node in-radius, then edge in-radius, then its</span>
+<span class="d-del">-  //      nearest member with no cap) — a block is selectable from anywhere</span>
+<span class="d-del">-  //      inside its polygon and never resolves to a neighbour&#x27;s edges.</span>
+<span class="d-del">-  //   3. no block under the point: a node within SNAP_NODE_PX wins (same</span>
+<span class="d-del">-  //      radius for hover and click).</span>
+<span class="d-del">-  //   4. otherwise the nearest edge (in-radius via hitTest, else globally).</span>
+<span class="d-add">+  //      block&#x27;s own members — a block is selectable from anywhere inside</span>
+<span class="d-add">+  //      its polygon and never resolves to a neighbour&#x27;s edges.</span>
+<span class="d-add">+  //   3. no block under the point: unrestricted search.</span>
+<span class="d-add">+  // Both searches are ONE uncapped hitTest: nearest edge with its ends</span>
+<span class="d-add">+  // handed to their nodes (NODE_END_SHARE parity split), else nearest node —</span>
+<span class="d-add">+  // so a selection always resolves and nodes are as reachable as edges</span>
+<span class="d-add">+  // everywhere, not just inside a priority disc.</span>
+<span class="d-ctx">   // Pulls indices/data from refs so the closure stays stable across renders.</span>
+<span class="d-ctx">   const resolveSelection = useCallback((</span>
+<span class="d-ctx">     lat: number, lng: number, overrideEdgeIdx?: number | null</span>
+<span class="d-hunk">@@ -957,7 +952,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       const { edgeInBlock, nodeInBlock } = filters;</span>
+<span class="d-ctx">       const hit = hitTest(</span>
+<span class="d-ctx">         data, map, pt.x, pt.y, lat, lng,</span>
+<span class="d-del">-        edgeIndexRef.current, nodeIndexRef.current, edgeInBlock, nodeInBlock</span>
+<span class="d-add">+        edgeIndexRef.current, nodeIndexRef.current, edgeInBlock, nodeInBlock,</span>
+<span class="d-add">+        Infinity</span>
+<span class="d-ctx">       );</span>
+<span class="d-ctx">       if (hit) {</span>
+<span class="d-ctx">         const voteEdgeId = hit.target.kind === &quot;edge&quot;</span>
+<span class="d-hunk">@@ -965,26 +961,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           : adjShortestInBlock(data, adj, hit.target.index, filters.blockId);</span>
+<span class="d-ctx">         return { target: hit.target, snapLat: hit.snapLat, snapLng: hit.snapLng, voteEdgeId };</span>
+<span class="d-ctx">       }</span>
+<span class="d-del">-      // Nothing in radius — the hovered block still names the intent, so</span>
+<span class="d-del">-      // resolve to its nearest member edge with no radius cap.</span>
+<span class="d-del">-      const nearestInBlock = findNearestEdgeIndex(</span>
+<span class="d-del">-        data, map, pt.x, pt.y, edgeIndexRef.current, lng, lat, edgeInBlock</span>
+<span class="d-del">-      );</span>
+<span class="d-del">-      if (nearestInBlock !== null) {</span>
+<span class="d-del">-        const snap = projectOntoEdge(data, nearestInBlock, lat, lng);</span>
+<span class="d-del">-        return {</span>
+<span class="d-del">-          target: { kind: &quot;edge&quot;, index: nearestInBlock },</span>
+<span class="d-del">-          snapLat: snap.lat, snapLng: snap.lng, voteEdgeId: nearestInBlock,</span>
+<span class="d-del">-        };</span>
+<span class="d-del">-      }</span>
+<span class="d-ctx">       // A block with no reachable members (stale bake) falls through to the</span>
+<span class="d-del">-      // unrestricted paths below.</span>
+<span class="d-add">+      // unrestricted path below.</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    // 3. Node-then-edge within radius.</span>
+<span class="d-add">+    // 3. Unrestricted, uncapped — always resolves when the graph has edges.</span>
+<span class="d-ctx">     const hit = hitTest(</span>
+<span class="d-ctx">       data, map, pt.x, pt.y, lat, lng,</span>
+<span class="d-del">-      edgeIndexRef.current, nodeIndexRef.current</span>
+<span class="d-add">+      edgeIndexRef.current, nodeIndexRef.current, undefined, undefined,</span>
+<span class="d-add">+      Infinity</span>
+<span class="d-ctx">     );</span>
+<span class="d-ctx">     if (hit) {</span>
+<span class="d-ctx">       const voteEdgeId = hit.target.kind === &quot;edge&quot;</span>
+<span class="d-hunk">@@ -993,18 +978,6 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       return { target: hit.target, snapLat: hit.snapLat, snapLng: hit.snapLng, voteEdgeId };</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    // 4. Nearest-edge fallback (no radius) so a selection always resolves.</span>
+<span class="d-del">-    const nearestEdgeIdx = findNearestEdgeIndex(</span>
+<span class="d-del">-      data, map, pt.x, pt.y, edgeIndexRef.current, lng, lat</span>
+<span class="d-del">-    );</span>
+<span class="d-del">-    if (nearestEdgeIdx !== null) {</span>
+<span class="d-del">-      const snap = projectOntoEdge(data, nearestEdgeIdx, lat, lng);</span>
+<span class="d-del">-      return {</span>
+<span class="d-del">-        target: { kind: &quot;edge&quot;, index: nearestEdgeIdx },</span>
+<span class="d-del">-        snapLat: snap.lat, snapLng: snap.lng, voteEdgeId: nearestEdgeIdx,</span>
+<span class="d-del">-      };</span>
+<span class="d-del">-    }</span>
+<span class="d-del">-</span>
+<span class="d-ctx">     return null;</span>
+<span class="d-ctx">   }, [map]);</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1020,6 +993,35 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // never a re-derivation from the stored point.</span>
+<span class="d-ctx">   const lastSnapSelectionRef = useRef&lt;ResolvedSelection | null&gt;(null);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // The waypoint-drag resolver — ONE function shared by the registered</span>
+<span class="d-add">+  // snapFn, the drop-preview highlight, and the live-trail snap so a drag&#x27;s</span>
+<span class="d-add">+  // preview, trail, and committed drop always agree. Over a block polygon it</span>
+<span class="d-add">+  // IS the hover resolver (full hierarchy, always resolves); off-polygon</span>
+<span class="d-add">+  // it&#x27;s the radius-bounded hitTest so dragging stays free far from the</span>
+<span class="d-add">+  // graph — not resolveSelection&#x27;s always-resolve fallback.</span>
+<span class="d-add">+  const resolveDragSnap = useCallback((</span>
+<span class="d-add">+    lat: number, lng: number</span>
+<span class="d-add">+  ): ResolvedSelection | null =&gt; {</span>
+<span class="d-add">+    const data = graphDataRef.current;</span>
+<span class="d-add">+    if (!data) return null;</span>
+<span class="d-add">+    const filters = blockFiltersAt(data, nodeAdjRef.current, lat, lng);</span>
+<span class="d-add">+    if (filters) return resolveSelectionRef.current(lat, lng);</span>
+<span class="d-add">+    const pt = map.latLngToContainerPoint([lat, lng]);</span>
+<span class="d-add">+    const result = hitTest(</span>
+<span class="d-add">+      data, map, pt.x, pt.y, lat, lng,</span>
+<span class="d-add">+      edgeIndexRef.current, nodeIndexRef.current</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+    if (!result) return null;</span>
+<span class="d-add">+    const voteEdgeId = result.target.kind === &quot;edge&quot;</span>
+<span class="d-add">+      ? result.target.index</span>
+<span class="d-add">+      : adjShortest(data, nodeAdjRef.current, result.target.index);</span>
+<span class="d-add">+    return {</span>
+<span class="d-add">+      target: result.target, snapLat: result.snapLat, snapLng: result.snapLng, voteEdgeId,</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+  }, [map]);</span>
+<span class="d-add">+  const resolveDragSnapRef = useRef(resolveDragSnap);</span>
+<span class="d-add">+  useEffect(() =&gt; { resolveDragSnapRef.current = resolveDragSnap; }, [resolveDragSnap]);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   // Console/headless probe: cityedit.resolveAt(lat, lng) interrogates the live</span>
+<span class="d-ctx">   // resolver so a debugging session can see exactly what a point resolves to</span>
+<span class="d-ctx">   // (hovered block, target kind/index, vote edge) without synthetic mouse events.</span>
+<span class="d-hunk">@@ -1027,9 +1029,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     debugProbe(&quot;resolveAt&quot;, (lat: number, lng: number) =&gt; {</span>
+<span class="d-ctx">       const sel = resolveSelectionRef.current(lat, lng);</span>
+<span class="d-ctx">       const data = graphDataRef.current;</span>
+<span class="d-add">+      // hoverTarget is what the cursor/click actually see (the gated drag-snap</span>
+<span class="d-add">+      // resolver): null far from the graph, where a click pins nothing.</span>
+<span class="d-add">+      // sticky (a top-proposal snap annulus) means a click LINKS to that</span>
+<span class="d-add">+      // proposal instead of pinning — hover rings stickyEdgeIdx.</span>
+<span class="d-add">+      const hover = resolveDragSnapRef.current(lat, lng);</span>
+<span class="d-add">+      const sticky = stickyProposalSnapRef.current(lat, lng);</span>
+<span class="d-ctx">       return {</span>
+<span class="d-ctx">         hoveredBlock: data?.edgeBlockId ? blockIdAtLatLng(lat, lng) : null,</span>
+<span class="d-ctx">         target: sel?.target ?? null,</span>
+<span class="d-add">+        hoverTarget: hover?.target ?? null,</span>
+<span class="d-add">+        sticky: !!sticky,</span>
+<span class="d-add">+        stickyEdgeIdx: sticky?.edgeIdx ?? null,</span>
+<span class="d-ctx">         snapLat: sel?.snapLat ?? null,</span>
+<span class="d-ctx">         snapLng: sel?.snapLng ?? null,</span>
+<span class="d-ctx">         voteEdgeId: sel?.voteEdgeId ?? null,</span>
+<span class="d-hunk">@@ -1039,47 +1050,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     });</span>
+<span class="d-ctx">   }, []);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // Register graph snap function for use by path drag. Uses hitTest directly</span>
+<span class="d-del">-  // (in-radius only, null when out of range) so dragging stays free when far</span>
+<span class="d-del">-  // from the graph — unlike resolveSelection, which always resolves to an edge.</span>
+<span class="d-add">+  // Register graph snap function for use by path drag. Resolves through the</span>
+<span class="d-add">+  // shared drag-snap resolver and RECORDS the resolution — the pinned effect</span>
+<span class="d-add">+  // reuses the recorded target when the point it receives is the coordinate</span>
+<span class="d-add">+  // this snap returned, so the click selects exactly what hover showed.</span>
+<span class="d-add">+  // Re-deriving a target from a stored coordinate is inherently leaky: the</span>
+<span class="d-add">+  // snapped point can sit in a different polygon than the cursor, and pixel</span>
+<span class="d-add">+  // radii shift with zoom.</span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-del">-    setSnapFn((m: L.Map, lat: number, lng: number) =&gt; {</span>
+<span class="d-add">+    setSnapFn((_m: L.Map, lat: number, lng: number) =&gt; {</span>
+<span class="d-ctx">       // Proposals are sticky drop targets: a drop near one links to its midpoint.</span>
+<span class="d-ctx">       const sticky = stickyProposalSnapRef.current(lat, lng);</span>
+<span class="d-ctx">       if (sticky) return { lat: sticky.lat, lng: sticky.lng };</span>
+<span class="d-del">-      const data = graphDataRef.current;</span>
+<span class="d-del">-      if (!data) return null;</span>
+<span class="d-del">-</span>
+<span class="d-del">-      // Over a block polygon: use THE hover resolver verbatim (full hierarchy,</span>
+<span class="d-del">-      // same filters, same fallbacks) and RECORD the resolution — the pinned</span>
+<span class="d-del">-      // effect reuses the recorded target when the point it receives is the</span>
+<span class="d-del">-      // coordinate this snap returned, so the click selects exactly what hover</span>
+<span class="d-del">-      // showed. Re-deriving a target from a stored coordinate is inherently</span>
+<span class="d-del">-      // leaky: the snapped point can sit in a different polygon than the</span>
+<span class="d-del">-      // cursor, and pixel radii shift with zoom.</span>
+<span class="d-del">-      const filters = blockFiltersAt(data, nodeAdjRef.current, lat, lng);</span>
+<span class="d-del">-      if (filters) {</span>
+<span class="d-del">-        const sel = resolveSelectionRef.current(lat, lng);</span>
+<span class="d-del">-        if (!sel) return null;</span>
+<span class="d-del">-        lastSnapSelectionRef.current = sel;</span>
+<span class="d-del">-        return { lat: sel.snapLat, lng: sel.snapLng };</span>
+<span class="d-del">-      }</span>
+<span class="d-del">-</span>
+<span class="d-del">-      // Off-polygon: radius-bounded hit only, so dragging stays free when far</span>
+<span class="d-del">-      // from the graph (unlike resolveSelection&#x27;s always-resolve fallback).</span>
+<span class="d-del">-      const pt = m.latLngToContainerPoint([lat, lng]);</span>
+<span class="d-del">-      const result = hitTest(</span>
+<span class="d-del">-        data, m, pt.x, pt.y, lat, lng,</span>
+<span class="d-del">-        edgeIndexRef.current, nodeIndexRef.current</span>
+<span class="d-del">-      );</span>
+<span class="d-del">-      if (!result) return null;</span>
+<span class="d-del">-      const voteEdgeId = result.target.kind === &quot;edge&quot;</span>
+<span class="d-del">-        ? result.target.index</span>
+<span class="d-del">-        : adjShortest(data, nodeAdjRef.current, result.target.index);</span>
+<span class="d-del">-      lastSnapSelectionRef.current = {</span>
+<span class="d-del">-        target: result.target, snapLat: result.snapLat, snapLng: result.snapLng, voteEdgeId,</span>
+<span class="d-del">-      };</span>
+<span class="d-del">-      return { lat: result.snapLat, lng: result.snapLng };</span>
+<span class="d-add">+      const sel = resolveDragSnapRef.current(lat, lng);</span>
+<span class="d-add">+      if (!sel) return null;</span>
+<span class="d-add">+      lastSnapSelectionRef.current = sel;</span>
+<span class="d-add">+      return { lat: sel.snapLat, lng: sel.snapLng };</span>
+<span class="d-ctx">     });</span>
+<span class="d-ctx">   }, [setSnapFn]);</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1768,8 +1754,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Light the graph edge (or node) a live waypoint drag would snap to — the drop</span>
+<span class="d-ctx">   // preview. Mirrors the registered snapFn exactly (sticky proposal first, then</span>
+<span class="d-del">-  // hitTest) so the highlight matches where the waypoint actually lands on release.</span>
+<span class="d-del">-  // Out of snap range → no highlight, matching the &quot;drag stays free&quot; snap rule.</span>
+<span class="d-add">+  // the shared drag-snap resolver) so the highlight matches where the waypoint</span>
+<span class="d-add">+  // actually lands on release. Out of snap range → no highlight, matching the</span>
+<span class="d-add">+  // &quot;drag stays free&quot; snap rule.</span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-ctx">     let next: HoverTarget | null = null;</span>
+<span class="d-ctx">     if (dragPoint) {</span>
+<span class="d-hunk">@@ -1781,12 +1768,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           // diamond&#x27;s own drop-target ring (dropTargetRbtpId) is the affordance.</span>
+<span class="d-ctx">           next = sticky.edgeIdx != null ? { kind: &quot;edge&quot;, index: sticky.edgeIdx } : null;</span>
+<span class="d-ctx">         } else {</span>
+<span class="d-del">-          const pt = map.latLngToContainerPoint([dragPoint.lat, dragPoint.lng]);</span>
+<span class="d-del">-          const result = hitTest(</span>
+<span class="d-del">-            data, map, pt.x, pt.y, dragPoint.lat, dragPoint.lng,</span>
+<span class="d-del">-            edgeIndexRef.current, nodeIndexRef.current</span>
+<span class="d-del">-          );</span>
+<span class="d-del">-          if (result) next = result.target;</span>
+<span class="d-add">+          next = resolveDragSnapRef.current(dragPoint.lat, dragPoint.lng)?.target ?? null;</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">     }</span>
+<span class="d-hunk">@@ -2790,7 +2772,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           let proposalTarget: HoverTarget | null = null;</span>
+<span class="d-ctx">           if (suppressHoverRef.current &amp;&amp; !overModalRef.current &amp;&amp; !overModalBox</span>
+<span class="d-ctx">               &amp;&amp; !graphDraggingRef.current &amp;&amp; !isHoverSuppressed()) {</span>
+<span class="d-del">-            const sel = resolveSelectionRef.current(e.latlng.lat, e.latlng.lng);</span>
+<span class="d-add">+            const sel = resolveDragSnapRef.current(e.latlng.lat, e.latlng.lng);</span>
+<span class="d-ctx">             if (sel?.target?.kind === &quot;edge&quot;</span>
+<span class="d-ctx">                 &amp;&amp; winnersRef.current.some((w) =&gt; w.edgeIdx === sel.target.index)) {</span>
+<span class="d-ctx">               proposalTarget = sel.target;</span>
+<span class="d-hunk">@@ -2815,12 +2797,24 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         const dragging = graphDraggingRef.current;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         // During drag: suppress hover highlight and tooltip, but still compute</span>
+<span class="d-del">-        // snap below. Otherwise resolve the hover target through the unified</span>
+<span class="d-del">-        // hierarchy so hover reflects exactly the component a click would pin.</span>
+<span class="d-add">+        // snap below. Otherwise resolve the hover target through the SAME</span>
+<span class="d-add">+        // hierarchy a click&#x27;s snap uses — sticky proposal first (a click in a</span>
+<span class="d-add">+        // proposal&#x27;s snap annulus links to it, so hover rings the proposal&#x27;s</span>
+<span class="d-add">+        // edge exactly like the drag drop-preview), then the shared drag-snap</span>
+<span class="d-add">+        // resolver: over a polygon the full hierarchy, off-polygon</span>
+<span class="d-add">+        // radius-bounded, and far from everything NO hover — a click there</span>
+<span class="d-add">+        // places a free (unsnapped) waypoint and pins nothing, so hover must</span>
+<span class="d-add">+        // show nothing too. resolveSelection&#x27;s always-resolve fallback would</span>
+<span class="d-add">+        // highlight a component the click can&#x27;t select.</span>
+<span class="d-ctx">         let newTarget: HoverTarget | null = null;</span>
+<span class="d-ctx">         if (!dragging) {</span>
+<span class="d-del">-          const sel = resolveSelectionRef.current(e.latlng.lat, e.latlng.lng);</span>
+<span class="d-del">-          newTarget = sel?.target ?? null;</span>
+<span class="d-add">+          const sticky = stickyProposalSnapRef.current(e.latlng.lat, e.latlng.lng);</span>
+<span class="d-add">+          if (sticky) {</span>
+<span class="d-add">+            newTarget = sticky.edgeIdx != null ? { kind: &quot;edge&quot;, index: sticky.edgeIdx } : null;</span>
+<span class="d-add">+          } else {</span>
+<span class="d-add">+            const sel = resolveDragSnapRef.current(e.latlng.lat, e.latlng.lng);</span>
+<span class="d-add">+            newTarget = sel?.target ?? null;</span>
+<span class="d-add">+          }</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         // Don&#x27;t hover the component that&#x27;s already selected — its pinned modal</span>
+<span class="d-hunk">@@ -2848,8 +2842,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         // Snap position: only compute when actually dragging (path-drag system</span>
+<span class="d-ctx">         // is the only consumer). Skipping when idle saves ~100k iterations</span>
+<span class="d-del">-        // on every mousemove. Uses hitTest directly (in-radius only) so the drag</span>
+<span class="d-del">-        // stays free when far from the graph — not resolveSelection&#x27;s edge fallback.</span>
+<span class="d-add">+        // on every mousemove. Uses the shared drag-snap resolver so the live</span>
+<span class="d-add">+        // trail agrees with the committed drop (block-aware over polygons,</span>
+<span class="d-add">+        // radius-bounded off them so the drag stays free far from the graph).</span>
+<span class="d-ctx">         if (!dragging) return;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         // Sticky proposal snap wins: snap the live trail to the proposal midpoint</span>
+<span class="d-hunk">@@ -2863,10 +2858,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           return;</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-        const hit = hitTest(</span>
+<span class="d-del">-          data, map, e.containerPoint.x, e.containerPoint.y, e.latlng.lat, e.latlng.lng,</span>
+<span class="d-del">-          edgeIndexRef.current, nodeIndexRef.current</span>
+<span class="d-del">-        );</span>
+<span class="d-add">+        const hit = resolveDragSnapRef.current(e.latlng.lat, e.latlng.lng);</span>
+<span class="d-ctx">         if (hit) {</span>
+<span class="d-ctx">           const snapPos = { lat: hit.snapLat, lng: hit.snapLng };</span>
+<span class="d-ctx">           onSnapRef.current?.(snapPos);</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes-node-parity.diff</code> by <code>changelog/build_node_parity_report.py</code>.
+    Regenerate with <code>git diff b47a197^..b47a197 &gt; changelog/changes-node-parity.diff &amp;&amp;
+    python changelog/build_node_parity_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

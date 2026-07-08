@@ -1,0 +1,514 @@
+diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
+index e0a4d52..5e325cd 100644
+--- a/client-react/src/components/GraphLayer/GraphLayer.tsx
++++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -206,14 +206,23 @@ function resolveAddress(
+ // ---------------------------------------------------------------------------
+ 
+ // Unified radii — used for hover, snap, pinned highlight, and tooltip lookup
+-const SNAP_EDGE_PX = 4;   // hit-test radius for edges
+-// Node priority radius — a node within it ALWAYS wins over edges (the original
+-// model, just reachable: the old 3px made nodes practically impossible to
+-// hover deliberately; edges have a 4px radius PLUS an unlimited nearest-edge
+-// fallback, so they won everything). No yield-to-closer-edge games: absolute
+-// priority is predictable, and edges stay hoverable along their length (nodes
+-// only sit at ends and junctions).
+-const SNAP_NODE_PX = 8;
++const SNAP_EDGE_PX = 4;   // hit-test radius for edges (radius-bounded callers only)
++// Node/edge PARITY: the ends of every segment belong to its endpoint NODES.
++// The nearest edge decides the hit, then the projection parameter t decides
++// the final target — t in the outer NODE_END_SHARE of the segment resolves
++// to that end's node instead. At 0.25 per end, nodes own half of every
++// edge's catchment area (plus the clamped region beyond the endpoints), so
++// random clicks split ~50/50 node/edge. This is deliberately the ONLY node
++// rule — it's scale-invariant, so the split holds at every zoom:
++//   - A pixel-radius node disc can never achieve parity: distance-to-nearest-
++//     node is always >= distance-to-nearest-edge (nodes ARE edge endpoints),
++//     so any "pick the closer" rule degenerates to all-edges.
++//   - An absolute-priority disc overshoots the moment edges get short on
++//     screen (park paths at z15 have geometry nodes every 4-16px, so an 8px
++//     disc paves the whole line with node hits).
++// Hovering exactly on a junction still yields the node: the nearest edge is
++// an incident one and t clamps to its node end.
++const NODE_END_SHARE = 0.25;
+ // While a feature is pinned, a re-click within this screen distance of it keeps
+ // the SAME selection rather than re-resolving to a neighbour/endpoint. Stops the
+ // open card — which occludes its own icon — from drifting as you click near it.
+@@ -360,61 +369,26 @@ function buildEdgeIndex(data: GraphTopology): Flatbush | null {
+ }
+ 
+ /**
+- * Find the edge with the minimum pixel distance from (px,py).
+- * No radius limit — used to guarantee hover/click always select *some* segment.
++ * Unified hit-test: resolve (px,py) to a node or edge with node/edge PARITY.
+  *
+- * With a spatial index: O(log n + k) — query the index for k nearest bboxes,
+- * then compute exact projected-pixel distance for just those candidates.
+- * Without: brute-force fallback used during the brief window before the
+- * index is built on first topology load.
+- */
+-function findNearestEdgeIndex(
+-  data: GraphData,
+-  map: L.Map,
+-  px: number, py: number,
+-  index: Flatbush | null,
+-  queryLng: number,
+-  queryLat: number,
+-  allowEdge?: (i: number) => boolean
+-): number | null {
+-  if (data.nEdges === 0) return null;
+-
+-  const checkEdge = (i: number, currentBestDist: number, currentBestIdx: number): [number, number] => {
+-    const fromPt = map.latLngToContainerPoint([nodeLat(data, edgeFrom(data, i)), nodeLon(data, edgeFrom(data, i))]);
+-    const toPt = map.latLngToContainerPoint([nodeLat(data, edgeTo(data, i)), nodeLon(data, edgeTo(data, i))]);
+-    const dist = pointToSegmentDist(px, py, fromPt.x, fromPt.y, toPt.x, toPt.y);
+-    return dist < currentBestDist ? [dist, i] : [currentBestDist, currentBestIdx];
+-  };
+-
+-  let bestDist = Infinity;
+-  let bestIdx = -1;
+-
+-  if (index) {
+-    // flatbush applies the filter BEFORE counting results, so a constrained
+-    // query still returns up to K matching candidates however sparse they are.
+-    const candidates = index.neighbors(queryLng, queryLat, INDEX_NEIGHBOR_K, Infinity, allowEdge);
+-    for (const i of candidates) {
+-      [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);
+-    }
+-  } else {
+-    // Brief fallback while the index is being built
+-    for (let i = 0; i < data.nEdges; i++) {
+-      if (allowEdge && !allowEdge(i)) continue;
+-      [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);
+-    }
+-  }
+-
+-  return bestIdx >= 0 ? bestIdx : null;
+-}
+-
+-/**
+- * Unified hit-test: find the nearest node or edge within snap radius.
+- * Nodes within SNAP_NODE_PX win; otherwise edges within SNAP_EDGE_PX.
+- * Returns the target and projected snap position.
++ * Hierarchy:
++ *   1. The nearest edge within `maxEdgeDistPx` decides — but its ends belong
++ *      to its endpoint nodes: a projection parameter t in the outer
++ *      NODE_END_SHARE of the segment resolves to that end's node instead of
++ *      the edge (see the constant's comment for why this is the ONLY node
++ *      rule). Degenerate self-edges (e-bike stations) are never split —
++ *      they stay edge targets.
++ *   2. maxEdgeDistPx === Infinity (always-resolve callers) with no eligible
++ *      edge: the nearest eligible node, uncapped — a block whose only
++ *      member is a node is still selectable from anywhere in its polygon.
+  *
+- * With spatial indices: each loop runs over the top-k bbox-nearest candidates
+- * (typically <30 per call) instead of all nodes/edges. Path-drag fires this
+- * on every mousemove via the snap closure, so this is the hot path.
++ * Radius-bounded callers (the off-polygon waypoint snap and drag preview)
++ * use the SNAP_EDGE_PX default so dragging stays free far from the graph;
++ * resolveSelection passes Infinity so a selection always resolves.
++ *
++ * With spatial indices each scan touches only the top-k bbox-nearest
++ * candidates (typically <30 per call) instead of all nodes/edges. Path-drag
++ * fires this on every mousemove via the snap closure, so this is the hot path.
+  */
+ function hitTest(
+   data: GraphData,
+@@ -424,34 +398,17 @@ function hitTest(
+   edgeIndex: Flatbush | null,
+   nodeIndex: Flatbush | null,
+   allowEdge?: (i: number) => boolean,
+-  allowNode?: (i: number) => boolean
++  allowNode?: (i: number) => boolean,
++  maxEdgeDistPx: number = SNAP_EDGE_PX
+ ): HitResult | null {
+-  // 1. Nodes — absolute priority within SNAP_NODE_PX.
+-  let bestNode: number | null = null;
+-  let bestNodeDist = SNAP_NODE_PX;
+-
+-  const checkNode = (i: number) => {
+-    const pt = map.latLngToContainerPoint([nodeLat(data, i), nodeLon(data, i)]);
+-    const dist = Math.sqrt((px - pt.x) ** 2 + (py - pt.y) ** 2);
+-    if (dist < bestNodeDist) {
+-      bestNodeDist = dist;
+-      bestNode = i;
+-    }
+-  };
+-
+-  if (nodeIndex) {
+-    const candidates = nodeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K, Infinity, allowNode);
+-    for (const i of candidates) checkNode(i);
+-  } else {
+-    for (let i = 0; i < data.nNodes; i++) {
+-      if (allowNode && !allowNode(i)) continue;
+-      checkNode(i);
+-    }
+-  }
++  const nodeResult = (i: number): HitResult => ({
++    target: { kind: "node", index: i },
++    snapLat: nodeLat(data, i), snapLng: nodeLon(data, i),
++  });
+ 
+-  // 2. Edges — project onto segment for snap position
++  // 1. Nearest edge within maxEdgeDistPx.
+   let bestEdge: number | null = null;
+-  let bestEdgeDist = SNAP_EDGE_PX;
++  let bestEdgeDist = maxEdgeDistPx;
+ 
+   const checkEdge = (i: number) => {
+     const fromIdx = edgeFrom(data, i), toIdx = edgeTo(data, i);
+@@ -465,6 +422,8 @@ function hitTest(
+   };
+ 
+   if (edgeIndex) {
++    // flatbush applies the filter BEFORE counting results, so a constrained
++    // query still returns up to K matching candidates however sparse they are.
+     const candidates = edgeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K, Infinity, allowEdge);
+     for (const i of candidates) checkEdge(i);
+   } else {
+@@ -474,19 +433,54 @@ function hitTest(
+     }
+   }
+ 
+-  // 3. Node in radius wins outright; otherwise the edge.
+-  if (bestNode !== null) {
+-    return {
+-      target: { kind: "node", index: bestNode },
+-      snapLat: nodeLat(data, bestNode), snapLng: nodeLon(data, bestNode),
+-    };
+-  }
+-
+   if (bestEdge !== null) {
++    // Parity split: t in the outer NODE_END_SHARE hands the hit to that
++    // end's node. t is computed in PIXEL space (the same space the distance
++    // ranking uses) — lat/lng space is anisotropic at NYC latitudes.
++    const fromIdx = edgeFrom(data, bestEdge), toIdx = edgeTo(data, bestEdge);
++    const fromPt = map.latLngToContainerPoint([nodeLat(data, fromIdx), nodeLon(data, fromIdx)]);
++    const toPt = map.latLngToContainerPoint([nodeLat(data, toIdx), nodeLon(data, toIdx)]);
++    const dx = toPt.x - fromPt.x, dy = toPt.y - fromPt.y;
++    const lenSq = dx * dx + dy * dy;
++    if (lenSq > 0) {
++      const t = Math.max(0, Math.min(1,
++        ((px - fromPt.x) * dx + (py - fromPt.y) * dy) / lenSq
++      ));
++      if (t < NODE_END_SHARE || t > 1 - NODE_END_SHARE) {
++        const nid = t < 0.5 ? fromIdx : toIdx;
++        if (!allowNode || allowNode(nid)) return nodeResult(nid);
++      }
++    }
+     const { lat: snapLat, lng: snapLng } = projectOntoEdge(data, bestEdge, lat, lng);
+     return { target: { kind: "edge", index: bestEdge }, snapLat, snapLng };
+   }
+ 
++  // 2. Always-resolve mode with no eligible edge (a capture-only node cell):
++  // the nearest eligible node, uncapped. Node scan only runs on this cold
++  // path — the hot path above never touches the node index.
++  if (maxEdgeDistPx === Infinity) {
++    let bestNode: number | null = null;
++    let bestNodeDist = Infinity;
++    const checkNode = (i: number) => {
++      const pt = map.latLngToContainerPoint([nodeLat(data, i), nodeLon(data, i)]);
++      const dist = (px - pt.x) ** 2 + (py - pt.y) ** 2;
++      if (dist < bestNodeDist) {
++        bestNodeDist = dist;
++        bestNode = i;
++      }
++    };
++    if (nodeIndex) {
++      const candidates = nodeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K, Infinity, allowNode);
++      for (const i of candidates) checkNode(i);
++    } else {
++      for (let i = 0; i < data.nNodes; i++) {
++        if (allowNode && !allowNode(i)) continue;
++        checkNode(i);
++      }
++    }
++    if (bestNode !== null) return nodeResult(bestNode);
++  }
++
+   return null;
+ }
+ 
+@@ -921,12 +915,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // highlighted component always equals the vote target. Hierarchy:
+   //   1. overrideEdgeIdx (a top-proposal icon) dominates everything.
+   //   2. the block polygon under the point constrains the search to that
+-  //      block's own members (node in-radius, then edge in-radius, then its
+-  //      nearest member with no cap) — a block is selectable from anywhere
+-  //      inside its polygon and never resolves to a neighbour's edges.
+-  //   3. no block under the point: a node within SNAP_NODE_PX wins (same
+-  //      radius for hover and click).
+-  //   4. otherwise the nearest edge (in-radius via hitTest, else globally).
++  //      block's own members — a block is selectable from anywhere inside
++  //      its polygon and never resolves to a neighbour's edges.
++  //   3. no block under the point: unrestricted search.
++  // Both searches are ONE uncapped hitTest: nearest edge with its ends
++  // handed to their nodes (NODE_END_SHARE parity split), else nearest node —
++  // so a selection always resolves and nodes are as reachable as edges
++  // everywhere, not just inside a priority disc.
+   // Pulls indices/data from refs so the closure stays stable across renders.
+   const resolveSelection = useCallback((
+     lat: number, lng: number, overrideEdgeIdx?: number | null
+@@ -957,7 +952,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       const { edgeInBlock, nodeInBlock } = filters;
+       const hit = hitTest(
+         data, map, pt.x, pt.y, lat, lng,
+-        edgeIndexRef.current, nodeIndexRef.current, edgeInBlock, nodeInBlock
++        edgeIndexRef.current, nodeIndexRef.current, edgeInBlock, nodeInBlock,
++        Infinity
+       );
+       if (hit) {
+         const voteEdgeId = hit.target.kind === "edge"
+@@ -965,26 +961,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+           : adjShortestInBlock(data, adj, hit.target.index, filters.blockId);
+         return { target: hit.target, snapLat: hit.snapLat, snapLng: hit.snapLng, voteEdgeId };
+       }
+-      // Nothing in radius — the hovered block still names the intent, so
+-      // resolve to its nearest member edge with no radius cap.
+-      const nearestInBlock = findNearestEdgeIndex(
+-        data, map, pt.x, pt.y, edgeIndexRef.current, lng, lat, edgeInBlock
+-      );
+-      if (nearestInBlock !== null) {
+-        const snap = projectOntoEdge(data, nearestInBlock, lat, lng);
+-        return {
+-          target: { kind: "edge", index: nearestInBlock },
+-          snapLat: snap.lat, snapLng: snap.lng, voteEdgeId: nearestInBlock,
+-        };
+-      }
+       // A block with no reachable members (stale bake) falls through to the
+-      // unrestricted paths below.
++      // unrestricted path below.
+     }
+ 
+-    // 3. Node-then-edge within radius.
++    // 3. Unrestricted, uncapped — always resolves when the graph has edges.
+     const hit = hitTest(
+       data, map, pt.x, pt.y, lat, lng,
+-      edgeIndexRef.current, nodeIndexRef.current
++      edgeIndexRef.current, nodeIndexRef.current, undefined, undefined,
++      Infinity
+     );
+     if (hit) {
+       const voteEdgeId = hit.target.kind === "edge"
+@@ -993,18 +978,6 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       return { target: hit.target, snapLat: hit.snapLat, snapLng: hit.snapLng, voteEdgeId };
+     }
+ 
+-    // 4. Nearest-edge fallback (no radius) so a selection always resolves.
+-    const nearestEdgeIdx = findNearestEdgeIndex(
+-      data, map, pt.x, pt.y, edgeIndexRef.current, lng, lat
+-    );
+-    if (nearestEdgeIdx !== null) {
+-      const snap = projectOntoEdge(data, nearestEdgeIdx, lat, lng);
+-      return {
+-        target: { kind: "edge", index: nearestEdgeIdx },
+-        snapLat: snap.lat, snapLng: snap.lng, voteEdgeId: nearestEdgeIdx,
+-      };
+-    }
+-
+     return null;
+   }, [map]);
+ 
+@@ -1020,6 +993,35 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // never a re-derivation from the stored point.
+   const lastSnapSelectionRef = useRef<ResolvedSelection | null>(null);
+ 
++  // The waypoint-drag resolver — ONE function shared by the registered
++  // snapFn, the drop-preview highlight, and the live-trail snap so a drag's
++  // preview, trail, and committed drop always agree. Over a block polygon it
++  // IS the hover resolver (full hierarchy, always resolves); off-polygon
++  // it's the radius-bounded hitTest so dragging stays free far from the
++  // graph — not resolveSelection's always-resolve fallback.
++  const resolveDragSnap = useCallback((
++    lat: number, lng: number
++  ): ResolvedSelection | null => {
++    const data = graphDataRef.current;
++    if (!data) return null;
++    const filters = blockFiltersAt(data, nodeAdjRef.current, lat, lng);
++    if (filters) return resolveSelectionRef.current(lat, lng);
++    const pt = map.latLngToContainerPoint([lat, lng]);
++    const result = hitTest(
++      data, map, pt.x, pt.y, lat, lng,
++      edgeIndexRef.current, nodeIndexRef.current
++    );
++    if (!result) return null;
++    const voteEdgeId = result.target.kind === "edge"
++      ? result.target.index
++      : adjShortest(data, nodeAdjRef.current, result.target.index);
++    return {
++      target: result.target, snapLat: result.snapLat, snapLng: result.snapLng, voteEdgeId,
++    };
++  }, [map]);
++  const resolveDragSnapRef = useRef(resolveDragSnap);
++  useEffect(() => { resolveDragSnapRef.current = resolveDragSnap; }, [resolveDragSnap]);
++
+   // Console/headless probe: cityedit.resolveAt(lat, lng) interrogates the live
+   // resolver so a debugging session can see exactly what a point resolves to
+   // (hovered block, target kind/index, vote edge) without synthetic mouse events.
+@@ -1027,9 +1029,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     debugProbe("resolveAt", (lat: number, lng: number) => {
+       const sel = resolveSelectionRef.current(lat, lng);
+       const data = graphDataRef.current;
++      // hoverTarget is what the cursor/click actually see (the gated drag-snap
++      // resolver): null far from the graph, where a click pins nothing.
++      // sticky (a top-proposal snap annulus) means a click LINKS to that
++      // proposal instead of pinning — hover rings stickyEdgeIdx.
++      const hover = resolveDragSnapRef.current(lat, lng);
++      const sticky = stickyProposalSnapRef.current(lat, lng);
+       return {
+         hoveredBlock: data?.edgeBlockId ? blockIdAtLatLng(lat, lng) : null,
+         target: sel?.target ?? null,
++        hoverTarget: hover?.target ?? null,
++        sticky: !!sticky,
++        stickyEdgeIdx: sticky?.edgeIdx ?? null,
+         snapLat: sel?.snapLat ?? null,
+         snapLng: sel?.snapLng ?? null,
+         voteEdgeId: sel?.voteEdgeId ?? null,
+@@ -1039,47 +1050,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     });
+   }, []);
+ 
+-  // Register graph snap function for use by path drag. Uses hitTest directly
+-  // (in-radius only, null when out of range) so dragging stays free when far
+-  // from the graph — unlike resolveSelection, which always resolves to an edge.
++  // Register graph snap function for use by path drag. Resolves through the
++  // shared drag-snap resolver and RECORDS the resolution — the pinned effect
++  // reuses the recorded target when the point it receives is the coordinate
++  // this snap returned, so the click selects exactly what hover showed.
++  // Re-deriving a target from a stored coordinate is inherently leaky: the
++  // snapped point can sit in a different polygon than the cursor, and pixel
++  // radii shift with zoom.
+   useEffect(() => {
+-    setSnapFn((m: L.Map, lat: number, lng: number) => {
++    setSnapFn((_m: L.Map, lat: number, lng: number) => {
+       // Proposals are sticky drop targets: a drop near one links to its midpoint.
+       const sticky = stickyProposalSnapRef.current(lat, lng);
+       if (sticky) return { lat: sticky.lat, lng: sticky.lng };
+-      const data = graphDataRef.current;
+-      if (!data) return null;
+-
+-      // Over a block polygon: use THE hover resolver verbatim (full hierarchy,
+-      // same filters, same fallbacks) and RECORD the resolution — the pinned
+-      // effect reuses the recorded target when the point it receives is the
+-      // coordinate this snap returned, so the click selects exactly what hover
+-      // showed. Re-deriving a target from a stored coordinate is inherently
+-      // leaky: the snapped point can sit in a different polygon than the
+-      // cursor, and pixel radii shift with zoom.
+-      const filters = blockFiltersAt(data, nodeAdjRef.current, lat, lng);
+-      if (filters) {
+-        const sel = resolveSelectionRef.current(lat, lng);
+-        if (!sel) return null;
+-        lastSnapSelectionRef.current = sel;
+-        return { lat: sel.snapLat, lng: sel.snapLng };
+-      }
+-
+-      // Off-polygon: radius-bounded hit only, so dragging stays free when far
+-      // from the graph (unlike resolveSelection's always-resolve fallback).
+-      const pt = m.latLngToContainerPoint([lat, lng]);
+-      const result = hitTest(
+-        data, m, pt.x, pt.y, lat, lng,
+-        edgeIndexRef.current, nodeIndexRef.current
+-      );
+-      if (!result) return null;
+-      const voteEdgeId = result.target.kind === "edge"
+-        ? result.target.index
+-        : adjShortest(data, nodeAdjRef.current, result.target.index);
+-      lastSnapSelectionRef.current = {
+-        target: result.target, snapLat: result.snapLat, snapLng: result.snapLng, voteEdgeId,
+-      };
+-      return { lat: result.snapLat, lng: result.snapLng };
++      const sel = resolveDragSnapRef.current(lat, lng);
++      if (!sel) return null;
++      lastSnapSelectionRef.current = sel;
++      return { lat: sel.snapLat, lng: sel.snapLng };
+     });
+   }, [setSnapFn]);
+ 
+@@ -1768,8 +1754,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+ 
+   // Light the graph edge (or node) a live waypoint drag would snap to — the drop
+   // preview. Mirrors the registered snapFn exactly (sticky proposal first, then
+-  // hitTest) so the highlight matches where the waypoint actually lands on release.
+-  // Out of snap range → no highlight, matching the "drag stays free" snap rule.
++  // the shared drag-snap resolver) so the highlight matches where the waypoint
++  // actually lands on release. Out of snap range → no highlight, matching the
++  // "drag stays free" snap rule.
+   useEffect(() => {
+     let next: HoverTarget | null = null;
+     if (dragPoint) {
+@@ -1781,12 +1768,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+           // diamond's own drop-target ring (dropTargetRbtpId) is the affordance.
+           next = sticky.edgeIdx != null ? { kind: "edge", index: sticky.edgeIdx } : null;
+         } else {
+-          const pt = map.latLngToContainerPoint([dragPoint.lat, dragPoint.lng]);
+-          const result = hitTest(
+-            data, map, pt.x, pt.y, dragPoint.lat, dragPoint.lng,
+-            edgeIndexRef.current, nodeIndexRef.current
+-          );
+-          if (result) next = result.target;
++          next = resolveDragSnapRef.current(dragPoint.lat, dragPoint.lng)?.target ?? null;
+         }
+       }
+     }
+@@ -2790,7 +2772,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+           let proposalTarget: HoverTarget | null = null;
+           if (suppressHoverRef.current && !overModalRef.current && !overModalBox
+               && !graphDraggingRef.current && !isHoverSuppressed()) {
+-            const sel = resolveSelectionRef.current(e.latlng.lat, e.latlng.lng);
++            const sel = resolveDragSnapRef.current(e.latlng.lat, e.latlng.lng);
+             if (sel?.target?.kind === "edge"
+                 && winnersRef.current.some((w) => w.edgeIdx === sel.target.index)) {
+               proposalTarget = sel.target;
+@@ -2815,12 +2797,24 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+         const dragging = graphDraggingRef.current;
+ 
+         // During drag: suppress hover highlight and tooltip, but still compute
+-        // snap below. Otherwise resolve the hover target through the unified
+-        // hierarchy so hover reflects exactly the component a click would pin.
++        // snap below. Otherwise resolve the hover target through the SAME
++        // hierarchy a click's snap uses — sticky proposal first (a click in a
++        // proposal's snap annulus links to it, so hover rings the proposal's
++        // edge exactly like the drag drop-preview), then the shared drag-snap
++        // resolver: over a polygon the full hierarchy, off-polygon
++        // radius-bounded, and far from everything NO hover — a click there
++        // places a free (unsnapped) waypoint and pins nothing, so hover must
++        // show nothing too. resolveSelection's always-resolve fallback would
++        // highlight a component the click can't select.
+         let newTarget: HoverTarget | null = null;
+         if (!dragging) {
+-          const sel = resolveSelectionRef.current(e.latlng.lat, e.latlng.lng);
+-          newTarget = sel?.target ?? null;
++          const sticky = stickyProposalSnapRef.current(e.latlng.lat, e.latlng.lng);
++          if (sticky) {
++            newTarget = sticky.edgeIdx != null ? { kind: "edge", index: sticky.edgeIdx } : null;
++          } else {
++            const sel = resolveDragSnapRef.current(e.latlng.lat, e.latlng.lng);
++            newTarget = sel?.target ?? null;
++          }
+         }
+ 
+         // Don't hover the component that's already selected — its pinned modal
+@@ -2848,8 +2842,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+ 
+         // Snap position: only compute when actually dragging (path-drag system
+         // is the only consumer). Skipping when idle saves ~100k iterations
+-        // on every mousemove. Uses hitTest directly (in-radius only) so the drag
+-        // stays free when far from the graph — not resolveSelection's edge fallback.
++        // on every mousemove. Uses the shared drag-snap resolver so the live
++        // trail agrees with the committed drop (block-aware over polygons,
++        // radius-bounded off them so the drag stays free far from the graph).
+         if (!dragging) return;
+ 
+         // Sticky proposal snap wins: snap the live trail to the proposal midpoint
+@@ -2863,10 +2858,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+           return;
+         }
+ 
+-        const hit = hitTest(
+-          data, map, e.containerPoint.x, e.containerPoint.y, e.latlng.lat, e.latlng.lng,
+-          edgeIndexRef.current, nodeIndexRef.current
+-        );
++        const hit = resolveDragSnapRef.current(e.latlng.lat, e.latlng.lng);
+         if (hit) {
+           const snapPos = { lat: hit.snapLat, lng: hit.snapLng };
+           onSnapRef.current?.(snapPos);
