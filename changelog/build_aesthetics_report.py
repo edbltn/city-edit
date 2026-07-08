@@ -113,6 +113,36 @@ SECTIONS = [
             "client-react/src/context/ThemeContext.tsx",
         ],
     },
+    {
+        "id": "heatring",
+        "tag": "Client · proposal markers · round 2",
+        "title": "3 · Heat is a solid glow ring — the outline belongs to hover again",
+        "symptom": (
+            "Hot top proposals brightened and thickened their own outline, which is exactly what hover "
+            "does (outline → ink + lift) — so a busy map read as a field of hovered pins."
+        ),
+        "cause": [
+            "The first-pass heat treatment burned the pin's outline toward the ramp color (100% mix, up to "
+            "+0.75px thicker) — the same visual channel hover and the selected double ring already own. Two "
+            "meanings on one channel: overloaded.",
+        ],
+        "fixes": [
+            "Four alternative languages were checked in first (underglow shadow, heat-strip meter, ember "
+            "dot, deeper fill stain); direction chosen: a glowing border — solid, no fade/transparency.",
+            "Implementation: a new <code>-glow</code> path — the pin's own shape stroked WIDE in the sampled "
+            "ramp color and painted first, so the paper fill hides the inner half and the outer half reads "
+            "as a hard, fully-opaque ring hugging the outside of the pin. Zero blur, zero alpha; follows the "
+            "square + tail and the diamond exactly. Width grows with heat, up to ≈1.75px past the hairline "
+            "(thinned from ≈2.75px after review).",
+            "The outline itself is now deliberately heat-blind: hover (→ ink) and the selected/start/end "
+            "double ring are its only states. The subtle 26% warm stain on the paper fill stays, and tinted "
+            "(start/end) pins still suppress heat entirely.",
+        ],
+        "files": [
+            "client-react/src/styles/globals.css",
+            "client-react/src/components/GraphLayer/voteTypeIcon.ts",
+        ],
+    },
 ]
 
 VERIFY = [
@@ -128,6 +158,10 @@ VERIFY = [
     "(screenshots at city and neighborhood zoom). Legend gradient ends in the tip "
     "(<code>--heat-gradient</code> checked: … rgb(244,206,96) 85%, rgb(251,237,195)).",
     "No console errors on either map; <code>npx tsc --noEmit</code> clean; client suite green — 195/195.",
+    "Round 2, live on /m/nyc-walkways: heat rings differentiate by hue and width (tip-cream on the "
+    "hottest pins, gold and orange below); hovering a hot pin shows the ink outline + 1.1× lift OVER its "
+    "unchanged ring — the two states finally compose; a start-tinted pin correctly drops its ring "
+    "(zoomed screenshots of all three states).",
     "Commit hygiene: the working tree also carries the uncommitted rbtp-parity workstream in the same "
     "files, so the two commits were staged surgically (index-only HEAD+fix versions) — "
     "<code>git show e24a359 54c1a55</code> contain ONLY these fixes; parity edits remain untouched in the "
@@ -146,6 +180,9 @@ CHECKLIST = [
     "Check the Votes legend swatch on a dark map: it should end in a pale (near-white) tip after the gold.",
     "Open a LIGHT-basemap map (e.g. a trees/terracotta/plum styled map): the hottest blocks should run "
     "DARKER past peak (toward ink), not lighter.",
+    "Round 2 — hover a HOT pin: the outline snaps to ink and the pin lifts, while its colored ring "
+    "stays put; un-hovered hot pins must no longer look hovered.",
+    "Round 2 — judge the ring width on the hottest pin (≈1.75px past the hairline): thin enough?",
     "Sanity-check a quiet map (few votes): it should still render proportionally cool — the "
     "HEAT_FULL_SCALE floor is untouched.",
 ]
@@ -191,6 +228,8 @@ FILE_CONTEXT = {
             "INNER_PATH — true 2.25px contour of the pin (tail tip rises ≈2.9)",
             "INNER_SQUARE_PATH — 2.25px contour of the plain square",
             "INNER_DIAMOND_PATH — 2.25px contour of the kite (was hand-placed ≈3.5-4.2px)",
+            "heat option docs + heatStyle comment — glow-ring language (round 2)",
+            "-glow path prepended to the pin SVG, stroked by CSS into the solid heat ring (round 2)",
         ],
     },
     "client-react/src/mapStyles.ts": {
@@ -241,6 +280,21 @@ FILE_CONTEXT = {
             "buildHeatRampStops(heat, mapStyle.basemap) + tipColor = sampleRamp(1) in the canvas redraw",
             "ctx.strokeStyle = tipColor in the hottest-edge accent pass",
             "basemap added to the redraw + indicator memo deps; PBTP rampStops call updated",
+        ],
+    },
+    "client-react/src/styles/globals.css": {
+        "on": ["React / Leaflet client"],
+        "module": ("React client · styles", "the single global stylesheet: design tokens + every component's rules"),
+        "file": ("globals.css", "~2k LOC — tokens, map chrome, indicator/marker states, cards"),
+        "outline": [
+            ("Design tokens", ":root palette per basemap", False),
+            (".vote-type-indicator block", "heat comment + -glow ring rule + heat-blind outer", True),
+            ("hover / selected rules", "outline → ink · double ring (unchanged, now sole outline owners)", False),
+        ],
+        "blocks": [
+            "heat comment — ink language replaced by the solid glow-ring description",
+            ".vote-type-indicator-glow — wide stroke under the fill; width 2px + heat*3px",
+            ".vote-type-indicator-outer — constant hairline; heat color-mix and width calc removed",
         ],
     },
     "client-react/src/context/ThemeContext.tsx": {
@@ -435,7 +489,7 @@ def main():
   every nyc-bikes block from 46 to 617 votes (4,152 blocks — exactly the hottest parts of the map) one
   identical gold. The ramp now keeps resolving through peak into white-hot (dark basemaps) or ink-dark
   (light ones), across the block fill, the canvas heatmap, the proposal-pin tint, and the legend.
-  <br><br><em>Note: the working tree also carries the uncommitted rbtp-parity workstream in
+  <br><br>Round 2 (same day): heat moved OFF the pin outline entirely — hot pins used to brighten and thicken their border, which is hover's channel, so everything hot looked hovered. Heat is now a solid glow ring: the pin's own shape stroked wide in the ramp color under the paper fill, a hard fully-opaque band outside the hairline — no blur, no fade — leaving the outline to hover and selection alone.\n  <br><br><em>Note: the working tree also carries the uncommitted rbtp-parity workstream in
   <code>voteTypeIcon.ts</code> / <code>GraphLayer.tsx</code>; these two commits were staged surgically and
   the diff below (captured from the commits) contains ONLY this workstream. Two entangled one-liners — the
   fanned-diamond inner contour value and the third <code>buildHeatRampStops</code> basemap arg, both on

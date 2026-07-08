@@ -41,7 +41,11 @@
     painted one identical gold. Every ramp now extends past peak into a computed incandescent tip
     (white-hot on dark basemaps, ink-dark on light ones), stops respaced to 0/.35/.65/.85/1, the block
     fill spans the full heat domain with a heat-driven outline width, and the canvas hottest-edge accent
-    strokes the tip — legend, canvas heatmap, proposal pins, and block fill all still agree.</p>
+    strokes the tip — legend, canvas heatmap, proposal pins, and block fill all still agree. Round 2: heat then moved off the pin outline entirely — hot pins used to brighten their border,
+    which is hover's channel, so everything hot looked hovered. Heat now renders as a solid glow
+    ring: the pin's own shape stroked wide in the ramp color beneath the paper fill — a hard,
+    fully-opaque band outside the hairline, no blur, no fade — leaving the outline to hover and
+    selection alone.</p>
   </a>
 
   <a class="entry" href="./2026-07-07-node-cluster-blocks.html">
