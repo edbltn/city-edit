@@ -2554,7 +2554,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // node's coords) voted an arbitrary incident edge and then collapsed onto it.
     // Resolve a node that has proposals to the edge owning its strongest one, so
     // the selection is an edge throughout. Bare intersections (no proposals) stay
-    // a node — their modal is just an unvotable "no proposals yet" preview.
+    // a node — their modal is just an unvotable "No votes yet" preview.
     let didNodeUpgrade = false;
     if (target?.kind === "node") {
       const up = strongestProposalEdgeForNode(target.index);
@@ -2828,7 +2828,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
   // Safety net for a momentary winners/data desync: if an edge is a current
   // winner but its live breakdown decoded empty, show the winner's own proposal
-  // so a top-proposal card never reads "no proposals yet". Net support maps to
+  // so a top-proposal card never reads "No votes yet". Net support maps to
   // up (positive) so the row's net (up − down) matches the winner's count.
   if (hoverWinner && hoverVoteTypes.length === 0) {
     hoverVoteTypes = [{ label: hoverWinner.label, up: hoverWinner.count, down: 0 }];
@@ -3976,7 +3976,7 @@ function ProposalCard({
               {metaText
                 ?? (rows.length > 0
                   ? `${rows.length} proposal${rows.length !== 1 ? "s" : ""}`
-                  : "no proposals yet")}
+                  : "No votes yet")}
             </div>
             {rows.length > 0 && (
               <div className="graph-proposal-rows" style={voteColumnWidths(rows)}>
