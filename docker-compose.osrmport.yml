@@ -1,8 +1,11 @@
-# Local-dev only: publish the dockerized merged-OSRM on host :5000 so the
-# host-run Flask (OSRM_URL=http://localhost:5000 in server/.env) can route.
+# Local-dev only: publish the dockerized merged-OSRM on host :5005 so the
+# host-run Flask (OSRM_URL=http://localhost:5005 in server/.env) can route.
 # The base compose intentionally keeps OSRM internal; this override restores the
 # host port mapping that local host-Flask dev relies on.
+# Host port is 5005, NOT 5000: macOS AirPlay Receiver (ControlCenter) listens on
+# *:5000 and both steals the bind and answers IPv6 localhost dials with AirTunes
+# errors. Keep this in sync with OSRM_URL in server/.env.
 services:
   osrm:
     ports:
-      - "5000:5000"
+      - "5005:5000"
