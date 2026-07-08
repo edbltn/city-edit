@@ -207,7 +207,16 @@ function resolveAddress(
 
 // Unified radii — used for hover, snap, pinned highlight, and tooltip lookup
 const SNAP_EDGE_PX = 4;   // hit-test radius for edges
-const SNAP_NODE_PX = 3;   // node priority radius (wins over edges when very close)
+// Node targeting radius. Nodes are point features — with the old 3px radius a
+// node was practically impossible to hover deliberately, and one pixel of
+// drift between hover and click handed the target to an edge (edges have a
+// 4px radius PLUS an unlimited nearest-edge fallback, so they won everything).
+const SNAP_NODE_PX = 10;
+// A node inside its radius still yields to an edge the cursor is visibly ON
+// unless the node is nearly as close: node wins iff nodeDist ≤ edgeDist + bias.
+// At a node's own position nodeDist≈edgeDist≈0 → node; mid-edge near a
+// junction the edge stays targetable along its length.
+const NODE_OVER_EDGE_BIAS_PX = 6;
 // While a feature is pinned, a re-click within this screen distance of it keeps
 // the SAME selection rather than re-resolving to a neighbour/endpoint. Stops the
 // open card — which occludes its own icon — from drifting as you click near it.
@@ -420,7 +429,8 @@ function hitTest(
   allowEdge?: (i: number) => boolean,
   allowNode?: (i: number) => boolean
 ): HitResult | null {
-  // 1. Nodes — small radius, highest priority
+  // 1. Nodes — collect the best candidate; the node-vs-edge decision happens
+  // after edges are measured too (see NODE_OVER_EDGE_BIAS_PX).
   let bestNode: number | null = null;
   let bestNodeDist = SNAP_NODE_PX;
 
@@ -441,13 +451,6 @@ function hitTest(
       if (allowNode && !allowNode(i)) continue;
       checkNode(i);
     }
-  }
-
-  if (bestNode !== null) {
-    return {
-      target: { kind: "node", index: bestNode },
-      snapLat: nodeLat(data, bestNode), snapLng: nodeLon(data, bestNode),
-    };
   }
 
   // 2. Edges — project onto segment for snap position
@@ -473,6 +476,17 @@ function hitTest(
       if (allowEdge && !allowEdge(i)) continue;
       checkEdge(i);
     }
+  }
+
+  // 3. Decide: a node in radius wins unless the cursor is visibly ON an edge
+  // and clearly closer to it than to the node.
+  const nodeWins = bestNode !== null &&
+    (bestEdge === null || bestNodeDist <= bestEdgeDist + NODE_OVER_EDGE_BIAS_PX);
+  if (nodeWins && bestNode !== null) {
+    return {
+      target: { kind: "node", index: bestNode },
+      snapLat: nodeLat(data, bestNode), snapLng: nodeLon(data, bestNode),
+    };
   }
 
   if (bestEdge !== null) {
