@@ -112,6 +112,8 @@
   <nav class="toc"><a href="#inset">1</a>
 <a href="#heattip">2</a>
 <a href="#heatring">3</a>
+<a href="#rankspectrum">4</a>
+<a href="#novotescopy">5</a>
     <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
   </nav>
 
@@ -187,6 +189,39 @@
     </section>
     
 
+    <section class="card" id="rankspectrum">
+      <div class="tag">Client · proposal markers · round 3</div>
+      <h2>4 · Each top proposal gets its own color — the ramp pinned to ranking</h2>
+      <h3>Symptom</h3>
+      <p>The glow rings sampled the ramp by log-normalized vote count, so the pack clustered wherever the vote distribution piled up — and the hottest pins wore the new incandescent tip, reading bright rather than like the ramp's own top color.</p>
+      <h3>Root cause</h3>
+      <ul><li>Log-normalized counts are a fine scale for the heat FIELD, but for a small set of discrete markers they waste the spectrum: near-tied counts collapse onto one hue and heavy-tailed counts crowd the top.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Heat = RANKING: dense rank over the visible winners' distinct vote counts (ties share a color), lowest just above the ramp's cold end, hottest = 1 — so the visible set always spans the full spectrum, one hue per rank.</li>
+<li>The color sample is capped at the new exported <code>HEAT_PEAK_POS</code> (0.85): the top-ranked pin wears the ramp's named upper extreme (<code>peak</code>) — the incandescent tip stays reserved for the heatmap itself. Same treatment in both marker families (the RBTP half rides with the parity workstream).</li>
+<li>The ring also slimmed again: ≈1.25px past the hairline at rank 1 (<code>1.75px + heat·2.25px</code> stroke).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx</li>
+<li>client-react/src/mapStyles.ts</li>
+<li>client-react/src/styles/globals.css</li>
+<li>client-react/src/components/GraphLayer/voteTypeIcon.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="novotescopy">
+      <div class="tag">Client · copy</div>
+      <h2>5 · Empty proposal modals say “No votes yet”</h2>
+      <h3>Symptom</h3>
+      <p>An unvoted edge/node's modal read “no proposals yet”.</p>
+      <h3>Root cause</h3>
+      <ul><li>Literal template string — and the absent thing is votes, not proposals.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>No votes yet</code>, capitalized to match the route card's “Selects N blocks” meta line.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
   <section class="card verify" id="verify">
     <div class="tag">Verification</div>
     <h2>What was run</h2>
@@ -195,6 +230,7 @@
 <li>Live on <code>/m/nyc-bikes</code>: block heat now resolves across the top — cross streets green → yellow-green, avenues gold, and the waterfront greenway visibly outburns them in pale white-gold (screenshots at city and neighborhood zoom). Legend gradient ends in the tip (<code>--heat-gradient</code> checked: … rgb(244,206,96) 85%, rgb(251,237,195)).</li>
 <li>No console errors on either map; <code>npx tsc --noEmit</code> clean; client suite green — 195/195.</li>
 <li>Round 2, live on /m/nyc-walkways: heat rings differentiate by hue and width (tip-cream on the hottest pins, gold and orange below); hovering a hot pin shows the ink outline + 1.1× lift OVER its unchanged ring — the two states finally compose; a start-tinted pin correctly drops its ring (zoomed screenshots of all three states).</li>
+<li>Round 3, live on /m/chicago-bikes (712k votes, no blocks): 20 point proposals spread evenly across teal → green → yellow-green → gold at .05-rank steps (checked in the DOM: every pin a distinct --heat/--heat-color pair), top color exactly the bikepaths peak rgb(244,206,96) — not the tip; /m/plum (light basemap): all-tied winners correctly share peak indigo. NYC maps were unverifiable at the time — a concurrent block re-bake left topology/votes mismatched and the stale-cache guard (correctly) refused to paint.</li>
 <li>Commit hygiene: the working tree also carries the uncommitted rbtp-parity workstream in the same files, so the two commits were staged surgically (index-only HEAD+fix versions) — <code>git show e24a359 54c1a55</code> contain ONLY these fixes; parity edits remain untouched in the working tree.</li></ul>
   </section>
 
@@ -217,7 +253,7 @@
     
         <details open>
           <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
-            <span class="stat"><span class="d-add">+8</span> / <span class="d-del">-5</span></span>
+            <span class="stat"><span class="d-add">+25</span> / <span class="d-del">-17</span></span>
           </summary>
           
     <div class="ctx">
@@ -247,9 +283,18 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
-<span class="d-meta">index 779a446..0313e74 100644</span>
+<span class="d-meta">index 779a446..b79c97a 100644</span>
 <span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
 <span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -54,7 +54,7 @@ import {</span>
+<span class="d-ctx"> } <span class="s-kw">from</span> <span class="s-str">&quot;./graphTopology&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> { materializeBlocks, selectionVoteRows } <span class="s-kw">from</span> <span class="s-str">&quot;../../utils/blockSelection&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> { iconForLabel, iconSrc, mapStyleForTheme } <span class="s-kw">from</span> <span class="s-str">&quot;../../themes&quot;</span>;</span>
+<span class="d-del">-<span class="s-kw">import</span> { buildHeatRampStops, sampleHeatRamp } <span class="s-kw">from</span> <span class="s-str">&quot;../../mapStyles&quot;</span>;</span>
+<span class="d-add">+<span class="s-kw">import</span> { buildHeatRampStops, sampleHeatRamp, <span class="s-type">HEAT_PEAK_POS</span> } <span class="s-kw">from</span> <span class="s-str">&quot;../../mapStyles&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> {</span>
+<span class="d-ctx">   getCachedTopology,</span>
+<span class="d-ctx">   setCachedTopology,</span>
 <span class="d-hunk">@@ -2176,8 +2176,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
 <span class="d-ctx">     <span class="s-com">// Stops mirror heatGradientCss (mapStyles.ts) so the legend matches the map.</span></span>
 <span class="d-ctx">     <span class="s-com">// The same ramp feeds the top-proposal pins (see indicatorMarkers), so a pin</span></span>
@@ -281,16 +326,65 @@
 <span class="d-ctx"> </span>
 <span class="d-ctx">   <span class="s-com">// Schedule redraw</span></span>
 <span class="d-ctx">   <span class="s-kw">const</span> scheduleRedraw = <span class="s-fn">useCallback</span>(() =&gt; {</span>
-<span class="d-hunk">@@ -3059,7 +3062,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
-<span class="d-ctx">     <span class="s-com">// intensity. The pin glows + tints to that color, as hot as its votes. The</span></span>
+<span class="d-hunk">@@ -2551,7 +2554,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     <span class="s-com">// node&#x27;s coords) voted an arbitrary incident edge and then collapsed onto it.</span></span>
+<span class="d-ctx">     <span class="s-com">// Resolve a node that has proposals to the edge owning its strongest one, so</span></span>
+<span class="d-ctx">     <span class="s-com">// the selection is an edge throughout. Bare intersections (no proposals) stay</span></span>
+<span class="d-del">-    <span class="s-com">// a node — their modal is just an unvotable &quot;no proposals yet&quot; preview.</span></span>
+<span class="d-add">+    <span class="s-com">// a node — their modal is just an unvotable &quot;No votes yet&quot; preview.</span></span>
+<span class="d-ctx">     <span class="s-kw">let</span> didNodeUpgrade = <span class="s-lit">false</span>;</span>
+<span class="d-ctx">     <span class="s-kw">if</span> (target?.kind === <span class="s-str">&quot;node&quot;</span>) {</span>
+<span class="d-ctx">       <span class="s-kw">const</span> up = <span class="s-fn">strongestProposalEdgeForNode</span>(target.index);</span>
+<span class="d-hunk">@@ -2825,7 +2828,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-com">// Safety net for a momentary winners/data desync: if an edge is a current</span></span>
+<span class="d-ctx">   <span class="s-com">// winner but its live breakdown decoded empty, show the winner&#x27;s own proposal</span></span>
+<span class="d-del">-  <span class="s-com">// so a top-proposal card never reads &quot;no proposals yet&quot;. Net support maps to</span></span>
+<span class="d-add">+  <span class="s-com">// so a top-proposal card never reads &quot;No votes yet&quot;. Net support maps to</span></span>
+<span class="d-ctx">   <span class="s-com">// up (positive) so the row&#x27;s net (up − down) matches the winner&#x27;s count.</span></span>
+<span class="d-ctx">   <span class="s-kw">if</span> (hoverWinner &amp;&amp; hoverVoteTypes.length === <span class="s-num">0</span>) {</span>
+<span class="d-ctx">     hoverVoteTypes = [{ label: hoverWinner.label, up: hoverWinner.count, down: <span class="s-num">0</span> }];</span>
+<span class="d-hunk">@@ -3053,17 +3056,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       : winners;</span>
+<span class="d-ctx">     <span class="s-kw">if</span> (source.length === <span class="s-num">0</span>) <span class="s-kw">return</span> <span class="s-lit">null</span>;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    <span class="s-com">// Per-proposal &quot;heat&quot;: normalize each winner&#x27;s net votes against the hottest</span></span>
+<span class="d-del">-    <span class="s-com">// visible proposal (log scale, matching the canvas heatmap so a busy map</span></span>
+<span class="d-del">-    <span class="s-com">// doesn&#x27;t peg everything to max), then sample the map&#x27;s ramp at that</span></span>
+<span class="d-del">-    <span class="s-com">// intensity. The pin glows + tints to that color, as hot as its votes. The</span></span>
+<span class="d-add">+    <span class="s-com">// Per-proposal &quot;heat&quot;: the RANKING of the visible winners, spread across</span></span>
+<span class="d-add">+    <span class="s-com">// the map&#x27;s heat spectrum — dense rank over distinct vote counts (ties</span></span>
+<span class="d-add">+    <span class="s-com">// share a color), lowest → just above the ramp&#x27;s cold end, hottest → 1.</span></span>
+<span class="d-add">+    <span class="s-com">// Ranking (not log-normalized counts) is the scale, so every top proposal</span></span>
+<span class="d-add">+    <span class="s-com">// gets its own hue off the ramp instead of the pack clustering wherever</span></span>
+<span class="d-add">+    <span class="s-com">// the vote distribution piles up. The color sample is capped at</span></span>
+<span class="d-add">+    <span class="s-com">// HEAT_PEAK_POS: the hottest pin wears the ramp&#x27;s named upper extreme</span></span>
+<span class="d-add">+    <span class="s-com">// (peak), never the incandescent tip — bright is the heatmap&#x27;s job. The</span></span>
 <span class="d-ctx">     <span class="s-com">// bucketed color keys the icon cache so equally-hot pins of a label still</span></span>
 <span class="d-ctx">     <span class="s-com">// share one divIcon (and so a re-render doesn&#x27;t churn setIcon every frame).</span></span>
 <span class="d-del">-    <span class="s-kw">const</span> rampStops = <span class="s-fn">buildHeatRampStops</span>(mapStyle.heat);</span>
+<span class="d-del">-    <span class="s-kw">const</span> maxCount = source.<span class="s-fn">reduce</span>((m, w) =&gt; <span class="s-type">Math</span>.<span class="s-fn">max</span>(m, w.count), <span class="s-num">0</span>);</span>
 <span class="d-add">+    <span class="s-kw">const</span> rampStops = <span class="s-fn">buildHeatRampStops</span>(mapStyle.heat, mapStyle.basemap);</span>
-<span class="d-ctx">     <span class="s-kw">const</span> maxCount = source.<span class="s-fn">reduce</span>((m, w) =&gt; <span class="s-type">Math</span>.<span class="s-fn">max</span>(m, w.count), <span class="s-num">0</span>);</span>
+<span class="d-add">+    <span class="s-kw">const</span> rankedCounts = <span class="s-type">Array</span>.<span class="s-kw">from</span>(<span class="s-kw">new</span> <span class="s-fn">Set</span>(source.<span class="s-fn">map</span>((w) =&gt; w.count).<span class="s-fn">filter</span>((c) =&gt; c &gt; <span class="s-num">0</span>)))</span>
+<span class="d-add">+      .<span class="s-fn">sort</span>((a, b) =&gt; a - b);</span>
 <span class="d-ctx">     <span class="s-kw">const</span> heatOf = (count: number): number =&gt;</span>
-<span class="d-ctx">       maxCount &gt; <span class="s-num">0</span> &amp;&amp; count &gt; <span class="s-num">0</span></span>
-<span class="d-hunk">@@ -3364,7 +3367,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-del">-      maxCount &gt; <span class="s-num">0</span> &amp;&amp; count &gt; <span class="s-num">0</span></span>
+<span class="d-del">-        ? <span class="s-type">Math</span>.<span class="s-fn">log</span>(count + <span class="s-num">1</span>) / <span class="s-type">Math</span>.<span class="s-fn">log</span>(maxCount + <span class="s-num">1</span>)</span>
+<span class="d-add">+      count &gt; <span class="s-num">0</span> &amp;&amp; rankedCounts.length &gt; <span class="s-num">0</span></span>
+<span class="d-add">+        ? (rankedCounts.<span class="s-fn">indexOf</span>(count) + <span class="s-num">1</span>) / rankedCounts.length</span>
+<span class="d-ctx">         : <span class="s-num">0</span>;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-com">// Resolve every marker to its edge-midpoint once up front so click handlers</span></span>
+<span class="d-hunk">@@ -3204,7 +3212,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       <span class="s-com">// teal/red) owns the pin&#x27;s color, so skip heat there to avoid fighting it;</span></span>
+<span class="d-ctx">       <span class="s-com">// otherwise even selected/on-path pins keep their warmth.</span></span>
+<span class="d-ctx">       <span class="s-kw">const</span> heat = tint ? <span class="s-num">0</span> : <span class="s-fn">heatOf</span>(w.count);</span>
+<span class="d-del">-      <span class="s-kw">const</span> heatColor = heat &gt; <span class="s-num">0</span> ? <span class="s-fn">sampleHeatRamp</span>(rampStops, heat) : <span class="s-lit">undefined</span>;</span>
+<span class="d-add">+      <span class="s-kw">const</span> heatColor = heat &gt; <span class="s-num">0</span> ? <span class="s-fn">sampleHeatRamp</span>(rampStops, heat * <span class="s-type">HEAT_PEAK_POS</span>) : <span class="s-lit">undefined</span>;</span>
+<span class="d-ctx">       <span class="s-kw">const</span> heatBucket = <span class="s-type">Math</span>.<span class="s-fn">round</span>(heat * <span class="s-num">12</span>);</span>
+<span class="d-ctx">       <span class="s-kw">let</span> icon: <span class="s-type">L</span>.<span class="s-type">DivIcon</span>;</span>
+<span class="d-ctx">       <span class="s-kw">if</span> (isSelected || tint || isSpread || passthrough || removeEdge !== <span class="s-lit">null</span>) {</span>
+<span class="d-hunk">@@ -3364,7 +3372,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
 <span class="d-ctx">     <span class="s-com">// re-runs once topology+votes arrive so stations appear even with zero votes.</span></span>
 <span class="d-ctx">   }, [winners, currentZoom, map, spread, collapseSpread, clearSpreadTimer, applySpread,</span>
 <span class="d-ctx">       selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,</span>
@@ -298,12 +392,21 @@
 <span class="d-add">+      isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, mapStyle.basemap, isStationNetwork, stationLabel, isHeatmapLoading, canHover]);</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx">   <span class="s-com">// Cast a directional vote on a single proposal (edge, vote type) through the</span></span>
-<span class="d-ctx">   <span class="s-com">// SAME unified path the top-bar route cast uses. castVotes() handles the</span></span></pre>
+<span class="d-ctx">   <span class="s-com">// SAME unified path the top-bar route cast uses. castVotes() handles the</span></span>
+<span class="d-hunk">@@ -3968,7 +3976,7 @@ function ProposalCard({</span>
+<span class="d-ctx">               {metaText</span>
+<span class="d-ctx">                 ?? (rows.length &gt; <span class="s-num">0</span></span>
+<span class="d-ctx">                   ? <span class="s-str">`${rows.length} proposal${rows.length !== 1 ? &quot;s&quot; : &quot;&quot;}`</span></span>
+<span class="d-del">-                  : <span class="s-str">&quot;no proposals yet&quot;</span>)}</span>
+<span class="d-add">+                  : <span class="s-str">&quot;No votes yet&quot;</span>)}</span>
+<span class="d-ctx">             &lt;/div&gt;</span>
+<span class="d-ctx">             {rows.length &gt; <span class="s-num">0</span> &amp;&amp; (</span>
+<span class="d-ctx">               &lt;div className=<span class="s-str">&quot;graph-proposal-rows&quot;</span> style={<span class="s-fn">voteColumnWidths</span>(rows)}&gt;</span></pre>
         </details>
         
         <details open>
           <summary><span class="fname">client-react/src/components/GraphLayer/voteTypeIcon.ts</span>
-            <span class="stat"><span class="d-add">+25</span> / <span class="d-del">-17</span></span>
+            <span class="stat"><span class="d-add">+27</span> / <span class="d-del">-18</span></span>
           </summary>
           
     <div class="ctx">
@@ -333,27 +436,30 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/voteTypeIcon.ts b/client-react/src/components/GraphLayer/voteTypeIcon.ts</span>
-<span class="d-meta">index 27e2124..b74162b 100644</span>
+<span class="d-meta">index 27e2124..e5dc232 100644</span>
 <span class="d-meta">--- a/client-react/src/components/GraphLayer/voteTypeIcon.ts</span>
 <span class="d-meta">+++ b/client-react/src/components/GraphLayer/voteTypeIcon.ts</span>
-<span class="d-hunk">@@ -30,10 +30,12 @@ export interface VoteTypeIconOptions {</span>
+<span class="d-hunk">@@ -29,11 +29,14 @@ export interface VoteTypeIconOptions {</span>
+<span class="d-ctx"> <span class="s-com">   *  resolve which waypoint to remove. Stays clickable even when `passthrough`</span></span>
 <span class="d-ctx"> <span class="s-com">   *  (the badge is pointer-events:auto; the rest of the icon is not). */</span></span>
 <span class="d-ctx">   removeEdge?: number | <span class="s-lit">null</span>;</span>
-<span class="d-ctx"> <span class="s-com">  /** &quot;Heat&quot; of this proposal, 0–1, normalized against the hottest visible</span></span>
+<span class="d-del">-<span class="s-com">  /** &quot;Heat&quot; of this proposal, 0–1, normalized against the hottest visible</span></span>
 <span class="d-del">-<span class="s-com">   *  proposal&#x27;s vote count. Rendered as INK, not glow (CSS off the `--heat` /</span></span>
 <span class="d-del">-<span class="s-com">   *  `--heat-color` custom properties below): the pin&#x27;s paper fill warms toward</span></span>
 <span class="d-del">-<span class="s-com">   *  the ramp color and its outline burns hotter and slightly thicker — crisp</span></span>
 <span class="d-del">-<span class="s-com">   *  at every heat. 0 (or omitted) renders the plain pin. */</span></span>
-<span class="d-add">+<span class="s-com">   *  proposal&#x27;s vote count. Rendered as a SOLID GLOW RING (CSS off the</span></span>
-<span class="d-add">+<span class="s-com">   *  `--heat` / `--heat-color` custom properties below): a hard, fully-opaque</span></span>
-<span class="d-add">+<span class="s-com">   *  band of the ramp color hugging the outside of the pin, widening with</span></span>
-<span class="d-add">+<span class="s-com">   *  heat, plus a subtle warm stain on the paper fill. Never the outline</span></span>
-<span class="d-add">+<span class="s-com">   *  itself — that channel belongs to hover/selected. 0 (or omitted) renders</span></span>
-<span class="d-add">+<span class="s-com">   *  the plain pin. */</span></span>
+<span class="d-add">+<span class="s-com">  /** &quot;Heat&quot; of this proposal, 0–1: its RANK among the visible top proposals</span></span>
+<span class="d-add">+<span class="s-com">   *  (dense rank over distinct vote counts — the caller spreads the pack</span></span>
+<span class="d-add">+<span class="s-com">   *  across the map&#x27;s heat spectrum, hottest = 1). Rendered as a SOLID GLOW</span></span>
+<span class="d-add">+<span class="s-com">   *  RING (CSS off the `--heat` / `--heat-color` custom properties below): a</span></span>
+<span class="d-add">+<span class="s-com">   *  hard, fully-opaque band of the ramp color hugging the outside of the</span></span>
+<span class="d-add">+<span class="s-com">   *  pin, widening with rank, plus a subtle warm stain on the paper fill.</span></span>
+<span class="d-add">+<span class="s-com">   *  Never the outline itself — that channel belongs to hover/selected. 0 (or</span></span>
+<span class="d-add">+<span class="s-com">   *  omitted) renders the plain pin. */</span></span>
 <span class="d-ctx">   heat?: number;</span>
 <span class="d-ctx"> <span class="s-com">  /** The tint color for `heat`, sampled from the active map&#x27;s heat ramp at the</span></span>
 <span class="d-ctx"> <span class="s-com">   *  same intensity the heat field uses — so a pin matches the hue the heat</span></span>
-<span class="d-hunk">@@ -46,28 +48,32 @@ export interface VoteTypeIconOptions {</span>
+<span class="d-hunk">@@ -46,28 +49,32 @@ export interface VoteTypeIconOptions {</span>
 <span class="d-ctx"> <span class="s-com">//   square  : (3,3)→(31,31)               — 28px box</span></span>
 <span class="d-ctx"> <span class="s-com">//   tail tip: (17,36)                      — the Leaflet anchor, on the location</span></span>
 <span class="d-ctx"> <span class="s-com">//                                            (a wide, shallow tail reads blunt)</span></span>
@@ -396,7 +502,7 @@
 <span class="d-ctx"> <span class="s-kw">const</span> <span class="s-type">TIP</span>: [number, number] = [<span class="s-num">17</span>, <span class="s-num">36</span>];</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx"> <span class="s-com">/**</span></span>
-<span class="d-hunk">@@ -107,9 +113,10 @@ export function makeVoteTypeIcon(</span>
+<span class="d-hunk">@@ -107,9 +114,10 @@ export function makeVoteTypeIcon(</span>
 <span class="d-ctx">     ? <span class="s-str">`&lt;span class=&quot;vote-type-indicator-x&quot; data-x-edge=&quot;${opts.removeEdge}&quot; role=&quot;button&quot; aria-label=&quot;Remove from route&quot;&gt;×&lt;/span&gt;`</span></span>
 <span class="d-ctx">     : <span class="s-str">&quot;&quot;</span>;</span>
 <span class="d-ctx">   <span class="s-com">// Heat: hand the intensity + color to CSS as custom properties on the</span></span>
@@ -410,7 +516,7 @@
 <span class="d-ctx">   <span class="s-kw">const</span> heat = opts.heat &amp;&amp; opts.heatColor ? opts.heat : <span class="s-num">0</span>;</span>
 <span class="d-ctx">   <span class="s-kw">const</span> heatStyle = heat &gt; <span class="s-num">0</span></span>
 <span class="d-ctx">     ? <span class="s-str">` style=&quot;--heat:${heat.toFixed(3)};--heat-color:${opts.heatColor}&quot;`</span></span>
-<span class="d-hunk">@@ -117,6 +124,7 @@ export function makeVoteTypeIcon(</span>
+<span class="d-hunk">@@ -117,6 +125,7 @@ export function makeVoteTypeIcon(</span>
 <span class="d-ctx">   <span class="s-kw">const</span> html =</span>
 <span class="d-ctx">     <span class="s-str">`&lt;div class=&quot;${cls.join(&quot; &quot;)}&quot;${heatStyle}&gt;`</span> +</span>
 <span class="d-ctx">       <span class="s-str">`&lt;svg class=&quot;vote-type-indicator-pin&quot; viewBox=&quot;0 0 ${SVG_W} ${SVG_H}&quot; width=&quot;${SVG_W}&quot; height=&quot;${SVG_H}&quot;&gt;`</span> +</span>
@@ -604,7 +710,7 @@
         
         <details open>
           <summary><span class="fname">client-react/src/mapStyles.ts</span>
-            <span class="stat"><span class="d-add">+30</span> / <span class="d-del">-10</span></span>
+            <span class="stat"><span class="d-add">+36</span> / <span class="d-del">-10</span></span>
           </summary>
           
     <div class="ctx">
@@ -634,7 +740,7 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/mapStyles.ts b/client-react/src/mapStyles.ts</span>
-<span class="d-meta">index cb6a113..f6aa6ff 100644</span>
+<span class="d-meta">index cb6a113..7720c04 100644</span>
 <span class="d-meta">--- a/client-react/src/mapStyles.ts</span>
 <span class="d-meta">+++ b/client-react/src/mapStyles.ts</span>
 <span class="d-hunk">@@ -210,18 +210,34 @@ export function maplibreRasterTiles(style: MapStyle): string[] {</span>
@@ -677,15 +783,21 @@
 <span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">interface</span> <span class="s-type">HeatRampStop</span> {</span>
 <span class="d-ctx">   pos: number;</span>
 <span class="d-ctx">   rgb: [number, number, number];</span>
-<span class="d-hunk">@@ -232,13 +248,17 @@ function parseRgb(s: string): [number, number, number] {</span>
+<span class="d-hunk">@@ -232,13 +248,23 @@ function parseRgb(s: string): [number, number, number] {</span>
 <span class="d-ctx">   <span class="s-kw">return</span> m ? [<span class="s-fn">Number</span>(m[<span class="s-num">0</span>]), <span class="s-fn">Number</span>(m[<span class="s-num">1</span>]), <span class="s-fn">Number</span>(m[<span class="s-num">2</span>])] : [<span class="s-num">0</span>, <span class="s-num">0</span>, <span class="s-num">0</span>];</span>
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
 <span class="d-del">-<span class="s-com">/** Expand a HeatRamp into the positioned stops `sampleHeatRamp` interpolates. */</span></span>
 <span class="d-del">-<span class="s-kw">export</span> <span class="s-kw">function</span> <span class="s-fn">buildHeatRampStops</span>(heat: <span class="s-type">HeatRamp</span>): <span class="s-type">HeatRampStop</span>[] {</span>
+<span class="d-add">+<span class="s-com">/** Ramp position of `peak` — the upper extreme of the NAMED ramp colors. The</span></span>
+<span class="d-add">+<span class="s-com"> *  proposal pins cap their color spectrum here (a pin ring should wear the</span></span>
+<span class="d-add">+<span class="s-com"> *  ramp&#x27;s top color, not blaze); only the heatmap itself runs past it into the</span></span>
+<span class="d-add">+<span class="s-com"> *  incandescent tip. */</span></span>
+<span class="d-add">+<span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">HEAT_PEAK_POS</span> = <span class="s-num">0.85</span>;</span>
+<span class="d-add">+</span>
 <span class="d-add">+<span class="s-com">/** Expand a HeatRamp into the positioned stops `sampleHeatRamp` interpolates.</span></span>
-<span class="d-add">+<span class="s-com"> *  `peak` sits at 0.85 (not 1) with the incandescent tip above it, so the</span></span>
-<span class="d-add">+<span class="s-com"> *  log-crushed top of a busy map&#x27;s vote distribution still resolves into</span></span>
+<span class="d-add">+<span class="s-com"> *  `peak` sits at HEAT_PEAK_POS (not 1) with the incandescent tip above it, so</span></span>
+<span class="d-add">+<span class="s-com"> *  the log-crushed top of a busy map&#x27;s vote distribution still resolves into</span></span>
 <span class="d-add">+<span class="s-com"> *  visibly different colors instead of one flat band. */</span></span>
 <span class="d-add">+<span class="s-kw">export</span> <span class="s-kw">function</span> <span class="s-fn">buildHeatRampStops</span>(heat: <span class="s-type">HeatRamp</span>, basemap: <span class="s-type">Basemap</span>): <span class="s-type">HeatRampStop</span>[] {</span>
 <span class="d-ctx">   <span class="s-kw">return</span> [</span>
@@ -695,7 +807,7 @@
 <span class="d-del">-    { pos: <span class="s-num">1</span>, rgb: <span class="s-fn">parseRgb</span>(heat.peak) },</span>
 <span class="d-add">+    { pos: <span class="s-num">0.35</span>, rgb: <span class="s-fn">parseRgb</span>(heat.warm) },</span>
 <span class="d-add">+    { pos: <span class="s-num">0.65</span>, rgb: <span class="s-fn">parseRgb</span>(heat.hot) },</span>
-<span class="d-add">+    { pos: <span class="s-num">0.85</span>, rgb: <span class="s-fn">parseRgb</span>(heat.peak) },</span>
+<span class="d-add">+    { pos: <span class="s-type">HEAT_PEAK_POS</span>, rgb: <span class="s-fn">parseRgb</span>(heat.peak) },</span>
 <span class="d-add">+    { pos: <span class="s-num">1</span>, rgb: <span class="s-fn">parseRgb</span>(<span class="s-fn">heatTip</span>(heat, basemap)) },</span>
 <span class="d-ctx">   ];</span>
 <span class="d-ctx"> }</span>
@@ -704,7 +816,7 @@
         
         <details open>
           <summary><span class="fname">client-react/src/styles/globals.css</span>
-            <span class="stat"><span class="d-add">+23</span> / <span class="d-del">-9</span></span>
+            <span class="stat"><span class="d-add">+24</span> / <span class="d-del">-9</span></span>
           </summary>
           
     <div class="ctx">
@@ -734,7 +846,7 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
-<span class="d-meta">index 423b556..3d56910 100644</span>
+<span class="d-meta">index 423b556..c3e3cf9 100644</span>
 <span class="d-meta">--- a/client-react/src/styles/globals.css</span>
 <span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
 <span class="d-hunk">@@ -1622,10 +1622,11 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
@@ -753,7 +865,7 @@
 <span class="d-ctx">   <span class="s-prop">--heat</span>: <span class="s-num">0</span>;</span>
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
-<span class="d-hunk">@@ -1635,6 +1636,19 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-hunk">@@ -1635,6 +1636,20 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
 <span class="d-ctx">   <span class="s-prop">height</span>: <span class="s-num">42px</span>;</span>
 <span class="d-ctx">   <span class="s-prop">overflow</span>: visible;</span>
 <span class="d-ctx"> }</span>
@@ -761,19 +873,20 @@
 <span class="d-add">+   the inner half of the stroke hides under the paper fill and the outer half</span>
 <span class="d-add">+   reads as a solid band outside the hairline — following the square + tail and</span>
 <span class="d-add">+   the diamond exactly. No blur, no <span class="s-prop">alpha</span>: a flat ring of the sampled ramp</span>
-<span class="d-add">+   color, up to ≈<span class="s-num">1.75px</span> past the hairline on the hottest pin. `--heat-color` is</span>
-<span class="d-add">+   only set when heat &gt; <span class="s-num">0</span>, so cold pins paint nothing (transparent fallback). */</span>
+<span class="d-add">+   color, up to ≈<span class="s-num">1.25px</span> past the hairline on the top-ranked pin. `--heat-color`</span>
+<span class="d-add">+   is only set when heat &gt; <span class="s-num">0</span>, so cold pins paint nothing (transparent</span>
+<span class="d-add">+   fallback). */</span>
 <span class="d-add">+.vote-type-indicator-glow {</span>
 <span class="d-add">+  <span class="s-prop">fill</span>: none;</span>
 <span class="d-add">+  <span class="s-prop">stroke</span>: var(--heat-color, transparent);</span>
-<span class="d-add">+  <span class="s-prop">stroke-width</span>: calc(<span class="s-num">2px</span> + var(--heat, <span class="s-num">0</span>) * <span class="s-num">3px</span>);</span>
+<span class="d-add">+  <span class="s-prop">stroke-width</span>: calc(<span class="s-num">1.75px</span> + var(--heat, <span class="s-num">0</span>) * <span class="s-num">2.25px</span>);</span>
 <span class="d-add">+  <span class="s-prop">stroke-linejoin</span>: round;</span>
 <span class="d-add">+  <span class="s-prop">transition</span>: stroke-width <span class="s-num">0.15s</span> ease;</span>
 <span class="d-add">+}</span>
 <span class="d-ctx"> <span class="s-com">/* Paper fill, warmed toward the heat color by `--heat` (capped well short of</span></span>
 <span class="d-ctx">    full so the glyph stays legible on the hottest pin). */</span>
 <span class="d-ctx"> .vote-type-indicator-fill {</span>
-<span class="d-hunk">@@ -1642,13 +1656,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-hunk">@@ -1642,13 +1657,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
 <span class="d-ctx">   <span class="s-prop">transition</span>: fill <span class="s-num">0.15s</span> ease;</span>
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> <span class="s-com">/* Outer outline (square + tail). Idle = thin hairline; pin states thicken it.</span></span>

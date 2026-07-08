@@ -1,7 +1,16 @@
 diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
-index 779a446..0313e74 100644
+index 779a446..b79c97a 100644
 --- a/client-react/src/components/GraphLayer/GraphLayer.tsx
 +++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -54,7 +54,7 @@ import {
+ } from "./graphTopology";
+ import { materializeBlocks, selectionVoteRows } from "../../utils/blockSelection";
+ import { iconForLabel, iconSrc, mapStyleForTheme } from "../../themes";
+-import { buildHeatRampStops, sampleHeatRamp } from "../../mapStyles";
++import { buildHeatRampStops, sampleHeatRamp, HEAT_PEAK_POS } from "../../mapStyles";
+ import {
+   getCachedTopology,
+   setCachedTopology,
 @@ -2176,8 +2176,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
      // Stops mirror heatGradientCss (mapStyles.ts) so the legend matches the map.
      // The same ramp feeds the top-proposal pins (see indicatorMarkers), so a pin
@@ -33,16 +42,65 @@ index 779a446..0313e74 100644
  
    // Schedule redraw
    const scheduleRedraw = useCallback(() => {
-@@ -3059,7 +3062,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
-     // intensity. The pin glows + tints to that color, as hot as its votes. The
+@@ -2551,7 +2554,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     // node's coords) voted an arbitrary incident edge and then collapsed onto it.
+     // Resolve a node that has proposals to the edge owning its strongest one, so
+     // the selection is an edge throughout. Bare intersections (no proposals) stay
+-    // a node — their modal is just an unvotable "no proposals yet" preview.
++    // a node — their modal is just an unvotable "No votes yet" preview.
+     let didNodeUpgrade = false;
+     if (target?.kind === "node") {
+       const up = strongestProposalEdgeForNode(target.index);
+@@ -2825,7 +2828,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+ 
+   // Safety net for a momentary winners/data desync: if an edge is a current
+   // winner but its live breakdown decoded empty, show the winner's own proposal
+-  // so a top-proposal card never reads "no proposals yet". Net support maps to
++  // so a top-proposal card never reads "No votes yet". Net support maps to
+   // up (positive) so the row's net (up − down) matches the winner's count.
+   if (hoverWinner && hoverVoteTypes.length === 0) {
+     hoverVoteTypes = [{ label: hoverWinner.label, up: hoverWinner.count, down: 0 }];
+@@ -3053,17 +3056,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       : winners;
+     if (source.length === 0) return null;
+ 
+-    // Per-proposal "heat": normalize each winner's net votes against the hottest
+-    // visible proposal (log scale, matching the canvas heatmap so a busy map
+-    // doesn't peg everything to max), then sample the map's ramp at that
+-    // intensity. The pin glows + tints to that color, as hot as its votes. The
++    // Per-proposal "heat": the RANKING of the visible winners, spread across
++    // the map's heat spectrum — dense rank over distinct vote counts (ties
++    // share a color), lowest → just above the ramp's cold end, hottest → 1.
++    // Ranking (not log-normalized counts) is the scale, so every top proposal
++    // gets its own hue off the ramp instead of the pack clustering wherever
++    // the vote distribution piles up. The color sample is capped at
++    // HEAT_PEAK_POS: the hottest pin wears the ramp's named upper extreme
++    // (peak), never the incandescent tip — bright is the heatmap's job. The
      // bucketed color keys the icon cache so equally-hot pins of a label still
      // share one divIcon (and so a re-render doesn't churn setIcon every frame).
 -    const rampStops = buildHeatRampStops(mapStyle.heat);
+-    const maxCount = source.reduce((m, w) => Math.max(m, w.count), 0);
 +    const rampStops = buildHeatRampStops(mapStyle.heat, mapStyle.basemap);
-     const maxCount = source.reduce((m, w) => Math.max(m, w.count), 0);
++    const rankedCounts = Array.from(new Set(source.map((w) => w.count).filter((c) => c > 0)))
++      .sort((a, b) => a - b);
      const heatOf = (count: number): number =>
-       maxCount > 0 && count > 0
-@@ -3364,7 +3367,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+-      maxCount > 0 && count > 0
+-        ? Math.log(count + 1) / Math.log(maxCount + 1)
++      count > 0 && rankedCounts.length > 0
++        ? (rankedCounts.indexOf(count) + 1) / rankedCounts.length
+         : 0;
+ 
+     // Resolve every marker to its edge-midpoint once up front so click handlers
+@@ -3204,7 +3212,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       // teal/red) owns the pin's color, so skip heat there to avoid fighting it;
+       // otherwise even selected/on-path pins keep their warmth.
+       const heat = tint ? 0 : heatOf(w.count);
+-      const heatColor = heat > 0 ? sampleHeatRamp(rampStops, heat) : undefined;
++      const heatColor = heat > 0 ? sampleHeatRamp(rampStops, heat * HEAT_PEAK_POS) : undefined;
+       const heatBucket = Math.round(heat * 12);
+       let icon: L.DivIcon;
+       if (isSelected || tint || isSpread || passthrough || removeEdge !== null) {
+@@ -3364,7 +3372,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
      // re-runs once topology+votes arrive so stations appear even with zero votes.
    }, [winners, currentZoom, map, spread, collapseSpread, clearSpreadTimer, applySpread,
        selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,
@@ -51,28 +109,40 @@ index 779a446..0313e74 100644
  
    // Cast a directional vote on a single proposal (edge, vote type) through the
    // SAME unified path the top-bar route cast uses. castVotes() handles the
+@@ -3968,7 +3976,7 @@ function ProposalCard({
+               {metaText
+                 ?? (rows.length > 0
+                   ? `${rows.length} proposal${rows.length !== 1 ? "s" : ""}`
+-                  : "no proposals yet")}
++                  : "No votes yet")}
+             </div>
+             {rows.length > 0 && (
+               <div className="graph-proposal-rows" style={voteColumnWidths(rows)}>
 diff --git a/client-react/src/components/GraphLayer/voteTypeIcon.ts b/client-react/src/components/GraphLayer/voteTypeIcon.ts
-index 27e2124..b74162b 100644
+index 27e2124..e5dc232 100644
 --- a/client-react/src/components/GraphLayer/voteTypeIcon.ts
 +++ b/client-react/src/components/GraphLayer/voteTypeIcon.ts
-@@ -30,10 +30,12 @@ export interface VoteTypeIconOptions {
+@@ -29,11 +29,14 @@ export interface VoteTypeIconOptions {
+    *  resolve which waypoint to remove. Stays clickable even when `passthrough`
     *  (the badge is pointer-events:auto; the rest of the icon is not). */
    removeEdge?: number | null;
-   /** "Heat" of this proposal, 0–1, normalized against the hottest visible
+-  /** "Heat" of this proposal, 0–1, normalized against the hottest visible
 -   *  proposal's vote count. Rendered as INK, not glow (CSS off the `--heat` /
 -   *  `--heat-color` custom properties below): the pin's paper fill warms toward
 -   *  the ramp color and its outline burns hotter and slightly thicker — crisp
 -   *  at every heat. 0 (or omitted) renders the plain pin. */
-+   *  proposal's vote count. Rendered as a SOLID GLOW RING (CSS off the
-+   *  `--heat` / `--heat-color` custom properties below): a hard, fully-opaque
-+   *  band of the ramp color hugging the outside of the pin, widening with
-+   *  heat, plus a subtle warm stain on the paper fill. Never the outline
-+   *  itself — that channel belongs to hover/selected. 0 (or omitted) renders
-+   *  the plain pin. */
++  /** "Heat" of this proposal, 0–1: its RANK among the visible top proposals
++   *  (dense rank over distinct vote counts — the caller spreads the pack
++   *  across the map's heat spectrum, hottest = 1). Rendered as a SOLID GLOW
++   *  RING (CSS off the `--heat` / `--heat-color` custom properties below): a
++   *  hard, fully-opaque band of the ramp color hugging the outside of the
++   *  pin, widening with rank, plus a subtle warm stain on the paper fill.
++   *  Never the outline itself — that channel belongs to hover/selected. 0 (or
++   *  omitted) renders the plain pin. */
    heat?: number;
    /** The tint color for `heat`, sampled from the active map's heat ramp at the
     *  same intensity the heat field uses — so a pin matches the hue the heat
-@@ -46,28 +48,32 @@ export interface VoteTypeIconOptions {
+@@ -46,28 +49,32 @@ export interface VoteTypeIconOptions {
  //   square  : (3,3)→(31,31)               — 28px box
  //   tail tip: (17,36)                      — the Leaflet anchor, on the location
  //                                            (a wide, shallow tail reads blunt)
@@ -115,7 +185,7 @@ index 27e2124..b74162b 100644
  const TIP: [number, number] = [17, 36];
  
  /**
-@@ -107,9 +113,10 @@ export function makeVoteTypeIcon(
+@@ -107,9 +114,10 @@ export function makeVoteTypeIcon(
      ? `<span class="vote-type-indicator-x" data-x-edge="${opts.removeEdge}" role="button" aria-label="Remove from route">×</span>`
      : "";
    // Heat: hand the intensity + color to CSS as custom properties on the
@@ -129,7 +199,7 @@ index 27e2124..b74162b 100644
    const heat = opts.heat && opts.heatColor ? opts.heat : 0;
    const heatStyle = heat > 0
      ? ` style="--heat:${heat.toFixed(3)};--heat-color:${opts.heatColor}"`
-@@ -117,6 +124,7 @@ export function makeVoteTypeIcon(
+@@ -117,6 +125,7 @@ export function makeVoteTypeIcon(
    const html =
      `<div class="${cls.join(" ")}"${heatStyle}>` +
        `<svg class="vote-type-indicator-pin" viewBox="0 0 ${SVG_W} ${SVG_H}" width="${SVG_W}" height="${SVG_H}">` +
@@ -254,7 +324,7 @@ index 04472f3..e28e0e2 100644
  
    return (
 diff --git a/client-react/src/mapStyles.ts b/client-react/src/mapStyles.ts
-index cb6a113..f6aa6ff 100644
+index cb6a113..7720c04 100644
 --- a/client-react/src/mapStyles.ts
 +++ b/client-react/src/mapStyles.ts
 @@ -210,18 +210,34 @@ export function maplibreRasterTiles(style: MapStyle): string[] {
@@ -297,15 +367,21 @@ index cb6a113..f6aa6ff 100644
  export interface HeatRampStop {
    pos: number;
    rgb: [number, number, number];
-@@ -232,13 +248,17 @@ function parseRgb(s: string): [number, number, number] {
+@@ -232,13 +248,23 @@ function parseRgb(s: string): [number, number, number] {
    return m ? [Number(m[0]), Number(m[1]), Number(m[2])] : [0, 0, 0];
  }
  
 -/** Expand a HeatRamp into the positioned stops `sampleHeatRamp` interpolates. */
 -export function buildHeatRampStops(heat: HeatRamp): HeatRampStop[] {
++/** Ramp position of `peak` — the upper extreme of the NAMED ramp colors. The
++ *  proposal pins cap their color spectrum here (a pin ring should wear the
++ *  ramp's top color, not blaze); only the heatmap itself runs past it into the
++ *  incandescent tip. */
++export const HEAT_PEAK_POS = 0.85;
++
 +/** Expand a HeatRamp into the positioned stops `sampleHeatRamp` interpolates.
-+ *  `peak` sits at 0.85 (not 1) with the incandescent tip above it, so the
-+ *  log-crushed top of a busy map's vote distribution still resolves into
++ *  `peak` sits at HEAT_PEAK_POS (not 1) with the incandescent tip above it, so
++ *  the log-crushed top of a busy map's vote distribution still resolves into
 + *  visibly different colors instead of one flat band. */
 +export function buildHeatRampStops(heat: HeatRamp, basemap: Basemap): HeatRampStop[] {
    return [
@@ -315,13 +391,13 @@ index cb6a113..f6aa6ff 100644
 -    { pos: 1, rgb: parseRgb(heat.peak) },
 +    { pos: 0.35, rgb: parseRgb(heat.warm) },
 +    { pos: 0.65, rgb: parseRgb(heat.hot) },
-+    { pos: 0.85, rgb: parseRgb(heat.peak) },
++    { pos: HEAT_PEAK_POS, rgb: parseRgb(heat.peak) },
 +    { pos: 1, rgb: parseRgb(heatTip(heat, basemap)) },
    ];
  }
  
 diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css
-index 423b556..3d56910 100644
+index 423b556..c3e3cf9 100644
 --- a/client-react/src/styles/globals.css
 +++ b/client-react/src/styles/globals.css
 @@ -1622,10 +1622,11 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
@@ -340,7 +416,7 @@ index 423b556..3d56910 100644
    --heat: 0;
  }
  
-@@ -1635,6 +1636,19 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
+@@ -1635,6 +1636,20 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
    height: 42px;
    overflow: visible;
  }
@@ -348,19 +424,20 @@ index 423b556..3d56910 100644
 +   the inner half of the stroke hides under the paper fill and the outer half
 +   reads as a solid band outside the hairline — following the square + tail and
 +   the diamond exactly. No blur, no alpha: a flat ring of the sampled ramp
-+   color, up to ≈1.75px past the hairline on the hottest pin. `--heat-color` is
-+   only set when heat > 0, so cold pins paint nothing (transparent fallback). */
++   color, up to ≈1.25px past the hairline on the top-ranked pin. `--heat-color`
++   is only set when heat > 0, so cold pins paint nothing (transparent
++   fallback). */
 +.vote-type-indicator-glow {
 +  fill: none;
 +  stroke: var(--heat-color, transparent);
-+  stroke-width: calc(2px + var(--heat, 0) * 3px);
++  stroke-width: calc(1.75px + var(--heat, 0) * 2.25px);
 +  stroke-linejoin: round;
 +  transition: stroke-width 0.15s ease;
 +}
  /* Paper fill, warmed toward the heat color by `--heat` (capped well short of
     full so the glyph stays legible on the hottest pin). */
  .vote-type-indicator-fill {
-@@ -1642,13 +1656,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
+@@ -1642,13 +1657,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
    transition: fill 0.15s ease;
  }
  /* Outer outline (square + tail). Idle = thin hairline; pin states thicken it.

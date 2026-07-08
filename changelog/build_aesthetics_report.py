@@ -143,6 +143,47 @@ SECTIONS = [
             "client-react/src/components/GraphLayer/voteTypeIcon.ts",
         ],
     },
+    {
+        "id": "rankspectrum",
+        "tag": "Client · proposal markers · round 3",
+        "title": "4 · Each top proposal gets its own color — the ramp pinned to ranking",
+        "symptom": (
+            "The glow rings sampled the ramp by log-normalized vote count, so the pack clustered wherever "
+            "the vote distribution piled up — and the hottest pins wore the new incandescent tip, reading "
+            "bright rather than like the ramp's own top color."
+        ),
+        "cause": [
+            "Log-normalized counts are a fine scale for the heat FIELD, but for a small set of discrete "
+            "markers they waste the spectrum: near-tied counts collapse onto one hue and heavy-tailed "
+            "counts crowd the top.",
+        ],
+        "fixes": [
+            "Heat = RANKING: dense rank over the visible winners' distinct vote counts (ties share a "
+            "color), lowest just above the ramp's cold end, hottest = 1 — so the visible set always spans "
+            "the full spectrum, one hue per rank.",
+            "The color sample is capped at the new exported <code>HEAT_PEAK_POS</code> (0.85): the "
+            "top-ranked pin wears the ramp's named upper extreme (<code>peak</code>) — the incandescent "
+            "tip stays reserved for the heatmap itself. Same treatment in both marker families (the RBTP "
+            "half rides with the parity workstream).",
+            "The ring also slimmed again: ≈1.25px past the hairline at rank 1 "
+            "(<code>1.75px + heat·2.25px</code> stroke).",
+        ],
+        "files": [
+            "client-react/src/components/GraphLayer/GraphLayer.tsx",
+            "client-react/src/mapStyles.ts",
+            "client-react/src/styles/globals.css",
+            "client-react/src/components/GraphLayer/voteTypeIcon.ts",
+        ],
+    },
+    {
+        "id": "novotescopy",
+        "tag": "Client · copy",
+        "title": "5 · Empty proposal modals say \u201cNo votes yet\u201d",
+        "symptom": "An unvoted edge/node's modal read \u201cno proposals yet\u201d.",
+        "cause": ["Literal template string \u2014 and the absent thing is votes, not proposals."],
+        "fixes": ["<code>No votes yet</code>, capitalized to match the route card's \u201cSelects N blocks\u201d meta line."],
+        "files": ["client-react/src/components/GraphLayer/GraphLayer.tsx"],
+    },
 ]
 
 VERIFY = [
@@ -162,6 +203,12 @@ VERIFY = [
     "hottest pins, gold and orange below); hovering a hot pin shows the ink outline + 1.1× lift OVER its "
     "unchanged ring — the two states finally compose; a start-tinted pin correctly drops its ring "
     "(zoomed screenshots of all three states).",
+    "Round 3, live on /m/chicago-bikes (712k votes, no blocks): 20 point proposals spread evenly "
+    "across teal \u2192 green \u2192 yellow-green \u2192 gold at .05-rank steps (checked in the DOM: every pin a "
+    "distinct --heat/--heat-color pair), top color exactly the bikepaths peak rgb(244,206,96) \u2014 not the "
+    "tip; /m/plum (light basemap): all-tied winners correctly share peak indigo. NYC maps were "
+    "unverifiable at the time \u2014 a concurrent block re-bake left topology/votes mismatched and the "
+    "stale-cache guard (correctly) refused to paint.",
     "Commit hygiene: the working tree also carries the uncommitted rbtp-parity workstream in the same "
     "files, so the two commits were staged surgically (index-only HEAD+fix versions) — "
     "<code>git show e24a359 54c1a55</code> contain ONLY these fixes; parity edits remain untouched in the "
