@@ -95,13 +95,24 @@ def main():
     pts = shp_points(lon, lat)
 
     feats = json.load(open(BLOCKS_FILE))["features"]
-    # Node cells are EXCLUDED from the geometric passes: a junction block's
-    # membership comes only from capture (pass 0) and the merge pass's stub
-    # rule — letting containment/nearest dump whatever edges pass through a
-    # cell turned park forks into confetti (every nearby path fragment glommed
-    # into the fork bubble instead of staying with its path).
+    # NON-street node cells are EXCLUDED from the geometric passes: a park
+    # fork's membership comes only from capture/fallback and the merge pass's
+    # stub rule — letting containment/nearest dump whatever edges pass through
+    # a cell turned park forks into confetti. STREET junction cells stay
+    # geometric containers: they own their intersection interior (the roadway
+    # edges threading the junction), so a route through an intersection
+    # includes the junction block and its nodes hover/vote as part of it.
+    street_cells: set[int] = set()
+    sidecar_pre = os.path.join(_SERVER, city.data_dir,
+                               f"node_clusters_{NETWORK}.npz")
+    if os.path.exists(sidecar_pre):
+        nc_pre = np.load(sidecar_pre)
+        if "street" in nc_pre:
+            street_cells = set(
+                int(b) for b in np.unique(nc_pre["block_id"][nc_pre["street"]]))
     geo_feats = [f for f in feats
-                 if f["properties"].get("road_class") != "node"]
+                 if f["properties"].get("road_class") != "node"
+                 or int(f["properties"]["block_id"]) in street_cells]
     polys = [shape(f["geometry"]) for f in geo_feats]
     block_ids = np.array([int(f["properties"]["block_id"]) for f in geo_feats], dtype=np.int64)
     tree = STRtree(polys)
