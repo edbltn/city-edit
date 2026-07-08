@@ -29,6 +29,21 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-08-agent-load-test.html">
+    <div class="date">2026-07-08</div>
+    <h2>Agent load test — the vote pipeline saturates at ~9 votes/s</h2>
+    <p>Tiered load test (5 → 160 simulated voter agents, each a real client: WebSocket + graph-votes
+    fetch + route→vote cycles) against a fresh NYC map. Voting saturated at ~8–9 votes/s from 20 agents
+    on; at 160 agents the app functionally locked up — 13% of votes blew a 45 s timeout (p95 45.6 s),
+    11 graph-votes bodies truncated mid-stream, Flask RSS doubled to 7.1 GB — while /health stayed at
+    1–2 ms throughout. Root cause: every vote serializes through the process-wide _proposal_vote_lock
+    with ~300–550 sequential Redis round trips (per-edge apply_directional/apply_block_delta) plus a
+    synchronous Postgres write inside it. Report includes the tier-by-tier data, six ranked findings,
+    and a mitigation plan: batch the Redis writes into ≤3 pipelines, narrow the lock to per-voter,
+    cached-gzip + debounced graph-votes snapshots, coalesced WS broadcasts, and load-shedding + a real
+    saturation signal.</p>
+  </a>
+
   <a class="entry" href="./2026-07-08-ghost-hover-phantom.html">
     <div class="date">2026-07-08</div>
     <h2>Phantom path-hover pockets + the Top Route Proposal that wouldn't let go</h2>
@@ -41,6 +56,22 @@
     deselects when a ghost waypoint splits its corridor — anchorsAreWaypoints requires the anchors to
     be CONSECUTIVE waypoints, mirroring the reducer's insertMid un-force rule, so the ✕ badge and
     “Top Route Proposal” header can no longer outlive the corridor they describe.</p>
+  </a>
+
+  <a class="entry" href="./2026-07-08-forced-corridor-threading.html">
+    <div class="date">2026-07-08</div>
+    <h2>Forced-corridor threading — drop any waypoint on a diamond, get an explicit flag</h2>
+    <p>Dropping a waypoint onto a route-based top proposal now threads the route through the whole
+    corridor with an explicit forced-corridor flag in the canonical Selection, replacing the implicit
+    coords-equal-anchors matching. All three drop scenarios work — dropping the END gives S…A→Z with the
+    far anchor becoming the end, dropping the START gives AZ…E, and mid/path drops stamp the flag they
+    already threaded — with anchor order chosen by whichever chain is shorter. Every spec break rule
+    un-forces the pair: drag either anchor away, insert a mid between them, remove an anchor. The flag
+    rides the URL as a compact ,f&lt;proposalId&gt; token (deep links re-resolve the live proposal and
+    snap onto the corridor once proposals compute) and the in-app back/forward history; an edge-id
+    snapshot keeps the forced geometry stable when live vote deltas reshape or retire the proposal.
+    Verified live on nyc-walkways: threading, breaking, re-threading, two corridors coexisting
+    (70-pt + 21-pt verbatim chains), URL restore, and history stepping.</p>
   </a>
 
   <a class="entry" href="./2026-07-08-block-graph-redesign.html">
@@ -134,6 +165,33 @@
     (topology blob key, Redis block aggregates via a version marker, blocks.pmtiles via ?v=mtime).</p>
   </a>
 
+  <a class="entry" href="./2026-07-07-qgis-export.html">
+    <div class="date">2026-07-07</div>
+    <h2>QGIS export — one command turns a map slug into a GeoPackage of blocks, proposals, graph, and sample routes</h2>
+    <p>New tooling: <code>scripts/export_qgis_artifacts.py &lt;slug&gt;</code> exports everything a map
+    serves into a single QGIS-ready GeoPackage — Layer-2 blocks joined with their vote aggregates, both
+    kinds of top proposals (PBTPs and RBTPs, computed by the actual client TS modules via vite-node so
+    nothing drifts — only the tiebreak salt is fixed for determinism), the full Layer-1 votable graph
+    with per-edge votes, and sample OSRM routes paired with the graph edges they mapped to, for checking
+    the OSRM↔graph snap. Tested end-to-end on NYC: 10 layers, 853MB, 53 seconds; the vote join
+    cross-checked against the served arrays (634 voted blocks both sides). Guide with layer table and
+    QGIS styling recipes: <code>docs/qgis-export.md</code>.</p>
+  </a>
+
+  <a class="entry" href="./2026-07-07-latency-opts.html">
+    <div class="date">2026-07-07</div>
+    <h2>API latency fixes — kill the per-request DB tax, unblock the gevent hub</h2>
+    <p>The per-endpoint dashboard exposed a shared floor under every API call: resolve_map's map lookup
+    LEFT JOINed a full-table COUNT over 1.8M edge_votes rows on the f1-micro, per request — 320ms
+    medians on endpoints whose real work is sub-millisecond. Fixed by splitting the map query (indexed
+    per-slug count, or none for resolve_map) behind a 30s TTL cache with mutation invalidation; adding
+    psycogreen + a real connection pool so one slow psycopg2 query no longer freezes every in-flight
+    request on the gevent worker (the old shared singleton connection was only safe because the hub
+    blocked); a per-instance 60s maps-list cache; and graph-votes 304s answered straight from Redis
+    before ensure_loaded, so cold instances don't load a graph to say "unchanged". Verified locally:
+    sub-ms warm endpoints, tests green, 32-greenlet concurrency harness clean. Prod deploy pending.</p>
+  </a>
+
   <a class="entry" href="./2026-07-07-monitoring-mvp.html">
     <div class="date">2026-07-07</div>
     <h2>Monitoring MVP — system-health dashboard, uptime check, and 8 alert policies</h2>
@@ -143,7 +201,11 @@
     policies with thresholds set from this system's measured cliffs — the app's 90%-of-8Gi OOM line,
     OSRM's pinned single instance (missing metric data counts as down), Redis's 1GB LRU eviction point,
     Postgres's read-only-on-full disk. Applied with a targeted -target list so the drifted app service
-    was never touched; dashboard JSON normalized to the API's stored form so plans stay clean.</p>
+    was never touched; dashboard JSON normalized to the API's stored form so plans stay clean.
+    Round&nbsp;2: P99 split by request type via a log-based latency metric (bot-scanner-whitelisted
+    endpoint label), charted in four groups by backing store — Redis/Postgres, OSRM, in-process graph
+    provider, external — with a 7-day measured baseline; digging for it found the shared latency floor:
+    every API request runs a full-table COUNT over edge_votes via resolve_map's map lookup.</p>
   </a>
 
   <a class="entry" href="./2026-07-05-routeprop-ui-fixes.html">

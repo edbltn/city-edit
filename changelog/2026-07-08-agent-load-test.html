@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>City Edit — Agent load test: where voting saturates</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --accent: #b4541e;
+    --hairline: rgba(0,0,0,0.10);
+    --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+    /* chart palette (validated on --paper: CVD ΔE 73.6; aqua 2.72:1 → direct labels + tables) */
+    --series-1: #2a78d6;   /* blue */
+    --series-2: #1baf7a;   /* aqua */
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --chart-muted: #898781;
+    --critical: #d03b3b;
+  }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 56px 24px 96px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 32px; margin: 8px 0 6px; }
+  .date { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  h2 { font-family: var(--font-ed); font-size: 23px; margin: 44px 0 10px; border-bottom: 2px solid var(--ink); padding-bottom: 8px; }
+  h3 { font-family: var(--font-ed); font-size: 18px; margin: 26px 0 6px; }
+  p, li { font-size: 15px; line-height: 1.6; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 13px; background: rgba(0,0,0,0.05); padding: 1px 5px; border-radius: 4px; }
+  .tldr { background: #fff; border: 1px solid var(--hairline); border-left: 4px solid var(--accent);
+    border-radius: 10px; padding: 16px 20px; margin: 22px 0; }
+  .tldr p { margin: 6px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 13.5px; }
+  th { text-align: right; font-weight: 600; border-bottom: 2px solid var(--ink); padding: 6px 10px; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  td { text-align: right; border-bottom: 1px solid var(--hairline); padding: 6px 10px; font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 12.5px; }
+  td.bad { color: var(--critical); font-weight: 700; }
+  .figure { background: #fff; border: 1px solid var(--hairline); border-radius: 12px; padding: 18px 18px 10px; margin: 20px 0; }
+  .figure .ftitle { font-weight: 600; font-size: 14.5px; color: var(--ink); margin: 0 0 2px; }
+  .figure .fsub { font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+  .legend { display: flex; gap: 16px; font-size: 12.5px; color: #33312b; margin: 4px 0 2px; }
+  .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  svg text { font-family: var(--font-ui); }
+  .tip { position: fixed; pointer-events: none; background: #15140f; color: #fbfbf8; font-size: 12px;
+    font-family: var(--font-mono); padding: 5px 9px; border-radius: 6px; opacity: 0; transition: opacity 0.08s; z-index: 10; white-space: nowrap; }
+  .finding { background: #fff; border: 1px solid var(--hairline); border-radius: 12px; padding: 16px 20px; margin: 16px 0; }
+  .finding h3 { margin: 0 0 6px; }
+  .finding .sev { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 10px; margin-left: 8px; vertical-align: 2px; }
+  .sev.s1 { background: #fbe4e4; color: #8f2323; }
+  .sev.s2 { background: #fdf0dc; color: #7a5200; }
+  .sev.s3 { background: #e8eef8; color: #1c5cab; }
+  .mit { border-left: 4px solid var(--series-1); }
+  ol.plan > li { margin: 8px 0; }
+  .small { font-size: 12.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">City Edit · Performance</div>
+  <h1>Agent load test: the vote pipeline saturates at ~9 votes/s</h1>
+  <div class="date">2026-07-08 · map <code>agent-test-1</code> (NYC · streets · Bikes list) · local dev stack (host Flask <code>app.py</code>, Werkzeug threaded · OSRM :5005 · Redis :6379 · Postgres in Docker)</div>
+
+  <div class="tldr">
+    <p><strong>TL;DR.</strong> Simulated voter agents (WebSocket + one <code>graph-votes</code> fetch +
+    route→vote cycles) were run in tiers of 5 → 160 against a fresh map. The app never hard-crashed,
+    but the vote path <strong>saturated at ~8–9 votes/s from Tier&nbsp;3 (20 agents) onward</strong> —
+    every additional agent just deepened the queue. At <strong>Tier&nbsp;6 (160 agents)</strong> the app
+    functionally locked up: 13% of votes exceeded a 45&nbsp;s client timeout (p95 = 45.6&nbsp;s), 11 of 160
+    <code>graph-votes</code> responses were truncated mid-body, and Flask RSS doubled to 7.1&nbsp;GB.
+    Root cause: <strong>all votes serialize through one process-wide lock, and each vote performs
+    ~300–550 sequential Redis round trips plus a synchronous Postgres write inside it</strong>
+    (~90–100&nbsp;ms of serialized work per vote). The health endpoint stayed at 1–2&nbsp;ms throughout —
+    monitoring would not have noticed.</p>
+  </div>
+
+  <h2>Method</h2>
+  <p>A fresh map <code>agent test 1</code> was created via <code>POST /api/maps</code>. Each simulated
+  agent behaves like a real client joining the map: it opens <code>/ws?map=agent-test-1</code> and counts
+  pushed deltas, fetches <code>/api/graph-votes</code> once (what the client does on load), then runs six
+  cycles of <code>POST /api/routes</code> (random Manhattan-core origin/destination) followed by
+  <code>POST /api/vote</code> on the returned edge set (typically ~100–200 edges, i.e. a real multi-block
+  route vote with clear-then-cast semantics). A sidecar probe hit <code>/health</code> every second and
+  sampled Flask CPU/RSS. Harness: <code>loadtest.py</code> (asyncio/aiohttp), 45&nbsp;s request timeout,
+  unique <code>voter_id</code> per agent.</p>
+  <p class="small">Caveat: local dev serves via Werkzeug thread-per-connection; prod is gunicorn + gevent
+  (1 worker). The <em>bottleneck measured here is inside the request handler</em> (lock + Redis/DB round
+  trips), so it applies to both — but the failure shape differs: prod's single gevent worker would show
+  head-of-line blocking on <em>all</em> endpoints sooner, whereas Werkzeug kept cheap endpoints fast while
+  votes queued.</p>
+
+  <h2>Results by tier</h2>
+  <table>
+    <thead><tr>
+      <th>Tier</th><th>Agents</th><th>Wall (s)</th>
+      <th>Vote p50 (s)</th><th>Vote p95 (s)</th><th>Vote fails</th>
+      <th>Votes/s</th><th>graph-votes p50 (s)</th><th>Routes p95 (s)</th>
+      <th>WS msgs</th><th>RSS peak (MB)</th><th>CPU peak (%)</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>1</td><td>5</td><td>6.5</td><td>0.29</td><td>0.93</td><td>0 / 30</td><td>4.6</td><td>1.31</td><td>0.15</td><td>150</td><td>3,537</td><td>99</td></tr>
+      <tr><td>2</td><td>10</td><td>8.9</td><td>0.72</td><td>1.03</td><td>0 / 60</td><td>6.7</td><td>1.31</td><td>0.03</td><td>582</td><td>3,656</td><td>101</td></tr>
+      <tr><td>3</td><td>20</td><td>15.2</td><td>1.76</td><td>2.10</td><td>0 / 120</td><td>7.9</td><td>1.25</td><td>0.06</td><td>2,263</td><td>3,698</td><td>103</td></tr>
+      <tr><td>4</td><td>40</td><td>27.8</td><td>3.79</td><td>4.26</td><td>0 / 240</td><td>8.6</td><td>1.51</td><td>0.12</td><td>8,942</td><td>3,744</td><td>101</td></tr>
+      <tr><td>5</td><td>80</td><td>58.4</td><td>8.37</td><td>9.54</td><td>0 / 480</td><td>8.2</td><td>3.08</td><td>0.24</td><td>35,305</td><td>5,167</td><td>122</td></tr>
+      <tr><td>6</td><td>160</td><td>146.9</td><td class="bad">16.57</td><td class="bad">45.63</td><td class="bad">129 / 960</td><td class="bad">5.7</td><td>3.97</td><td>2.10</td><td>132,808</td><td class="bad">7,066</td><td>165</td></tr>
+    </tbody>
+  </table>
+  <p class="small">Vote fails at Tier&nbsp;6 are client-side 45&nbsp;s timeouts. Tier&nbsp;6 also produced
+  11 <code>ClientPayloadError</code>s on <code>graph-votes</code> (server truncated the ~33.7&nbsp;MB body
+  mid-stream). <code>/health</code> stayed p50 1–2&nbsp;ms in every tier (worst single probe 1.8&nbsp;s).
+  All 160 WebSockets connected and stayed up in every tier.</p>
+
+  <div class="figure">
+    <p class="ftitle">Vote latency grows linearly with concurrent agents</p>
+    <p class="fsub">p50 / p95 of POST /api/vote per tier · log-scaled y (values labeled) · 45 s = harness timeout</p>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--series-1)"></span>p50</span>
+      <span><span class="sw" style="background:var(--series-2)"></span>p95</span>
+    </div>
+    <svg id="chart-latency" width="100%" height="300" viewBox="0 0 780 300" role="img"
+         aria-label="Line chart: vote p50 and p95 latency versus agent count, rising linearly from 0.29 and 0.93 seconds at 5 agents to 16.6 and 45.6 seconds at 160 agents"></svg>
+  </div>
+
+  <div class="figure">
+    <p class="ftitle">Throughput saturates at ~8–9 votes/s, then degrades</p>
+    <p class="fsub">Completed votes ÷ tier wall-clock · the ceiling is the serialized critical section (~100 ms/vote)</p>
+    <svg id="chart-tput" width="100%" height="260" viewBox="0 0 780 260" role="img"
+         aria-label="Line chart: achieved vote throughput versus agent count, rising to 8.6 per second at 40 agents, flat at 80, dropping to 5.7 at 160"></svg>
+  </div>
+
+  <div class="figure">
+    <p class="ftitle">Flask RSS doubles under join load</p>
+    <p class="fsub">Peak resident memory per tier (MB) · baseline ~3.5 GB is the NYC graph · growth is buffered 33.7 MB graph-votes responses + WS threads</p>
+    <svg id="chart-rss" width="100%" height="240" viewBox="0 0 780 240" role="img"
+         aria-label="Bar chart: peak Flask RSS per tier, roughly 3.5 gigabytes for tiers 1 to 4, 5.2 at 80 agents, 7.1 at 160"></svg>
+  </div>
+
+  <h2>What breaks, in order</h2>
+
+  <div class="finding">
+    <h3>1 · One process-wide lock serializes every vote<span class="sev s1">Critical — the lockup</span></h3>
+    <p><code>cast_vote</code> takes <code>_proposal_vote_lock</code> (a single
+    <code>threading.Lock</code>, <code>server/app.py:315</code>) around the whole clear-then-cast
+    transaction (<code>server/app.py:1104</code>). It serializes <em>all voters on all maps</em> within
+    the instance — the per-voter Redis <code>voter_lock</code> would already be enough for the
+    read-modify-write correctness it protects. With ~90–100&nbsp;ms of work inside, the instance has a hard
+    ceiling near 10 votes/s; queue latency is <code>depth × 100 ms</code>, which is exactly the measured
+    linear p50 series (0.29 → 0.72 → 1.76 → 3.79 → 8.37 → 16.6&nbsp;s). At 160 agents the queue exceeds any
+    client timeout: functional lockup.</p>
+  </div>
+
+  <div class="finding">
+    <h3>2 · ~300–550 sequential Redis round trips per vote inside the lock<span class="sev s1">Critical — why the lock is slow</span></h3>
+    <p>The critical section is dominated by per-edge chatter for a ~145-edge route vote:
+    <code>apply_directional</code> (<code>server/vote_store.py:203</code>) builds and <em>executes</em> a
+    2-command pipeline <em>once per edge</em> (~145 round trips), and
+    <code>apply_block_delta</code> (<code>server/block_votes.py:56</code>) issues 1–3 <em>unpipelined</em>
+    <code>HINCRBY</code>/<code>HDEL</code>s per edge (~150–400 more). Add the synchronous Postgres
+    read + delete + 145-row insert (<code>server/app.py:1158</code>) and the post-write count read-back.
+    At ~0.2&nbsp;ms per local round trip this is the measured ~100&nbsp;ms. (Contrast:
+    <code>read_edge_vt_counts</code> at <code>vote_store.py:260</code> already does it right — one
+    pipeline for all edges.)</p>
+  </div>
+
+  <div class="finding">
+    <h3>3 · graph-votes: 33.7 MB per join, cache defeated by voting<span class="sev s2">High — the join storm</span></h3>
+    <p>Each joining client fetches <code>/api/graph-votes</code>: ~33.7&nbsp;MB uncompressed JSON,
+    1.3&nbsp;s to build idle, 3–4&nbsp;s p50 under load. The LRU vote cache
+    (<code>server/app.py:299</code>) is keyed by revision — and every vote bumps the revision — so under
+    sustained voting <em>every</em> fetch at a new rev is a full rebuild, and each response buffers the
+    full body per request. At Tier&nbsp;6 this drove RSS from 3.7 to 7.1&nbsp;GB and truncated 11 of 160
+    responses mid-body (<code>ClientPayloadError</code>) — clients would see the stale-cache mismatch
+    path.</p>
+  </div>
+
+  <div class="finding">
+    <h3>4 · WS fan-out is O(votes × clients), one thread + one Redis connection per client<span class="sev s2">High</span></h3>
+    <p>Every vote publishes one delta (per-edge counts for ~145 edges + block counts) and each of the N
+    connected clients receives it — 132,808 messages at Tier&nbsp;6 for 831 votes. Each WS handler
+    (<code>server/app.py:885</code>) is a dedicated thread polling its own Redis pubsub connection at
+    10&nbsp;Hz. 160 clients ≈ 160 polling threads fighting the GIL with the vote work — this is why
+    <code>routes</code> p95 rose from 30&nbsp;ms to 2.1&nbsp;s (OSRM itself was never the bottleneck) and
+    CPU exceeded one core only via socket/JSON C code.</p>
+  </div>
+
+  <div class="finding">
+    <h3>5 · No backpressure or load-shedding<span class="sev s3">Medium</span></h3>
+    <p>Werkzeug accepts unbounded connections and queues them into the lock; a vote waits 45&nbsp;s and
+    then dies at the client while the server still burns through it (write amplification after abandonment).
+    Nothing sheds load, nothing bounds the queue, and <code>/health</code> — p50 1–2&nbsp;ms through the
+    entire meltdown — is blind to vote-path saturation, so prod monitoring keyed on health would miss this
+    exact failure.</p>
+  </div>
+
+  <div class="finding">
+    <h3>6 · Memory headroom<span class="sev s3">Medium</span></h3>
+    <p>Baseline RSS is ~3.5&nbsp;GB (NYC graph) and peaked at 7.1&nbsp;GB. Each horizontal replica pays the
+    full graph again, and a join storm adds gigabytes of transient response buffers — on a small Cloud Run
+    instance this profile is an OOM, which is the mobile-crash pattern seen before, now on the server
+    side.</p>
+  </div>
+
+  <h2>Mitigation plan</h2>
+  <p>Ordered by impact; M1+M2 remove the lockup, M3+M4 remove the join storm, the rest harden.</p>
+
+  <div class="finding mit">
+    <h3>M1 · Batch all Redis writes into ≤3 pipelines per vote <span class="small">(fixes #2 · est. 100 ms → ~10 ms)</span></h3>
+    <ol class="plan">
+      <li>In <code>cast_vote</code>, replace the per-edge <code>_apply</code> loop with a whole-plan batch:
+      accumulate every <code>HINCRBY</code> for clears + casts into <strong>one</strong> pipeline and execute once
+      (same commands, same keys — pure transport change).</li>
+      <li><code>apply_block_delta</code> needs <code>HINCRBY</code> return values (the 0↔1 presence boundary), so
+      make a vectorized <code>apply_block_deltas</code> two-phase: pipeline all <code>bd:</code> HINCRBYs → read
+      results → pipeline the boundary-crossing <code>bagg:</code> adjustments and <code>HDEL</code>s. Two round
+      trips regardless of edge count.</li>
+      <li>Optional endgame: move clear-then-cast into a Lua script/Redis Function — one round trip <em>and</em>
+      cross-instance atomicity, which would also let the Redis <code>voter_lock</code> shrink.</li>
+      <li>Verify with the existing vote semantics tests plus a new test asserting command-count per vote
+      (pipeline call count) so the chatter can't regress.</li>
+    </ol>
+  </div>
+
+  <div class="finding mit">
+    <h3>M2 · Narrow the global lock to per-voter <span class="small">(fixes #1 · unlocks concurrency)</span></h3>
+    <ol class="plan">
+      <li>Audit what <code>_proposal_vote_lock</code> actually protects: the voter's DB read-modify-write
+      (per-voter by definition) and Redis counter updates (atomic <code>HINCRBY</code>s, and single-pipeline
+      after M1). Nothing in the section is cross-voter except the counters, which don't need mutual exclusion.</li>
+      <li>Replace it with a striped in-process lock keyed by <code>(slug, device_id)</code> — e.g. 64
+      <code>threading.Lock</code>s indexed by hash — matching the scope of the existing cross-instance Redis
+      <code>voter_lock</code>. Same correctness story, stated in one place.</li>
+      <li>Postgres: give <code>delete_edge_votes</code>/<code>record_edge_votes</code> a connection pool +
+      <code>executemany</code>/<code>COPY</code>; one transaction per vote. The synchronous write is fine once it
+      only blocks <em>that voter</em>.</li>
+      <li>Load-test again with the harness: expect votes/s to scale to Postgres/Redis limits (target ≥ 100/s
+      single instance) and p95 flat vs. agent count.</li>
+    </ol>
+  </div>
+
+  <div class="finding mit">
+    <h3>M3 · Serve graph-votes as cached compressed bytes with debounced rebuild <span class="small">(fixes #3 and most of #6)</span></h3>
+    <ol class="plan">
+      <li>Cache the <strong>gzipped bytes</strong> (not the JSON string) per <code>(map, mode, rev)</code>; serve
+      with <code>Content-Encoding: gzip</code> directly. 160 joiners then share one build + one compression, and
+      per-request buffering drops ~10×. (Mind the existing curl/Accept-Encoding trap — keep an identity path.)</li>
+      <li>Debounce invalidation under sustained voting: rebuild at most every 2–3&nbsp;s, serving the last
+      complete snapshot with its rev stamped. Clients already reconcile forward via WS deltas (SET semantics), so
+      a slightly-stale snapshot + newer deltas is exactly the designed path; keep the topology-dimension stamp so
+      the mismatch detector still works.</li>
+      <li>Single-flight the rebuild (extend the existing build lock) so N concurrent joiners trigger one build.</li>
+      <li>Longer term: emit the vote array in the typed-array binary format like <code>graph-topology</code>, or
+      sparse (nonzero entries only) — a fresh map's 33.7&nbsp;MB is almost all zeros.</li>
+    </ol>
+  </div>
+
+  <div class="finding mit">
+    <h3>M4 · Coalesce WS broadcasts; one pubsub listener per process <span class="small">(fixes #4)</span></h3>
+    <ol class="plan">
+      <li>Batch deltas per map: aggregate published deltas and flush to clients at ≤ 5–10&nbsp;Hz. Because
+      clients SET authoritative counts, last-write-wins merging per (edge, vt) is lossless — N votes/s to M
+      clients becomes ~10 msgs/s per client regardless of vote rate.</li>
+      <li>Replace per-client pubsub connections + 10&nbsp;Hz poll threads with <em>one</em> Redis pubsub listener
+      per process fanning out to in-memory client queues; each WS then blocks on its queue instead of polling.
+      Kills 160 threads and 160 Redis connections at Tier-6 scale.</li>
+      <li>Verify: rerun Tier 5–6; expect <code>routes</code> p95 back to ~50&nbsp;ms (contention gone) and WS
+      message count ≈ clients × flush ticks, not clients × votes.</li>
+    </ol>
+  </div>
+
+  <div class="finding mit">
+    <h3>M5 · Backpressure, load-shedding, and a saturation signal <span class="small">(fixes #5)</span></h3>
+    <ol class="plan">
+      <li>Bound the vote queue: if lock wait exceeds ~2&nbsp;s (or striped-lock queue depth exceeds a threshold),
+      return <code>503 + Retry-After</code> immediately — the client already has optimistic-rollback UX. Better a
+      visible retry than a 45&nbsp;s hang that dies anyway.</li>
+      <li>Expose vote-path saturation where monitoring can see it: lock-wait p95, votes/s, and rebuild time in
+      <code>/api/admin/stats</code>, and fail <code>/health</code> (or a separate readiness probe) when lock-wait
+      p95 exceeds a limit — the current health check stayed green through the whole event.</li>
+      <li>Prod serving: with M1–M4 the handler becomes IO-light; keep gevent but run ≥ 2 workers × 2 instances
+      (the June Redis vote lock + mode-scoped invalidation were built for exactly this) and set explicit
+      gunicorn timeouts.</li>
+    </ol>
+  </div>
+
+  <div class="finding mit">
+    <h3>M6 · Memory <span class="small">(fixes #6, mostly falls out of M3)</span></h3>
+    <ol class="plan">
+      <li>M3's shared compressed cache removes the join-storm buffers (the 3.5 → 7.1&nbsp;GB spike).</li>
+      <li>Baseline: the ~3.5&nbsp;GB NYC graph per replica is the known rustworkx/typed-array workstream — worth
+      doing before adding replicas, since each pays it again.</li>
+      <li>Add RSS to the admin stats sample so growth is visible per deploy.</li>
+    </ol>
+  </div>
+
+  <h2>Verification checklist (after M1+M2)</h2>
+  <ul>
+    <li>Rerun <code>loadtest.py --agents 40</code>: vote p50 should be &lt; 0.3&nbsp;s (was 3.8&nbsp;s) and votes/s &gt; 50 (was 8.6).</li>
+    <li>Rerun <code>--agents 160</code>: zero timeouts, zero <code>ClientPayloadError</code>, RSS peak &lt; 4.5&nbsp;GB.</li>
+    <li>Vote-semantics tests green; one-direction-per-block invariant spot-checked via two agents voting opposite directions on overlapping routes.</li>
+    <li>Redis command count per 145-edge vote ≤ ~10 (was ~300–550) — assert via <code>MONITOR</code> sample or pipeline-call counter.</li>
+  </ul>
+
+  <p class="small">Harness + raw per-tier JSON: session scratchpad (<code>loadtest.py</code>,
+  <code>tier1.json … tier6.json</code>). Test map left in place at
+  <a href="http://localhost:3000/m/agent-test-1"><code>/m/agent-test-1</code></a> (831+ real votes on it) —
+  safe to delete.</p>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script>
+const TIERS = [5, 10, 20, 40, 80, 160];
+const P50  = [0.290, 0.719, 1.757, 3.791, 8.368, 16.569];
+const P95  = [0.934, 1.030, 2.101, 4.255, 9.541, 45.633];
+const TPUT = [4.6, 6.7, 7.9, 8.6, 8.2, 5.7];
+const RSS  = [3537, 3656, 3698, 3744, 5167, 7066];
+
+const tip = document.getElementById("tip");
+function showTip(evt, text) {
+  tip.textContent = text;
+  tip.style.opacity = 1;
+  tip.style.left = (evt.clientX + 12) + "px";
+  tip.style.top = (evt.clientY - 28) + "px";
+}
+function hideTip() { tip.style.opacity = 0; }
+
+const NS = "http://www.w3.org/2000/svg";
+function el(parent, tag, attrs, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text !== undefined) e.textContent = text;
+  parent.appendChild(e);
+  return e;
+}
+
+// Ordinal x (tiers double, so even spacing = log2 spacing)
+function xPos(i, x0, x1) { return x0 + (i / (TIERS.length - 1)) * (x1 - x0); }
+
+function lineChart(svgId, seriesList, opts) {
+  const svg = document.getElementById(svgId);
+  const W = 780, H = +svg.getAttribute("height").replace("%","") || 300;
+  const M = { l: 52, r: 70, t: 14, b: 34 };
+  const x0 = M.l, x1 = W - M.r, y0 = H - M.b, y1 = M.t;
+  const yv = opts.log ? v => Math.log10(v) : v => v;
+  const lo = yv(opts.min), hi = yv(opts.max);
+  const yPos = v => y0 - ((yv(v) - lo) / (hi - lo)) * (y0 - y1);
+
+  for (const g of opts.gridlines) {
+    const y = yPos(g);
+    el(svg, "line", { x1: x0, x2: x1, y1: y, y2: y, stroke: "var(--grid)", "stroke-width": 1 });
+    el(svg, "text", { x: x0 - 8, y: y + 4, "text-anchor": "end", "font-size": 11, fill: "var(--chart-muted)" }, opts.fmt(g));
+  }
+  el(svg, "line", { x1: x0, x2: x1, y1: y0, y2: y0, stroke: "var(--axis)", "stroke-width": 1 });
+  TIERS.forEach((t, i) => {
+    el(svg, "text", { x: xPos(i, x0, x1), y: y0 + 20, "text-anchor": "middle", "font-size": 11.5, fill: "var(--chart-muted)" }, t + " agents");
+  });
+
+  for (const s of seriesList) {
+    const pts = s.data.map((v, i) => [xPos(i, x0, x1), yPos(v)]);
+    el(svg, "path", { d: "M" + pts.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join("L"),
+      fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round" });
+    pts.forEach((p, i) => {
+      el(svg, "circle", { cx: p[0], cy: p[1], r: 4, fill: s.color, stroke: "var(--paper)", "stroke-width": 2 });
+      const hit = el(svg, "circle", { cx: p[0], cy: p[1], r: 14, fill: "transparent", cursor: "default" });
+      hit.addEventListener("mousemove", e => showTip(e, `${TIERS[i]} agents · ${s.name} ${opts.fmt(s.data[i])}`));
+      hit.addEventListener("mouseleave", hideTip);
+    });
+    // direct label at line end
+    const last = pts[pts.length - 1];
+    el(svg, "text", { x: last[0] + 10, y: last[1] + 4, "font-size": 12, "font-weight": 600, fill: s.color },
+      `${s.name} ${opts.fmt(s.data[s.data.length - 1])}`);
+    // selective labels: first point + any flagged indices (below the line for
+    // labelBelow series so two series' labels can't collide)
+    for (const i of (s.labelAt || [0])) {
+      const dy = s.labelBelow ? 20 : -10;
+      el(svg, "text", { x: pts[i][0], y: pts[i][1] + dy, "text-anchor": "middle", "font-size": 11, fill: "var(--ink)" },
+        opts.fmt(s.data[i]));
+    }
+  }
+}
+
+lineChart("chart-latency", [
+  { name: "p95", color: "var(--series-2)", data: P95, labelAt: [0, 4] },
+  { name: "p50", color: "var(--series-1)", data: P50, labelAt: [0, 4], labelBelow: true },
+], { log: true, min: 0.2, max: 60, gridlines: [0.5, 1, 2, 5, 10, 20, 45], fmt: v => v < 10 ? v.toFixed(v < 1 ? 2 : 1) + " s" : Math.round(v) + " s" });
+
+lineChart("chart-tput", [
+  { name: "votes/s", color: "var(--series-1)", data: TPUT, labelAt: [0, 3] },
+], { log: false, min: 0, max: 10, gridlines: [2, 4, 6, 8, 10], fmt: v => v.toFixed(1) + "/s" });
+
+(function rssChart() {
+  const svg = document.getElementById("chart-rss");
+  const W = 780, H = 240;
+  const M = { l: 60, r: 20, t: 14, b: 34 };
+  const x0 = M.l, x1 = W - M.r, y0 = H - M.b, y1 = M.t;
+  const max = 8000;
+  const yPos = v => y0 - (v / max) * (y0 - y1);
+  for (const g of [2000, 4000, 6000, 8000]) {
+    el(svg, "line", { x1: x0, x2: x1, y1: yPos(g), y2: yPos(g), stroke: "var(--grid)" });
+    el(svg, "text", { x: x0 - 8, y: yPos(g) + 4, "text-anchor": "end", "font-size": 11, fill: "var(--chart-muted)" }, (g / 1000) + " GB");
+  }
+  el(svg, "line", { x1: x0, x2: x1, y1: y0, y2: y0, stroke: "var(--axis)" });
+  const bw = 46, span = (x1 - x0) / TIERS.length;
+  RSS.forEach((v, i) => {
+    const cx = x0 + span * (i + 0.5);
+    const h = y0 - yPos(v);
+    const bar = el(svg, "path", {
+      d: `M${cx - bw / 2},${y0} v${-(h - 4)} q0,-4 4,-4 h${bw - 8} q4,0 4,4 v${h - 4} z`,
+      fill: "var(--series-1)" });
+    bar.addEventListener("mousemove", e => showTip(e, `${TIERS[i]} agents · peak RSS ${(v / 1000).toFixed(1)} GB`));
+    bar.addEventListener("mouseleave", hideTip);
+    el(svg, "text", { x: cx, y: yPos(v) - 7, "text-anchor": "middle", "font-size": 11.5, fill: "var(--ink)" }, (v / 1000).toFixed(1));
+    el(svg, "text", { x: cx, y: y0 + 20, "text-anchor": "middle", "font-size": 11.5, fill: "var(--chart-muted)" }, TIERS[i] + " agents");
+  });
+})();
+</script>
+</body>
+</html>
