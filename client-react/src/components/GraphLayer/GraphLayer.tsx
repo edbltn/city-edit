@@ -2935,6 +2935,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   }, [map]);
 
   // Track pinned tooltip screen position on map pan/zoom
+  // The last live map click, recorded verbatim. A pinned point whose coords
+  // equal it was placed by an in-app click (plain clicks store the RAW click
+  // latlng — the snap path only records drags), as opposed to a deep link /
+  // history restore, whose coords come from URL parsing and can never be the
+  // same doubles. The pinned effect uses this to tell interactive pins (hover
+  // already told the user what they're selecting — honour it verbatim) from
+  // link-derived pins (a bare lat/lng that may need proposal reconciliation).
+  const lastMapClickRef = useRef<{ lat: number; lng: number } | null>(null);
+  useEffect(() => {
+    const onClick = (e: L.LeafletMouseEvent) => {
+      lastMapClickRef.current = { lat: e.latlng.lat, lng: e.latlng.lng };
+    };
+    map.on("click", onClick);
+    return () => { map.off("click", onClick); };
+  }, [map]);
+
   const pinnedLat = pinnedPoint?.lat ?? null;
   const pinnedLng = pinnedPoint?.lng ?? null;
 
@@ -2965,14 +2981,27 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const snapMatch = !hadOverride && lastSnap != null &&
       Math.abs(lastSnap.snapLat - pinnedLat) < 1e-9 &&
       Math.abs(lastSnap.snapLng - pinnedLng) < 1e-9;
+    // Interactive = this point was placed by a live gesture in THIS session: a
+    // drag that recorded its snap resolution, or a plain click whose raw coords
+    // the map click listener recorded. Everything else (deep link, history
+    // restore, address search) is link-derived.
+    const lastClick = lastMapClickRef.current;
+    const clickMatch = !hadOverride && lastClick != null &&
+      lastClick.lat === pinnedLat && lastClick.lng === pinnedLng;
+    const interactive = snapMatch || clickMatch;
+    // Interactive pins resolve through the SAME gated resolver hover uses —
+    // including its "nothing far from the graph" answer, where the click
+    // placed a free waypoint and hover showed nothing, so nothing may pin.
+    // Only link-derived pins use resolveSelection's always-resolve contract.
     const sel = snapMatch
       ? lastSnap
-      : resolveSelection(pinnedLat, pinnedLng, pinnedEdgeOverrideRef.current);
+      : clickMatch
+        ? resolveDragSnapRef.current(pinnedLat, pinnedLng)
+        : resolveSelection(pinnedLat, pinnedLng, pinnedEdgeOverrideRef.current);
     pinnedEdgeOverrideRef.current = null;
     let target = sel?.target ?? null;
     dlog("cast", `pinned resolve @${pinnedLat.toFixed(5)},${pinnedLng.toFixed(5)}`,
-      { hadOverride, snapMatch, target, voteEdgeId: sel?.voteEdgeId });
-    debugState("pinnedTarget", target);
+      { hadOverride, snapMatch, clickMatch, target, voteEdgeId: sel?.voteEdgeId });
 
     // Drop the edge-lock the moment the point itself moves (a click/drag sets new
     // coords); a re-run at the SAME coords (vote tick / winners load) keeps it.
@@ -2992,28 +3021,39 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // includes every station on a station network, where each station IS a top
     // proposal even with no net-positive votes (so it isn't in `winners`).
     //
-    // Skip entirely when an override was set: an indicator click and the
-    // re-pin in castProposalVote both name an EXACT edge to keep selected. A
-    // vote can momentarily drop that edge out of the spaced `winners` list, so
-    // without this guard isProposalTarget reads false and reconciliation re-snaps
-    // the modal onto a neighbouring winner — the selection appears to jump to a
+    // Skip when an override was set: an indicator click and the re-pin in
+    // castProposalVote both name an EXACT edge to keep selected. A vote can
+    // momentarily drop that edge out of the spaced `winners` list, so without
+    // this guard isProposalTarget reads false and reconciliation re-snaps the
+    // modal onto a neighbouring winner — the selection appears to jump to a
     // different proposal the instant you vote.
+    //
+    // Skip equally for INTERACTIVE pins (a live click or drag): hover already
+    // told the user exactly what they are selecting — hover must equal the
+    // pin, verbatim. Reconciliation is for link-derived pins only, where a
+    // bare lat/lng is all the URL gives us: a point that was shared AS a
+    // proposal midpoint should reconcile to that proposal even if the raw
+    // resolve lands elsewhere. (Regression this guards against: clicking a
+    // junction node within 8 m of a winner's midpoint hijacked the selection
+    // onto the neighbouring street's proposal — flipped-name card, wrong
+    // block highlighted.)
     const isProposalTarget = target?.kind === "edge"
       && (isStationNetwork || winners.some((w) => w.edgeIdx === target!.index));
-    if (!hadOverride && !isProposalTarget) {
+    if (!hadOverride && !interactive && !isProposalTarget) {
       const snapped = nearestProposalEdgeIndex(pinnedLat, pinnedLng, 8);
       if (snapped !== null) target = { kind: "edge", index: snapped };
     }
 
-    // Node → proposal-edge upgrade. A node modal merges the proposals of every
-    // incident edge, but a vote lands on one edge — so selecting an intersection
-    // (a map click that snaps to a node, or a deep link whose slat/slng IS a
-    // node's coords) voted an arbitrary incident edge and then collapsed onto it.
-    // Resolve a node that has proposals to the edge owning its strongest one, so
-    // the selection is an edge throughout. Bare intersections (no proposals) stay
-    // a node — their modal is just an unvotable "No votes yet" preview.
+    // Node → proposal-edge upgrade — link-derived pins only, same reasoning.
+    // A shared link whose slat/slng IS a node's coords was probably minted from
+    // a proposal view, so resolve the node to the edge owning its strongest
+    // proposal (a node modal merges incident proposals but a vote lands on one
+    // edge). An INTERACTIVE click on a node pins the node exactly as hovered —
+    // its vote still lands on voteEdgeId (adjShortestInBlock) by the per-edge
+    // storage rule; only the TARGET must match hover. Bare intersections stay
+    // a node either way — their modal is an unvotable "No votes yet" preview.
     let didNodeUpgrade = false;
-    if (target?.kind === "node") {
+    if (!interactive && target?.kind === "node") {
       const up = strongestProposalEdgeForNode(target.index);
       if (up !== null) { target = { kind: "edge", index: up }; didNodeUpgrade = true; }
     }
@@ -3026,7 +3066,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // within STICKY_RESELECT_PX of the currently-pinned feature (point-to-segment
     // for edges), keep that feature. A direct indicator click (override) always
     // wins, so you can still jump to another proposal by tapping its icon.
-    if (!hadOverride && prevTarget && target &&
+    // TOUCH ONLY: on a hover-capable device an interactive click means hover
+    // already showed the user the new target — keeping the old one would make
+    // the pin contradict hover. Touch has no hover to honour, so sloppy re-taps
+    // near the open card still stick to it there.
+    const canHover = window.matchMedia("(hover: hover)").matches;
+    if (!hadOverride && !(interactive && canHover) && prevTarget && target &&
         (prevTarget.kind !== target.kind || prevTarget.index !== target.index)) {
       const gd = graphDataRef.current;
       const onFeature = gd && (prevTarget.kind === "edge"
@@ -3053,6 +3098,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     }
 
     pinnedTargetRef.current = target;
+    // The probe records the FINAL target, after reconciliation/upgrade/sticky/
+    // lock — what the card and highlight actually show. Recording the raw
+    // resolution here once masked a hover≠pin hijack from the test harness.
+    debugState("pinnedTarget", target);
     // Lock once settled on a proposal edge (override pin, a winner, or a node
     // upgraded to its strongest proposal edge), so subsequent vote-driven
     // re-resolves hold this exact edge. A node-upgrade target may not be a spaced
