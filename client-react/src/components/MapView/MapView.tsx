@@ -15,7 +15,7 @@ import { useMapClick } from "../../hooks";
 import { kiteGhostIcon } from "../../utils/kiteIcon";
 import { setMapViewState, setMapInstance, getInitialMapView } from "../../utils/mapViewState";
 import { getCurrentMap } from "../../map/runtime";
-import { chooseAnchorOrder, type RouteProposal } from "../GraphLayer/routeProposals";
+import { chooseAnchorOrder, chooseAnchorOrderBefore, type RouteProposal } from "../GraphLayer/routeProposals";
 import { RouteMarker } from "../RouteMarker";
 import { DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
@@ -29,6 +29,17 @@ import type { LatLng, ProposalMatch } from "../../types";
 import "leaflet/dist/leaflet.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./MapView.css";
+
+// Equirectangular "duration" between two points — proportional to foot time at
+// city scale, and only the ORDER of candidate waypoint chains matters, so route
+// choices never block on OSRM. Shared by the diamond click and the
+// drop-a-waypoint-onto-a-diamond corridor threading.
+function chainDurationOf(x: LatLng, y: LatLng): number {
+  const meanLat = ((x.lat + y.lat) / 2) * (Math.PI / 180);
+  const dLat = (y.lat - x.lat) * (Math.PI / 180);
+  const dLng = (y.lng - x.lng) * (Math.PI / 180) * Math.cos(meanLat);
+  return Math.hypot(dLat, dLng);
+}
 
 // Custom pane setup component
 function MapPanes() {
@@ -199,6 +210,12 @@ export function MapView() {
     insertWaypointAtSegment,
     updateGhostWaypoint,
     removeGhostWaypoint,
+    replaceGhostWaypointWithPair,
+    insertWaypointPairAtSegment,
+    replaceStartWithPair,
+    replaceEndWithPair,
+    selectCorridor,
+    removeWaypointsNear,
     updateWaypoint,
     clearSuppressClick,
     setSuppressClick,
@@ -274,6 +291,11 @@ export function MapView() {
   // proposal tap — on the path (handleTap) AND on a matched waypoint's kite
   // (handleProposalRestart) — routes through it so a stack always explodes first.
   const clusterExploderRef = useRef<((latlng: LatLng) => boolean) | null>(null);
+  // GraphLayer publishes its "which RBTP diamond is at this point?" resolver here
+  // (it also SELECTS the hit, like the diamond's own click). Consulted on every
+  // waypoint/path drop so dropping onto a diamond threads the route through the
+  // proposal's whole corridor instead of just placing a point there.
+  const routeProposalAtRef = useRef<((latlng: LatLng) => RouteProposal | null) | null>(null);
   // Live dragged-waypoint position, fed to GraphLayer to light the drop-target
   // proposal. rAF-coalesced so a 60fps drag re-renders at most once per frame.
   const [dragPoint, setDragPoint] = useState<LatLng | null>(null);
@@ -349,10 +371,14 @@ export function MapView() {
     setHoverProposalPoint(null);
   }, [setSuppressClick]);
 
-  // Wrapper for marker drag finish — re-enables ghost pin
+  // Wrapper for marker drag finish — re-enables ghost pin. Clears the matched-
+  // waypoint hover card too: the drop fires a mouseover with the PRE-drag match
+  // still in state, which otherwise pins the old proposal's card to the kite's
+  // new spot until the cursor happens to leave it.
   const handleMarkerDragFinish = useCallback(() => {
     setIsDraggingMarker(false);
     clearDragPoint();
+    setHoverProposalPoint(null);
   }, [clearDragPoint]);
 
   // Indicator click follows the same tool logic as a normal map click.
@@ -374,32 +400,32 @@ export function MapView() {
     }
   }, [activeTool, startReplaceArmed, start.coords, end.coords, clearPoints, clearSplitPaths, placeStart, placeEnd, setActiveTool, clearSuppressClick]);
 
-  // Forcing the route through a ROUTE proposal (diamond). The corridor's two
-  // anchor endpoints become waypoints: with an existing route they're inserted
-  // as ghost mids in the faster order (start→A→B→end vs start→B→A→end); with no
-  // route yet they seed start + end. Either way the route now traverses — and
-  // thus selects — the corridor. Duration is approximated by equirectangular
-  // distance (monotonic with foot time at city scale), so we don't block on OSRM.
+  // Clicking a ROUTE proposal (diamond) selects it FLAT OUT: the corridor
+  // becomes the whole selection — start/end seeded at its two anchors with the
+  // forced-corridor flag stamped, any existing route replaced. (Threading a
+  // corridor INTO an existing route is the drag-and-drop affordance — dropping
+  // a waypoint onto the diamond — never the click.) The flagged segment then
+  // routes through the corridor VERBATIM (RouteContext's corridor resolver), so
+  // the selection traces the proposal exactly.
   const handleRouteProposalClick = useCallback((p: RouteProposal) => {
     clearSuppressClick();
-    clearSplitPaths();
     const [a, b] = p.anchorCoords;
-    const durationOf = (x: LatLng, y: LatLng) => {
-      const meanLat = ((x.lat + y.lat) / 2) * (Math.PI / 180);
-      const dLat = (y.lat - x.lat) * (Math.PI / 180);
-      const dLng = (y.lng - x.lng) * (Math.PI / 180) * Math.cos(meanLat);
-      return Math.hypot(dLat, dLng); // proportional to meters; only the order matters
-    };
-    if (start.coords && end.coords && !isStationNetwork) {
-      const [first, second] = chooseAnchorOrder([start.coords, end.coords], a, b, durationOf);
-      insertWaypointAtSegment(0, first);
-      insertWaypointAtSegment(1, second);
-    } else {
+    // Already exactly this corridor (start/end are the two anchors, no mids) —
+    // a re-tap of the selected diamond is a no-op, not a pointless reroute.
+    const nearM = (x: LatLng, y: LatLng) => 6_371_000 * chainDurationOf(x, y);
+    const exactSelection = ghostWaypoints.length === 0 && start.coords && end.coords
+      && ((nearM(start.coords, a) < 5 && nearM(end.coords, b) < 5)
+        || (nearM(start.coords, b) < 5 && nearM(end.coords, a) < 5));
+    if (exactSelection) return;
+    if (isStationNetwork) {
+      // Station maps never hold a route — the diamond click is a point select.
+      clearSplitPaths();
       clearPoints();
       setStartPoint(a);
-      if (!isStationNetwork) setEndPoint(b);
+      return;
     }
-  }, [start.coords, end.coords, isStationNetwork, insertWaypointAtSegment, clearPoints, setStartPoint, setEndPoint, clearSuppressClick, clearSplitPaths]);
+    selectCorridor([a, b], { proposalId: p.id, edgeIds: p.edgeIds });
+  }, [start.coords, end.coords, ghostWaypoints, isStationNetwork, clearPoints, setStartPoint, selectCorridor, clearSuppressClick, clearSplitPaths]);
 
   // Tapping a top-proposal waypoint (start/end/mid). A crowded stack fans out
   // first (no side effect) — the SAME exploder a path tap uses, so matched
@@ -419,6 +445,126 @@ export function MapView() {
   // indicator IS the selection). GraphLayer applies the same gate to the [×] badge.
   const isRouteMode = !!start.coords && !!end.coords && !isStationNetwork;
 
+  // The ForcedCorridor stamp for a proposal: its deterministic id (what the URL
+  // carries) + an edge-id snapshot (what survives proposal churn).
+  const corridorOf = useCallback(
+    (p: RouteProposal) => ({ proposalId: p.id, edgeIds: p.edgeIds }),
+    []
+  );
+
+  // Did this drop land on an RBTP diamond? Then the route threads through the
+  // WHOLE corridor: its two anchors join the sequence between `prev` and `next`
+  // in whichever of the two orders gives the shorter chain —
+  //   (1) prev → anchorA → (corridor) → anchorB → next
+  //   (2) prev → anchorB → (corridor) → anchorA → next
+  // (the corridor's own length is the same both ways, so the comparison is the
+  // approach + departure legs). Null when the drop isn't on a diamond or there's
+  // no full route to thread it into.
+  const corridorPairFor = useCallback(
+    (drop: LatLng, prev: LatLng, next: LatLng): { pair: [LatLng, LatLng]; proposal: RouteProposal } | null => {
+      if (!isRouteMode) return null;
+      const p = routeProposalAtRef.current?.(drop);
+      if (!p) return null;
+      return {
+        pair: chooseAnchorOrder([prev, next], p.anchorCoords[0], p.anchorCoords[1], chainDurationOf),
+        proposal: p,
+      };
+    },
+    [isRouteMode]
+  );
+
+  // A mid (ghost waypoint) drag drop: onto a diamond → the mid BECOMES the
+  // corridor (both anchors replace it, flagged forced); anywhere else → the
+  // normal move (which un-forces the segments it touches).
+  const handleGhostWaypointDragEnd = useCallback(
+    (index: number, pos: LatLng) => {
+      if (start.coords && end.coords) {
+        const prev = index === 0 ? start.coords : ghostWaypoints[index - 1];
+        const next = index === ghostWaypoints.length - 1 ? end.coords : ghostWaypoints[index + 1];
+        const hit = prev && next ? corridorPairFor(pos, prev, next) : null;
+        if (hit) {
+          replaceGhostWaypointWithPair(index, hit.pair, corridorOf(hit.proposal));
+          return;
+        }
+      }
+      updateGhostWaypoint(index, pos);
+    },
+    [start.coords, end.coords, ghostWaypoints, corridorPairFor, corridorOf, replaceGhostWaypointWithPair, updateGhostWaypoint]
+  );
+
+  // A path drag drop (the ghost mid pulled out of the route): onto a diamond →
+  // insert the corridor's two anchors into that segment (flagged forced); else
+  // the normal mid (which un-forces the segment it splits).
+  const handleSegmentDrag = useCallback(
+    (segmentIndex: number, pos: LatLng) => {
+      if (start.coords && end.coords) {
+        const seq = [start.coords, ...ghostWaypoints, end.coords];
+        const prev = seq[segmentIndex];
+        const next = seq[segmentIndex + 1];
+        const hit = prev && next ? corridorPairFor(pos, prev, next) : null;
+        if (hit) {
+          insertWaypointPairAtSegment(segmentIndex, hit.pair, corridorOf(hit.proposal));
+          return;
+        }
+      }
+      insertWaypointAtSegment(segmentIndex, pos);
+    },
+    [start.coords, end.coords, ghostWaypoints, corridorPairFor, corridorOf, insertWaypointPairAtSegment, insertWaypointAtSegment]
+  );
+
+  // ENDPOINT drag drops — scenarios 1 and 3 of the corridor-threading spec.
+  // Dropping the END onto a diamond: the route becomes S…AZ or S…ZA — the near
+  // anchor joins as the last mid, the far anchor becomes the end, and the pair
+  // is forced through the proposal. chooseAnchorOrder with only a head point
+  // compares the two approach legs (the corridor's own length cancels), i.e.
+  // "is the last fixed point closer to A or Z" — on the straight-line proxy
+  // shared by every drop decision (see chainDurationOf). Anywhere else: the
+  // normal endpoint move, which un-forces a corridor arriving at the end.
+  const handleEndDragEnd = useCallback(
+    (pos: LatLng) => {
+      if (isRouteMode && start.coords && end.coords) {
+        const p = routeProposalAtRef.current?.(pos);
+        if (p) {
+          const prev = ghostWaypoints.length > 0 ? ghostWaypoints[ghostWaypoints.length - 1] : start.coords;
+          const pair = chooseAnchorOrder([prev], p.anchorCoords[0], p.anchorCoords[1], chainDurationOf);
+          replaceEndWithPair(pair, corridorOf(p));
+          return;
+        }
+      }
+      setEndPoint(pos);
+    },
+    [isRouteMode, start.coords, end.coords, ghostWaypoints, corridorOf, replaceEndWithPair, setEndPoint]
+  );
+
+  // Dropping the START onto a diamond: the route becomes AZ…E or ZA…E — one
+  // anchor becomes the start proper, the other joins as the first mid, forced.
+  // chooseAnchorOrderBefore picks the order by which anchor should touch the
+  // next fixed point (the head-side complement of the end drop).
+  const handleStartDragEnd = useCallback(
+    (pos: LatLng) => {
+      if (isRouteMode && start.coords && end.coords) {
+        const p = routeProposalAtRef.current?.(pos);
+        if (p) {
+          const next = ghostWaypoints.length > 0 ? ghostWaypoints[0] : end.coords;
+          const pair = chooseAnchorOrderBefore(next, p.anchorCoords[0], p.anchorCoords[1], chainDurationOf);
+          replaceStartWithPair(pair, corridorOf(p));
+          return;
+        }
+      }
+      setStartPoint(pos);
+    },
+    [isRouteMode, start.coords, end.coords, ghostWaypoints, corridorOf, replaceStartWithPair, setStartPoint]
+  );
+
+  // [×] on a selected route-proposal diamond: pull its two corridor anchors back
+  // out of the route in one step (they went in together via click or drop).
+  const removeRouteProposal = useCallback(
+    (p: RouteProposal) => {
+      removeWaypointsNear([p.anchorCoords[0], p.anchorCoords[1]]);
+    },
+    [removeWaypointsNear]
+  );
+
   // Resolve the [×] badge baked into a matched proposal's indicator (GraphLayer)
   // to the right removal: the badge stamps the proposal's edge, and waypointMatch
   // tells us which waypoint sits on that edge. One handler for all three roles —
@@ -435,10 +581,12 @@ export function MapView() {
   // the non-exploded proposal: a matched start/end/mid MOVES that waypoint to the
   // drop; an on-path proposal inserts a NEW mid at the segment its `origin` lies on.
   const onProposalDrop = useCallback((edgeIdx: number, origin: LatLng, drop: LatLng) => {
-    if (waypointMatch.start?.edgeIdx === edgeIdx) { setStartPoint(drop); return; }
-    if (waypointMatch.end?.edgeIdx === edgeIdx) { setEndPoint(drop); return; }
+    // Every branch goes through the corridor-aware handlers, so dropping onto an
+    // RBTP diamond threads the whole proposal regardless of what was grabbed.
+    if (waypointMatch.start?.edgeIdx === edgeIdx) { handleStartDragEnd(drop); return; }
+    if (waypointMatch.end?.edgeIdx === edgeIdx) { handleEndDragEnd(drop); return; }
     const midIdx = waypointMatch.mids.findIndex((m) => m?.edgeIdx === edgeIdx);
-    if (midIdx >= 0) { updateGhostWaypoint(midIdx, drop); return; }
+    if (midIdx >= 0) { handleGhostWaypointDragEnd(midIdx, drop); return; }
 
     // On-path (not a waypoint): insert a NEW mid into whichever route segment the
     // origin lies on, then insertWaypointAtSegment splits/reroutes like a path drag.
@@ -460,8 +608,8 @@ export function MapView() {
         if (d < bestD) { bestD = d; bestIdx = s.idx; }
       }
     }
-    insertWaypointAtSegment(bestIdx, drop);
-  }, [waypointMatch, setStartPoint, setEndPoint, updateGhostWaypoint, leafletMap, splitDesirePaths, routeData, insertWaypointAtSegment]);
+    handleSegmentDrag(bestIdx, drop);
+  }, [waypointMatch, handleStartDragEnd, handleEndDragEnd, handleGhostWaypointDragEnd, leafletMap, splitDesirePaths, routeData, handleSegmentDrag]);
 
   const { handleMapClick } = useMapClick({
     state: { start, end },
@@ -485,8 +633,18 @@ export function MapView() {
   // selecting whichever icon sits on top. Mirrors handleProposalRestart (kite).
   const handleTap = useCallback((latlng: LatLng) => {
     if (clusterExploderRef.current?.(latlng)) return;
+    // A tap landing inside an RBTP diamond's icon box only reaches here when
+    // the diamond couldn't take its own click — it's passthrough over a
+    // waypoint, or the press landed on the path/map around it. Treat it as the
+    // diamond's click (select the corridor), NOT as a route restart / bare
+    // placement — the user aimed at the proposal.
+    const p = routeProposalAtRef.current?.(latlng);
+    if (p) {
+      handleRouteProposalClick(p);
+      return;
+    }
     handleMapClick(latlng);
-  }, [handleMapClick]);
+  }, [handleMapClick, handleRouteProposalClick]);
 
   const handleOutOfBounds = useCallback(() => {
     setError("That's outside this map — drop your pins inside the highlighted area.");
@@ -538,9 +696,12 @@ export function MapView() {
         onIndicatorClick={handleIndicatorClick}
         onRouteProposalClick={handleRouteProposalClick}
         clusterExploderRef={clusterExploderRef}
+        routeProposalAtRef={routeProposalAtRef}
         onRemoveProposal={removeProposalAtEdge}
+        onRouteProposalRemove={removeRouteProposal}
         onProposalDrop={onProposalDrop}
         onRemoveSelected={clearStart}
+        onClearRoute={clearPoints}
         suppressHover={isHoveringPath || markerHoverCount > 0}
         pathEdgeIds={pathEdgeIds}
       />
@@ -581,7 +742,7 @@ export function MapView() {
         <DesirePathLayer
           geometry={routeData.geometry}
           segmentIndex={0}
-          onSegmentDrag={insertWaypointAtSegment}
+          onSegmentDrag={handleSegmentDrag}
           onTap={handleTap}
           onPathHoverChange={setIsHoveringPath}
         />
@@ -593,7 +754,7 @@ export function MapView() {
           <SplitDesirePathLayer
             key={splitPath.id}
             splitPath={splitPath}
-            onSegmentDrag={insertWaypointAtSegment}
+            onSegmentDrag={handleSegmentDrag}
             onTap={handleTap}
             onPathHoverChange={setIsHoveringPath}
           />
@@ -622,7 +783,7 @@ export function MapView() {
           hidden={waypointMatch.mids[index] != null}
           onDragStart={handleMarkerDragStart}
           onDragMove={handleDragMove}
-          onDragEnd={(pos) => updateGhostWaypoint(index, pos)}
+          onDragEnd={(pos) => handleGhostWaypointDragEnd(index, pos)}
           onDragFinish={handleMarkerDragFinish}
           onDelete={() => removeGhostWaypoint(index)}
           // On a proposal: tapping restarts the path from here ([x] removes it).
@@ -669,7 +830,7 @@ export function MapView() {
           hidden={waypointMatch.start != null}
           onDragStart={handleMarkerDragStart}
           onDragMove={handleDragMove}
-          onDragEnd={setStartPoint}
+          onDragEnd={handleStartDragEnd}
           onDragFinish={handleMarkerDragFinish}
           onDelete={clearStart}
           // On a proposal in route mode: tap restarts from here ([x] removes).
@@ -695,7 +856,7 @@ export function MapView() {
           hidden={waypointMatch.end != null}
           onDragStart={handleMarkerDragStart}
           onDragMove={handleDragMove}
-          onDragEnd={setEndPoint}
+          onDragEnd={handleEndDragEnd}
           onDragFinish={handleMarkerDragFinish}
           onDelete={clearEnd}
           // End only exists with a start, so always route mode: tap restarts.

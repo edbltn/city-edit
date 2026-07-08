@@ -14,14 +14,31 @@
 
 import type { LatLng } from "../types";
 
-/** One selected waypoint. `coords` is the only field the URL carries; the rest is
- *  runtime sugar: `address` for the banner, `voteEdgeId` to pin a vote to the exact
- *  edge of a chosen top-proposal (vs. re-snapping a bare coordinate), and `id` for
- *  stable React keys / drag identity (mirrors the old ghostWaypointIds). */
+/** The segment leaving a waypoint is FORCIBLY routed through a route-based top
+ *  proposal's corridor (the user threaded it there by dropping onto the diamond)
+ *  instead of being computed as the min-cost path. `edgeIds` is a snapshot of the
+ *  corridor's ordered path edges taken at threading time, so the forced geometry
+ *  stays stable even if live vote deltas reshape or retire the proposal;
+ *  `proposalId` is the deterministic proposal id (also what the URL carries — a
+ *  restored link re-resolves the live proposal and falls back gracefully when it
+ *  no longer exists). Cleared by the reducer whenever the user edits either end
+ *  of the pair or inserts a waypoint between them. */
+export interface ForcedCorridor {
+  proposalId: string;
+  edgeIds?: number[];
+}
+
+/** One selected waypoint. `coords` (plus a forced-corridor marker) is what the URL
+ *  carries; the rest is runtime sugar: `address` for the banner, `voteEdgeId` to pin
+ *  a vote to the exact edge of a chosen top-proposal (vs. re-snapping a bare
+ *  coordinate), and `id` for stable React keys / drag identity (mirrors the old
+ *  ghostWaypointIds). `forcedCorridor` annotates the segment from THIS waypoint to
+ *  the NEXT one. */
 export interface SelWaypoint {
   coords: LatLng;
   address?: string | null;
   voteEdgeId?: number | null;
+  forcedCorridor?: ForcedCorridor | null;
   id: string;
 }
 

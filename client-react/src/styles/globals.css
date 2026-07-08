@@ -1595,6 +1595,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 .vote-type-indicator.is-start { --x-ring: var(--color-start); }
 .vote-type-indicator.is-end { --x-ring: var(--color-end); }
+/* On a diamond the square's corner is empty air — center the badge on the
+   diamond's top-right EDGE midpoint (SVG 24,10) so it hugs the shape the same
+   way it hugs the square's corner. */
+.vote-type-indicator.is-diamond .vote-type-indicator-x {
+  left: 24px;
+  top: 10px;
+}
 /* Hover tint must stay OPAQUE — the badge sits directly on the map, so the
    translucent --hover-bg would make it see-through. Blend ink into paper. */
 .vote-type-indicator-x:hover {
@@ -1767,6 +1774,15 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   animation: indicator-modal-in 120ms ease-out;
 }
 
+/* The route-summary card sits above the pinned modal (1100). Portals mount at
+   different times, so DOM order can't order them. The transient hover card
+   (1400) tops both open modals — it actively dodges them via the avoid-rects
+   pass in ProposalCard, so it only overlaps when no quadrant is clear, and
+   then the card under the cursor is the one that must stay readable. */
+.graph-indicator-modal.is-elevated {
+  z-index: 1300;
+}
+
 @keyframes indicator-modal-in {
   from {
     opacity: 0;
@@ -1889,10 +1905,12 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   user-select: text;
 }
 
-/* Transient hover card sits above the pinned/selection modal (z-index 1100) so
-   it's never occluded when both are visible. */
+/* Transient hover card sits above BOTH open modals — the pinned card (1100)
+   and the route summary (1300) — so when its dodge pass finds no clear
+   quadrant and it must overlap one, the card under the cursor stays readable
+   rather than sliding underneath. */
 .graph-proposal-card.is-hover {
-  z-index: 1200;
+  z-index: 1400;
 }
 
 /* Per-vote-type rows: label on the left, a connected −/net/+ control on the right. */

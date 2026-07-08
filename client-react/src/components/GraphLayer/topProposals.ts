@@ -1,6 +1,10 @@
 // ==========================================================================
-// Top-proposal selection
+// Point-based top proposals (PBTPs) — selection
 // ==========================================================================
+// Terminology (docs/three-layer-model.md §3.1): a PBTP is a POINT-based top
+// proposal — one hot edge, shown as a square pin. Its route-based counterpart
+// is the RBTP (a hot corridor, diamond pin) in routeProposals.ts.
+//
 // Pure logic (no React/Leaflet) for choosing which segments get a "Top
 // Proposal" indicator. The path is four explicit steps:
 //

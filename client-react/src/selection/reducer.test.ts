@@ -9,6 +9,7 @@ import {
   removeAt,
   clearWaypoints,
   setVoteType,
+  setForcedCorridorAt,
   fullIndexOf,
 } from "./reducer";
 
@@ -169,6 +170,88 @@ describe("fullIndexOf", () => {
     expect(fullIndexOf(s, "end")).toBe(3);
     expect(fullIndexOf(s, 0)).toBe(1); // ghost 0 → full 1
     expect(fullIndexOf(s, 1)).toBe(2); // ghost 1 → full 2
+  });
+});
+
+describe("forced corridors (stamping + break rules)", () => {
+  const FC = { proposalId: "abc123", edgeIds: [7, 8, 9] };
+
+  /** [S, A, Z] with the A→Z segment forced (scenario 1's post-drop shape). */
+  function threaded(): Selection {
+    let s = sel([0, 0], [2, 2]); // S, Z
+    s = insertMid(s, 0, { coords: ll(1, 1) }, () => "A"); // [S, A, Z]
+    return setForcedCorridorAt(s, 1, FC);
+  }
+
+  it("setForcedCorridorAt stamps the leading point; never the last waypoint", () => {
+    const s = threaded();
+    expect(s.waypoints[1].forcedCorridor).toEqual(FC);
+    expect(setForcedCorridorAt(s, 2, FC)).toBe(s); // no segment leaves the end
+    expect(setForcedCorridorAt(s, -1, FC)).toBe(s);
+  });
+
+  it("moving the LEADING anchor (mid drag) clears the flag", () => {
+    const s = updateAt(threaded(), 1, ll(1.5, 1.5));
+    expect(s.waypoints[1].forcedCorridor).toBeNull();
+  });
+
+  it("moving the TRAILING anchor via updateAt clears the predecessor's flag", () => {
+    const s = updateAt(threaded(), 2, ll(3, 3));
+    expect(s.waypoints[1].forcedCorridor).toBeNull();
+  });
+
+  it("moving the end via setEnd clears the flag arriving at it", () => {
+    const s = setEnd(threaded(), { coords: ll(3, 3) }, counter());
+    expect(s.waypoints[1].forcedCorridor).toBeNull();
+  });
+
+  it("an in-place setEnd (same coords) keeps the flag", () => {
+    const s = setEnd(threaded(), { coords: ll(2, 2) }, counter());
+    expect(s.waypoints[1].forcedCorridor).toEqual(FC);
+  });
+
+  it("inserting a mid BETWEEN the anchors un-forces the pair", () => {
+    // Segment 1 = between A (full 1) and Z (full 2).
+    const s = insertMid(threaded(), 1, { coords: ll(1.5, 1.5) }, () => "m");
+    expect(s.waypoints[1].forcedCorridor).toBeNull();
+    expect(s.waypoints[2].forcedCorridor).toBeNull(); // the new mid is unflagged
+  });
+
+  it("inserting a mid OUTSIDE the pair leaves the flag alone", () => {
+    // Segment 0 = between S and A.
+    const s = insertMid(threaded(), 0, { coords: ll(0.5, 0.5) }, () => "m");
+    expect(s.waypoints[2].forcedCorridor).toEqual(FC); // A moved to full 2
+  });
+
+  it("removing the trailing anchor clears the predecessor's flag", () => {
+    const s = removeAt(threaded(), 2); // remove Z → [S, A]
+    expect(s.waypoints[1].forcedCorridor).toBeNull();
+  });
+
+  it("removing the leading anchor drops its flag with it", () => {
+    const s = removeAt(threaded(), 1); // remove A → [S, Z]
+    expect(s.waypoints.every((w) => !w.forcedCorridor)).toBe(true);
+  });
+
+  it("moving the START when the forced pair is start→next clears it", () => {
+    // [A, Z] with A→Z forced (a clicked corridor / scenario 3's minimal shape).
+    let s = sel([0, 0], [2, 2]);
+    s = setForcedCorridorAt(s, 0, FC);
+    const moved = setStart(s, { coords: ll(5, 5) }, counter());
+    expect(moved.waypoints[0].forcedCorridor).toBeNull();
+    // …but an in-place replace (same coords, e.g. re-pinning a vote edge) keeps it.
+    const repinned = setStart(s, { coords: ll(0, 0), voteEdgeId: 4 }, counter());
+    expect(repinned.waypoints[0].forcedCorridor).toEqual(FC);
+  });
+
+  it("updateAt on a point not touching the pair leaves the flag alone", () => {
+    // [S, m, A, Z] with A→Z forced; move m.
+    let s = sel([0, 0], [3, 3]);
+    s = insertMid(s, 0, { coords: ll(1, 1) }, () => "m"); // [S, m, Z]
+    s = insertMid(s, 1, { coords: ll(2, 2) }, () => "A"); // [S, m, A, Z]
+    s = setForcedCorridorAt(s, 2, FC);
+    const moved = updateAt(s, 1, ll(1.2, 1.2));
+    expect(moved.waypoints[2].forcedCorridor).toEqual(FC);
   });
 });
 

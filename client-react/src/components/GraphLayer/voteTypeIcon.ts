@@ -29,6 +29,11 @@ export interface VoteTypeIconOptions {
    *  resolve which waypoint to remove. Stays clickable even when `passthrough`
    *  (the badge is pointer-events:auto; the rest of the icon is not). */
   removeEdge?: number | null;
+  /** Same remove [×] badge for a ROUTE proposal diamond — shown when the
+   *  corridor's two anchors are current route waypoints, so [×] pulls the whole
+   *  corridor back out. Stamps the proposal id (`data-x-route`) for the same
+   *  delegated handler. Ignored when `removeEdge` is set. */
+  removeRoute?: string | null;
   /** "Heat" of this proposal, 0–1: its RANK among the visible top proposals
    *  (dense rank over distinct vote counts — the caller spreads the pack
    *  across the map's heat spectrum, hottest = 1). Rendered as a SOLID GLOW
@@ -75,6 +80,10 @@ const INNER_SQUARE_PATH = "M5.25,5.25 H28.75 V28.75 H5.25 Z";
 // the kite's side vertices land at y 17.2 because its lower edges are steeper).
 const DIAMOND_PATH = "M17,3 L31,17 L17,36 L3,17 Z";
 const INNER_DIAMOND_PATH = "M17,6.2 L28,17.2 L17,32.2 L6,17.2 Z";
+// Symmetric diamond (no pulled-down tip) for fanned-out route icons — the same
+// "drop the locating point in a grid cell" rule the square gives point icons.
+const DIAMOND_SQUARE_PATH = "M17,3 L31,17 L17,31 L3,17 Z";
+const INNER_DIAMOND_SQUARE_PATH = "M17,6.2 L27.8,17 L17,27.8 L6.2,17 Z";
 const TIP: [number, number] = [17, 36];
 
 /**
@@ -101,10 +110,13 @@ export function makeVoteTypeIcon(
     ? `<img class="vote-type-indicator-icon" src="${iconSrc(icon)}" alt="" />`
     : suggestionGlyphSvg(hashLabelToColor(label));
 
-  // Diamond (route) takes precedence over the square (fanned-out) variant.
-  const shape = opts.diamond ? DIAMOND_PATH : opts.square ? SQUARE_PATH : OUTER_PATH;
+  // Diamond (route) keeps its shape family in the fanned-out (square) state —
+  // it just loses the pulled-down locating tip, exactly like the point pin does.
+  const shape = opts.diamond
+    ? (opts.square ? DIAMOND_SQUARE_PATH : DIAMOND_PATH)
+    : opts.square ? SQUARE_PATH : OUTER_PATH;
   const innerShape = opts.diamond
-    ? INNER_DIAMOND_PATH
+    ? (opts.square ? INNER_DIAMOND_SQUARE_PATH : INNER_DIAMOND_PATH)
     : opts.square ? INNER_SQUARE_PATH : INNER_PATH;
   // Remove badge: a sibling of the pin/icon inside the scaled .vote-type-indicator,
   // so CSS pins it to the square's top-right corner (SVG 31,3) and it inherits the
@@ -112,6 +124,8 @@ export function makeVoteTypeIcon(
   // GraphLayer resolve which waypoint to drop.
   const removeBadge = opts.removeEdge != null
     ? `<span class="vote-type-indicator-x" data-x-edge="${opts.removeEdge}" role="button" aria-label="Remove from route">×</span>`
+    : opts.removeRoute
+    ? `<span class="vote-type-indicator-x" data-x-route="${opts.removeRoute}" role="button" aria-label="Remove this route proposal from the route">×</span>`
     : "";
   // Heat: hand the intensity + color to CSS as custom properties on the
   // scaled .vote-type-indicator. CSS strokes the -glow path (painted first,

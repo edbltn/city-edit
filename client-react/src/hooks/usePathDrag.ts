@@ -93,8 +93,16 @@ export function usePathDrag({
   const dragTrailRef = useRef<L.Polyline | null>(null);
   // When the press began (Date.now), so release can tell a tap (quick → restart)
   // from a drag (held → insert a mid) via the shared TAP_MAX_MS convention. The
-  // polyline isn't a Leaflet draggable, so timing is the only signal we get.
+  // polyline isn't a Leaflet draggable, so timing is one signal…
   const pressStartRef = useRef(0);
+  // …and movement is the other: where the press started (screen px) and the max
+  // displacement seen during the gesture. A held press that never drifted past
+  // TAP_MAX_DRIFT_PX is a TAP — a slow click must not become a zero-distance
+  // drag-and-drop (which, near a sticky proposal pin, inserted mids / threaded
+  // corridors the user only meant to select). Max (not net) drift, so pulling a
+  // mid out and dropping it back on its proposal still reads as a drag.
+  const pressPosRef = useRef({ x: 0, y: 0 });
+  const maxDriftSqRef = useRef(0);
   const [hoverLatLng, setHoverLatLng] = useState<L.LatLng | null>(null);
 
   // Get position from mouse or touch event
@@ -113,6 +121,9 @@ export function usePathDrag({
     (e: MouseEvent | TouchEvent) => {
       if (isDraggingRef.current) {
         const pos = getEventPosition(e);
+        const dx = pos.x - pressPosRef.current.x;
+        const dy = pos.y - pressPosRef.current.y;
+        maxDriftSqRef.current = Math.max(maxDriftSqRef.current, dx * dx + dy * dy);
         const container = map.getContainer();
         const rect = container.getBoundingClientRect();
         const containerPoint = L.point(pos.x - rect.left, pos.y - rect.top);
@@ -147,11 +158,12 @@ export function usePathDrag({
         // Snap to nearest graph node/edge
         const snapped = snapToGraph(map, latLng.lat, latLng.lng);
         const finalPos = snapped ?? { lat: latLng.lat, lng: latLng.lng };
-        // Quick release → a tap on the path → restart the route from here.
-        // A held press → a drag → insert a mid at the drop point. (A long press
-        // that never moved still reads as a drag and drops a mid where pressed —
-        // a "pin here" — which is safer than a stray route-clear.)
-        if (isTap(pressStartRef.current)) {
+        // Quick release OR a press that never really moved → a tap on the path.
+        // A held press that actually traveled → a drag → insert a mid at the
+        // drop point. (The old time-only rule made a slow unmoved click drop a
+        // mid where pressed — which the sticky proposal pins turned into
+        // accidental corridor threading.)
+        if (isTap(pressStartRef.current, Math.sqrt(maxDriftSqRef.current))) {
           onTap?.(finalPos);
         } else {
           onSegmentDrag?.(segmentIndex, finalPos);
@@ -195,6 +207,8 @@ export function usePathDrag({
       // underlying edge/node used for the trail + drop.
       const pos = getEventPosition(e.originalEvent);
       pressStartRef.current = Date.now();
+      pressPosRef.current = pos;
+      maxDriftSqRef.current = 0;
       const snapped = snapToGraph(map, e.latlng.lat, e.latlng.lng);
 
       startDrag(pos, snapped);
@@ -279,6 +293,8 @@ export function usePathDrag({
         const snapped = snapToGraph(map, latlng.lat, latlng.lng);
         const pos = { x: touch.clientX, y: touch.clientY };
         pressStartRef.current = Date.now();
+        pressPosRef.current = pos;
+        maxDriftSqRef.current = 0;
 
         // Ghost follows the finger (unsnapped); snapped is the underlying drop.
         startDrag(pos, snapped);

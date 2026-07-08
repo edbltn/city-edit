@@ -15,11 +15,22 @@
 
 export const TAP_MAX_MS = 300;
 
+// A press that never strayed beyond this many pixels is ALSO a tap, no matter
+// how long it was held. Time alone turned a slow, deliberate click into a
+// zero-distance drag-and-drop — on the route path that "dropped a mid where
+// pressed", and with proposal pins being sticky drop targets it kept threading
+// corridors the user only meant to select. Drift is measured as the MAX
+// displacement during the gesture (never the net): a real drag that returns to
+// its origin — e.g. pulling a mid out and dropping it back on its proposal to
+// link it — must still count as a drag.
+export const TAP_MAX_DRIFT_PX = 8;
+
 /**
  * True if a press that began at `pressStartMs` (a `Date.now()` timestamp) and is
  * ending now counts as a tap — i.e. it was released within TAP_MAX_MS. A longer
- * press is a drag.
+ * press is a drag — unless it never drifted past TAP_MAX_DRIFT_PX; callers that
+ * track movement pass their max drift so an unmoved hold reads as a tap too.
  */
-export function isTap(pressStartMs: number): boolean {
-  return Date.now() - pressStartMs < TAP_MAX_MS;
+export function isTap(pressStartMs: number, maxDriftPx = Infinity): boolean {
+  return Date.now() - pressStartMs < TAP_MAX_MS || maxDriftPx < TAP_MAX_DRIFT_PX;
 }

@@ -1,6 +1,11 @@
 // ==========================================================================
-// Route-based top proposals (client side)
+// Route-based top proposals (RBTPs) — client side
 // ==========================================================================
+// Terminology (docs/three-layer-model.md §3.1): an RBTP is a ROUTE-based top
+// proposal — a hot corridor through the vote graph, shown as a diamond pin at
+// its middle edge. Its point-based counterpart is the PBTP (one hot edge,
+// square pin) in topProposals.ts.
+//
 // Pure logic (no React/Leaflet) for the server-computed ROUTE proposals served
 // by /api/route-proposals. A route proposal is a high-vote corridor: a simple
 // path through the intersection graph, expressed in BLOCK units (edge groups),
@@ -166,6 +171,88 @@ export function dropPointsCoveredByRoutes<T extends { edgeIdx: number; legendIdx
 }
 
 // --------------------------------------------------------------------------
+// Corridor geometry — the proposal's stored path as a coordinate chain.
+// --------------------------------------------------------------------------
+/**
+ * The corridor's polyline as GeoJSON [lng, lat] pairs, walked from
+ * `anchors[0]` to `anchors[1]` along the ordered `edgeIds`. This is what lets
+ * a selected RBTP route the selection through the proposal VERBATIM instead of
+ * whatever OSRM picks between the anchors. Returns null if the chain breaks
+ * (stale topology / edge not incident to the walk) — callers fall back to OSRM.
+ */
+export function corridorCoordinates(
+  topo: GraphTopology,
+  p: RouteProposal,
+): [number, number][] | null {
+  if (p.edgeIds.length === 0) return null;
+  let cur = p.anchors[0];
+  if (cur >= topo.nNodes) return null;
+  const coords: [number, number][] = [];
+  const push = (n: number) => {
+    const [lat, lng] = nodeLatLng(topo, n);
+    coords.push([lng, lat]);
+  };
+  push(cur);
+  for (const e of p.edgeIds) {
+    if (e >= topo.nEdges) return null;
+    const u = topo.ends[2 * e];
+    const v = topo.ends[2 * e + 1];
+    const next = u === cur ? v : v === cur ? u : null;
+    if (next === null || next >= topo.nNodes) return null;
+    push(next);
+    cur = next;
+  }
+  return coords;
+}
+
+/**
+ * Corridor geometry rebuilt from a bare ORDERED edge-id chain (a forced-corridor
+ * snapshot — the proposal itself may no longer exist), oriented from the segment
+ * point `a` to `b`. The chain's start node is inferred: for one edge either
+ * endpoint works; otherwise it's the first edge's node NOT shared with the second
+ * edge. The walked polyline is then reversed if its far end sits closer to `a`.
+ * Null when the chain breaks (stale topology) — callers fall back to OSRM.
+ */
+export function corridorFromEdgeIds(
+  topo: GraphTopology,
+  edgeIds: number[],
+  a: LatLng,
+  b: LatLng,
+): { coordinates: [number, number][]; edgeIds: number[] } | null {
+  if (edgeIds.length === 0) return null;
+  const e0 = edgeIds[0];
+  if (e0 >= topo.nEdges) return null;
+  const u0 = topo.ends[2 * e0];
+  const v0 = topo.ends[2 * e0 + 1];
+  let startNode = u0;
+  if (edgeIds.length > 1) {
+    const e1 = edgeIds[1];
+    if (e1 >= topo.nEdges) return null;
+    const u1 = topo.ends[2 * e1];
+    const v1 = topo.ends[2 * e1 + 1];
+    // Walk must LEAVE from the node the second edge doesn't touch.
+    startNode = u0 === u1 || u0 === v1 ? v0 : u0;
+  }
+  // corridorCoordinates only reads `edgeIds` and `anchors[0]` — a minimal stub
+  // stands in for the retired proposal.
+  const coords = corridorCoordinates(topo, {
+    edgeIds,
+    anchors: [startNode, -1],
+  } as RouteProposal);
+  if (!coords || coords.length < 2) return null;
+  const sq = (p: [number, number], q: LatLng) =>
+    (p[1] - q.lat) ** 2 + (p[0] - q.lng) ** 2;
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  // Orient a→b: keep whichever direction puts the near end at `a`.
+  const forward = sq(first, a) + sq(last, b) <= sq(first, b) + sq(last, a);
+  return {
+    coordinates: forward ? coords : [...coords].reverse(),
+    edgeIds,
+  };
+}
+
+// --------------------------------------------------------------------------
 // Ghost-waypoint forcing — choose the faster anchor insertion order.
 // --------------------------------------------------------------------------
 export type DurationOf = (a: LatLng, b: LatLng) => number;
@@ -195,6 +282,21 @@ export function chooseAnchorOrder(
   const forward = chainDuration([...head, a, b, ...tail]);
   const backward = chainDuration([...head, b, a, ...tail]);
   return backward < forward ? [b, a] : [a, b];
+}
+
+/**
+ * Anchor order for a pair inserted BEFORE an existing point (dropping the START
+ * onto a proposal: the chain becomes anchor→anchor→next). The corridor's own
+ * length is the same either way, so the choice reduces to which anchor should
+ * touch `next` — the head-side complement of `chooseAnchorOrder`.
+ */
+export function chooseAnchorOrderBefore(
+  next: LatLng,
+  a: LatLng,
+  b: LatLng,
+  durationOf: DurationOf,
+): [LatLng, LatLng] {
+  return durationOf(b, next) <= durationOf(a, next) ? [a, b] : [b, a];
 }
 
 // ==========================================================================

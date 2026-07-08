@@ -7,7 +7,10 @@ import {
   expandSelectionToUndirected,
   dropPointsCoveredByRoutes,
   chooseAnchorOrder,
+  chooseAnchorOrderBefore,
   computeRouteProposals,
+  corridorCoordinates,
+  corridorFromEdgeIds,
   dedupeRoutes,
   MIN_ROUTE_SCORE,
   MIN_ROUTE_EDGES,
@@ -443,5 +446,88 @@ describe("computeRouteProposals — determinism", () => {
     const b = compute(EDGES, VOTES);
     expect(a.map((p) => p.id)).toEqual(b.map((p) => p.id));
     expect(a.every((p) => /^[0-9a-f]{8}$/.test(p.id))).toBe(true);
+  });
+});
+
+describe("corridorCoordinates (verbatim corridor routing)", () => {
+  it("walks the ordered edges from anchors[0] into a [lng, lat] chain", () => {
+    // makeTopo places node i at [40.7, -74.0 + 0.001*i].
+    const topo = makeTopo([[0, 1], [1, 2], [2, 3]]);
+    const p = bareRoute({ edgeIds: [0, 1, 2], anchors: [0, 3] });
+    expect(corridorCoordinates(topo, p)).toEqual([
+      [-74.0, 40.7], [-73.999, 40.7], [-73.998, 40.7], [-73.997, 40.7],
+    ]);
+  });
+
+  it("chains through edges stored in either direction", () => {
+    // Edge 1 is stored REVERSED (2→1): the walk must still traverse 0→1→2→3.
+    const topo = makeTopo([[0, 1], [2, 1], [2, 3]]);
+    const p = bareRoute({ edgeIds: [0, 1, 2], anchors: [0, 3] });
+    expect(corridorCoordinates(topo, p)?.length).toBe(4);
+    expect(corridorCoordinates(topo, p)?.[3]).toEqual([-73.997, 40.7]);
+  });
+
+  it("returns null when the chain breaks (edge not incident to the walk)", () => {
+    const topo = makeTopo([[0, 1], [2, 3]]);
+    const p = bareRoute({ edgeIds: [0, 1], anchors: [0, 3] }); // edge 1 doesn't touch node 1
+    expect(corridorCoordinates(topo, p)).toBeNull();
+  });
+
+  it("returns null on out-of-range edges or an empty path (stale topology)", () => {
+    const topo = makeTopo([[0, 1]]);
+    expect(corridorCoordinates(topo, bareRoute({ edgeIds: [7], anchors: [0, 1] }))).toBeNull();
+    expect(corridorCoordinates(topo, bareRoute({ edgeIds: [], anchors: [0, 1] }))).toBeNull();
+  });
+});
+
+describe("corridorFromEdgeIds (forced-corridor snapshot fallback)", () => {
+  // makeTopo places node i at [40.7, -74.0 + 0.001*i] → node 0 west, node 3 east.
+  const nodeLL = (i: number) => ll(40.7, -74.0 + 0.001 * i);
+
+  it("rebuilds the chain and orients it a→b", () => {
+    const topo = makeTopo([[0, 1], [1, 2], [2, 3]]);
+    const fwd = corridorFromEdgeIds(topo, [0, 1, 2], nodeLL(0), nodeLL(3));
+    expect(fwd?.coordinates).toEqual([
+      [-74.0, 40.7], [-73.999, 40.7], [-73.998, 40.7], [-73.997, 40.7],
+    ]);
+    // Same snapshot queried in the opposite direction reverses the polyline.
+    const bwd = corridorFromEdgeIds(topo, [0, 1, 2], nodeLL(3), nodeLL(0));
+    expect(bwd?.coordinates).toEqual([...fwd!.coordinates].reverse());
+    expect(bwd?.edgeIds).toEqual([0, 1, 2]);
+  });
+
+  it("infers the start node when the first edge is stored reversed", () => {
+    // Edge 0 stored 1→0 (walk must still leave from node 0, which edge 1 doesn't touch).
+    const topo = makeTopo([[1, 0], [1, 2], [2, 3]]);
+    const c = corridorFromEdgeIds(topo, [0, 1, 2], nodeLL(0), nodeLL(3));
+    expect(c?.coordinates[0]).toEqual([-74.0, 40.7]);
+    expect(c?.coordinates[3]).toEqual([-73.997, 40.7]);
+  });
+
+  it("handles a single-edge snapshot (either endpoint works, oriented to a)", () => {
+    const topo = makeTopo([[0, 1]]);
+    const c = corridorFromEdgeIds(topo, [0], nodeLL(1), nodeLL(0));
+    expect(c?.coordinates).toEqual([[-73.999, 40.7], [-74.0, 40.7]]);
+  });
+
+  it("returns null on a broken chain or empty/stale snapshot", () => {
+    const topo = makeTopo([[0, 1], [2, 3]]);
+    expect(corridorFromEdgeIds(topo, [0, 1], nodeLL(0), nodeLL(3))).toBeNull();
+    expect(corridorFromEdgeIds(topo, [], nodeLL(0), nodeLL(3))).toBeNull();
+    expect(corridorFromEdgeIds(topo, [9], nodeLL(0), nodeLL(3))).toBeNull();
+  });
+});
+
+describe("chooseAnchorOrderBefore (start dropped onto a diamond)", () => {
+  // 1-D world matching the chooseAnchorOrder tests: duration = longitude gap.
+  const durationOf: (a: LatLng, b: LatLng) => number = (a, b) => Math.abs(a.lng - b.lng);
+  const A = ll(0, 0);
+  const B = ll(0, 10);
+
+  it("puts the anchor nearer the next fixed point SECOND", () => {
+    // next(15) is nearer B(10) → chain A→B→next: [A, B].
+    expect(chooseAnchorOrderBefore(ll(0, 15), A, B, durationOf)).toEqual([A, B]);
+    // next(-5) is nearer A(0) → chain B→A→next: [B, A].
+    expect(chooseAnchorOrderBefore(ll(0, -5), A, B, durationOf)).toEqual([B, A]);
   });
 });

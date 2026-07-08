@@ -24,6 +24,22 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored
          (source of truth) per (map, edge, vote_type, device) → direction ±1
 ```
 
+> **Terminology — PBTP / RBTP.** The map surfaces two kinds of *top proposal*,
+> and the code, changelogs, and discussions use these abbreviations throughout:
+>
+> - **PBTP** — **point-based top proposal**: one hot edge, rendered as a
+>   **square** pin at the edge midpoint. Selected by
+>   `topProposals.selectTopProposals` (client), drawn by GraphLayer's
+>   `indicatorMarkers`.
+> - **RBTP** — **route-based top proposal**: a hot **corridor** (Layer 3 below),
+>   rendered as a **diamond** pin at its middle path edge. Computed by
+>   `routeProposals.computeRouteProposals` (client), drawn by GraphLayer's
+>   `routeIndicatorMarkers`.
+>
+> Same-type PBTPs subsumed by an RBTP's blocks are dropped
+> (`dropPointsCoveredByRoutes`); both kinds share one icon system
+> (`makeVoteTypeIcon`: square vs `diamond`, same tint/heat/selected states).
+
 ---
 
 ## 1. Layer 1 — the edge/node graph
@@ -193,13 +209,23 @@ proposal → blocks is a well-defined projection.
 
 ### 3.3 Selection behavior
 
-- A route proposal renders **selected** when the current selection covers **all
-  of its blocks** (≥ 1 selected edge in every block) — exactly like point
-  proposals render selected when their block is covered. `isRouteCovered` is the
-  shared predicate.
-- Tapping a route proposal inserts its two anchors as waypoints
-  (`chooseAnchorOrder` picks the faster order) so the route traverses the
-  corridor; the A→B leg uses the proposal's stored path verbatim.
+- An RBTP renders **selected** when either:
+  1. **Coverage** — the current selection covers **all of its blocks** (≥ 1
+     selected edge in every block), exactly like PBTPs render selected when
+     their block is covered. `isRouteCovered` is the shared predicate, with the
+     selection **expanded to direction twins** first
+     (`expandSelectionToUndirected`) — a routed path often traverses the twin
+     of the edge a corridor's block recorded.
+  2. **Explicit tap** — it is the RBTP the user tapped (GraphLayer's
+     `selectedRbtpId`) and **both of its anchors are still waypoints** of the
+     current route. Editing an anchor away or clearing the route deselects it.
+- Tapping an RBTP inserts its two anchors as waypoints (`chooseAnchorOrder`
+  picks the faster order) so the route runs anchor-to-anchor. The A→B leg is
+  routed by **OSRM**, which need not re-trace the corridor's exact path — that
+  is *why* rule 2 exists: coverage alone almost never fires for a tapped RBTP,
+  especially on maps without block artifacts (singleton blocks). Routing the
+  leg through the proposal's stored `edgeIds` verbatim remains an open
+  follow-up.
 
 ## 4. Vote semantics — block-scoped clear-then-cast
 

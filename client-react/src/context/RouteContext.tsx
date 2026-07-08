@@ -17,7 +17,7 @@ import { useVotesVersion } from "../utils/useVotesVersion";
 import { castVotes, voteButtonState } from "../utils/castVote";
 import { useTheme } from "./ThemeContext";
 import { useGraphSnap } from "./GraphSnapContext";
-import type { Selection } from "../selection/types";
+import type { ForcedCorridor, Selection } from "../selection/types";
 import {
   setStart as selSetStart,
   setEnd as selSetEnd,
@@ -26,6 +26,7 @@ import {
   removeAt as selRemoveAt,
   clearWaypoints as selClearWaypoints,
   setVoteType as selSetVoteType,
+  setForcedCorridorAt as selSetForcedCorridorAt,
   fullIndexOf,
 } from "../selection/reducer";
 import { deriveStart, deriveEnd, deriveMids, deriveMidIds } from "../selection/selectors";
@@ -148,6 +149,20 @@ export type ActiveTool = "start" | "end";
  *  three-layer-model §4). Registered by GraphLayer, which owns the topology. */
 export type BlockMaterializer = (edgeIds: number[]) => ArrayLike<number>[];
 
+/** Corridor geometry for a segment the selection FLAGS as forcibly routed
+ *  through a route proposal (SelWaypoint.forcedCorridor): the corridor's path as
+ *  a GeoJSON [lng, lat] chain oriented a→b, plus its path edge ids. Registered
+ *  by GraphLayer (which owns the proposals + topology). Resolution prefers the
+ *  LIVE proposal by id (deep links carry only the id), then the flag's edge-id
+ *  snapshot (stable under proposal churn). Null = can't resolve — route the
+ *  segment normally. This is what makes a threaded RBTP follow its corridor
+ *  VERBATIM instead of whatever OSRM picks between the anchors. */
+export type CorridorSegmentResolver = (
+  a: LatLng,
+  b: LatLng,
+  forced: ForcedCorridor,
+) => { coordinates: [number, number][]; edgeIds: number[] } | null;
+
 interface RouteContextValue {
   start: RoutePoint;
   end: RoutePoint;
@@ -167,6 +182,9 @@ interface RouteContextValue {
    *  GraphLayer once topology loads; casts and pressed-state fall back to
    *  singleton [edge] blocks until then. */
   setBlockMaterializer: (fn: BlockMaterializer | null) => void;
+  /** Register (or clear) the anchors→corridor resolver. Set by GraphLayer once
+   *  proposals + topology exist; until then every segment routes via OSRM. */
+  setCorridorSegmentResolver: (fn: CorridorSegmentResolver | null) => void;
   ghostWaypoints: LatLng[];
   ghostWaypointIds: string[];
   splitDesirePaths: SplitDesirePath[];
@@ -208,6 +226,46 @@ interface RouteContextValue {
   insertWaypointAtSegment: (segmentIndex: number, position: LatLng) => Promise<void>;
   updateGhostWaypoint: (index: number, position: LatLng) => Promise<void>;
   removeGhostWaypoint: (index: number) => void;
+  /** Replace the mid at `index` with TWO waypoints (a route proposal's corridor
+   *  anchors, already in insertion order) as ONE selection change + recalc —
+   *  dropping a mid onto a route-proposal diamond threads the route through the
+   *  whole corridor, stamping the pair's forced-corridor flag. An anchor that
+   *  coincides with the neighboring waypoint is skipped (a zero-length segment
+   *  breaks the recalc). */
+  replaceGhostWaypointWithPair: (
+    index: number,
+    pair: [LatLng, LatLng],
+    corridor: ForcedCorridor
+  ) => void;
+  /** Insert TWO waypoints into segment `segmentIndex` (corridor anchors, in
+   *  order) — the pair analogue of insertWaypointAtSegment, for a path drag
+   *  dropped onto a route-proposal diamond. Stamps the forced-corridor flag. */
+  insertWaypointPairAtSegment: (
+    segmentIndex: number,
+    pair: [LatLng, LatLng],
+    corridor: ForcedCorridor
+  ) => void;
+  /** Dropping the START onto a route-proposal diamond: the start becomes
+   *  `pair[0]`, `pair[1]` joins as the first mid (spec: SE + drop S on AZ →
+   *  AZ…E or ZA…E), and the pair's segment is flagged as forcibly routed
+   *  through the proposal. One atomic selection change + recalc. */
+  replaceStartWithPair: (pair: [LatLng, LatLng], corridor: ForcedCorridor) => void;
+  /** Dropping the END onto a route-proposal diamond: `pair[0]` joins as the
+   *  last mid, the end becomes `pair[1]` (spec: SE + drop E on AZ → S…AZ or
+   *  S…ZA), flagged as forced. One atomic selection change + recalc. */
+  replaceEndWithPair: (pair: [LatLng, LatLng], corridor: ForcedCorridor) => void;
+  /** Clicking a route-proposal diamond with no route to thread into: the corridor
+   *  BECOMES the selection — [anchorA, anchorB] with the forced flag stamped. */
+  selectCorridor: (pair: [LatLng, LatLng], corridor: ForcedCorridor) => void;
+  /** GraphLayer signals that the live route-proposal set changed. If a forced
+   *  segment previously failed to resolve (deep link restored before proposals
+   *  computed, or the proposal was churned away and came back), recalc so the
+   *  corridor snaps into place. */
+  notifyCorridorsChanged: () => void;
+  /** Remove every waypoint within a few meters of any of `coords` as ONE
+   *  selection change + recalc — the [×] on a selected route-proposal diamond
+   *  pulls both corridor anchors back out together. */
+  removeWaypointsNear: (coords: LatLng[]) => void;
   clearSplitPaths: () => void;
   clearSuppressClick: () => void;
   setSuppressClick: () => void;
@@ -227,16 +285,21 @@ function uniq(ids: number[]): number[] {
   return [...new Set(ids)];
 }
 
-/** Two selections represent the SAME navigable state — same ordered coordinates and
- *  requested vote type. Addresses / ids / voteEdgeId (runtime sugar) are ignored, so
- *  an async reverse-geocode or a pinned edge never spawns a spurious history entry. */
+/** Two selections represent the SAME navigable state — same ordered coordinates,
+ *  same forced-corridor flags, and same requested vote type. Addresses / ids /
+ *  voteEdgeId (runtime sugar) are ignored, so an async reverse-geocode or a pinned
+ *  edge never spawns a spurious history entry. Forcing IS navigable (it changes
+ *  the route), so re-threading the same coords through a proposal still records. */
 function selectionsEqual(a: Selection, b: Selection): boolean {
   if (a.voteType !== b.voteType) return false;
   if (a.waypoints.length !== b.waypoints.length) return false;
   for (let i = 0; i < a.waypoints.length; i++) {
-    const x = a.waypoints[i].coords;
-    const y = b.waypoints[i].coords;
-    if (x.lat !== y.lat || x.lng !== y.lng) return false;
+    const x = a.waypoints[i];
+    const y = b.waypoints[i];
+    if (x.coords.lat !== y.coords.lat || x.coords.lng !== y.coords.lng) return false;
+    if ((x.forcedCorridor?.proposalId ?? null) !== (y.forcedCorridor?.proposalId ?? null)) {
+      return false;
+    }
   }
   return true;
 }
@@ -266,11 +329,18 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     });
     if (!parsed) return { waypoints: [], voteType: defaultVt };
     return {
-      waypoints: parsed.waypoints.map((c) => ({
-        coords: c,
+      waypoints: parsed.waypoints.map((pw, i) => ({
+        coords: pw.coords,
         id: `wp-${++nextIdRef.current}`,
         address: null,
         voteEdgeId: null,
+        // A deep link carries only the proposal id (no edge snapshot); the
+        // corridor resolver re-resolves the live proposal once it computes. A
+        // marker on the last waypoint is meaningless (no segment leaves it).
+        forcedCorridor:
+          pw.forcedProposalId && i < parsed.waypoints.length - 1
+            ? { proposalId: pw.forcedProposalId }
+            : null,
       })),
       voteType: parsed.voteType ?? defaultVt,
     };
@@ -310,6 +380,14 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const blockMaterializerRef = useRef<BlockMaterializer | null>(null);
   const setBlockMaterializer = useCallback((fn: BlockMaterializer | null) => {
     blockMaterializerRef.current = fn;
+  }, []);
+
+  // GraphLayer's anchors→corridor resolver (same registration pattern). Every
+  // segment calculation consults it first, so any consecutive waypoint pair
+  // that IS a route proposal's two anchors routes through the corridor verbatim.
+  const corridorResolverRef = useRef<CorridorSegmentResolver | null>(null);
+  const setCorridorSegmentResolver = useCallback((fn: CorridorSegmentResolver | null) => {
+    corridorResolverRef.current = fn;
   }, []);
 
   const setActiveTool = useCallback((tool: ActiveTool) => {
@@ -440,6 +518,43 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // ============================================
   const splitAbortRef = useRef<AbortController | null>(null);
 
+  // True when a FLAGGED segment couldn't resolve its corridor (resolver not
+  // registered yet / proposal not computed yet / retired with no snapshot) and
+  // fell back to OSRM. notifyCorridorsChanged() uses it to recalc exactly once
+  // when the proposal set changes — a deep-linked forced route snaps onto its
+  // corridor as soon as proposals arrive, without polling.
+  const unresolvedForcedRef = useRef(false);
+
+  // The corridor-verbatim SplitDesirePath for consecutive waypoints a→b when the
+  // selection FLAGS that segment as forcibly routed through a route proposal
+  // (SelWaypoint.forcedCorridor on the leading point — `segmentIndex` IS the
+  // leading full index in [start, ...mids, end]). Unflagged segments route
+  // normally; a flagged segment that can't resolve falls back to OSRM (graceful
+  // degradation) and is remembered as unresolved. Built locally from the
+  // proposal/snapshot geometry — no OSRM round-trip, and the segment's edgeIds
+  // are the corridor's own path edges, so the heat/hover highlight, block
+  // coverage, and the vote target all match what's selected.
+  const corridorSegmentFor = useCallback(
+    (a: LatLng, b: LatLng, segmentIndex: number): SplitDesirePath | null => {
+      const forced = selectionRef.current.waypoints[segmentIndex]?.forcedCorridor ?? null;
+      if (!forced) return null;
+      const c = corridorResolverRef.current?.(a, b, forced);
+      if (!c || c.coordinates.length < 2) {
+        unresolvedForcedRef.current = true;
+        return null;
+      }
+      const geometry: RouteGeometry = { type: "LineString", coordinates: c.coordinates };
+      return {
+        id: `split-${segmentIndex}`,
+        segmentIndex,
+        geometry,
+        segments: segmentsFromGeometry(geometry),
+        edgeIds: c.edgeIds,
+      };
+    },
+    []
+  );
+
   const calculateAllSegments = useCallback(async (points: LatLng[]): Promise<SplitDesirePath[]> => {
     if (points.length < 2) return [];
 
@@ -455,6 +570,10 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     // segments and the route always renders.
     const fetchSegment = async (i: number): Promise<SplitDesirePath> => {
       const a = points[i], b = points[i + 1];
+      // A segment flagged as forced routes through its proposal's corridor
+      // VERBATIM — locally, before (and instead of) any OSRM request.
+      const corridor = corridorSegmentFor(a, b, i);
+      if (corridor) return corridor;
       const straight: SplitDesirePath = {
         id: `split-${i}`,
         segmentIndex: i,
@@ -493,7 +612,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     };
 
     return Promise.all(points.slice(0, -1).map((_, i) => fetchSegment(i)));
-  }, []);
+  }, [corridorSegmentFor]);
 
   /** Recompute the split paths for [start, ...mids, end], discarding stale batches. */
   const runSplitCalc = useCallback(
@@ -512,6 +631,26 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         });
     },
     [calculateAllSegments]
+  );
+
+  // Route start→end directly (no mids): through the corridor VERBATIM when the
+  // start's forced-corridor flag says so — represented as a single split
+  // segment, the same shape a mids-only recalc leaves (routeData stays null) —
+  // else the normal OSRM route. Every "route the two endpoints" call site
+  // funnels through here so a corridor selection always traces its proposal.
+  const routeDirect = useCallback(
+    (startC: LatLng, endC: LatLng) => {
+      const corridor = corridorSegmentFor(startC, endC, 0);
+      if (corridor) {
+        // Invalidate any in-flight split batch so it can't clobber the corridor.
+        splitCalcVersionRef.current++;
+        setSplitDesirePaths([corridor]);
+        setIsCalculatingSplit(false);
+        return;
+      }
+      calculateRoute({ start: startC, end: endC, waypoints: [] });
+    },
+    [corridorSegmentFor, calculateRoute]
   );
 
   // ============================================
@@ -578,9 +717,15 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const clearSplitPaths = useCallback(() => {
     const cur = selectionRef.current;
     if (cur.waypoints.length > 2) {
+      // Collapsing to [start, end] drops the mids — a forced corridor departing
+      // the start pointed at a mid that no longer exists.
+      const first = cur.waypoints[0];
       applySelection({
         ...cur,
-        waypoints: [cur.waypoints[0], cur.waypoints[cur.waypoints.length - 1]],
+        waypoints: [
+          first.forcedCorridor ? { ...first, forcedCorridor: null } : first,
+          cur.waypoints[cur.waypoints.length - 1],
+        ],
       });
     }
     setSplitDesirePaths([]);
@@ -638,6 +783,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       const next = seq[segmentIndex + 1];
       if ((prev && sameLatLng(position, prev)) || (next && sameLatLng(position, next))) return;
 
+      // Splitting a FORCED segment un-forces it (spec: a mid introduced between a
+      // corridor's anchors reverts the pair to computed routing). selInsertMid
+      // clears the flag; remember it so we skip the local geometry split below —
+      // splitting the corridor polyline in place would silently KEEP the forced
+      // shape the user just asked to break. Full recalc instead.
+      const wasForced = !!cur.waypoints[segmentIndex]?.forcedCorridor;
+
       const nextSel = selInsertMid(cur, segmentIndex, { coords: position }, makeId);
       // Path changed - bump version so any in-flight vote isn't recorded
       routeVersionRef.current++;
@@ -648,9 +800,11 @@ export function RouteProvider({ children }: { children: ReactNode }) {
 
       // Try client-side geometry splitting: if the insertion point is on the
       // existing route/segment geometry, split locally instead of server requests.
-      const currentGeometry = splitDesirePaths.length > 0
-        ? splitDesirePaths[segmentIndex]?.geometry
-        : routeData?.geometry;
+      const currentGeometry = wasForced
+        ? undefined
+        : splitDesirePaths.length > 0
+          ? splitDesirePaths[segmentIndex]?.geometry
+          : routeData?.geometry;
 
       if (currentGeometry) {
         const splitResult = splitGeometryAtPoint(currentGeometry, position);
@@ -811,6 +965,248 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   );
 
   // ============================================
+  // Corridor (waypoint-pair) operations — dropping onto a route-proposal
+  // diamond threads the route through the proposal's TWO anchors at once.
+  // ============================================
+  const replaceGhostWaypointWithPair = useCallback(
+    (index: number, pair: [LatLng, LatLng], corridor: ForcedCorridor) => {
+      const cur = selectionRef.current;
+      const startC = deriveStart(cur).coords;
+      const endC = deriveEnd(cur).coords;
+      if (!startC || !endC) return;
+      const mids = deriveMids(cur);
+      if (index < 0 || index >= mids.length) return;
+
+      suppressNextClickRef.current = true;
+
+      // An anchor that coincides with the neighboring waypoint (the corridor
+      // starts/ends AT an existing point) is skipped, not doubled — a
+      // zero-length segment breaks the recalc (same rule as updateGhostWaypoint).
+      const fullIdx = fullIndexOf(cur, index);
+      const prevC = cur.waypoints[fullIdx - 1].coords;
+      const nextC = cur.waypoints[fullIdx + 1].coords;
+      const keepFirst = !sameLatLng(pair[0], prevC);
+      const keepSecond = !sameLatLng(pair[1], nextC);
+
+      let nextSel: Selection;
+      let leadIdx: number; // full index of the forced pair's LEADING point
+      if (!keepFirst && !keepSecond) {
+        // Both anchors already ARE the neighbors — the mid is redundant; drop it
+        // and (re)force the now-adjacent pair.
+        nextSel = selRemoveAt(cur, fullIdx);
+        leadIdx = fullIdx - 1;
+      } else if (keepFirst && keepSecond) {
+        nextSel = selInsertMid(selUpdateAt(cur, fullIdx, pair[0]), fullIdx, { coords: pair[1] }, makeId);
+        leadIdx = fullIdx;
+      } else if (keepFirst) {
+        // pair[1] IS the next waypoint: the mid becomes the first anchor and the
+        // forced segment runs mid→next.
+        nextSel = selUpdateAt(cur, fullIdx, pair[0]);
+        leadIdx = fullIdx;
+      } else {
+        // pair[0] IS the previous waypoint: the mid becomes the second anchor and
+        // the forced segment runs prev→mid.
+        nextSel = selUpdateAt(cur, fullIdx, pair[1]);
+        leadIdx = fullIdx - 1;
+      }
+      nextSel = selSetForcedCorridorAt(nextSel, leadIdx, corridor);
+
+      routeVersionRef.current++;
+      applySelection(nextSel);
+      setSplitDesirePaths([]);
+      const newMids = deriveMids(nextSel);
+      if (newMids.length > 0) runSplitCalc(startC, endC, newMids);
+      else routeDirect(startC, endC);
+    },
+    [applySelection, runSplitCalc, routeDirect, makeId]
+  );
+
+  const insertWaypointPairAtSegment = useCallback(
+    (segmentIndex: number, pair: [LatLng, LatLng], corridor: ForcedCorridor) => {
+      const cur = selectionRef.current;
+      const startC = deriveStart(cur).coords;
+      const endC = deriveEnd(cur).coords;
+      if (!startC || !endC) return;
+
+      suppressNextClickRef.current = true;
+
+      const seq = [startC, ...deriveMids(cur), endC];
+      const prevC = seq[segmentIndex];
+      const nextC = seq[segmentIndex + 1];
+      if (!prevC || !nextC) return;
+      const keepFirst = !sameLatLng(pair[0], prevC);
+      const keepSecond = !sameLatLng(pair[1], nextC);
+
+      let nextSel: Selection;
+      let leadIdx: number; // full index of the forced pair's LEADING point
+      if (!keepFirst && !keepSecond) {
+        // The segment's endpoints already ARE the anchors — nothing to insert;
+        // just (re)force the pair (a drop on the diamond after a break re-threads).
+        nextSel = cur;
+        leadIdx = segmentIndex;
+      } else if (keepFirst && keepSecond) {
+        nextSel = selInsertMid(
+          selInsertMid(cur, segmentIndex, { coords: pair[0] }, makeId),
+          segmentIndex + 1, { coords: pair[1] }, makeId
+        );
+        leadIdx = segmentIndex + 1;
+      } else if (keepFirst) {
+        // pair[1] IS the segment's far end: insert only the first anchor; the
+        // forced segment runs anchor→next.
+        nextSel = selInsertMid(cur, segmentIndex, { coords: pair[0] }, makeId);
+        leadIdx = segmentIndex + 1;
+      } else {
+        // pair[0] IS the segment's near end: insert only the second anchor; the
+        // forced segment runs prev→anchor.
+        nextSel = selInsertMid(cur, segmentIndex, { coords: pair[1] }, makeId);
+        leadIdx = segmentIndex;
+      }
+      nextSel = selSetForcedCorridorAt(nextSel, leadIdx, corridor);
+      if (nextSel === cur) return;
+      routeVersionRef.current++;
+      applySelection(nextSel);
+      setSplitDesirePaths([]);
+      runSplitCalc(startC, endC, deriveMids(nextSel));
+    },
+    [applySelection, runSplitCalc, makeId]
+  );
+
+  // Dropping an ENDPOINT onto a route-proposal diamond threads the corridor at
+  // that end of the chain: the dropped endpoint lands on the far anchor, the
+  // near anchor joins as a mid, and the pair is flagged forced. Both ops mirror
+  // removePoint's recalc choreography — the endpoint coordinate changes, so the
+  // main effect WOULD fire; handlingRemovalRef suppresses its duplicate recalc
+  // and we recompute explicitly (one atomic selection change, one recalc).
+  const replaceEndWithPair = useCallback(
+    (pair: [LatLng, LatLng], corridor: ForcedCorridor) => {
+      const cur = selectionRef.current;
+      const startC = deriveStart(cur).coords;
+      const endC = deriveEnd(cur).coords;
+      if (!startC || !endC) return;
+
+      suppressNextClickRef.current = true;
+
+      const n = cur.waypoints.length;
+      const prevC = cur.waypoints[n - 2].coords; // the point before the end
+      // Re-drop of an already-threaded corridor in the same orientation: no-op.
+      if (
+        cur.waypoints[n - 2].forcedCorridor?.proposalId === corridor.proposalId &&
+        sameLatLng(prevC, pair[0]) && sameLatLng(endC, pair[1])
+      ) return;
+
+      let nextSel = selSetEnd(cur, { coords: pair[1] }, makeId);
+      let leadIdx = n - 2;
+      if (!sameLatLng(pair[0], prevC)) {
+        // Near anchor joins as the last mid (full index n-1, before the end).
+        nextSel = selInsertMid(nextSel, n - 2, { coords: pair[0] }, makeId);
+        leadIdx = n - 1;
+      }
+      nextSel = selSetForcedCorridorAt(nextSel, leadIdx, corridor);
+
+      routeVersionRef.current++;
+      clearRoute();
+      setSplitDesirePaths([]);
+      const endChanged = !sameLatLng(endC, pair[1]);
+      if (endChanged) handlingRemovalRef.current = true;
+      applySelection(nextSel);
+      if (endChanged) geocodeInto(pair[1]);
+
+      const mids = deriveMids(nextSel);
+      if (mids.length > 0) runSplitCalc(startC, deriveEnd(nextSel).coords!, mids);
+      else routeDirect(startC, deriveEnd(nextSel).coords!);
+    },
+    [applySelection, geocodeInto, clearRoute, runSplitCalc, routeDirect, makeId]
+  );
+
+  const replaceStartWithPair = useCallback(
+    (pair: [LatLng, LatLng], corridor: ForcedCorridor) => {
+      const cur = selectionRef.current;
+      const startC = deriveStart(cur).coords;
+      const endC = deriveEnd(cur).coords;
+      if (!startC || !endC) return;
+
+      suppressNextClickRef.current = true;
+
+      const nextC = cur.waypoints[1].coords; // the point after the start
+      // Re-drop of an already-threaded corridor in the same orientation: no-op.
+      if (
+        cur.waypoints[0].forcedCorridor?.proposalId === corridor.proposalId &&
+        sameLatLng(startC, pair[0]) && sameLatLng(nextC, pair[1])
+      ) return;
+
+      let nextSel = selSetStart(cur, { coords: pair[0], forcedCorridor: null }, makeId);
+      if (!sameLatLng(pair[1], nextC)) {
+        // Far anchor joins as the first mid (full index 1, after the start).
+        nextSel = selInsertMid(nextSel, 0, { coords: pair[1] }, makeId);
+      }
+      nextSel = selSetForcedCorridorAt(nextSel, 0, corridor);
+
+      routeVersionRef.current++;
+      clearRoute();
+      setSplitDesirePaths([]);
+      const startChanged = !sameLatLng(startC, pair[0]);
+      if (startChanged) handlingRemovalRef.current = true;
+      applySelection(nextSel);
+      if (startChanged) geocodeInto(pair[0]);
+
+      const mids = deriveMids(nextSel);
+      if (mids.length > 0) runSplitCalc(deriveStart(nextSel).coords!, endC, mids);
+      else routeDirect(deriveStart(nextSel).coords!, endC);
+    },
+    [applySelection, geocodeInto, clearRoute, runSplitCalc, routeDirect, makeId]
+  );
+
+  // Clicking a diamond with no route to thread into: the corridor becomes the
+  // WHOLE selection — start/end seeded at its anchors with the forced flag on
+  // the leading point. Replaces the old clearPoints+setStart+setEnd dance so the
+  // flag, the recalc, and the history entry land as one atomic change.
+  const selectCorridor = useCallback(
+    (pair: [LatLng, LatLng], corridor: ForcedCorridor) => {
+      const cur = selectionRef.current;
+      const nextSel: Selection = {
+        ...cur,
+        waypoints: [
+          { coords: pair[0], address: null, voteEdgeId: null, forcedCorridor: corridor, id: makeId() },
+          { coords: pair[1], address: null, voteEdgeId: null, forcedCorridor: null, id: makeId() },
+        ],
+      };
+      routeVersionRef.current++;
+      setActiveToolState("start");
+      setStartReplaceArmed(false);
+      clearRoute();
+      setSplitDesirePaths([]);
+      // Recalc explicitly (the endpoints usually change → suppress the main
+      // effect's duplicate; when they don't change it wouldn't fire at all).
+      handlingRemovalRef.current = true;
+      applySelection(nextSel);
+      geocodeInto(pair[0]);
+      geocodeInto(pair[1]);
+      routeDirect(pair[0], pair[1]);
+    },
+    [applySelection, geocodeInto, clearRoute, routeDirect, makeId]
+  );
+
+  // GraphLayer pokes this when its live proposal set changes: if a FLAGGED
+  // segment previously fell back to OSRM because its corridor couldn't resolve
+  // (deep link restored before proposals computed, or churn), recalc once so
+  // the forced geometry snaps in.
+  const notifyCorridorsChanged = useCallback(() => {
+    if (!unresolvedForcedRef.current) return;
+    const sel = selectionRef.current;
+    if (!sel.waypoints.some((w) => w.forcedCorridor)) {
+      unresolvedForcedRef.current = false;
+      return;
+    }
+    const startC = deriveStart(sel).coords;
+    const endC = deriveEnd(sel).coords;
+    if (!startC || !endC) return;
+    unresolvedForcedRef.current = false;
+    const mids = deriveMids(sel);
+    if (mids.length > 0) runSplitCalc(startC, endC, mids);
+    else routeDirect(startC, endC);
+  }, [runSplitCalc, routeDirect]);
+
+  // ============================================
   // Remove any point (unified logic)
   // All points conceptually: [start, ...mids, end]
   // removeAt rebalances automatically; we then drive the right recalculation.
@@ -852,13 +1248,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       // doubling up when an endpoint moved).
       if (nextStartC && nextEndC) {
         if (mids.length > 0) runSplitCalc(nextStartC, nextEndC, mids);
-        else calculateRoute({ start: nextStartC, end: nextEndC, waypoints: [] });
+        else routeDirect(nextStartC, nextEndC);
       }
       // 0 or 1 points remaining: no route — already cleared above. activeTool
       // returns to "start" when nothing routable is left.
       if (next.waypoints.length <= 1) setActiveToolState("start");
     },
-    [applySelection, geocodeInto, calculateRoute, clearRoute, runSplitCalc]
+    [applySelection, geocodeInto, routeDirect, clearRoute, runSplitCalc]
   );
 
   // Keep the ref current so updateGhostWaypoint (defined above) can delegate.
@@ -868,6 +1264,64 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const clearStart = useCallback(() => removePoint("start"), [removePoint]);
   const clearEnd = useCallback(() => removePoint("end"), [removePoint]);
   const removeGhostWaypoint = useCallback((index: number) => removePoint(index), [removePoint]);
+
+  // Meters within which a waypoint counts as sitting ON a given coordinate.
+  // Corridor anchors are inserted at the proposal's exact anchor coords and only
+  // move if the user edits them, so a tight match is the right identity test
+  // (mirrors GraphLayer's anchorsAreWaypoints threshold).
+  const WAYPOINT_NEAR_M = 5;
+
+  // Remove every waypoint near any of `coords` in ONE atomic selection change +
+  // recalc — removing a corridor's two anchors via removePoint twice would fire
+  // two recalcs and shift indices between them. Mirrors removePoint's recalc
+  // choreography exactly.
+  const removeWaypointsNear = useCallback(
+    (coords: LatLng[]) => {
+      const cur = selectionRef.current;
+      const near = (w: LatLng, c: LatLng) =>
+        haversineMeters([w.lng, w.lat], [c.lng, c.lat]) < WAYPOINT_NEAR_M;
+      // Dropping a waypoint breaks the forced corridor ARRIVING at it — the flag
+      // lives on the last kept waypoint before it (the removed point's own flag
+      // leaves with it). Mirrors selRemoveAt's rule for the multi-remove case.
+      const kept: typeof cur.waypoints = [];
+      for (const w of cur.waypoints) {
+        if (coords.some((c) => near(w.coords, c))) {
+          const p = kept[kept.length - 1];
+          if (p?.forcedCorridor) kept[kept.length - 1] = { ...p, forcedCorridor: null };
+        } else {
+          kept.push(w);
+        }
+      }
+      if (kept.length === cur.waypoints.length) return;
+
+      const prevStartC = deriveStart(cur).coords;
+      const prevEndC = deriveEnd(cur).coords;
+      const next: Selection = { ...cur, waypoints: kept };
+      const nextStartC = deriveStart(next).coords;
+      const nextEndC = deriveEnd(next).coords;
+      const mids = deriveMids(next);
+
+      routeVersionRef.current++;
+      clearRoute();
+      setSplitDesirePaths([]);
+
+      const startChanged = !coordsEqual(prevStartC, nextStartC);
+      const endChanged = !coordsEqual(prevEndC, nextEndC);
+      if (startChanged || endChanged) handlingRemovalRef.current = true;
+
+      applySelection(next);
+
+      if (startChanged && nextStartC && !deriveStart(next).address) geocodeInto(nextStartC);
+      if (endChanged && nextEndC && !deriveEnd(next).address) geocodeInto(nextEndC);
+
+      if (nextStartC && nextEndC) {
+        if (mids.length > 0) runSplitCalc(nextStartC, nextEndC, mids);
+        else routeDirect(nextStartC, nextEndC);
+      }
+      if (next.waypoints.length <= 1) setActiveToolState("start");
+    },
+    [applySelection, geocodeInto, routeDirect, clearRoute, runSplitCalc]
+  );
 
   // ============================================
   // History: back / forward
@@ -900,8 +1354,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       setSplitDesirePaths([]);
       const mids = deriveMids(restored);
       if (nextStartC && nextEndC) {
-        calculateRoute({ start: nextStartC, end: nextEndC, waypoints: [] });
         if (mids.length > 0) runSplitCalc(nextStartC, nextEndC, mids);
+        else routeDirect(nextStartC, nextEndC);
       }
       if (nextStartC && !deriveStart(restored).address) geocodeInto(nextStartC);
       if (nextEndC && !deriveEnd(restored).address) geocodeInto(nextEndC);
@@ -1079,12 +1533,15 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     const endCoords = { lat: endLat, lng: endLng };
     const currentMids = ghostWaypointsRef.current;
 
-    // Always calculate the main route
-    calculateRoute({ start: startCoords, end: endCoords, waypoints: [] });
-
-    // If there are mids, also calculate split paths
-    if (currentMids.length > 0) runSplitCalc(startCoords, endCoords, currentMids);
-  }, [startLat, startLng, endLat, endLng, calculateRoute, clearRoute, runSplitCalc]);
+    // Mids → split paths per pair (each corridor-aware); no mids → the direct
+    // route, through the corridor verbatim when start/end are its anchors.
+    if (currentMids.length > 0) {
+      calculateRoute({ start: startCoords, end: endCoords, waypoints: [] });
+      runSplitCalc(startCoords, endCoords, currentMids);
+    } else {
+      routeDirect(startCoords, endCoords);
+    }
+  }, [startLat, startLng, endLat, endLng, calculateRoute, routeDirect, clearRoute, runSplitCalc]);
 
   // ============================================
   // Recalculate when (legacy) explicit waypoints change
@@ -1131,6 +1588,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       setVoteDirection,
       isDirectionCast,
       setBlockMaterializer,
+      setCorridorSegmentResolver,
       ghostWaypoints,
       ghostWaypointIds,
       splitDesirePaths,
@@ -1158,6 +1616,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       insertWaypointAtSegment,
       updateGhostWaypoint,
       removeGhostWaypoint,
+      replaceGhostWaypointWithPair,
+      insertWaypointPairAtSegment,
+      replaceStartWithPair,
+      replaceEndWithPair,
+      selectCorridor,
+      notifyCorridorsChanged,
+      removeWaypointsNear,
       clearSplitPaths,
       clearSuppressClick,
       setSuppressClick,
@@ -1180,6 +1645,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       setVoteDirection,
       isDirectionCast,
       setBlockMaterializer,
+      setCorridorSegmentResolver,
       ghostWaypoints,
       ghostWaypointIds,
       splitDesirePaths,
@@ -1207,6 +1673,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       insertWaypointAtSegment,
       updateGhostWaypoint,
       removeGhostWaypoint,
+      replaceGhostWaypointWithPair,
+      insertWaypointPairAtSegment,
+      replaceStartWithPair,
+      replaceEndWithPair,
+      selectCorridor,
+      notifyCorridorsChanged,
+      removeWaypointsNear,
       clearSplitPaths,
       clearSuppressClick,
       setSuppressClick,
