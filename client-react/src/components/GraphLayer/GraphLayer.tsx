@@ -207,16 +207,13 @@ function resolveAddress(
 
 // Unified radii — used for hover, snap, pinned highlight, and tooltip lookup
 const SNAP_EDGE_PX = 4;   // hit-test radius for edges
-// Node targeting radius. Nodes are point features — with the old 3px radius a
-// node was practically impossible to hover deliberately, and one pixel of
-// drift between hover and click handed the target to an edge (edges have a
-// 4px radius PLUS an unlimited nearest-edge fallback, so they won everything).
-const SNAP_NODE_PX = 10;
-// A node inside its radius still yields to an edge the cursor is visibly ON
-// unless the node is nearly as close: node wins iff nodeDist ≤ edgeDist + bias.
-// At a node's own position nodeDist≈edgeDist≈0 → node; mid-edge near a
-// junction the edge stays targetable along its length.
-const NODE_OVER_EDGE_BIAS_PX = 6;
+// Node priority radius — a node within it ALWAYS wins over edges (the original
+// model, just reachable: the old 3px made nodes practically impossible to
+// hover deliberately; edges have a 4px radius PLUS an unlimited nearest-edge
+// fallback, so they won everything). No yield-to-closer-edge games: absolute
+// priority is predictable, and edges stay hoverable along their length (nodes
+// only sit at ends and junctions).
+const SNAP_NODE_PX = 8;
 // While a feature is pinned, a re-click within this screen distance of it keeps
 // the SAME selection rather than re-resolving to a neighbour/endpoint. Stops the
 // open card — which occludes its own icon — from drifting as you click near it.
@@ -429,8 +426,7 @@ function hitTest(
   allowEdge?: (i: number) => boolean,
   allowNode?: (i: number) => boolean
 ): HitResult | null {
-  // 1. Nodes — collect the best candidate; the node-vs-edge decision happens
-  // after edges are measured too (see NODE_OVER_EDGE_BIAS_PX).
+  // 1. Nodes — absolute priority within SNAP_NODE_PX.
   let bestNode: number | null = null;
   let bestNodeDist = SNAP_NODE_PX;
 
@@ -478,11 +474,8 @@ function hitTest(
     }
   }
 
-  // 3. Decide: a node in radius wins unless the cursor is visibly ON an edge
-  // and clearly closer to it than to the node.
-  const nodeWins = bestNode !== null &&
-    (bestEdge === null || bestNodeDist <= bestEdgeDist + NODE_OVER_EDGE_BIAS_PX);
-  if (nodeWins && bestNode !== null) {
+  // 3. Node in radius wins outright; otherwise the edge.
+  if (bestNode !== null) {
     return {
       target: { kind: "node", index: bestNode },
       snapLat: nodeLat(data, bestNode), snapLng: nodeLon(data, bestNode),
@@ -517,12 +510,20 @@ function blockFiltersAt(
   return {
     blockId,
     edgeInBlock: (i: number) => ebi[i] === blockId,
+    // A node belongs to the hovered block if an adjacent edge is a member OR
+    // the node physically sits inside the block's polygon. The geometric arm
+    // is what makes the junction node at the CENTER of a circular cell
+    // hoverable — its incident roadway edges can all belong to neighbouring
+    // street blocks, so adjacency alone rejected the very node under the
+    // cursor. (Short-circuited: the MapLibre point query only runs for nodes
+    // that fail adjacency, i.e. near junction cells.)
     nodeInBlock: (n: number) => {
-      if (!adj) return false;
-      for (let k = adj.start[n]; k < adj.start[n + 1]; k++) {
-        if (ebi[adj.edges[k]] === blockId) return true;
+      if (adj) {
+        for (let k = adj.start[n]; k < adj.start[n + 1]; k++) {
+          if (ebi[adj.edges[k]] === blockId) return true;
+        }
       }
-      return false;
+      return blockIdAtLatLng(nodeLat(data, n), nodeLon(data, n)) === blockId;
     },
   };
 }
@@ -1012,6 +1013,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const resolveSelectionRef = useRef(resolveSelection);
   useEffect(() => { resolveSelectionRef.current = resolveSelection; }, [resolveSelection]);
 
+  // The last selection the waypoint snap resolved, keyed by the exact
+  // coordinate it returned. When a placed point comes back to the pinned
+  // effect carrying that coordinate, the recorded target is used verbatim —
+  // the click pins precisely what its own resolution (= hover's) found,
+  // never a re-derivation from the stored point.
+  const lastSnapSelectionRef = useRef<ResolvedSelection | null>(null);
+
   // Console/headless probe: cityedit.resolveAt(lat, lng) interrogates the live
   // resolver so a debugging session can see exactly what a point resolves to
   // (hovered block, target kind/index, vote edge) without synthetic mouse events.
@@ -1041,26 +1049,36 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       if (sticky) return { lat: sticky.lat, lng: sticky.lng };
       const data = graphDataRef.current;
       if (!data) return null;
-      const pt = m.latLngToContainerPoint([lat, lng]);
-      // Same block constraint as resolveSelection: the click's stored
-      // coordinate must land on the SAME target hover showed (a node snap
-      // stores the node's exact position, so later re-resolution — at any
-      // zoom — finds the node again, not a nearby edge).
+
+      // Over a block polygon: use THE hover resolver verbatim (full hierarchy,
+      // same filters, same fallbacks) and RECORD the resolution — the pinned
+      // effect reuses the recorded target when the point it receives is the
+      // coordinate this snap returned, so the click selects exactly what hover
+      // showed. Re-deriving a target from a stored coordinate is inherently
+      // leaky: the snapped point can sit in a different polygon than the
+      // cursor, and pixel radii shift with zoom.
       const filters = blockFiltersAt(data, nodeAdjRef.current, lat, lng);
-      let result = filters
-        ? hitTest(
-            data, m, pt.x, pt.y, lat, lng,
-            edgeIndexRef.current, nodeIndexRef.current,
-            filters.edgeInBlock, filters.nodeInBlock
-          )
-        : null;
-      if (!result) {
-        result = hitTest(
-          data, m, pt.x, pt.y, lat, lng,
-          edgeIndexRef.current, nodeIndexRef.current
-        );
+      if (filters) {
+        const sel = resolveSelectionRef.current(lat, lng);
+        if (!sel) return null;
+        lastSnapSelectionRef.current = sel;
+        return { lat: sel.snapLat, lng: sel.snapLng };
       }
+
+      // Off-polygon: radius-bounded hit only, so dragging stays free when far
+      // from the graph (unlike resolveSelection's always-resolve fallback).
+      const pt = m.latLngToContainerPoint([lat, lng]);
+      const result = hitTest(
+        data, m, pt.x, pt.y, lat, lng,
+        edgeIndexRef.current, nodeIndexRef.current
+      );
       if (!result) return null;
+      const voteEdgeId = result.target.kind === "edge"
+        ? result.target.index
+        : adjShortest(data, nodeAdjRef.current, result.target.index);
+      lastSnapSelectionRef.current = {
+        target: result.target, snapLat: result.snapLat, snapLng: result.snapLng, voteEdgeId,
+      };
       return { lat: result.snapLat, lng: result.snapLng };
     });
   }, [setSnapFn]);
@@ -2949,11 +2967,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // it's node-within-radius then nearest edge — same logic as hover.
     const hadOverride = pinnedEdgeOverrideRef.current != null;
     const prevTarget = pinnedTargetRef.current;
-    const sel = resolveSelection(pinnedLat, pinnedLng, pinnedEdgeOverrideRef.current);
+    // A point placed through the snap carries the snap's exact coordinate —
+    // reuse its recorded resolution verbatim (see lastSnapSelectionRef).
+    const lastSnap = lastSnapSelectionRef.current;
+    const snapMatch = !hadOverride && lastSnap != null &&
+      Math.abs(lastSnap.snapLat - pinnedLat) < 1e-9 &&
+      Math.abs(lastSnap.snapLng - pinnedLng) < 1e-9;
+    const sel = snapMatch
+      ? lastSnap
+      : resolveSelection(pinnedLat, pinnedLng, pinnedEdgeOverrideRef.current);
     pinnedEdgeOverrideRef.current = null;
     let target = sel?.target ?? null;
     dlog("cast", `pinned resolve @${pinnedLat.toFixed(5)},${pinnedLng.toFixed(5)}`,
-      { hadOverride, target, voteEdgeId: sel?.voteEdgeId });
+      { hadOverride, snapMatch, target, voteEdgeId: sel?.voteEdgeId });
     debugState("pinnedTarget", target);
 
     // Drop the edge-lock the moment the point itself moves (a click/drag sets new
