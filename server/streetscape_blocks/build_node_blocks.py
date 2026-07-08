@@ -81,6 +81,23 @@ MAX_RADIUS_M = float(os.environ.get("NODE_BLOCK_MAX_RADIUS_M", "28"))
 # Disc base is a 24-gon: plenty round at these radii, keeps the tiles small.
 DISC_SEGS = int(os.environ.get("NODE_BLOCK_DISC_SEGS", "24"))
 
+# Road classes that make a junction a STREET junction. Junction capture (the
+# "ladder" fix — see build_edge_blocks.py) only applies at street junctions:
+# capturing at pure-foot forks (park paths, greenways) shredded the path
+# network into node-cell confetti — a fork between two footpaths has no
+# perpendicular street block to protect. The flag ships per cluster in the
+# node_clusters sidecar.
+STREET_CLASSES = {
+    "motorway", "motorway_link", "trunk", "trunk_link", "primary",
+    "primary_link", "secondary", "secondary_link", "tertiary", "tertiary_link",
+    "residential", "living_street", "unclassified", "service", "busway",
+    # NOT "pedestrian": plaza streets (Broadway through Flatiron/Times Sq) are
+    # walking fabric — flagging their forks as street junctions turned the
+    # plazas into captured-junction mush instead of a path network. A real
+    # cross street at a plaza still flags its own junctions (it has
+    # street-class edges), so the ladder guard is preserved where it matters.
+}
+
 _DISC_ANGLES = np.linspace(0.0, 2.0 * np.pi, DISC_SEGS, endpoint=False)
 
 
@@ -188,6 +205,13 @@ def main():
     print(f"[node_blocks] {len(junctions)} junction nodes "
           f"(deg>=3) of {len(nodes)} — link={LINK_M}m "
           f"R∈[{MIN_RADIUS_M},{MAX_RADIUS_M}]m", flush=True)
+
+    # Which nodes touch a street-class edge (drives the per-cluster flag).
+    node_touches_street = np.zeros(len(nodes), dtype=bool)
+    for e2 in g.edges:
+        if len(e2) > 3 and str(e2[3]) in STREET_CLASSES:
+            node_touches_street[e2[0]] = True
+            node_touches_street[e2[1]] = True
 
     # Same local equirectangular frame as build_foot_blocks.py so both scripts
     # agree exactly on where a cell's boundary falls.
@@ -312,6 +336,12 @@ def main():
         block_id=np.concatenate([
             np.full(len(m), first_blob_id + k, dtype=np.int32)
             for k, m in enumerate(blob_members)
+        ]),
+        # Per-node copy of the cluster's street flag: capture applies only at
+        # street junctions (any member node touching a street-class edge).
+        street=np.concatenate([
+            np.full(len(m), bool(node_touches_street[m].any()), dtype=bool)
+            for m in blob_members
         ]),
     )
     print(f"[node_blocks] clipped {cut} blocks, appended {len(blobs)} node cells "

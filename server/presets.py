@@ -114,4 +114,12 @@ PRESET_MAPS: list[dict] = [
     {"slug": "philly-walkways", "name": "Philly Walkways", "city_id": "philly",
      "list_key": "walkways", "subdomain": None,
      "subtitle": "A more walkable Philadelphia"},
+
+    # Block-pipeline playground (local experiments on tiny test cities).
+    {"slug": "test-central-park", "name": "Test: Central Park", "city_id": "test-cp",
+     "list_key": "walkways", "subdomain": None,
+     "subtitle": "Block-pipeline playground — Central Park"},
+    {"slug": "test-midtown", "name": "Test: Midtown", "city_id": "test-mid",
+     "list_key": "walkways", "subdomain": None,
+     "subtitle": "Block-pipeline playground — Midtown"},
 ]

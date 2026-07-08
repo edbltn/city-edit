@@ -55,7 +55,7 @@ if _SERVER not in sys.path:
     sys.path.insert(0, _SERVER)
 
 import shapely  # noqa: E402
-from shapely import union_all  # noqa: E402
+from shapely import make_valid, union_all  # noqa: E402
 from shapely.geometry import mapping, shape as shp_shape  # noqa: E402
 
 from cities import CITIES  # noqa: E402
@@ -63,8 +63,16 @@ from graph_registry import CityGraph  # noqa: E402
 
 CITY = os.environ.get("CITY", "nyc")
 NETWORK = os.environ.get("NETWORK", "streets")
-STUB_MAX_M = float(os.environ.get("STUB_MAX_M", "40"))
+STUB_MAX_M = float(os.environ.get("STUB_MAX_M", "25"))
 MAX_ROUNDS = int(os.environ.get("MERGE_MAX_ROUNDS", "25"))
+# V1 class affinity: a stub only merges into its junction when ALL its member
+# edges are driveway-like — a named residential/secondary dead-end (or a
+# footway pill that carries street-class pieces) keeps its own block. Field
+# case: a ~40 m footway pill at Broadway/W 26th (plaza-class Broadway) merged
+# through V1+V2 into the West 26th Street block and read as part of the wrong
+# street.
+STUBBY_CLASSES = {"service", "footway", "path", "steps", "cycleway",
+                  "pedestrian", "track", ""}
 # Edges-are-the-source-of-truth guard: a polygon whose bbox diagonal exceeds its
 # member edges' bbox diagonal by more than this is a PHANTOM (its shape came
 # from a drive centerline with no votable edges — e.g. a motorway ROW whose only
@@ -164,6 +172,15 @@ def main():
     extent = np.where(has_edges,
                       np.hypot(maxx - minx, maxy - miny), 0.0)
 
+    # Per-block V1 affinity: every member edge is driveway-like. Maintained
+    # through unions (a merged group is stubby only if all parts are).
+    edge_stubby = np.array(
+        [str(e[3]) if len(e) > 3 else "" for e in g.edges]) \
+        .astype(object)
+    edge_stubby = np.array([c in STUBBY_CLASSES for c in edge_stubby])
+    stubby = np.ones(n_blocks, dtype=bool)
+    np.logical_and.at(stubby, ebid[valid], edge_stubby[valid])
+
     # ── Union-find over block ids ────────────────────────────────────────────
     parent = np.arange(n_blocks)
 
@@ -183,6 +200,7 @@ def main():
             return ra
         parent[rb] = ra
         kind_node[ra] = result_node_kind
+        stubby[ra] = stubby[ra] and stubby[rb]
         # merged extent: combined bbox
         minx[ra] = min(minx[ra], minx[rb]); maxx[ra] = max(maxx[ra], maxx[rb])
         miny[ra] = min(miny[ra], miny[rb]); maxy[ra] = max(maxy[ra], maxy[rb])
@@ -200,12 +218,13 @@ def main():
 
         changed = 0
 
-        # V1: edge groups adjacent to exactly one node group, extent-capped.
+        # V1: edge groups adjacent to exactly one node group, extent-capped and
+        # driveway-like (class affinity — see STUBBY_CLASSES).
         eg, counts = np.unique(gpairs[:, 0], return_counts=True)
         stub_groups = set(eg[counts == 1])
         ext_now = np.hypot(maxx[roots] - minx[roots], maxy[roots] - miny[roots])
         for a, b in gpairs:
-            if a in stub_groups and ext_now[a] <= STUB_MAX_M:
+            if a in stub_groups and ext_now[a] <= STUB_MAX_M and stubby[find(int(a))]:
                 union(b, a, result_node_kind=True)
                 changed += 1
                 v1_total += 1
@@ -253,6 +272,49 @@ def main():
         int(r_uniq[k]): e_order[r_starts[k]:r_starts[k + 1]]
         for k in range(len(r_uniq))
     }
+    # ── Adopt empty node cells into their dominant adjacent block ───────────
+    # A simple fork (single-node cluster) has no internal edges, so its cell
+    # would render nothing and hover-dead — dropping it left black gaps in
+    # path networks. Instead the cell joins the adjacent block that owns most
+    # of the fork's incident edges (pure union-find, before features build).
+    empty_node_roots = {int(r) for r in uniq_roots
+                        if kind_node[find(int(r))] and int(r) not in edges_of_root}
+    adopted = 0
+    if empty_node_roots:
+        cluster_root_of_node = np.full(len(nodes), -1, dtype=np.int64)
+        cluster_root_of_node[jn_idx] = roots[jn_block]
+        votes: dict[int, dict[int, int]] = {}
+        for col in (0, 1):
+            nds = ends[:, col]
+            cr = cluster_root_of_node[nds]
+            ok = (cr >= 0) & (edge_root >= 0) & (cr != edge_root)
+            for c, er in zip(cr[ok], edge_root[ok]):
+                if int(c) in empty_node_roots:
+                    d = votes.setdefault(int(c), {})
+                    d[int(er)] = d.get(int(er), 0) + 1
+        for c, d in votes.items():
+            target = max(d, key=d.get)
+            tr = find(target)
+            union(tr, c, result_node_kind=bool(kind_node[tr]))
+            adopted += 1
+        if adopted:
+            # Re-derive groups after adoption (edges keep their roots — the
+            # adopted cells had none).
+            roots = np.array([find(a) for a in range(n_blocks)])
+            uniq_roots = np.unique(roots)
+            edge_root = np.where(ebid >= 0, roots[np.maximum(ebid, 0)], -1)
+            e_order = np.argsort(edge_root, kind="stable")
+            e_sorted = edge_root[e_order]
+            first_valid = np.searchsorted(e_sorted, 0, side="left")
+            r_uniq, r_starts = np.unique(e_sorted[first_valid:], return_index=True)
+            r_starts = np.append(r_starts + first_valid, len(e_sorted))
+            edges_of_root = {
+                int(r_uniq[k]): e_order[r_starts[k]:r_starts[k + 1]]
+                for k in range(len(r_uniq))
+            }
+        print(f"[merge] adopted {adopted} empty node cells into their "
+              f"dominant neighbour", flush=True)
+
     rc_of_edge = np.array([str(e[3]) if len(e) > 3 else "" for e in g.edges])
     ex = (nodes[:, 1] - w_) * mlon
     ey = (nodes[:, 0] - s_) * mlat
@@ -287,8 +349,8 @@ def main():
 
         eids = edges_of_root.get(int(r))
         # Zero member edges → nothing can ever light, hover or select this
-        # feature; drop it (phantom drive-graph geometry, punched node cells
-        # with no captured edges, fully-swallowed slivers).
+        # feature; drop it (phantom drive slivers, isolated cells — empty
+        # node cells with graph neighbours were adopted above).
         if eids is None or len(eids) == 0:
             dropped_empty += 1
             continue
@@ -296,7 +358,10 @@ def main():
         if len(fs) == 1:
             geom = fs[0]["geometry"]
         else:
-            geom = mapping(union_all([shp_shape(f["geometry"]) for f in fs]))
+            # make_valid: punched street polygons can carry self-touching
+            # slivers that make GEOS throw "side location conflict" on union.
+            geom = mapping(union_all([make_valid(shp_shape(f["geometry"]))
+                                      for f in fs]))
             merged_geoms += 1
 
         # Representative properties: node-kind keeps junction identity; a

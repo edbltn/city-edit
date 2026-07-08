@@ -95,10 +95,18 @@ def main():
     pts = shp_points(lon, lat)
 
     feats = json.load(open(BLOCKS_FILE))["features"]
-    polys = [shape(f["geometry"]) for f in feats]
-    block_ids = np.array([int(f["properties"]["block_id"]) for f in feats], dtype=np.int64)
+    # Node cells are EXCLUDED from the geometric passes: a junction block's
+    # membership comes only from capture (pass 0) and the merge pass's stub
+    # rule — letting containment/nearest dump whatever edges pass through a
+    # cell turned park forks into confetti (every nearby path fragment glommed
+    # into the fork bubble instead of staying with its path).
+    geo_feats = [f for f in feats
+                 if f["properties"].get("road_class") != "node"]
+    polys = [shape(f["geometry"]) for f in geo_feats]
+    block_ids = np.array([int(f["properties"]["block_id"]) for f in geo_feats], dtype=np.int64)
     tree = STRtree(polys)
-    print(f"[edge_blocks] {len(polys)} block polygons from {os.path.basename(BLOCKS_FILE)}")
+    print(f"[edge_blocks] {len(polys)} street/foot polygons "
+          f"(of {len(feats)} features) from {os.path.basename(BLOCKS_FILE)}")
 
     edge_block = np.full(n_edges, -1, dtype=np.int32)
     seen = np.zeros(n_edges, dtype=bool)
@@ -118,14 +126,25 @@ def main():
         # node index → cluster block id (−1 = not a junction-cluster member)
         node_cluster = np.full(len(nodes), -1, dtype=np.int64)
         node_cluster[jn_idx] = jn_block
+        # Cluster street flag: capture only applies at STREET junctions. A
+        # pure-foot fork (park paths, greenways) has no perpendicular street
+        # block to protect from the "ladder" — capturing there just shreds the
+        # path network into node-cell confetti. Older sidecars lack the flag;
+        # treat every cluster as street (the pre-scoping behaviour).
+        cluster_is_street = np.ones(len(nodes), dtype=bool)
+        if "street" in nc:
+            cluster_is_street = np.zeros(len(nodes), dtype=bool)
+            cluster_is_street[jn_idx] = nc["street"]
 
         cu = node_cluster[ends[:, 0]]
         cv = node_cluster[ends[:, 1]]
+        su = cluster_is_street[ends[:, 0]]
+        sv = cluster_is_street[ends[:, 1]]
         ex = (nodes_arr[ends[:, 0], 1] - nodes_arr[ends[:, 1], 1]) * mlon
         ey = (nodes_arr[ends[:, 0], 0] - nodes_arr[ends[:, 1], 0]) * mlat
         elen = np.hypot(ex, ey)
         not_self = ends[:, 0] != ends[:, 1]
-        both = (cu >= 0) & (cv >= 0) & not_self
+        both = (cu >= 0) & (cv >= 0) & not_self & su & sv
 
         same = both & (cu == cv)
         edge_block[same] = cu[same]
@@ -185,7 +204,26 @@ def main():
             seen[ei] = True
     contained = int(seen.sum()) - pre_contain
 
-    # 3) Nearest-within-threshold for the rest.
+    # 3) Cluster fallback BEFORE nearest-snap: an edge nothing else claimed
+    # whose endpoints are junction-cluster members belongs to the junction —
+    # fork-internal fragments at NON-street clusters (park path forks) land
+    # here (street clusters already took theirs in pass 0). Without this the
+    # fragments nearest-snap into a NEIGHBOURING path's tube and the fork cell
+    # dies empty (a black gap in the path network).
+    cluster_fallback = 0
+    if os.path.exists(sidecar):
+        cu2 = node_cluster[ends[:, 0]]
+        cv2 = node_cluster[ends[:, 1]]
+        rest = ~seen & (cu2 >= 0) & (cv2 >= 0) & (ends[:, 0] != ends[:, 1])
+        same2 = rest & (cu2 == cv2)
+        edge_block[same2] = cu2[same2]
+        seen |= same2
+        cluster_fallback = int(same2.sum())
+        if cluster_fallback:
+            print(f"[edge_blocks] cluster fallback: {cluster_fallback} "
+                  "leftover intra-junction edges")
+
+    # 4) Nearest-within-threshold for the rest.
     missing = np.where(~seen)[0]
     if len(missing):
         nearest = tree.nearest(pts[missing])
@@ -203,10 +241,10 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     npy = os.path.join(out_dir, f"edge_blocks_{NETWORK}.npy")
     np.save(npy, edge_block)
-    nearest_n = snapped - contained - captured - foot_assigned
+    nearest_n = snapped - contained - captured - foot_assigned - cluster_fallback
     meta = {
         "city": CITY, "network": NETWORK,
-        "n_edges": n_edges, "n_blocks": len(polys),
+        "n_edges": n_edges, "n_blocks": len(feats),
         "topology_etag": g.topology_etag,
         "blocks_sha256": _sha256_file(BLOCKS_FILE),
         "blocks_file": os.path.basename(BLOCKS_FILE),
@@ -214,6 +252,7 @@ def main():
         "captured_junction": captured,
         "foot_by_construction": foot_assigned,
         "contained": contained,
+        "cluster_fallback": cluster_fallback,
         "snapped_nearest": nearest_n,
         "unmapped": n_edges - snapped,
         "block_snap_m": NEAREST_THRESHOLD_M,

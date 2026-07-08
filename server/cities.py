@@ -153,6 +153,30 @@ CITIES: dict[str, City] = {
         pbf_url="https://download.bbbike.org/osm/bbbike/Philadelphia/Philadelphia.osm.pbf",
         osrm_service="osrm-philly",
     ),
+    # ── Block-pipeline playground areas (local experiments; reuse the NYC PBF
+    # by hardlinking osm_data/nyc/source.osm.pbf into their data dirs) ────────
+    "test-cp": City(
+        id="test-cp",
+        name="Test: Central Park",
+        bbox=(40.7640, -73.9830, 40.8010, -73.9490),
+        center=(40.7825, -73.9660),
+        default_zoom=15,
+        min_zoom=13,
+        max_zoom=21,
+        pbf_url="https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf",
+        osrm_service="osrm-nyc",
+    ),
+    "test-mid": City(
+        id="test-mid",
+        name="Test: Midtown",
+        bbox=(40.7380, -74.0000, 40.7650, -73.9680),
+        center=(40.7515, -73.9840),
+        default_zoom=15,
+        min_zoom=13,
+        max_zoom=21,
+        pbf_url="https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf",
+        osrm_service="osrm-nyc",
+    ),
 }
 
 
