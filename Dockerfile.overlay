@@ -23,6 +23,11 @@ FROM ${BASE_IMAGE}
 WORKDIR /app
 
 # Updated backend + fixed station data (graphs/pmtiles/venv come from the base).
+# Re-sync Python deps against the lockfile first: an overlay that ships code
+# importing a package the base image predates (e.g. orjson) would otherwise
+# crash at boot. Already-satisfied pins are no-ops, so this stays fast.
+COPY server/requirements.txt ./
+RUN uv pip install --system --no-cache -r requirements.txt
 COPY server/*.py ./
 COPY server/data/ ./data/
 
