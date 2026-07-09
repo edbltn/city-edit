@@ -349,6 +349,11 @@ def _voter_lock_stripe(slug: str, device_id: str) -> threading.Lock:
 #     shed counts, and process RSS from a rolling window.
 VOTE_MAX_INFLIGHT = int(os.environ.get("VOTE_MAX_INFLIGHT", "64"))
 VOTE_LOCK_SHED_SECONDS = float(os.environ.get("VOTE_LOCK_SHED_SECONDS", "2.0"))
+# How long a vote may WAIT for an inflight slot before shedding. Zero would
+# shed the moment a burst exceeds the cap (58% of a 160-agent wave); a bounded
+# wait turns the cap into a short queue that absorbs bursts while still
+# capping worst-case latency at wait + handler time.
+VOTE_QUEUE_WAIT_SECONDS = float(os.environ.get("VOTE_QUEUE_WAIT_SECONDS", "1.5"))
 
 _vote_inflight = threading.Semaphore(VOTE_MAX_INFLIGHT)
 _vote_metrics_lock = threading.Lock()
@@ -1231,7 +1236,7 @@ def cast_vote():
     # Backpressure: shed instead of queueing once the instance is saturated —
     # a 503 the client retries beats a 45s hang that dies at the timeout.
     t_handler0 = time.monotonic()
-    if not _vote_inflight.acquire(blocking=False):
+    if not _vote_inflight.acquire(timeout=VOTE_QUEUE_WAIT_SECONDS):
         return _shed_response("inflight", retry_after=1)
     stripe_acquired = False
     lock_wait_s = 0.0
