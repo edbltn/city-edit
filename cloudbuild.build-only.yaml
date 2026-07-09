@@ -1,0 +1,50 @@
+# Build + push BOTH images (osrm, app) WITHOUT deploying either service.
+# Used when the new artifacts need post-processing before they serve — e.g.
+# baking Layer-2 blocks against the new image's graphs (Dockerfile.blocks-
+# overlay) so prod flips once, to a complete image, instead of serving a
+# blocks-less window. Deploy afterwards with:
+#   gcloud run services update desire-path-osrm --image=…/osrm:<BUILD_ID>
+#   gcloud run services update desire-path-mapper --image=<final overlay image>
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-osrm'
+    waitFor: ['-']
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/osrm:${BUILD_ID}'
+      - 'osrm'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-osrm'
+    waitFor: ['build-osrm']
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/osrm:${BUILD_ID}'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-app'
+    waitFor: ['-']
+    args:
+      - 'build'
+      - '--no-cache'
+      - '-f'
+      - 'Dockerfile'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:${BUILD_ID}'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-app'
+    waitFor: ['build-app']
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:${BUILD_ID}'
+
+timeout: '7200s'
+
+options:
+  machineType: 'E2_HIGHCPU_32'
+
+substitutions:
+  _REGION: us-central1
