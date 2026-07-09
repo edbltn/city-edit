@@ -36,9 +36,11 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # Connection pool. A pool (not the old shared singleton connection) is REQUIRED
 # once psycopg2 yields to the gevent hub mid-query: two greenlets interleaving
-# on one connection raise "another command is already in progress". Sized so
-# 4 app instances stay under db-f1-micro's ~25-connection ceiling.
-_POOL_MAX = 5
+# on one connection raise "another command is already in progress". Default
+# sized so 4 app instances stay under db-f1-micro's ~25-connection ceiling;
+# DB_POOL_MAX overrides where the DB allows more (votes now run concurrently
+# per voter, so the pool is the write path's throughput governor).
+_POOL_MAX = int(os.environ.get("DB_POOL_MAX", "5"))
 _pool: Optional[ThreadedConnectionPool] = None
 
 

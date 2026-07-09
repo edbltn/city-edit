@@ -311,10 +311,19 @@ _build_locks: dict[str, threading.Lock] = {}
 _build_locks_guard = threading.Lock()
 
 # Serializes the read-modify-write of a voter's per-proposal direction so a
-# rapid +/− toggle can't read a stale prior direction (see /api/vote). This is a
-# PER-PROCESS lock; across Flask instances/workers the Redis lock in cast_vote
-# (vote_store.voter_lock) provides the cross-instance guarantee.
-_proposal_vote_lock = threading.Lock()
+# rapid +/− toggle can't read a stale prior direction (see /api/vote). This is
+# the PER-PROCESS half of the guarantee; across Flask instances/workers the
+# Redis lock in cast_vote (vote_store.voter_lock) provides the same scope
+# fleet-wide. STRIPED by (slug, device): a voter's own casts serialize, but
+# different voters vote concurrently — a single global lock here capped the
+# whole instance at ~9 votes/s (changelog/2026-07-08-agent-load-test.html,
+# finding #1 / mitigation M2). Redis counter updates are atomic HINCRBYs and
+# commute across voters, so cross-voter mutual exclusion buys nothing.
+_VOTE_LOCK_STRIPES = tuple(threading.Lock() for _ in range(64))
+
+
+def _voter_lock_stripe(slug: str, device_id: str) -> threading.Lock:
+    return _VOTE_LOCK_STRIPES[hash((slug, device_id)) % len(_VOTE_LOCK_STRIPES)]
 
 
 def _vote_cache_get(cache_key: str, rev: int) -> str | None:
@@ -1111,10 +1120,12 @@ def cast_vote():
         ) if direction != 0 else {}
 
         # voter_lock serializes this voter's read-modify-write ACROSS instances
-        # (Redis); _proposal_vote_lock serializes it within THIS process. Together
-        # they hold whether the app runs one worker or a horizontally-scaled fleet.
+        # (Redis); the stripe serializes it within THIS process. Both are scoped
+        # per (slug, device) — different voters proceed concurrently — and
+        # together they hold whether the app runs one worker or a fleet.
         ebid = rmap.graph.edge_block_id  # None unless this map has a block layer
-        with vote_store.voter_lock(redis_client, slug, device_id), _proposal_vote_lock:
+        with vote_store.voter_lock(redis_client, slug, device_id), \
+                _voter_lock_stripe(slug, device_id):
             # Block-scoped clear-then-cast (docs/three-layer-model.md §4): the
             # plan clears this device's same-type rows across every touched
             # block, then casts on exactly the selection edges.
