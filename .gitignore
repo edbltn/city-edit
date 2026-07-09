@@ -83,3 +83,4 @@ server/streetscape_blocks/eval/*.npz
 
 # QGIS artifact exports (regenerable via scripts/export_qgis_artifacts.py)
 exports/
+.blocks-staging/
