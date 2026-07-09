@@ -228,6 +228,33 @@ def apply_directional(
     pipe.execute()
 
 
+def apply_directional_batch(
+    redis_client, slug: str, ops: list[tuple[int, int, int]], mode: int, vt_id: int,
+) -> None:
+    """Apply a whole vote plan's edge-counter transitions in ONE round trip.
+
+    `ops` is [(edge_id, prev_dir, new_dir), …] in plan order (clears then
+    casts). Semantically identical to calling apply_directional per edge — the
+    same HINCRBYs in the same order — but a 145-edge route vote costs one
+    pipeline execute instead of ~145 (the measured bulk of the vote critical
+    section; changelog/2026-07-08-agent-load-test.html finding #2).
+    """
+    h = hash_key(slug)
+    pipe = redis_client.pipeline()
+    queued = False
+    for edge_id, prev_dir, new_dir in ops:
+        if new_dir == prev_dir:
+            continue
+        if new_dir in (UP, DOWN):
+            pipe.hincrby(h, str(redis_field(edge_id, mode, vt_id, new_dir)), 1)
+            queued = True
+        if prev_dir in (UP, DOWN):
+            pipe.hincrby(h, str(redis_field(edge_id, mode, vt_id, prev_dir)), -1)
+            queued = True
+    if queued:
+        pipe.execute()
+
+
 def publish_delta(
     redis_client, slug: str, edge_ids: list[int], mode: int, vt_id: int,
     direction: int = UP, reversed_vote: bool = False,

@@ -80,3 +80,36 @@ def test_publish_delta_broadcasts_authoritative_counts(redis_client):
     assert payload["type"] == "delta"
     assert payload["vtCounts"] == {"0": [1, 0]}
     assert payload["rev"] == 1
+
+
+# ── Batched write path (apply_directional_batch ≡ per-edge loop) ────────────
+
+def test_batch_matches_loop_for_mixed_plan(redis_client):
+    """One pipelined batch produces byte-identical Redis state to the loop."""
+    import fakeredis
+    loop_r = fakeredis.FakeStrictRedis(decode_responses=True)
+
+    # clears (→0), fresh casts (0→dir), reversals (∓→±) in one plan
+    ops = [(0, v.UP, 0), (1, v.DOWN, 0),          # clears
+           (2, 0, v.UP), (3, v.DOWN, v.UP),       # fresh + reversal
+           (4, v.UP, v.UP)]                       # no-op (guarded)
+    # seed prior state on both sides so decrements land on real counts
+    for r in (redis_client, loop_r):
+        v.apply_directional(r, SLUG, 0, MODE, VT, v.UP, 0)
+        v.apply_directional(r, SLUG, 1, MODE, VT, v.DOWN, 0)
+        v.apply_directional(r, SLUG, 3, MODE, VT, v.DOWN, 0)
+        v.apply_directional(r, SLUG, 4, MODE, VT, v.UP, 0)
+
+    v.apply_directional_batch(redis_client, SLUG, ops, MODE, VT)
+    for eid, prev, new in ops:
+        v.apply_directional(loop_r, SLUG, eid, MODE, VT, new, prev)
+
+    assert redis_client.hgetall(v.hash_key(SLUG)) == loop_r.hgetall(v.hash_key(SLUG))
+    assert counts(redis_client, [0, 1, 2, 3, 4]) == {
+        0: [0, 0], 1: [0, 0], 2: [1, 0], 3: [1, 0], 4: [1, 0]}
+
+
+def test_batch_empty_plan_is_noop(redis_client):
+    v.apply_directional_batch(redis_client, SLUG, [], MODE, VT)
+    v.apply_directional_batch(redis_client, SLUG, [(0, v.UP, v.UP)], MODE, VT)
+    assert redis_client.hgetall(v.hash_key(SLUG)) == {}

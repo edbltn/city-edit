@@ -111,6 +111,73 @@ def apply_block_deltas(
                           new_dir, prev_dirs.get(eid, 0), device_id)
 
 
+def apply_block_deltas_batch(
+    redis_client, slug: str, mode: int,
+    block_ops: list[tuple[int, int, int]], vt_id: int, device_id: str,
+) -> None:
+    """Apply a whole vote plan's block deltas in TWO round trips.
+
+    `block_ops` is [(block_id, prev_dir, new_dir), …] in plan order — one entry
+    per changed edge (multiplicity per edge is the point; do NOT dedupe blocks).
+    Equivalent to apply_block_delta per edge, but pipelined: the loop version
+    cost 1–3 unpipelined commands per edge (~150–400 round trips on a route
+    vote — changelog/2026-07-08-agent-load-test.html finding #2).
+
+    Phase A pipelines every bd: multiplicity HINCRBY in op order. Phase B
+    derives from the returned multiplicities:
+      · bagg moves on every presence-boundary crossing (+1 result == 1,
+        −1 result == 0), same as the loop — crossings are real regardless of
+        interleaving, and opposite crossings on one field cancel via summing.
+      · a device field is deleted only when the LAST op touching it left
+        it ≤ 0 — deferring HDEL per-op could wipe a field a later op in the
+        same plan re-created (clear on edge A + cast on edge B, same block).
+    """
+    from vote_store import dir_to_bit, UP, DOWN
+
+    # Phase A: (bd_key, +1/-1 increment) per boundary-relevant transition.
+    incrs: list[tuple[str, int]] = []
+    for block_id, prev_dir, new_dir in block_ops:
+        if new_dir == prev_dir or block_id < 0:
+            continue
+        if new_dir in (UP, DOWN):
+            incrs.append((bd_key(slug, mode, block_id, vt_id, dir_to_bit(new_dir)), 1))
+        if prev_dir in (UP, DOWN):
+            incrs.append((bd_key(slug, mode, block_id, vt_id, dir_to_bit(prev_dir)), -1))
+    if not incrs:
+        return
+    pipe = redis_client.pipeline()
+    for bdk, delta in incrs:
+        pipe.hincrby(bdk, device_id, delta)
+    results = pipe.execute()
+
+    # Phase B: aggregate boundary crossings + final-state cleanup.
+    bagg_deltas: dict[str, int] = {}   # bd_key → net bagg move
+    final_mult: dict[str, int] = {}    # bd_key → multiplicity after last op
+    for (bdk, delta), n in zip(incrs, results):
+        if delta > 0 and n == 1:
+            bagg_deltas[bdk] = bagg_deltas.get(bdk, 0) + 1
+        elif delta < 0 and n == 0:
+            bagg_deltas[bdk] = bagg_deltas.get(bdk, 0) - 1
+        final_mult[bdk] = n
+
+    bagg = bagg_key(slug, mode)
+    pipe = redis_client.pipeline()
+    queued = False
+    for bdk, n in final_mult.items():
+        if n <= 0:
+            pipe.hdel(bdk, device_id)
+            queued = True
+    for bdk, move in bagg_deltas.items():
+        if move == 0:
+            continue
+        # bd:<slug>:<mode>:<block>:<vt>:<dir>
+        _, _, _, block_s, vt_s, dir_s = bdk.split(":")
+        pipe.hincrby(bagg, str(pack_block_field(int(block_s), int(vt_s), int(dir_s))), move)
+        queued = True
+    if queued:
+        pipe.execute()
+
+
 # ── Read path ───────────────────────────────────────────────────────────────
 
 def build_block_arrays(redis_client, slug: str, mode: int, n_blocks: int) -> dict:

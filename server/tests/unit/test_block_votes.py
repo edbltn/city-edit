@@ -130,3 +130,72 @@ def test_rebuild_no_warning_when_consistent(redis_client, caplog):
     with caplog.at_level(logging.WARNING, logger="block_votes"):
         bv.rebuild_from_db(redis_client, SLUG, MODE, EDGE_BLOCK, rows)
     assert not [r for r in caplog.records if "invariant violation" in r.message]
+
+
+# ── Batched write path (apply_block_deltas_batch ≡ per-edge loop) ───────────
+
+def _loop_apply(r, block_ops, device):
+    for b, prev, new in block_ops:
+        bv.apply_block_delta(r, SLUG, MODE, b, VT, new, prev, device)
+
+
+def _state(r):
+    """(bagg nonzero fields, all bd hashes) — the full observable block state."""
+    bagg = {k: v for k, v in r.hgetall(bv.bagg_key(SLUG, MODE)).items() if int(v) != 0}
+    bd = {}
+    for key in r.scan_iter(match=f"bd:{SLUG}:{MODE}:*"):
+        h = r.hgetall(key)
+        if h:
+            bd[key] = h
+    return bagg, bd
+
+
+def test_batch_matches_loop_route_vote(redis_client):
+    """A route vote spanning both edges of block 10 + block 20, then a reversal."""
+    import fakeredis
+    loop_r = fakeredis.FakeStrictRedis(decode_responses=True)
+
+    fresh = [(10, 0, UP), (10, 0, UP), (20, 0, UP)]
+    reverse = [(10, UP, DOWN), (10, UP, DOWN), (20, UP, DOWN)]
+    for ops in (fresh, reverse):
+        bv.apply_block_deltas_batch(redis_client, SLUG, MODE, ops, VT, "d1")
+        _loop_apply(loop_r, ops, "d1")
+        assert _state(redis_client) == _state(loop_r)
+    assert total(redis_client, 10) == 1
+    assert total(redis_client, 20) == 1
+
+
+def test_batch_clear_then_cast_same_block_keeps_field(redis_client):
+    """A plan that clears edge A and casts edge B in the SAME block must leave
+    the device present (multiplicity 1) — the deferred HDEL must not wipe the
+    field the cast re-created."""
+    import fakeredis
+    loop_r = fakeredis.FakeStrictRedis(decode_responses=True)
+
+    # prior: d1 upvoted edge 0 (block 10). New selection: edge 1 only (block 10)
+    # → plan clears edge 0 (UP→0) and casts edge 1 (0→UP).
+    seed = [(10, 0, UP)]
+    plan = [(10, UP, 0), (10, 0, UP)]
+    for r, apply in ((redis_client, lambda o: bv.apply_block_deltas_batch(
+            r, SLUG, MODE, o, VT, "d1")), (loop_r, lambda o: _loop_apply(loop_r, o, "d1"))):
+        apply(seed)
+        apply(plan)
+
+    assert _state(redis_client) == _state(loop_r)
+    assert redis_client.hget(bv.bd_key(SLUG, MODE, 10, VT, 0), "d1") == "1"
+    assert total(redis_client, 10) == 1  # still exactly one deduped vote
+
+
+def test_batch_full_clear_removes_field_and_aggregate(redis_client):
+    seed = [(10, 0, UP), (10, 0, UP)]
+    bv.apply_block_deltas_batch(redis_client, SLUG, MODE, seed, VT, "d1")
+    bv.apply_block_deltas_batch(
+        redis_client, SLUG, MODE, [(10, UP, 0), (10, UP, 0)], VT, "d1")
+    assert redis_client.hget(bv.bd_key(SLUG, MODE, 10, VT, 0), "d1") is None
+    assert total(redis_client, 10) == 0
+
+
+def test_batch_skips_unmapped_and_noop(redis_client):
+    bv.apply_block_deltas_batch(
+        redis_client, SLUG, MODE, [(-1, 0, UP), (10, UP, UP)], VT, "d1")
+    assert _state(redis_client) == ({}, {})

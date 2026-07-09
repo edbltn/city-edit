@@ -1121,8 +1121,6 @@ def cast_vote():
             prior = get_voter_type_rows(slug, vt_id, device_id)
             plan = vote_semantics.plan_block_vote(edge_ids, direction, prior, ebid)
 
-            reversed_any = False
-            changed: list[int] = []
             at_cap: list[int] = []  # fresh device, IP at cap → LRU takeover below
             casts: list[tuple[int, int]] = []
             for eid, prev in plan.cast:
@@ -1134,26 +1132,28 @@ def cast_vote():
                     continue
                 casts.append((eid, prev))
 
-            def _apply(eid: int, prev: int, new: int) -> None:
-                vote_store.apply_directional(
-                    redis_client, slug, eid, mode_int, vt_id, new, prev
+            # Apply the whole plan batched — one pipeline for the edge counters,
+            # two for the block mirror — instead of ~2 round trips per edge
+            # (the measured bulk of vote latency at scale; changelog
+            # 2026-07-08-agent-load-test.html finding #2). Order is plan order:
+            # clears then casts, matching the per-edge loop this replaces.
+            ops = ([(eid, prev, 0) for eid, prev in plan.clear]
+                   + [(eid, prev, direction) for eid, prev in casts])
+            vote_store.apply_directional_batch(
+                redis_client, slug, ops, mode_int, vt_id
+            )
+            # Mirror onto each edge's block (deduped per device); no-op without
+            # a block layer or for edges outside any block.
+            if ebid is not None:
+                n_edges = len(ebid)
+                block_ops = [(int(ebid[eid]), prev, new)
+                             for eid, prev, new in ops if 0 <= eid < n_edges]
+                block_votes.apply_block_deltas_batch(
+                    redis_client, slug, mode_int, block_ops, vt_id, device_id
                 )
-                # Mirror onto the edge's block (deduped per device); no-op without
-                # a block layer or for edges outside any block.
-                if ebid is not None and 0 <= eid < len(ebid):
-                    b = int(ebid[eid])
-                    if b >= 0:
-                        block_votes.apply_block_delta(
-                            redis_client, slug, mode_int, b, vt_id,
-                            new, prev, device_id)
-                changed.append(eid)
-
-            for eid, prev in plan.clear:
-                _apply(eid, prev, 0)
-            for eid, prev in casts:
-                _apply(eid, prev, direction)
-                if prev in (vote_store.UP, vote_store.DOWN):
-                    reversed_any = True
+            changed = [eid for eid, _, _ in ops]
+            reversed_any = any(prev in (vote_store.UP, vote_store.DOWN)
+                               for _, prev in casts)
             cleared = [eid for eid, _ in plan.clear]
             cast_ids = [eid for eid, _ in casts]
 
