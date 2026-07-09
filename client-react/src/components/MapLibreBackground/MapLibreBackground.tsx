@@ -61,7 +61,7 @@ export function blockIdAtLatLng(lat: number, lng: number): number | null {
  *  is no baseline edge layer (edges show only on Leaflet hover/selection). */
 function blockFillPaint(style: MapStyle): maplibregl.FillLayerSpecification["paint"] {
   const heat = style.heat;
-  const h = ["coalesce", ["feature-state", "heat"], 0] as const;
+  const h: maplibregl.ExpressionSpecification = ["coalesce", ["feature-state", "heat"], 0];
   return {
     // Start the ramp at `warm` (not halo) so even a single vote reads clearly,
     // and keep the fill translucent — the outline layer below carries the
@@ -91,7 +91,7 @@ function blockFillPaint(style: MapStyle): maplibregl.FillLayerSpecification["pai
  *  width that grows with heat so the hottest blocks read etched, not just lit. */
 function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification["paint"] {
   const heat = style.heat;
-  const h = ["coalesce", ["feature-state", "heat"], 0] as const;
+  const h: maplibregl.ExpressionSpecification = ["coalesce", ["feature-state", "heat"], 0];
   return {
     "line-color": [
       "interpolate", ["linear"], h,
@@ -116,7 +116,7 @@ function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification["pai
 }
 
 function buildStyle(
-  graphTilesUrl: string,
+  _graphTilesUrl: string,
   blockTilesUrl: string,
   tiles: string[],
   mapStyle: MapStyle,
