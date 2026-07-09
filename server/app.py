@@ -295,15 +295,20 @@ def _locked_response():
 
 # ── Per-map vote response cache ───────────────────────────────────────────
 
-# Bounded LRU of built /api/graph-votes bodies, keyed by "<slug>:<mode>". This
-# used to be an unbounded dict: every (map, mode) ever requested kept its full
-# JSON body resident forever, so a multi-tenant server with many maps leaked
-# memory until the worker OOM-crashed (exactly the "more than one tenant → crash"
-# symptom). The cap evicts the least-recently-served body so memory stays flat
-# regardless of how many maps exist. Access is guarded by _vote_cache_lock since
-# several greenlets/requests touch it concurrently.
-_VOTE_CACHE_MAX = int(os.environ.get("VOTE_CACHE_MAX", "64"))
+# Bounded LRU of built /api/graph-votes snapshots, keyed by "<slug>:<mode>".
+# This used to be an unbounded dict: every (map, mode) ever requested kept its
+# full JSON body resident forever, so a multi-tenant server with many maps
+# leaked memory until the worker OOM-crashed (exactly the "more than one tenant
+# → crash" symptom). The bound is in BYTES, not entries: an NYC-sized snapshot
+# is ~37MB while a small city's is a few hundred KB, so an entry count says
+# nothing about footprint — and since entries now persist across votes (the
+# debounce serves rev-stale snapshots instead of purging them), a count-capped
+# cache could quietly hold gigabytes on an 8GiB prod instance. Eviction drops
+# the least-recently-served snapshot until under budget. Access is guarded by
+# _vote_cache_lock since several greenlets/requests touch it concurrently.
+_VOTE_CACHE_MAX_MB = float(os.environ.get("VOTE_CACHE_MAX_MB", "512"))
 _vote_cache: "OrderedDict[str, dict]" = OrderedDict()
+_vote_cache_bytes = 0
 _vote_cache_lock = threading.Lock()
 
 # Per-cache-key single-flight locks. Building the vote arrays for a big map (NYC
@@ -420,13 +425,25 @@ def _vote_cache_peek(cache_key: str) -> dict | None:
         return cached
 
 
+def _entry_bytes(entry: dict) -> int:
+    return len(entry["body"]) + len(entry["gz"])
+
+
 def _vote_cache_put(cache_key: str, entry: dict) -> None:
-    """Store a built entry, evicting the least-recently-used entry past the cap."""
+    """Store a built entry, evicting least-recently-used entries past the
+    byte budget (never the entry just stored — a snapshot bigger than the
+    whole budget still serves; the cache just holds nothing else)."""
+    global _vote_cache_bytes
+    budget = int(_VOTE_CACHE_MAX_MB * 1024 * 1024)
     with _vote_cache_lock:
+        old = _vote_cache.pop(cache_key, None)
+        if old is not None:
+            _vote_cache_bytes -= _entry_bytes(old)
         _vote_cache[cache_key] = entry
-        _vote_cache.move_to_end(cache_key)
-        while len(_vote_cache) > _VOTE_CACHE_MAX:
-            _vote_cache.popitem(last=False)
+        _vote_cache_bytes += _entry_bytes(entry)
+        while _vote_cache_bytes > budget and len(_vote_cache) > 1:
+            _, evicted = _vote_cache.popitem(last=False)
+            _vote_cache_bytes -= _entry_bytes(evicted)
 
 
 def _invalidate_vote_cache(slug: str) -> None:
@@ -437,10 +454,13 @@ def _invalidate_vote_cache(slug: str) -> None:
     in _build_graph_votes_body still kept responses CORRECT, but the stale entries
     lingered in memory and forced an extra rebuild.) Clearing all of a slug's
     variants makes invalidation actually free the right entries."""
+    global _vote_cache_bytes
     prefix = f"{slug}:"
     with _vote_cache_lock:
         for key in [k for k in _vote_cache if k == slug or k.startswith(prefix)]:
-            _vote_cache.pop(key, None)
+            dropped = _vote_cache.pop(key, None)
+            if dropped is not None:
+                _vote_cache_bytes -= _entry_bytes(dropped)
 
 
 def _build_lock_for(cache_key: str) -> threading.Lock:
@@ -2045,7 +2065,11 @@ def admin_stats():
     # and live WS fan-out size.
     result["votes"] = _vote_metrics_snapshot()
     result["ws"] = {"subscribers": delta_hub.subscriber_count()}
-    result["graph_votes_cache"] = {"entries": len(_vote_cache)}
+    result["graph_votes_cache"] = {
+        "entries": len(_vote_cache),
+        "mb": round(_vote_cache_bytes / (1024 * 1024), 1),
+        "budget_mb": _VOTE_CACHE_MAX_MB,
+    }
     return jsonify(result)
 
 
