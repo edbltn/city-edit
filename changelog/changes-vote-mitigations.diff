@@ -1,0 +1,1367 @@
+diff --git a/Dockerfile.overlay b/Dockerfile.overlay
+index 6a0f009..2d732c9 100644
+--- a/Dockerfile.overlay
++++ b/Dockerfile.overlay
+@@ -23,6 +23,11 @@ FROM ${BASE_IMAGE}
+ WORKDIR /app
+ 
+ # Updated backend + fixed station data (graphs/pmtiles/venv come from the base).
++# Re-sync Python deps against the lockfile first: an overlay that ships code
++# importing a package the base image predates (e.g. orjson) would otherwise
++# crash at boot. Already-satisfied pins are no-ops, so this stays fast.
++COPY server/requirements.txt ./
++RUN uv pip install --system --no-cache -r requirements.txt
+ COPY server/*.py ./
+ COPY server/data/ ./data/
+ 
+diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
+index a678b3d..82a9206 100644
+--- a/client-react/src/components/GraphLayer/GraphLayer.tsx
++++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -903,6 +903,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // Deltas received before the initial vote fetch completes
+   const pendingDeltasRef = useRef<import("../../types").VoteDelta[]>([]);
+ 
++  // Ring of recently APPLIED deltas. A refetched /api/graph-votes body may be
++  // slightly older than deltas we already applied (the server debounces
++  // snapshot rebuilds under sustained voting), and installing it wholesale
++  // would regress lastRev and the counts — making the very next delta look
++  // like a gap and triggering a refetch loop. Replaying the ring's newer
++  // deltas over the installed body heals both (deltas SET authoritative
++  // counts, so replay is idempotent).
++  const recentDeltasRef = useRef<import("../../types").VoteDelta[]>([]);
++  const RECENT_DELTAS_MAX = 500;
++
+   // Stable ref for onSnap callback
+   const onSnapRef = useRef(onSnap);
+   useEffect(() => { onSnapRef.current = onSnap; }, [onSnap]);
+@@ -1985,14 +1995,27 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       setVoteTypeMap(voteData.vote_types);
+       broadcastBlockVotes(voteData);
+ 
+-      // Replay any deltas that arrived while the fetch was in flight
+-      const pending = pendingDeltasRef.current;
+-      if (pending.length > 0) {
+-        pendingDeltasRef.current = [];
+-        for (const d of pending) {
+-          if (d.rev <= lastRevRef.current) continue;
+-          applyDeltaToGraphData(d);
+-        }
++      // Replay deltas newer than the installed body: both any buffered before
++      // the initial load (pendingDeltasRef) and the recent-applied ring — the
++      // server may serve a debounced snapshot a couple of revisions old, and
++      // the wholesale install above just overwrote those deltas' counts.
++      const bodyRev = voteData.rev ?? 0;
++      const replay = [...pendingDeltasRef.current, ...recentDeltasRef.current]
++        .filter((d) => d.rev > bodyRev)
++        .sort((a, b) => a.rev - b.rev);
++      pendingDeltasRef.current = [];
++      for (const d of replay) {
++        if (d.rev <= lastRevRef.current) continue; // duplicate rev across lists
++        applyDeltaToGraphData(d);
++      }
++      if (replay.length > 0 && replay[0].rev > bodyRev + 1) {
++        // The ring couldn't bridge body→first-replayed; those revisions'
++        // counts are lost until a fresh snapshot. One DELAYED refetch (past
++        // the server's debounce) instead of an immediate one — an immediate
++        // retry would get the same stale snapshot and loop.
++        dwarn("votes", `snapshot rev ${bodyRev} + ring from ${replay[0].rev} `
++          + "leave a hole — scheduling one delayed refetch");
++        setTimeout(() => fetchVotesRef.current(), 2500);
+       }
+ 
+       refreshGraphDisplayRef.current();
+@@ -2282,6 +2305,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+         return;
+       }
+ 
++      // Remember every received delta (bounded) so a refetch can replay the
++      // ones newer than the (possibly debounced) snapshot it installs. This
++      // includes gap-triggering deltas below — the refetch body may not cover
++      // them, but the replay will.
++      recentDeltasRef.current.push(delta);
++      if (recentDeltasRef.current.length > RECENT_DELTAS_MAX) {
++        recentDeltasRef.current.splice(
++          0, recentDeltasRef.current.length - RECENT_DELTAS_MAX);
++      }
++
+       // Gap detection: if we missed revisions, full refetch
+       if (lastRevRef.current > 0 && delta.rev > lastRevRef.current + 1) {
+         dwarn("votes", `delta gap (have rev ${lastRevRef.current}, got ${delta.rev}) — full refetch`);
+diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+index 312bc87..797aa3f 100644
+--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
++++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+@@ -61,7 +61,7 @@ export function blockIdAtLatLng(lat: number, lng: number): number | null {
+  *  is no baseline edge layer (edges show only on Leaflet hover/selection). */
+ function blockFillPaint(style: MapStyle): maplibregl.FillLayerSpecification["paint"] {
+   const heat = style.heat;
+-  const h = ["coalesce", ["feature-state", "heat"], 0] as const;
++  const h: maplibregl.ExpressionSpecification = ["coalesce", ["feature-state", "heat"], 0];
+   return {
+     // Start the ramp at `warm` (not halo) so even a single vote reads clearly,
+     // and keep the fill translucent — the outline layer below carries the
+@@ -91,7 +91,7 @@ function blockFillPaint(style: MapStyle): maplibregl.FillLayerSpecification["pai
+  *  width that grows with heat so the hottest blocks read etched, not just lit. */
+ function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification["paint"] {
+   const heat = style.heat;
+-  const h = ["coalesce", ["feature-state", "heat"], 0] as const;
++  const h: maplibregl.ExpressionSpecification = ["coalesce", ["feature-state", "heat"], 0];
+   return {
+     "line-color": [
+       "interpolate", ["linear"], h,
+@@ -116,7 +116,7 @@ function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification["pai
+ }
+ 
+ function buildStyle(
+-  graphTilesUrl: string,
++  _graphTilesUrl: string,
+   blockTilesUrl: string,
+   tiles: string[],
+   mapStyle: MapStyle,
+diff --git a/client-react/src/context/WebSocketContext.tsx b/client-react/src/context/WebSocketContext.tsx
+index 9b2044c..c644019 100644
+--- a/client-react/src/context/WebSocketContext.tsx
++++ b/client-react/src/context/WebSocketContext.tsx
+@@ -57,6 +57,19 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
+           for (const cb of deltaListenersRef.current) {
+             cb(delta as VoteDelta);
+           }
++        } else if (msg.type === "deltas" && Array.isArray(msg.items)) {
++          // Server-coalesced batch (delta_hub): unwrap into individual deltas
++          // in rev order so downstream gap detection and count application see
++          // exactly the per-vote stream they always did.
++          const items = [...msg.items].sort(
++            (a, b) => (a.rev ?? 0) - (b.rev ?? 0));
++          for (const item of items) {
++            const { type: _t, ...delta } = item;
++            void _t;
++            for (const cb of deltaListenersRef.current) {
++              cb(delta as VoteDelta);
++            }
++          }
+         }
+         // "init" and "keepalive" are handled silently
+       } catch (e) {
+diff --git a/server/app.py b/server/app.py
+index a3ffda3..4c45b15 100644
+--- a/server/app.py
++++ b/server/app.py
+@@ -1,14 +1,18 @@
++import gzip
+ import json
+ import logging
+ import os
++import queue
+ import re
++import resource
+ import sys
+ import time
+ import hashlib
+ import threading
+-from collections import OrderedDict
++from collections import OrderedDict, deque
+ from functools import lru_cache
+ 
++import orjson
+ import redis
+ import requests
+ from dotenv import load_dotenv
+@@ -26,6 +30,7 @@ import vote_semantics
+ import vote_migration
+ import block_votes
+ import database
++import delta_hub as delta_hub_mod
+ from cities import CITIES, DEFAULT_CITY_ID, get_city, all_cities
+ from graph_registry import GraphRegistry, OsrmRegistry, STATION_NETWORKS
+ from osrm_router import extract_all_segments
+@@ -290,15 +295,20 @@ def _locked_response():
+ 
+ # ── Per-map vote response cache ───────────────────────────────────────────
+ 
+-# Bounded LRU of built /api/graph-votes bodies, keyed by "<slug>:<mode>". This
+-# used to be an unbounded dict: every (map, mode) ever requested kept its full
+-# JSON body resident forever, so a multi-tenant server with many maps leaked
+-# memory until the worker OOM-crashed (exactly the "more than one tenant → crash"
+-# symptom). The cap evicts the least-recently-served body so memory stays flat
+-# regardless of how many maps exist. Access is guarded by _vote_cache_lock since
+-# several greenlets/requests touch it concurrently.
+-_VOTE_CACHE_MAX = int(os.environ.get("VOTE_CACHE_MAX", "64"))
++# Bounded LRU of built /api/graph-votes snapshots, keyed by "<slug>:<mode>".
++# This used to be an unbounded dict: every (map, mode) ever requested kept its
++# full JSON body resident forever, so a multi-tenant server with many maps
++# leaked memory until the worker OOM-crashed (exactly the "more than one tenant
++# → crash" symptom). The bound is in BYTES, not entries: an NYC-sized snapshot
++# is ~37MB while a small city's is a few hundred KB, so an entry count says
++# nothing about footprint — and since entries now persist across votes (the
++# debounce serves rev-stale snapshots instead of purging them), a count-capped
++# cache could quietly hold gigabytes on an 8GiB prod instance. Eviction drops
++# the least-recently-served snapshot until under budget. Access is guarded by
++# _vote_cache_lock since several greenlets/requests touch it concurrently.
++_VOTE_CACHE_MAX_MB = float(os.environ.get("VOTE_CACHE_MAX_MB", "512"))
+ _vote_cache: "OrderedDict[str, dict]" = OrderedDict()
++_vote_cache_bytes = 0
+ _vote_cache_lock = threading.Lock()
+ 
+ # Per-cache-key single-flight locks. Building the vote arrays for a big map (NYC
+@@ -311,29 +321,134 @@ _build_locks: dict[str, threading.Lock] = {}
+ _build_locks_guard = threading.Lock()
+ 
+ # Serializes the read-modify-write of a voter's per-proposal direction so a
+-# rapid +/− toggle can't read a stale prior direction (see /api/vote). This is a
+-# PER-PROCESS lock; across Flask instances/workers the Redis lock in cast_vote
+-# (vote_store.voter_lock) provides the cross-instance guarantee.
+-_proposal_vote_lock = threading.Lock()
++# rapid +/− toggle can't read a stale prior direction (see /api/vote). This is
++# the PER-PROCESS half of the guarantee; across Flask instances/workers the
++# Redis lock in cast_vote (vote_store.voter_lock) provides the same scope
++# fleet-wide. STRIPED by (slug, device): a voter's own casts serialize, but
++# different voters vote concurrently — a single global lock here capped the
++# whole instance at ~9 votes/s (changelog/2026-07-08-agent-load-test.html,
++# finding #1 / mitigation M2). Redis counter updates are atomic HINCRBYs and
++# commute across voters, so cross-voter mutual exclusion buys nothing.
++_VOTE_LOCK_STRIPES = tuple(threading.Lock() for _ in range(256))
++
++
++def _voter_lock_stripe(slug: str, device_id: str) -> threading.Lock:
++    return _VOTE_LOCK_STRIPES[hash((slug, device_id)) % len(_VOTE_LOCK_STRIPES)]
++
++
++# ── Vote-path saturation: backpressure valve + rolling metrics (M5) ─────────
++# The July load test's sharpest lesson was that /health stayed at 1-2ms while
++# votes queued 45s — monitoring keyed on health was blind to the melt. Two
++# valves + a metrics window make saturation both bounded and visible:
++#   · at most VOTE_MAX_INFLIGHT votes run concurrently; past that the endpoint
++#     sheds with 503 + Retry-After instead of queueing into timeouts (clients
++#     already roll back optimistic casts on failure);
++#   · a same-voter stripe that can't be acquired in VOTE_LOCK_SHED_SECONDS
++#     sheds the same way (a wedged voter shouldn't hold a request thread);
++#   · /api/admin/stats reports votes/s, lock-wait and handler percentiles,
++#     shed counts, and process RSS from a rolling window.
++VOTE_MAX_INFLIGHT = int(os.environ.get("VOTE_MAX_INFLIGHT", "64"))
++VOTE_LOCK_SHED_SECONDS = float(os.environ.get("VOTE_LOCK_SHED_SECONDS", "2.0"))
++# How long a vote may WAIT for an inflight slot before shedding. Zero would
++# shed the moment a burst exceeds the cap (58% of a 160-agent wave); a bounded
++# wait turns the cap into a short queue that absorbs bursts while still
++# capping worst-case latency at wait + handler time.
++VOTE_QUEUE_WAIT_SECONDS = float(os.environ.get("VOTE_QUEUE_WAIT_SECONDS", "1.5"))
++
++_vote_inflight = threading.Semaphore(VOTE_MAX_INFLIGHT)
++_vote_metrics_lock = threading.Lock()
++_vote_metrics: "deque[tuple[float, float, float]]" = deque(maxlen=2048)
++_vote_shed = {"inflight": 0, "stripe": 0}
++
++
++def _vote_metrics_record(lock_wait_s: float, total_s: float) -> None:
++    with _vote_metrics_lock:
++        _vote_metrics.append((time.time(), lock_wait_s, total_s))
++
++
++def _shed_response(reason: str, retry_after: int):
++    with _vote_metrics_lock:
++        _vote_shed[reason] += 1
++    resp = jsonify({"error": "Server is at vote capacity — retry shortly",
++                    "shed": reason, "retry": True})
++    resp.headers["Retry-After"] = str(retry_after)
++    return resp, 503
++
++
++def _vote_metrics_snapshot(window_s: float = 60.0) -> dict:
++    now = time.time()
++    with _vote_metrics_lock:
++        rows = [r for r in _vote_metrics if now - r[0] <= window_s]
++        shed = dict(_vote_shed)
++
++    def pct(vals: list[float], p: float) -> float:
++        if not vals:
++            return 0.0
++        vals = sorted(vals)
++        return round(vals[min(len(vals) - 1, int(p * len(vals)))] * 1000, 1)
++
++    lock_waits = [r[1] for r in rows]
++    totals = [r[2] for r in rows]
++    return {
++        "window_s": window_s,
++        "count": len(rows),
++        "votes_per_sec": round(len(rows) / window_s, 2),
++        "lock_wait_ms": {"p50": pct(lock_waits, 0.5), "p95": pct(lock_waits, 0.95)},
++        "handler_ms": {"p50": pct(totals, 0.5), "p95": pct(totals, 0.95)},
++        "shed": shed,
++        "max_inflight": VOTE_MAX_INFLIGHT,
++    }
++
++
++# How long a built snapshot keeps serving after its revision goes stale. Under
++# sustained voting the revision bumps on every cast, so rebuilding per rev is a
++# full-array rebuild per vote (finding #3 of the load-test report); serving the
++# last complete snapshot for a couple of seconds costs nothing — clients
++# reconcile forward from WS deltas, which carry authoritative counts — and
++# collapses a join storm to one rebuild per window.
++_VOTE_CACHE_DEBOUNCE = float(os.environ.get("GRAPH_VOTES_DEBOUNCE", "2.0"))
+ 
+ 
+-def _vote_cache_get(cache_key: str, rev: int) -> str | None:
+-    """Return a cached body for this key+revision, marking it most-recently-used."""
++def _vote_cache_get(cache_key: str, rev: int) -> dict | None:
++    """Return the cached entry for this key when built at exactly this revision,
++    marking it most-recently-used."""
+     with _vote_cache_lock:
+         cached = _vote_cache.get(cache_key)
+         if cached and cached["rev"] == rev:
+             _vote_cache.move_to_end(cache_key)
+-            return cached["body"]
++            return cached
+     return None
+ 
+ 
+-def _vote_cache_put(cache_key: str, rev: int, body: str) -> None:
+-    """Store a built body, evicting the least-recently-used entry past the cap."""
++def _vote_cache_peek(cache_key: str) -> dict | None:
++    """Return the cached entry regardless of revision (debounce decides
++    servability), marking it most-recently-used."""
+     with _vote_cache_lock:
+-        _vote_cache[cache_key] = {"rev": rev, "body": body}
+-        _vote_cache.move_to_end(cache_key)
+-        while len(_vote_cache) > _VOTE_CACHE_MAX:
+-            _vote_cache.popitem(last=False)
++        cached = _vote_cache.get(cache_key)
++        if cached:
++            _vote_cache.move_to_end(cache_key)
++        return cached
++
++
++def _entry_bytes(entry: dict) -> int:
++    return len(entry["body"]) + len(entry["gz"])
++
++
++def _vote_cache_put(cache_key: str, entry: dict) -> None:
++    """Store a built entry, evicting least-recently-used entries past the
++    byte budget (never the entry just stored — a snapshot bigger than the
++    whole budget still serves; the cache just holds nothing else)."""
++    global _vote_cache_bytes
++    budget = int(_VOTE_CACHE_MAX_MB * 1024 * 1024)
++    with _vote_cache_lock:
++        old = _vote_cache.pop(cache_key, None)
++        if old is not None:
++            _vote_cache_bytes -= _entry_bytes(old)
++        _vote_cache[cache_key] = entry
++        _vote_cache_bytes += _entry_bytes(entry)
++        while _vote_cache_bytes > budget and len(_vote_cache) > 1:
++            _, evicted = _vote_cache.popitem(last=False)
++            _vote_cache_bytes -= _entry_bytes(evicted)
+ 
+ 
+ def _invalidate_vote_cache(slug: str) -> None:
+@@ -344,10 +459,13 @@ def _invalidate_vote_cache(slug: str) -> None:
+     in _build_graph_votes_body still kept responses CORRECT, but the stale entries
+     lingered in memory and forced an extra rebuild.) Clearing all of a slug's
+     variants makes invalidation actually free the right entries."""
++    global _vote_cache_bytes
+     prefix = f"{slug}:"
+     with _vote_cache_lock:
+         for key in [k for k in _vote_cache if k == slug or k.startswith(prefix)]:
+-            _vote_cache.pop(key, None)
++            dropped = _vote_cache.pop(key, None)
++            if dropped is not None:
++                _vote_cache_bytes -= _entry_bytes(dropped)
+ 
+ 
+ def _build_lock_for(cache_key: str) -> threading.Lock:
+@@ -359,8 +477,13 @@ def _build_lock_for(cache_key: str) -> threading.Lock:
+         return lock
+ 
+ 
+-def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
+-    """Build the /api/graph-votes JSON for one map+mode, cached by its revision.
++def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> dict:
++    """Build (or reuse) the /api/graph-votes snapshot for one map+mode.
++
++    Returns a cache entry {rev, bstamp, body, gz, built}: the JSON bytes, their
++    pre-compressed gzip twin (one compression per rebuild, shared by every
++    client — not one per response), the revision + blocks stamp the body
++    describes, and a monotonic build time for the serve-stale debounce.
+ 
+     `mode` scopes the legend and heatmap to a single vote namespace (e.g.
+     "walkways") so proposals cast under other modes on the same map don't leak
+@@ -383,7 +506,7 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
+ 
+ def _build_graph_votes_body_locked(
+     rmap: ResolvedMap, mode: str | None, rev: int, cache_key: str,
+-) -> str:
++) -> dict:
+     rmap.graph.ensure_loaded()
+ 
+     # The heatmap serves ONLY from Redis; Postgres is the durable copy that the
+@@ -437,10 +560,21 @@ def _build_graph_votes_body_locked(
+             redis_client, rmap.slug, block_mode, rmap.graph.n_blocks))
+         arrays["blocks_version"] = rmap.graph.blocks_version
+ 
+-    body = json.dumps(arrays)
+-
+-    _vote_cache_put(cache_key, rev, body)
+-    return body
++    # orjson + gzip level 3: the rebuild runs on the request path (debounced,
++    # but each one used to stall the GIL ~2s serializing 37MB and compressing
++    # at level 6 — the p95 spikes on unrelated endpoints). orjson is ~10x
++    # faster than json here and zlib releases the GIL while compressing;
++    # level 3 halves compression time for ~1.5% larger output.
++    body = orjson.dumps(arrays, option=orjson.OPT_SERIALIZE_NUMPY)
++    entry = {
++        "rev": rev,
++        "bstamp": rmap.graph.blocks_stamp(),
++        "body": body,
++        "gz": gzip.compress(body, 3),
++        "built": time.monotonic(),
++    }
++    _vote_cache_put(cache_key, entry)
++    return entry
+ 
+ 
+ def _write_vote_fields(slug: str, fields: list[tuple[int, int]]) -> None:
+@@ -582,28 +716,17 @@ if os.environ.get("SKIP_WARMUP") != "1":
+     _PrewarmThread(target=_startup_warm, name="startup-warm", daemon=True).start()
+ 
+ 
+-# ── Pubsub delta listener (invalidates per-map vote cache on peer writes) ───
+-
+-def _start_delta_listener():
+-    def listener():
+-        ps_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
+-        ps = ps_client.pubsub()
+-        ps.psubscribe("vote_deltas:*")
+-        logger.info("[PUBSUB] Subscribed to vote_deltas:*")
+-        for msg in ps.listen():
+-            if msg["type"] != "pmessage":
+-                continue
+-            channel = msg["channel"]
+-            slug = channel.split(":", 1)[1] if ":" in channel else None
+-            if slug:
+-                _invalidate_vote_cache(slug)
++# NOTE: the old vote_deltas:* listener that hard-invalidated the vote cache on
++# every peer write is gone — publish_delta's revision bump already rev-stales
++# cached snapshots (on every instance, since the revision lives in Redis), and
++# per-vote invalidation is exactly what forced a full 33MB rebuild per cast
++# under load. The graph-votes debounce now decides how long a stale snapshot
++# keeps serving.
+ 
+-    t = threading.Thread(target=listener, daemon=True, name="delta-listener")
+-    t.start()
+-    return t
+-
+-
+-_start_delta_listener()
++# One pubsub listener + coalesced fan-out for every WebSocket client (see
++# delta_hub.py). Its thread starts lazily on the first subscription.
++delta_hub = delta_hub_mod.DeltaHub(
++    lambda: redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True))
+ 
+ 
+ # ── Helpers ────────────────────────────────────────────────────────────────
+@@ -904,7 +1027,14 @@ def map_auth(slug):
+ 
+ @sock.route("/ws")
+ def ws(ws):
+-    """Push a single map's vote deltas to a client in real time."""
++    """Push a single map's vote deltas to a client in real time.
++
++    Delivery comes from the process-wide DeltaHub: ONE Redis pubsub listener
++    feeds every client, and deltas arrive merged ({"type": "deltas", ...}) at
++    the hub's flush cadence instead of one send per vote per client. This
++    handler just blocks on its queue — no per-client Redis connection and no
++    10Hz busy poll (finding #4 of changelog/2026-07-08-agent-load-test.html).
++    """
+     slug = (request.args.get("map") or DEFAULT_MAP_SLUG).strip()
+ 
+     # Gate the live stream exactly like the REST content: a locked map's deltas
+@@ -918,19 +1048,15 @@ def ws(ws):
+             pass
+         return
+ 
+-    channel = vote_store.channel_key(slug)
+-
+-    ws_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
+-    pubsub = ws_client.pubsub()
+-    pubsub.subscribe(channel)
+-
+-    rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)
+-    ws.send(json.dumps({"type": "init", "rev": rev, "map": slug}))
+-
+-    last_push = time.time()
+-    KEEPALIVE = 30
++    sub = delta_hub.subscribe(slug)
+     try:
++        rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)
++        ws.send(json.dumps({"type": "init", "rev": rev, "map": slug}))
++
++        last_push = time.time()
++        KEEPALIVE = 30
+         while True:
++            # Pump inbound frames so a client close is noticed promptly.
+             try:
+                 ws.receive(timeout=0)
+             except Exception as e:
+@@ -938,18 +1064,25 @@ def ws(ws):
+                 if "timed out" not in s and "no data" not in s and "connection closed" not in s:
+                     logger.warning(f"[WS] receive exception: {e}")
+ 
+-            msg = pubsub.get_message(timeout=0.1)
+-            if msg and msg["type"] == "message":
+-                ws.send(msg["data"])
++            if sub.overflowed.is_set():
++                # This client lagged past its queue bound; a reconnect plus
++                # the client's gap refetch is cheaper than a catch-up replay.
++                logger.warning(f"[WS] {slug}: subscriber overflowed — closing")
++                break
++
++            try:
++                payload = sub.q.get(timeout=1.0)
++                ws.send(payload)
+                 last_push = time.time()
++                continue
++            except queue.Empty:
++                pass
+ 
+             if time.time() - last_push > KEEPALIVE:
+                 ws.send('{"type":"keepalive"}')
+                 last_push = time.time()
+     finally:
+-        pubsub.unsubscribe(channel)
+-        pubsub.close()
+-        ws_client.close()
++        delta_hub.unsubscribe(slug, sub)
+ 
+ 
+ # ── Routes API ─────────────────────────────────────────────────────────────
+@@ -1100,6 +1233,13 @@ def cast_vote():
+     mode_int = vote_store.mode_to_int(mode)  # Redis key only; DB scopes by map_slug
+     slug = rmap.slug
+ 
++    # Backpressure: shed instead of queueing once the instance is saturated —
++    # a 503 the client retries beats a 45s hang that dies at the timeout.
++    t_handler0 = time.monotonic()
++    if not _vote_inflight.acquire(timeout=VOTE_QUEUE_WAIT_SECONDS):
++        return _shed_response("inflight", retry_after=1)
++    stripe_acquired = False
++    lock_wait_s = 0.0
+     try:
+         vt_id = vote_store.get_vote_type_id(vt_label, vt_point_type) if vt_label else 0
+ 
+@@ -1111,18 +1251,24 @@ def cast_vote():
+         ) if direction != 0 else {}
+ 
+         # voter_lock serializes this voter's read-modify-write ACROSS instances
+-        # (Redis); _proposal_vote_lock serializes it within THIS process. Together
+-        # they hold whether the app runs one worker or a horizontally-scaled fleet.
++        # (Redis); the stripe serializes it within THIS process. Both are scoped
++        # per (slug, device) — different voters proceed concurrently — and
++        # together they hold whether the app runs one worker or a fleet. A
++        # stripe held past the shed timeout (a wedged same-voter cast) sheds
++        # rather than parking this request thread behind it.
+         ebid = rmap.graph.edge_block_id  # None unless this map has a block layer
+-        with vote_store.voter_lock(redis_client, slug, device_id), _proposal_vote_lock:
++        stripe = _voter_lock_stripe(slug, device_id)
++        if not stripe.acquire(timeout=VOTE_LOCK_SHED_SECONDS):
++            return _shed_response("stripe", retry_after=2)
++        lock_wait_s = time.monotonic() - t_handler0
++        stripe_acquired = True
++        with vote_store.voter_lock(redis_client, slug, device_id):
+             # Block-scoped clear-then-cast (docs/three-layer-model.md §4): the
+             # plan clears this device's same-type rows across every touched
+             # block, then casts on exactly the selection edges.
+             prior = get_voter_type_rows(slug, vt_id, device_id)
+             plan = vote_semantics.plan_block_vote(edge_ids, direction, prior, ebid)
+ 
+-            reversed_any = False
+-            changed: list[int] = []
+             at_cap: list[int] = []  # fresh device, IP at cap → LRU takeover below
+             casts: list[tuple[int, int]] = []
+             for eid, prev in plan.cast:
+@@ -1134,26 +1280,28 @@ def cast_vote():
+                     continue
+                 casts.append((eid, prev))
+ 
+-            def _apply(eid: int, prev: int, new: int) -> None:
+-                vote_store.apply_directional(
+-                    redis_client, slug, eid, mode_int, vt_id, new, prev
++            # Apply the whole plan batched — one pipeline for the edge counters,
++            # two for the block mirror — instead of ~2 round trips per edge
++            # (the measured bulk of vote latency at scale; changelog
++            # 2026-07-08-agent-load-test.html finding #2). Order is plan order:
++            # clears then casts, matching the per-edge loop this replaces.
++            ops = ([(eid, prev, 0) for eid, prev in plan.clear]
++                   + [(eid, prev, direction) for eid, prev in casts])
++            vote_store.apply_directional_batch(
++                redis_client, slug, ops, mode_int, vt_id
++            )
++            # Mirror onto each edge's block (deduped per device); no-op without
++            # a block layer or for edges outside any block.
++            if ebid is not None:
++                n_edges = len(ebid)
++                block_ops = [(int(ebid[eid]), prev, new)
++                             for eid, prev, new in ops if 0 <= eid < n_edges]
++                block_votes.apply_block_deltas_batch(
++                    redis_client, slug, mode_int, block_ops, vt_id, device_id
+                 )
+-                # Mirror onto the edge's block (deduped per device); no-op without
+-                # a block layer or for edges outside any block.
+-                if ebid is not None and 0 <= eid < len(ebid):
+-                    b = int(ebid[eid])
+-                    if b >= 0:
+-                        block_votes.apply_block_delta(
+-                            redis_client, slug, mode_int, b, vt_id,
+-                            new, prev, device_id)
+-                changed.append(eid)
+-
+-            for eid, prev in plan.clear:
+-                _apply(eid, prev, 0)
+-            for eid, prev in casts:
+-                _apply(eid, prev, direction)
+-                if prev in (vote_store.UP, vote_store.DOWN):
+-                    reversed_any = True
++            changed = [eid for eid, _, _ in ops]
++            reversed_any = any(prev in (vote_store.UP, vote_store.DOWN)
++                               for _, prev in casts)
+             cleared = [eid for eid, _ in plan.clear]
+             cast_ids = [eid for eid, _ in casts]
+ 
+@@ -1202,8 +1350,13 @@ def cast_vote():
+                     direction=direction or vote_store.UP, reversed_vote=reversed_any,
+                     vt_counts=vt_counts, block_counts=block_counts,
+                 )
+-                _invalidate_vote_cache(slug)
++                # No cache invalidation here: publish_delta bumped the revision,
++                # which makes the cached graph-votes snapshot rev-stale on its
++                # own; the endpoint's debounce decides whether to briefly keep
++                # serving it. Hard invalidation is reserved for structural
++                # changes (resnap, block re-bake, admin rebuild).
+ 
++        _vote_metrics_record(lock_wait_s, time.monotonic() - t_handler0)
+         return jsonify({
+             "success": True, "edge_ids": edge_ids, "changed": changed,
+             "cleared": cleared,  # edges unvoted (block-scoped clear) but not cast
+@@ -1214,6 +1367,10 @@ def cast_vote():
+     except Exception as e:
+         logger.error(f"[VOTE] Error: {e}")
+         return jsonify({"error": f"Vote failed: {str(e)}"}), 500
++    finally:
++        if stripe_acquired:
++            stripe.release()
++        _vote_inflight.release()
+ 
+ 
+ def _resnap_city_maps(city_id: str) -> None:
+@@ -1697,40 +1854,83 @@ def graph_topology():
+     return resp
+ 
+ 
++def _graph_votes_etag(slug: str, mode: str | None, entry: dict, gzipped: bool) -> str:
++    """ETag derived from the SERVED entry (its rev + blocks stamp), never from
++    the live revision — the etag must always describe the body it rides with
++    (a live-rev etag over a debounced body is the 304-pins-stale-body bug of
++    the blocks re-bake incident). The encoding rides in the tag because the
++    gzip and identity representations are different bytes."""
++    bstamp = entry.get("bstamp")
++    return (f'"v-{slug}-{mode or "all"}-{entry["rev"]}'
++            f'{f"-b{bstamp}" if bstamp else ""}{"-gz" if gzipped else ""}"')
++
++
+ @app.route("/api/graph-votes", methods=["GET"])
+ def graph_votes():
+     """Return per-edge and per-node vote arrays for a map.
+ 
+-    Indices match /api/graph-topology. Cached by the map's revision.
++    Indices match /api/graph-topology. Served from a per-(map, mode) snapshot
++    cache: a snapshot serves while its revision is current OR for a short
++    debounce window after it staled (clients reconcile forward from WS deltas,
++    which carry authoritative counts) — under sustained voting the revision
++    bumps per cast, and rebuilding the full arrays per cast was finding #3 of
++    changelog/2026-07-08-agent-load-test.html. Bodies are pre-gzipped once per
++    rebuild and shared by every client.
+     """
+     rmap = resolve_map(request.args.get("map"))
+     if _locked(rmap):
+         return _locked_response()
+ 
+-    # ETag first, load second: the revision lives in Redis, so a client whose
+-    # cached copy is current gets its 304 without this instance ever loading
+-    # the graph — ensure_loaded() on a cold instance took 10s+ and rode P95.
+     mode = request.args.get("mode") or None
++    cache_key = f"{rmap.slug}:{mode}" if mode else rmap.slug
+     rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+-    # blocks_stamp (a stat, no graph load) rides in the validator: a blocks
+-    # re-bake renumbers block ids WITHOUT bumping rev, and a 304 would pin
+-    # clients on a body whose block_votes index the previous block set.
++    # blocks_stamp (a stat, no graph load) gates servability: a blocks re-bake
++    # renumbers block ids WITHOUT bumping rev, so an entry built against the
++    # previous block set must not serve even inside the debounce window.
+     bstamp = rmap.graph.blocks_stamp()
+-    etag = f'"v-{rmap.slug}-{mode or "all"}-{rev}{f"-b{bstamp}" if bstamp else ""}"'
++
++    entry = _vote_cache_peek(cache_key)
++    if entry is not None and entry.get("bstamp") != bstamp:
++        entry = None
++    servable = entry is not None and (
++        entry["rev"] == rev
++        or time.monotonic() - entry["built"] < _VOTE_CACHE_DEBOUNCE
++    )
++
++    if not servable:
++        # Stale-while-revalidate: one caller rebuilds; the rest keep serving
++        # the previous snapshot instead of queueing on the build lock (they
++        # only block when there is nothing to serve at all).
++        lock = _build_lock_for(cache_key)
++        if lock.acquire(blocking=entry is None):
++            try:
++                rmap.graph.ensure_loaded()
++                fresh_rev = int(
++                    redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
++                entry = (_vote_cache_get(cache_key, fresh_rev)
++                         or _build_graph_votes_body_locked(
++                             rmap, mode, fresh_rev, cache_key))
++            except Exception as e:
++                return jsonify({"error": str(e)}), 500
++            finally:
++                lock.release()
++        # else: a rebuild is in flight — serve the stale entry we hold.
++
++    wants_gzip = "gzip" in (request.headers.get("Accept-Encoding") or "").lower()
++    etag = _graph_votes_etag(rmap.slug, mode, entry, wants_gzip)
+     if request.headers.get("If-None-Match") == etag:
+         resp = app.response_class(status=304)
+         resp.headers["ETag"] = etag
+         resp.headers["Cache-Control"] = "public, max-age=5"
++        resp.headers["Vary"] = "Accept-Encoding"
+         return resp
+ 
+-    rmap.graph.ensure_loaded()
+-
+-    try:
+-        body = _build_graph_votes_body(rmap, mode)
+-    except Exception as e:
+-        return jsonify({"error": str(e)}), 500
+-
+-    resp = app.response_class(response=body, status=200, mimetype="application/json")
++    resp = app.response_class(
++        response=entry["gz"] if wants_gzip else entry["body"],
++        status=200, mimetype="application/json")
++    if wants_gzip:
++        resp.headers["Content-Encoding"] = "gzip"
++    resp.headers["Vary"] = "Accept-Encoding"
+     resp.headers["Cache-Control"] = "public, max-age=5"
+     resp.headers["ETag"] = etag
+     return resp
+@@ -1855,10 +2055,25 @@ def admin_stats():
+ 
+     result["database"] = database.get_admin_counts() if DATABASE_URL else {"connected": False}
+ 
++    # ru_maxrss is bytes on macOS, kilobytes on Linux.
++    ru = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
++    rss_mb = round(ru / (1024 * 1024 if sys.platform == "darwin" else 1024), 1)
++
+     result["app"] = {
+         "loaded_cities": graph_registry.loaded_ids(),
+         "cities": list(CITIES),
+         "vote_types_cached": len(vote_store.all_vote_types()),
++        "peak_rss_mb": rss_mb,
++    }
++    # The saturation signals /health can't show (it stayed 1-2ms through the
++    # July melt): vote throughput, lock waits, handler latency, shed counts,
++    # and live WS fan-out size.
++    result["votes"] = _vote_metrics_snapshot()
++    result["ws"] = {"subscribers": delta_hub.subscriber_count()}
++    result["graph_votes_cache"] = {
++        "entries": len(_vote_cache),
++        "mb": round(_vote_cache_bytes / (1024 * 1024), 1),
++        "budget_mb": _VOTE_CACHE_MAX_MB,
+     }
+     return jsonify(result)
+ 
+diff --git a/server/block_votes.py b/server/block_votes.py
+index 910b39d..50df906 100644
+--- a/server/block_votes.py
++++ b/server/block_votes.py
+@@ -111,6 +111,73 @@ def apply_block_deltas(
+                           new_dir, prev_dirs.get(eid, 0), device_id)
+ 
+ 
++def apply_block_deltas_batch(
++    redis_client, slug: str, mode: int,
++    block_ops: list[tuple[int, int, int]], vt_id: int, device_id: str,
++) -> None:
++    """Apply a whole vote plan's block deltas in TWO round trips.
++
++    `block_ops` is [(block_id, prev_dir, new_dir), …] in plan order — one entry
++    per changed edge (multiplicity per edge is the point; do NOT dedupe blocks).
++    Equivalent to apply_block_delta per edge, but pipelined: the loop version
++    cost 1–3 unpipelined commands per edge (~150–400 round trips on a route
++    vote — changelog/2026-07-08-agent-load-test.html finding #2).
++
++    Phase A pipelines every bd: multiplicity HINCRBY in op order. Phase B
++    derives from the returned multiplicities:
++      · bagg moves on every presence-boundary crossing (+1 result == 1,
++        −1 result == 0), same as the loop — crossings are real regardless of
++        interleaving, and opposite crossings on one field cancel via summing.
++      · a device field is deleted only when the LAST op touching it left
++        it ≤ 0 — deferring HDEL per-op could wipe a field a later op in the
++        same plan re-created (clear on edge A + cast on edge B, same block).
++    """
++    from vote_store import dir_to_bit, UP, DOWN
++
++    # Phase A: (bd_key, +1/-1 increment) per boundary-relevant transition.
++    incrs: list[tuple[str, int]] = []
++    for block_id, prev_dir, new_dir in block_ops:
++        if new_dir == prev_dir or block_id < 0:
++            continue
++        if new_dir in (UP, DOWN):
++            incrs.append((bd_key(slug, mode, block_id, vt_id, dir_to_bit(new_dir)), 1))
++        if prev_dir in (UP, DOWN):
++            incrs.append((bd_key(slug, mode, block_id, vt_id, dir_to_bit(prev_dir)), -1))
++    if not incrs:
++        return
++    pipe = redis_client.pipeline()
++    for bdk, delta in incrs:
++        pipe.hincrby(bdk, device_id, delta)
++    results = pipe.execute()
++
++    # Phase B: aggregate boundary crossings + final-state cleanup.
++    bagg_deltas: dict[str, int] = {}   # bd_key → net bagg move
++    final_mult: dict[str, int] = {}    # bd_key → multiplicity after last op
++    for (bdk, delta), n in zip(incrs, results):
++        if delta > 0 and n == 1:
++            bagg_deltas[bdk] = bagg_deltas.get(bdk, 0) + 1
++        elif delta < 0 and n == 0:
++            bagg_deltas[bdk] = bagg_deltas.get(bdk, 0) - 1
++        final_mult[bdk] = n
++
++    bagg = bagg_key(slug, mode)
++    pipe = redis_client.pipeline()
++    queued = False
++    for bdk, n in final_mult.items():
++        if n <= 0:
++            pipe.hdel(bdk, device_id)
++            queued = True
++    for bdk, move in bagg_deltas.items():
++        if move == 0:
++            continue
++        # bd:<slug>:<mode>:<block>:<vt>:<dir>
++        _, _, _, block_s, vt_s, dir_s = bdk.split(":")
++        pipe.hincrby(bagg, str(pack_block_field(int(block_s), int(vt_s), int(dir_s))), move)
++        queued = True
++    if queued:
++        pipe.execute()
++
++
+ # ── Read path ───────────────────────────────────────────────────────────────
+ 
+ def build_block_arrays(redis_client, slug: str, mode: int, n_blocks: int) -> dict:
+diff --git a/server/database.py b/server/database.py
+index 33ecb89..5107736 100644
+--- a/server/database.py
++++ b/server/database.py
+@@ -36,9 +36,11 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
+ 
+ # Connection pool. A pool (not the old shared singleton connection) is REQUIRED
+ # once psycopg2 yields to the gevent hub mid-query: two greenlets interleaving
+-# on one connection raise "another command is already in progress". Sized so
+-# 4 app instances stay under db-f1-micro's ~25-connection ceiling.
+-_POOL_MAX = 5
++# on one connection raise "another command is already in progress". Default
++# sized so 4 app instances stay under db-f1-micro's ~25-connection ceiling;
++# DB_POOL_MAX overrides where the DB allows more (votes now run concurrently
++# per voter, so the pool is the write path's throughput governor).
++_POOL_MAX = int(os.environ.get("DB_POOL_MAX", "5"))
+ _pool: Optional[ThreadedConnectionPool] = None
+ 
+ 
+diff --git a/server/delta_hub.py b/server/delta_hub.py
+new file mode 100644
+index 0000000..e3c66b0
+--- /dev/null
++++ b/server/delta_hub.py
+@@ -0,0 +1,164 @@
++"""Per-process fan-out hub for vote deltas — one Redis pubsub listener,
++coalesced delivery to every connected WebSocket client.
++
++Before this, EVERY WebSocket client held its own Redis pubsub connection and
++its own 10Hz polling thread, and every vote's delta was sent to every client
++individually — O(votes x clients) sends plus a thread and a connection per
++client (findings #4 of changelog/2026-07-08-agent-load-test.html). The hub
++inverts that: one listener thread receives each map's deltas once, buffers
++them briefly, and flushes a merged {"type": "deltas", "rev": <max>,
++"items": [...]} message to each subscribed client queue at FLUSH_INTERVAL.
++Clients apply items in rev order; merged counts are authoritative SETs, so
++coalescing is lossless.
++
++Ordering: votes claim their rev via INCR then publish, so two concurrent
++casts can publish out of rev order. Within a flush window the sort fixes any
++inversion; a batch whose lowest rev leaves a hole above the last flushed rev
++is HELD for HOLE_GRACE to let the straggler land — after that it flushes
++anyway, and the client's gap detection (which compares the first delivered
++rev against its own last-seen rev) decides whether to refetch. Revision bumps
++that never publish a delta (manual `INCR vote_rev:<slug>`, hydration) surface
++the same way: as a gap the client heals with one refetch.
++
++A slow client whose queue overflows gets its `overflowed` flag set instead of
++silently losing deltas; the WS handler closes the socket, and the client's
++reconnect + gap-refetch resynchronizes it.
++"""
++
++import json
++import logging
++import queue
++import threading
++import time
++
++logger = logging.getLogger(__name__)
++
++FLUSH_INTERVAL = 0.1   # seconds between merged flushes per map
++HOLE_GRACE = 0.3       # how long to hold a batch that leaves a rev hole
++QUEUE_MAX = 256        # merged payloads a client may lag before resync
++
++
++class Subscriber:
++    """One connected WebSocket client: its payload queue + overflow signal."""
++
++    __slots__ = ("q", "overflowed")
++
++    def __init__(self):
++        self.q: queue.Queue = queue.Queue(maxsize=QUEUE_MAX)
++        self.overflowed = threading.Event()
++
++
++class DeltaHub:
++    def __init__(self, redis_factory,
++                 flush_interval: float = FLUSH_INTERVAL,
++                 hole_grace: float = HOLE_GRACE):
++        self._redis_factory = redis_factory
++        self._flush_interval = flush_interval
++        self._hole_grace = hole_grace
++        self._lock = threading.Lock()
++        self._subs: dict[str, set[Subscriber]] = {}
++        self._buf: dict[str, list[dict]] = {}
++        self._buf_since: dict[str, float] = {}
++        self._last_flushed: dict[str, int] = {}
++        self._thread: threading.Thread | None = None
++
++    # ── Subscription (called by WS handlers) ────────────────────────────────
++
++    def subscribe(self, slug: str) -> Subscriber:
++        sub = Subscriber()
++        with self._lock:
++            self._subs.setdefault(slug, set()).add(sub)
++            self._ensure_thread()
++        return sub
++
++    def unsubscribe(self, slug: str, sub: Subscriber) -> None:
++        with self._lock:
++            subs = self._subs.get(slug)
++            if subs is None:
++                return
++            subs.discard(sub)
++            if not subs:
++                del self._subs[slug]
++                self._buf.pop(slug, None)
++                self._buf_since.pop(slug, None)
++
++    def subscriber_count(self, slug: str | None = None) -> int:
++        with self._lock:
++            if slug is not None:
++                return len(self._subs.get(slug, ()))
++            return sum(len(s) for s in self._subs.values())
++
++    # ── Listener thread ──────────────────────────────────────────────────────
++
++    def _ensure_thread(self) -> None:
++        if self._thread is None or not self._thread.is_alive():
++            self._thread = threading.Thread(
++                target=self._run, daemon=True, name="delta-hub")
++            self._thread.start()
++
++    def _run(self) -> None:
++        while True:
++            try:
++                self._listen_loop()
++            except Exception:
++                logger.exception("[DELTAHUB] listener died; reconnecting in 1s")
++                time.sleep(1)
++
++    def _listen_loop(self) -> None:
++        r = self._redis_factory()
++        ps = r.pubsub(ignore_subscribe_messages=True)
++        ps.psubscribe("vote_deltas:*")
++        logger.info("[DELTAHUB] subscribed to vote_deltas:*")
++        next_flush = time.monotonic() + self._flush_interval
++        while True:
++            timeout = max(0.01, next_flush - time.monotonic())
++            msg = ps.get_message(timeout=timeout)
++            if msg and msg.get("type") == "pmessage":
++                self._ingest(msg["channel"], msg["data"])
++            now = time.monotonic()
++            if now >= next_flush:
++                self._flush(now)
++                next_flush = now + self._flush_interval
++
++    # ── Core (synchronous; unit-testable without the thread) ────────────────
++
++    def _ingest(self, channel: str, data) -> None:
++        slug = channel.split(":", 1)[1] if ":" in channel else None
++        if not slug:
++            return
++        try:
++            delta = json.loads(data)
++        except (ValueError, TypeError):
++            return
++        with self._lock:
++            if slug not in self._subs:
++                return  # no local client cares about this map
++            buf = self._buf.setdefault(slug, [])
++            if not buf:
++                self._buf_since[slug] = time.monotonic()
++            buf.append(delta)
++
++    def _flush(self, now: float) -> None:
++        with self._lock:
++            for slug in [s for s, b in self._buf.items() if b]:
++                buf = self._buf[slug]
++                buf.sort(key=lambda d: d.get("rev", 0))
++                last = self._last_flushed.get(slug)
++                min_rev = buf[0].get("rev", 0)
++                if (last is not None and min_rev > last + 1
++                        and now - self._buf_since.get(slug, now) < self._hole_grace):
++                    continue  # hold for an out-of-order straggler
++                self._buf[slug] = []
++                self._last_flushed[slug] = max(
++                    buf[-1].get("rev", 0), last or 0)
++                payload = json.dumps(
++                    {"type": "deltas", "rev": buf[-1].get("rev", 0),
++                     "items": buf})
++                for sub in self._subs.get(slug, ()):
++                    try:
++                        sub.q.put_nowait(payload)
++                    except queue.Full:
++                        # Too far behind to catch up delta-by-delta: signal the
++                        # WS handler to drop the socket; reconnect + the
++                        # client's gap refetch resync it.
++                        sub.overflowed.set()
+diff --git a/server/requirements.in b/server/requirements.in
+index de0d5b3..b3e2884 100644
+--- a/server/requirements.in
++++ b/server/requirements.in
+@@ -17,3 +17,4 @@ pmtiles
+ mercantile
+ mapbox-vector-tile
+ psycogreen
++orjson
+diff --git a/server/requirements.txt b/server/requirements.txt
+index 10a5959..29bc933 100644
+--- a/server/requirements.txt
++++ b/server/requirements.txt
+@@ -1,5 +1,5 @@
+ # This file was autogenerated by uv via the following command:
+-#    uv pip compile requirements.in -o requirements.txt
++#    uv pip compile requirements.in -o requirements.txt --python env/bin/python
+ blinker==1.9.0
+     # via flask
+ certifi==2025.11.12
+@@ -54,6 +54,8 @@ numpy==2.4.0
+     #   scikit-learn
+     #   scipy
+     #   shapely
++orjson==3.11.9
++    # via -r requirements.in
+ osmium==4.3.1
+     # via -r requirements.in
+ packaging==25.0
+diff --git a/server/tests/unit/test_block_votes.py b/server/tests/unit/test_block_votes.py
+index 902ae50..bf23fbb 100644
+--- a/server/tests/unit/test_block_votes.py
++++ b/server/tests/unit/test_block_votes.py
+@@ -130,3 +130,72 @@ def test_rebuild_no_warning_when_consistent(redis_client, caplog):
+     with caplog.at_level(logging.WARNING, logger="block_votes"):
+         bv.rebuild_from_db(redis_client, SLUG, MODE, EDGE_BLOCK, rows)
+     assert not [r for r in caplog.records if "invariant violation" in r.message]
++
++
++# ── Batched write path (apply_block_deltas_batch ≡ per-edge loop) ───────────
++
++def _loop_apply(r, block_ops, device):
++    for b, prev, new in block_ops:
++        bv.apply_block_delta(r, SLUG, MODE, b, VT, new, prev, device)
++
++
++def _state(r):
++    """(bagg nonzero fields, all bd hashes) — the full observable block state."""
++    bagg = {k: v for k, v in r.hgetall(bv.bagg_key(SLUG, MODE)).items() if int(v) != 0}
++    bd = {}
++    for key in r.scan_iter(match=f"bd:{SLUG}:{MODE}:*"):
++        h = r.hgetall(key)
++        if h:
++            bd[key] = h
++    return bagg, bd
++
++
++def test_batch_matches_loop_route_vote(redis_client):
++    """A route vote spanning both edges of block 10 + block 20, then a reversal."""
++    import fakeredis
++    loop_r = fakeredis.FakeStrictRedis(decode_responses=True)
++
++    fresh = [(10, 0, UP), (10, 0, UP), (20, 0, UP)]
++    reverse = [(10, UP, DOWN), (10, UP, DOWN), (20, UP, DOWN)]
++    for ops in (fresh, reverse):
++        bv.apply_block_deltas_batch(redis_client, SLUG, MODE, ops, VT, "d1")
++        _loop_apply(loop_r, ops, "d1")
++        assert _state(redis_client) == _state(loop_r)
++    assert total(redis_client, 10) == 1
++    assert total(redis_client, 20) == 1
++
++
++def test_batch_clear_then_cast_same_block_keeps_field(redis_client):
++    """A plan that clears edge A and casts edge B in the SAME block must leave
++    the device present (multiplicity 1) — the deferred HDEL must not wipe the
++    field the cast re-created."""
++    import fakeredis
++    loop_r = fakeredis.FakeStrictRedis(decode_responses=True)
++
++    # prior: d1 upvoted edge 0 (block 10). New selection: edge 1 only (block 10)
++    # → plan clears edge 0 (UP→0) and casts edge 1 (0→UP).
++    seed = [(10, 0, UP)]
++    plan = [(10, UP, 0), (10, 0, UP)]
++    for r, apply in ((redis_client, lambda o: bv.apply_block_deltas_batch(
++            r, SLUG, MODE, o, VT, "d1")), (loop_r, lambda o: _loop_apply(loop_r, o, "d1"))):
++        apply(seed)
++        apply(plan)
++
++    assert _state(redis_client) == _state(loop_r)
++    assert redis_client.hget(bv.bd_key(SLUG, MODE, 10, VT, 0), "d1") == "1"
++    assert total(redis_client, 10) == 1  # still exactly one deduped vote
++
++
++def test_batch_full_clear_removes_field_and_aggregate(redis_client):
++    seed = [(10, 0, UP), (10, 0, UP)]
++    bv.apply_block_deltas_batch(redis_client, SLUG, MODE, seed, VT, "d1")
++    bv.apply_block_deltas_batch(
++        redis_client, SLUG, MODE, [(10, UP, 0), (10, UP, 0)], VT, "d1")
++    assert redis_client.hget(bv.bd_key(SLUG, MODE, 10, VT, 0), "d1") is None
++    assert total(redis_client, 10) == 0
++
++
++def test_batch_skips_unmapped_and_noop(redis_client):
++    bv.apply_block_deltas_batch(
++        redis_client, SLUG, MODE, [(-1, 0, UP), (10, UP, UP)], VT, "d1")
++    assert _state(redis_client) == ({}, {})
+diff --git a/server/tests/unit/test_delta_hub.py b/server/tests/unit/test_delta_hub.py
+new file mode 100644
+index 0000000..f024983
+--- /dev/null
++++ b/server/tests/unit/test_delta_hub.py
+@@ -0,0 +1,131 @@
++"""Unit tests for delta_hub — merged fan-out of vote deltas.
++
++These drive _ingest/_flush synchronously (no listener thread, no timing) and
++pin: rev-ordered merging, inversion absorption within a window, the hole-grace
++hold for out-of-order stragglers, per-map isolation, and the slow-client
++overflow signal.
++"""
++import json
++from types import SimpleNamespace
++
++import delta_hub as dh
++
++# Stands in for the listener thread so subscribe() never starts a real one.
++_FAKE_THREAD = SimpleNamespace(is_alive=lambda: True)
++
++
++def make_hub(**kw):
++    hub = dh.DeltaHub(redis_factory=lambda: None, **kw)
++    hub._thread = _FAKE_THREAD
++    return hub
++
++
++def ingest(hub, slug, rev, edges=(1,)):
++    hub._ingest(f"vote_deltas:{slug}",
++                json.dumps({"type": "delta", "rev": rev, "edges": list(edges)}))
++
++
++def drain(sub):
++    out = []
++    while not sub.q.empty():
++        out.append(json.loads(sub.q.get_nowait()))
++    return out
++
++
++def test_merges_a_window_in_rev_order():
++    hub = make_hub()
++
++    sub = hub.subscribe("m1")
++    ingest(hub, "m1", 2)
++    ingest(hub, "m1", 1)  # inverted arrival inside one window
++    ingest(hub, "m1", 3)
++    hub._flush(now=100.0)
++    msgs = drain(sub)
++    assert len(msgs) == 1
++    assert msgs[0]["type"] == "deltas"
++    assert msgs[0]["rev"] == 3
++    assert [i["rev"] for i in msgs[0]["items"]] == [1, 2, 3]
++
++
++def test_ignores_maps_without_subscribers():
++    hub = make_hub()
++
++    sub = hub.subscribe("m1")
++    ingest(hub, "other-map", 1)
++    hub._flush(now=100.0)
++    assert drain(sub) == []
++    assert hub._buf.get("other-map") is None
++
++
++def test_hole_grace_holds_then_releases():
++    hub = make_hub(hole_grace=0.3)
++
++    sub = hub.subscribe("m1")
++    ingest(hub, "m1", 1)
++    hub._flush(now=100.0)
++    assert drain(sub)[0]["rev"] == 1
++
++    # rev 3 arrives but 2 hasn't — the batch holds inside the grace window...
++    ingest(hub, "m1", 3)
++    hub._buf_since["m1"] = 100.0
++    hub._flush(now=100.1)
++    assert drain(sub) == []
++
++    # ...the straggler lands, and the next flush merges both in order.
++    ingest(hub, "m1", 2)
++    hub._flush(now=100.2)
++    msgs = drain(sub)
++    assert [i["rev"] for i in msgs[0]["items"]] == [2, 3]
++
++
++def test_hole_grace_expires_and_flushes_anyway():
++    hub = make_hub(hole_grace=0.3)
++
++    sub = hub.subscribe("m1")
++    ingest(hub, "m1", 1)
++    hub._flush(now=100.0)
++    drain(sub)
++
++    ingest(hub, "m1", 5)  # rev bumped without deltas 2-4 (e.g. manual INCR)
++    hub._buf_since["m1"] = 100.0
++    hub._flush(now=100.5)  # grace expired
++    msgs = drain(sub)
++    assert len(msgs) == 1
++    assert [i["rev"] for i in msgs[0]["items"]] == [5]
++    # the client sees first-item rev 5 vs its last-seen 1 -> gap -> refetch
++
++
++def test_unsubscribe_stops_delivery_and_clears_state():
++    hub = make_hub()
++
++    sub = hub.subscribe("m1")
++    hub.unsubscribe("m1", sub)
++    ingest(hub, "m1", 1)
++    hub._flush(now=100.0)
++    assert drain(sub) == []
++    assert hub.subscriber_count() == 0
++
++
++def test_overflow_sets_flag_instead_of_blocking():
++    hub = make_hub()
++
++    sub = hub.subscribe("m1")
++    for i in range(dh.QUEUE_MAX):
++        ingest(hub, "m1", i + 1)
++        hub._flush(now=100.0 + i)
++    assert not sub.overflowed.is_set()
++    ingest(hub, "m1", dh.QUEUE_MAX + 1)
++    hub._flush(now=999.0)
++    assert sub.overflowed.is_set()
++
++
++def test_two_maps_are_isolated():
++    hub = make_hub()
++
++    s1 = hub.subscribe("m1")
++    s2 = hub.subscribe("m2")
++    ingest(hub, "m1", 1)
++    ingest(hub, "m2", 7)
++    hub._flush(now=100.0)
++    assert [i["rev"] for i in drain(s1)[0]["items"]] == [1]
++    assert [i["rev"] for i in drain(s2)[0]["items"]] == [7]
+diff --git a/server/tests/unit/test_vote_counts.py b/server/tests/unit/test_vote_counts.py
+index 6393686..a4f4bc4 100644
+--- a/server/tests/unit/test_vote_counts.py
++++ b/server/tests/unit/test_vote_counts.py
+@@ -80,3 +80,36 @@ def test_publish_delta_broadcasts_authoritative_counts(redis_client):
+     assert payload["type"] == "delta"
+     assert payload["vtCounts"] == {"0": [1, 0]}
+     assert payload["rev"] == 1
++
++
++# ── Batched write path (apply_directional_batch ≡ per-edge loop) ────────────
++
++def test_batch_matches_loop_for_mixed_plan(redis_client):
++    """One pipelined batch produces byte-identical Redis state to the loop."""
++    import fakeredis
++    loop_r = fakeredis.FakeStrictRedis(decode_responses=True)
++
++    # clears (→0), fresh casts (0→dir), reversals (∓→±) in one plan
++    ops = [(0, v.UP, 0), (1, v.DOWN, 0),          # clears
++           (2, 0, v.UP), (3, v.DOWN, v.UP),       # fresh + reversal
++           (4, v.UP, v.UP)]                       # no-op (guarded)
++    # seed prior state on both sides so decrements land on real counts
++    for r in (redis_client, loop_r):
++        v.apply_directional(r, SLUG, 0, MODE, VT, v.UP, 0)
++        v.apply_directional(r, SLUG, 1, MODE, VT, v.DOWN, 0)
++        v.apply_directional(r, SLUG, 3, MODE, VT, v.DOWN, 0)
++        v.apply_directional(r, SLUG, 4, MODE, VT, v.UP, 0)
++
++    v.apply_directional_batch(redis_client, SLUG, ops, MODE, VT)
++    for eid, prev, new in ops:
++        v.apply_directional(loop_r, SLUG, eid, MODE, VT, new, prev)
++
++    assert redis_client.hgetall(v.hash_key(SLUG)) == loop_r.hgetall(v.hash_key(SLUG))
++    assert counts(redis_client, [0, 1, 2, 3, 4]) == {
++        0: [0, 0], 1: [0, 0], 2: [1, 0], 3: [1, 0], 4: [1, 0]}
++
++
++def test_batch_empty_plan_is_noop(redis_client):
++    v.apply_directional_batch(redis_client, SLUG, [], MODE, VT)
++    v.apply_directional_batch(redis_client, SLUG, [(0, v.UP, v.UP)], MODE, VT)
++    assert redis_client.hgetall(v.hash_key(SLUG)) == {}
+diff --git a/server/vote_store.py b/server/vote_store.py
+index e829389..63163ed 100644
+--- a/server/vote_store.py
++++ b/server/vote_store.py
+@@ -228,6 +228,33 @@ def apply_directional(
+     pipe.execute()
+ 
+ 
++def apply_directional_batch(
++    redis_client, slug: str, ops: list[tuple[int, int, int]], mode: int, vt_id: int,
++) -> None:
++    """Apply a whole vote plan's edge-counter transitions in ONE round trip.
++
++    `ops` is [(edge_id, prev_dir, new_dir), …] in plan order (clears then
++    casts). Semantically identical to calling apply_directional per edge — the
++    same HINCRBYs in the same order — but a 145-edge route vote costs one
++    pipeline execute instead of ~145 (the measured bulk of the vote critical
++    section; changelog/2026-07-08-agent-load-test.html finding #2).
++    """
++    h = hash_key(slug)
++    pipe = redis_client.pipeline()
++    queued = False
++    for edge_id, prev_dir, new_dir in ops:
++        if new_dir == prev_dir:
++            continue
++        if new_dir in (UP, DOWN):
++            pipe.hincrby(h, str(redis_field(edge_id, mode, vt_id, new_dir)), 1)
++            queued = True
++        if prev_dir in (UP, DOWN):
++            pipe.hincrby(h, str(redis_field(edge_id, mode, vt_id, prev_dir)), -1)
++            queued = True
++    if queued:
++        pipe.execute()
++
++
+ def publish_delta(
+     redis_client, slug: str, edge_ids: list[int], mode: int, vt_id: int,
+     direction: int = UP, reversed_vote: bool = False,

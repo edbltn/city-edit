@@ -1,0 +1,2117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vote-path mitigations — 160 agents from lockup to 45 votes/s — 2026-07-09</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  table.cmp { border-collapse: collapse; width: 100%; margin: 8px 0 18px; font-size: 13.5px; }
+  table.cmp th { text-align: left; border-bottom: 2px solid var(--ink); padding: 6px 10px; font-weight: 600; }
+  table.cmp td { border-bottom: 1px solid var(--hairline); padding: 6px 10px;
+    font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  table.cmp td:first-child { font-family: var(--font-ui); color: var(--muted); }
+  table.cmp td.good { color: #06402b; font-weight: 600; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Vote-path mitigations — 160 agents from lockup to 45 votes/s</h1>
+    <div class="dateline">2026-07-09 · branch <code>fix/unify-voting</code> · fix set for
+      <a href="./2026-07-08-agent-load-test.html">the 2026-07-08 agent load test</a></div>
+  </header>
+
+  <nav class="toc"><a href="#m1">M1</a>
+<a href="#m2">M2</a>
+<a href="#m3">M3</a>
+<a href="#m4">M4</a>
+<a href="#m5">M5</a>
+<a href="#m6">M6</a>
+    <a href="#results">Before / after</a><a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">The July-8 load test found the vote pipeline capped at ~9 votes/s — every cast
+  serialized through one process-wide lock holding ~300–550 sequential Redis round trips and a
+  synchronous Postgres write, every cast invalidated the 37&nbsp;MB graph-votes body, and every cast
+  was fanned out to every WebSocket client individually. At 160 agents the app functionally locked
+  up while /health stayed green. This lands the whole mitigation plan (M1–M6): batched Redis writes,
+  per-voter lock striping, debounced pre-gzipped snapshots with client-side delta replay, one
+  coalescing pubsub hub for all WS clients, a bounded vote queue that sheds with 503 + Retry-After,
+  the saturation metrics /health can't show, and a byte-budgeted snapshot cache sized against
+  prod's 8&nbsp;GiB instances. Same harness, same map: 160 agents now complete 97% of casts at
+  p50 1.25&nbsp;s / p95 3.9&nbsp;s and 45.7 votes/s — an 8× throughput lift with less than half the
+  peak memory.</p>
+
+  <section class="card" id="results">
+    <div class="tag">Measured — server/tests/loadtest_votes.py, map agent-test-1</div>
+    <h2>Before / after by tier</h2>
+    <h3>20 agents</h3><table class='cmp'><thead><tr><th></th><th>2026-07-08 baseline</th><th>after mitigations</th></tr></thead><tbody><tr><td>vote p50</td><td>1.76 s</td><td class='good'>0.06–0.50 s</td></tr><tr><td>vote p95</td><td>2.10 s</td><td class='good'>0.49 s</td></tr><tr><td>throughput</td><td>7.9 votes/s</td><td class='good'>~20 votes/s (offered-limited)</td></tr><tr><td>failures</td><td>0</td><td class='good'>0</td></tr></tbody></table>
+<h3>40 agents</h3><table class='cmp'><thead><tr><th></th><th>2026-07-08 baseline</th><th>after mitigations</th></tr></thead><tbody><tr><td>vote p50</td><td>3.79 s</td><td class='good'>0.16 s</td></tr><tr><td>vote p95</td><td>4.26 s</td><td class='good'>1.7 s</td></tr><tr><td>throughput</td><td>8.6 votes/s</td><td class='good'>29.6 votes/s</td></tr><tr><td>failures</td><td>0</td><td class='good'>0</td></tr></tbody></table>
+<h3>80 agents</h3><table class='cmp'><thead><tr><th></th><th>2026-07-08 baseline</th><th>after mitigations</th></tr></thead><tbody><tr><td>vote p50</td><td>8.37 s</td><td class='good'>0.22 s</td></tr><tr><td>vote p95</td><td>9.54 s</td><td class='good'>4.3 s</td></tr><tr><td>throughput</td><td>8.2 votes/s</td><td class='good'>34.1 votes/s</td></tr><tr><td>failures</td><td>0</td><td class='good'>6 clean 503s (1.3%)</td></tr></tbody></table>
+<h3>160 agents</h3><table class='cmp'><thead><tr><th></th><th>2026-07-08 baseline</th><th>after mitigations</th></tr></thead><tbody><tr><td>vote p50</td><td>16.57 s</td><td class='good'>1.25 s</td></tr><tr><td>vote p95</td><td>45.63 s (= timeout)</td><td class='good'>3.9 s</td></tr><tr><td>throughput</td><td>5.7 votes/s</td><td class='good'>45.7 votes/s</td></tr><tr><td>wall clock</td><td>146.9 s</td><td class='good'>20.4 s</td></tr><tr><td>failures</td><td>129 timeouts (13%) + 11 truncated bodies</td><td class='good'>28 clean 503s (2.9%), 0 truncations</td></tr><tr><td>RSS peak</td><td>7.1 GB</td><td class='good'>4.0 GB</td></tr><tr><td>WS sends</td><td>132,808</td><td class='good'>19,385</td></tr></tbody></table>
+    <p style="color:var(--muted);font-size:13px;">Baseline numbers are the 2026-07-08 report's
+    (Werkzeug dev server, same machine, same harness, same map). 20-agent throughput is
+    offered-load-limited (agents pace 0.1–0.5&nbsp;s between casts) — the ceiling above 8–9/s only
+    becomes visible from 40 agents up. 503s are the new bounded-queue shed: instant clean failures
+    with Retry-After that a real client retries, versus the baseline's 45&nbsp;s hangs.</p>
+  </section>
+
+  
+    <section class="card" id="m1">
+      <div class="tag">Flask API · Redis write path</div>
+      <h2>M1 · One pipeline per vote, not one round trip per edge</h2>
+      <h3>Symptom</h3>
+      <p>~100&nbsp;ms of serialized work per vote capped the instance near 9 votes/s. Profiled: a 145-edge route vote made ~300–550 sequential Redis round trips inside the vote lock.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>apply_directional</code> built and <em>executed</em> a 2-command pipeline once per edge (~145 executes per vote).</li>
+<li><code>apply_block_delta</code> issued 1–3 <em>unpipelined</em> HINCRBY/HDELs per edge (~150–400 more) because each edge's bagg move depends on that edge's returned multiplicity.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>apply_directional_batch</code>: every edge-counter HINCRBY of the whole plan (clears then casts, plan order) in ONE pipeline execute.</li>
+<li><code>apply_block_deltas_batch</code>: two phases — pipeline all bd: multiplicity HINCRBYs, then derive the bagg moves from the returned values. bagg moves on every presence-boundary crossing (opposite crossings cancel by summing); a device field is deleted only when the LAST op touching it left it ≤ 0, because a per-op HDEL could wipe a field a later cast in the same plan re-created (clear edge A + cast edge B, one block).</li>
+<li>Equivalence pinned by fakeredis tests comparing batch vs per-edge loop state byte-for-byte, including the clear-then-cast-same-block case.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/vote_store.py</li>
+<li>server/block_votes.py</li>
+<li>server/app.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="m2">
+      <div class="tag">Flask API · locking</div>
+      <h2>M2 · The global vote lock becomes 256 per-voter stripes</h2>
+      <h3>Symptom</h3>
+      <p>Vote latency grew exactly linearly with concurrent voters (queue depth × ~100 ms): all voters on all maps serialized through one process-wide <code>threading.Lock</code>.</p>
+      <h3>Root cause</h3>
+      <ul><li>The lock only ever needed the scope the cross-instance Redis <code>voter_lock</code> already has: one voter's clear-then-cast read-modify-write on one map. Cross-voter exclusion protected nothing — counter updates are atomic HINCRBYs (batched by M1), DB rows are per-device, and the read-counts-then-publish interleaving it ordered was already unordered across prod instances.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>256 striped locks keyed by <code>hash((slug, device_id))</code> — same-voter casts still serialize (a rapid ± toggle can't read a stale prior direction); different voters proceed concurrently. Verified live: 20 concurrent alternating-direction casts from one voter converge with exact per-edge deltas (+1 cast / −1 remove, state restored).</li>
+<li><code>DB_POOL_MAX</code> env override (default 5 unchanged) — the pool becomes the write path's throughput governor once voters run concurrently.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/app.py</li>
+<li>server/database.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="m3">
+      <div class="tag">Flask API + client · graph-votes</div>
+      <h2>M3 · Debounced, pre-gzipped snapshots (37 MB → 0.75 MB on the wire)</h2>
+      <h3>Symptom</h3>
+      <p>Every vote bumped the revision AND hard-purged the snapshot cache, so under sustained voting every /api/graph-votes fetch rebuilt the full 37 MB dense-JSON body — and 160 concurrent joiners buffered gigabytes (RSS 3.5→7.1 GB) and truncated 11 bodies mid-stream.</p>
+      <h3>Root cause</h3>
+      <ul><li>Cache keyed by exact revision + per-vote invalidation = a rebuild per cast under load.</li>
+<li>Un-compressed 37 MB responses, buffered per request.</li>
+<li>Each rebuild held the GIL ~2 s (stdlib json.dumps + gzip level 6 per REQUEST would have been worse still) — the p95 spikes on unrelated endpoints.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Snapshot entries {rev, bstamp, body, gz, built}: orjson serialization (~10× faster) + ONE gzip (level 3; zlib releases the GIL) per rebuild, shared by every client.</li>
+<li>Debounce: a snapshot serves while rev-current OR for GRAPH_VOTES_DEBOUNCE (2 s) after staling — one rebuild per window, not per cast. Stale-while-revalidate: one caller rebuilds, the rest keep serving the old snapshot.</li>
+<li>The ETag derives from the SERVED entry's rev + blocks-stamp (+ encoding) so the tag always describes the body it rides with; an entry with a stale blocks stamp never serves. Per-vote invalidation is gone — hard invalidation remains for structural changes (resnap, block re-bake).</li>
+<li>Client: a bounded ring of recently received deltas replays over every installed snapshot (idempotent SET counts), so a debounced (slightly old) body can't regress counts or trigger a gap-refetch loop; a body+ring hole schedules ONE delayed refetch.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/app.py</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li>
+<li>server/requirements.in</li>
+<li>server/requirements.txt</li></ul>
+    </section>
+    
+
+    <section class="card" id="m4">
+      <div class="tag">Flask API + client · WebSocket</div>
+      <h2>M4 · One pubsub listener, coalesced deltas — O(votes×clients) sends gone</h2>
+      <h3>Symptom</h3>
+      <p>Every WS client held its own Redis pubsub connection and 10 Hz poll thread; every vote was sent to every client individually — 132,808 sends at the 160-agent tier, and the GIL contention pushed unrelated routes p95 from 30 ms to 2.1 s.</p>
+      <h3>Root cause</h3>
+      <ul><li>Per-client fan-out did O(votes × clients) work; per-client pubsub connections and poll loops multiplied threads and Redis connections by the audience size.</li>
+<li>New with M2: concurrent casts claim revs by INCR then publish, so deltas can publish out of rev order — each inversion tripped the client's gap detector into a full 33 MB refetch.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>delta_hub.py</code>: ONE listener thread psubscribes vote_deltas:*, buffers per map, and flushes merged {type:"deltas", rev, items:[…]} to registered client queues every 100 ms. Coalescing is lossless (counts are authoritative SETs).</li>
+<li>Inversions sort within a window; a batch whose lowest rev leaves a hole HOLDS 300 ms for the straggler, then flushes and lets the client's gap detection decide (a manual <code>INCR vote_rev:&lt;slug&gt;</code> still surfaces as one refetch).</li>
+<li>A slow client that overflows its bounded queue gets its socket closed; reconnect + gap refetch resyncs it. WS handlers now block on their queue — no per-client Redis connection, no 10 Hz poll.</li>
+<li>Client socket layer unwraps merged batches into individual rev-ordered deltas — GraphLayer's gap/apply logic untouched.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/delta_hub.py</li>
+<li>server/app.py</li>
+<li>client-react/src/context/WebSocketContext.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="m5">
+      <div class="tag">Flask API · backpressure</div>
+      <h2>M5 · Bounded queue + load shedding + the metrics /health can't show</h2>
+      <h3>Symptom</h3>
+      <p>At the July-8 lockup, /health stayed at 1–2 ms while votes queued past 45 s — monitoring keyed on health was blind, and requests abandoned by their clients kept burning the server.</p>
+      <h3>Root cause</h3>
+      <ul><li>Nothing bounded the vote queue; nothing measured it.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>At most VOTE_MAX_INFLIGHT (64) votes run concurrently; a vote may wait VOTE_QUEUE_WAIT_SECONDS (1.5 s) for a slot, then sheds with 503 + Retry-After: 1 (clients roll back optimistic casts). A same-voter stripe not acquired in VOTE_LOCK_SHED_SECONDS (2 s) sheds with Retry-After: 2.</li>
+<li>Instant-shed was too eager (58% of a 160-agent wave); the bounded wait turns the cap into a short queue — the same wave now completes 97% at p50 1.25 s.</li>
+<li>/api/admin/stats gains the saturation signals: rolling-60s votes/s, lock-wait and handler p50/p95, shed counts by reason, WS subscriber count, snapshot-cache {entries, mb, budget_mb}, and peak RSS.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/app.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="m6">
+      <div class="tag">Flask API · memory / prod fit</div>
+      <h2>M6 · Byte-budgeted snapshot cache + measured prod headroom</h2>
+      <h3>Symptom</h3>
+      <p>With snapshots persisting across votes (M3), the old 64-ENTRY cache cap could quietly hold ~2.4 GB of NYC-sized bodies on prod's 8 GiB instances.</p>
+      <h3>Root cause</h3>
+      <ul><li>An entry count says nothing about footprint: an NYC snapshot is ~37 MB, a small city's a few hundred KB.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The LRU now evicts against VOTE_CACHE_MAX_MB (512 default), counting body+gz per entry; invalidation keeps the byte counter exact; admin stats report it.</li>
+<li>Measured for prod sizing (8 GiB / max_loaded=3 / 1–4 instances): base 211 MB, +NYC graph 3.35 GB, +Chicago graph 1.22 GB, both snapshots cached = 4.84 GB total — ~2 GB headroom with a third mid-size city resident. Under the 160-agent tier RSS peaked at 4.0 GB vs 7.1 GB before.</li>
+<li>Overlay deploys re-sync Python deps from the lockfile (base image predates orjson — code-only overlays would have crashed at boot).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/app.py</li>
+<li>Dockerfile.overlay</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Server suite green after every step (62 tests at the end: vote-count batch equivalence, block-delta batch equivalence incl. clear-then-cast-same-block, 7 delta-hub tests, multi-agent convergence).</li>
+<li>Same-voter race probe: 20 concurrent alternating casts from one voter — all 200s, exact per-edge count deltas on cast and remove, state restored.</li>
+<li>Live WS probe: 5 concurrent casts arrive as ONE merged message with contiguous ordered revs.</li>
+<li>graph-votes: gzip wire size 37.4 MB → 0.56–0.75 MB; 304s intact; debounce verified (back-to-back votes serve the fresh snapshot's rev inside the window, the new rev after).</li>
+<li>Shed valve: with VOTE_MAX_INFLIGHT=2, 12 concurrent casts → exactly 2×200 + 10×503 (Retry-After: 1); at defaults a 40-agent tier sheds nothing.</li>
+<li>Full tier ladder rerun with the July-8 harness on the same map — table above.</li>
+<li>Prod DB backed up before deploy (pg_dump full + per-table CSVs + checksums, ~/city-edit-prod-backups/20260709-054934/, 668,651 edge_votes, dump verified with pg_restore -l).</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <a href='http://localhost:3000/m/agent-test-1'>http://localhost:3000/m/agent-test-1</a> — cast a route vote, reverse it, remove it: the heat and block counts should track each press with no drift.</li>
+<li>Open the same map in two windows and vote in one — the other should update within ~100 ms (one merged WS delta), and its console (dbg tab) should show 'deltas' messages, not per-vote 'delta' spam.</li>
+<li>curl -H 'Accept-Encoding: gzip' -I 'localhost:5001/api/graph-votes?map=agent-test-1&mode=walk' — expect Content-Encoding: gzip, an ETag ending in -gz, and a sub-MB Content-Length.</li>
+<li>curl localhost:5001/api/admin/stats — the votes/ws/graph_votes_cache sections carry the new saturation metrics.</li>
+<li>On prod after the deploy: cast a vote on a live map, watch it appear in a second browser; check /api/admin/stats shows the new sections (the deploy marker).</li>
+<li>rerun server/tests/loadtest_votes.py --agents 160 against local dev whenever the vote path changes again — the harness is the regression instrument for all of this.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Green is added, red removed. Click a file to expand.</p>
+    
+        <details>
+          <summary><span class="fname">Dockerfile.overlay</span>
+            <span class="stat"><span class="d-add">+5</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill on">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · Dockerfile.overlay</span>
+        <span class="ctx-sum">code-only overlay build reusing the base image&#x27;s baked graphs</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Dockerfile.overlay</span>
+        <span class="ctx-sum">+5 lines</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">client build stage</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">overlay stage</span><span class="ol-sum">NEW: uv pip install -r requirements.txt before copying code</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>dep re-sync — an overlay shipping code that imports a package the base predates (orjson) would crash at boot</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/Dockerfile.overlay b/Dockerfile.overlay</span>
+<span class="d-meta">index 6a0f009..2d732c9 100644</span>
+<span class="d-meta">--- a/Dockerfile.overlay</span>
+<span class="d-meta">+++ b/Dockerfile.overlay</span>
+<span class="d-hunk">@@ -23,6 +23,11 @@ FROM ${BASE_IMAGE}</span>
+<span class="d-ctx"> WORKDIR /app</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Updated backend + fixed station data (graphs/pmtiles/venv come from the base).</span>
+<span class="d-add">+# Re-sync Python deps against the lockfile first: an overlay that ships code</span>
+<span class="d-add">+# importing a package the base image predates (e.g. orjson) would otherwise</span>
+<span class="d-add">+# crash at boot. Already-satisfied pins are no-ops, so this stays fast.</span>
+<span class="d-add">+COPY server/requirements.txt ./</span>
+<span class="d-add">+RUN uv pip install --system --no-cache -r requirements.txt</span>
+<span class="d-ctx"> COPY server/*.py ./</span>
+<span class="d-ctx"> COPY server/data/ ./data/</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+41</span> / <span class="d-del">-8</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GraphLayer</span>
+        <span class="ctx-sum">the heatmap layer: votes, deltas, hover/click, proposals</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~4000 LOC — this diff touches the delta/refetch reconciliation only</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">refs &amp; state</span><span class="ol-sum">NEW recentDeltasRef ring (500) beside pendingDeltasRef</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">fetchVotes</span><span class="ol-sum">replays ring+pending deltas newer than the installed body; hole → ONE delayed refetch</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">WS delta handler</span><span class="ol-sum">pushes every received delta into the ring before gap check</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">hover/click/proposals</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>recentDeltasRef — bounded ring of received deltas</li><li>fetchVotes — install body → replay newer deltas (idempotent SETs) → hole ⇒ delayed refetch</li><li>delta handler — ring push (incl. gap-triggering deltas, so the refetch can replay them)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index a678b3d..82a9206 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -903,6 +903,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // Deltas received before the initial vote fetch completes</span>
+<span class="d-ctx">   const pendingDeltasRef = useRef&lt;import(&quot;../../types&quot;).VoteDelta[]&gt;([]);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // Ring of recently APPLIED deltas. A refetched /api/graph-votes body may be</span>
+<span class="d-add">+  // slightly older than deltas we already applied (the server debounces</span>
+<span class="d-add">+  // snapshot rebuilds under sustained voting), and installing it wholesale</span>
+<span class="d-add">+  // would regress lastRev and the counts — making the very next delta look</span>
+<span class="d-add">+  // like a gap and triggering a refetch loop. Replaying the ring&#x27;s newer</span>
+<span class="d-add">+  // deltas over the installed body heals both (deltas SET authoritative</span>
+<span class="d-add">+  // counts, so replay is idempotent).</span>
+<span class="d-add">+  const recentDeltasRef = useRef&lt;import(&quot;../../types&quot;).VoteDelta[]&gt;([]);</span>
+<span class="d-add">+  const RECENT_DELTAS_MAX = 500;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   // Stable ref for onSnap callback</span>
+<span class="d-ctx">   const onSnapRef = useRef(onSnap);</span>
+<span class="d-ctx">   useEffect(() =&gt; { onSnapRef.current = onSnap; }, [onSnap]);</span>
+<span class="d-hunk">@@ -1985,14 +1995,27 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       setVoteTypeMap(voteData.vote_types);</span>
+<span class="d-ctx">       broadcastBlockVotes(voteData);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-      // Replay any deltas that arrived while the fetch was in flight</span>
+<span class="d-del">-      const pending = pendingDeltasRef.current;</span>
+<span class="d-del">-      if (pending.length &gt; 0) {</span>
+<span class="d-del">-        pendingDeltasRef.current = [];</span>
+<span class="d-del">-        for (const d of pending) {</span>
+<span class="d-del">-          if (d.rev &lt;= lastRevRef.current) continue;</span>
+<span class="d-del">-          applyDeltaToGraphData(d);</span>
+<span class="d-del">-        }</span>
+<span class="d-add">+      // Replay deltas newer than the installed body: both any buffered before</span>
+<span class="d-add">+      // the initial load (pendingDeltasRef) and the recent-applied ring — the</span>
+<span class="d-add">+      // server may serve a debounced snapshot a couple of revisions old, and</span>
+<span class="d-add">+      // the wholesale install above just overwrote those deltas&#x27; counts.</span>
+<span class="d-add">+      const bodyRev = voteData.rev ?? 0;</span>
+<span class="d-add">+      const replay = [...pendingDeltasRef.current, ...recentDeltasRef.current]</span>
+<span class="d-add">+        .filter((d) =&gt; d.rev &gt; bodyRev)</span>
+<span class="d-add">+        .sort((a, b) =&gt; a.rev - b.rev);</span>
+<span class="d-add">+      pendingDeltasRef.current = [];</span>
+<span class="d-add">+      for (const d of replay) {</span>
+<span class="d-add">+        if (d.rev &lt;= lastRevRef.current) continue; // duplicate rev across lists</span>
+<span class="d-add">+        applyDeltaToGraphData(d);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+      if (replay.length &gt; 0 &amp;&amp; replay[0].rev &gt; bodyRev + 1) {</span>
+<span class="d-add">+        // The ring couldn&#x27;t bridge body→first-replayed; those revisions&#x27;</span>
+<span class="d-add">+        // counts are lost until a fresh snapshot. One DELAYED refetch (past</span>
+<span class="d-add">+        // the server&#x27;s debounce) instead of an immediate one — an immediate</span>
+<span class="d-add">+        // retry would get the same stale snapshot and loop.</span>
+<span class="d-add">+        dwarn(&quot;votes&quot;, `snapshot rev ${bodyRev} + ring from ${replay[0].rev} `</span>
+<span class="d-add">+          + &quot;leave a hole — scheduling one delayed refetch&quot;);</span>
+<span class="d-add">+        setTimeout(() =&gt; fetchVotesRef.current(), 2500);</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       refreshGraphDisplayRef.current();</span>
+<span class="d-hunk">@@ -2282,6 +2305,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         return;</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+      // Remember every received delta (bounded) so a refetch can replay the</span>
+<span class="d-add">+      // ones newer than the (possibly debounced) snapshot it installs. This</span>
+<span class="d-add">+      // includes gap-triggering deltas below — the refetch body may not cover</span>
+<span class="d-add">+      // them, but the replay will.</span>
+<span class="d-add">+      recentDeltasRef.current.push(delta);</span>
+<span class="d-add">+      if (recentDeltasRef.current.length &gt; RECENT_DELTAS_MAX) {</span>
+<span class="d-add">+        recentDeltasRef.current.splice(</span>
+<span class="d-add">+          0, recentDeltasRef.current.length - RECENT_DELTAS_MAX);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-ctx">       // Gap detection: if we missed revisions, full refetch</span>
+<span class="d-ctx">       if (lastRevRef.current &gt; 0 &amp;&amp; delta.rev &gt; lastRevRef.current + 1) {</span>
+<span class="d-ctx">         dwarn(&quot;votes&quot;, `delta gap (have rev ${lastRevRef.current}, got ${delta.rev}) — full refetch`);</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+            <span class="stat"><span class="d-add">+3</span> / <span class="d-del">-3</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · MapLibreBackground</span>
+        <span class="ctx-sum">the MapLibre GL basemap + block-heat styling</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapLibreBackground.tsx</span>
+        <span class="ctx-sum">build fix only — no behavior change</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">blockFillPaint/blockLinePaint</span><span class="ol-sum">heat expression typed as ExpressionSpecification (was readonly as-const)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">buildStyle</span><span class="ol-sum">dead graphTilesUrl param underscored</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>two pre-existing tsc-build errors fixed to unblock the prod client build</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index 312bc87..797aa3f 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -61,7 +61,7 @@ export function blockIdAtLatLng(lat: number, lng: number): number | null {</span>
+<span class="d-ctx">  *  is no baseline edge layer (edges show only on Leaflet hover/selection). */</span>
+<span class="d-ctx"> function blockFillPaint(style: MapStyle): maplibregl.FillLayerSpecification[&quot;paint&quot;] {</span>
+<span class="d-ctx">   const heat = style.heat;</span>
+<span class="d-del">-  const h = [&quot;coalesce&quot;, [&quot;feature-state&quot;, &quot;heat&quot;], 0] as const;</span>
+<span class="d-add">+  const h: maplibregl.ExpressionSpecification = [&quot;coalesce&quot;, [&quot;feature-state&quot;, &quot;heat&quot;], 0];</span>
+<span class="d-ctx">   return {</span>
+<span class="d-ctx">     // Start the ramp at `warm` (not halo) so even a single vote reads clearly,</span>
+<span class="d-ctx">     // and keep the fill translucent — the outline layer below carries the</span>
+<span class="d-hunk">@@ -91,7 +91,7 @@ function blockFillPaint(style: MapStyle): maplibregl.FillLayerSpecification[&quot;pai</span>
+<span class="d-ctx">  *  width that grows with heat so the hottest blocks read etched, not just lit. */</span>
+<span class="d-ctx"> function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification[&quot;paint&quot;] {</span>
+<span class="d-ctx">   const heat = style.heat;</span>
+<span class="d-del">-  const h = [&quot;coalesce&quot;, [&quot;feature-state&quot;, &quot;heat&quot;], 0] as const;</span>
+<span class="d-add">+  const h: maplibregl.ExpressionSpecification = [&quot;coalesce&quot;, [&quot;feature-state&quot;, &quot;heat&quot;], 0];</span>
+<span class="d-ctx">   return {</span>
+<span class="d-ctx">     &quot;line-color&quot;: [</span>
+<span class="d-ctx">       &quot;interpolate&quot;, [&quot;linear&quot;], h,</span>
+<span class="d-hunk">@@ -116,7 +116,7 @@ function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification[&quot;pai</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> function buildStyle(</span>
+<span class="d-del">-  graphTilesUrl: string,</span>
+<span class="d-add">+  _graphTilesUrl: string,</span>
+<span class="d-ctx">   blockTilesUrl: string,</span>
+<span class="d-ctx">   tiles: string[],</span>
+<span class="d-ctx">   mapStyle: MapStyle,</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/context/WebSocketContext.tsx</span>
+            <span class="stat"><span class="d-add">+13</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · WebSocketContext</span>
+        <span class="ctx-sum">the /ws connection + delta subscription API</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">WebSocketContext.tsx</span>
+        <span class="ctx-sum">~130 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">onmessage</span><span class="ol-sum">NEW: unwrap {type:&#x27;deltas&#x27;, items} into rev-ordered individual deltas</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">reconnect/backoff</span><span class="ol-sum">unchanged (overflow-closed sockets land here)</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>&#x27;deltas&#x27; branch — sort items by rev, dispatch each to subscribers</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/context/WebSocketContext.tsx b/client-react/src/context/WebSocketContext.tsx</span>
+<span class="d-meta">index 9b2044c..c644019 100644</span>
+<span class="d-meta">--- a/client-react/src/context/WebSocketContext.tsx</span>
+<span class="d-meta">+++ b/client-react/src/context/WebSocketContext.tsx</span>
+<span class="d-hunk">@@ -57,6 +57,19 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {</span>
+<span class="d-ctx">           for (const cb of deltaListenersRef.current) {</span>
+<span class="d-ctx">             cb(delta as VoteDelta);</span>
+<span class="d-ctx">           }</span>
+<span class="d-add">+        } else if (msg.type === &quot;deltas&quot; &amp;&amp; Array.isArray(msg.items)) {</span>
+<span class="d-add">+          // Server-coalesced batch (delta_hub): unwrap into individual deltas</span>
+<span class="d-add">+          // in rev order so downstream gap detection and count application see</span>
+<span class="d-add">+          // exactly the per-vote stream they always did.</span>
+<span class="d-add">+          const items = [...msg.items].sort(</span>
+<span class="d-add">+            (a, b) =&gt; (a.rev ?? 0) - (b.rev ?? 0));</span>
+<span class="d-add">+          for (const item of items) {</span>
+<span class="d-add">+            const { type: _t, ...delta } = item;</span>
+<span class="d-add">+            void _t;</span>
+<span class="d-add">+            for (const cb of deltaListenersRef.current) {</span>
+<span class="d-add">+              cb(delta as VoteDelta);</span>
+<span class="d-add">+            }</span>
+<span class="d-add">+          }</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx">         // &quot;init&quot; and &quot;keepalive&quot; are handled silently</span>
+<span class="d-ctx">       } catch (e) {</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+325</span> / <span class="d-del">-110</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · app.py</span>
+        <span class="ctx-sum">all HTTP endpoints + the vote codepath, WS handler, snapshot cache</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~2100 LOC — this diff touches the vote transaction, the graph-votes cache/endpoint, the WS handler, and admin stats</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports · config</span><span class="ol-sum">+gzip, orjson, queue, resource, deque; delta_hub</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">snapshot cache</span><span class="ol-sum">byte-budgeted LRU {rev,bstamp,body,gz,built} + debounce + peek</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">vote locks + metrics</span><span class="ol-sum">global lock → 256 (slug,device) stripes; inflight valve; rolling metrics</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">delta listener</span><span class="ol-sum">per-vote cache invalidation DELETED (rev-check + debounce subsume it)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">WS handler</span><span class="ol-sum">per-client pubsub+poll → blocks on its delta_hub queue</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">cast_vote</span><span class="ol-sum">batched Redis writes · bounded-wait shed · no cache purge</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">graph-votes endpoint</span><span class="ol-sum">serve current-or-debounced snapshot, entry-derived ETag, pre-gzipped body</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">admin stats</span><span class="ol-sum">votes/ws/cache/RSS saturation sections</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">maps/routes/admin endpoints</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>_VOTE_CACHE_MAX_MB byte-budget LRU + _vote_cache_peek + _entry_bytes</li><li>_VOTE_LOCK_STRIPES(256) + _voter_lock_stripe</li><li>_vote_inflight semaphore + _shed_response + _vote_metrics_record/_snapshot</li><li>delta_hub instantiation (one listener per process)</li><li>ws() — subscribe/unsubscribe, queue-blocking send loop, overflow close</li><li>cast_vote — apply_directional_batch + apply_block_deltas_batch under the stripe</li><li>graph_votes() — debounce + stale-while-revalidate + gzip/identity + entry ETag</li><li>admin_stats — votes/ws/graph_votes_cache/peak_rss_mb</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index a3ffda3..4c45b15 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -1,14 +1,18 @@</span>
+<span class="d-add">+import gzip</span>
+<span class="d-ctx"> import json</span>
+<span class="d-ctx"> import logging</span>
+<span class="d-ctx"> import os</span>
+<span class="d-add">+import queue</span>
+<span class="d-ctx"> import re</span>
+<span class="d-add">+import resource</span>
+<span class="d-ctx"> import sys</span>
+<span class="d-ctx"> import time</span>
+<span class="d-ctx"> import hashlib</span>
+<span class="d-ctx"> import threading</span>
+<span class="d-del">-from collections import OrderedDict</span>
+<span class="d-add">+from collections import OrderedDict, deque</span>
+<span class="d-ctx"> from functools import lru_cache</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+import orjson</span>
+<span class="d-ctx"> import redis</span>
+<span class="d-ctx"> import requests</span>
+<span class="d-ctx"> from dotenv import load_dotenv</span>
+<span class="d-hunk">@@ -26,6 +30,7 @@ import vote_semantics</span>
+<span class="d-ctx"> import vote_migration</span>
+<span class="d-ctx"> import block_votes</span>
+<span class="d-ctx"> import database</span>
+<span class="d-add">+import delta_hub as delta_hub_mod</span>
+<span class="d-ctx"> from cities import CITIES, DEFAULT_CITY_ID, get_city, all_cities</span>
+<span class="d-ctx"> from graph_registry import GraphRegistry, OsrmRegistry, STATION_NETWORKS</span>
+<span class="d-ctx"> from osrm_router import extract_all_segments</span>
+<span class="d-hunk">@@ -290,15 +295,20 @@ def _locked_response():</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # ── Per-map vote response cache ───────────────────────────────────────────</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# Bounded LRU of built /api/graph-votes bodies, keyed by &quot;&lt;slug&gt;:&lt;mode&gt;&quot;. This</span>
+<span class="d-del">-# used to be an unbounded dict: every (map, mode) ever requested kept its full</span>
+<span class="d-del">-# JSON body resident forever, so a multi-tenant server with many maps leaked</span>
+<span class="d-del">-# memory until the worker OOM-crashed (exactly the &quot;more than one tenant → crash&quot;</span>
+<span class="d-del">-# symptom). The cap evicts the least-recently-served body so memory stays flat</span>
+<span class="d-del">-# regardless of how many maps exist. Access is guarded by _vote_cache_lock since</span>
+<span class="d-del">-# several greenlets/requests touch it concurrently.</span>
+<span class="d-del">-_VOTE_CACHE_MAX = int(os.environ.get(&quot;VOTE_CACHE_MAX&quot;, &quot;64&quot;))</span>
+<span class="d-add">+# Bounded LRU of built /api/graph-votes snapshots, keyed by &quot;&lt;slug&gt;:&lt;mode&gt;&quot;.</span>
+<span class="d-add">+# This used to be an unbounded dict: every (map, mode) ever requested kept its</span>
+<span class="d-add">+# full JSON body resident forever, so a multi-tenant server with many maps</span>
+<span class="d-add">+# leaked memory until the worker OOM-crashed (exactly the &quot;more than one tenant</span>
+<span class="d-add">+# → crash&quot; symptom). The bound is in BYTES, not entries: an NYC-sized snapshot</span>
+<span class="d-add">+# is ~37MB while a small city&#x27;s is a few hundred KB, so an entry count says</span>
+<span class="d-add">+# nothing about footprint — and since entries now persist across votes (the</span>
+<span class="d-add">+# debounce serves rev-stale snapshots instead of purging them), a count-capped</span>
+<span class="d-add">+# cache could quietly hold gigabytes on an 8GiB prod instance. Eviction drops</span>
+<span class="d-add">+# the least-recently-served snapshot until under budget. Access is guarded by</span>
+<span class="d-add">+# _vote_cache_lock since several greenlets/requests touch it concurrently.</span>
+<span class="d-add">+_VOTE_CACHE_MAX_MB = float(os.environ.get(&quot;VOTE_CACHE_MAX_MB&quot;, &quot;512&quot;))</span>
+<span class="d-ctx"> _vote_cache: &quot;OrderedDict[str, dict]&quot; = OrderedDict()</span>
+<span class="d-add">+_vote_cache_bytes = 0</span>
+<span class="d-ctx"> _vote_cache_lock = threading.Lock()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Per-cache-key single-flight locks. Building the vote arrays for a big map (NYC</span>
+<span class="d-hunk">@@ -311,29 +321,134 @@ _build_locks: dict[str, threading.Lock] = {}</span>
+<span class="d-ctx"> _build_locks_guard = threading.Lock()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Serializes the read-modify-write of a voter&#x27;s per-proposal direction so a</span>
+<span class="d-del">-# rapid +/− toggle can&#x27;t read a stale prior direction (see /api/vote). This is a</span>
+<span class="d-del">-# PER-PROCESS lock; across Flask instances/workers the Redis lock in cast_vote</span>
+<span class="d-del">-# (vote_store.voter_lock) provides the cross-instance guarantee.</span>
+<span class="d-del">-_proposal_vote_lock = threading.Lock()</span>
+<span class="d-add">+# rapid +/− toggle can&#x27;t read a stale prior direction (see /api/vote). This is</span>
+<span class="d-add">+# the PER-PROCESS half of the guarantee; across Flask instances/workers the</span>
+<span class="d-add">+# Redis lock in cast_vote (vote_store.voter_lock) provides the same scope</span>
+<span class="d-add">+# fleet-wide. STRIPED by (slug, device): a voter&#x27;s own casts serialize, but</span>
+<span class="d-add">+# different voters vote concurrently — a single global lock here capped the</span>
+<span class="d-add">+# whole instance at ~9 votes/s (changelog/2026-07-08-agent-load-test.html,</span>
+<span class="d-add">+# finding #1 / mitigation M2). Redis counter updates are atomic HINCRBYs and</span>
+<span class="d-add">+# commute across voters, so cross-voter mutual exclusion buys nothing.</span>
+<span class="d-add">+_VOTE_LOCK_STRIPES = tuple(threading.Lock() for _ in range(256))</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _voter_lock_stripe(slug: str, device_id: str) -&gt; threading.Lock:</span>
+<span class="d-add">+    return _VOTE_LOCK_STRIPES[hash((slug, device_id)) % len(_VOTE_LOCK_STRIPES)]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+# ── Vote-path saturation: backpressure valve + rolling metrics (M5) ─────────</span>
+<span class="d-add">+# The July load test&#x27;s sharpest lesson was that /health stayed at 1-2ms while</span>
+<span class="d-add">+# votes queued 45s — monitoring keyed on health was blind to the melt. Two</span>
+<span class="d-add">+# valves + a metrics window make saturation both bounded and visible:</span>
+<span class="d-add">+#   · at most VOTE_MAX_INFLIGHT votes run concurrently; past that the endpoint</span>
+<span class="d-add">+#     sheds with 503 + Retry-After instead of queueing into timeouts (clients</span>
+<span class="d-add">+#     already roll back optimistic casts on failure);</span>
+<span class="d-add">+#   · a same-voter stripe that can&#x27;t be acquired in VOTE_LOCK_SHED_SECONDS</span>
+<span class="d-add">+#     sheds the same way (a wedged voter shouldn&#x27;t hold a request thread);</span>
+<span class="d-add">+#   · /api/admin/stats reports votes/s, lock-wait and handler percentiles,</span>
+<span class="d-add">+#     shed counts, and process RSS from a rolling window.</span>
+<span class="d-add">+VOTE_MAX_INFLIGHT = int(os.environ.get(&quot;VOTE_MAX_INFLIGHT&quot;, &quot;64&quot;))</span>
+<span class="d-add">+VOTE_LOCK_SHED_SECONDS = float(os.environ.get(&quot;VOTE_LOCK_SHED_SECONDS&quot;, &quot;2.0&quot;))</span>
+<span class="d-add">+# How long a vote may WAIT for an inflight slot before shedding. Zero would</span>
+<span class="d-add">+# shed the moment a burst exceeds the cap (58% of a 160-agent wave); a bounded</span>
+<span class="d-add">+# wait turns the cap into a short queue that absorbs bursts while still</span>
+<span class="d-add">+# capping worst-case latency at wait + handler time.</span>
+<span class="d-add">+VOTE_QUEUE_WAIT_SECONDS = float(os.environ.get(&quot;VOTE_QUEUE_WAIT_SECONDS&quot;, &quot;1.5&quot;))</span>
+<span class="d-add">+</span>
+<span class="d-add">+_vote_inflight = threading.Semaphore(VOTE_MAX_INFLIGHT)</span>
+<span class="d-add">+_vote_metrics_lock = threading.Lock()</span>
+<span class="d-add">+_vote_metrics: &quot;deque[tuple[float, float, float]]&quot; = deque(maxlen=2048)</span>
+<span class="d-add">+_vote_shed = {&quot;inflight&quot;: 0, &quot;stripe&quot;: 0}</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _vote_metrics_record(lock_wait_s: float, total_s: float) -&gt; None:</span>
+<span class="d-add">+    with _vote_metrics_lock:</span>
+<span class="d-add">+        _vote_metrics.append((time.time(), lock_wait_s, total_s))</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _shed_response(reason: str, retry_after: int):</span>
+<span class="d-add">+    with _vote_metrics_lock:</span>
+<span class="d-add">+        _vote_shed[reason] += 1</span>
+<span class="d-add">+    resp = jsonify({&quot;error&quot;: &quot;Server is at vote capacity — retry shortly&quot;,</span>
+<span class="d-add">+                    &quot;shed&quot;: reason, &quot;retry&quot;: True})</span>
+<span class="d-add">+    resp.headers[&quot;Retry-After&quot;] = str(retry_after)</span>
+<span class="d-add">+    return resp, 503</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _vote_metrics_snapshot(window_s: float = 60.0) -&gt; dict:</span>
+<span class="d-add">+    now = time.time()</span>
+<span class="d-add">+    with _vote_metrics_lock:</span>
+<span class="d-add">+        rows = [r for r in _vote_metrics if now - r[0] &lt;= window_s]</span>
+<span class="d-add">+        shed = dict(_vote_shed)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def pct(vals: list[float], p: float) -&gt; float:</span>
+<span class="d-add">+        if not vals:</span>
+<span class="d-add">+            return 0.0</span>
+<span class="d-add">+        vals = sorted(vals)</span>
+<span class="d-add">+        return round(vals[min(len(vals) - 1, int(p * len(vals)))] * 1000, 1)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    lock_waits = [r[1] for r in rows]</span>
+<span class="d-add">+    totals = [r[2] for r in rows]</span>
+<span class="d-add">+    return {</span>
+<span class="d-add">+        &quot;window_s&quot;: window_s,</span>
+<span class="d-add">+        &quot;count&quot;: len(rows),</span>
+<span class="d-add">+        &quot;votes_per_sec&quot;: round(len(rows) / window_s, 2),</span>
+<span class="d-add">+        &quot;lock_wait_ms&quot;: {&quot;p50&quot;: pct(lock_waits, 0.5), &quot;p95&quot;: pct(lock_waits, 0.95)},</span>
+<span class="d-add">+        &quot;handler_ms&quot;: {&quot;p50&quot;: pct(totals, 0.5), &quot;p95&quot;: pct(totals, 0.95)},</span>
+<span class="d-add">+        &quot;shed&quot;: shed,</span>
+<span class="d-add">+        &quot;max_inflight&quot;: VOTE_MAX_INFLIGHT,</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+# How long a built snapshot keeps serving after its revision goes stale. Under</span>
+<span class="d-add">+# sustained voting the revision bumps on every cast, so rebuilding per rev is a</span>
+<span class="d-add">+# full-array rebuild per vote (finding #3 of the load-test report); serving the</span>
+<span class="d-add">+# last complete snapshot for a couple of seconds costs nothing — clients</span>
+<span class="d-add">+# reconcile forward from WS deltas, which carry authoritative counts — and</span>
+<span class="d-add">+# collapses a join storm to one rebuild per window.</span>
+<span class="d-add">+_VOTE_CACHE_DEBOUNCE = float(os.environ.get(&quot;GRAPH_VOTES_DEBOUNCE&quot;, &quot;2.0&quot;))</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-def _vote_cache_get(cache_key: str, rev: int) -&gt; str | None:</span>
+<span class="d-del">-    &quot;&quot;&quot;Return a cached body for this key+revision, marking it most-recently-used.&quot;&quot;&quot;</span>
+<span class="d-add">+def _vote_cache_get(cache_key: str, rev: int) -&gt; dict | None:</span>
+<span class="d-add">+    &quot;&quot;&quot;Return the cached entry for this key when built at exactly this revision,</span>
+<span class="d-add">+    marking it most-recently-used.&quot;&quot;&quot;</span>
+<span class="d-ctx">     with _vote_cache_lock:</span>
+<span class="d-ctx">         cached = _vote_cache.get(cache_key)</span>
+<span class="d-ctx">         if cached and cached[&quot;rev&quot;] == rev:</span>
+<span class="d-ctx">             _vote_cache.move_to_end(cache_key)</span>
+<span class="d-del">-            return cached[&quot;body&quot;]</span>
+<span class="d-add">+            return cached</span>
+<span class="d-ctx">     return None</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-def _vote_cache_put(cache_key: str, rev: int, body: str) -&gt; None:</span>
+<span class="d-del">-    &quot;&quot;&quot;Store a built body, evicting the least-recently-used entry past the cap.&quot;&quot;&quot;</span>
+<span class="d-add">+def _vote_cache_peek(cache_key: str) -&gt; dict | None:</span>
+<span class="d-add">+    &quot;&quot;&quot;Return the cached entry regardless of revision (debounce decides</span>
+<span class="d-add">+    servability), marking it most-recently-used.&quot;&quot;&quot;</span>
+<span class="d-ctx">     with _vote_cache_lock:</span>
+<span class="d-del">-        _vote_cache[cache_key] = {&quot;rev&quot;: rev, &quot;body&quot;: body}</span>
+<span class="d-del">-        _vote_cache.move_to_end(cache_key)</span>
+<span class="d-del">-        while len(_vote_cache) &gt; _VOTE_CACHE_MAX:</span>
+<span class="d-del">-            _vote_cache.popitem(last=False)</span>
+<span class="d-add">+        cached = _vote_cache.get(cache_key)</span>
+<span class="d-add">+        if cached:</span>
+<span class="d-add">+            _vote_cache.move_to_end(cache_key)</span>
+<span class="d-add">+        return cached</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _entry_bytes(entry: dict) -&gt; int:</span>
+<span class="d-add">+    return len(entry[&quot;body&quot;]) + len(entry[&quot;gz&quot;])</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _vote_cache_put(cache_key: str, entry: dict) -&gt; None:</span>
+<span class="d-add">+    &quot;&quot;&quot;Store a built entry, evicting least-recently-used entries past the</span>
+<span class="d-add">+    byte budget (never the entry just stored — a snapshot bigger than the</span>
+<span class="d-add">+    whole budget still serves; the cache just holds nothing else).&quot;&quot;&quot;</span>
+<span class="d-add">+    global _vote_cache_bytes</span>
+<span class="d-add">+    budget = int(_VOTE_CACHE_MAX_MB * 1024 * 1024)</span>
+<span class="d-add">+    with _vote_cache_lock:</span>
+<span class="d-add">+        old = _vote_cache.pop(cache_key, None)</span>
+<span class="d-add">+        if old is not None:</span>
+<span class="d-add">+            _vote_cache_bytes -= _entry_bytes(old)</span>
+<span class="d-add">+        _vote_cache[cache_key] = entry</span>
+<span class="d-add">+        _vote_cache_bytes += _entry_bytes(entry)</span>
+<span class="d-add">+        while _vote_cache_bytes &gt; budget and len(_vote_cache) &gt; 1:</span>
+<span class="d-add">+            _, evicted = _vote_cache.popitem(last=False)</span>
+<span class="d-add">+            _vote_cache_bytes -= _entry_bytes(evicted)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def _invalidate_vote_cache(slug: str) -&gt; None:</span>
+<span class="d-hunk">@@ -344,10 +459,13 @@ def _invalidate_vote_cache(slug: str) -&gt; None:</span>
+<span class="d-ctx">     in _build_graph_votes_body still kept responses CORRECT, but the stale entries</span>
+<span class="d-ctx">     lingered in memory and forced an extra rebuild.) Clearing all of a slug&#x27;s</span>
+<span class="d-ctx">     variants makes invalidation actually free the right entries.&quot;&quot;&quot;</span>
+<span class="d-add">+    global _vote_cache_bytes</span>
+<span class="d-ctx">     prefix = f&quot;{slug}:&quot;</span>
+<span class="d-ctx">     with _vote_cache_lock:</span>
+<span class="d-ctx">         for key in [k for k in _vote_cache if k == slug or k.startswith(prefix)]:</span>
+<span class="d-del">-            _vote_cache.pop(key, None)</span>
+<span class="d-add">+            dropped = _vote_cache.pop(key, None)</span>
+<span class="d-add">+            if dropped is not None:</span>
+<span class="d-add">+                _vote_cache_bytes -= _entry_bytes(dropped)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def _build_lock_for(cache_key: str) -&gt; threading.Lock:</span>
+<span class="d-hunk">@@ -359,8 +477,13 @@ def _build_lock_for(cache_key: str) -&gt; threading.Lock:</span>
+<span class="d-ctx">         return lock</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -&gt; str:</span>
+<span class="d-del">-    &quot;&quot;&quot;Build the /api/graph-votes JSON for one map+mode, cached by its revision.</span>
+<span class="d-add">+def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -&gt; dict:</span>
+<span class="d-add">+    &quot;&quot;&quot;Build (or reuse) the /api/graph-votes snapshot for one map+mode.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Returns a cache entry {rev, bstamp, body, gz, built}: the JSON bytes, their</span>
+<span class="d-add">+    pre-compressed gzip twin (one compression per rebuild, shared by every</span>
+<span class="d-add">+    client — not one per response), the revision + blocks stamp the body</span>
+<span class="d-add">+    describes, and a monotonic build time for the serve-stale debounce.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     `mode` scopes the legend and heatmap to a single vote namespace (e.g.</span>
+<span class="d-ctx">     &quot;walkways&quot;) so proposals cast under other modes on the same map don&#x27;t leak</span>
+<span class="d-hunk">@@ -383,7 +506,7 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -&gt; str:</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def _build_graph_votes_body_locked(</span>
+<span class="d-ctx">     rmap: ResolvedMap, mode: str | None, rev: int, cache_key: str,</span>
+<span class="d-del">-) -&gt; str:</span>
+<span class="d-add">+) -&gt; dict:</span>
+<span class="d-ctx">     rmap.graph.ensure_loaded()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # The heatmap serves ONLY from Redis; Postgres is the durable copy that the</span>
+<span class="d-hunk">@@ -437,10 +560,21 @@ def _build_graph_votes_body_locked(</span>
+<span class="d-ctx">             redis_client, rmap.slug, block_mode, rmap.graph.n_blocks))</span>
+<span class="d-ctx">         arrays[&quot;blocks_version&quot;] = rmap.graph.blocks_version</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    body = json.dumps(arrays)</span>
+<span class="d-del">-</span>
+<span class="d-del">-    _vote_cache_put(cache_key, rev, body)</span>
+<span class="d-del">-    return body</span>
+<span class="d-add">+    # orjson + gzip level 3: the rebuild runs on the request path (debounced,</span>
+<span class="d-add">+    # but each one used to stall the GIL ~2s serializing 37MB and compressing</span>
+<span class="d-add">+    # at level 6 — the p95 spikes on unrelated endpoints). orjson is ~10x</span>
+<span class="d-add">+    # faster than json here and zlib releases the GIL while compressing;</span>
+<span class="d-add">+    # level 3 halves compression time for ~1.5% larger output.</span>
+<span class="d-add">+    body = orjson.dumps(arrays, option=orjson.OPT_SERIALIZE_NUMPY)</span>
+<span class="d-add">+    entry = {</span>
+<span class="d-add">+        &quot;rev&quot;: rev,</span>
+<span class="d-add">+        &quot;bstamp&quot;: rmap.graph.blocks_stamp(),</span>
+<span class="d-add">+        &quot;body&quot;: body,</span>
+<span class="d-add">+        &quot;gz&quot;: gzip.compress(body, 3),</span>
+<span class="d-add">+        &quot;built&quot;: time.monotonic(),</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    _vote_cache_put(cache_key, entry)</span>
+<span class="d-add">+    return entry</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def _write_vote_fields(slug: str, fields: list[tuple[int, int]]) -&gt; None:</span>
+<span class="d-hunk">@@ -582,28 +716,17 @@ if os.environ.get(&quot;SKIP_WARMUP&quot;) != &quot;1&quot;:</span>
+<span class="d-ctx">     _PrewarmThread(target=_startup_warm, name=&quot;startup-warm&quot;, daemon=True).start()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# ── Pubsub delta listener (invalidates per-map vote cache on peer writes) ───</span>
+<span class="d-del">-</span>
+<span class="d-del">-def _start_delta_listener():</span>
+<span class="d-del">-    def listener():</span>
+<span class="d-del">-        ps_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)</span>
+<span class="d-del">-        ps = ps_client.pubsub()</span>
+<span class="d-del">-        ps.psubscribe(&quot;vote_deltas:*&quot;)</span>
+<span class="d-del">-        logger.info(&quot;[PUBSUB] Subscribed to vote_deltas:*&quot;)</span>
+<span class="d-del">-        for msg in ps.listen():</span>
+<span class="d-del">-            if msg[&quot;type&quot;] != &quot;pmessage&quot;:</span>
+<span class="d-del">-                continue</span>
+<span class="d-del">-            channel = msg[&quot;channel&quot;]</span>
+<span class="d-del">-            slug = channel.split(&quot;:&quot;, 1)[1] if &quot;:&quot; in channel else None</span>
+<span class="d-del">-            if slug:</span>
+<span class="d-del">-                _invalidate_vote_cache(slug)</span>
+<span class="d-add">+# NOTE: the old vote_deltas:* listener that hard-invalidated the vote cache on</span>
+<span class="d-add">+# every peer write is gone — publish_delta&#x27;s revision bump already rev-stales</span>
+<span class="d-add">+# cached snapshots (on every instance, since the revision lives in Redis), and</span>
+<span class="d-add">+# per-vote invalidation is exactly what forced a full 33MB rebuild per cast</span>
+<span class="d-add">+# under load. The graph-votes debounce now decides how long a stale snapshot</span>
+<span class="d-add">+# keeps serving.</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    t = threading.Thread(target=listener, daemon=True, name=&quot;delta-listener&quot;)</span>
+<span class="d-del">-    t.start()</span>
+<span class="d-del">-    return t</span>
+<span class="d-del">-</span>
+<span class="d-del">-</span>
+<span class="d-del">-_start_delta_listener()</span>
+<span class="d-add">+# One pubsub listener + coalesced fan-out for every WebSocket client (see</span>
+<span class="d-add">+# delta_hub.py). Its thread starts lazily on the first subscription.</span>
+<span class="d-add">+delta_hub = delta_hub_mod.DeltaHub(</span>
+<span class="d-add">+    lambda: redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True))</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # ── Helpers ────────────────────────────────────────────────────────────────</span>
+<span class="d-hunk">@@ -904,7 +1027,14 @@ def map_auth(slug):</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> @sock.route(&quot;/ws&quot;)</span>
+<span class="d-ctx"> def ws(ws):</span>
+<span class="d-del">-    &quot;&quot;&quot;Push a single map&#x27;s vote deltas to a client in real time.&quot;&quot;&quot;</span>
+<span class="d-add">+    &quot;&quot;&quot;Push a single map&#x27;s vote deltas to a client in real time.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Delivery comes from the process-wide DeltaHub: ONE Redis pubsub listener</span>
+<span class="d-add">+    feeds every client, and deltas arrive merged ({&quot;type&quot;: &quot;deltas&quot;, ...}) at</span>
+<span class="d-add">+    the hub&#x27;s flush cadence instead of one send per vote per client. This</span>
+<span class="d-add">+    handler just blocks on its queue — no per-client Redis connection and no</span>
+<span class="d-add">+    10Hz busy poll (finding #4 of changelog/2026-07-08-agent-load-test.html).</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-ctx">     slug = (request.args.get(&quot;map&quot;) or DEFAULT_MAP_SLUG).strip()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # Gate the live stream exactly like the REST content: a locked map&#x27;s deltas</span>
+<span class="d-hunk">@@ -918,19 +1048,15 @@ def ws(ws):</span>
+<span class="d-ctx">             pass</span>
+<span class="d-ctx">         return</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    channel = vote_store.channel_key(slug)</span>
+<span class="d-del">-</span>
+<span class="d-del">-    ws_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)</span>
+<span class="d-del">-    pubsub = ws_client.pubsub()</span>
+<span class="d-del">-    pubsub.subscribe(channel)</span>
+<span class="d-del">-</span>
+<span class="d-del">-    rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)</span>
+<span class="d-del">-    ws.send(json.dumps({&quot;type&quot;: &quot;init&quot;, &quot;rev&quot;: rev, &quot;map&quot;: slug}))</span>
+<span class="d-del">-</span>
+<span class="d-del">-    last_push = time.time()</span>
+<span class="d-del">-    KEEPALIVE = 30</span>
+<span class="d-add">+    sub = delta_hub.subscribe(slug)</span>
+<span class="d-ctx">     try:</span>
+<span class="d-add">+        rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)</span>
+<span class="d-add">+        ws.send(json.dumps({&quot;type&quot;: &quot;init&quot;, &quot;rev&quot;: rev, &quot;map&quot;: slug}))</span>
+<span class="d-add">+</span>
+<span class="d-add">+        last_push = time.time()</span>
+<span class="d-add">+        KEEPALIVE = 30</span>
+<span class="d-ctx">         while True:</span>
+<span class="d-add">+            # Pump inbound frames so a client close is noticed promptly.</span>
+<span class="d-ctx">             try:</span>
+<span class="d-ctx">                 ws.receive(timeout=0)</span>
+<span class="d-ctx">             except Exception as e:</span>
+<span class="d-hunk">@@ -938,18 +1064,25 @@ def ws(ws):</span>
+<span class="d-ctx">                 if &quot;timed out&quot; not in s and &quot;no data&quot; not in s and &quot;connection closed&quot; not in s:</span>
+<span class="d-ctx">                     logger.warning(f&quot;[WS] receive exception: {e}&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-            msg = pubsub.get_message(timeout=0.1)</span>
+<span class="d-del">-            if msg and msg[&quot;type&quot;] == &quot;message&quot;:</span>
+<span class="d-del">-                ws.send(msg[&quot;data&quot;])</span>
+<span class="d-add">+            if sub.overflowed.is_set():</span>
+<span class="d-add">+                # This client lagged past its queue bound; a reconnect plus</span>
+<span class="d-add">+                # the client&#x27;s gap refetch is cheaper than a catch-up replay.</span>
+<span class="d-add">+                logger.warning(f&quot;[WS] {slug}: subscriber overflowed — closing&quot;)</span>
+<span class="d-add">+                break</span>
+<span class="d-add">+</span>
+<span class="d-add">+            try:</span>
+<span class="d-add">+                payload = sub.q.get(timeout=1.0)</span>
+<span class="d-add">+                ws.send(payload)</span>
+<span class="d-ctx">                 last_push = time.time()</span>
+<span class="d-add">+                continue</span>
+<span class="d-add">+            except queue.Empty:</span>
+<span class="d-add">+                pass</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">             if time.time() - last_push &gt; KEEPALIVE:</span>
+<span class="d-ctx">                 ws.send(&#x27;{&quot;type&quot;:&quot;keepalive&quot;}&#x27;)</span>
+<span class="d-ctx">                 last_push = time.time()</span>
+<span class="d-ctx">     finally:</span>
+<span class="d-del">-        pubsub.unsubscribe(channel)</span>
+<span class="d-del">-        pubsub.close()</span>
+<span class="d-del">-        ws_client.close()</span>
+<span class="d-add">+        delta_hub.unsubscribe(slug, sub)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # ── Routes API ─────────────────────────────────────────────────────────────</span>
+<span class="d-hunk">@@ -1100,6 +1233,13 @@ def cast_vote():</span>
+<span class="d-ctx">     mode_int = vote_store.mode_to_int(mode)  # Redis key only; DB scopes by map_slug</span>
+<span class="d-ctx">     slug = rmap.slug</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    # Backpressure: shed instead of queueing once the instance is saturated —</span>
+<span class="d-add">+    # a 503 the client retries beats a 45s hang that dies at the timeout.</span>
+<span class="d-add">+    t_handler0 = time.monotonic()</span>
+<span class="d-add">+    if not _vote_inflight.acquire(timeout=VOTE_QUEUE_WAIT_SECONDS):</span>
+<span class="d-add">+        return _shed_response(&quot;inflight&quot;, retry_after=1)</span>
+<span class="d-add">+    stripe_acquired = False</span>
+<span class="d-add">+    lock_wait_s = 0.0</span>
+<span class="d-ctx">     try:</span>
+<span class="d-ctx">         vt_id = vote_store.get_vote_type_id(vt_label, vt_point_type) if vt_label else 0</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1111,18 +1251,24 @@ def cast_vote():</span>
+<span class="d-ctx">         ) if direction != 0 else {}</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         # voter_lock serializes this voter&#x27;s read-modify-write ACROSS instances</span>
+<span class="d-del">-        # (Redis); _proposal_vote_lock serializes it within THIS process. Together</span>
+<span class="d-del">-        # they hold whether the app runs one worker or a horizontally-scaled fleet.</span>
+<span class="d-add">+        # (Redis); the stripe serializes it within THIS process. Both are scoped</span>
+<span class="d-add">+        # per (slug, device) — different voters proceed concurrently — and</span>
+<span class="d-add">+        # together they hold whether the app runs one worker or a fleet. A</span>
+<span class="d-add">+        # stripe held past the shed timeout (a wedged same-voter cast) sheds</span>
+<span class="d-add">+        # rather than parking this request thread behind it.</span>
+<span class="d-ctx">         ebid = rmap.graph.edge_block_id  # None unless this map has a block layer</span>
+<span class="d-del">-        with vote_store.voter_lock(redis_client, slug, device_id), _proposal_vote_lock:</span>
+<span class="d-add">+        stripe = _voter_lock_stripe(slug, device_id)</span>
+<span class="d-add">+        if not stripe.acquire(timeout=VOTE_LOCK_SHED_SECONDS):</span>
+<span class="d-add">+            return _shed_response(&quot;stripe&quot;, retry_after=2)</span>
+<span class="d-add">+        lock_wait_s = time.monotonic() - t_handler0</span>
+<span class="d-add">+        stripe_acquired = True</span>
+<span class="d-add">+        with vote_store.voter_lock(redis_client, slug, device_id):</span>
+<span class="d-ctx">             # Block-scoped clear-then-cast (docs/three-layer-model.md §4): the</span>
+<span class="d-ctx">             # plan clears this device&#x27;s same-type rows across every touched</span>
+<span class="d-ctx">             # block, then casts on exactly the selection edges.</span>
+<span class="d-ctx">             prior = get_voter_type_rows(slug, vt_id, device_id)</span>
+<span class="d-ctx">             plan = vote_semantics.plan_block_vote(edge_ids, direction, prior, ebid)</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-            reversed_any = False</span>
+<span class="d-del">-            changed: list[int] = []</span>
+<span class="d-ctx">             at_cap: list[int] = []  # fresh device, IP at cap → LRU takeover below</span>
+<span class="d-ctx">             casts: list[tuple[int, int]] = []</span>
+<span class="d-ctx">             for eid, prev in plan.cast:</span>
+<span class="d-hunk">@@ -1134,26 +1280,28 @@ def cast_vote():</span>
+<span class="d-ctx">                     continue</span>
+<span class="d-ctx">                 casts.append((eid, prev))</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-            def _apply(eid: int, prev: int, new: int) -&gt; None:</span>
+<span class="d-del">-                vote_store.apply_directional(</span>
+<span class="d-del">-                    redis_client, slug, eid, mode_int, vt_id, new, prev</span>
+<span class="d-add">+            # Apply the whole plan batched — one pipeline for the edge counters,</span>
+<span class="d-add">+            # two for the block mirror — instead of ~2 round trips per edge</span>
+<span class="d-add">+            # (the measured bulk of vote latency at scale; changelog</span>
+<span class="d-add">+            # 2026-07-08-agent-load-test.html finding #2). Order is plan order:</span>
+<span class="d-add">+            # clears then casts, matching the per-edge loop this replaces.</span>
+<span class="d-add">+            ops = ([(eid, prev, 0) for eid, prev in plan.clear]</span>
+<span class="d-add">+                   + [(eid, prev, direction) for eid, prev in casts])</span>
+<span class="d-add">+            vote_store.apply_directional_batch(</span>
+<span class="d-add">+                redis_client, slug, ops, mode_int, vt_id</span>
+<span class="d-add">+            )</span>
+<span class="d-add">+            # Mirror onto each edge&#x27;s block (deduped per device); no-op without</span>
+<span class="d-add">+            # a block layer or for edges outside any block.</span>
+<span class="d-add">+            if ebid is not None:</span>
+<span class="d-add">+                n_edges = len(ebid)</span>
+<span class="d-add">+                block_ops = [(int(ebid[eid]), prev, new)</span>
+<span class="d-add">+                             for eid, prev, new in ops if 0 &lt;= eid &lt; n_edges]</span>
+<span class="d-add">+                block_votes.apply_block_deltas_batch(</span>
+<span class="d-add">+                    redis_client, slug, mode_int, block_ops, vt_id, device_id</span>
+<span class="d-ctx">                 )</span>
+<span class="d-del">-                # Mirror onto the edge&#x27;s block (deduped per device); no-op without</span>
+<span class="d-del">-                # a block layer or for edges outside any block.</span>
+<span class="d-del">-                if ebid is not None and 0 &lt;= eid &lt; len(ebid):</span>
+<span class="d-del">-                    b = int(ebid[eid])</span>
+<span class="d-del">-                    if b &gt;= 0:</span>
+<span class="d-del">-                        block_votes.apply_block_delta(</span>
+<span class="d-del">-                            redis_client, slug, mode_int, b, vt_id,</span>
+<span class="d-del">-                            new, prev, device_id)</span>
+<span class="d-del">-                changed.append(eid)</span>
+<span class="d-del">-</span>
+<span class="d-del">-            for eid, prev in plan.clear:</span>
+<span class="d-del">-                _apply(eid, prev, 0)</span>
+<span class="d-del">-            for eid, prev in casts:</span>
+<span class="d-del">-                _apply(eid, prev, direction)</span>
+<span class="d-del">-                if prev in (vote_store.UP, vote_store.DOWN):</span>
+<span class="d-del">-                    reversed_any = True</span>
+<span class="d-add">+            changed = [eid for eid, _, _ in ops]</span>
+<span class="d-add">+            reversed_any = any(prev in (vote_store.UP, vote_store.DOWN)</span>
+<span class="d-add">+                               for _, prev in casts)</span>
+<span class="d-ctx">             cleared = [eid for eid, _ in plan.clear]</span>
+<span class="d-ctx">             cast_ids = [eid for eid, _ in casts]</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1202,8 +1350,13 @@ def cast_vote():</span>
+<span class="d-ctx">                     direction=direction or vote_store.UP, reversed_vote=reversed_any,</span>
+<span class="d-ctx">                     vt_counts=vt_counts, block_counts=block_counts,</span>
+<span class="d-ctx">                 )</span>
+<span class="d-del">-                _invalidate_vote_cache(slug)</span>
+<span class="d-add">+                # No cache invalidation here: publish_delta bumped the revision,</span>
+<span class="d-add">+                # which makes the cached graph-votes snapshot rev-stale on its</span>
+<span class="d-add">+                # own; the endpoint&#x27;s debounce decides whether to briefly keep</span>
+<span class="d-add">+                # serving it. Hard invalidation is reserved for structural</span>
+<span class="d-add">+                # changes (resnap, block re-bake, admin rebuild).</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+        _vote_metrics_record(lock_wait_s, time.monotonic() - t_handler0)</span>
+<span class="d-ctx">         return jsonify({</span>
+<span class="d-ctx">             &quot;success&quot;: True, &quot;edge_ids&quot;: edge_ids, &quot;changed&quot;: changed,</span>
+<span class="d-ctx">             &quot;cleared&quot;: cleared,  # edges unvoted (block-scoped clear) but not cast</span>
+<span class="d-hunk">@@ -1214,6 +1367,10 @@ def cast_vote():</span>
+<span class="d-ctx">     except Exception as e:</span>
+<span class="d-ctx">         logger.error(f&quot;[VOTE] Error: {e}&quot;)</span>
+<span class="d-ctx">         return jsonify({&quot;error&quot;: f&quot;Vote failed: {str(e)}&quot;}), 500</span>
+<span class="d-add">+    finally:</span>
+<span class="d-add">+        if stripe_acquired:</span>
+<span class="d-add">+            stripe.release()</span>
+<span class="d-add">+        _vote_inflight.release()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def _resnap_city_maps(city_id: str) -&gt; None:</span>
+<span class="d-hunk">@@ -1697,40 +1854,83 @@ def graph_topology():</span>
+<span class="d-ctx">     return resp</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+def _graph_votes_etag(slug: str, mode: str | None, entry: dict, gzipped: bool) -&gt; str:</span>
+<span class="d-add">+    &quot;&quot;&quot;ETag derived from the SERVED entry (its rev + blocks stamp), never from</span>
+<span class="d-add">+    the live revision — the etag must always describe the body it rides with</span>
+<span class="d-add">+    (a live-rev etag over a debounced body is the 304-pins-stale-body bug of</span>
+<span class="d-add">+    the blocks re-bake incident). The encoding rides in the tag because the</span>
+<span class="d-add">+    gzip and identity representations are different bytes.&quot;&quot;&quot;</span>
+<span class="d-add">+    bstamp = entry.get(&quot;bstamp&quot;)</span>
+<span class="d-add">+    return (f&#x27;&quot;v-{slug}-{mode or &quot;all&quot;}-{entry[&quot;rev&quot;]}&#x27;</span>
+<span class="d-add">+            f&#x27;{f&quot;-b{bstamp}&quot; if bstamp else &quot;&quot;}{&quot;-gz&quot; if gzipped else &quot;&quot;}&quot;&#x27;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> @app.route(&quot;/api/graph-votes&quot;, methods=[&quot;GET&quot;])</span>
+<span class="d-ctx"> def graph_votes():</span>
+<span class="d-ctx">     &quot;&quot;&quot;Return per-edge and per-node vote arrays for a map.</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    Indices match /api/graph-topology. Cached by the map&#x27;s revision.</span>
+<span class="d-add">+    Indices match /api/graph-topology. Served from a per-(map, mode) snapshot</span>
+<span class="d-add">+    cache: a snapshot serves while its revision is current OR for a short</span>
+<span class="d-add">+    debounce window after it staled (clients reconcile forward from WS deltas,</span>
+<span class="d-add">+    which carry authoritative counts) — under sustained voting the revision</span>
+<span class="d-add">+    bumps per cast, and rebuilding the full arrays per cast was finding #3 of</span>
+<span class="d-add">+    changelog/2026-07-08-agent-load-test.html. Bodies are pre-gzipped once per</span>
+<span class="d-add">+    rebuild and shared by every client.</span>
+<span class="d-ctx">     &quot;&quot;&quot;</span>
+<span class="d-ctx">     rmap = resolve_map(request.args.get(&quot;map&quot;))</span>
+<span class="d-ctx">     if _locked(rmap):</span>
+<span class="d-ctx">         return _locked_response()</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    # ETag first, load second: the revision lives in Redis, so a client whose</span>
+<span class="d-del">-    # cached copy is current gets its 304 without this instance ever loading</span>
+<span class="d-del">-    # the graph — ensure_loaded() on a cold instance took 10s+ and rode P95.</span>
+<span class="d-ctx">     mode = request.args.get(&quot;mode&quot;) or None</span>
+<span class="d-add">+    cache_key = f&quot;{rmap.slug}:{mode}&quot; if mode else rmap.slug</span>
+<span class="d-ctx">     rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)</span>
+<span class="d-del">-    # blocks_stamp (a stat, no graph load) rides in the validator: a blocks</span>
+<span class="d-del">-    # re-bake renumbers block ids WITHOUT bumping rev, and a 304 would pin</span>
+<span class="d-del">-    # clients on a body whose block_votes index the previous block set.</span>
+<span class="d-add">+    # blocks_stamp (a stat, no graph load) gates servability: a blocks re-bake</span>
+<span class="d-add">+    # renumbers block ids WITHOUT bumping rev, so an entry built against the</span>
+<span class="d-add">+    # previous block set must not serve even inside the debounce window.</span>
+<span class="d-ctx">     bstamp = rmap.graph.blocks_stamp()</span>
+<span class="d-del">-    etag = f&#x27;&quot;v-{rmap.slug}-{mode or &quot;all&quot;}-{rev}{f&quot;-b{bstamp}&quot; if bstamp else &quot;&quot;}&quot;&#x27;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    entry = _vote_cache_peek(cache_key)</span>
+<span class="d-add">+    if entry is not None and entry.get(&quot;bstamp&quot;) != bstamp:</span>
+<span class="d-add">+        entry = None</span>
+<span class="d-add">+    servable = entry is not None and (</span>
+<span class="d-add">+        entry[&quot;rev&quot;] == rev</span>
+<span class="d-add">+        or time.monotonic() - entry[&quot;built&quot;] &lt; _VOTE_CACHE_DEBOUNCE</span>
+<span class="d-add">+    )</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if not servable:</span>
+<span class="d-add">+        # Stale-while-revalidate: one caller rebuilds; the rest keep serving</span>
+<span class="d-add">+        # the previous snapshot instead of queueing on the build lock (they</span>
+<span class="d-add">+        # only block when there is nothing to serve at all).</span>
+<span class="d-add">+        lock = _build_lock_for(cache_key)</span>
+<span class="d-add">+        if lock.acquire(blocking=entry is None):</span>
+<span class="d-add">+            try:</span>
+<span class="d-add">+                rmap.graph.ensure_loaded()</span>
+<span class="d-add">+                fresh_rev = int(</span>
+<span class="d-add">+                    redis_client.get(vote_store.revision_key(rmap.slug)) or 0)</span>
+<span class="d-add">+                entry = (_vote_cache_get(cache_key, fresh_rev)</span>
+<span class="d-add">+                         or _build_graph_votes_body_locked(</span>
+<span class="d-add">+                             rmap, mode, fresh_rev, cache_key))</span>
+<span class="d-add">+            except Exception as e:</span>
+<span class="d-add">+                return jsonify({&quot;error&quot;: str(e)}), 500</span>
+<span class="d-add">+            finally:</span>
+<span class="d-add">+                lock.release()</span>
+<span class="d-add">+        # else: a rebuild is in flight — serve the stale entry we hold.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    wants_gzip = &quot;gzip&quot; in (request.headers.get(&quot;Accept-Encoding&quot;) or &quot;&quot;).lower()</span>
+<span class="d-add">+    etag = _graph_votes_etag(rmap.slug, mode, entry, wants_gzip)</span>
+<span class="d-ctx">     if request.headers.get(&quot;If-None-Match&quot;) == etag:</span>
+<span class="d-ctx">         resp = app.response_class(status=304)</span>
+<span class="d-ctx">         resp.headers[&quot;ETag&quot;] = etag</span>
+<span class="d-ctx">         resp.headers[&quot;Cache-Control&quot;] = &quot;public, max-age=5&quot;</span>
+<span class="d-add">+        resp.headers[&quot;Vary&quot;] = &quot;Accept-Encoding&quot;</span>
+<span class="d-ctx">         return resp</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    rmap.graph.ensure_loaded()</span>
+<span class="d-del">-</span>
+<span class="d-del">-    try:</span>
+<span class="d-del">-        body = _build_graph_votes_body(rmap, mode)</span>
+<span class="d-del">-    except Exception as e:</span>
+<span class="d-del">-        return jsonify({&quot;error&quot;: str(e)}), 500</span>
+<span class="d-del">-</span>
+<span class="d-del">-    resp = app.response_class(response=body, status=200, mimetype=&quot;application/json&quot;)</span>
+<span class="d-add">+    resp = app.response_class(</span>
+<span class="d-add">+        response=entry[&quot;gz&quot;] if wants_gzip else entry[&quot;body&quot;],</span>
+<span class="d-add">+        status=200, mimetype=&quot;application/json&quot;)</span>
+<span class="d-add">+    if wants_gzip:</span>
+<span class="d-add">+        resp.headers[&quot;Content-Encoding&quot;] = &quot;gzip&quot;</span>
+<span class="d-add">+    resp.headers[&quot;Vary&quot;] = &quot;Accept-Encoding&quot;</span>
+<span class="d-ctx">     resp.headers[&quot;Cache-Control&quot;] = &quot;public, max-age=5&quot;</span>
+<span class="d-ctx">     resp.headers[&quot;ETag&quot;] = etag</span>
+<span class="d-ctx">     return resp</span>
+<span class="d-hunk">@@ -1855,10 +2055,25 @@ def admin_stats():</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     result[&quot;database&quot;] = database.get_admin_counts() if DATABASE_URL else {&quot;connected&quot;: False}</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    # ru_maxrss is bytes on macOS, kilobytes on Linux.</span>
+<span class="d-add">+    ru = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss</span>
+<span class="d-add">+    rss_mb = round(ru / (1024 * 1024 if sys.platform == &quot;darwin&quot; else 1024), 1)</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     result[&quot;app&quot;] = {</span>
+<span class="d-ctx">         &quot;loaded_cities&quot;: graph_registry.loaded_ids(),</span>
+<span class="d-ctx">         &quot;cities&quot;: list(CITIES),</span>
+<span class="d-ctx">         &quot;vote_types_cached&quot;: len(vote_store.all_vote_types()),</span>
+<span class="d-add">+        &quot;peak_rss_mb&quot;: rss_mb,</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    # The saturation signals /health can&#x27;t show (it stayed 1-2ms through the</span>
+<span class="d-add">+    # July melt): vote throughput, lock waits, handler latency, shed counts,</span>
+<span class="d-add">+    # and live WS fan-out size.</span>
+<span class="d-add">+    result[&quot;votes&quot;] = _vote_metrics_snapshot()</span>
+<span class="d-add">+    result[&quot;ws&quot;] = {&quot;subscribers&quot;: delta_hub.subscriber_count()}</span>
+<span class="d-add">+    result[&quot;graph_votes_cache&quot;] = {</span>
+<span class="d-add">+        &quot;entries&quot;: len(_vote_cache),</span>
+<span class="d-add">+        &quot;mb&quot;: round(_vote_cache_bytes / (1024 * 1024), 1),</span>
+<span class="d-add">+        &quot;budget_mb&quot;: _VOTE_CACHE_MAX_MB,</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     return jsonify(result)</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/block_votes.py</span>
+            <span class="stat"><span class="d-add">+67</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · block_votes.py</span>
+        <span class="ctx-sum">deduped per-block projection of edge votes (bd:/bagg: hashes)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">block_votes.py</span>
+        <span class="ctx-sum">~350 LOC — incremental write path, read path, rebuild_from_db</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">key helpers + packing</span><span class="ol-sum">bd:/bagg: layout</span></li><li class="changed"><span class="ol-label">write path</span><span class="ol-sum">apply_block_delta (kept) + NEW apply_block_deltas_batch (two-phase pipelined)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">read path</span><span class="ol-sum">build_block_arrays · read_block_vt_counts</span></li><li class="dim"><span class="ol-label">rebuild</span><span class="ol-sum">clear + rebuild_from_db</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>apply_block_deltas_batch — phase A: all bd: HINCRBYs pipelined; phase B: bagg moves from boundary crossings, HDEL only on final multiplicity ≤ 0</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/block_votes.py b/server/block_votes.py</span>
+<span class="d-meta">index 910b39d..50df906 100644</span>
+<span class="d-meta">--- a/server/block_votes.py</span>
+<span class="d-meta">+++ b/server/block_votes.py</span>
+<span class="d-hunk">@@ -111,6 +111,73 @@ def apply_block_deltas(</span>
+<span class="d-ctx">                           new_dir, prev_dirs.get(eid, 0), device_id)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+def apply_block_deltas_batch(</span>
+<span class="d-add">+    redis_client, slug: str, mode: int,</span>
+<span class="d-add">+    block_ops: list[tuple[int, int, int]], vt_id: int, device_id: str,</span>
+<span class="d-add">+) -&gt; None:</span>
+<span class="d-add">+    &quot;&quot;&quot;Apply a whole vote plan&#x27;s block deltas in TWO round trips.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    `block_ops` is [(block_id, prev_dir, new_dir), …] in plan order — one entry</span>
+<span class="d-add">+    per changed edge (multiplicity per edge is the point; do NOT dedupe blocks).</span>
+<span class="d-add">+    Equivalent to apply_block_delta per edge, but pipelined: the loop version</span>
+<span class="d-add">+    cost 1–3 unpipelined commands per edge (~150–400 round trips on a route</span>
+<span class="d-add">+    vote — changelog/2026-07-08-agent-load-test.html finding #2).</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Phase A pipelines every bd: multiplicity HINCRBY in op order. Phase B</span>
+<span class="d-add">+    derives from the returned multiplicities:</span>
+<span class="d-add">+      · bagg moves on every presence-boundary crossing (+1 result == 1,</span>
+<span class="d-add">+        −1 result == 0), same as the loop — crossings are real regardless of</span>
+<span class="d-add">+        interleaving, and opposite crossings on one field cancel via summing.</span>
+<span class="d-add">+      · a device field is deleted only when the LAST op touching it left</span>
+<span class="d-add">+        it ≤ 0 — deferring HDEL per-op could wipe a field a later op in the</span>
+<span class="d-add">+        same plan re-created (clear on edge A + cast on edge B, same block).</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    from vote_store import dir_to_bit, UP, DOWN</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # Phase A: (bd_key, +1/-1 increment) per boundary-relevant transition.</span>
+<span class="d-add">+    incrs: list[tuple[str, int]] = []</span>
+<span class="d-add">+    for block_id, prev_dir, new_dir in block_ops:</span>
+<span class="d-add">+        if new_dir == prev_dir or block_id &lt; 0:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        if new_dir in (UP, DOWN):</span>
+<span class="d-add">+            incrs.append((bd_key(slug, mode, block_id, vt_id, dir_to_bit(new_dir)), 1))</span>
+<span class="d-add">+        if prev_dir in (UP, DOWN):</span>
+<span class="d-add">+            incrs.append((bd_key(slug, mode, block_id, vt_id, dir_to_bit(prev_dir)), -1))</span>
+<span class="d-add">+    if not incrs:</span>
+<span class="d-add">+        return</span>
+<span class="d-add">+    pipe = redis_client.pipeline()</span>
+<span class="d-add">+    for bdk, delta in incrs:</span>
+<span class="d-add">+        pipe.hincrby(bdk, device_id, delta)</span>
+<span class="d-add">+    results = pipe.execute()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # Phase B: aggregate boundary crossings + final-state cleanup.</span>
+<span class="d-add">+    bagg_deltas: dict[str, int] = {}   # bd_key → net bagg move</span>
+<span class="d-add">+    final_mult: dict[str, int] = {}    # bd_key → multiplicity after last op</span>
+<span class="d-add">+    for (bdk, delta), n in zip(incrs, results):</span>
+<span class="d-add">+        if delta &gt; 0 and n == 1:</span>
+<span class="d-add">+            bagg_deltas[bdk] = bagg_deltas.get(bdk, 0) + 1</span>
+<span class="d-add">+        elif delta &lt; 0 and n == 0:</span>
+<span class="d-add">+            bagg_deltas[bdk] = bagg_deltas.get(bdk, 0) - 1</span>
+<span class="d-add">+        final_mult[bdk] = n</span>
+<span class="d-add">+</span>
+<span class="d-add">+    bagg = bagg_key(slug, mode)</span>
+<span class="d-add">+    pipe = redis_client.pipeline()</span>
+<span class="d-add">+    queued = False</span>
+<span class="d-add">+    for bdk, n in final_mult.items():</span>
+<span class="d-add">+        if n &lt;= 0:</span>
+<span class="d-add">+            pipe.hdel(bdk, device_id)</span>
+<span class="d-add">+            queued = True</span>
+<span class="d-add">+    for bdk, move in bagg_deltas.items():</span>
+<span class="d-add">+        if move == 0:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        # bd:&lt;slug&gt;:&lt;mode&gt;:&lt;block&gt;:&lt;vt&gt;:&lt;dir&gt;</span>
+<span class="d-add">+        _, _, _, block_s, vt_s, dir_s = bdk.split(&quot;:&quot;)</span>
+<span class="d-add">+        pipe.hincrby(bagg, str(pack_block_field(int(block_s), int(vt_s), int(dir_s))), move)</span>
+<span class="d-add">+        queued = True</span>
+<span class="d-add">+    if queued:</span>
+<span class="d-add">+        pipe.execute()</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> # ── Read path ───────────────────────────────────────────────────────────────</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def build_block_arrays(redis_client, slug: str, mode: int, n_blocks: int) -&gt; dict:</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/database.py</span>
+            <span class="stat"><span class="d-add">+5</span> / <span class="d-del">-3</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · database.py</span>
+        <span class="ctx-sum">Postgres persistence (pool, votes, maps)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">database.py</span>
+        <span class="ctx-sum">~1000 LOC — one-line change</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">connection pool</span><span class="ol-sum">DB_POOL_MAX env override (default 5)</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>_POOL_MAX = int(os.environ.get(&#x27;DB_POOL_MAX&#x27;, &#x27;5&#x27;))</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/database.py b/server/database.py</span>
+<span class="d-meta">index 33ecb89..5107736 100644</span>
+<span class="d-meta">--- a/server/database.py</span>
+<span class="d-meta">+++ b/server/database.py</span>
+<span class="d-hunk">@@ -36,9 +36,11 @@ DATABASE_URL = os.environ.get(&quot;DATABASE_URL&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Connection pool. A pool (not the old shared singleton connection) is REQUIRED</span>
+<span class="d-ctx"> # once psycopg2 yields to the gevent hub mid-query: two greenlets interleaving</span>
+<span class="d-del">-# on one connection raise &quot;another command is already in progress&quot;. Sized so</span>
+<span class="d-del">-# 4 app instances stay under db-f1-micro&#x27;s ~25-connection ceiling.</span>
+<span class="d-del">-_POOL_MAX = 5</span>
+<span class="d-add">+# on one connection raise &quot;another command is already in progress&quot;. Default</span>
+<span class="d-add">+# sized so 4 app instances stay under db-f1-micro&#x27;s ~25-connection ceiling;</span>
+<span class="d-add">+# DB_POOL_MAX overrides where the DB allows more (votes now run concurrently</span>
+<span class="d-add">+# per voter, so the pool is the write path&#x27;s throughput governor).</span>
+<span class="d-add">+_POOL_MAX = int(os.environ.get(&quot;DB_POOL_MAX&quot;, &quot;5&quot;))</span>
+<span class="d-ctx"> _pool: Optional[ThreadedConnectionPool] = None</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/delta_hub.py</span>
+            <span class="stat"><span class="d-add">+164</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · delta_hub.py</span>
+        <span class="ctx-sum">NEW — per-process fan-out hub for vote deltas</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">delta_hub.py</span>
+        <span class="ctx-sum">~180 LOC — listener thread, per-map buffers, merged flushes, subscriber queues</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Subscriber</span><span class="ol-sum">bounded queue + overflow Event per WS client</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">DeltaHub</span><span class="ol-sum">subscribe/unsubscribe · listener loop · _ingest/_flush (sync, unit-tested)</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>_ingest — parse, drop if no local subscriber, buffer per map</li><li>_flush — sort by rev, hole-grace hold (300ms), merged payload to every queue, overflow → flag</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/delta_hub.py b/server/delta_hub.py</span>
+<span class="d-ctx">new file mode 100644</span>
+<span class="d-meta">index 0000000..e3c66b0</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/delta_hub.py</span>
+<span class="d-hunk">@@ -0,0 +1,164 @@</span>
+<span class="d-add">+&quot;&quot;&quot;Per-process fan-out hub for vote deltas — one Redis pubsub listener,</span>
+<span class="d-add">+coalesced delivery to every connected WebSocket client.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Before this, EVERY WebSocket client held its own Redis pubsub connection and</span>
+<span class="d-add">+its own 10Hz polling thread, and every vote&#x27;s delta was sent to every client</span>
+<span class="d-add">+individually — O(votes x clients) sends plus a thread and a connection per</span>
+<span class="d-add">+client (findings #4 of changelog/2026-07-08-agent-load-test.html). The hub</span>
+<span class="d-add">+inverts that: one listener thread receives each map&#x27;s deltas once, buffers</span>
+<span class="d-add">+them briefly, and flushes a merged {&quot;type&quot;: &quot;deltas&quot;, &quot;rev&quot;: &lt;max&gt;,</span>
+<span class="d-add">+&quot;items&quot;: [...]} message to each subscribed client queue at FLUSH_INTERVAL.</span>
+<span class="d-add">+Clients apply items in rev order; merged counts are authoritative SETs, so</span>
+<span class="d-add">+coalescing is lossless.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Ordering: votes claim their rev via INCR then publish, so two concurrent</span>
+<span class="d-add">+casts can publish out of rev order. Within a flush window the sort fixes any</span>
+<span class="d-add">+inversion; a batch whose lowest rev leaves a hole above the last flushed rev</span>
+<span class="d-add">+is HELD for HOLE_GRACE to let the straggler land — after that it flushes</span>
+<span class="d-add">+anyway, and the client&#x27;s gap detection (which compares the first delivered</span>
+<span class="d-add">+rev against its own last-seen rev) decides whether to refetch. Revision bumps</span>
+<span class="d-add">+that never publish a delta (manual `INCR vote_rev:&lt;slug&gt;`, hydration) surface</span>
+<span class="d-add">+the same way: as a gap the client heals with one refetch.</span>
+<span class="d-add">+</span>
+<span class="d-add">+A slow client whose queue overflows gets its `overflowed` flag set instead of</span>
+<span class="d-add">+silently losing deltas; the WS handler closes the socket, and the client&#x27;s</span>
+<span class="d-add">+reconnect + gap-refetch resynchronizes it.</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import json</span>
+<span class="d-add">+import logging</span>
+<span class="d-add">+import queue</span>
+<span class="d-add">+import threading</span>
+<span class="d-add">+import time</span>
+<span class="d-add">+</span>
+<span class="d-add">+logger = logging.getLogger(__name__)</span>
+<span class="d-add">+</span>
+<span class="d-add">+FLUSH_INTERVAL = 0.1   # seconds between merged flushes per map</span>
+<span class="d-add">+HOLE_GRACE = 0.3       # how long to hold a batch that leaves a rev hole</span>
+<span class="d-add">+QUEUE_MAX = 256        # merged payloads a client may lag before resync</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+class Subscriber:</span>
+<span class="d-add">+    &quot;&quot;&quot;One connected WebSocket client: its payload queue + overflow signal.&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    __slots__ = (&quot;q&quot;, &quot;overflowed&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def __init__(self):</span>
+<span class="d-add">+        self.q: queue.Queue = queue.Queue(maxsize=QUEUE_MAX)</span>
+<span class="d-add">+        self.overflowed = threading.Event()</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+class DeltaHub:</span>
+<span class="d-add">+    def __init__(self, redis_factory,</span>
+<span class="d-add">+                 flush_interval: float = FLUSH_INTERVAL,</span>
+<span class="d-add">+                 hole_grace: float = HOLE_GRACE):</span>
+<span class="d-add">+        self._redis_factory = redis_factory</span>
+<span class="d-add">+        self._flush_interval = flush_interval</span>
+<span class="d-add">+        self._hole_grace = hole_grace</span>
+<span class="d-add">+        self._lock = threading.Lock()</span>
+<span class="d-add">+        self._subs: dict[str, set[Subscriber]] = {}</span>
+<span class="d-add">+        self._buf: dict[str, list[dict]] = {}</span>
+<span class="d-add">+        self._buf_since: dict[str, float] = {}</span>
+<span class="d-add">+        self._last_flushed: dict[str, int] = {}</span>
+<span class="d-add">+        self._thread: threading.Thread | None = None</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # ── Subscription (called by WS handlers) ────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def subscribe(self, slug: str) -&gt; Subscriber:</span>
+<span class="d-add">+        sub = Subscriber()</span>
+<span class="d-add">+        with self._lock:</span>
+<span class="d-add">+            self._subs.setdefault(slug, set()).add(sub)</span>
+<span class="d-add">+            self._ensure_thread()</span>
+<span class="d-add">+        return sub</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def unsubscribe(self, slug: str, sub: Subscriber) -&gt; None:</span>
+<span class="d-add">+        with self._lock:</span>
+<span class="d-add">+            subs = self._subs.get(slug)</span>
+<span class="d-add">+            if subs is None:</span>
+<span class="d-add">+                return</span>
+<span class="d-add">+            subs.discard(sub)</span>
+<span class="d-add">+            if not subs:</span>
+<span class="d-add">+                del self._subs[slug]</span>
+<span class="d-add">+                self._buf.pop(slug, None)</span>
+<span class="d-add">+                self._buf_since.pop(slug, None)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def subscriber_count(self, slug: str | None = None) -&gt; int:</span>
+<span class="d-add">+        with self._lock:</span>
+<span class="d-add">+            if slug is not None:</span>
+<span class="d-add">+                return len(self._subs.get(slug, ()))</span>
+<span class="d-add">+            return sum(len(s) for s in self._subs.values())</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # ── Listener thread ──────────────────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def _ensure_thread(self) -&gt; None:</span>
+<span class="d-add">+        if self._thread is None or not self._thread.is_alive():</span>
+<span class="d-add">+            self._thread = threading.Thread(</span>
+<span class="d-add">+                target=self._run, daemon=True, name=&quot;delta-hub&quot;)</span>
+<span class="d-add">+            self._thread.start()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def _run(self) -&gt; None:</span>
+<span class="d-add">+        while True:</span>
+<span class="d-add">+            try:</span>
+<span class="d-add">+                self._listen_loop()</span>
+<span class="d-add">+            except Exception:</span>
+<span class="d-add">+                logger.exception(&quot;[DELTAHUB] listener died; reconnecting in 1s&quot;)</span>
+<span class="d-add">+                time.sleep(1)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def _listen_loop(self) -&gt; None:</span>
+<span class="d-add">+        r = self._redis_factory()</span>
+<span class="d-add">+        ps = r.pubsub(ignore_subscribe_messages=True)</span>
+<span class="d-add">+        ps.psubscribe(&quot;vote_deltas:*&quot;)</span>
+<span class="d-add">+        logger.info(&quot;[DELTAHUB] subscribed to vote_deltas:*&quot;)</span>
+<span class="d-add">+        next_flush = time.monotonic() + self._flush_interval</span>
+<span class="d-add">+        while True:</span>
+<span class="d-add">+            timeout = max(0.01, next_flush - time.monotonic())</span>
+<span class="d-add">+            msg = ps.get_message(timeout=timeout)</span>
+<span class="d-add">+            if msg and msg.get(&quot;type&quot;) == &quot;pmessage&quot;:</span>
+<span class="d-add">+                self._ingest(msg[&quot;channel&quot;], msg[&quot;data&quot;])</span>
+<span class="d-add">+            now = time.monotonic()</span>
+<span class="d-add">+            if now &gt;= next_flush:</span>
+<span class="d-add">+                self._flush(now)</span>
+<span class="d-add">+                next_flush = now + self._flush_interval</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # ── Core (synchronous; unit-testable without the thread) ────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def _ingest(self, channel: str, data) -&gt; None:</span>
+<span class="d-add">+        slug = channel.split(&quot;:&quot;, 1)[1] if &quot;:&quot; in channel else None</span>
+<span class="d-add">+        if not slug:</span>
+<span class="d-add">+            return</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            delta = json.loads(data)</span>
+<span class="d-add">+        except (ValueError, TypeError):</span>
+<span class="d-add">+            return</span>
+<span class="d-add">+        with self._lock:</span>
+<span class="d-add">+            if slug not in self._subs:</span>
+<span class="d-add">+                return  # no local client cares about this map</span>
+<span class="d-add">+            buf = self._buf.setdefault(slug, [])</span>
+<span class="d-add">+            if not buf:</span>
+<span class="d-add">+                self._buf_since[slug] = time.monotonic()</span>
+<span class="d-add">+            buf.append(delta)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def _flush(self, now: float) -&gt; None:</span>
+<span class="d-add">+        with self._lock:</span>
+<span class="d-add">+            for slug in [s for s, b in self._buf.items() if b]:</span>
+<span class="d-add">+                buf = self._buf[slug]</span>
+<span class="d-add">+                buf.sort(key=lambda d: d.get(&quot;rev&quot;, 0))</span>
+<span class="d-add">+                last = self._last_flushed.get(slug)</span>
+<span class="d-add">+                min_rev = buf[0].get(&quot;rev&quot;, 0)</span>
+<span class="d-add">+                if (last is not None and min_rev &gt; last + 1</span>
+<span class="d-add">+                        and now - self._buf_since.get(slug, now) &lt; self._hole_grace):</span>
+<span class="d-add">+                    continue  # hold for an out-of-order straggler</span>
+<span class="d-add">+                self._buf[slug] = []</span>
+<span class="d-add">+                self._last_flushed[slug] = max(</span>
+<span class="d-add">+                    buf[-1].get(&quot;rev&quot;, 0), last or 0)</span>
+<span class="d-add">+                payload = json.dumps(</span>
+<span class="d-add">+                    {&quot;type&quot;: &quot;deltas&quot;, &quot;rev&quot;: buf[-1].get(&quot;rev&quot;, 0),</span>
+<span class="d-add">+                     &quot;items&quot;: buf})</span>
+<span class="d-add">+                for sub in self._subs.get(slug, ()):</span>
+<span class="d-add">+                    try:</span>
+<span class="d-add">+                        sub.q.put_nowait(payload)</span>
+<span class="d-add">+                    except queue.Full:</span>
+<span class="d-add">+                        # Too far behind to catch up delta-by-delta: signal the</span>
+<span class="d-add">+                        # WS handler to drop the socket; reconnect + the</span>
+<span class="d-add">+                        # client&#x27;s gap refetch resync it.</span>
+<span class="d-add">+                        sub.overflowed.set()</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/requirements.in</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · deps</span>
+        <span class="ctx-sum">hand-written top-level dependency list (uv two-file flow)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">requirements.in</span>
+        <span class="ctx-sum">20 lines — one addition</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">deps</span><span class="ol-sum">+ orjson</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>orjson — C-speed JSON for the 37MB snapshot rebuild</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/requirements.in b/server/requirements.in</span>
+<span class="d-meta">index de0d5b3..b3e2884 100644</span>
+<span class="d-meta">--- a/server/requirements.in</span>
+<span class="d-meta">+++ b/server/requirements.in</span>
+<span class="d-hunk">@@ -17,3 +17,4 @@ pmtiles</span>
+<span class="d-ctx"> mercantile</span>
+<span class="d-ctx"> mapbox-vector-tile</span>
+<span class="d-ctx"> psycogreen</span>
+<span class="d-add">+orjson</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/requirements.txt</span>
+            <span class="stat"><span class="d-add">+3</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · deps</span>
+        <span class="ctx-sum">uv-compiled lockfile</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">requirements.txt</span>
+        <span class="ctx-sum">compiled from requirements.in</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">pins</span><span class="ol-sum">+ orjson==3.11.9</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>orjson==3.11.9</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/requirements.txt b/server/requirements.txt</span>
+<span class="d-meta">index 10a5959..29bc933 100644</span>
+<span class="d-meta">--- a/server/requirements.txt</span>
+<span class="d-meta">+++ b/server/requirements.txt</span>
+<span class="d-hunk">@@ -1,5 +1,5 @@</span>
+<span class="d-ctx"> # This file was autogenerated by uv via the following command:</span>
+<span class="d-del">-#    uv pip compile requirements.in -o requirements.txt</span>
+<span class="d-add">+#    uv pip compile requirements.in -o requirements.txt --python env/bin/python</span>
+<span class="d-ctx"> blinker==1.9.0</span>
+<span class="d-ctx">     # via flask</span>
+<span class="d-ctx"> certifi==2025.11.12</span>
+<span class="d-hunk">@@ -54,6 +54,8 @@ numpy==2.4.0</span>
+<span class="d-ctx">     #   scikit-learn</span>
+<span class="d-ctx">     #   scipy</span>
+<span class="d-ctx">     #   shapely</span>
+<span class="d-add">+orjson==3.11.9</span>
+<span class="d-add">+    # via -r requirements.in</span>
+<span class="d-ctx"> osmium==4.3.1</span>
+<span class="d-ctx">     # via -r requirements.in</span>
+<span class="d-ctx"> packaging==25.0</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/tests/unit/test_block_votes.py</span>
+            <span class="stat"><span class="d-add">+69</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · tests</span>
+        <span class="ctx-sum">block projection invariants on fakeredis</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">test_block_votes.py</span>
+        <span class="ctx-sum">+4 tests</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">batch path</span><span class="ol-sum">route vote ≡ loop; clear-then-cast keeps field; full clear cleans; unmapped skipped</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>test_batch_matches_loop_route_vote</li><li>test_batch_clear_then_cast_same_block_keeps_field</li><li>test_batch_full_clear_removes_field_and_aggregate</li><li>test_batch_skips_unmapped_and_noop</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/tests/unit/test_block_votes.py b/server/tests/unit/test_block_votes.py</span>
+<span class="d-meta">index 902ae50..bf23fbb 100644</span>
+<span class="d-meta">--- a/server/tests/unit/test_block_votes.py</span>
+<span class="d-meta">+++ b/server/tests/unit/test_block_votes.py</span>
+<span class="d-hunk">@@ -130,3 +130,72 @@ def test_rebuild_no_warning_when_consistent(redis_client, caplog):</span>
+<span class="d-ctx">     with caplog.at_level(logging.WARNING, logger=&quot;block_votes&quot;):</span>
+<span class="d-ctx">         bv.rebuild_from_db(redis_client, SLUG, MODE, EDGE_BLOCK, rows)</span>
+<span class="d-ctx">     assert not [r for r in caplog.records if &quot;invariant violation&quot; in r.message]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+# ── Batched write path (apply_block_deltas_batch ≡ per-edge loop) ───────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _loop_apply(r, block_ops, device):</span>
+<span class="d-add">+    for b, prev, new in block_ops:</span>
+<span class="d-add">+        bv.apply_block_delta(r, SLUG, MODE, b, VT, new, prev, device)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _state(r):</span>
+<span class="d-add">+    &quot;&quot;&quot;(bagg nonzero fields, all bd hashes) — the full observable block state.&quot;&quot;&quot;</span>
+<span class="d-add">+    bagg = {k: v for k, v in r.hgetall(bv.bagg_key(SLUG, MODE)).items() if int(v) != 0}</span>
+<span class="d-add">+    bd = {}</span>
+<span class="d-add">+    for key in r.scan_iter(match=f&quot;bd:{SLUG}:{MODE}:*&quot;):</span>
+<span class="d-add">+        h = r.hgetall(key)</span>
+<span class="d-add">+        if h:</span>
+<span class="d-add">+            bd[key] = h</span>
+<span class="d-add">+    return bagg, bd</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_batch_matches_loop_route_vote(redis_client):</span>
+<span class="d-add">+    &quot;&quot;&quot;A route vote spanning both edges of block 10 + block 20, then a reversal.&quot;&quot;&quot;</span>
+<span class="d-add">+    import fakeredis</span>
+<span class="d-add">+    loop_r = fakeredis.FakeStrictRedis(decode_responses=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    fresh = [(10, 0, UP), (10, 0, UP), (20, 0, UP)]</span>
+<span class="d-add">+    reverse = [(10, UP, DOWN), (10, UP, DOWN), (20, UP, DOWN)]</span>
+<span class="d-add">+    for ops in (fresh, reverse):</span>
+<span class="d-add">+        bv.apply_block_deltas_batch(redis_client, SLUG, MODE, ops, VT, &quot;d1&quot;)</span>
+<span class="d-add">+        _loop_apply(loop_r, ops, &quot;d1&quot;)</span>
+<span class="d-add">+        assert _state(redis_client) == _state(loop_r)</span>
+<span class="d-add">+    assert total(redis_client, 10) == 1</span>
+<span class="d-add">+    assert total(redis_client, 20) == 1</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_batch_clear_then_cast_same_block_keeps_field(redis_client):</span>
+<span class="d-add">+    &quot;&quot;&quot;A plan that clears edge A and casts edge B in the SAME block must leave</span>
+<span class="d-add">+    the device present (multiplicity 1) — the deferred HDEL must not wipe the</span>
+<span class="d-add">+    field the cast re-created.&quot;&quot;&quot;</span>
+<span class="d-add">+    import fakeredis</span>
+<span class="d-add">+    loop_r = fakeredis.FakeStrictRedis(decode_responses=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # prior: d1 upvoted edge 0 (block 10). New selection: edge 1 only (block 10)</span>
+<span class="d-add">+    # → plan clears edge 0 (UP→0) and casts edge 1 (0→UP).</span>
+<span class="d-add">+    seed = [(10, 0, UP)]</span>
+<span class="d-add">+    plan = [(10, UP, 0), (10, 0, UP)]</span>
+<span class="d-add">+    for r, apply in ((redis_client, lambda o: bv.apply_block_deltas_batch(</span>
+<span class="d-add">+            r, SLUG, MODE, o, VT, &quot;d1&quot;)), (loop_r, lambda o: _loop_apply(loop_r, o, &quot;d1&quot;))):</span>
+<span class="d-add">+        apply(seed)</span>
+<span class="d-add">+        apply(plan)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    assert _state(redis_client) == _state(loop_r)</span>
+<span class="d-add">+    assert redis_client.hget(bv.bd_key(SLUG, MODE, 10, VT, 0), &quot;d1&quot;) == &quot;1&quot;</span>
+<span class="d-add">+    assert total(redis_client, 10) == 1  # still exactly one deduped vote</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_batch_full_clear_removes_field_and_aggregate(redis_client):</span>
+<span class="d-add">+    seed = [(10, 0, UP), (10, 0, UP)]</span>
+<span class="d-add">+    bv.apply_block_deltas_batch(redis_client, SLUG, MODE, seed, VT, &quot;d1&quot;)</span>
+<span class="d-add">+    bv.apply_block_deltas_batch(</span>
+<span class="d-add">+        redis_client, SLUG, MODE, [(10, UP, 0), (10, UP, 0)], VT, &quot;d1&quot;)</span>
+<span class="d-add">+    assert redis_client.hget(bv.bd_key(SLUG, MODE, 10, VT, 0), &quot;d1&quot;) is None</span>
+<span class="d-add">+    assert total(redis_client, 10) == 0</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_batch_skips_unmapped_and_noop(redis_client):</span>
+<span class="d-add">+    bv.apply_block_deltas_batch(</span>
+<span class="d-add">+        redis_client, SLUG, MODE, [(-1, 0, UP), (10, UP, UP)], VT, &quot;d1&quot;)</span>
+<span class="d-add">+    assert _state(redis_client) == ({}, {})</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/tests/unit/test_delta_hub.py</span>
+            <span class="stat"><span class="d-add">+131</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · tests</span>
+        <span class="ctx-sum">NEW — delta hub merge/ordering semantics, no threads or timing</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">test_delta_hub.py</span>
+        <span class="ctx-sum">7 tests driving _ingest/_flush synchronously</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">hub</span><span class="ol-sum">merge order · inversion absorb · hole-grace hold/expiry · isolation · overflow</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>seven tests pinning the merged-delivery contract</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/tests/unit/test_delta_hub.py b/server/tests/unit/test_delta_hub.py</span>
+<span class="d-ctx">new file mode 100644</span>
+<span class="d-meta">index 0000000..f024983</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/tests/unit/test_delta_hub.py</span>
+<span class="d-hunk">@@ -0,0 +1,131 @@</span>
+<span class="d-add">+&quot;&quot;&quot;Unit tests for delta_hub — merged fan-out of vote deltas.</span>
+<span class="d-add">+</span>
+<span class="d-add">+These drive _ingest/_flush synchronously (no listener thread, no timing) and</span>
+<span class="d-add">+pin: rev-ordered merging, inversion absorption within a window, the hole-grace</span>
+<span class="d-add">+hold for out-of-order stragglers, per-map isolation, and the slow-client</span>
+<span class="d-add">+overflow signal.</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+import json</span>
+<span class="d-add">+from types import SimpleNamespace</span>
+<span class="d-add">+</span>
+<span class="d-add">+import delta_hub as dh</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Stands in for the listener thread so subscribe() never starts a real one.</span>
+<span class="d-add">+_FAKE_THREAD = SimpleNamespace(is_alive=lambda: True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def make_hub(**kw):</span>
+<span class="d-add">+    hub = dh.DeltaHub(redis_factory=lambda: None, **kw)</span>
+<span class="d-add">+    hub._thread = _FAKE_THREAD</span>
+<span class="d-add">+    return hub</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def ingest(hub, slug, rev, edges=(1,)):</span>
+<span class="d-add">+    hub._ingest(f&quot;vote_deltas:{slug}&quot;,</span>
+<span class="d-add">+                json.dumps({&quot;type&quot;: &quot;delta&quot;, &quot;rev&quot;: rev, &quot;edges&quot;: list(edges)}))</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def drain(sub):</span>
+<span class="d-add">+    out = []</span>
+<span class="d-add">+    while not sub.q.empty():</span>
+<span class="d-add">+        out.append(json.loads(sub.q.get_nowait()))</span>
+<span class="d-add">+    return out</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_merges_a_window_in_rev_order():</span>
+<span class="d-add">+    hub = make_hub()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    sub = hub.subscribe(&quot;m1&quot;)</span>
+<span class="d-add">+    ingest(hub, &quot;m1&quot;, 2)</span>
+<span class="d-add">+    ingest(hub, &quot;m1&quot;, 1)  # inverted arrival inside one window</span>
+<span class="d-add">+    ingest(hub, &quot;m1&quot;, 3)</span>
+<span class="d-add">+    hub._flush(now=100.0)</span>
+<span class="d-add">+    msgs = drain(sub)</span>
+<span class="d-add">+    assert len(msgs) == 1</span>
+<span class="d-add">+    assert msgs[0][&quot;type&quot;] == &quot;deltas&quot;</span>
+<span class="d-add">+    assert msgs[0][&quot;rev&quot;] == 3</span>
+<span class="d-add">+    assert [i[&quot;rev&quot;] for i in msgs[0][&quot;items&quot;]] == [1, 2, 3]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_ignores_maps_without_subscribers():</span>
+<span class="d-add">+    hub = make_hub()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    sub = hub.subscribe(&quot;m1&quot;)</span>
+<span class="d-add">+    ingest(hub, &quot;other-map&quot;, 1)</span>
+<span class="d-add">+    hub._flush(now=100.0)</span>
+<span class="d-add">+    assert drain(sub) == []</span>
+<span class="d-add">+    assert hub._buf.get(&quot;other-map&quot;) is None</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_hole_grace_holds_then_releases():</span>
+<span class="d-add">+    hub = make_hub(hole_grace=0.3)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    sub = hub.subscribe(&quot;m1&quot;)</span>
+<span class="d-add">+    ingest(hub, &quot;m1&quot;, 1)</span>
+<span class="d-add">+    hub._flush(now=100.0)</span>
+<span class="d-add">+    assert drain(sub)[0][&quot;rev&quot;] == 1</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # rev 3 arrives but 2 hasn&#x27;t — the batch holds inside the grace window...</span>
+<span class="d-add">+    ingest(hub, &quot;m1&quot;, 3)</span>
+<span class="d-add">+    hub._buf_since[&quot;m1&quot;] = 100.0</span>
+<span class="d-add">+    hub._flush(now=100.1)</span>
+<span class="d-add">+    assert drain(sub) == []</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # ...the straggler lands, and the next flush merges both in order.</span>
+<span class="d-add">+    ingest(hub, &quot;m1&quot;, 2)</span>
+<span class="d-add">+    hub._flush(now=100.2)</span>
+<span class="d-add">+    msgs = drain(sub)</span>
+<span class="d-add">+    assert [i[&quot;rev&quot;] for i in msgs[0][&quot;items&quot;]] == [2, 3]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_hole_grace_expires_and_flushes_anyway():</span>
+<span class="d-add">+    hub = make_hub(hole_grace=0.3)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    sub = hub.subscribe(&quot;m1&quot;)</span>
+<span class="d-add">+    ingest(hub, &quot;m1&quot;, 1)</span>
+<span class="d-add">+    hub._flush(now=100.0)</span>
+<span class="d-add">+    drain(sub)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    ingest(hub, &quot;m1&quot;, 5)  # rev bumped without deltas 2-4 (e.g. manual INCR)</span>
+<span class="d-add">+    hub._buf_since[&quot;m1&quot;] = 100.0</span>
+<span class="d-add">+    hub._flush(now=100.5)  # grace expired</span>
+<span class="d-add">+    msgs = drain(sub)</span>
+<span class="d-add">+    assert len(msgs) == 1</span>
+<span class="d-add">+    assert [i[&quot;rev&quot;] for i in msgs[0][&quot;items&quot;]] == [5]</span>
+<span class="d-add">+    # the client sees first-item rev 5 vs its last-seen 1 -&gt; gap -&gt; refetch</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_unsubscribe_stops_delivery_and_clears_state():</span>
+<span class="d-add">+    hub = make_hub()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    sub = hub.subscribe(&quot;m1&quot;)</span>
+<span class="d-add">+    hub.unsubscribe(&quot;m1&quot;, sub)</span>
+<span class="d-add">+    ingest(hub, &quot;m1&quot;, 1)</span>
+<span class="d-add">+    hub._flush(now=100.0)</span>
+<span class="d-add">+    assert drain(sub) == []</span>
+<span class="d-add">+    assert hub.subscriber_count() == 0</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_overflow_sets_flag_instead_of_blocking():</span>
+<span class="d-add">+    hub = make_hub()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    sub = hub.subscribe(&quot;m1&quot;)</span>
+<span class="d-add">+    for i in range(dh.QUEUE_MAX):</span>
+<span class="d-add">+        ingest(hub, &quot;m1&quot;, i + 1)</span>
+<span class="d-add">+        hub._flush(now=100.0 + i)</span>
+<span class="d-add">+    assert not sub.overflowed.is_set()</span>
+<span class="d-add">+    ingest(hub, &quot;m1&quot;, dh.QUEUE_MAX + 1)</span>
+<span class="d-add">+    hub._flush(now=999.0)</span>
+<span class="d-add">+    assert sub.overflowed.is_set()</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_two_maps_are_isolated():</span>
+<span class="d-add">+    hub = make_hub()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    s1 = hub.subscribe(&quot;m1&quot;)</span>
+<span class="d-add">+    s2 = hub.subscribe(&quot;m2&quot;)</span>
+<span class="d-add">+    ingest(hub, &quot;m1&quot;, 1)</span>
+<span class="d-add">+    ingest(hub, &quot;m2&quot;, 7)</span>
+<span class="d-add">+    hub._flush(now=100.0)</span>
+<span class="d-add">+    assert [i[&quot;rev&quot;] for i in drain(s1)[0][&quot;items&quot;]] == [1]</span>
+<span class="d-add">+    assert [i[&quot;rev&quot;] for i in drain(s2)[0][&quot;items&quot;]] == [7]</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/tests/unit/test_vote_counts.py</span>
+            <span class="stat"><span class="d-add">+33</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · tests</span>
+        <span class="ctx-sum">Redis vote-count logic on fakeredis</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">test_vote_counts.py</span>
+        <span class="ctx-sum">+2 tests</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">batch path</span><span class="ol-sum">batch ≡ per-edge loop, byte-identical hashes; empty/no-op plans</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>test_batch_matches_loop_for_mixed_plan</li><li>test_batch_empty_plan_is_noop</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/tests/unit/test_vote_counts.py b/server/tests/unit/test_vote_counts.py</span>
+<span class="d-meta">index 6393686..a4f4bc4 100644</span>
+<span class="d-meta">--- a/server/tests/unit/test_vote_counts.py</span>
+<span class="d-meta">+++ b/server/tests/unit/test_vote_counts.py</span>
+<span class="d-hunk">@@ -80,3 +80,36 @@ def test_publish_delta_broadcasts_authoritative_counts(redis_client):</span>
+<span class="d-ctx">     assert payload[&quot;type&quot;] == &quot;delta&quot;</span>
+<span class="d-ctx">     assert payload[&quot;vtCounts&quot;] == {&quot;0&quot;: [1, 0]}</span>
+<span class="d-ctx">     assert payload[&quot;rev&quot;] == 1</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+# ── Batched write path (apply_directional_batch ≡ per-edge loop) ────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_batch_matches_loop_for_mixed_plan(redis_client):</span>
+<span class="d-add">+    &quot;&quot;&quot;One pipelined batch produces byte-identical Redis state to the loop.&quot;&quot;&quot;</span>
+<span class="d-add">+    import fakeredis</span>
+<span class="d-add">+    loop_r = fakeredis.FakeStrictRedis(decode_responses=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # clears (→0), fresh casts (0→dir), reversals (∓→±) in one plan</span>
+<span class="d-add">+    ops = [(0, v.UP, 0), (1, v.DOWN, 0),          # clears</span>
+<span class="d-add">+           (2, 0, v.UP), (3, v.DOWN, v.UP),       # fresh + reversal</span>
+<span class="d-add">+           (4, v.UP, v.UP)]                       # no-op (guarded)</span>
+<span class="d-add">+    # seed prior state on both sides so decrements land on real counts</span>
+<span class="d-add">+    for r in (redis_client, loop_r):</span>
+<span class="d-add">+        v.apply_directional(r, SLUG, 0, MODE, VT, v.UP, 0)</span>
+<span class="d-add">+        v.apply_directional(r, SLUG, 1, MODE, VT, v.DOWN, 0)</span>
+<span class="d-add">+        v.apply_directional(r, SLUG, 3, MODE, VT, v.DOWN, 0)</span>
+<span class="d-add">+        v.apply_directional(r, SLUG, 4, MODE, VT, v.UP, 0)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    v.apply_directional_batch(redis_client, SLUG, ops, MODE, VT)</span>
+<span class="d-add">+    for eid, prev, new in ops:</span>
+<span class="d-add">+        v.apply_directional(loop_r, SLUG, eid, MODE, VT, new, prev)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    assert redis_client.hgetall(v.hash_key(SLUG)) == loop_r.hgetall(v.hash_key(SLUG))</span>
+<span class="d-add">+    assert counts(redis_client, [0, 1, 2, 3, 4]) == {</span>
+<span class="d-add">+        0: [0, 0], 1: [0, 0], 2: [1, 0], 3: [1, 0], 4: [1, 0]}</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_batch_empty_plan_is_noop(redis_client):</span>
+<span class="d-add">+    v.apply_directional_batch(redis_client, SLUG, [], MODE, VT)</span>
+<span class="d-add">+    v.apply_directional_batch(redis_client, SLUG, [(0, v.UP, v.UP)], MODE, VT)</span>
+<span class="d-add">+    assert redis_client.hgetall(v.hash_key(SLUG)) == {}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/vote_store.py</span>
+            <span class="stat"><span class="d-add">+27</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · vote_store.py</span>
+        <span class="ctx-sum">the Redis vote codec + write/read path (ev:&lt;slug&gt; hashes, deltas, revisions)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">vote_store.py</span>
+        <span class="ctx-sum">~450 LOC — packing, apply/read, publish_delta, build_arrays</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">codec (pack/unpack, dir bit)</span><span class="ol-sum">53-bit field layout</span></li><li class="changed"><span class="ol-label">write path</span><span class="ol-sum">apply_directional + NEW apply_directional_batch (one pipeline per plan)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">publish_delta</span><span class="ol-sum">rev INCR + per-vote pubsub (unchanged; hub coalesces at delivery)</span></li><li class="dim"><span class="ol-label">read path</span><span class="ol-sum">read_edge_vt_counts (already pipelined) · build_arrays</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>apply_directional_batch — all HINCRBYs of a plan, plan order, one execute</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/vote_store.py b/server/vote_store.py</span>
+<span class="d-meta">index e829389..63163ed 100644</span>
+<span class="d-meta">--- a/server/vote_store.py</span>
+<span class="d-meta">+++ b/server/vote_store.py</span>
+<span class="d-hunk">@@ -228,6 +228,33 @@ def apply_directional(</span>
+<span class="d-ctx">     pipe.execute()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+def apply_directional_batch(</span>
+<span class="d-add">+    redis_client, slug: str, ops: list[tuple[int, int, int]], mode: int, vt_id: int,</span>
+<span class="d-add">+) -&gt; None:</span>
+<span class="d-add">+    &quot;&quot;&quot;Apply a whole vote plan&#x27;s edge-counter transitions in ONE round trip.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    `ops` is [(edge_id, prev_dir, new_dir), …] in plan order (clears then</span>
+<span class="d-add">+    casts). Semantically identical to calling apply_directional per edge — the</span>
+<span class="d-add">+    same HINCRBYs in the same order — but a 145-edge route vote costs one</span>
+<span class="d-add">+    pipeline execute instead of ~145 (the measured bulk of the vote critical</span>
+<span class="d-add">+    section; changelog/2026-07-08-agent-load-test.html finding #2).</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    h = hash_key(slug)</span>
+<span class="d-add">+    pipe = redis_client.pipeline()</span>
+<span class="d-add">+    queued = False</span>
+<span class="d-add">+    for edge_id, prev_dir, new_dir in ops:</span>
+<span class="d-add">+        if new_dir == prev_dir:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        if new_dir in (UP, DOWN):</span>
+<span class="d-add">+            pipe.hincrby(h, str(redis_field(edge_id, mode, vt_id, new_dir)), 1)</span>
+<span class="d-add">+            queued = True</span>
+<span class="d-add">+        if prev_dir in (UP, DOWN):</span>
+<span class="d-add">+            pipe.hincrby(h, str(redis_field(edge_id, mode, vt_id, prev_dir)), -1)</span>
+<span class="d-add">+            queued = True</span>
+<span class="d-add">+    if queued:</span>
+<span class="d-add">+        pipe.execute()</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> def publish_delta(</span>
+<span class="d-ctx">     redis_client, slug: str, edge_ids: list[int], mode: int, vt_id: int,</span>
+<span class="d-ctx">     direction: int = UP, reversed_vote: bool = False,</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes-vote-mitigations.diff</code> by
+    <code>changelog/build_vote_mitigations_report.py</code>. Regenerate with
+    <code>git diff ca50ca5..HEAD &gt; changelog/changes-vote-mitigations.diff &amp;&amp;
+    python changelog/build_vote_mitigations_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

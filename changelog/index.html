@@ -29,6 +29,27 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-09-vote-path-mitigations.html">
+    <div class="date">2026-07-09</div>
+    <h2>Vote-path mitigations — 160 agents from lockup to 45 votes/s, deployed to prod</h2>
+    <p>The full M1–M6 fix set for the 2026-07-08 load-test findings, measured with the same harness on
+    the same map. M1: a vote's ~300–550 sequential Redis round trips become ≤3 pipelines (two-phase
+    block deltas preserve the presence-boundary semantics, pinned by fakeredis equivalence tests).
+    M2: the process-wide vote lock becomes 256 per-(map, voter) stripes — same-voter casts still
+    serialize, strangers don't. M3: graph-votes serves debounced pre-gzipped snapshots (37 MB → 0.75 MB
+    on the wire, orjson + one gzip per rebuild, ETag derived from the served body) and the client
+    replays a ring of recent deltas over any refetched body so a slightly-stale snapshot can't regress
+    counts or loop refetches. M4: one pubsub listener per process coalesces deltas into merged
+    100 ms batches for every WS client (132,808 → 19,385 sends at tier 6), with a hole-grace hold for
+    out-of-order publishes. M5: a bounded vote queue sheds with 503 + Retry-After past 64 in flight,
+    and /api/admin/stats gains the saturation metrics /health can't show. M6: the snapshot cache is
+    byte-budgeted (512 MB) and the whole stack was measured against prod's 8 GiB (NYC 3.35 GB +
+    Chicago 1.22 GB + snapshots = 4.84 GB). At 160 agents: p50 16.57 s → 1.25 s, p95 45.6 s → 3.9 s,
+    5.7 → 45.7 votes/s, RSS peak 7.1 → 4.0 GB, zero truncations. Prod DB backed up, overlay-deployed
+    (with a new lockfile re-sync so overlays can't ship code whose deps the base image predates),
+    revision 00088 verified live: gzip snapshots, merged-delta WS, new admin metrics.</p>
+  </a>
+
   <a class="entry" href="./2026-07-08-graph-first-blocks.html">
     <div class="date">2026-07-08</div>
     <h2>Graph-first blocks — membership decides the polygons, and no point on the map is a dead zone</h2>
