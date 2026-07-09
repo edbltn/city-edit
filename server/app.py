@@ -4,11 +4,12 @@ import logging
 import os
 import queue
 import re
+import resource
 import sys
 import time
 import hashlib
 import threading
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from functools import lru_cache
 
 import orjson
@@ -323,11 +324,70 @@ _build_locks_guard = threading.Lock()
 # whole instance at ~9 votes/s (changelog/2026-07-08-agent-load-test.html,
 # finding #1 / mitigation M2). Redis counter updates are atomic HINCRBYs and
 # commute across voters, so cross-voter mutual exclusion buys nothing.
-_VOTE_LOCK_STRIPES = tuple(threading.Lock() for _ in range(64))
+_VOTE_LOCK_STRIPES = tuple(threading.Lock() for _ in range(256))
 
 
 def _voter_lock_stripe(slug: str, device_id: str) -> threading.Lock:
     return _VOTE_LOCK_STRIPES[hash((slug, device_id)) % len(_VOTE_LOCK_STRIPES)]
+
+
+# ── Vote-path saturation: backpressure valve + rolling metrics (M5) ─────────
+# The July load test's sharpest lesson was that /health stayed at 1-2ms while
+# votes queued 45s — monitoring keyed on health was blind to the melt. Two
+# valves + a metrics window make saturation both bounded and visible:
+#   · at most VOTE_MAX_INFLIGHT votes run concurrently; past that the endpoint
+#     sheds with 503 + Retry-After instead of queueing into timeouts (clients
+#     already roll back optimistic casts on failure);
+#   · a same-voter stripe that can't be acquired in VOTE_LOCK_SHED_SECONDS
+#     sheds the same way (a wedged voter shouldn't hold a request thread);
+#   · /api/admin/stats reports votes/s, lock-wait and handler percentiles,
+#     shed counts, and process RSS from a rolling window.
+VOTE_MAX_INFLIGHT = int(os.environ.get("VOTE_MAX_INFLIGHT", "64"))
+VOTE_LOCK_SHED_SECONDS = float(os.environ.get("VOTE_LOCK_SHED_SECONDS", "2.0"))
+
+_vote_inflight = threading.Semaphore(VOTE_MAX_INFLIGHT)
+_vote_metrics_lock = threading.Lock()
+_vote_metrics: "deque[tuple[float, float, float]]" = deque(maxlen=2048)
+_vote_shed = {"inflight": 0, "stripe": 0}
+
+
+def _vote_metrics_record(lock_wait_s: float, total_s: float) -> None:
+    with _vote_metrics_lock:
+        _vote_metrics.append((time.time(), lock_wait_s, total_s))
+
+
+def _shed_response(reason: str, retry_after: int):
+    with _vote_metrics_lock:
+        _vote_shed[reason] += 1
+    resp = jsonify({"error": "Server is at vote capacity — retry shortly",
+                    "shed": reason, "retry": True})
+    resp.headers["Retry-After"] = str(retry_after)
+    return resp, 503
+
+
+def _vote_metrics_snapshot(window_s: float = 60.0) -> dict:
+    now = time.time()
+    with _vote_metrics_lock:
+        rows = [r for r in _vote_metrics if now - r[0] <= window_s]
+        shed = dict(_vote_shed)
+
+    def pct(vals: list[float], p: float) -> float:
+        if not vals:
+            return 0.0
+        vals = sorted(vals)
+        return round(vals[min(len(vals) - 1, int(p * len(vals)))] * 1000, 1)
+
+    lock_waits = [r[1] for r in rows]
+    totals = [r[2] for r in rows]
+    return {
+        "window_s": window_s,
+        "count": len(rows),
+        "votes_per_sec": round(len(rows) / window_s, 2),
+        "lock_wait_ms": {"p50": pct(lock_waits, 0.5), "p95": pct(lock_waits, 0.95)},
+        "handler_ms": {"p50": pct(totals, 0.5), "p95": pct(totals, 0.95)},
+        "shed": shed,
+        "max_inflight": VOTE_MAX_INFLIGHT,
+    }
 
 
 # How long a built snapshot keeps serving after its revision goes stale. Under
@@ -1148,6 +1208,13 @@ def cast_vote():
     mode_int = vote_store.mode_to_int(mode)  # Redis key only; DB scopes by map_slug
     slug = rmap.slug
 
+    # Backpressure: shed instead of queueing once the instance is saturated —
+    # a 503 the client retries beats a 45s hang that dies at the timeout.
+    t_handler0 = time.monotonic()
+    if not _vote_inflight.acquire(blocking=False):
+        return _shed_response("inflight", retry_after=1)
+    stripe_acquired = False
+    lock_wait_s = 0.0
     try:
         vt_id = vote_store.get_vote_type_id(vt_label, vt_point_type) if vt_label else 0
 
@@ -1161,10 +1228,16 @@ def cast_vote():
         # voter_lock serializes this voter's read-modify-write ACROSS instances
         # (Redis); the stripe serializes it within THIS process. Both are scoped
         # per (slug, device) — different voters proceed concurrently — and
-        # together they hold whether the app runs one worker or a fleet.
+        # together they hold whether the app runs one worker or a fleet. A
+        # stripe held past the shed timeout (a wedged same-voter cast) sheds
+        # rather than parking this request thread behind it.
         ebid = rmap.graph.edge_block_id  # None unless this map has a block layer
-        with vote_store.voter_lock(redis_client, slug, device_id), \
-                _voter_lock_stripe(slug, device_id):
+        stripe = _voter_lock_stripe(slug, device_id)
+        if not stripe.acquire(timeout=VOTE_LOCK_SHED_SECONDS):
+            return _shed_response("stripe", retry_after=2)
+        lock_wait_s = time.monotonic() - t_handler0
+        stripe_acquired = True
+        with vote_store.voter_lock(redis_client, slug, device_id):
             # Block-scoped clear-then-cast (docs/three-layer-model.md §4): the
             # plan clears this device's same-type rows across every touched
             # block, then casts on exactly the selection edges.
@@ -1258,6 +1331,7 @@ def cast_vote():
                 # serving it. Hard invalidation is reserved for structural
                 # changes (resnap, block re-bake, admin rebuild).
 
+        _vote_metrics_record(lock_wait_s, time.monotonic() - t_handler0)
         return jsonify({
             "success": True, "edge_ids": edge_ids, "changed": changed,
             "cleared": cleared,  # edges unvoted (block-scoped clear) but not cast
@@ -1268,6 +1342,10 @@ def cast_vote():
     except Exception as e:
         logger.error(f"[VOTE] Error: {e}")
         return jsonify({"error": f"Vote failed: {str(e)}"}), 500
+    finally:
+        if stripe_acquired:
+            stripe.release()
+        _vote_inflight.release()
 
 
 def _resnap_city_maps(city_id: str) -> None:
@@ -1952,11 +2030,22 @@ def admin_stats():
 
     result["database"] = database.get_admin_counts() if DATABASE_URL else {"connected": False}
 
+    # ru_maxrss is bytes on macOS, kilobytes on Linux.
+    ru = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    rss_mb = round(ru / (1024 * 1024 if sys.platform == "darwin" else 1024), 1)
+
     result["app"] = {
         "loaded_cities": graph_registry.loaded_ids(),
         "cities": list(CITIES),
         "vote_types_cached": len(vote_store.all_vote_types()),
+        "peak_rss_mb": rss_mb,
     }
+    # The saturation signals /health can't show (it stayed 1-2ms through the
+    # July melt): vote throughput, lock waits, handler latency, shed counts,
+    # and live WS fan-out size.
+    result["votes"] = _vote_metrics_snapshot()
+    result["ws"] = {"subscribers": delta_hub.subscriber_count()}
+    result["graph_votes_cache"] = {"entries": len(_vote_cache)}
     return jsonify(result)
 
 
