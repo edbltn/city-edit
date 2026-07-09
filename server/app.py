@@ -1,3 +1,4 @@
+import gzip
 import json
 import logging
 import os
@@ -9,6 +10,7 @@ import threading
 from collections import OrderedDict
 from functools import lru_cache
 
+import orjson
 import redis
 import requests
 from dotenv import load_dotenv
@@ -326,20 +328,40 @@ def _voter_lock_stripe(slug: str, device_id: str) -> threading.Lock:
     return _VOTE_LOCK_STRIPES[hash((slug, device_id)) % len(_VOTE_LOCK_STRIPES)]
 
 
-def _vote_cache_get(cache_key: str, rev: int) -> str | None:
-    """Return a cached body for this key+revision, marking it most-recently-used."""
+# How long a built snapshot keeps serving after its revision goes stale. Under
+# sustained voting the revision bumps on every cast, so rebuilding per rev is a
+# full-array rebuild per vote (finding #3 of the load-test report); serving the
+# last complete snapshot for a couple of seconds costs nothing — clients
+# reconcile forward from WS deltas, which carry authoritative counts — and
+# collapses a join storm to one rebuild per window.
+_VOTE_CACHE_DEBOUNCE = float(os.environ.get("GRAPH_VOTES_DEBOUNCE", "2.0"))
+
+
+def _vote_cache_get(cache_key: str, rev: int) -> dict | None:
+    """Return the cached entry for this key when built at exactly this revision,
+    marking it most-recently-used."""
     with _vote_cache_lock:
         cached = _vote_cache.get(cache_key)
         if cached and cached["rev"] == rev:
             _vote_cache.move_to_end(cache_key)
-            return cached["body"]
+            return cached
     return None
 
 
-def _vote_cache_put(cache_key: str, rev: int, body: str) -> None:
-    """Store a built body, evicting the least-recently-used entry past the cap."""
+def _vote_cache_peek(cache_key: str) -> dict | None:
+    """Return the cached entry regardless of revision (debounce decides
+    servability), marking it most-recently-used."""
     with _vote_cache_lock:
-        _vote_cache[cache_key] = {"rev": rev, "body": body}
+        cached = _vote_cache.get(cache_key)
+        if cached:
+            _vote_cache.move_to_end(cache_key)
+        return cached
+
+
+def _vote_cache_put(cache_key: str, entry: dict) -> None:
+    """Store a built entry, evicting the least-recently-used entry past the cap."""
+    with _vote_cache_lock:
+        _vote_cache[cache_key] = entry
         _vote_cache.move_to_end(cache_key)
         while len(_vote_cache) > _VOTE_CACHE_MAX:
             _vote_cache.popitem(last=False)
@@ -368,8 +390,13 @@ def _build_lock_for(cache_key: str) -> threading.Lock:
         return lock
 
 
-def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
-    """Build the /api/graph-votes JSON for one map+mode, cached by its revision.
+def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> dict:
+    """Build (or reuse) the /api/graph-votes snapshot for one map+mode.
+
+    Returns a cache entry {rev, bstamp, body, gz, built}: the JSON bytes, their
+    pre-compressed gzip twin (one compression per rebuild, shared by every
+    client — not one per response), the revision + blocks stamp the body
+    describes, and a monotonic build time for the serve-stale debounce.
 
     `mode` scopes the legend and heatmap to a single vote namespace (e.g.
     "walkways") so proposals cast under other modes on the same map don't leak
@@ -392,7 +419,7 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
 
 def _build_graph_votes_body_locked(
     rmap: ResolvedMap, mode: str | None, rev: int, cache_key: str,
-) -> str:
+) -> dict:
     rmap.graph.ensure_loaded()
 
     # The heatmap serves ONLY from Redis; Postgres is the durable copy that the
@@ -446,10 +473,21 @@ def _build_graph_votes_body_locked(
             redis_client, rmap.slug, block_mode, rmap.graph.n_blocks))
         arrays["blocks_version"] = rmap.graph.blocks_version
 
-    body = json.dumps(arrays)
-
-    _vote_cache_put(cache_key, rev, body)
-    return body
+    # orjson + gzip level 3: the rebuild runs on the request path (debounced,
+    # but each one used to stall the GIL ~2s serializing 37MB and compressing
+    # at level 6 — the p95 spikes on unrelated endpoints). orjson is ~10x
+    # faster than json here and zlib releases the GIL while compressing;
+    # level 3 halves compression time for ~1.5% larger output.
+    body = orjson.dumps(arrays, option=orjson.OPT_SERIALIZE_NUMPY)
+    entry = {
+        "rev": rev,
+        "bstamp": rmap.graph.blocks_stamp(),
+        "body": body,
+        "gz": gzip.compress(body, 3),
+        "built": time.monotonic(),
+    }
+    _vote_cache_put(cache_key, entry)
+    return entry
 
 
 def _write_vote_fields(slug: str, fields: list[tuple[int, int]]) -> None:
@@ -591,28 +629,12 @@ if os.environ.get("SKIP_WARMUP") != "1":
     _PrewarmThread(target=_startup_warm, name="startup-warm", daemon=True).start()
 
 
-# ── Pubsub delta listener (invalidates per-map vote cache on peer writes) ───
-
-def _start_delta_listener():
-    def listener():
-        ps_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
-        ps = ps_client.pubsub()
-        ps.psubscribe("vote_deltas:*")
-        logger.info("[PUBSUB] Subscribed to vote_deltas:*")
-        for msg in ps.listen():
-            if msg["type"] != "pmessage":
-                continue
-            channel = msg["channel"]
-            slug = channel.split(":", 1)[1] if ":" in channel else None
-            if slug:
-                _invalidate_vote_cache(slug)
-
-    t = threading.Thread(target=listener, daemon=True, name="delta-listener")
-    t.start()
-    return t
-
-
-_start_delta_listener()
+# NOTE: the old vote_deltas:* listener that hard-invalidated the vote cache on
+# every peer write is gone — publish_delta's revision bump already rev-stales
+# cached snapshots (on every instance, since the revision lives in Redis), and
+# per-vote invalidation is exactly what forced a full 33MB rebuild per cast
+# under load. The graph-votes debounce now decides how long a stale snapshot
+# keeps serving.
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -1213,7 +1235,11 @@ def cast_vote():
                     direction=direction or vote_store.UP, reversed_vote=reversed_any,
                     vt_counts=vt_counts, block_counts=block_counts,
                 )
-                _invalidate_vote_cache(slug)
+                # No cache invalidation here: publish_delta bumped the revision,
+                # which makes the cached graph-votes snapshot rev-stale on its
+                # own; the endpoint's debounce decides whether to briefly keep
+                # serving it. Hard invalidation is reserved for structural
+                # changes (resnap, block re-bake, admin rebuild).
 
         return jsonify({
             "success": True, "edge_ids": edge_ids, "changed": changed,
@@ -1708,40 +1734,83 @@ def graph_topology():
     return resp
 
 
+def _graph_votes_etag(slug: str, mode: str | None, entry: dict, gzipped: bool) -> str:
+    """ETag derived from the SERVED entry (its rev + blocks stamp), never from
+    the live revision — the etag must always describe the body it rides with
+    (a live-rev etag over a debounced body is the 304-pins-stale-body bug of
+    the blocks re-bake incident). The encoding rides in the tag because the
+    gzip and identity representations are different bytes."""
+    bstamp = entry.get("bstamp")
+    return (f'"v-{slug}-{mode or "all"}-{entry["rev"]}'
+            f'{f"-b{bstamp}" if bstamp else ""}{"-gz" if gzipped else ""}"')
+
+
 @app.route("/api/graph-votes", methods=["GET"])
 def graph_votes():
     """Return per-edge and per-node vote arrays for a map.
 
-    Indices match /api/graph-topology. Cached by the map's revision.
+    Indices match /api/graph-topology. Served from a per-(map, mode) snapshot
+    cache: a snapshot serves while its revision is current OR for a short
+    debounce window after it staled (clients reconcile forward from WS deltas,
+    which carry authoritative counts) — under sustained voting the revision
+    bumps per cast, and rebuilding the full arrays per cast was finding #3 of
+    changelog/2026-07-08-agent-load-test.html. Bodies are pre-gzipped once per
+    rebuild and shared by every client.
     """
     rmap = resolve_map(request.args.get("map"))
     if _locked(rmap):
         return _locked_response()
 
-    # ETag first, load second: the revision lives in Redis, so a client whose
-    # cached copy is current gets its 304 without this instance ever loading
-    # the graph — ensure_loaded() on a cold instance took 10s+ and rode P95.
     mode = request.args.get("mode") or None
+    cache_key = f"{rmap.slug}:{mode}" if mode else rmap.slug
     rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
-    # blocks_stamp (a stat, no graph load) rides in the validator: a blocks
-    # re-bake renumbers block ids WITHOUT bumping rev, and a 304 would pin
-    # clients on a body whose block_votes index the previous block set.
+    # blocks_stamp (a stat, no graph load) gates servability: a blocks re-bake
+    # renumbers block ids WITHOUT bumping rev, so an entry built against the
+    # previous block set must not serve even inside the debounce window.
     bstamp = rmap.graph.blocks_stamp()
-    etag = f'"v-{rmap.slug}-{mode or "all"}-{rev}{f"-b{bstamp}" if bstamp else ""}"'
+
+    entry = _vote_cache_peek(cache_key)
+    if entry is not None and entry.get("bstamp") != bstamp:
+        entry = None
+    servable = entry is not None and (
+        entry["rev"] == rev
+        or time.monotonic() - entry["built"] < _VOTE_CACHE_DEBOUNCE
+    )
+
+    if not servable:
+        # Stale-while-revalidate: one caller rebuilds; the rest keep serving
+        # the previous snapshot instead of queueing on the build lock (they
+        # only block when there is nothing to serve at all).
+        lock = _build_lock_for(cache_key)
+        if lock.acquire(blocking=entry is None):
+            try:
+                rmap.graph.ensure_loaded()
+                fresh_rev = int(
+                    redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+                entry = (_vote_cache_get(cache_key, fresh_rev)
+                         or _build_graph_votes_body_locked(
+                             rmap, mode, fresh_rev, cache_key))
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+            finally:
+                lock.release()
+        # else: a rebuild is in flight — serve the stale entry we hold.
+
+    wants_gzip = "gzip" in (request.headers.get("Accept-Encoding") or "").lower()
+    etag = _graph_votes_etag(rmap.slug, mode, entry, wants_gzip)
     if request.headers.get("If-None-Match") == etag:
         resp = app.response_class(status=304)
         resp.headers["ETag"] = etag
         resp.headers["Cache-Control"] = "public, max-age=5"
+        resp.headers["Vary"] = "Accept-Encoding"
         return resp
 
-    rmap.graph.ensure_loaded()
-
-    try:
-        body = _build_graph_votes_body(rmap, mode)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    resp = app.response_class(response=body, status=200, mimetype="application/json")
+    resp = app.response_class(
+        response=entry["gz"] if wants_gzip else entry["body"],
+        status=200, mimetype="application/json")
+    if wants_gzip:
+        resp.headers["Content-Encoding"] = "gzip"
+    resp.headers["Vary"] = "Accept-Encoding"
     resp.headers["Cache-Control"] = "public, max-age=5"
     resp.headers["ETag"] = etag
     return resp

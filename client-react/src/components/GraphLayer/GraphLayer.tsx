@@ -903,6 +903,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // Deltas received before the initial vote fetch completes
   const pendingDeltasRef = useRef<import("../../types").VoteDelta[]>([]);
 
+  // Ring of recently APPLIED deltas. A refetched /api/graph-votes body may be
+  // slightly older than deltas we already applied (the server debounces
+  // snapshot rebuilds under sustained voting), and installing it wholesale
+  // would regress lastRev and the counts — making the very next delta look
+  // like a gap and triggering a refetch loop. Replaying the ring's newer
+  // deltas over the installed body heals both (deltas SET authoritative
+  // counts, so replay is idempotent).
+  const recentDeltasRef = useRef<import("../../types").VoteDelta[]>([]);
+  const RECENT_DELTAS_MAX = 500;
+
   // Stable ref for onSnap callback
   const onSnapRef = useRef(onSnap);
   useEffect(() => { onSnapRef.current = onSnap; }, [onSnap]);
@@ -1985,14 +1995,27 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       setVoteTypeMap(voteData.vote_types);
       broadcastBlockVotes(voteData);
 
-      // Replay any deltas that arrived while the fetch was in flight
-      const pending = pendingDeltasRef.current;
-      if (pending.length > 0) {
-        pendingDeltasRef.current = [];
-        for (const d of pending) {
-          if (d.rev <= lastRevRef.current) continue;
-          applyDeltaToGraphData(d);
-        }
+      // Replay deltas newer than the installed body: both any buffered before
+      // the initial load (pendingDeltasRef) and the recent-applied ring — the
+      // server may serve a debounced snapshot a couple of revisions old, and
+      // the wholesale install above just overwrote those deltas' counts.
+      const bodyRev = voteData.rev ?? 0;
+      const replay = [...pendingDeltasRef.current, ...recentDeltasRef.current]
+        .filter((d) => d.rev > bodyRev)
+        .sort((a, b) => a.rev - b.rev);
+      pendingDeltasRef.current = [];
+      for (const d of replay) {
+        if (d.rev <= lastRevRef.current) continue; // duplicate rev across lists
+        applyDeltaToGraphData(d);
+      }
+      if (replay.length > 0 && replay[0].rev > bodyRev + 1) {
+        // The ring couldn't bridge body→first-replayed; those revisions'
+        // counts are lost until a fresh snapshot. One DELAYED refetch (past
+        // the server's debounce) instead of an immediate one — an immediate
+        // retry would get the same stale snapshot and loop.
+        dwarn("votes", `snapshot rev ${bodyRev} + ring from ${replay[0].rev} `
+          + "leave a hole — scheduling one delayed refetch");
+        setTimeout(() => fetchVotesRef.current(), 2500);
       }
 
       refreshGraphDisplayRef.current();
@@ -2280,6 +2303,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       if (!graphDataRef.current?.edge_votes) {
         pendingDeltasRef.current.push(delta);
         return;
+      }
+
+      // Remember every received delta (bounded) so a refetch can replay the
+      // ones newer than the (possibly debounced) snapshot it installs. This
+      // includes gap-triggering deltas below — the refetch body may not cover
+      // them, but the replay will.
+      recentDeltasRef.current.push(delta);
+      if (recentDeltasRef.current.length > RECENT_DELTAS_MAX) {
+        recentDeltasRef.current.splice(
+          0, recentDeltasRef.current.length - RECENT_DELTAS_MAX);
       }
 
       // Gap detection: if we missed revisions, full refetch
