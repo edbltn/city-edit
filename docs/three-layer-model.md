@@ -15,7 +15,7 @@ unchanged. This doc defines the two layers above it and the write semantics.
 ```
 Layer 3  Route proposals   dynamic · client-computed · deterministic clustering of
          (derived)         vote state → corridors → displayed as their blocks
-                                       │ many-to-one (edge → proposal), real time
+                                       │ many-to-one (edge → proposal), minute-batched
 Layer 2  Blocks            precomputed · procedural per-city polygons · aggregate +
          (interaction)     display votes deduped per (voter, type, direction) ·
                            define unvote/flip behavior · highlight target
@@ -197,9 +197,14 @@ unit tests cover the flip/partial/concurrent paths.
 For each vote type with enough support, the top **corridors** — simple paths
 through the intersection graph where that type has strong net support. They are
 **derived state**: a pure, deterministic function of (topology, current vote
-state), recomputed **on the client in real time** as vote deltas arrive
+state), recomputed **on the client**
 (`client-react/src/components/GraphLayer/routeProposals.ts`). No server
-round-trip, no persistence, no randomness.
+round-trip, no persistence, no randomness. Recomputation is **batched off the
+vote path**: casts and deltas only mark the lists dirty; a minute-cadence sweep
+(GraphLayer `PROPOSALS_REFRESH_INTERVAL_MS`) reruns the pipeline in idle-time
+slices — one vote type per slice — so proposals may lag votes by up to a minute
+while casting stays instant even on the 3.3M-edge NYC bike graph. The heatmap
+and per-proposal counts do NOT go through this path and stay live.
 
 ### 3.2 The clustering pipeline (deterministic)
 

@@ -341,12 +341,12 @@ export const DEFAULT_JACCARD = 0.5;
 // — a corridor earns length with votes — and is trimmed to its best-supported
 // contiguous window under that budget (see capPathToLengthBudget).
 /** Budget floor: every corridor may span at least this many meters. */
-export const ROUTE_LENGTH_BASE_M = 600;
+export const ROUTE_LENGTH_BASE_M = 900;
 /** Budget growth: meters added per √(path score). √ keeps a corridor with 4×
  *  the votes at 2× the earned length — support buys reach, sublinearly. */
-export const ROUTE_LENGTH_PER_SQRT_SCORE_M = 150;
+export const ROUTE_LENGTH_PER_SQRT_SCORE_M = 220;
 /** Budget ceiling, whatever the support. */
-export const ROUTE_LENGTH_MAX_M = 2500;
+export const ROUTE_LENGTH_MAX_M = 3500;
 
 /** The meter budget a path of `score` (sum of nets) has earned. */
 export function routeLengthBudgetM(score: number, maxM = ROUTE_LENGTH_MAX_M): number {
@@ -363,6 +363,9 @@ export interface RouteProposalOptions {
   minRouteEdges?: number;
   /** Hard ceiling override for the corridor length budget (meters). */
   maxRouteLengthM?: number;
+  /** Prebuilt edge→block index for `topo` (GraphLayer already holds one).
+   *  Omitted, one is built here — an O(nEdges) pass worth skipping per call. */
+  blockIndex?: BlockIndex | null;
   /** Label → route/point kind. POINT-kind vote types are skipped — their votes
    *  surface as PBTP pins (topProposals.ts), not corridors. Unknown (null)
    *  kinds stay eligible. Omit to admit every type. */
@@ -391,19 +394,27 @@ function proposalIdOf(legendIdx: number, pathEdgeIds: number[]): string {
   return (h >>> 0).toString(16).padStart(8, "0");
 }
 
-/** Per-edge net (up − down) for one legend index, as a typed array. */
-function netsForType(
+/** Per-type sparse nets (up − down), built in ONE pass over the vote table.
+ *  The table has an nEdges-long slot array but nearly every slot is empty, so
+ *  the old per-type full rescan (an O(nEdges) Int32Array per legend entry)
+ *  dominated recompute time on big graphs — ~2s on the 3.3M-edge NYC bike
+ *  graph. Keys insert in ascending-eid scan order, so iterating a type's map
+ *  preserves the determinism contract's ascending-edge-id iteration. */
+function netsByType(
   edgeVoteTypes: [number, number, number][][],
   nEdges: number,
-  legendIdx: number,
-): Int32Array {
-  const nets = new Int32Array(nEdges);
+  nTypes: number,
+): Map<number, number>[] {
+  const nets: Map<number, number>[] = Array.from({ length: nTypes }, () => new Map());
   const n = Math.min(edgeVoteTypes.length, nEdges);
   for (let eid = 0; eid < n; eid++) {
     const pairs = edgeVoteTypes[eid];
     if (!pairs) continue;
     for (const [t, up, dn] of pairs) {
-      if (t === legendIdx) nets[eid] += up - dn;
+      if (t >= 0 && t < nTypes) {
+        const m = nets[t];
+        m.set(eid, (m.get(eid) ?? 0) + (up - dn));
+      }
     }
   }
   return nets;
@@ -414,14 +425,16 @@ function netsForType(
 function buildTypeAdj(
   topo: GraphTopology,
   adj: NodeAdj,
-  nets: Int32Array,
+  nets: Map<number, number>,
   minNet: number,
 ): TypeAdj {
-  const { nEdges, ends } = topo;
+  const { ends } = topo;
   const nodeIds: number[] = [];
   const seen = new Set<number>();
-  for (let e = 0; e < nEdges; e++) {
-    if (nets[e] < minNet) continue;
+  // nets iterates in ascending edge id (see netsByType) — the same order the
+  // old full scan visited, so nodeIds collect (then sort) identically.
+  for (const [e, w] of nets) {
+    if (w < minNet) continue;
     const u = ends[2 * e];
     const v = ends[2 * e + 1];
     if (u === v) continue;
@@ -442,11 +455,12 @@ function buildTypeAdj(
     const arcs: Arc[] = [];
     for (let i = 0; i < row.length; i++) {
       const e = row[i];
-      if (nets[e] < minNet) continue;
+      const w = nets.get(e) ?? 0;
+      if (w < minNet) continue;
       const u = ends[2 * e];
       const v = ends[2 * e + 1];
       if (u === v) continue;
-      arcs.push({ n: u === nid ? v : u, e, w: nets[e] });
+      arcs.push({ n: u === nid ? v : u, e, w });
     }
     if (arcs.length) typeAdj.set(nid, arcs);
   }
@@ -747,11 +761,22 @@ export function dedupeRoutes(
 }
 
 /**
- * Full deterministic route-proposal extraction from the current vote state.
- * Same (topology, vote state) ⇒ identical output (ids and order) on every
- * client — see the determinism contract above.
+ * A resumable route-proposal extraction: `types` lists every eligible legend
+ * index (ascending), `step(legendIdx)` runs the full pipeline for one vote
+ * type, and `finish(perType)` assembles the ranked, capped list. Splitting on
+ * the type boundary lets the app spread the recompute across idle slices —
+ * one type per slice — instead of freezing for the whole walk; running every
+ * step back-to-back is byte-identical to the old single-pass loop, so the
+ * determinism contract is unchanged (computeRouteProposals below does exactly
+ * that and remains the reference/entry point for tests and one-shot callers).
  */
-export function computeRouteProposals(
+export interface RouteProposalJob {
+  types: number[];
+  step(legendIdx: number): RouteProposal[];
+  finish(perType: RouteProposal[][]): RouteProposal[];
+}
+
+export function createRouteProposalJob(
   topo: GraphTopology,
   adj: NodeAdj,
   data: {
@@ -759,7 +784,7 @@ export function computeRouteProposals(
     vote_type_legend?: string[];
   },
   opts: RouteProposalOptions = {},
-): RouteProposal[] {
+): RouteProposalJob {
   const legend = data.vote_type_legend ?? [];
   const edgeVoteTypes = data.edge_vote_types ?? [];
   const limit = opts.limit ?? DEFAULT_LIMIT;
@@ -768,16 +793,23 @@ export function computeRouteProposals(
   const minRouteScore = opts.minRouteScore ?? MIN_ROUTE_SCORE;
   const minRouteEdges = opts.minRouteEdges ?? MIN_ROUTE_EDGES;
   const maxRouteLengthM = opts.maxRouteLengthM ?? ROUTE_LENGTH_MAX_M;
-  const blockIndex = buildBlockIndex(topo);
+  const blockIndex = opts.blockIndex !== undefined ? opts.blockIndex : buildBlockIndex(topo);
+  const netsPerType = netsByType(edgeVoteTypes, topo.nEdges, legend.length);
 
-  const all: RouteProposal[] = [];
+  const types: number[] = [];
   for (let legendIdx = 0; legendIdx < legend.length; legendIdx++) {
     const label = legend[legendIdx];
     if (!label) continue;
     // POINT-kind vote types never form corridors — their votes are PBTP pins
     // (topProposals.ts). Unknown kind (null) stays eligible for both families.
     if (opts.kindOf && opts.kindOf(label) === "point") continue;
-    const nets = netsForType(edgeVoteTypes, topo.nEdges, legendIdx);
+    if (netsPerType[legendIdx].size === 0) continue;
+    types.push(legendIdx);
+  }
+
+  const step = (legendIdx: number): RouteProposal[] => {
+    const label = legend[legendIdx];
+    const nets = netsPerType[legendIdx];
     const typeAdj = buildTypeAdj(topo, adj, nets, minNet);
     const typeProposals: RouteProposal[] = [];
     for (const compAdj of connectedComponents(typeAdj)) {
@@ -788,7 +820,7 @@ export function computeRouteProposals(
           peeled,
           routeLengthBudgetM(peeled.weight, maxRouteLengthM),
           (e) => edgeLengthMeters(topo, e),
-          (e) => nets[e],
+          (e) => nets.get(e) ?? 0,
         );
         if (path.weight < minRouteScore || path.edges.length < minRouteEdges) continue;
         const { blocks, blockEdgeIds } = groupBlocks(path.edges, topo, blockIndex);
@@ -809,9 +841,32 @@ export function computeRouteProposals(
         });
       }
     }
-    all.push(...dedupeRoutes(typeProposals, jaccardThreshold));
-  }
+    return dedupeRoutes(typeProposals, jaccardThreshold);
+  };
 
-  all.sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return all.slice(0, limit);
+  const finish = (perType: RouteProposal[][]): RouteProposal[] => {
+    const all = perType.flat();
+    all.sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    return all.slice(0, limit);
+  };
+
+  return { types, step, finish };
+}
+
+/**
+ * Full deterministic route-proposal extraction from the current vote state.
+ * Same (topology, vote state) ⇒ identical output (ids and order) on every
+ * client — see the determinism contract above.
+ */
+export function computeRouteProposals(
+  topo: GraphTopology,
+  adj: NodeAdj,
+  data: {
+    edge_vote_types?: [number, number, number][][];
+    vote_type_legend?: string[];
+  },
+  opts: RouteProposalOptions = {},
+): RouteProposal[] {
+  const job = createRouteProposalJob(topo, adj, data, opts);
+  return job.finish(job.types.map(job.step));
 }

@@ -30,7 +30,7 @@ import { makeVoteTypeIcon } from "./voteTypeIcon";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, type VoteTypeWinner } from "./topProposals";
 import {
-  computeRouteProposals, corridorCoordinates, corridorFromEdgeIds, routeBlockEdges, isRouteCovered,
+  createRouteProposalJob, corridorCoordinates, corridorFromEdgeIds, routeBlockEdges, isRouteCovered,
   expandSelectionToUndirected,
   type RouteProposal,
 } from "./routeProposals";
@@ -291,6 +291,20 @@ const CLUSTER_RADIUS_PX = 26; // screen distance that counts as "clustered"
 const SPREAD_CELL_PX = 38;    // grid cell pitch when fanned out
 const SPREAD_DURATION_MS = 2200;
 const SPREAD_ANIM_MS = 280;   // keep in sync with the CSS transition
+
+// Top-proposal recomputation is BATCHED off the vote path: a cast/delta only
+// marks the lists dirty and repaints the heatmap; this sweep recomputes both
+// proposal families (PBTP scan + RBTP clustering) in idle time on a minute
+// cadence. On the 3.3M-edge NYC bike graph the recompute is far too heavy to
+// run per vote — it froze the app for seconds on every cast.
+const PROPOSALS_REFRESH_INTERVAL_MS = 60_000;
+
+// requestIdleCallback with a setTimeout fallback (Safari) — schedules the next
+// slice of the route-proposal job so heavy vote types never monopolize a frame.
+function scheduleIdleSlice(cb: (deadline?: IdleDeadline) => void): void {
+  if (typeof requestIdleCallback === "function") requestIdleCallback(cb, { timeout: 1000 });
+  else window.setTimeout(() => cb(), 50);
+}
 
 // Movement (px²) before a press on an exploded proposal becomes a mid-drag rather
 // than a tap (which selects). Mirrors the path-drag's tap-vs-drag intent.
@@ -679,14 +693,11 @@ function votesMatchTopology(
  * mirroring the same guard RouteMarker uses for its hover counter.
  */
 function IndicatorMarker({
-  position, icon, zIndexOffset, interactive = true, onActivate, onDeactivate, onClick, onMidDragDown,
+  position, icon, zIndexOffset, onActivate, onDeactivate, onClick, onMidDragDown,
 }: {
   position: [number, number];
   icon: L.DivIcon;
   zIndexOffset: number;
-  /** When false the marker is a passive visual (no events) — used for a linked
-   *  or on-path proposal so the path/kite underneath takes the drag/click. */
-  interactive?: boolean;
   onActivate: () => void;
   onDeactivate: () => void;
   onClick: () => void;
@@ -708,11 +719,20 @@ function IndicatorMarker({
   }, []);
 
   return (
+    // ALWAYS created interactive: a passive (passthrough) proposal is gated by
+    // its icon's `passthrough` class (pointer-events:none), NOT by Leaflet's
+    // `interactive` option. react-leaflet applies `interactive` only when the
+    // marker is CREATED (its updater handles position/icon/zIndex/opacity and
+    // nothing else), so a marker that mounted passive would stay event-dead
+    // for its whole life — the "exploded route diamonds aren't clickable" bug:
+    // corridor diamonds stacked on a waypoint mounted as passthrough, and no
+    // later state (fan-out, waypoint moved away) could ever revive them. The
+    // CSS class swaps with the icon on every render, so it is the one gate
+    // that tracks state correctly.
     <Marker
       position={position}
       icon={icon}
       zIndexOffset={zIndexOffset}
-      interactive={interactive}
       eventHandlers={{
         mouseover: () => { hoveredRef.current = true; onActivate(); },
         mouseout: () => { hoveredRef.current = false; onDeactivate(); },
@@ -1192,10 +1212,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const [geocodeVersion, setGeocodeVersion] = useState(0);
   const bumpGeocode = useCallback(() => setGeocodeVersion((v) => v + 1), []);
 
-  // Increments when graph vote data mutates, forcing tooltip re-render. The
-  // value is read so the vote-type decode memos re-run in lockstep with the
-  // winners recompute (both happen in refreshGraphDisplay) — avoiding a stale
-  // winner indexing into emptied vote data ("no votes yet" on a top proposal).
+  // Increments when graph vote data mutates (refreshHeatmapDisplay), forcing
+  // tooltip re-render. The value is read so the vote-type decode memos re-run
+  // whenever the underlying vote arrays change — avoiding a stale winner
+  // indexing into emptied vote data ("no votes yet" on a top proposal).
   const [graphVoteVersion, setGraphVoteVersion] = useState(0);
   void graphVoteVersion; // read so decode memos/winners re-render in lockstep
 
@@ -1341,7 +1361,23 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     return pointTypeForLabel(label, cfg?.voteTypes, cfg?.searchVoteTypes);
   }, []);
 
-  const refreshGraphDisplay = useCallback(() => {
+  // Cheap per-vote display refresh: repaint the heatmap and bump the version
+  // the vote-count readouts key off. Deliberately does NOT touch the top
+  // proposals — recomputing those walks the full edge table (seconds on the
+  // NYC bike graph), so votes only mark them dirty and the batched sweep
+  // (requestProposalsRecompute / PROPOSALS_REFRESH_INTERVAL_MS) catches up.
+  const refreshHeatmapDisplay = useCallback(() => {
+    if (!graphDataRef.current) return;
+    setGraphVoteVersion((v) => v + 1);
+    scheduleRedrawRef.current();
+  }, []);
+
+  const refreshHeatmapDisplayRef = useRef(refreshHeatmapDisplay);
+  useEffect(() => { refreshHeatmapDisplayRef.current = refreshHeatmapDisplay; }, [refreshHeatmapDisplay]);
+
+  // PBTP winners recompute — the full edge-table scan. Only called from the
+  // batched recompute path (never per vote).
+  const recomputeTopProposals = useCallback(() => {
     const data = graphDataRef.current;
     if (!data) return;
     const legendLen = data.vote_type_legend?.length ?? 0;
@@ -1352,12 +1388,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       TOP_PROPOSAL_MIN_SPACING_M,
       isStationNetwork ? undefined : voteTypeKindOf,
     ), legendChanged);
-    setGraphVoteVersion((v) => v + 1);
-    scheduleRedrawRef.current();
   }, [setStableWinners, isStationNetwork, voteTypeKindOf]);
 
-  const refreshGraphDisplayRef = useRef(refreshGraphDisplay);
-  useEffect(() => { refreshGraphDisplayRef.current = refreshGraphDisplay; }, [refreshGraphDisplay]);
+  const recomputeTopProposalsRef = useRef(recomputeTopProposals);
+  useEffect(() => { recomputeTopProposalsRef.current = recomputeTopProposals; }, [recomputeTopProposals]);
 
   // Stable ref for the indicator-click callback (avoids re-running the
   // useMemo that builds marker components every time the parent re-renders).
@@ -1932,43 +1966,120 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   }, []);
 
   // Route proposals are DERIVED state — a pure, deterministic function of
-  // (topology, vote state) computed locally (docs/three-layer-model.md §3), so
-  // they track every vote in real time with no server round-trip.
+  // (topology, vote state) computed locally (docs/three-layer-model.md §3).
+  // The clustering walks the full vote graph (hundreds of ms on the NYC bike
+  // map even after the sparse-nets rework), so it runs as a SLICED job: one
+  // vote type per idle slice, yielding to input between slices. Kicking off a
+  // new recompute cancels any in-flight job (its half-built result would mix
+  // vote states); a delta landing mid-job just dirties the sweep again.
+  const routeJobTokenRef = useRef<{ cancelled: boolean } | null>(null);
   const recomputeRouteProposals = useCallback(() => {
     const topo = topologyRef.current;
     const adj = nodeAdjRef.current;
     const data = graphDataRef.current;
     if (!topo || !adj || !data?.edge_vote_types) return;
+    if (routeJobTokenRef.current) routeJobTokenRef.current.cancelled = true;
+    const token = { cancelled: false };
+    routeJobTokenRef.current = token;
+
     const t0 = performance.now();
     // kindOf keeps POINT-kind vote types out of the corridor family (their
     // votes surface as PBTP pins instead) — the mirror of the PBTP filter.
-    const next = computeRouteProposals(topo, adj, data, { kindOf: voteTypeKindOf });
-    dlog("proposals", `recompute: ${next.length} corridors in ${(performance.now() - t0).toFixed(1)}ms`,
-      next.map((p) => `${p.label}#${p.id}(${p.score})`));
-    debugState("routeProposals", next.length);
-    // Clustering is deterministic, so an unchanged vote state yields an
-    // identical list — keep the previous array to avoid remounting diamonds.
-    setRouteProposals((prev) =>
-      prev.length === next.length
-        && prev.every((p, i) => p.id === next[i].id && p.score === next[i].score)
-        ? prev : next);
+    // The prebuilt block index skips the job's own O(nEdges) rebuild
+    // (GraphLayer already built one for hover/selection).
+    const job = createRouteProposalJob(topo, adj, data, {
+      kindOf: voteTypeKindOf, blockIndex: blockIndexRef.current,
+    });
+    const perType: RouteProposal[][] = [];
+    let i = 0;
+    let slices = 0;
+
+    const finishJob = () => {
+      const next = job.finish(perType);
+      dlog("proposals", `recompute: ${next.length} corridors in ${(performance.now() - t0).toFixed(1)}ms `
+        + `(${job.types.length} types over ${slices} slices)`,
+        next.map((p) => `${p.label}#${p.id}(${p.score})`));
+      debugState("routeProposals", next.length);
+      // Clustering is deterministic, so an unchanged vote state yields an
+      // identical list — keep the previous array to avoid remounting diamonds.
+      setRouteProposals((prev) =>
+        prev.length === next.length
+          && prev.every((p, i2) => p.id === next[i2].id && p.score === next[i2].score)
+          ? prev : next);
+    };
+
+    const slice = (deadline?: IdleDeadline) => {
+      if (token.cancelled) return;
+      slices++;
+      // Always run at least one type per slice; keep going while the idle
+      // budget holds (small maps finish in one slice, the NYC bike map
+      // spreads its heavy types across several).
+      do {
+        if (i >= job.types.length) { finishJob(); return; }
+        perType.push(job.step(job.types[i++]));
+      } while (deadline && deadline.timeRemaining() > 10 && i < job.types.length);
+      if (i >= job.types.length) { finishJob(); return; }
+      scheduleIdleSlice(slice);
+    };
+    // The first slice is deferred too, so the caller (often itself an idle
+    // callback that just ran the PBTP scan) returns before any heavy type runs.
+    scheduleIdleSlice(slice);
   }, [voteTypeKindOf]);
 
   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);
   useEffect(() => { recomputeRouteProposalsRef.current = recomputeRouteProposals; }, [recomputeRouteProposals]);
 
-  // Coalesce bursts of votes into one recompute (the clustering walks the full
-  // edge set per vote type, and the corridors only shift after several votes).
-  const routeRecomputeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduleRouteProposalsRecompute = useCallback(() => {
-    if (routeRecomputeTimerRef.current) return;
-    routeRecomputeTimerRef.current = setTimeout(() => {
-      routeRecomputeTimerRef.current = null;
-      recomputeRouteProposalsRef.current();
-    }, 800);
+  // Both proposal families in one sweep — the only place either recompute runs.
+  const recomputeAllProposals = useCallback(() => {
+    recomputeTopProposalsRef.current();
+    recomputeRouteProposalsRef.current();
   }, []);
-  const scheduleRouteProposalsRecomputeRef = useRef(scheduleRouteProposalsRecompute);
-  useEffect(() => { scheduleRouteProposalsRecomputeRef.current = scheduleRouteProposalsRecompute; }, [scheduleRouteProposalsRecompute]);
+
+  // Coalesced, idle-time recompute: at most one queued at a time, run via
+  // requestIdleCallback so it never lands mid-gesture. Used for the "must be
+  // fresh" moments (initial load, full refetch, mode switch) and by the dirty
+  // sweep below; per-vote paths only set proposalsDirtyRef.
+  const proposalsIdleRef = useRef<number | null>(null);
+  const requestProposalsRecompute = useCallback(() => {
+    if (proposalsIdleRef.current != null) return;
+    const run = () => {
+      proposalsIdleRef.current = null;
+      recomputeAllProposals();
+    };
+    proposalsIdleRef.current = typeof requestIdleCallback === "function"
+      ? requestIdleCallback(run, { timeout: 4000 })
+      : (window.setTimeout(run, 200) as unknown as number);
+  }, [recomputeAllProposals]);
+  const requestProposalsRecomputeRef = useRef(requestProposalsRecompute);
+  useEffect(() => { requestProposalsRecomputeRef.current = requestProposalsRecompute; }, [requestProposalsRecompute]);
+
+  // The batched sweep: votes (own casts and WS deltas) mark this flag; every
+  // PROPOSALS_REFRESH_INTERVAL_MS — or as soon as a hidden tab comes back —
+  // one idle recompute folds them all in. Proposals may therefore lag votes by
+  // up to a minute; the heatmap and count readouts stay live (they don't go
+  // through this path).
+  const proposalsDirtyRef = useRef(false);
+  useEffect(() => {
+    const flush = () => {
+      if (!proposalsDirtyRef.current || document.hidden) return;
+      proposalsDirtyRef.current = false;
+      requestProposalsRecomputeRef.current();
+    };
+    const intervalId = window.setInterval(flush, PROPOSALS_REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", flush);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", flush);
+      if (proposalsIdleRef.current != null) {
+        if (typeof cancelIdleCallback === "function") cancelIdleCallback(proposalsIdleRef.current);
+        else window.clearTimeout(proposalsIdleRef.current);
+        proposalsIdleRef.current = null;
+      }
+      // Abandon any in-flight sliced route-proposal job — its next slice
+      // would setState on an unmounted component.
+      if (routeJobTokenRef.current) routeJobTokenRef.current.cancelled = true;
+    };
+  }, []);
 
   // Full vote fetch — used on initial load and revision-gap recovery.
   const fetchVotes = useCallback(async () => {
@@ -2018,8 +2129,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         setTimeout(() => fetchVotesRef.current(), 2500);
       }
 
-      refreshGraphDisplayRef.current();
-      scheduleRouteProposalsRecomputeRef.current();
+      refreshHeatmapDisplayRef.current();
+      requestProposalsRecomputeRef.current();
     } catch (error) {
       derror("votes", "failed to fetch graph votes:", error);
     }
@@ -2205,7 +2316,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           lastRevRef.current = cachedVotes.rev ?? 0;
           setVoteTypeMap(cachedVotes.vote_types);
           broadcastBlockVotes(cachedVotes);
-          refreshGraphDisplayRef.current();
+          refreshHeatmapDisplayRef.current();
+          requestProposalsRecomputeRef.current();
           setHeatmapLoaded();
         } else if (cachedVotes) {
           dwarn("votes", "ignoring cached votes: stale block set", {
@@ -2275,9 +2387,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           }
         }
 
-        refreshGraphDisplayRef.current();
+        refreshHeatmapDisplayRef.current();
         setHeatmapLoaded();
-        recomputeRouteProposalsRef.current();
+        requestProposalsRecomputeRef.current();
       } catch (error) {
         derror("votes", "failed to fetch graph votes:", error);
       }
@@ -2285,10 +2397,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     return () => { cancelled = true; };
   }, [applyDeltaToGraphData, setHeatmapLoaded, broadcastBlockVotes]);
 
-  // Recompute route proposals when the vote namespace (theme mode) switches. On
+  // Recompute proposals when the vote namespace (theme mode) switches. On
   // first mount topology isn't loaded yet so this no-ops; the post-vote call in
   // the loader above does the initial compute.
-  useEffect(() => { recomputeRouteProposalsRef.current(); }, [themeMode]);
+  useEffect(() => { requestProposalsRecomputeRef.current(); }, [themeMode]);
 
   // Subscribe to WebSocket deltas — apply each directly to the vote arrays.
   // If a revision gap is detected, do a full refetch to recover.
@@ -2329,9 +2441,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
       dlog("votes", `delta rev ${delta.rev}: "${delta.vtLabel ?? delta.vt}" `
         + `edges=${delta.edges.length} blocks=${Object.keys(delta.blockCounts ?? {}).length}`);
+      const legendLenBefore = graphDataRef.current?.vote_type_legend?.length ?? 0;
       applyDeltaToGraphData(delta);
-      refreshGraphDisplayRef.current();
-      scheduleRouteProposalsRecomputeRef.current();
+      refreshHeatmapDisplayRef.current();
+      // A vote only dirties the proposal lists (the batched sweep folds it in)
+      // — EXCEPT when the delta grew the legend: the current winners were
+      // ranked against a shorter legend, so refresh promptly (still idle-time).
+      const legendLenAfter = graphDataRef.current?.vote_type_legend?.length ?? 0;
+      if (legendLenAfter !== legendLenBefore) requestProposalsRecomputeRef.current();
+      else proposalsDirtyRef.current = true;
     });
     return unsubscribe;
   }, [subscribeToDelta, themeMode, applyDeltaToGraphData]);
@@ -2353,9 +2471,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       if (!data?.edge_votes || !adj) return;
       if (!detail.edgeIds?.length) return;
 
+      const legendLenBefore = data.vote_type_legend?.length ?? 0;
       applyMyVoteChange(data, adj, detail.edgeIds, detail.label, detail.prevDir, detail.newDir);
-      refreshGraphDisplayRef.current();
-      scheduleRouteProposalsRecomputeRef.current();
+      refreshHeatmapDisplayRef.current();
+      // Same rule as the WS-delta path: dirty-mark for the batched sweep,
+      // prompt (idle) refresh only if this cast introduced a new legend entry.
+      if ((data.vote_type_legend?.length ?? 0) !== legendLenBefore) requestProposalsRecomputeRef.current();
+      else proposalsDirtyRef.current = true;
     };
     window.addEventListener("optimistic-vote", handler);
     return () => window.removeEventListener("optimistic-vote", handler);
@@ -3964,7 +4086,6 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
              : 1000)
             + Math.min(50000, Math.max(0, w.count))
           }
-          interactive={!passthrough}
           onActivate={activateIndicator}
           onDeactivate={deactivateIndicator}
           onClick={handleClick}
@@ -4183,11 +4304,25 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       const removable = isRouteMode && p.id === selectedRbtpId && anchorsAreWaypoints(p);
       const heat = heatOf(p.score);
       const heatColor = heat > 0 ? sampleHeatRamp(rampStops, heat * HEAT_PEAK_POS) : undefined;
-      const icon = makeVoteTypeIcon(p.label, theme.suggestions, {
-        diamond: true, selected: covered || isDropTarget, passthrough,
-        square: !!override, heat, heatColor,
-        removeRoute: removable ? p.id : null,
-      });
+      // Plain diamonds share one cached divIcon per label+heat bucket (same
+      // scheme as the squares above): this memo re-runs on every zoom, and a
+      // fresh icon object per run would setIcon (tear down + recreate the DOM
+      // element) for every diamond on every zoom step. Stateful variants
+      // (selected/passthrough/fanned/removable) are a handful and stay fresh.
+      const stateful = covered || isDropTarget || passthrough || !!override || removable;
+      let icon: L.DivIcon;
+      if (stateful) {
+        icon = makeVoteTypeIcon(p.label, theme.suggestions, {
+          diamond: true, selected: covered || isDropTarget, passthrough,
+          square: !!override, heat, heatColor,
+          removeRoute: removable ? p.id : null,
+        });
+      } else {
+        const cacheKey = `${p.label}|d${Math.round(heat * 12)}`;
+        icon = iconCacheRef.current.get(cacheKey)
+          ?? makeVoteTypeIcon(p.label, theme.suggestions, { diamond: true, heat, heatColor });
+        iconCacheRef.current.set(cacheKey, icon);
+      }
 
       const activate = () => {
         // The diamond owns the hover while the cursor is on it — same
@@ -4238,7 +4373,6 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           // joins that top band with the fanned squares. Bands documented at
           // the point-icon zIndexOffset.
           zIndexOffset={(override ? 500000 : covered ? 400000 : 300000) + Math.min(48000, Math.max(0, p.score))}
-          interactive={!passthrough}
           onActivate={activate}
           onDeactivate={deactivate}
           onClick={() => {

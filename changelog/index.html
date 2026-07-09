@@ -29,6 +29,22 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-09-vote-zoom-batching.html">
+    <div class="date">2026-07-09</div>
+    <h2>Instant voting, storm-free zoom, live exploded diamonds, longer corridors</h2>
+    <p>Four client fixes at NYC-bikes scale (3.3&nbsp;M edges, ~47&nbsp;k lit blocks), each reproduced and
+    measured live first. Casting a vote froze the app ~2.3&nbsp;s because both top-proposal computations
+    re-ran on every cast — proposal recomputation is now a minute-batched sweep run in idle-time slices
+    (worst slice ~284&nbsp;ms, votes now produce zero long tasks) while the heatmap and counts stay live;
+    the clustering itself got 3× faster (sparse one-pass nets, reused block index). Zooming re-applied all
+    ~47&nbsp;k block heats once per loaded tile — 4.4&nbsp;M setFeatureState calls per wheel zoom — now
+    feature-state is written once and diffed per vote (a cast writes ~3). Exploded route diamonds were
+    permanently click-dead when they mounted over a waypoint (react-leaflet applies `interactive` only at
+    creation) — the icon's CSS passthrough class is now the single, live-updating gate. Corridor length
+    budgets raised ~50% (900&nbsp;m floor&nbsp;+&nbsp;220&nbsp;m/√score, 3.5&nbsp;km cap) so hot corridors
+    read as real routes, not stubs.</p>
+  </a>
+
   <a class="entry" href="./2026-07-09-vote-path-mitigations.html">
     <div class="date">2026-07-09</div>
     <h2>Vote-path mitigations — 160 agents from lockup to 45 votes/s, deployed to prod</h2>

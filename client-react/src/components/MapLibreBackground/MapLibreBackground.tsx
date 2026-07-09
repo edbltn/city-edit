@@ -371,6 +371,11 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
     const latest = { current: null as BlockVotesDetail | null };
     // Block ids currently holding feature-state { selected: true }.
     const selected = { current: [] as number[] };
+    // What the source actually holds: the sparse id→heat map last written, and
+    // the normalization it was computed with. Feature-state lives on the SOURCE
+    // (tiles pick it up as they load), so once applied it survives every tile
+    // (re)load — this is what lets apply() diff instead of rewriting the world.
+    const applied = { current: null as { heat: Map<number, number>; denom: number } | null };
 
     const featureOf = (id: number) => ({ source: "blocks", sourceLayer: "blocks", id });
 
@@ -392,23 +397,57 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
       }
       const { blockVotes, max } = detail;
       const denom = Math.log(Math.max(1, max) + 1);
-      // Clear prior states, then set only the blocks that have votes (sparse).
-      // The wholesale clear drops the `selected` key too — re-apply it after.
-      ml.removeFeatureState({ source: "blocks", sourceLayer: "blocks" });
-      for (let id = 0; id < blockVotes.length; id++) {
-        const v = blockVotes[id];
-        if (v > 0) {
-          ml.setFeatureState(featureOf(id), { heat: Math.log(v + 1) / denom });
+      const prev = applied.current;
+      // Full rewrite only on the first apply and when the normalization
+      // ceiling moved (every lit block's heat changes then — rare). Otherwise
+      // write just the blocks whose heat actually changed: a vote touches a
+      // handful, and the old always-full rewrite (~47k setFeatureState on the
+      // NYC bike map, on EVERY vote and EVERY sourcedata event) was the main
+      // "zooming reloads the whole map" cost.
+      const full = !prev || prev.denom !== denom;
+      const next = new Map<number, number>();
+      let writes = 0;
+      if (full) {
+        // Clear prior states, then set only the blocks that have votes
+        // (sparse). The wholesale clear drops `selected` too — re-apply after.
+        ml.removeFeatureState({ source: "blocks", sourceLayer: "blocks" });
+        for (let id = 0; id < blockVotes.length; id++) {
+          const v = blockVotes[id];
+          if (v > 0) {
+            const h = Math.log(v + 1) / denom;
+            next.set(id, h);
+            ml.setFeatureState(featureOf(id), { heat: h });
+            writes++;
+          }
+        }
+        applySelected();
+      } else {
+        for (let id = 0; id < blockVotes.length; id++) {
+          const v = blockVotes[id];
+          if (v > 0) {
+            const h = Math.log(v + 1) / denom;
+            next.set(id, h);
+            if (prev.heat.get(id) !== h) {
+              ml.setFeatureState(featureOf(id), { heat: h });
+              writes++;
+            }
+          }
+        }
+        // Blocks whose last vote was just undone: cool back to 0.
+        for (const id of prev.heat.keys()) {
+          if (!next.has(id)) {
+            ml.setFeatureState(featureOf(id), { heat: 0 });
+            writes++;
+          }
         }
       }
-      applySelected();
+      applied.current = { heat: next, denom };
+      dlog("blocks", `heat apply (${full ? "full" : "diff"}): ${writes} writes, ${next.size} lit`);
+      debugState("blockHeatNonzero", next.size);
     };
 
     const onVotes = (e: Event) => {
       latest.current = (e as CustomEvent<BlockVotesDetail>).detail;
-      const nz = latest.current.blockVotes.reduce((n, v) => (v > 0 ? n + 1 : n), 0);
-      dlog("blocks", `heat broadcast: ${nz} blocks lit (max=${latest.current.max})`);
-      debugState("blockHeatNonzero", nz);
       apply();
     };
 
@@ -431,15 +470,24 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
       selected.current = next;
     };
 
+    // Votes can arrive before the blocks source exists (apply() bails then).
+    // Retry on sourcedata ONLY until the first successful apply: feature-state
+    // is stored on the source, not the tiles, so once written it persists
+    // through every subsequent tile load — re-applying per sourcedata event
+    // (which fires per TILE) multiplied the full rewrite by ~a hundred per
+    // zoom, the storm behind the slow bike-map zoom.
+    const onSourceData = () => {
+      if (!applied.current) apply();
+    };
+
     window.addEventListener(BLOCK_VOTES_EVENT, onVotes);
     window.addEventListener(BLOCK_SELECT_EVENT, onSelect);
-    // Re-apply whenever the block source (re)loads tiles.
     const ml = mapRef.current;
-    ml?.on("sourcedata", apply);
+    ml?.on("sourcedata", onSourceData);
     return () => {
       window.removeEventListener(BLOCK_VOTES_EVENT, onVotes);
       window.removeEventListener(BLOCK_SELECT_EVENT, onSelect);
-      ml?.off("sourcedata", apply);
+      ml?.off("sourcedata", onSourceData);
     };
   }, []);
 
