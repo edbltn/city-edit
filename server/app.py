@@ -2,6 +2,7 @@ import gzip
 import json
 import logging
 import os
+import queue
 import re
 import sys
 import time
@@ -28,6 +29,7 @@ import vote_semantics
 import vote_migration
 import block_votes
 import database
+import delta_hub as delta_hub_mod
 from cities import CITIES, DEFAULT_CITY_ID, get_city, all_cities
 from graph_registry import GraphRegistry, OsrmRegistry, STATION_NETWORKS
 from osrm_router import extract_all_segments
@@ -636,6 +638,11 @@ if os.environ.get("SKIP_WARMUP") != "1":
 # under load. The graph-votes debounce now decides how long a stale snapshot
 # keeps serving.
 
+# One pubsub listener + coalesced fan-out for every WebSocket client (see
+# delta_hub.py). Its thread starts lazily on the first subscription.
+delta_hub = delta_hub_mod.DeltaHub(
+    lambda: redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True))
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -935,7 +942,14 @@ def map_auth(slug):
 
 @sock.route("/ws")
 def ws(ws):
-    """Push a single map's vote deltas to a client in real time."""
+    """Push a single map's vote deltas to a client in real time.
+
+    Delivery comes from the process-wide DeltaHub: ONE Redis pubsub listener
+    feeds every client, and deltas arrive merged ({"type": "deltas", ...}) at
+    the hub's flush cadence instead of one send per vote per client. This
+    handler just blocks on its queue — no per-client Redis connection and no
+    10Hz busy poll (finding #4 of changelog/2026-07-08-agent-load-test.html).
+    """
     slug = (request.args.get("map") or DEFAULT_MAP_SLUG).strip()
 
     # Gate the live stream exactly like the REST content: a locked map's deltas
@@ -949,19 +963,15 @@ def ws(ws):
             pass
         return
 
-    channel = vote_store.channel_key(slug)
-
-    ws_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
-    pubsub = ws_client.pubsub()
-    pubsub.subscribe(channel)
-
-    rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)
-    ws.send(json.dumps({"type": "init", "rev": rev, "map": slug}))
-
-    last_push = time.time()
-    KEEPALIVE = 30
+    sub = delta_hub.subscribe(slug)
     try:
+        rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)
+        ws.send(json.dumps({"type": "init", "rev": rev, "map": slug}))
+
+        last_push = time.time()
+        KEEPALIVE = 30
         while True:
+            # Pump inbound frames so a client close is noticed promptly.
             try:
                 ws.receive(timeout=0)
             except Exception as e:
@@ -969,18 +979,25 @@ def ws(ws):
                 if "timed out" not in s and "no data" not in s and "connection closed" not in s:
                     logger.warning(f"[WS] receive exception: {e}")
 
-            msg = pubsub.get_message(timeout=0.1)
-            if msg and msg["type"] == "message":
-                ws.send(msg["data"])
+            if sub.overflowed.is_set():
+                # This client lagged past its queue bound; a reconnect plus
+                # the client's gap refetch is cheaper than a catch-up replay.
+                logger.warning(f"[WS] {slug}: subscriber overflowed — closing")
+                break
+
+            try:
+                payload = sub.q.get(timeout=1.0)
+                ws.send(payload)
                 last_push = time.time()
+                continue
+            except queue.Empty:
+                pass
 
             if time.time() - last_push > KEEPALIVE:
                 ws.send('{"type":"keepalive"}')
                 last_push = time.time()
     finally:
-        pubsub.unsubscribe(channel)
-        pubsub.close()
-        ws_client.close()
+        delta_hub.unsubscribe(slug, sub)
 
 
 # ── Routes API ─────────────────────────────────────────────────────────────

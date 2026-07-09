@@ -57,6 +57,19 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           for (const cb of deltaListenersRef.current) {
             cb(delta as VoteDelta);
           }
+        } else if (msg.type === "deltas" && Array.isArray(msg.items)) {
+          // Server-coalesced batch (delta_hub): unwrap into individual deltas
+          // in rev order so downstream gap detection and count application see
+          // exactly the per-vote stream they always did.
+          const items = [...msg.items].sort(
+            (a, b) => (a.rev ?? 0) - (b.rev ?? 0));
+          for (const item of items) {
+            const { type: _t, ...delta } = item;
+            void _t;
+            for (const cb of deltaListenersRef.current) {
+              cb(delta as VoteDelta);
+            }
+          }
         }
         // "init" and "keepalive" are handled silently
       } catch (e) {
