@@ -32,11 +32,18 @@ COPY server/data/ ./data/
 
 # Build routing graphs during image build (bakes per-city graphs into image).
 # Separate processes so each city's osmnx memory is freed before the next.
+# build_graph also emits walk_graph_arrays.npz per city — the ONLY graph
+# artifact the runtime loads (the pkl is build-time-only input for block
+# bakes and array conversion). Test cities (test-cp/test-mid) come from local
+# extracts, not refresh_osm — ship them via the arrays-overlay staging dir.
+# NOTE: a full rebuild produces NEW edge ids → votes need the graph_reload
+# resnap AND blocks need a re-bake against the new graphs before serving.
 RUN mkdir -p osm_data && \
     python refresh_osm.py --region nyc --force && \
     python refresh_osm.py --region sf --force && \
     python refresh_osm.py --region chicago --force && \
     python refresh_osm.py --region dc --force && \
+    python refresh_osm.py --region philly --force && \
     rm -f osm_data/*/source.osm.pbf
 
 COPY --from=client-builder /app/dist /var/www/html/

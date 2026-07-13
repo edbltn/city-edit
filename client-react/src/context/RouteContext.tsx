@@ -15,6 +15,7 @@ import { getDefaultVoteTypeForTheme } from "../constants/voteTypes";
 import { blockCoverage, type VoteDirection } from "../utils/voteStore";
 import { useVotesVersion } from "../utils/useVotesVersion";
 import { castVotes, voteButtonState } from "../utils/castVote";
+import { derror } from "../utils/debugLog";
 import { useTheme } from "./ThemeContext";
 import { useGraphSnap } from "./GraphSnapContext";
 import type { ForcedCorridor, Selection } from "../selection/types";
@@ -625,7 +626,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
           if (calcVersion !== splitCalcVersionRef.current) return;
           if (splitPaths.length === mids.length + 1) setSplitDesirePaths(splitPaths);
         })
-        .catch(console.error)
+        .catch((err) => derror("proposals", "split path calculation failed:", err))
         .finally(() => {
           if (calcVersion === splitCalcVersionRef.current) setIsCalculatingSplit(false);
         });
@@ -893,7 +894,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
           setSplitDesirePaths(splitPaths);
         }
       } catch (err) {
-        console.error("Failed to calculate split paths:", err);
+        derror("proposals", "Failed to calculate split paths:", err);
       } finally {
         if (calcVersion === splitCalcVersionRef.current) {
           setIsCalculatingSplit(false);
@@ -954,7 +955,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
           setSplitDesirePaths(splitPaths);
         }
       } catch (err) {
-        console.error("Failed to recalculate split paths:", err);
+        derror("proposals", "Failed to recalculate split paths:", err);
       } finally {
         if (calcVersion === splitCalcVersionRef.current) {
           setIsCalculatingSplit(false);

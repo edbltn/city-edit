@@ -314,7 +314,7 @@ def build_arrays(
     votes: dict[int, int],
     edge_count: int,
     node_count: int,
-    node_adj: list[list[int]],
+    node_adj,  # NodeAdjacency (CSR view): node id -> numpy slice of edge ids
     mode_filter: int | None = None,
 ) -> dict:
     """Unpack votes into per-edge and derived per-node arrays.
@@ -375,11 +375,12 @@ def build_arrays(
     node_vt_merged: dict[int, dict[int, list[int]]] = {}
     for nid in range(node_count):
         adj = node_adj[nid]
-        if not adj:
+        if len(adj) == 0:  # numpy slice — truthiness is ambiguous, use len
             continue
         best = 0
         merged: dict[int, list[int]] | None = None
         for eid in adj:
+            eid = int(eid)
             v = edge_totals[eid]
             if v > best:
                 best = v
@@ -408,23 +409,7 @@ def build_arrays(
     }
 
 
-# ── Coordinate → edge ID mapping ──────────────────────────────────────────
-
-def coords_to_edge_ids(segments: list, coord_to_edge: dict) -> list[int]:
-    """Map route segments (coordinate pairs) to unique edge IDs."""
-    seen: set[int] = set()
-    result: list[int] = []
-    for seg in segments:
-        if len(seg) < 2:
-            continue
-        c1 = f"{round(seg[0][0], 5)},{round(seg[0][1], 5)}"
-        c2 = f"{round(seg[1][0], 5)},{round(seg[1][1], 5)}"
-        for eid in coord_to_edge.get((c1, c2), ()):
-            if eid not in seen:
-                seen.add(eid)
-                result.append(eid)
-    return result
-
+# ── OSM node → edge ID mapping ────────────────────────────────────────────
 
 def osm_nodes_to_edge_ids(
     osm_node_ids: list[int],

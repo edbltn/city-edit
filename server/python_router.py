@@ -1,24 +1,25 @@
 """
 Walk-graph provider: topology, nearest-node snapping, and reverse geocoding.
 
-Loads a city's pickled walk graph into compact numpy arrays + a kdtree and serves:
+Loads a city's prebaked compact arrays (walk_graph_arrays.npz — see
+graph_arrays.py) into numpy arrays + a kdtree and serves:
   - get_graph_for_bbox: nodes/edges plus the OSM-node→edge maps that let OSRM
     route annotations resolve to votable edges (osm_to_graph_idx / node_pair_to_edge)
   - nearest_node_coords / reverse_geocode: point snapping and intersection naming
 
-Routing itself is OSRM's job (see osrm_router.py); this module no longer computes
-routes, so it carries no networkx/rustworkx routing graph at runtime — the heavy
-networkx graph is freed right after the compact arrays are extracted.
+Routing itself is OSRM's job (see osrm_router.py). The runtime never touches
+networkx or the walk_graph.pkl pickle — that decode transiently inflated to
+several GB per city and OOM-looped prod. The pickle remains a build-time
+artifact only (graph builds, block bakes, array conversion).
 """
-import gc
 import logging
-import os
-import pickle
 import sys
 from pathlib import Path
 
 import numpy as np
 from scipy.spatial import cKDTree
+
+import graph_arrays
 
 logger = logging.getLogger(__name__)
 
@@ -27,137 +28,75 @@ class PythonRouter:
     """Walk-graph provider: compact-array topology, snapping, and geocoding.
 
     Despite the name (kept for import stability), this is not a router — OSRM
-    serves every route. It loads the walk graph once into numpy arrays and a
-    kdtree, frees the source networkx graph, and answers topology/snap/geocode
-    queries from the arrays.
+    serves every route. It loads the prebaked arrays once and answers
+    topology/snap/geocode queries from them.
     """
 
     def __init__(self, data_dir: str = "osm_data", redis_client=None):
         """
         Args:
-            data_dir: Directory containing graph pickle files
+            data_dir: Directory containing walk_graph_arrays.npz
             redis_client: Redis client (held for callers that re-pass it on reload)
         """
         self.data_dir = Path(data_dir)
         self.redis = redis_client
         self._loaded = False
-        self._node_index = {}    # osm id -> graph index
-        self._index_to_node = {}  # graph index -> osm id
-        self._version = None
-        self._bbox_cache: dict[tuple, dict] = {}
+        self._version: str | None = None
         self._kdtree: cKDTree | None = None
-        # Compact graph representation (replaces the heavy networkx graph after
-        # load). Coords indexed by graph index; edges as parallel arrays; names
-        # interned to dedupe; adjacency as edge-positions per node.
-        self._coords: np.ndarray | None = None      # [n, 2] -> (lat, lon)
+        self._coords: np.ndarray | None = None       # [n, 2] -> (lat, lon)
+        self._node_osmid: np.ndarray | None = None   # [n] int64 graph index -> osm id
         self._edge_u: np.ndarray | None = None       # [e] int32 from-index
         self._edge_v: np.ndarray | None = None       # [e] int32 to-index
-        self._edge_len: np.ndarray | None = None      # [e] float32 length (m)
-        self._edge_name: list[str] = []               # [e] interned street names
-        self._edge_highway: list[str] = []            # [e] interned highway tags
-        self._edge_adj: list[list[int]] = []          # node index -> [edge positions]
-
-    @staticmethod
-    def _first_str(val) -> str:
-        """OSM tags can be a string or a list of strings (multi-valued); take one."""
-        if isinstance(val, list):
-            return val[0] if val else ""
-        return val or ""
+        self._edge_len: np.ndarray | None = None     # [e] float32 length (m)
+        self._edge_name: list[str] = []              # [e] shared street-name strings
+        self._edge_highway: list[str] = []           # [e] shared highway-tag strings
+        # CSR adjacency: node index -> incident edge positions.
+        self._adj_indptr: np.ndarray | None = None
+        self._adj_edges: np.ndarray | None = None
 
     def _ensure_loaded(self):
-        """Load the OSM graph into compact arrays + spatial index, then free networkx.
-
-        The pickled networkx graph is the single biggest structure (a Python dict
-        per node and per edge → several GB for NYC), but everything we actually
-        need from it — node coords, edge endpoints/lengths/names, and adjacency —
-        fits in compact numpy arrays + interned-string lists an order of magnitude
-        smaller. We extract those, build the kdtree from them, drop networkx, and
-        let gc reclaim it. Nothing routing-related is kept (OSRM does routing).
-        """
+        """Load the prebaked arrays + spatial index (~1s; no pickle, no networkx)."""
         if self._loaded:
             return
 
-        graph_path = self.data_dir / "walk_graph.pkl"
-        if not graph_path.exists():
-            raise RuntimeError(
-                f"Graph file not found: {graph_path}. "
-                "Run: python refresh_osm.py --region fidi --force"
-            )
+        arrays = graph_arrays.load(self.data_dir)
+        self._coords = arrays["coords"]
+        self._node_osmid = arrays["node_osmid"]
+        self._edge_u = arrays["edge_u"]
+        self._edge_v = arrays["edge_v"]
+        self._edge_len = arrays["edge_len"]
+        self._version = arrays["version"]
 
-        logger.info(f"Loading walk graph from {graph_path}")
-        with open(graph_path, "rb") as f:
-            data = pickle.load(f)
+        # Expand name/highway codes to shared Python strings (interned so the
+        # per-edge lists are references onto the small unique sets).
+        names = [sys.intern(s) for s in arrays["names"]]
+        highways = [sys.intern(s) for s in arrays["highways"]]
+        self._edge_name = [names[c] for c in arrays["edge_name"]]
+        self._edge_highway = [highways[c] for c in arrays["edge_highway"]]
 
-        nx_graph = data["graph"]
-        self._node_index = data["node_index"]
-        self._index_to_node = data["index_to_node"]
-        self._version = data.get("version", "unknown")
-        data = None
-
-        n = len(self._node_index)
-
-        # Node coords indexed by graph index (osmnx stores y=lat, x=lon). The
-        # kdtree is built on this array, so a query returns the graph index directly.
-        coords = np.zeros((n, 2), dtype=np.float64)
-        for osmid, idx in self._node_index.items():
-            nd = nx_graph.nodes[osmid]
-            coords[idx, 0] = nd["y"]
-            coords[idx, 1] = nd["x"]
-
-        # Compact edge arrays + per-node adjacency (edge positions touching a node).
-        edge_u: list[int] = []
-        edge_v: list[int] = []
-        edge_len: list[float] = []
-        edge_name: list[str] = []
-        edge_highway: list[str] = []
-        adj: list[list[int]] = [[] for _ in range(n)]
-
-        for u, v, ed in nx_graph.edges(data=True):
-            ui = self._node_index.get(u)
-            vi = self._node_index.get(v)
-            if ui is None or vi is None:
-                continue
-            pos = len(edge_u)
-            edge_u.append(ui)
-            edge_v.append(vi)
-            edge_len.append(float(ed.get("length", 1.0)))
-            # Intern names/highways: street names repeat heavily across edges, so
-            # interning collapses millions of references onto a small unique set.
-            edge_name.append(sys.intern(str(self._first_str(ed.get("name", "")))))
-            edge_highway.append(sys.intern(str(self._first_str(ed.get("highway", "")))))
-            adj[ui].append(pos)
-            adj[vi].append(pos)
-
-        self._coords = coords
-        self._edge_u = np.array(edge_u, dtype=np.int32)
-        self._edge_v = np.array(edge_v, dtype=np.int32)
-        self._edge_len = np.array(edge_len, dtype=np.float32)
-        self._edge_name = edge_name
-        self._edge_highway = edge_highway
-        self._edge_adj = adj
-        self._kdtree = cKDTree(coords)
-
-        # Free the heavy networkx graph — its data now lives in the compact arrays.
-        del nx_graph
-        gc.collect()
+        n = len(self._coords)
+        self._adj_indptr, self._adj_edges = graph_arrays.build_csr_adjacency(
+            self._edge_u, self._edge_v, n)
+        self._kdtree = cKDTree(self._coords)
         self._loaded = True
 
         logger.info(
-            f"Walk graph loaded: {n} nodes, {len(edge_u)} edges, "
-            f"version: {self._version} (networkx freed)"
+            f"[ROUTER] Walk graph loaded from arrays: {n} nodes, "
+            f"{len(self._edge_u)} edges, version: {self._version}"
         )
+
+    def _incident_edges(self, node: int) -> np.ndarray:
+        """Edge positions incident to a node (CSR slice)."""
+        return self._adj_edges[self._adj_indptr[node]:self._adj_indptr[node + 1]]
 
     def get_graph_for_bbox(self, south: float, west: float, north: float, east: float) -> dict:
         """Return nodes and edges of the walk graph within a lat/lon bounding box.
 
-        Results are cached by bbox rounded to 3 decimal places (~111m).
+        The node/edge construction (ordering, rounding, field layout) is the
+        etag-critical contract: baked blocks stamp a topology_etag computed from
+        this exact output, so any change here invalidates every block artifact.
         """
         self._ensure_loaded()
-
-        # Check cache (rounded to 3dp for ~111m granularity)
-        cache_key = (round(south, 3), round(west, 3), round(north, 3), round(east, 3))
-        if cache_key in self._bbox_cache:
-            return self._bbox_cache[cache_key]
 
         # Nodes within bbox — vectorized mask over the coord array (coords[:,0]=lat).
         lat = self._coords[:, 0]
@@ -186,7 +125,7 @@ class PythonRouter:
 
         # OSM node ID → position in node_list (for OSRM annotation-based edge mapping)
         osm_to_graph_idx = {
-            int(self._index_to_node[int(g)]): pos for pos, g in enumerate(included)
+            int(self._node_osmid[int(g)]): pos for pos, g in enumerate(included)
         }
 
         # (graph_node_a, graph_node_b) → edge index (both directions for undirected)
@@ -195,21 +134,12 @@ class PythonRouter:
             node_pair_to_edge[(edge[0], edge[1])] = i
             node_pair_to_edge[(edge[1], edge[0])] = i
 
-        result = {
+        return {
             "nodes": node_list,
             "edges": edge_list,
             "osm_to_graph_idx": osm_to_graph_idx,
             "node_pair_to_edge": node_pair_to_edge,
         }
-
-        # Cache (limit to 64 entries to bound memory)
-        if len(self._bbox_cache) >= 64:
-            # Evict oldest entry
-            oldest = next(iter(self._bbox_cache))
-            del self._bbox_cache[oldest]
-        self._bbox_cache[cache_key] = result
-
-        return result
 
     def nearest_node_coords(self, lat: float, lon: float) -> tuple[float, float]:
         """Return (lat, lon) of the nearest graph node to the given point."""
@@ -235,7 +165,7 @@ class PythonRouter:
         seen_names: set[str] = set()
 
         # BFS up to 5 hops from nearest node (pedestrian plazas can be wide),
-        # walking the compact adjacency (node index → incident edge positions).
+        # walking the CSR adjacency (node index → incident edge positions).
         visited: set = {start_node}
         frontier = [start_node]
         for _ in range(5):
@@ -243,7 +173,7 @@ class PythonRouter:
                 break
             next_frontier = []
             for node in frontier:
-                for ep in self._edge_adj[node]:
+                for ep in self._incident_edges(node):
                     name = self._edge_name[ep]
                     if name and name not in seen_names:
                         seen_names.add(name)
@@ -268,28 +198,26 @@ class PythonRouter:
 
     def reload(self):
         """Force reload of graph (called after OSM refresh)."""
-        logger.info("Reloading walk graph...")
+        logger.info("[ROUTER] Reloading walk graph...")
         self._loaded = False
-        self._node_index = {}
-        self._index_to_node = {}
         self._version = None
-        self._bbox_cache = {}
         self._kdtree = None
         self._coords = None
+        self._node_osmid = None
         self._edge_u = None
         self._edge_v = None
         self._edge_len = None
         self._edge_name = []
         self._edge_highway = []
-        self._edge_adj = []
-        gc.collect()
+        self._adj_indptr = None
+        self._adj_edges = None
         self._ensure_loaded()
 
     def stats(self) -> dict:
         """Get graph statistics."""
         self._ensure_loaded()
         return {
-            "nodes": len(self._node_index),
+            "nodes": int(len(self._coords)),
             "edges": int(len(self._edge_u)) if self._edge_u is not None else 0,
             "version": self._version
         }
@@ -301,12 +229,13 @@ def build_graph(bbox: tuple, output_dir: str, pbf_url: str | None = None) -> dic
 
     Reads the city's `pbf_url` extract and keeps every way OSRM's foot profile would
     route (see osm_graph_builder / foot_profile), so the topology graph is a superset
-    of OSRM's foot network and route votes map cleanly by OSM node id. Replaces the
-    old live-Overpass osmnx download, which used a different snapshot and filter.
+    of OSRM's foot network and route votes map cleanly by OSM node id. Emits BOTH
+    artifacts: walk_graph.pkl (build-time canonical source, consumed by the block
+    bake) and walk_graph_arrays.npz (the only thing the runtime loads).
 
     Args:
         bbox: (south, west, north, east) bounding box
-        output_dir: Directory to save the graph pickle (and cache the source PBF)
+        output_dir: Directory to save the graph artifacts (and cache the source PBF)
         pbf_url: Source OSM extract URL (same one OSRM uses; from cities.py)
 
     Returns:
@@ -320,6 +249,8 @@ def build_graph(bbox: tuple, output_dir: str, pbf_url: str | None = None) -> dic
     if not pbf_url:
         raise RuntimeError("build_graph requires pbf_url (the source extract OSRM uses)")
 
+    import os
+    import pickle
     import time
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -355,6 +286,10 @@ def build_graph(bbox: tuple, output_dir: str, pbf_url: str | None = None) -> dic
     with open(tmp_path, "wb") as f:
         pickle.dump(data, f)
     os.replace(tmp_path, graph_path)
+
+    # The runtime loads only the compact arrays — convert immediately so a
+    # fresh build is servable without a separate step.
+    graph_arrays.convert(output_path)
 
     elapsed = time.time() - start_time
 

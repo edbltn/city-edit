@@ -134,7 +134,9 @@ resource "google_sql_database_instance" "votes" {
   region           = var.region
 
   settings {
-    tier = "db-f1-micro"
+    # g1-small (1.7GB shared-core): f1-micro (0.6GB) ran out of steam under
+    # concurrent tenant writes — vote persistence is on the request path.
+    tier = "db-g1-small"
 
     ip_configuration {
       ipv4_enabled    = false
@@ -316,6 +318,12 @@ resource "google_cloud_run_service" "app" {
 
   template {
     spec {
+      # Explicit cap (Cloud Run default is 80). Requests are gevent-multiplexed
+      # on one worker; each held-open WebSocket occupies a slot for its
+      # lifetime, so the ceiling is concurrent VIEWERS per instance, not RPS.
+      # 200 × maxScale 8 ≈ 1600 concurrent viewers before saturation.
+      container_concurrency = 200
+
       containers {
         image = "${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper/app:latest"
 
@@ -384,16 +392,16 @@ resource "google_cloud_run_service" "app" {
         }
 
         resources {
-          # Holds all 4 city walk graphs (nyc/sf/chicago/dc) + the tiny station
-          # networks resident (GraphRegistry max_loaded=4+stations). python_router
-          # keeps only compact numpy arrays after load (drops the heavy networkx
-          # graph); the rustworkx OSRM-fallback representation was removed entirely.
-          # Measured on the post-deploy revision: ~5.5Gi avg, ~6.0Gi peak — the
-          # dropped deps were mostly build/import-time, so resident memory did NOT
-          # fall much. Keep 8Gi: peak already touches 6Gi and the multi-graph warmup
-          # transient needs the headroom. Do NOT trim to 6Gi (would OOM on warmup).
+          # Holds every city walk graph (nyc/sf/chicago/dc/philly + test cities)
+          # + station networks resident. The runtime loads prebaked compact
+          # arrays (walk_graph_arrays.npz — no networkx unpickle, whose multi-GB
+          # transient caused the 2026-07 OOM crash loop at 8Gi/old code).
+          # Measured locally with ALL cities + 21 map vote bodies warm: 1.35Gi
+          # RSS, so 8Gi is ~6x headroom. 4 vCPU: the single gevent worker plus
+          # nginx gzip are the concurrency ceiling per instance — extra cores
+          # keep topology/vote-snapshot compression off the request path's back.
           limits = {
-            cpu    = "2"
+            cpu    = "4"
             memory = "8Gi"
           }
         }
@@ -423,8 +431,10 @@ resource "google_cloud_run_service" "app" {
         # bounded, shared-nothing LRU (Redis holds the authoritative votes). So
         # the autoscaler may spill to additional instances under concurrent load
         # instead of head-of-line-blocking on the single gevent worker. Added
-        # instances are 8Gi/2CPU each and only run under load (minScale stays 1).
-        "autoscaling.knative.dev/maxScale"        = "4"
+        # instances are 8Gi/4CPU each and only run under load (minScale stays 1);
+        # graph loads from the array artifacts take seconds, so a scale-out
+        # instance is useful almost immediately.
+        "autoscaling.knative.dev/maxScale"        = "8"
         # Extra CPU during startup so imports + _populate_redis + the background
         # graph prewarm finish quickly (we run at only 2 vCPU steady-state).
         "run.googleapis.com/startup-cpu-boost"    = "true"

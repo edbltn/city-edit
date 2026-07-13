@@ -96,11 +96,11 @@ class OsrmRouter(RouterInterface):
             "?overview=full&geometries=geojson&steps=false&annotations=nodes"
         )
 
-        logger.info(f"[OSRM] GET {url}")
+        logger.debug(f"[OSRM] GET {url}")
 
         try:
             resp = self._session.get(url, timeout=10, headers=self._auth_headers())
-            logger.info(f"[OSRM] Response status={resp.status_code}, body={resp.text[:500]}")
+            logger.debug(f"[OSRM] Response status={resp.status_code}, body={resp.text[:500]}")
             resp.raise_for_status()
             data = resp.json()
         except requests.ConnectionError as e:
@@ -128,7 +128,7 @@ class OsrmRouter(RouterInterface):
             else:
                 osm_node_ids.extend(nodes)
 
-        logger.info(
+        logger.debug(
             f"[OSRM] Route OK: {route['distance']:.0f}m, "
             f"{route['duration']:.0f}s, "
             f"{len(route['geometry']['coordinates'])} coords, "

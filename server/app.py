@@ -522,7 +522,7 @@ def _build_graph_votes_body_locked(
     votes = vote_store.read_all(redis_client, rmap.slug)
     mode_filter = vote_store.mode_to_int(mode) if mode else None
     arrays = vote_store.build_arrays(
-        votes, len(rmap.graph.edges), len(rmap.graph.nodes), rmap.graph.node_adj,
+        votes, rmap.graph.n_edges, rmap.graph.n_nodes, rmap.graph.node_adj,
         mode_filter=mode_filter,
     )
     arrays["rev"] = rev
@@ -533,8 +533,8 @@ def _build_graph_votes_body_locked(
     # and the topology etag lets the client detect a mismatch and refuse to paint
     # votes against the wrong topology — the root of the mobile-Safari crash —
     # rather than indexing past the end of its node/edge arrays.
-    arrays["n_edges"] = len(rmap.graph.edges)
-    arrays["n_nodes"] = len(rmap.graph.nodes)
+    arrays["n_edges"] = rmap.graph.n_edges
+    arrays["n_nodes"] = rmap.graph.n_nodes
     arrays["topology_version"] = rmap.graph.topology_etag
 
     # Block layer: when this map has an edge→block mapping, also project the
@@ -1109,7 +1109,7 @@ def calculate_route():
 
     try:
         waypoints_tuples = [(wp[0], wp[1]) for wp in waypoints]
-        logger.info(
+        logger.debug(
             f"[ROUTE] {rmap.slug}: start={start} end={end} "
             f"waypoints={len(waypoints_tuples)} -> OSRM"
         )
@@ -1133,6 +1133,10 @@ def calculate_route():
         segments = extract_all_segments(route.get("geometry"))
 
         # Map OSRM route → graph edge IDs for fast voting + optimistic updates.
+        # OSRM annotations are the ONLY mapping — the graph is built from the
+        # same PBF + foot filter, so node ids resolve directly. The old
+        # coordinate-rounding fallback masked real mapping failures and is gone;
+        # an empty edge_ids list now surfaces the problem instead of hiding it.
         rmap.graph.ensure_loaded()
         edge_ids = []
         osm_node_ids = route.get("osm_node_ids", [])
@@ -1141,7 +1145,7 @@ def calculate_route():
                 osm_node_ids, rmap.graph.osm_to_graph_idx, rmap.graph.node_pair_to_edge,
             )
         if not edge_ids:
-            edge_ids = vote_store.coords_to_edge_ids(segments, rmap.graph.coord_to_edge_idx)
+            logger.warning(f"[ROUTE] {rmap.slug}: OSRM route resolved to 0 edge ids")
 
         return jsonify({
             "route": route,
@@ -1322,9 +1326,9 @@ def cast_vote():
             if capped:
                 logger.info(f"[VOTE:{slug}] capped {len(capped)} edge(s) for "
                             f"ip={ip_hash[:8]}… (no device to take over)")
-            logger.info(f"[VOTE:{slug}] dir={direction} changed={len(changed)} "
-                        f"cleared={len(cleared)} blocks={len(plan.touched_blocks)} "
-                        f"vt={vt_id} ({vt_label!r}) ip={ip_hash[:8]}…")
+            logger.debug(f"[VOTE:{slug}] dir={direction} changed={len(changed)} "
+                         f"cleared={len(cleared)} blocks={len(plan.touched_blocks)} "
+                         f"vt={vt_id} ({vt_label!r}) ip={ip_hash[:8]}…")
 
             if changed:
                 # Persist synchronously so the next vote reads the new direction.
@@ -1509,21 +1513,6 @@ def route_votes():
 
 # ── Graph data APIs ──────────────────────────────────────────────────────────
 
-@app.route("/api/nearest-node", methods=["GET"])
-def nearest_node():
-    try:
-        lat = float(request.args["lat"])
-        lon = float(request.args["lng"])
-    except (KeyError, ValueError):
-        return jsonify({"error": "lat and lng are required"}), 400
-    try:
-        rmap = resolve_map(request.args.get("map"))
-        node_lat, node_lon = rmap.graph.provider.nearest_node_coords(lat, lon)
-        return jsonify({"lat": node_lat, "lng": node_lon})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
 def _compose_address(props: dict) -> str:
     """Build a clean label from Photon's structured fields.
 
@@ -1665,7 +1654,7 @@ def geocode():
         results = _photon_search(query, rmap.city.geocode_bbox, clat, clon)
         return jsonify({"results": list(results)})
     except requests.RequestException as e:
-        logger.error(f"Geocoding error: {e}")
+        logger.error(f"[GEOCODE] Geocoding error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -1685,28 +1674,7 @@ def reverse_geocode():
         address = rmap.graph.provider.reverse_geocode(lat, lon)
         return jsonify({"address": address or None, "lat": lat, "lng": lon})
     except Exception as e:
-        logger.error(f"Reverse geocoding error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/graph", methods=["GET"])
-def graph_data():
-    """Return graph topology for a bounding box (no vote data)."""
-    try:
-        bbox = request.args["bbox"]
-        west, south, east, north = [float(v) for v in bbox.split(",")]
-    except (KeyError, ValueError):
-        return jsonify({"error": "bbox=minLon,minLat,maxLon,maxLat required"}), 400
-    try:
-        rmap = resolve_map(request.args.get("map"))
-        if _locked(rmap):
-            return _locked_response()
-        data = rmap.graph.provider.get_graph_for_bbox(south, west, north, east)
-        # Only the JSON-serializable topology goes over the wire; the lookup maps
-        # (node_pair_to_edge keyed by int tuples, osm_to_graph_idx) are server-side
-        # routing helpers and can't be JSON-encoded.
-        return jsonify({"nodes": data["nodes"], "edges": data["edges"]})
-    except Exception as e:
+        logger.error(f"[GEOCODE] Reverse geocoding error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -1756,7 +1724,7 @@ def _gcs_access_token() -> str | None:
         r.raise_for_status()
         data = r.json()
     except (requests.RequestException, ValueError) as e:
-        logger.warning("Could not fetch GCS access token: %s", e)
+        logger.warning("[PREVIEWS] Could not fetch GCS access token: %s", e)
         return None
     _gcs_token["value"] = data["access_token"]
     _gcs_token["expires_at"] = now + int(data.get("expires_in", 3600)) - 300
@@ -1778,7 +1746,7 @@ def serve_preview(name):
             url, headers={"Authorization": f"Bearer {token}"}, timeout=10
         )
     except requests.RequestException as e:
-        logger.warning("Preview fetch failed for %s: %s", name, e)
+        logger.warning("[PREVIEWS] Preview fetch failed for %s: %s", name, e)
         return "", 404
     if r.status_code != 200:
         return "", 404
@@ -1813,8 +1781,6 @@ def graph_topology():
     if _locked(rmap):
         return _locked_response()
     rmap.graph.ensure_loaded()
-    if rmap.graph.topology_json is None:
-        return jsonify({"error": "Graph not loaded"}), 500
 
     # Binary topology (?format=bin): a compact ArrayBuffer the client decodes
     # without JSON.parse-ing the ~150MB string (which OOM-crashes mobile Safari).
@@ -1837,6 +1803,13 @@ def graph_topology():
         resp.headers["Cache-Control"] = "public, max-age=86400"
         resp.headers["ETag"] = bin_etag
         return resp
+
+    # JSON topology exists only for station networks (tiny, names matter);
+    # street networks are binary-only — the client always requests format=bin
+    # for them, and the ~150MB JSON string is no longer kept resident.
+    if rmap.graph.topology_json is None:
+        return jsonify({"error": "JSON topology not served for street networks; "
+                                 "use format=bin"}), 410
 
     etag = rmap.graph.topology_etag
     if request.headers.get("If-None-Match") == etag:
@@ -1934,42 +1907,6 @@ def graph_votes():
     resp.headers["Cache-Control"] = "public, max-age=5"
     resp.headers["ETag"] = etag
     return resp
-
-
-@app.route("/api/graph.geojson", methods=["GET"])
-def graph_geojson():
-    rmap = resolve_map(request.args.get("map"))
-    if _locked(rmap):
-        return _locked_response()
-    rmap.graph.ensure_loaded()
-    nodes = rmap.graph.nodes
-    edges = rmap.graph.edges
-    features = []
-
-    for edge in edges:
-        from_idx, to_idx = edge[0], edge[1]
-        name = edge[2] if len(edge) > 2 else ""
-        highway = edge[3] if len(edge) > 3 else ""
-        length = edge[4] if len(edge) > 4 else 0
-        from_lat, from_lon = nodes[from_idx]
-        to_lat, to_lon = nodes[to_idx]
-        features.append({
-            "type": "Feature",
-            "geometry": {"type": "LineString",
-                         "coordinates": [[from_lon, from_lat], [to_lon, to_lat]]},
-            "properties": {"type": "edge", "from_idx": from_idx, "to_idx": to_idx,
-                           "name": name, "highway": highway, "length": length},
-        })
-
-    for node_idx, (lat, lon) in enumerate(nodes):
-        features.append({
-            "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [lon, lat]},
-            "properties": {"type": "node", "node_id": node_idx,
-                           "lat": round(lat, 6), "lon": round(lon, 6)},
-        })
-
-    return jsonify({"type": "FeatureCollection", "features": features})
 
 
 # ── Admin ──────────────────────────────────────────────────────────────────

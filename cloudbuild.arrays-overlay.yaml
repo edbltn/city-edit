@@ -1,0 +1,33 @@
+# Arrays-overlay deploy: overlay updated code/client/nginx onto the CURRENT
+# app image AND generate walk_graph_arrays.npz in-image from its baked graphs
+# (plus staged new cities). No edge-id shift → no vote resnap. Pass the
+# digest-pinned base via _BASE_IMAGE. See Dockerfile.arrays-overlay.
+#
+# Big machine: the conversion step unpickles each city's networkx graph
+# (~6GB transient for NYC).
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'BASE_IMAGE=${_BASE_IMAGE}'
+      - '-f'
+      - 'Dockerfile.arrays-overlay'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest']
+
+options:
+  machineType: 'E2_HIGHCPU_32'
+
+timeout: '3600s'
+
+substitutions:
+  _REGION: us-central1
+  _BASE_IMAGE: ''
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'

@@ -1,12 +1,18 @@
 """
 Per-city graph + OSRM registries.
 
-Replaces the old single-global graph cache. Each city's walk graph
-(osm_data/<city>/walk_graph.pkl) is loaded on demand into a CityGraph that holds
-the topology, coordinate→edge lookups, node adjacency, and a cached topology JSON
-blob (with ETag) for /api/graph-topology. An LRU bound keeps memory in check when
-several cities are active. OSRM routers are likewise created per city, each
-pointing at that city's OSRM container.
+Each city's walk graph (osm_data/<city>/walk_graph_arrays.npz) is loaded on
+demand into a CityGraph that holds array-native topology, the OSM-annotation
+lookup maps, and the cached GTB2 binary blob for /api/graph-topology. An LRU
+bound keeps memory in check when several cities are active. OSRM routers are
+likewise created per city, each pointing at that city's OSRM container.
+
+Memory model: everything resident is a numpy array or a numpy-backed sorted
+lookup (IntMap/IntPairMap). The old dict/list-of-lists representation cost
+~2.5GB for NYC alone; the arrays cost ~150MB. The list form still exists
+transiently during load because topology_etag is the sha256 of the exact JSON
+the legacy path produced — baked blocks stamp that etag, so it must never
+change encoding.
 """
 import hashlib
 import json
@@ -20,6 +26,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from cities import City
+from graph_arrays import build_csr_adjacency
 from python_router import PythonRouter
 from osrm_router import OsrmRouter
 
@@ -50,24 +57,119 @@ def load_station_graph(network: str) -> dict:
     return {"nodes": nodes, "edges": edges, "osm_to_graph_idx": {}, "node_pair_to_edge": {}}
 
 
-def encode_topology_bin(nodes, edges, edge_block_id=None, n_blocks: int = 0) -> bytes:
+class IntMap:
+    """Immutable int→int map over sorted numpy arrays (dict-compatible .get()).
+
+    Replaces the per-city osm_to_graph_idx dict (~60MB of boxed ints for NYC)
+    with two flat arrays (~8MB) + binary search.
+    """
+
+    __slots__ = ("_keys", "_values")
+
+    def __init__(self, keys: np.ndarray, values: np.ndarray):
+        order = np.argsort(keys, kind="stable")
+        self._keys = keys[order]
+        self._values = values[order]
+
+    def get(self, key, default=None):
+        i = np.searchsorted(self._keys, key)
+        if i < len(self._keys) and self._keys[i] == key:
+            return int(self._values[i])
+        return default
+
+    def __len__(self):
+        return len(self._keys)
+
+
+class IntPairMap:
+    """Immutable (int, int)→int map, keys packed into uint64 (a<<32 | b).
+
+    Replaces node_pair_to_edge (~450MB of tuple-keyed dict for NYC) with flat
+    arrays (~50MB). Duplicate pairs keep the LAST inserted value — matching the
+    legacy dict-assignment semantics, so parallel edges resolve identically.
+    """
+
+    __slots__ = ("_keys", "_values")
+
+    def __init__(self, a: np.ndarray, b: np.ndarray, values: np.ndarray):
+        packed = (a.astype(np.uint64) << np.uint64(32)) | b.astype(np.uint64)
+        # stable sort + keep the last entry of each duplicate-key run
+        order = np.argsort(packed, kind="stable")
+        keys = packed[order]
+        vals = values[order]
+        if len(keys):
+            last_of_run = np.r_[keys[1:] != keys[:-1], True]
+            keys = keys[last_of_run]
+            vals = vals[last_of_run]
+        self._keys = keys
+        self._values = vals
+
+    def get(self, pair, default=None):
+        key = (np.uint64(pair[0]) << np.uint64(32)) | np.uint64(pair[1])
+        i = np.searchsorted(self._keys, key)
+        if i < len(self._keys) and self._keys[i] == key:
+            return int(self._values[i])
+        return default
+
+    def __len__(self):
+        return len(self._keys)
+
+
+class NodeAdjacency:
+    """CSR node→incident-edge-ids view with the old list-of-lists interface.
+
+    adj[node] returns a numpy slice of edge ids (use len(), not truthiness).
+    Self-edges appear once (matching the legacy build), so station-network
+    snapping keeps returning each station's own edge.
+    """
+
+    __slots__ = ("_indptr", "_edges")
+
+    def __init__(self, indptr: np.ndarray, edges: np.ndarray):
+        self._indptr = indptr
+        self._edges = edges
+
+    def __getitem__(self, node: int) -> np.ndarray:
+        return self._edges[self._indptr[node]:self._indptr[node + 1]]
+
+    def __len__(self):
+        return len(self._indptr) - 1
+
+
+def _build_node_adjacency(edge_ends: np.ndarray, n_nodes: int) -> NodeAdjacency:
+    """CSR adjacency over edge endpoint POSITIONS, self-edges recorded once."""
+    u = edge_ends[:, 0]
+    v = edge_ends[:, 1]
+    self_edge = u == v
+    endpoints = np.concatenate([u, v[~self_edge]]).astype(np.int64)
+    edge_pos = np.concatenate([
+        np.arange(len(u), dtype=np.int32),
+        np.arange(len(u), dtype=np.int32)[~self_edge],
+    ])
+    # lexsort: group by node, ascending edge id within each node — the same
+    # order the legacy per-edge append loop produced (snap_point_to_edge
+    # returns the FIRST incident edge, so ordering is behavior).
+    order = np.lexsort((edge_pos, endpoints))
+    counts = np.bincount(endpoints, minlength=n_nodes)
+    indptr = np.zeros(n_nodes + 1, dtype=np.int64)
+    np.cumsum(counts, out=indptr[1:])
+    return NodeAdjacency(indptr, edge_pos[order])
+
+
+def encode_topology_bin(node_coords: np.ndarray, edge_ends: np.ndarray,
+                        edge_block_id=None, n_blocks: int = 0) -> bytes:
     """Assemble the GTB2 binary topology blob (pure; see topology_binary).
 
     [b'GTB2', u32 nNodes, u32 nEdges, u32 nBlocks] + int32 coords (deg×1e7,
     lat/lon pairs) + uint32 edge ends (from/to pairs) + — when edge_block_id is
     given — a trailing int32[nEdges] block-id section (−1 = unmapped).
     """
-    coords = np.fromiter(
-        (round(v * 1e7) for nd in nodes for v in (nd[0], nd[1])),
-        dtype="<i4", count=2 * len(nodes),
-    )
-    ends = np.fromiter(
-        (v for e in edges for v in (e[0], e[1])),
-        dtype="<u4", count=2 * len(edges),
-    )
+    coords = np.rint(node_coords.reshape(-1) * 1e7).astype("<i4")
+    ends = edge_ends.astype("<u4").reshape(-1)
     has_blocks = edge_block_id is not None
     header = struct.pack(
-        "<4sIII", b"GTB2", len(nodes), len(edges), n_blocks if has_blocks else 0
+        "<4sIII", b"GTB2", len(node_coords), len(edge_ends),
+        n_blocks if has_blocks else 0
     )
     parts = [header, coords.tobytes(), ends.tobytes()]
     if has_blocks:
@@ -76,32 +178,34 @@ def encode_topology_bin(nodes, edges, edge_block_id=None, n_blocks: int = 0) -> 
 
 
 class CityGraph:
-    """Lazily-loaded graph + derived lookups for a single city + network."""
+    """Lazily-loaded array-native topology + derived lookups for one city+network."""
 
     def __init__(self, city: City, redis_client=None, network: str = "streets"):
         self.city = city
         self.network = network
         self.provider = PythonRouter(data_dir=city.data_dir, redis_client=redis_client)
         self._loaded = False
-        # Serializes concurrent first-loads of this city. Under the gevent worker
-        # pickle.load yields on file I/O, so without this two requests for the
-        # same unloaded city would each load the full graph (e.g. 3x the NYC
-        # graph at once → OOM). threading.Lock is gevent-patched at runtime.
+        # Serializes concurrent first-loads of this city so two requests for the
+        # same unloaded city don't both build it. threading.Lock is
+        # gevent-patched at runtime.
         self._load_lock = threading.Lock()
 
-        self.nodes: list = []
-        self.edges: list = []
-        self.node_adj: list[list[int]] = []
-        self.coord_to_edge_idx: dict = {}
-        self.coord_to_node_idx: dict = {}
-        self.osm_to_graph_idx: dict = {}
-        self.node_pair_to_edge: dict = {}
+        self.n_nodes: int = 0
+        self.n_edges: int = 0
+        self.node_coords: np.ndarray | None = None   # [n, 2] float64 (lat, lon)
+        self.edge_ends: np.ndarray | None = None     # [e, 2] int32 (from_pos, to_pos)
+        self.node_adj: NodeAdjacency | None = None
+        self.osm_to_graph_idx: IntMap | None = None
+        self.node_pair_to_edge: IntPairMap | None = None
+        # JSON topology is served only for station networks (tiny, names matter).
+        # Street networks serve the GTB2 binary; their JSON exists only long
+        # enough at load time to compute the etag baked blocks are stamped with.
         self.topology_json: str | None = None
         self.topology_etag: str | None = None
-        # Compact binary topology (built lazily; see topology_binary).
         self.topology_bin: bytes | None = None
-        # Lazily-built cKDTree over edge midpoints, used by the vote migration to
-        # re-snap many anchors at once (kept off the hot load path / common case).
+        # Lazily-built kdtrees: node tree for point-vote snapping, edge-midpoint
+        # tree for the vote migration (kept off the hot load path).
+        self._node_tree: cKDTree | None = None
         self._edge_mid_tree: cKDTree | None = None
 
         # Optional block layer: edge_block_id[edge_id] → block_id (−1 unmapped),
@@ -132,51 +236,50 @@ class CityGraph:
         nodes = data.get("nodes", [])
         edges = data.get("edges", [])
 
-        # coord → edge index reverse map (both directions for undirected lookup)
-        coord_to_edge_idx: dict[tuple[str, str], list[int]] = {}
-        for i, edge in enumerate(edges):
-            from_idx, to_idx = edge[0], edge[1]
-            from_lat, from_lon = nodes[from_idx]
-            to_lat, to_lon = nodes[to_idx]
-            c1 = f"{round(from_lon, 5)},{round(from_lat, 5)}"
-            c2 = f"{round(to_lon, 5)},{round(to_lat, 5)}"
-            coord_to_edge_idx.setdefault((c1, c2), []).append(i)
-            if c1 != c2:
-                coord_to_edge_idx.setdefault((c2, c1), []).append(i)
-
-        coord_to_node_idx: dict[str, int] = {}
-        for i, node in enumerate(nodes):
-            lat, lon = node[0], node[1]
-            coord_to_node_idx[f"{round(lon, 5)},{round(lat, 5)}"] = i
-
-        # Node adjacency: node_id → [edge_ids]. A self-edge (station network) is
-        # added once, not twice, so snap_point_to_edge returns it cleanly.
-        adj: list[list[int]] = [[] for _ in range(len(nodes))]
-        for i, edge in enumerate(edges):
-            adj[edge[0]].append(i)
-            if edge[1] != edge[0]:
-                adj[edge[1]].append(i)
-
+        # topology_etag is the sha256 of the exact legacy JSON encoding of
+        # (nodes, [from, to, name] edges). Baked block artifacts are stamped
+        # with it, so the encoding is a compatibility contract. The string is
+        # retained only for station networks (tiny; served as JSON); street
+        # networks hash it and let it go.
         edges_slim = [[e[0], e[1], e[2]] for e in edges]
         topology_json = json.dumps({"nodes": nodes, "edges": edges_slim})
         topology_etag = '"' + hashlib.sha256(topology_json.encode()).hexdigest()[:16] + '"'
+        keep_json = self.network in STATION_NETWORKS
 
-        self.nodes = nodes
-        self.edges = edges
-        self.node_adj = adj
-        self.coord_to_edge_idx = coord_to_edge_idx
-        self.coord_to_node_idx = coord_to_node_idx
-        self.osm_to_graph_idx = data.get("osm_to_graph_idx", {})
-        self.node_pair_to_edge = data.get("node_pair_to_edge", {})
-        self.topology_json = topology_json
+        # Array-native residents; the list form dies with this frame.
+        node_coords = np.asarray(nodes, dtype=np.float64).reshape(-1, 2)
+        edge_ends = (
+            np.asarray([(e[0], e[1]) for e in edges], dtype=np.int32).reshape(-1, 2)
+        )
+
+        # osm id → node position, as sorted flat arrays
+        osm_map = data.get("osm_to_graph_idx", {})
+        osm_keys = np.fromiter(osm_map.keys(), dtype=np.int64, count=len(osm_map))
+        osm_vals = np.fromiter(osm_map.values(), dtype=np.int32, count=len(osm_map))
+
+        self.n_nodes = len(node_coords)
+        self.n_edges = len(edge_ends)
+        self.node_coords = node_coords
+        self.edge_ends = edge_ends
+        self.node_adj = _build_node_adjacency(edge_ends, self.n_nodes)
+        self.osm_to_graph_idx = IntMap(osm_keys, osm_vals)
+        # Legacy insertion order was per-edge interleaved — (a,b) then (b,a) for
+        # edge 0, then edge 1, … — with dict assignment (last wins). Interleave
+        # the arrays the same way so duplicate pairs resolve identically.
+        pair_a = np.column_stack([edge_ends[:, 0], edge_ends[:, 1]]).reshape(-1)
+        pair_b = np.column_stack([edge_ends[:, 1], edge_ends[:, 0]]).reshape(-1)
+        pair_val = np.repeat(np.arange(self.n_edges, dtype=np.int32), 2)
+        self.node_pair_to_edge = IntPairMap(pair_a, pair_b, pair_val)
+        self.topology_json = topology_json if keep_json else None
         self.topology_etag = topology_etag
+        self._node_tree = None
         self._edge_mid_tree = None  # rebuilt lazily for the new edge set
         self._loaded = True
         self._load_edge_blocks()
 
         logger.info(
-            f"[GRAPH] '{self.city.id}:{self.network}' loaded: {len(nodes)} nodes, "
-            f"{len(edges)} edges, topology {len(topology_json) / (1024 * 1024):.1f} MB"
+            f"[GRAPH] '{self.city.id}:{self.network}' loaded: {self.n_nodes} nodes, "
+            f"{self.n_edges} edges"
             + (f", {self.n_blocks} blocks" if self.has_blocks else "")
         )
 
@@ -186,7 +289,7 @@ class CityGraph:
         Validates the mapping's stamped topology_etag against the just-loaded
         graph so a mapping left over from a previous graph build is ignored (the
         map then serves the edge heatmap) rather than mis-coloring blocks against
-        the wrong edge ids. Built by streetscape_blocks/build_edge_blocks.py."""
+        the wrong edge ids. Built by streetscape_blocks/build_blocks_graph_first.py."""
         self.edge_block_id = None
         self.n_blocks = 0
         self.blocks_version = None
@@ -204,9 +307,9 @@ class CityGraph:
                     "ignoring (serving edge heatmap)")
                 return
             arr = np.load(npy)
-            if len(arr) != len(self.edges):
+            if len(arr) != self.n_edges:
                 logger.warning(f"[GRAPH] edge_blocks length {len(arr)} != "
-                               f"{len(self.edges)} edges; ignoring")
+                               f"{self.n_edges} edges; ignoring")
                 return
             self.edge_block_id = arr
             self.n_blocks = int(meta.get("n_blocks", int(arr.max()) + 1 if len(arr) else 0))
@@ -248,49 +351,47 @@ class CityGraph:
         self.ensure_loaded()
         if self.topology_bin is None:
             self.topology_bin = encode_topology_bin(
-                self.nodes, self.edges,
+                self.node_coords, self.edge_ends,
                 self.edge_block_id if self.has_blocks else None,
                 n_blocks=self.n_blocks if self.has_blocks else 0,
             )
         return self.topology_bin
 
+    def _ensure_node_tree(self) -> cKDTree | None:
+        self.ensure_loaded()
+        if self._node_tree is None and self.n_nodes:
+            self._node_tree = cKDTree(self.node_coords)
+        return self._node_tree
+
     def snap_point_to_edge(self, lat: float, lon: float) -> list[int]:
         """Snap a lat/lon point to the nearest graph edge via closest node."""
-        self.ensure_loaded()
-        if not self.nodes:
+        tree = self._ensure_node_tree()
+        if tree is None:
             return []
-        best_idx = 0
-        best_dist = float("inf")
-        for i, node in enumerate(self.nodes):
-            d = (node[0] - lat) ** 2 + (node[1] - lon) ** 2
-            if d < best_dist:
-                best_dist = d
-                best_idx = i
-        if best_idx < len(self.node_adj) and self.node_adj[best_idx]:
-            return [self.node_adj[best_idx][0]]
+        _, best_idx = tree.query([lat, lon])
+        incident = self.node_adj[int(best_idx)]
+        if len(incident):
+            return [int(incident[0])]
         return []
 
     def edge_midpoint(self, edge_id: int) -> tuple[float, float] | None:
         """(lat, lon) midpoint of an edge — the migration anchor stored per vote."""
         self.ensure_loaded()
-        if edge_id < 0 or edge_id >= len(self.edges):
+        if edge_id < 0 or edge_id >= self.n_edges:
             return None
-        e = self.edges[edge_id]
-        a = self.nodes[e[0]]
-        b = self.nodes[e[1]]
-        return ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+        a, b = self.edge_ends[edge_id]
+        mid = (self.node_coords[a] + self.node_coords[b]) / 2.0
+        return (float(mid[0]), float(mid[1]))
 
     def edge_midpoints(self, edge_ids) -> dict[int, tuple[float, float]]:
         """{edge_id: (lat, lon)} midpoints for many edges (skips out-of-range ids)."""
         self.ensure_loaded()
         out: dict[int, tuple[float, float]] = {}
-        n = len(self.edges)
         for eid in edge_ids:
-            if 0 <= eid < n:
-                e = self.edges[eid]
-                a = self.nodes[e[0]]
-                b = self.nodes[e[1]]
-                out[eid] = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+            if 0 <= eid < self.n_edges:
+                a, b = self.edge_ends[eid]
+                mid = (self.node_coords[a] + self.node_coords[b]) / 2.0
+                out[eid] = (float(mid[0]), float(mid[1]))
         return out
 
     def _ensure_edge_mid_tree(self) -> cKDTree | None:
@@ -304,11 +405,10 @@ class CityGraph:
         """
         self.ensure_loaded()
         if self._edge_mid_tree is None:
-            if not self.edges:
+            if not self.n_edges:
                 return None
-            nodes = np.asarray(self.nodes, dtype=np.float64)  # [N, 2] = (lat, lon)
-            e = np.asarray([(edge[0], edge[1]) for edge in self.edges], dtype=np.int64)
-            mids = (nodes[e[:, 0]] + nodes[e[:, 1]]) / 2.0  # [E, 2]
+            mids = (self.node_coords[self.edge_ends[:, 0]] +
+                    self.node_coords[self.edge_ends[:, 1]]) / 2.0  # [E, 2]
             self._edge_mid_tree = cKDTree(mids)
         return self._edge_mid_tree
 
@@ -334,15 +434,17 @@ class CityGraph:
         redis_client = self.provider.redis
         self.provider = PythonRouter(data_dir=self.city.data_dir, redis_client=redis_client)
         self._loaded = False
-        self.nodes = []
-        self.edges = []
-        self.node_adj = []
-        self.coord_to_edge_idx = {}
-        self.coord_to_node_idx = {}
-        self.osm_to_graph_idx = {}
-        self.node_pair_to_edge = {}
+        self.n_nodes = 0
+        self.n_edges = 0
+        self.node_coords = None
+        self.edge_ends = None
+        self.node_adj = None
+        self.osm_to_graph_idx = None
+        self.node_pair_to_edge = None
         self.topology_json = None
         self.topology_etag = None
+        self.topology_bin = None
+        self._node_tree = None
         self._edge_mid_tree = None
 
 
@@ -394,9 +496,8 @@ class GraphRegistry:
 class OsrmRegistry:
     """Routers to OSRM.
 
-    Preferred: a single merged OSRM serves every city (set OSRM_URL) → one shared
-    router for all cities. Falls back to per-city hosts (OSRM_HOST_<CITY> / the
-    service name in cities.py) for legacy setups that still run one OSRM per city.
+    A single merged OSRM serves every city (set OSRM_URL) → one shared router
+    for all cities; without OSRM_URL (local dev) a per-city host from cities.py.
     """
 
     def __init__(self):

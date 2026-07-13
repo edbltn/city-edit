@@ -2235,25 +2235,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             if (version) setCachedTopology(version, t);
             return t;
           }
-          try {
-            const r = await fetch(
-              withVersion(withMap(`${CONFIG.apiUrl}/graph-topology?format=bin`), binVersion),
-              init,
-            );
-            if (!r.ok) throw new Error(`Binary topology fetch failed: ${r.status}`);
-            const buf = await r.arrayBuffer();
-            const t = decodeTopologyBin(buf);
-            if (binVersion) setCachedTopologyBin(binVersion, buf);
-            return t;
-          } catch (binErr) {
-            // Older server without the binary endpoint — fall back to JSON.
-            dwarn("topo", "binary topology unavailable, using JSON:", binErr);
-            const r = await fetch(withVersion(withMap(`${CONFIG.apiUrl}/graph-topology`)), init);
-            if (!r.ok) throw new Error(`Topology fetch failed: ${r.status}`);
-            const t = topologyFromJson(await r.json());
-            if (version) setCachedTopology(version, t);
-            return t;
-          }
+          // Street networks are binary-only (the server no longer serves their
+          // JSON topology) — a failure here surfaces instead of falling back.
+          const r = await fetch(
+            withVersion(withMap(`${CONFIG.apiUrl}/graph-topology?format=bin`), binVersion),
+            init,
+          );
+          if (!r.ok) throw new Error(`Binary topology fetch failed: ${r.status}`);
+          const buf = await r.arrayBuffer();
+          const t = decodeTopologyBin(buf);
+          if (binVersion) setCachedTopologyBin(binVersion, buf);
+          return t;
         };
         fetchFreshTopology = fetchTopologyFromNetwork;
 
@@ -2353,7 +2345,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           try {
             fresh = fetchFreshTopology ? await fetchFreshTopology(true) : null;
           } catch (refetchErr) {
-            console.error("Fresh topology refetch failed:", refetchErr);
+            derror("topo", "Fresh topology refetch failed:", refetchErr);
           }
           if (cancelled) return;
           if (fresh && votesMatchTopology(voteData, fresh)) {
