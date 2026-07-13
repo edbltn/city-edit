@@ -341,12 +341,12 @@ export const DEFAULT_JACCARD = 0.5;
 // — a corridor earns length with votes — and is trimmed to its best-supported
 // contiguous window under that budget (see capPathToLengthBudget).
 /** Budget floor: every corridor may span at least this many meters. */
-export const ROUTE_LENGTH_BASE_M = 900;
+export const ROUTE_LENGTH_BASE_M = 2700;
 /** Budget growth: meters added per √(path score). √ keeps a corridor with 4×
  *  the votes at 2× the earned length — support buys reach, sublinearly. */
-export const ROUTE_LENGTH_PER_SQRT_SCORE_M = 220;
+export const ROUTE_LENGTH_PER_SQRT_SCORE_M = 660;
 /** Budget ceiling, whatever the support. */
-export const ROUTE_LENGTH_MAX_M = 3500;
+export const ROUTE_LENGTH_MAX_M = 10500;
 
 /** The meter budget a path of `score` (sum of nets) has earned. */
 export function routeLengthBudgetM(score: number, maxM = ROUTE_LENGTH_MAX_M): number {
