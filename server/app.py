@@ -522,7 +522,7 @@ def _build_graph_votes_body_locked(
     votes = vote_store.read_all(redis_client, rmap.slug)
     mode_filter = vote_store.mode_to_int(mode) if mode else None
     arrays = vote_store.build_arrays(
-        votes, rmap.graph.n_edges, rmap.graph.n_nodes, rmap.graph.node_adj,
+        votes, rmap.graph.n_edges, rmap.graph.n_nodes, rmap.graph.edge_ends,
         mode_filter=mode_filter,
     )
     arrays["rev"] = rev
@@ -845,14 +845,31 @@ def _locked_stub(slug: str):
     return resp
 
 
+# slug → (expiry_monotonic, enriched map dict). Public maps only; 30s TTL
+# (the response is already Cache-Control: public, max-age=60). Every tenant's
+# page load enters here, and each uncached hit is two Postgres round-trips —
+# under a concurrent join wave that stampedes the shared pool.
+_map_get_cache: dict[str, tuple[float, dict]] = {}
+
+
 @app.route("/api/maps/<slug>", methods=["GET"])
 def map_get(slug):
+    cached = _map_get_cache.get(slug)
+    if cached and cached[0] > time.monotonic():
+        resp = jsonify(cached[1])
+        resp.headers["Cache-Control"] = "public, max-age=60"
+        return resp
     m = get_map(slug)
     if not m:
         return jsonify({"error": "Map not found"}), 404
     if m.get("requiresPasscode") and not _passcode_ok(slug):
         return _locked_stub(slug)
-    return _map_response(m)
+    resp = _map_response(m)
+    if not m.get("requiresPasscode"):
+        if len(_map_get_cache) > 256:  # bound: one entry per public map
+            _map_get_cache.clear()
+        _map_get_cache[slug] = (time.monotonic() + 30.0, m)
+    return resp
 
 
 @app.route("/api/maps/by-subdomain/<subdomain>", methods=["GET"])

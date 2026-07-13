@@ -310,11 +310,14 @@ def read_all(redis_client, slug: str) -> dict[int, int]:
     return {int(k): int(v) for k, v in raw.items()}
 
 
+_EMPTY: list = []  # shared per-edge/node placeholder — never mutated, only replaced
+
+
 def build_arrays(
     votes: dict[int, int],
     edge_count: int,
     node_count: int,
-    node_adj,  # NodeAdjacency (CSR view): node id -> numpy slice of edge ids
+    edge_ends,  # np.ndarray [e, 2] int32 — edge id -> (node_u, node_v)
     mode_filter: int | None = None,
 ) -> dict:
     """Unpack votes into per-edge and derived per-node arrays.
@@ -322,34 +325,43 @@ def build_arrays(
     `edge_votes`/`node_votes` are NET counts (up − down) — the heatmap value
     (clamped to ≥ 0 client-side). Per-type breakdowns are encoded as
     [legendIdx, up, down] so modals can show "net (−down, +up)".
+
+    Runs on the request path (debounced snapshot rebuild), so it must be
+    sparse: work scales with the number of VOTED fields, never with graph
+    size. The old pure-Python version looped every edge and every node
+    (~4.6M iterations for NYC) per rebuild, stalling the gevent loop for
+    seconds and head-of-line-blocking every other request under load.
     """
-    edge_up = [0] * edge_count
-    edge_down = [0] * edge_count
-    # edge_id → {vt_id: [up, down]}
+    import numpy as np
+
+    edge_up = np.zeros(edge_count, dtype=np.int64)
+    edge_down = np.zeros(edge_count, dtype=np.int64)
+    # edge_id → {vt_id: [up, down]} — sparse, voted edges only
     edge_vt: dict[int, dict[int, list[int]]] = {}
 
-    for packed, count in votes.items():
-        eid, m, vtid, dbit = unpack(packed)
-        if eid >= edge_count:
-            continue
-        if mode_filter is not None and m != mode_filter:
-            continue
-        if dbit:
-            edge_down[eid] += count
-        else:
-            edge_up[eid] += count
-        if vtid:
-            evd = edge_vt.get(eid)
-            if evd is None:
-                evd = {}
-                edge_vt[eid] = evd
-            pair = evd.get(vtid)
-            if pair is None:
-                pair = [0, 0]
-                evd[vtid] = pair
-            pair[1 if dbit else 0] += count
+    if votes:
+        packed = np.fromiter(votes.keys(), dtype=np.int64, count=len(votes))
+        counts = np.fromiter(votes.values(), dtype=np.int64, count=len(votes))
+        eid = packed & 0xFFFFFF
+        mode = (packed >> 24) & 0xF
+        vtid = (packed >> 28) & 0xFFFFFF
+        dbit = (packed >> 52) & 1
+        keep = eid < edge_count
+        if mode_filter is not None:
+            keep &= mode == mode_filter
+        eid, vtid, dbit, counts = eid[keep], vtid[keep], dbit[keep], counts[keep]
 
-    edge_totals = [edge_up[i] - edge_down[i] for i in range(edge_count)]
+        up_rows = dbit == 0
+        np.add.at(edge_up, eid[up_rows], counts[up_rows])
+        np.add.at(edge_down, eid[~up_rows], counts[~up_rows])
+
+        # typed breakdown: only rows carrying a vote type (small)
+        for e, vt, d, c in zip(eid[vtid != 0].tolist(), vtid[vtid != 0].tolist(),
+                               dbit[vtid != 0].tolist(), counts[vtid != 0].tolist()):
+            pair = edge_vt.setdefault(e, {}).setdefault(vt, [0, 0])
+            pair[1 if d else 0] += c
+
+    edge_totals = edge_up - edge_down
 
     # Build legend + per-edge vote types — sorted by net descending
     legend: list[str] = []
@@ -358,45 +370,40 @@ def build_arrays(
     def encode(vt_map: dict[int, list[int]]) -> list:
         pairs = sorted(vt_map.items(), key=lambda x: -(x[1][0] - x[1][1]))
         enc = []
-        for vtid, (up, down) in pairs:
-            if vtid not in li:
-                li[vtid] = len(legend)
-                legend.append(resolve_vote_type(vtid))
-            enc.append([li[vtid], up, down])
+        for vt, (up, down) in pairs:
+            if vt not in li:
+                li[vt] = len(legend)
+                legend.append(resolve_vote_type(vt))
+            enc.append([li[vt], int(up), int(down)])
         return enc
 
-    edge_vote_types: list[list] = [[] for _ in range(edge_count)]
-    for eid, vt_map in edge_vt.items():
-        edge_vote_types[eid] = encode(vt_map)
+    edge_vote_types: list[list] = [_EMPTY] * edge_count
+    for e in sorted(edge_vt):
+        edge_vote_types[e] = encode(edge_vt[e])
 
-    # Derive node votes from edges (max net of adjacent edges; per-type pair
-    # taken from the adjacent edge with the larger net for that type).
-    node_totals = [0] * node_count
+    # Derive node votes from edges: a node shows the max positive net among its
+    # incident edges. Sparse form: only edges with a positive net can move a
+    # node above 0, so scatter-max from those edges' endpoints.
+    node_totals = np.zeros(node_count, dtype=np.int64)
+    pos = np.nonzero(edge_totals > 0)[0]
+    if len(pos) and edge_ends is not None and len(edge_ends):
+        np.maximum.at(node_totals, edge_ends[pos, 0], edge_totals[pos])
+        np.maximum.at(node_totals, edge_ends[pos, 1], edge_totals[pos])
+
+    # Per-node type merge: for each type, the pair from the incident voted edge
+    # with the larger net (ties → lowest edge id, deterministic).
     node_vt_merged: dict[int, dict[int, list[int]]] = {}
-    for nid in range(node_count):
-        adj = node_adj[nid]
-        if len(adj) == 0:  # numpy slice — truthiness is ambiguous, use len
-            continue
-        best = 0
-        merged: dict[int, list[int]] | None = None
-        for eid in adj:
-            eid = int(eid)
-            v = edge_totals[eid]
-            if v > best:
-                best = v
-            evd = edge_vt.get(eid)
-            if evd:
-                if merged is None:
-                    merged = {}
-                for vtid, pair in evd.items():
-                    cur = merged.get(vtid)
+    if edge_ends is not None and len(edge_ends):
+        for e in sorted(edge_vt):
+            vt_map = edge_vt[e]
+            for nid in (int(edge_ends[e, 0]), int(edge_ends[e, 1])):
+                merged = node_vt_merged.setdefault(nid, {})
+                for vt, pair in vt_map.items():
+                    cur = merged.get(vt)
                     if cur is None or (pair[0] - pair[1]) > (cur[0] - cur[1]):
-                        merged[vtid] = [pair[0], pair[1]]
-        node_totals[nid] = best
-        if merged:
-            node_vt_merged[nid] = merged
+                        merged[vt] = [pair[0], pair[1]]
 
-    node_vote_types: list[list] = [[] for _ in range(node_count)]
+    node_vote_types: list[list] = [_EMPTY] * node_count
     for nid, vt_map in node_vt_merged.items():
         node_vote_types[nid] = encode(vt_map)
 
