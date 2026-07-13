@@ -1,0 +1,21 @@
+# Blocks ARTIFACTS-ONLY overlay — the most surgical deploy we have.
+#
+# Overlays refreshed Layer-2 block artifacts (edge_blocks_<network>.npy/.json
+# + blocks.pmtiles per city, staged in .blocks-staging/<city>/) onto the
+# CURRENT serving image and changes NOTHING else: no server code, no client
+# build, no nginx config. Use this when the working tree carries unrelated
+# in-flight work that must not ship (Dockerfile.blocks-overlay, by contrast,
+# also copies server/*.py + a fresh client build).
+#
+# The staged artifacts MUST be baked against the BASE IMAGE's own graphs
+# (docker cp them out of the image first) — graph_registry hard-rejects a
+# mapping whose stamped topology_etag doesn't match the live graph.
+#
+# BASE_IMAGE must be the exact digest-pinned image currently serving prod.
+
+ARG BASE_IMAGE
+
+FROM ${BASE_IMAGE}
+WORKDIR /app
+
+COPY .blocks-staging/ ./osm_data/
