@@ -248,7 +248,11 @@ resource "google_cloud_run_service" "osrm" {
   template {
     spec {
       containers {
-        image = "${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper/osrm:latest"
+        # Pinned to the SERVING build — osrm:latest in the registry is a
+        # different (older) dataset; flipping to it would silently swap the
+        # routing network out from under the graphs. Update this tag only
+        # alongside a deliberate OSRM dataset rebuild.
+        image = "${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper/osrm:cbdf4b3a-d63e-497b-9459-3f0ae0e4901f"
 
         # osrm-routed binds $PORT (Cloud Run injects 8080); see osrm/Dockerfile.
         ports {
