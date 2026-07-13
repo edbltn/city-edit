@@ -209,6 +209,11 @@ def init_db():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_edge ON edge_votes(edge_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_vt ON edge_votes(vote_type_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_map ON edge_votes(map_slug)")
+            # Covers fetch_voted_vote_type_labels' GROUP BY vote_type / MAX(created_at)
+            # as an index-only scan — that aggregate runs on the map-config path
+            # (page load) and seq-scanned the map's rows per request without it.
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_map_vt_created "
+                           "ON edge_votes(map_slug, vote_type_id, created_at)")
 
             # Vote-type lists: named collections (preset or user-created custom).
             cursor.execute("""

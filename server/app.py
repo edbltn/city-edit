@@ -848,8 +848,11 @@ def _locked_stub(slug: str):
 # slug → (expiry_monotonic, enriched map dict). Public maps only; 30s TTL
 # (the response is already Cache-Control: public, max-age=60). Every tenant's
 # page load enters here, and each uncached hit is two Postgres round-trips —
-# under a concurrent join wave that stampedes the shared pool.
+# a join wave of N clients would otherwise stampede N aggregates onto the
+# shared pool (measured: 40 concurrent joins → 10s+ map-config latency).
+# Single-flight: one lock per slug so a miss wave costs ONE query burst.
 _map_get_cache: dict[str, tuple[float, dict]] = {}
+_map_get_locks: dict[str, threading.Lock] = {}
 
 
 @app.route("/api/maps/<slug>", methods=["GET"])
@@ -859,17 +862,24 @@ def map_get(slug):
         resp = jsonify(cached[1])
         resp.headers["Cache-Control"] = "public, max-age=60"
         return resp
-    m = get_map(slug)
-    if not m:
-        return jsonify({"error": "Map not found"}), 404
-    if m.get("requiresPasscode") and not _passcode_ok(slug):
-        return _locked_stub(slug)
-    resp = _map_response(m)
-    if not m.get("requiresPasscode"):
-        if len(_map_get_cache) > 256:  # bound: one entry per public map
-            _map_get_cache.clear()
-        _map_get_cache[slug] = (time.monotonic() + 30.0, m)
-    return resp
+    lock = _map_get_locks.setdefault(slug, threading.Lock())
+    with lock:  # gevent-patched: waiters yield the hub
+        cached = _map_get_cache.get(slug)
+        if cached and cached[0] > time.monotonic():
+            resp = jsonify(cached[1])
+            resp.headers["Cache-Control"] = "public, max-age=60"
+            return resp
+        m = get_map(slug)
+        if not m:
+            return jsonify({"error": "Map not found"}), 404
+        if m.get("requiresPasscode") and not _passcode_ok(slug):
+            return _locked_stub(slug)
+        resp = _map_response(m)
+        if not m.get("requiresPasscode"):
+            if len(_map_get_cache) > 256:  # bound: one entry per public map
+                _map_get_cache.clear()
+            _map_get_cache[slug] = (time.monotonic() + 30.0, m)
+        return resp
 
 
 @app.route("/api/maps/by-subdomain/<subdomain>", methods=["GET"])

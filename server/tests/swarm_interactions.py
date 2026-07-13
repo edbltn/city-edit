@@ -132,7 +132,7 @@ async def ws_hold(base_ws, session, slug, metrics, stop):
         metrics.add("ws_connect", time.monotonic() - t0, type(e).__name__, slug)
 
 
-async def agent(i, base, slug, bbox, cycles, metrics, stop):
+async def agent(i, base, slug, bbox, cycles, metrics, stop, cast_votes=True):
     rng = random.Random(4200 + i)
     device = f"swarm-{i}-{uuid.uuid4().hex[:8]}"
     base_ws = base.replace("https://", "wss://").replace("http://", "ws://")
@@ -182,7 +182,7 @@ async def agent(i, base, slug, bbox, cycles, metrics, stop):
             except Exception as e:
                 metrics.add("route", time.monotonic() - t0, type(e).__name__, slug)
 
-            if edge_ids:
+            if edge_ids and cast_votes:
                 t0 = time.monotonic()
                 try:
                     async with session.post(
@@ -253,11 +253,17 @@ async def main_async(args):
           f"(primary {args.primary} x{weighted.count(args.primary)}), "
           f"{args.cycles} cycles → {args.base}")
 
+    # Synthetic votes only land on the primary map and test maps; every other
+    # tenant map gets the full read path (load, topology, votes, WS, routing)
+    # without polluting real vote data.
+    def may_vote(slug):
+        return slug == args.primary or slug.startswith("test-") or "test" in slug
+
     metrics = Metrics()
     stop = asyncio.Event()
     t0 = time.monotonic()
     tasks = [asyncio.create_task(agent(i, args.base, s, maps[s], args.cycles,
-                                       metrics, stop))
+                                       metrics, stop, cast_votes=may_vote(s)))
              for i, s in enumerate(weighted)]
     await asyncio.gather(*tasks, return_exceptions=True)
     stop.set()
