@@ -39,7 +39,12 @@ import aiohttp
 BUDGETS = {
     "map_meta":        (10,  1.0, 0.02),
     "graph_version":   (10,  1.5, 0.02),
-    "topology_bin":    (60, 20.0, 0.02),   # 16MB gz for NYC — bandwidth-bound
+    # topology_bin is BANDWIDTH-bound when the swarm runs from one machine:
+    # N agents × ~18MB share the test host's downlink and finish together, so
+    # client p95 ≈ N×size/bandwidth regardless of server health (single-stream
+    # prod: ~1s; server-side latency: <0.3s). The budget below allows a 40-agent
+    # run on a ~100Mbps link; judge the server by errors + Cloud Run latency.
+    "topology_bin":    (120, 90.0, 0.02),
     "graph_votes":     (30,  5.0, 0.02),
     "ws_connect":      (15,  5.0, 0.05),
     "route":           (20,  3.0, 0.05),   # OSRM + edge mapping
