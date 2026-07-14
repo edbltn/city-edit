@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Click-to-explode works for route-based top proposals — one cluster engine for both pin kinds — 2026-07-14</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.25; }
+  pre.diff span { display: block; white-space: pre; }
+  pre.diff span span { display: inline; }
+
+  .s-kw { color: #a52a5a; }
+  .s-str { color: #0a3069; }
+  .s-com { color: #77716a; font-style: italic; }
+  .s-num { color: #0550ae; }
+  .s-lit { color: #0550ae; }
+  .s-fn { color: #6639ba; }
+  .s-type { color: #953800; }
+  .s-prop { color: #116329; }
+  .s-tag { color: #116329; }
+  .s-attr { color: #0550ae; }
+  .s-dec { color: #6639ba; }
+
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Click-to-explode works for route-based top proposals — one cluster engine for both pin kinds</h1>
+    <div class="dateline">2026-07-14 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#divergence">1</a>
+<a href="#engine">2</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a>
+  </nav>
+
+  <p class="lede">Clicking a crowded stack of proposal pins is supposed to fan it out into a pickable
+  grid before any side effect — but the entire fan-out machinery lived inside the point-pin
+  (<code>indicatorMarkers</code>) memo, which early-returns when a map has no point-based winners.
+  On all-route maps (chicago-bikes: 20 diamonds, 0 squares) the exploder was therefore never
+  installed: diamond clicks selected the top-of-stack corridor blind, and bare-map taps over a stack
+  dropped a start pin. The fix extracts the machinery into a <code>clusterEngine</code> memo owned by
+  neither pin kind, which assigns the exploder refs unconditionally (also killing a stale-closure
+  hazard after mode switches empty the winners list). Both marker memos now consume the same engine;
+  the diamond markers and MapView are untouched. Verified live: diamond-only stacks explode, fanned
+  picks select, bare-map taps near stacks no longer place starts, and mixed square+diamond stacks
+  still fan out together.</p>
+
+  
+    <section class="card" id="divergence">
+      <div class="tag">Diagnosis · why the two pin kinds diverged</div>
+      <h2>1 · The exploder lived inside the point-pin memo</h2>
+      <h3>Symptom</h3>
+      <p>Clicking a crowded stack of proposal pins fans it out into a pickable grid (“click to explode”) — but only when a point-based top proposal (PBTP square) existed. On a map whose top proposals are all route-based (RBTP diamonds — e.g. chicago-bikes, whose 714 K imported votes are all route-kind), clicking a stack of overlapping diamonds selected whichever sat on top, blind.</p>
+      <h3>Root cause</h3>
+      <ul><li>The cluster machinery — the <code>clusterables</code> list, <code>clusterAround()</code>, <code>spreadCluster()</code>, and the <code>explodeClusterAt()</code> gate — was born with the PBTP squares and lived <em>inside</em> the <code>indicatorMarkers</code> memo. When RBTPs were added, they were wired in parasitically: the PBTP memo pushed the diamonds into its <code>clusterables</code>, and published the gate on two refs (<code>internalExploderRef</code> for the diamond markers' own clicks, <code>clusterExploderRef</code> for the host's path taps and drag-hover).</li>
+<li>But the host memo early-returns <strong>before</strong> those refs are assigned: <code>if (source.length === 0) return null</code> — no point-based winners, no markers to render, so also <em>no exploder for anyone</em>. Diamond clicks fell through their <code>internalExploderRef.current?.()</code> guard (still <code>null</code>) straight to corridor selection, and bare-map taps over a stack placed a start pin instead.</li>
+<li>Worse than never-installed: <em>stale</em>. When winners transiently empty (a theme/mode switch resets them; votes reload), the refs kept the previous closure — an exploder frozen over the OLD clusterables at their OLD positions — so explode behavior after a mode switch depended on what the last non-empty render happened to see.</li>
+<li>So the observed rule “explode only works when a point pin is around” was exactly the code structure: the shared gesture was owned by one of the two marker kinds.</li></ul>
+      
+      
+    </section>
+    
+
+    <section class="card" id="engine">
+      <div class="tag">Fix · GraphLayer.tsx</div>
+      <h2>2 · One clusterEngine memo, owned by neither pin kind</h2>
+      <h3>Symptom</h3>
+      <p>The fan-out machinery needed a home that exists whenever <em>either</em> pin kind exists.</p>
+      <h3>Root cause</h3>
+      <ul><li>Extraction, not rewrite: the cluster functions were already kind-agnostic (spread keys carry the kind: <code>e&lt;edgeIdx&gt;</code> vs <code>r&lt;id&gt;</code>); only their placement gated them on squares.</li></ul>
+      <h3>What changed</h3><ul><li>New <code>clusterEngine</code> <code>useMemo</code>, hoisted above both marker memos. It computes <code>placed</code> (each square/station resolved to its edge midpoint) and <code>clusterables</code> (squares <em>and</em> diamonds at their settled display positions), and defines <code>clusterAround</code> / <code>spreadCluster</code> / <code>explodeClusterAt</code> — all moved verbatim.</li>
+<li>The exploder refs are assigned <strong>unconditionally</strong> on every engine run — with zero clusterables the gate still exists and simply returns <code>false</code> — so they can never be null-on-a-diamond-map or stale-after-a-mode-switch again.</li>
+<li><code>indicatorMarkers</code> (the PBTP memo) now consumes <code>{ placed, clusterAround, spreadCluster }</code> from the engine and keeps only rendering: heat ranking (now computed from <code>placed</code>), icons, role tinting, its <code>handleClick</code> — whose cluster-detection body is unchanged.</li>
+<li>The diamond markers and the host (<code>MapView</code>) are untouched: they already called the gate through the refs; the refs just finally always point at a live one. Dependency arrays tightened accordingly (<code>winners</code>/<code>routeProposals</code>/<code>applySpread</code>/<code>stationLabel</code> moved to the engine; the marker memo keys off <code>clusterEngine</code>).</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+85</span> / <span class="d-del">-67</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">GraphLayer · proposal pins + voting UI</span>
+        <span class="ctx-sum">renders PBTP squares &amp; RBTP diamonds over the Leaflet map; owns hover/selection/cluster-fan-out gestures</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~4600 LOC — topology/vote wiring, spread state, drag gestures, the two marker memos, cards</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Constants + rbtpDisplayPos + spread keys</span><span class="ol-sum">CLUSTER_RADIUS_PX 26 · SPREAD_CELL_PX 38 · e&lt;edge&gt;/r&lt;id&gt; keys</span></li><li class="changed"><span class="ol-label">Spread state + exploder refs</span><span class="ol-sum">spread/spreadRef/spreadLockedRef; internalExploderRef comment now points at the engine</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Winners recompute + selection/hover effects</span><span class="ol-sum">selectTopProposals scan, deep-link reconciliation (unchanged)</span></li><li class="changed"><span class="ol-label">Drag effects</span><span class="ol-sum">drag-hover explode via clusterExploderRef (unchanged, comment updated)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">collapseSpread / armSpreadTimer</span><span class="ol-sum">snap-back timer machinery (unchanged)</span></li><li class="changed"><span class="ol-label">clusterEngine memo</span><span class="ol-sum">NEW HOME: placed + clusterables (BOTH kinds) + clusterAround/spreadCluster/explodeClusterAt + unconditional ref assignment</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">indicatorMarkers memo (PBTP squares)</span><span class="ol-sum">now renders from engine.placed; cluster logic consumed, not owned</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">routeIndicatorMarkers memo (RBTP diamonds)</span><span class="ol-sum">unchanged — its internalExploderRef gate finally always fires</span></li><li class="dim"><span class="ol-label">Pinned/hover ProposalCards + portals</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>internalExploderRef comment — assigned by clusterEngine, for BOTH kinds</li><li>drag-explode effect comment — ref assigned during the clusterEngine render</li><li>clusterEngine useMemo — placed/clusterables built for squares+stations+diamonds; clusterAround, spreadCluster, explodeClusterAt moved verbatim; refs re-assigned unconditionally</li><li>indicatorMarkers — destructures { placed, clusterAround, spreadCluster }; heat rank from placed; early returns are rendering-only now</li><li>indicatorMarkers deps — winners/routeProposals/applySpread/stationLabel replaced by clusterEngine</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 69d1a27..950d4d1 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -1316,8 +1316,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   <span class="s-kw">const</span> spreadTimeoutRef = useRef&lt;number | <span class="s-lit">null</span>&gt;(<span class="s-lit">null</span>);</span>
+<span class="d-ctx">   <span class="s-com">// collapseSpread is defined far below; this ref lets earlier effects call it.</span></span>
+<span class="d-ctx">   <span class="s-kw">const</span> collapseSpreadRef = useRef&lt;() =&gt; <span class="s-kw">void</span>&gt;(() =&gt; {});</span>
+<span class="d-del">-  <span class="s-com">// The cluster exploder, kept on an internal ref too (the prop ref is optional)</span></span>
+<span class="d-del">-  <span class="s-com">// so the route-diamond markers — built in a separate memo — can run the same</span></span>
+<span class="d-add">+  <span class="s-com">// The cluster exploder (assigned by the clusterEngine memo below, for BOTH</span></span>
+<span class="d-add">+  <span class="s-com">// proposal kinds), kept on an internal ref too (the prop ref is optional) so</span></span>
+<span class="d-add">+  <span class="s-com">// the route-diamond markers — built in a separate memo — can run the same</span></span>
+<span class="d-ctx">   <span class="s-com">// &quot;crowded stack fans out before any side effect&quot; rule the point pins use.</span></span>
+<span class="d-ctx">   <span class="s-kw">const</span> internalExploderRef = useRef&lt;((latlng: { lat: number; lng: number }) =&gt; boolean) | <span class="s-lit">null</span>&gt;(<span class="s-lit">null</span>);</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1815,7 +1816,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   <span class="s-com">// icon instead of blindly hitting whichever sits on top. The exploder no-ops</span></span>
+<span class="d-ctx">   <span class="s-com">// once a spread is open (and when not over a cluster), so firing it on every</span></span>
+<span class="d-ctx">   <span class="s-com">// drag frame is cheap. clusterExploderRef.current is assigned during the</span></span>
+<span class="d-del">-  <span class="s-com">// indicatorMarkers render above, so it&#x27;s set by the time this effect runs.</span></span>
+<span class="d-add">+  <span class="s-com">// clusterEngine memo&#x27;s render, so it&#x27;s set by the time this effect runs.</span></span>
+<span class="d-ctx">   <span class="s-fn">useEffect</span>(() =&gt; {</span>
+<span class="d-ctx">     <span class="s-kw">if</span> (!dragPoint) <span class="s-kw">return</span>;</span>
+<span class="d-ctx">     clusterExploderRef?.current?.(dragPoint);</span>
+<span class="d-hunk">@@ -3768,71 +3769,48 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   <span class="s-com">//     edge ids (RouteContext.insertWaypointAtSegment), or the on-path highlight</span></span>
+<span class="d-ctx">   <span class="s-com">//     AND the vote target both vanish.</span></span>
+<span class="d-ctx">   <span class="s-com">// ===========================================================================</span></span>
+<span class="d-del">-  <span class="s-com">// POINT-BASED top proposals — &quot;PBTPs&quot; (square pins): one hot edge per pin,</span></span>
+<span class="d-del">-  <span class="s-com">// selected by topProposals.selectTopProposals. Their ROUTE-based counterpart</span></span>
+<span class="d-del">-  <span class="s-com">// (RBTPs, the corridor diamonds) renders in routeIndicatorMarkers below;</span></span>
+<span class="d-del">-  <span class="s-com">// terminology in docs/three-layer-model.md §3.1.</span></span>
+<span class="d-del">-  <span class="s-kw">const</span> indicatorMarkers = <span class="s-fn">useMemo</span>(() =&gt; {</span>
+<span class="d-add">+  <span class="s-com">// CLUSTER FAN-OUT — shared by BOTH proposal kinds (PBTP squares and RBTP</span></span>
+<span class="d-add">+  <span class="s-com">// diamonds). The clusterables list, cluster detection, the grid fan-out, and</span></span>
+<span class="d-add">+  <span class="s-com">// the explode gate live HERE, outside the marker memos, because each marker</span></span>
+<span class="d-add">+  <span class="s-com">// memo early-returns when its own kind is absent: this machinery&#x27;s old home</span></span>
+<span class="d-add">+  <span class="s-com">// (the PBTP memo below) skipped installing the exploder whenever there were</span></span>
+<span class="d-add">+  <span class="s-com">// no point-based winners, so a stack of only route diamonds couldn&#x27;t be</span></span>
+<span class="d-add">+  <span class="s-com">// clicked open — and after winners emptied (e.g. a theme switch resets them)</span></span>
+<span class="d-add">+  <span class="s-com">// a STALE exploder with the old positions lingered on the refs. This memo</span></span>
+<span class="d-add">+  <span class="s-com">// runs whenever either kind exists and re-assigns the refs unconditionally,</span></span>
+<span class="d-add">+  <span class="s-com">// so both kinds always share one fresh exploder.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> clusterEngine = <span class="s-fn">useMemo</span>(() =&gt; {</span>
+<span class="d-ctx">     <span class="s-kw">const</span> topology = topologyRef.current;</span>
+<span class="d-del">-    <span class="s-kw">if</span> (!topology) <span class="s-kw">return</span> <span class="s-lit">null</span>;</span>
+<span class="d-del">-</span>
+<span class="d-del">-    <span class="s-com">// Station networks: draw EVERY point as a permanent marker (a self-edge per</span></span>
+<span class="d-del">-    <span class="s-com">// station), all sharing one icon — &quot;as though they were top proposals&quot;. The</span></span>
+<span class="d-del">-    <span class="s-com">// legendIdx (== edge index) keys the marker. Streets: the vote winners. A</span></span>
+<span class="d-del">-    <span class="s-com">// winner that hosts a waypoint stays drawn (it&#x27;s the fixed pin), just tinted</span></span>
+<span class="d-del">-    <span class="s-com">// + click-through (see the icon opts below).</span></span>
+<span class="d-del">-    <span class="s-kw">const</span> source: <span class="s-type">VoteTypeWinner</span>[] = isStationNetwork</span>
+<span class="d-del">-      ? <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: topology.nEdges }, (_, i) =&gt; ({ legendIdx: i, label: stationLabel, edgeIdx: i, count: <span class="s-num">0</span> }))</span>
+<span class="d-del">-      : winners;</span>
+<span class="d-del">-    <span class="s-kw">if</span> (source.length === <span class="s-num">0</span>) <span class="s-kw">return</span> <span class="s-lit">null</span>;</span>
+<span class="d-del">-</span>
+<span class="d-del">-    <span class="s-com">// Per-proposal &quot;heat&quot;: the RANKING of the visible winners, spread across</span></span>
+<span class="d-del">-    <span class="s-com">// the map&#x27;s heat spectrum — dense rank over distinct vote counts (ties</span></span>
+<span class="d-del">-    <span class="s-com">// share a color), lowest → just above the ramp&#x27;s cold end, hottest → 1.</span></span>
+<span class="d-del">-    <span class="s-com">// Ranking (not log-normalized counts) is the scale, so every top proposal</span></span>
+<span class="d-del">-    <span class="s-com">// gets its own hue off the ramp instead of the pack clustering wherever</span></span>
+<span class="d-del">-    <span class="s-com">// the vote distribution piles up. The color sample is capped at</span></span>
+<span class="d-del">-    <span class="s-com">// HEAT_PEAK_POS: the hottest pin wears the ramp&#x27;s named upper extreme</span></span>
+<span class="d-del">-    <span class="s-com">// (peak), never the incandescent tip — bright is the heatmap&#x27;s job. The</span></span>
+<span class="d-del">-    <span class="s-com">// bucketed color keys the icon cache so equally-hot pins of a label still</span></span>
+<span class="d-del">-    <span class="s-com">// share one divIcon (and so a re-render doesn&#x27;t churn setIcon every frame).</span></span>
+<span class="d-del">-    <span class="s-kw">const</span> rampStops = <span class="s-fn">buildHeatRampStops</span>(mapStyle.heat, mapStyle.basemap);</span>
+<span class="d-del">-    <span class="s-kw">const</span> rankedCounts = <span class="s-type">Array</span>.<span class="s-kw">from</span>(<span class="s-kw">new</span> <span class="s-fn">Set</span>(source.<span class="s-fn">map</span>((w) =&gt; w.count).<span class="s-fn">filter</span>((c) =&gt; c &gt; <span class="s-num">0</span>)))</span>
+<span class="d-del">-      .<span class="s-fn">sort</span>((a, b) =&gt; a - b);</span>
+<span class="d-del">-    <span class="s-kw">const</span> heatOf = (count: number): number =&gt;</span>
+<span class="d-del">-      count &gt; <span class="s-num">0</span> &amp;&amp; rankedCounts.length &gt; <span class="s-num">0</span></span>
+<span class="d-del">-        ? (rankedCounts.<span class="s-fn">indexOf</span>(count) + <span class="s-num">1</span>) / rankedCounts.length</span>
+<span class="d-del">-        : <span class="s-num">0</span>;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    <span class="s-com">// Resolve every marker to its edge-midpoint once up front so click handlers</span></span>
+<span class="d-del">-    <span class="s-com">// can measure on-screen distance between icons for cluster detection.</span></span>
+<span class="d-del">-    <span class="s-kw">const</span> placed = source</span>
+<span class="d-del">-      .<span class="s-fn">map</span>((w) =&gt; {</span>
+<span class="d-del">-        <span class="s-kw">if</span> (w.edgeIdx &gt;= topology.nEdges) <span class="s-kw">return</span> <span class="s-lit">null</span>;</span>
+<span class="d-add">+    <span class="s-com">// The squares to render, resolved to their edge midpoints once up front so</span></span>
+<span class="d-add">+    <span class="s-com">// click handlers can measure on-screen distance between icons for cluster</span></span>
+<span class="d-add">+    <span class="s-com">// detection. Station networks: EVERY point as a permanent marker (a</span></span>
+<span class="d-add">+    <span class="s-com">// self-edge per station), all sharing one icon — &quot;as though they were top</span></span>
+<span class="d-add">+    <span class="s-com">// proposals&quot;; the legendIdx (== edge index) keys the marker. Streets: the</span></span>
+<span class="d-add">+    <span class="s-com">// vote winners. The PBTP memo below renders from this same list.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> placed: <span class="s-type">Array</span>&lt;{ w: <span class="s-type">VoteTypeWinner</span>; midLat: number; midLng: number }&gt; = [];</span>
+<span class="d-add">+    <span class="s-com">// Everything that participates in a fan-out — the PBTP squares AND the RBTP</span></span>
+<span class="d-add">+    <span class="s-com">// diamonds (routeIndicatorMarkers) — keyed by its spread key at its settled</span></span>
+<span class="d-add">+    <span class="s-com">// display position. Both kinds cluster and explode TOGETHER: a stack of</span></span>
+<span class="d-add">+    <span class="s-com">// mixed pins fans out as one grid.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> clusterables: <span class="s-type">Array</span>&lt;{ key: string; lat: number; lng: number }&gt; = [];</span>
+<span class="d-add">+    <span class="s-kw">if</span> (topology) {</span>
+<span class="d-add">+      <span class="s-kw">const</span> source: <span class="s-type">VoteTypeWinner</span>[] = isStationNetwork</span>
+<span class="d-add">+        ? <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: topology.nEdges }, (_, i) =&gt; ({ legendIdx: i, label: stationLabel, edgeIdx: i, count: <span class="s-num">0</span> }))</span>
+<span class="d-add">+        : winners;</span>
+<span class="d-add">+      <span class="s-kw">for</span> (<span class="s-kw">const</span> w <span class="s-kw">of</span> source) {</span>
+<span class="d-add">+        <span class="s-kw">if</span> (w.edgeIdx &gt;= topology.nEdges) <span class="s-kw">continue</span>;</span>
+<span class="d-ctx">         <span class="s-kw">const</span> fromIdx = <span class="s-fn">edgeFrom</span>(topology, w.edgeIdx), toIdx = <span class="s-fn">edgeTo</span>(topology, w.edgeIdx);</span>
+<span class="d-ctx">         <span class="s-kw">const</span> midLat = (<span class="s-fn">nodeLat</span>(topology, fromIdx) + <span class="s-fn">nodeLat</span>(topology, toIdx)) / <span class="s-num">2</span>;</span>
+<span class="d-ctx">         <span class="s-kw">const</span> midLng = (<span class="s-fn">nodeLon</span>(topology, fromIdx) + <span class="s-fn">nodeLon</span>(topology, toIdx)) / <span class="s-num">2</span>;</span>
+<span class="d-del">-        <span class="s-kw">return</span> { w, midLat, midLng };</span>
+<span class="d-del">-      })</span>
+<span class="d-del">-      .<span class="s-fn">filter</span>(<span class="s-type">Boolean</span>) <span class="s-kw">as</span> <span class="s-type">Array</span>&lt;{</span>
+<span class="d-del">-      w: <span class="s-type">VoteTypeWinner</span>;</span>
+<span class="d-del">-      midLat: number;</span>
+<span class="d-del">-      midLng: number;</span>
+<span class="d-del">-    }&gt;;</span>
+<span class="d-del">-</span>
+<span class="d-del">-    <span class="s-com">// Everything that participates in a fan-out — the PBTP squares above AND the</span></span>
+<span class="d-del">-    <span class="s-com">// RBTP diamonds (routeIndicatorMarkers) — keyed by its spread key at its</span></span>
+<span class="d-del">-    <span class="s-com">// settled display position. Both kinds cluster and explode TOGETHER: a stack</span></span>
+<span class="d-del">-    <span class="s-com">// of mixed pins fans out as one grid.</span></span>
+<span class="d-del">-    <span class="s-kw">const</span> clusterables = [</span>
+<span class="d-del">-      ...placed.<span class="s-fn">map</span>((m) =&gt; ({</span>
+<span class="d-del">-        key: <span class="s-fn">spreadKeyEdge</span>(m.w.edgeIdx), lat: m.midLat, lng: m.midLng,</span>
+<span class="d-del">-      })),</span>
+<span class="d-del">-      ...routeProposals.<span class="s-fn">map</span>((p) =&gt; {</span>
+<span class="d-add">+        placed.<span class="s-fn">push</span>({ w, midLat, midLng });</span>
+<span class="d-add">+        clusterables.<span class="s-fn">push</span>({ key: <span class="s-fn">spreadKeyEdge</span>(w.edgeIdx), lat: midLat, lng: midLng });</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+      <span class="s-kw">for</span> (<span class="s-kw">const</span> p <span class="s-kw">of</span> routeProposals) {</span>
+<span class="d-ctx">         <span class="s-kw">const</span> [lat, lng] = <span class="s-fn">rbtpDisplayPos</span>(topology, p);</span>
+<span class="d-del">-        <span class="s-kw">return</span> { key: <span class="s-fn">spreadKeyRoute</span>(p.id), lat, lng };</span>
+<span class="d-del">-      }),</span>
+<span class="d-del">-    ];</span>
+<span class="d-add">+        clusterables.<span class="s-fn">push</span>({ key: <span class="s-fn">spreadKeyRoute</span>(p.id), lat, lng });</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-com">// The crowded proposal cluster around a screen anchor: the 2+ icons within</span></span>
+<span class="d-ctx">     <span class="s-com">// CLUSTER_RADIUS_PX of it. Shared by both explode entry points (browse click</span></span>
+<span class="d-hunk">@@ -3900,10 +3878,50 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       <span class="s-kw">return</span> <span class="s-lit">true</span>;</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx">     <span class="s-com">// Internal ref: the route-diamond markers run the same gate on their own</span></span>
+<span class="d-del">-    <span class="s-com">// clicks (a diamond in a crowded stack fans out instead of selecting).</span></span>
+<span class="d-add">+    <span class="s-com">// clicks (a diamond in a crowded stack fans out instead of selecting); the</span></span>
+<span class="d-add">+    <span class="s-com">// prop ref hands the SAME gate to the host for path taps and drag-hover.</span></span>
+<span class="d-ctx">     internalExploderRef.current = explodeClusterAt;</span>
+<span class="d-ctx">     <span class="s-kw">if</span> (clusterExploderRef) clusterExploderRef.current = explodeClusterAt;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    <span class="s-kw">return</span> { placed, clusterAround, spreadCluster };</span>
+<span class="d-add">+    <span class="s-com">// isHeatmapLoading re-runs this once topology+votes arrive (topology is</span></span>
+<span class="d-add">+    <span class="s-com">// read off a ref); isStationNetwork/stationLabel select the square source.</span></span>
+<span class="d-add">+  }, [winners, routeProposals, map, applySpread, armSpreadTimer, clusterExploderRef,</span>
+<span class="d-add">+      isStationNetwork, stationLabel, isHeatmapLoading]);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-com">// ===========================================================================</span></span>
+<span class="d-add">+  <span class="s-com">// POINT-BASED top proposals — &quot;PBTPs&quot; (square pins): one hot edge per pin,</span></span>
+<span class="d-add">+  <span class="s-com">// selected by topProposals.selectTopProposals. Their ROUTE-based counterpart</span></span>
+<span class="d-add">+  <span class="s-com">// (RBTPs, the corridor diamonds) renders in routeIndicatorMarkers below;</span></span>
+<span class="d-add">+  <span class="s-com">// terminology in docs/three-layer-model.md §3.1.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> indicatorMarkers = <span class="s-fn">useMemo</span>(() =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> topology = topologyRef.current;</span>
+<span class="d-add">+    <span class="s-kw">if</span> (!topology) <span class="s-kw">return</span> <span class="s-lit">null</span>;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com">// The squares at their edge midpoints, from the shared cluster engine. A</span></span>
+<span class="d-add">+    <span class="s-com">// winner that hosts a waypoint stays drawn (it&#x27;s the fixed pin), just tinted</span></span>
+<span class="d-add">+    <span class="s-com">// + click-through (see the icon opts below).</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> { placed, clusterAround, spreadCluster } = clusterEngine;</span>
+<span class="d-add">+    <span class="s-kw">if</span> (placed.length === <span class="s-num">0</span>) <span class="s-kw">return</span> <span class="s-lit">null</span>;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com">// Per-proposal &quot;heat&quot;: the RANKING of the visible winners, spread across</span></span>
+<span class="d-add">+    <span class="s-com">// the map&#x27;s heat spectrum — dense rank over distinct vote counts (ties</span></span>
+<span class="d-add">+    <span class="s-com">// share a color), lowest → just above the ramp&#x27;s cold end, hottest → 1.</span></span>
+<span class="d-add">+    <span class="s-com">// Ranking (not log-normalized counts) is the scale, so every top proposal</span></span>
+<span class="d-add">+    <span class="s-com">// gets its own hue off the ramp instead of the pack clustering wherever</span></span>
+<span class="d-add">+    <span class="s-com">// the vote distribution piles up. The color sample is capped at</span></span>
+<span class="d-add">+    <span class="s-com">// HEAT_PEAK_POS: the hottest pin wears the ramp&#x27;s named upper extreme</span></span>
+<span class="d-add">+    <span class="s-com">// (peak), never the incandescent tip — bright is the heatmap&#x27;s job. The</span></span>
+<span class="d-add">+    <span class="s-com">// bucketed color keys the icon cache so equally-hot pins of a label still</span></span>
+<span class="d-add">+    <span class="s-com">// share one divIcon (and so a re-render doesn&#x27;t churn setIcon every frame).</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> rampStops = <span class="s-fn">buildHeatRampStops</span>(mapStyle.heat, mapStyle.basemap);</span>
+<span class="d-add">+    <span class="s-kw">const</span> rankedCounts = <span class="s-type">Array</span>.<span class="s-kw">from</span>(<span class="s-kw">new</span> <span class="s-fn">Set</span>(placed.<span class="s-fn">map</span>((m) =&gt; m.w.count).<span class="s-fn">filter</span>((c) =&gt; c &gt; <span class="s-num">0</span>)))</span>
+<span class="d-add">+      .<span class="s-fn">sort</span>((a, b) =&gt; a - b);</span>
+<span class="d-add">+    <span class="s-kw">const</span> heatOf = (count: number): number =&gt;</span>
+<span class="d-add">+      count &gt; <span class="s-num">0</span> &amp;&amp; rankedCounts.length &gt; <span class="s-num">0</span></span>
+<span class="d-add">+        ? (rankedCounts.<span class="s-fn">indexOf</span>(count) + <span class="s-num">1</span>) / rankedCounts.length</span>
+<span class="d-add">+        : <span class="s-num">0</span>;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     <span class="s-kw">return</span> placed.<span class="s-fn">map</span>(({ w, midLat, midLng }) =&gt; {</span>
+<span class="d-ctx">       <span class="s-kw">const</span> <span class="s-kw">override</span> = spread?.<span class="s-kw">get</span>(<span class="s-fn">spreadKeyEdge</span>(w.edgeIdx));</span>
+<span class="d-ctx">       <span class="s-kw">const</span> posLat = <span class="s-kw">override</span> ? <span class="s-kw">override</span>[<span class="s-num">0</span>] : midLat;</span>
+<span class="d-hunk">@@ -4104,11 +4122,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         /&gt;</span>
+<span class="d-ctx">       );</span>
+<span class="d-ctx">     });</span>
+<span class="d-del">-    <span class="s-com">// isStationNetwork/stationLabel select the marker source; isHeatmapLoading</span></span>
+<span class="d-del">-    <span class="s-com">// re-runs once topology+votes arrive so stations appear even with zero votes.</span></span>
+<span class="d-del">-  }, [winners, routeProposals, currentZoom, map, spread, collapseSpread, clearSpreadTimer, armSpreadTimer, applySpread,</span>
+<span class="d-add">+    <span class="s-com">// clusterEngine carries the placed squares (winners/stations) and re-runs</span></span>
+<span class="d-add">+    <span class="s-com">// once topology+votes arrive, so stations appear even with zero votes.</span></span>
+<span class="d-add">+  }, [clusterEngine, currentZoom, map, spread, collapseSpread, clearSpreadTimer, armSpreadTimer,</span>
+<span class="d-ctx">       selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,</span>
+<span class="d-del">-      isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, mapStyle.basemap, isStationNetwork, stationLabel, isHeatmapLoading, canHover]);</span>
+<span class="d-add">+      isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, mapStyle.basemap, isStationNetwork, canHover]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-com">// Cast a directional vote on a single proposal (edge, vote type) through the</span></span>
+<span class="d-ctx">   <span class="s-com">// SAME unified path the top-bar route cast uses. castVotes() handles the</span></span></pre>
+        </details>
+        
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li><code>tsc --noEmit</code> clean.</li>
+<li>Driven in the running dev app (Vite + host Flask + Redis, Chrome). Repro map <strong>chicago-bikes</strong>: 20 RBTP diamonds, <strong>0</strong> PBTP squares — the exact state where the exploder was previously never installed.</li>
+<li>Diamond-stack click → the stack fanned out (container got <code>votes-spreading</code>; 3 markers lifted into the 500000+ fanned z-band in a 38 px grid) and the click was consumed — no blind corridor selection. Console: <code>[proposals] diamond click 2fb8434d override=false</code>.</li>
+<li>Picking a fanned diamond → selected that corridor: URL gained the forced-corridor token (<code>…,f2fb8434d;…</code>), Start/End populated, the “TOP ROUTE PROPOSAL · Improve bike lane · Selects 236 blocks” card opened.</li>
+<li>Bare-map tap just off a diamond-only stack (the <code>clusterExploderRef</code> path through MapView) → exploded 4 diamonds, and did NOT place a start pin.</li>
+<li>Transient snap-back intact: unhovered spread collapsed after ~2.2 s (<code>SPREAD_DURATION_MS</code>), <code>votes-spreading</code> cleared, 0 fanned markers.</li>
+<li>Regression, mixed cluster on <strong>nyc-bikes</strong> (8 squares + 20 diamonds): clicking an overlapping square+diamond stack fanned out 3 icons — 1 diamond + 2 squares — together in one grid.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/chicago-bikes</code> (all-route map): click any overlapping pair of diamond pins — they should fan out into a grid instead of opening a corridor.</li>
+<li>Click one of the fanned diamonds — the corridor should select (start/end pins at its anchors, route-proposal card open).</li>
+<li>With no route active, click the map just beside (not on) a diamond stack — it should still fan out rather than drop a start pin.</li>
+<li>On <code>http://localhost:3000/m/nyc-bikes</code>, click a stack where a square and a diamond overlap — both kinds should fan out together in one grid (no regression).</li>
+<li>Switch modes on a multi-mode map and immediately click a stack — it should explode at the current positions (the stale-exploder case).</li></ul>
+  </section>
+
+
+
+  <footer>
+    Generated from <code>changelog/changes-unify-explode.diff</code> by <code>changelog/build_unify_explode_report.py</code>.
+    Regenerate after further edits with
+    <code>git diff -- client-react/src/components/GraphLayer/GraphLayer.tsx &gt; changelog/changes-unify-explode.diff &amp;&amp; python changelog/build_unify_explode_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

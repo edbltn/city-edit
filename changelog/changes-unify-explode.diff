@@ -1,0 +1,201 @@
+diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
+index 69d1a27..950d4d1 100644
+--- a/client-react/src/components/GraphLayer/GraphLayer.tsx
++++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -1316,8 +1316,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   const spreadTimeoutRef = useRef<number | null>(null);
+   // collapseSpread is defined far below; this ref lets earlier effects call it.
+   const collapseSpreadRef = useRef<() => void>(() => {});
+-  // The cluster exploder, kept on an internal ref too (the prop ref is optional)
+-  // so the route-diamond markers — built in a separate memo — can run the same
++  // The cluster exploder (assigned by the clusterEngine memo below, for BOTH
++  // proposal kinds), kept on an internal ref too (the prop ref is optional) so
++  // the route-diamond markers — built in a separate memo — can run the same
+   // "crowded stack fans out before any side effect" rule the point pins use.
+   const internalExploderRef = useRef<((latlng: { lat: number; lng: number }) => boolean) | null>(null);
+ 
+@@ -1815,7 +1816,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // icon instead of blindly hitting whichever sits on top. The exploder no-ops
+   // once a spread is open (and when not over a cluster), so firing it on every
+   // drag frame is cheap. clusterExploderRef.current is assigned during the
+-  // indicatorMarkers render above, so it's set by the time this effect runs.
++  // clusterEngine memo's render, so it's set by the time this effect runs.
+   useEffect(() => {
+     if (!dragPoint) return;
+     clusterExploderRef?.current?.(dragPoint);
+@@ -3768,71 +3769,48 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   //     edge ids (RouteContext.insertWaypointAtSegment), or the on-path highlight
+   //     AND the vote target both vanish.
+   // ===========================================================================
+-  // POINT-BASED top proposals — "PBTPs" (square pins): one hot edge per pin,
+-  // selected by topProposals.selectTopProposals. Their ROUTE-based counterpart
+-  // (RBTPs, the corridor diamonds) renders in routeIndicatorMarkers below;
+-  // terminology in docs/three-layer-model.md §3.1.
+-  const indicatorMarkers = useMemo(() => {
++  // CLUSTER FAN-OUT — shared by BOTH proposal kinds (PBTP squares and RBTP
++  // diamonds). The clusterables list, cluster detection, the grid fan-out, and
++  // the explode gate live HERE, outside the marker memos, because each marker
++  // memo early-returns when its own kind is absent: this machinery's old home
++  // (the PBTP memo below) skipped installing the exploder whenever there were
++  // no point-based winners, so a stack of only route diamonds couldn't be
++  // clicked open — and after winners emptied (e.g. a theme switch resets them)
++  // a STALE exploder with the old positions lingered on the refs. This memo
++  // runs whenever either kind exists and re-assigns the refs unconditionally,
++  // so both kinds always share one fresh exploder.
++  const clusterEngine = useMemo(() => {
+     const topology = topologyRef.current;
+-    if (!topology) return null;
+-
+-    // Station networks: draw EVERY point as a permanent marker (a self-edge per
+-    // station), all sharing one icon — "as though they were top proposals". The
+-    // legendIdx (== edge index) keys the marker. Streets: the vote winners. A
+-    // winner that hosts a waypoint stays drawn (it's the fixed pin), just tinted
+-    // + click-through (see the icon opts below).
+-    const source: VoteTypeWinner[] = isStationNetwork
+-      ? Array.from({ length: topology.nEdges }, (_, i) => ({ legendIdx: i, label: stationLabel, edgeIdx: i, count: 0 }))
+-      : winners;
+-    if (source.length === 0) return null;
+-
+-    // Per-proposal "heat": the RANKING of the visible winners, spread across
+-    // the map's heat spectrum — dense rank over distinct vote counts (ties
+-    // share a color), lowest → just above the ramp's cold end, hottest → 1.
+-    // Ranking (not log-normalized counts) is the scale, so every top proposal
+-    // gets its own hue off the ramp instead of the pack clustering wherever
+-    // the vote distribution piles up. The color sample is capped at
+-    // HEAT_PEAK_POS: the hottest pin wears the ramp's named upper extreme
+-    // (peak), never the incandescent tip — bright is the heatmap's job. The
+-    // bucketed color keys the icon cache so equally-hot pins of a label still
+-    // share one divIcon (and so a re-render doesn't churn setIcon every frame).
+-    const rampStops = buildHeatRampStops(mapStyle.heat, mapStyle.basemap);
+-    const rankedCounts = Array.from(new Set(source.map((w) => w.count).filter((c) => c > 0)))
+-      .sort((a, b) => a - b);
+-    const heatOf = (count: number): number =>
+-      count > 0 && rankedCounts.length > 0
+-        ? (rankedCounts.indexOf(count) + 1) / rankedCounts.length
+-        : 0;
+ 
+-    // Resolve every marker to its edge-midpoint once up front so click handlers
+-    // can measure on-screen distance between icons for cluster detection.
+-    const placed = source
+-      .map((w) => {
+-        if (w.edgeIdx >= topology.nEdges) return null;
++    // The squares to render, resolved to their edge midpoints once up front so
++    // click handlers can measure on-screen distance between icons for cluster
++    // detection. Station networks: EVERY point as a permanent marker (a
++    // self-edge per station), all sharing one icon — "as though they were top
++    // proposals"; the legendIdx (== edge index) keys the marker. Streets: the
++    // vote winners. The PBTP memo below renders from this same list.
++    const placed: Array<{ w: VoteTypeWinner; midLat: number; midLng: number }> = [];
++    // Everything that participates in a fan-out — the PBTP squares AND the RBTP
++    // diamonds (routeIndicatorMarkers) — keyed by its spread key at its settled
++    // display position. Both kinds cluster and explode TOGETHER: a stack of
++    // mixed pins fans out as one grid.
++    const clusterables: Array<{ key: string; lat: number; lng: number }> = [];
++    if (topology) {
++      const source: VoteTypeWinner[] = isStationNetwork
++        ? Array.from({ length: topology.nEdges }, (_, i) => ({ legendIdx: i, label: stationLabel, edgeIdx: i, count: 0 }))
++        : winners;
++      for (const w of source) {
++        if (w.edgeIdx >= topology.nEdges) continue;
+         const fromIdx = edgeFrom(topology, w.edgeIdx), toIdx = edgeTo(topology, w.edgeIdx);
+         const midLat = (nodeLat(topology, fromIdx) + nodeLat(topology, toIdx)) / 2;
+         const midLng = (nodeLon(topology, fromIdx) + nodeLon(topology, toIdx)) / 2;
+-        return { w, midLat, midLng };
+-      })
+-      .filter(Boolean) as Array<{
+-      w: VoteTypeWinner;
+-      midLat: number;
+-      midLng: number;
+-    }>;
+-
+-    // Everything that participates in a fan-out — the PBTP squares above AND the
+-    // RBTP diamonds (routeIndicatorMarkers) — keyed by its spread key at its
+-    // settled display position. Both kinds cluster and explode TOGETHER: a stack
+-    // of mixed pins fans out as one grid.
+-    const clusterables = [
+-      ...placed.map((m) => ({
+-        key: spreadKeyEdge(m.w.edgeIdx), lat: m.midLat, lng: m.midLng,
+-      })),
+-      ...routeProposals.map((p) => {
++        placed.push({ w, midLat, midLng });
++        clusterables.push({ key: spreadKeyEdge(w.edgeIdx), lat: midLat, lng: midLng });
++      }
++      for (const p of routeProposals) {
+         const [lat, lng] = rbtpDisplayPos(topology, p);
+-        return { key: spreadKeyRoute(p.id), lat, lng };
+-      }),
+-    ];
++        clusterables.push({ key: spreadKeyRoute(p.id), lat, lng });
++      }
++    }
+ 
+     // The crowded proposal cluster around a screen anchor: the 2+ icons within
+     // CLUSTER_RADIUS_PX of it. Shared by both explode entry points (browse click
+@@ -3900,10 +3878,50 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       return true;
+     };
+     // Internal ref: the route-diamond markers run the same gate on their own
+-    // clicks (a diamond in a crowded stack fans out instead of selecting).
++    // clicks (a diamond in a crowded stack fans out instead of selecting); the
++    // prop ref hands the SAME gate to the host for path taps and drag-hover.
+     internalExploderRef.current = explodeClusterAt;
+     if (clusterExploderRef) clusterExploderRef.current = explodeClusterAt;
+ 
++    return { placed, clusterAround, spreadCluster };
++    // isHeatmapLoading re-runs this once topology+votes arrive (topology is
++    // read off a ref); isStationNetwork/stationLabel select the square source.
++  }, [winners, routeProposals, map, applySpread, armSpreadTimer, clusterExploderRef,
++      isStationNetwork, stationLabel, isHeatmapLoading]);
++
++  // ===========================================================================
++  // POINT-BASED top proposals — "PBTPs" (square pins): one hot edge per pin,
++  // selected by topProposals.selectTopProposals. Their ROUTE-based counterpart
++  // (RBTPs, the corridor diamonds) renders in routeIndicatorMarkers below;
++  // terminology in docs/three-layer-model.md §3.1.
++  const indicatorMarkers = useMemo(() => {
++    const topology = topologyRef.current;
++    if (!topology) return null;
++
++    // The squares at their edge midpoints, from the shared cluster engine. A
++    // winner that hosts a waypoint stays drawn (it's the fixed pin), just tinted
++    // + click-through (see the icon opts below).
++    const { placed, clusterAround, spreadCluster } = clusterEngine;
++    if (placed.length === 0) return null;
++
++    // Per-proposal "heat": the RANKING of the visible winners, spread across
++    // the map's heat spectrum — dense rank over distinct vote counts (ties
++    // share a color), lowest → just above the ramp's cold end, hottest → 1.
++    // Ranking (not log-normalized counts) is the scale, so every top proposal
++    // gets its own hue off the ramp instead of the pack clustering wherever
++    // the vote distribution piles up. The color sample is capped at
++    // HEAT_PEAK_POS: the hottest pin wears the ramp's named upper extreme
++    // (peak), never the incandescent tip — bright is the heatmap's job. The
++    // bucketed color keys the icon cache so equally-hot pins of a label still
++    // share one divIcon (and so a re-render doesn't churn setIcon every frame).
++    const rampStops = buildHeatRampStops(mapStyle.heat, mapStyle.basemap);
++    const rankedCounts = Array.from(new Set(placed.map((m) => m.w.count).filter((c) => c > 0)))
++      .sort((a, b) => a - b);
++    const heatOf = (count: number): number =>
++      count > 0 && rankedCounts.length > 0
++        ? (rankedCounts.indexOf(count) + 1) / rankedCounts.length
++        : 0;
++
+     return placed.map(({ w, midLat, midLng }) => {
+       const override = spread?.get(spreadKeyEdge(w.edgeIdx));
+       const posLat = override ? override[0] : midLat;
+@@ -4104,11 +4122,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+         />
+       );
+     });
+-    // isStationNetwork/stationLabel select the marker source; isHeatmapLoading
+-    // re-runs once topology+votes arrive so stations appear even with zero votes.
+-  }, [winners, routeProposals, currentZoom, map, spread, collapseSpread, clearSpreadTimer, armSpreadTimer, applySpread,
++    // clusterEngine carries the placed squares (winners/stations) and re-runs
++    // once topology+votes arrive, so stations appear even with zero votes.
++  }, [clusterEngine, currentZoom, map, spread, collapseSpread, clearSpreadTimer, armSpreadTimer,
+       selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,
+-      isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, mapStyle.basemap, isStationNetwork, stationLabel, isHeatmapLoading, canHover]);
++      isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, mapStyle.basemap, isStationNetwork, canHover]);
+ 
+   // Cast a directional vote on a single proposal (edge, vote type) through the
+   // SAME unified path the top-bar route cast uses. castVotes() handles the

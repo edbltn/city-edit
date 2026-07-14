@@ -29,6 +29,20 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-14-unify-cluster-explode.html">
+    <div class="date">2026-07-14</div>
+    <h2>Click-to-explode works for route-based top proposals — one cluster engine for both pin kinds</h2>
+    <p>Clicking a crowded stack of proposal pins fans it out into a pickable grid — but the fan-out
+    machinery lived inside the point-pin marker memo, which early-returns when a map has no point-based
+    winners. On all-route maps (chicago-bikes: 20 diamonds, 0 squares) the exploder was never installed:
+    diamond clicks selected the top-of-stack corridor blind and bare-map taps over a stack dropped a
+    start pin; a stale exploder could also linger after mode switches emptied the winners list. Fixed by
+    extracting a clusterEngine memo owned by neither pin kind that assigns the exploder refs
+    unconditionally; both marker memos consume it, diamonds and MapView untouched. Verified live in the
+    dev app: diamond-only stacks explode, fanned picks select the corridor, and mixed square+diamond
+    stacks still fan out together.</p>
+  </a>
+
   <a class="entry" href="./2026-07-14-routeprop-straightness.html">
     <div class="date">2026-07-14</div>
     <h2>Route proposals prefer long straight lines — loop-back splitting + a min-blocks gate</h2>
