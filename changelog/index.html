@@ -29,6 +29,50 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-13-map-load-oom-and-scaling.html">
+    <div class="date">2026-07-13</div>
+    <h2>Map-load OOM fix, compact-array graphs, 30-tenant scaling</h2>
+    <p>Prod was OOM-SIGKILL crash-looping every ~3 minutes — each worker boot unpickled the per-city
+    networkx graphs (multi-GB transient) and died mid-prewarm at 8&nbsp;Gi, hanging map loads
+    120&nbsp;s+ and 500ing Philly. Mitigated live with a 12&nbsp;Gi bump, then fixed for real: the
+    runtime never touches networkx/pickle again. A new compact-array artifact
+    (walk_graph_arrays.npz — 37&nbsp;MB for NYC, ~1&nbsp;s load) with edge ids + topology etags
+    verified bit-identical to the baked-blocks stamps for all 7 cities; an array-native CityGraph
+    (numpy IntMap/IntPairMap replace ~500&nbsp;MB of lookup dicts, CSR adjacency, kdtree point-snap
+    instead of a 1.3M-node scan); a sparse vectorized vote-snapshot build (graph_votes p95
+    13.3&nbsp;s → 0.64&nbsp;s under a 40-agent swarm); the topology blob pre-gzipped once per city
+    (nginx had been burning ~0.4 core-seconds re-compressing 37&nbsp;MB per request — starving cheap
+    endpoints to 1.4–2.3&nbsp;s p95 — and weakening the ETag, which had silently disabled topology
+    304s); and a dead-code purge (3 endpoints, the coords→edge fallback, the whole legacy
+    streetscape_blocks pipeline, 3 client modules). A new multi-tenant swarm harness budgets every
+    client interaction p95 — across three deploy iterations it caught the map-config stampede
+    (composite index via CREATE INDEX CONCURRENTLY + single-flight cache) and the gzip CPU tail.
+    Terraform: maxScale 1(!)→8, concurrency 200, 4CPU/8Gi, db-g1-small, OSRM pinned to the
+    serving dataset. Full 7-city + 21-map prewarm: 1.35&nbsp;GB RSS (was ~6&nbsp;Gi and dying);
+    corridor proposals earn 3× the length. Final prod swarm vs revision 00097: 40 agents / 16 maps /
+    10 cycles — ALL BUDGETS MET, zero errors in ~1,150 timed interactions (worst non-topology p95
+    1.30&nbsp;s). Plus, same range: truly disjoint junction cells (unconditional Voronoi trim +
+    stranded-edge re-home; 4,880 stacked pairs → 0) and an artifacts-only blocks overlay
+    Dockerfile.</p>
+  </a>
+
+  <a class="entry" href="./2026-07-13-junction-disjoint-blocks.html">
+    <div class="date">2026-07-13</div>
+    <h2>Disjoint junction cells — the Voronoi trim stops asking permission</h2>
+    <p>Prod NYC intersection blocks visibly stacked: the builder's bisector trim between overlapping
+    junction cells was vetoed whenever a cut would evict a member node or detach a captured edge, and at
+    big intersections something always crossed the bisector — 4,880 junction pairs (10% of NYC's 80k
+    cells, median 179&nbsp;m², max ~800&nbsp;m²) shipped overlapping. Fixed by inverting the priority to
+    match the builder's own corridor rule: cuts apply unconditionally, sliver cells are absorbed into
+    their neighbour, and stranded captured edges are re-homed to whichever polygon holds them now
+    (midpoint cell/corridor → line-touch → tube graft clipped against neighbours). 0 overlapping pairs on
+    test-cp and NYC, audit still 100%&nbsp;/&nbsp;100%. Also un-breaks the builder on the array-native
+    CityGraph. Shipped mid-flight around another agent's deploys: re-baked against the serving image's
+    NEW graph (etag b0ca56f8…), staged via a new artifacts-only overlay Dockerfile (digest-pinned base,
+    block artifacts only — no code), revision 00095, prod verified serving blocks_version 720da8e4… with
+    topology unchanged.</p>
+  </a>
+
   <a class="entry" href="./2026-07-09-vote-zoom-batching.html">
     <div class="date">2026-07-09</div>
     <h2>Instant voting, storm-free zoom, live exploded diamonds, longer corridors</h2>
