@@ -308,9 +308,11 @@ export function chooseAnchorOrderBefore(
 // kind types are skipped — their votes surface as PBTP pins): net-positive
 // subgraph → connected components (the deterministic replacement for the
 // server's Leiden step — components localize; path peeling separates parallel
-// corridors inside one component) → peel heaviest simple paths → trim each to
-// its support-earned meter budget (capPathToLengthBudget) → activity gates →
-// block projection → same-type dedupe → rank + cap.
+// corridors inside one component) → peel heaviest simple paths → split each at
+// its loop-back points into straight-ish corridors (splitLoopyPath) → trim
+// each to its support-earned meter budget (capPathToLengthBudget) → activity
+// gates (score, edges, blocks) → block projection → same-type dedupe → rank +
+// cap.
 //
 // Determinism contract: NO randomness, NO clock. Every iteration order and
 // tie-break is by ascending edge/node id, so the same (topology, vote state)
@@ -329,6 +331,10 @@ export const PEEL_DOMINANCE = 0.25;
 export const MIN_ROUTE_SCORE = 3;
 /** High-activity gate: minimum number of path edges. */
 export const MIN_ROUTE_EDGES = 2;
+/** Min-distance gate: a corridor must span at least this many BLOCKS. Anything
+ *  shorter reads as a point, not a route — and its votes still surface as a
+ *  PBTP pin, so nothing is lost by dropping the stub corridor. */
+export const MIN_ROUTE_BLOCKS = 5;
 /** Global cap on the ranked proposal list. */
 export const DEFAULT_LIMIT = 20;
 /** Same-type edge-set Jaccard at/above which two routes are duplicates. */
@@ -355,12 +361,147 @@ export function routeLengthBudgetM(score: number, maxM = ROUTE_LENGTH_MAX_M): nu
   return Math.min(maxM, earned);
 }
 
+// ── Loop-back splitting ─────────────────────────────────────────────────────
+// The peel extends by heaviest arc with no regard for direction, so a hot
+// region yields corridors that snake or double back — and the length budget
+// happily fills with the loop. A proposal should read as a corridor: a long,
+// roughly straight line. Straightness of a stretch is measured as
+// crow-flies(endpoints) / arc length (1.0 = ruler, ~0.33 = U-turn); a path is
+// split where it turns back on itself and each side re-judged recursively, so
+// one snake becomes several straight corridors that then earn their own
+// length budgets and pass the activity gates independently.
+/** Split when endpoint straightness of the whole stretch falls below this.
+ *  Calibration: an L-corner or a grid staircase sits near 0.71, a half-circle
+ *  arc at 0.64, a U-turn at ~0.33 — so 0.55 keeps corners and gentle arcs and
+ *  splits anything that meaningfully comes back on itself. */
+export const ROUTE_STRAIGHTNESS_MIN = 0.55;
+/** Hairpin detector: slide a window of this arc length along the path… */
+export const ROUTE_WINDOW_M = 800;
+/** …and split when any window's straightness falls below this — catches a
+ *  local double-back buried in an otherwise straight corridor, which the
+ *  endpoint measure can't see. */
+export const ROUTE_WINDOW_STRAIGHTNESS_MIN = 0.4;
+/** Recursion bound (≤ 2^depth fragments per peeled path). */
+export const ROUTE_SPLIT_MAX_DEPTH = 6;
+
+/**
+ * Split a peeled path at its loop-back points into straight-ish fragments.
+ * Two triggers, checked per stretch: a WINDOW that doubles back (split at the
+ * excursion apex — the window point farthest from its start) and a whole
+ * stretch that ends near where it began (split at the point that maximizes the
+ * weaker half's straightness). Fragments recurse until straight, too short to
+ * judge (< 4 edges), or ROUTE_SPLIT_MAX_DEPTH. Deterministic: pure arithmetic
+ * over node coordinates, ties keep the earliest index. Fragment weights are
+ * recomputed from `weightOf` (simple paths — edges are distinct).
+ */
+export function splitLoopyPath(
+  path: PathResult,
+  lengthOf: (edgeId: number) => number,
+  latLngOf: (nodeId: number) => [number, number],
+  weightOf: (edgeId: number) => number,
+): PathResult[] {
+  const n = path.edges.length;
+  if (n < 4) return [path];
+
+  // Planar meters (equirectangular — fine at city scale, and deterministic).
+  const lat0 = (latLngOf(path.nodes[0])[0] * Math.PI) / 180;
+  const kx = 111320 * Math.cos(lat0);
+  const ky = 110574;
+  const xs = new Float64Array(n + 1);
+  const ys = new Float64Array(n + 1);
+  for (let i = 0; i <= n; i++) {
+    const [lat, lng] = latLngOf(path.nodes[i]);
+    xs[i] = lng * kx;
+    ys[i] = lat * ky;
+  }
+  const arc = new Float64Array(n + 2);
+  for (let i = 0; i < n; i++) arc[i + 1] = arc[i] + lengthOf(path.edges[i]);
+  const crow = (i: number, j: number) => Math.hypot(xs[j] - xs[i], ys[j] - ys[i]);
+  // Straightness of the stretch i..j; degenerate (zero-arc) stretches count as
+  // straight so they never trigger a split.
+  const straight = (i: number, j: number) => {
+    const s = arc[j] - arc[i];
+    return s > 0 ? crow(i, j) / s : 1;
+  };
+
+  const out: PathResult[] = [];
+  const emit = (i0: number, i1: number) => {
+    let w = 0;
+    for (let i = i0; i < i1; i++) w += weightOf(path.edges[i]);
+    out.push({
+      edges: path.edges.slice(i0, i1),
+      nodes: path.nodes.slice(i0, i1 + 1),
+      weight: w,
+    });
+  };
+
+  const rec = (i0: number, i1: number, depth: number) => {
+    if (i1 - i0 < 4 || depth >= ROUTE_SPLIT_MAX_DEPTH) {
+      emit(i0, i1);
+      return;
+    }
+    // Worst window: for each end j, judge the longest window fitting the arc
+    // budget. Windows under 60% full are skipped (edge-of-path stubs).
+    let worst = 1;
+    let wi = -1;
+    let wj = -1;
+    {
+      let i = i0;
+      for (let j = i0 + 1; j <= i1; j++) {
+        while (arc[j] - arc[i] > ROUTE_WINDOW_M && i < j - 1) i++;
+        if (arc[j] - arc[i] < ROUTE_WINDOW_M * 0.6) continue;
+        const r = straight(i, j);
+        if (r < worst) {
+          worst = r;
+          wi = i;
+          wj = j;
+        }
+      }
+    }
+    let k = -1;
+    if (worst < ROUTE_WINDOW_STRAIGHTNESS_MIN) {
+      // Split at the excursion apex: the farthest point from the window start.
+      let best = -1;
+      for (let m = wi + 1; m < wj; m++) {
+        const d = crow(wi, m);
+        if (d > best) {
+          best = d;
+          k = m;
+        }
+      }
+    }
+    if (k <= i0 && straight(i0, i1) < ROUTE_STRAIGHTNESS_MIN) {
+      // Whole stretch comes back on itself: split where both halves are
+      // straightest (maximize the weaker half).
+      let best = -1;
+      for (let m = i0 + 1; m < i1; m++) {
+        const v = Math.min(straight(i0, m), straight(m, i1));
+        if (v > best) {
+          best = v;
+          k = m;
+        }
+      }
+    }
+    if (k <= i0 || k >= i1) {
+      emit(i0, i1);
+      return;
+    }
+    rec(i0, k, depth + 1);
+    rec(k, i1, depth + 1);
+  };
+
+  rec(0, n, 0);
+  return out;
+}
+
 export interface RouteProposalOptions {
   limit?: number;
   jaccardThreshold?: number;
   minNet?: number;
   minRouteScore?: number;
   minRouteEdges?: number;
+  /** Min-distance gate: minimum BLOCKS a corridor must span (MIN_ROUTE_BLOCKS). */
+  minRouteBlocks?: number;
   /** Hard ceiling override for the corridor length budget (meters). */
   maxRouteLengthM?: number;
   /** Prebuilt edge→block index for `topo` (GraphLayer already holds one).
@@ -792,6 +933,7 @@ export function createRouteProposalJob(
   const minNet = opts.minNet ?? MIN_NET;
   const minRouteScore = opts.minRouteScore ?? MIN_ROUTE_SCORE;
   const minRouteEdges = opts.minRouteEdges ?? MIN_ROUTE_EDGES;
+  const minRouteBlocks = opts.minRouteBlocks ?? MIN_ROUTE_BLOCKS;
   const maxRouteLengthM = opts.maxRouteLengthM ?? ROUTE_LENGTH_MAX_M;
   const blockIndex = opts.blockIndex !== undefined ? opts.blockIndex : buildBlockIndex(topo);
   const netsPerType = netsByType(edgeVoteTypes, topo.nEdges, legend.length);
@@ -812,33 +954,41 @@ export function createRouteProposalJob(
     const nets = netsPerType[legendIdx];
     const typeAdj = buildTypeAdj(topo, adj, nets, minNet);
     const typeProposals: RouteProposal[] = [];
+    const lengthOf = (e: number) => edgeLengthMeters(topo, e);
+    const weightOf = (e: number) => nets.get(e) ?? 0;
+    const latLngOf = (nid: number) => nodeLatLng(topo, nid);
     for (const compAdj of connectedComponents(typeAdj)) {
       for (const peeled of peelPaths(compAdj)) {
-        // Trim to the support-earned meter budget BEFORE the activity gates,
-        // so the gates judge the corridor that will actually be shown.
-        const path = capPathToLengthBudget(
-          peeled,
-          routeLengthBudgetM(peeled.weight, maxRouteLengthM),
-          (e) => edgeLengthMeters(topo, e),
-          (e) => nets.get(e) ?? 0,
-        );
-        if (path.weight < minRouteScore || path.edges.length < minRouteEdges) continue;
-        const { blocks, blockEdgeIds } = groupBlocks(path.edges, topo, blockIndex);
-        const a = path.nodes[0];
-        const b = path.nodes[path.nodes.length - 1];
-        const [aLat, aLng] = nodeLatLng(topo, a);
-        const [bLat, bLng] = nodeLatLng(topo, b);
-        typeProposals.push({
-          id: proposalIdOf(legendIdx, path.edges),
-          label,
-          legendIdx,
-          score: path.weight,
-          edgeIds: path.edges,
-          blocks,
-          blockEdgeIds,
-          anchors: [a, b],
-          anchorCoords: [{ lat: aLat, lng: aLng }, { lat: bLat, lng: bLng }],
-        });
+        // Split loop-backs FIRST (a snake becomes several straight corridors),
+        // then trim each fragment to the meter budget ITS OWN support earned,
+        // BEFORE the activity gates — the gates judge the corridor that will
+        // actually be shown.
+        for (const frag of splitLoopyPath(peeled, lengthOf, latLngOf, weightOf)) {
+          const path = capPathToLengthBudget(
+            frag,
+            routeLengthBudgetM(frag.weight, maxRouteLengthM),
+            lengthOf,
+            weightOf,
+          );
+          if (path.weight < minRouteScore || path.edges.length < minRouteEdges) continue;
+          const { blocks, blockEdgeIds } = groupBlocks(path.edges, topo, blockIndex);
+          if (blocks.length < minRouteBlocks) continue;
+          const a = path.nodes[0];
+          const b = path.nodes[path.nodes.length - 1];
+          const [aLat, aLng] = nodeLatLng(topo, a);
+          const [bLat, bLng] = nodeLatLng(topo, b);
+          typeProposals.push({
+            id: proposalIdOf(legendIdx, path.edges),
+            label,
+            legendIdx,
+            score: path.weight,
+            edgeIds: path.edges,
+            blocks,
+            blockEdgeIds,
+            anchors: [a, b],
+            anchorCoords: [{ lat: aLat, lng: aLng }, { lat: bLat, lng: bLng }],
+          });
+        }
       }
     }
     return dedupeRoutes(typeProposals, jaccardThreshold);

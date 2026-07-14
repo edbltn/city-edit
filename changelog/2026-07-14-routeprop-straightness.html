@@ -1,0 +1,930 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Route proposals prefer long straight lines — loop-back splitting + a min-blocks gate — 2026-07-14</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  table.stats { border-collapse: collapse; margin: 10px 0 2px; font-size: 13.5px; }
+  table.stats th, table.stats td { border: 1px solid var(--hairline); padding: 6px 10px; text-align: left; }
+  table.stats th { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: #f7f5ef; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.25; }
+  pre.diff span { display: block; white-space: pre; }
+  pre.diff span span { display: inline; }
+
+  .s-kw { color: #a52a5a; }
+  .s-str { color: #0a3069; }
+  .s-com { color: #77716a; font-style: italic; }
+  .s-num { color: #0550ae; }
+  .s-lit { color: #0550ae; }
+  .s-fn { color: #6639ba; }
+  .s-type { color: #953800; }
+  .s-prop { color: #116329; }
+  .s-tag { color: #116329; }
+  .s-attr { color: #0550ae; }
+  .s-dec { color: #6639ba; }
+
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Route proposals prefer long straight lines — loop-back splitting + a min-blocks gate</h1>
+    <div class="dateline">2026-07-14 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#diagnosis">1</a>
+<a href="#gate">2</a>
+<a href="#split">3</a>
+<a href="#harness">4</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a>
+  </nav>
+
+  <p class="lede">Yesterday's 3× corridor length budget (<code>cf1d576</code>) exposed what the greedy
+  peel always did: it extends by weight with no regard for direction, so on the imported-data maps the
+  top route proposals shipped as multi-kilometre snakes — 2 of nyc-bikes' top-20 ended ~2 km from their
+  start after 9–10 km, and 6 more hid an 800 m hairpin — while other maps still surfaced 100 m,
+  3-block stubs as route pins. No hard max distance is added (long corridors are the point). Instead the
+  pipeline becomes shape-aware: a new <code>splitLoopyPath()</code> splits every peeled path where it
+  turns back on itself (a sliding-window rule for buried hairpins, an endpoint rule for U-turns), each
+  fragment earns its own support-based length budget, and a new <code>MIN_ROUTE_BLOCKS = 5</code> gate
+  drops corridors that don't span at least 5 blocks (their votes still show as point pins). Verified
+  against real data with a new vite-node stats harness: 0/20 loopy corridors on nyc-bikes (was 8/20 by
+  either measure), stubs gone, determinism contract intact, compute time unchanged.</p>
+
+  
+    <section class="card" id="diagnosis">
+      <div class="tag">Diagnosis · real prod-scale data</div>
+      <h2>1 · Why top proposals got long and loopy (and some tiny)</h2>
+      <h3>Symptom</h3>
+      <p>After the corridor length budget was tripled (<code>cf1d576</code>, 2026-07-13: base 900→2700 m, growth 220→660 m·√score, ceiling 3500→10500 m), the top route proposals on the imported-data maps read as multi-kilometre snakes — some visibly looping back on themselves — while other maps still surfaced 100 m, 3-block stubs as route pins.</p>
+      <h3>Root cause</h3>
+      <ul><li>The peel was always able to snake: <code>greedyHeaviestPath</code> extends by the heaviest unvisited arc with <em>no regard for direction</em>, so in a dense net-positive region it wanders. The old 3.5 km ceiling just hid it — the budget window was too short to hold a full loop. At 10.5 km the best-weight window happily contains the whole double-back.</li>
+<li>The bulk-imported vote data is what makes regions dense enough to snake: nyc-bikes holds 1.79 M votes across 182,803 net-positive edges, so a single connected component can span boroughs and the heaviest path through it is effectively unconstrained.</li>
+<li>Measured on real data (the new <code>routepropStats.ts</code> harness, running the actual client pipeline): 2 of the top-20 nyc-bikes corridors ended ~2 km from their start after 9–10 km of path (endpoint straightness 0.22 / 0.32), and 6 of 20 contained a buried hairpin — an 800 m stretch that came back to within 120–300 m of where it began (worst-window straightness down to 0.13). Three corridors sat pinned at the 10,497–10,499 m ceiling.</li>
+<li>At the other end, nothing stopped a hot 2-edge stub from becoming a “route”: nyc-walkways shipped a 100 m, 3-block corridor whose votes already surface as a point pin (PBTP).</li></ul>
+      <h3>What changed</h3>
+      <ul><li>No hard max-distance change — long corridors are the point. The fix is shape-aware: split where a corridor turns back on itself (§3) and require a route to span ≥ 5 blocks (§2). Before/after on the same data:
+<table class="stats">
+  <thead><tr><th></th><th>before</th><th>after</th></tr></thead>
+  <tbody>
+    <tr><td>endpoint straightness &lt; 0.55 (comes back on itself)</td><td><strong>2 / 20</strong> (worst 0.22, 0.32)</td><td><strong>0 / 20</strong></td></tr>
+    <tr><td>buried hairpin (worst 800 m window &lt; 0.4)</td><td><strong>6 / 20</strong> (worst 0.13)</td><td><strong>0 / 20</strong></td></tr>
+    <tr><td>corridor length min / median / max (m)</td><td>882 / 3,065 / 10,499</td><td>881 / 3,961 / 10,497</td></tr>
+    <tr><td>compute time (3.3 M-edge NYC graph)</td><td>934 ms</td><td>924 ms</td></tr>
+    <tr><td>nyc-walkways stub proposal (100 m, 3 blocks)</td><td>shipped as a diamond pin</td><td>gated (still a PBTP)</td></tr>
+  </tbody>
+</table>
+</li></ul>
+      
+    </section>
+    
+
+    <section class="card" id="gate">
+      <div class="tag">Client clustering · min-distance gate</div>
+      <h2>2 · A route must span at least 5 blocks</h2>
+      <h3>Symptom</h3>
+      <p>Hot micro-corridors (2–4 blocks, sometimes &lt; 100 m) surfaced as diamond route pins, duplicating the point-proposal pin that the same votes already earn.</p>
+      <h3>Root cause</h3>
+      <ul><li>The activity gates only checked score (≥ 3) and path <em>edges</em> (≥ 2) — nothing expressed minimum <em>distance</em>. Edges are a poor proxy anyway: twin directions and crosswalk stubs mean many edges can still be one street corner.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>New gate <code>MIN_ROUTE_BLOCKS = 5</code> (option <code>minRouteBlocks</code>): after the path is projected onto blocks, a corridor spanning fewer than 5 distinct blocks is dropped. Blocks are the unit the UI selects and votes in, so “5 selected blocks” is exactly the min-distance the request asked for (~400–500 m in Manhattan).</li>
+<li>Nothing is lost: a dropped stub's votes still surface as a PBTP square pin — the gate only removes the redundant route pin.</li>
+<li>The gate runs AFTER loop-back splitting and budget-capping, so fragments and trimmed windows are judged by what will actually be shown.</li></ul>
+      
+    </section>
+    
+
+    <section class="card" id="split">
+      <div class="tag">Client clustering · splitLoopyPath</div>
+      <h2>3 · Corridors are split where they turn back on themselves</h2>
+      <h3>Symptom</h3>
+      <p>A single peeled path could snake through a hot region — out one avenue, back the parallel one — and ship as one absurd proposal instead of the two straight corridors a person would draw.</p>
+      <h3>Root cause</h3>
+      <ul><li>Peeling maximizes weight, and the budget trim (<code>capPathToLengthBudget</code>) maximizes weight-within-meters. Neither ever looks at geometry, so a weight-dense loop beats a straight line every time.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>New <code>splitLoopyPath()</code>, run on every peeled path before budget-capping. Straightness of a stretch = crow-flies(endpoints) / arc length (1.0 = ruler, ~0.71 = L-corner or grid staircase, ~0.33 = U-turn).</li>
+<li><strong>Two triggers</strong>: a sliding 800 m window whose straightness falls below 0.4 (a hairpin buried in an otherwise straight corridor — invisible to the endpoint measure), split at the excursion apex; and a whole stretch below 0.55 (it ends near where it began), split where the weaker half is straightest. Fragments recurse (depth ≤ 6) until straight or too short to judge (&lt; 4 edges).</li>
+<li>Each fragment then earns its OWN length budget from its own support and passes the activity gates independently — so one snake becomes several rankable straight corridors, and weak residue dies at the gates. On nyc-bikes the split fragments now fill ranks 9–15 (scores 700–2,900) that were previously occupied by sub-100-score stubs.</li>
+<li>Deterministic by construction: pure arithmetic over node coordinates (equirectangular meters), strict-inequality comparisons keep the earliest index on ties — the byte-identical-across-clients contract is preserved (determinism test included).</li>
+<li>Thresholds are calibrated so grid staircases (0.71), L-corners (0.71) and half-circle arcs (0.64) survive whole — only genuine double-backs split.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/routeProposals.ts</span>
+            <span class="stat"><span class="d-add">+178</span> / <span class="d-del">-28</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">GraphLayer · route proposals (RBTP)</span>
+        <span class="ctx-sum">client-side deterministic clustering — hot corridors from (topology, vote state), no server round-trip</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">routeProposals.ts</span>
+        <span class="ctx-sum">~1000 LOC — wire parsing, marker shape, coverage, corridor geometry, the clustering pipeline</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Wire parsing + marker shape</span><span class="ol-sum">parseRouteProposal, diamond vs square</span></li><li class="dim"><span class="ol-label">Coverage / dedupe / corridor geometry</span><span class="ol-sum">isRouteCovered, corridorCoordinates, anchor ordering</span></li><li class="changed"><span class="ol-label">Pipeline constants + gates</span><span class="ol-sum">MIN_NET, PEEL_*, MIN_ROUTE_SCORE/EDGES — NEW: MIN_ROUTE_BLOCKS = 5</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Corridor length budget</span><span class="ol-sum">routeLengthBudgetM — 2700 + 660·√score, cap 10500 (unchanged)</span></li><li class="changed"><span class="ol-label">Loop-back splitting</span><span class="ol-sum">NEW: splitLoopyPath — window rule (hairpins) + endpoint rule (U-turns), recursive</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">capPathToLengthBudget</span><span class="ol-sum">best-weight window within the meter budget (unchanged)</span></li><li class="dim"><span class="ol-label">netsByType / buildTypeAdj / components / peeling</span><span class="ol-sum">per-type net-positive subgraph → heaviest simple paths (unchanged)</span></li><li class="changed"><span class="ol-label">createRouteProposalJob · step()</span><span class="ol-sum">peel → SPLIT → cap → gates (score, edges, NEW blocks) → blocks → dedupe</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>MIN_ROUTE_BLOCKS = 5 — the min-distance gate, in BLOCK units (what the UI selects/votes)</li><li>ROUTE_STRAIGHTNESS_MIN 0.55 / ROUTE_WINDOW_M 800 / ROUTE_WINDOW_STRAIGHTNESS_MIN 0.4 / ROUTE_SPLIT_MAX_DEPTH 6</li><li>splitLoopyPath() — planar-meter coords, worst-window scan, apex split, weaker-half split, recursion</li><li>RouteProposalOptions.minRouteBlocks — override for tests/tuning</li><li>step(): splitLoopyPath around the cap; fragments earn their own budget; blocks.length gate after groupBlocks</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeProposals.ts b/client-react/src/components/GraphLayer/routeProposals.ts</span>
+<span class="d-meta">index 79877bd..f35d4b1 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/routeProposals.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeProposals.ts</span>
+<span class="d-hunk">@@ -308,9 +308,11 @@ export function chooseAnchorOrderBefore(</span>
+<span class="d-ctx"> <span class="s-com">// kind types are skipped — their votes surface as PBTP pins): net-positive</span></span>
+<span class="d-ctx"> <span class="s-com">// subgraph → connected components (the deterministic replacement for the</span></span>
+<span class="d-ctx"> <span class="s-com">// server&#x27;s Leiden step — components localize; path peeling separates parallel</span></span>
+<span class="d-del">-<span class="s-com">// corridors inside one component) → peel heaviest simple paths → trim each to</span></span>
+<span class="d-del">-<span class="s-com">// its support-earned meter budget (capPathToLengthBudget) → activity gates →</span></span>
+<span class="d-del">-<span class="s-com">// block projection → same-type dedupe → rank + cap.</span></span>
+<span class="d-add">+<span class="s-com">// corridors inside one component) → peel heaviest simple paths → split each at</span></span>
+<span class="d-add">+<span class="s-com">// its loop-back points into straight-ish corridors (splitLoopyPath) → trim</span></span>
+<span class="d-add">+<span class="s-com">// each to its support-earned meter budget (capPathToLengthBudget) → activity</span></span>
+<span class="d-add">+<span class="s-com">// gates (score, edges, blocks) → block projection → same-type dedupe → rank +</span></span>
+<span class="d-add">+<span class="s-com">// cap.</span></span>
+<span class="d-ctx"> <span class="s-com">//</span></span>
+<span class="d-ctx"> <span class="s-com">// Determinism contract: NO randomness, NO clock. Every iteration order and</span></span>
+<span class="d-ctx"> <span class="s-com">// tie-break is by ascending edge/node id, so the same (topology, vote state)</span></span>
+<span class="d-hunk">@@ -329,6 +331,10 @@ export const PEEL_DOMINANCE = 0.25;</span>
+<span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">MIN_ROUTE_SCORE</span> = <span class="s-num">3</span>;</span>
+<span class="d-ctx"> <span class="s-com">/** High-activity gate: minimum number of path edges. */</span></span>
+<span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">MIN_ROUTE_EDGES</span> = <span class="s-num">2</span>;</span>
+<span class="d-add">+<span class="s-com">/** Min-distance gate: a corridor must span at least this many BLOCKS. Anything</span></span>
+<span class="d-add">+<span class="s-com"> *  shorter reads as a point, not a route — and its votes still surface as a</span></span>
+<span class="d-add">+<span class="s-com"> *  PBTP pin, so nothing is lost by dropping the stub corridor. */</span></span>
+<span class="d-add">+<span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">MIN_ROUTE_BLOCKS</span> = <span class="s-num">5</span>;</span>
+<span class="d-ctx"> <span class="s-com">/** Global cap on the ranked proposal list. */</span></span>
+<span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">DEFAULT_LIMIT</span> = <span class="s-num">20</span>;</span>
+<span class="d-ctx"> <span class="s-com">/** Same-type edge-set Jaccard at/above which two routes are duplicates. */</span></span>
+<span class="d-hunk">@@ -355,12 +361,147 @@ export function routeLengthBudgetM(score: number, maxM = ROUTE_LENGTH_MAX_M): nu</span>
+<span class="d-ctx">   <span class="s-kw">return</span> <span class="s-type">Math</span>.<span class="s-fn">min</span>(maxM, earned);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+<span class="s-com">// ── Loop-back splitting ─────────────────────────────────────────────────────</span></span>
+<span class="d-add">+<span class="s-com">// The peel extends by heaviest arc with no regard for direction, so a hot</span></span>
+<span class="d-add">+<span class="s-com">// region yields corridors that snake or double back — and the length budget</span></span>
+<span class="d-add">+<span class="s-com">// happily fills with the loop. A proposal should read as a corridor: a long,</span></span>
+<span class="d-add">+<span class="s-com">// roughly straight line. Straightness of a stretch is measured as</span></span>
+<span class="d-add">+<span class="s-com">// crow-flies(endpoints) / arc length (1.0 = ruler, ~0.33 = U-turn); a path is</span></span>
+<span class="d-add">+<span class="s-com">// split where it turns back on itself and each side re-judged recursively, so</span></span>
+<span class="d-add">+<span class="s-com">// one snake becomes several straight corridors that then earn their own</span></span>
+<span class="d-add">+<span class="s-com">// length budgets and pass the activity gates independently.</span></span>
+<span class="d-add">+<span class="s-com">/** Split when endpoint straightness of the whole stretch falls below this.</span></span>
+<span class="d-add">+<span class="s-com"> *  Calibration: an L-corner or a grid staircase sits near 0.71, a half-circle</span></span>
+<span class="d-add">+<span class="s-com"> *  arc at 0.64, a U-turn at ~0.33 — so 0.55 keeps corners and gentle arcs and</span></span>
+<span class="d-add">+<span class="s-com"> *  splits anything that meaningfully comes back on itself. */</span></span>
+<span class="d-add">+<span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">ROUTE_STRAIGHTNESS_MIN</span> = <span class="s-num">0.55</span>;</span>
+<span class="d-add">+<span class="s-com">/** Hairpin detector: slide a window of this arc length along the path… */</span></span>
+<span class="d-add">+<span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">ROUTE_WINDOW_M</span> = <span class="s-num">800</span>;</span>
+<span class="d-add">+<span class="s-com">/** …and split when any window&#x27;s straightness falls below this — catches a</span></span>
+<span class="d-add">+<span class="s-com"> *  local double-back buried in an otherwise straight corridor, which the</span></span>
+<span class="d-add">+<span class="s-com"> *  endpoint measure can&#x27;t see. */</span></span>
+<span class="d-add">+<span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">ROUTE_WINDOW_STRAIGHTNESS_MIN</span> = <span class="s-num">0.4</span>;</span>
+<span class="d-add">+<span class="s-com">/** Recursion bound (≤ 2^depth fragments per peeled path). */</span></span>
+<span class="d-add">+<span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">ROUTE_SPLIT_MAX_DEPTH</span> = <span class="s-num">6</span>;</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-com">/**</span></span>
+<span class="d-add">+<span class="s-com"> * Split a peeled path at its loop-back points into straight-ish fragments.</span></span>
+<span class="d-add">+<span class="s-com"> * Two triggers, checked per stretch: a WINDOW that doubles back (split at the</span></span>
+<span class="d-add">+<span class="s-com"> * excursion apex — the window point farthest from its start) and a whole</span></span>
+<span class="d-add">+<span class="s-com"> * stretch that ends near where it began (split at the point that maximizes the</span></span>
+<span class="d-add">+<span class="s-com"> * weaker half&#x27;s straightness). Fragments recurse until straight, too short to</span></span>
+<span class="d-add">+<span class="s-com"> * judge (&lt; 4 edges), or ROUTE_SPLIT_MAX_DEPTH. Deterministic: pure arithmetic</span></span>
+<span class="d-add">+<span class="s-com"> * over node coordinates, ties keep the earliest index. Fragment weights are</span></span>
+<span class="d-add">+<span class="s-com"> * recomputed from `weightOf` (simple paths — edges are distinct).</span></span>
+<span class="d-add">+<span class="s-com"> */</span></span>
+<span class="d-add">+<span class="s-kw">export</span> <span class="s-kw">function</span> <span class="s-fn">splitLoopyPath</span>(</span>
+<span class="d-add">+  path: <span class="s-type">PathResult</span>,</span>
+<span class="d-add">+  lengthOf: (edgeId: number) =&gt; number,</span>
+<span class="d-add">+  latLngOf: (nodeId: number) =&gt; [number, number],</span>
+<span class="d-add">+  weightOf: (edgeId: number) =&gt; number,</span>
+<span class="d-add">+): <span class="s-type">PathResult</span>[] {</span>
+<span class="d-add">+  <span class="s-kw">const</span> n = path.edges.length;</span>
+<span class="d-add">+  <span class="s-kw">if</span> (n &lt; <span class="s-num">4</span>) <span class="s-kw">return</span> [path];</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-com">// Planar meters (equirectangular — fine at city scale, and deterministic).</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> lat0 = (<span class="s-fn">latLngOf</span>(path.nodes[<span class="s-num">0</span>])[<span class="s-num">0</span>] * <span class="s-type">Math</span>.<span class="s-type">PI</span>) / <span class="s-num">180</span>;</span>
+<span class="d-add">+  <span class="s-kw">const</span> kx = <span class="s-num">111320</span> * <span class="s-type">Math</span>.<span class="s-fn">cos</span>(lat0);</span>
+<span class="d-add">+  <span class="s-kw">const</span> ky = <span class="s-num">110574</span>;</span>
+<span class="d-add">+  <span class="s-kw">const</span> xs = <span class="s-kw">new</span> <span class="s-fn">Float64Array</span>(n + <span class="s-num">1</span>);</span>
+<span class="d-add">+  <span class="s-kw">const</span> ys = <span class="s-kw">new</span> <span class="s-fn">Float64Array</span>(n + <span class="s-num">1</span>);</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">let</span> i = <span class="s-num">0</span>; i &lt;= n; i++) {</span>
+<span class="d-add">+    <span class="s-kw">const</span> [lat, lng] = <span class="s-fn">latLngOf</span>(path.nodes[i]);</span>
+<span class="d-add">+    xs[i] = lng * kx;</span>
+<span class="d-add">+    ys[i] = lat * ky;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  <span class="s-kw">const</span> arc = <span class="s-kw">new</span> <span class="s-fn">Float64Array</span>(n + <span class="s-num">2</span>);</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">let</span> i = <span class="s-num">0</span>; i &lt; n; i++) arc[i + <span class="s-num">1</span>] = arc[i] + <span class="s-fn">lengthOf</span>(path.edges[i]);</span>
+<span class="d-add">+  <span class="s-kw">const</span> crow = (i: number, j: number) =&gt; <span class="s-type">Math</span>.<span class="s-fn">hypot</span>(xs[j] - xs[i], ys[j] - ys[i]);</span>
+<span class="d-add">+  <span class="s-com">// Straightness of the stretch i..j; degenerate (zero-arc) stretches count as</span></span>
+<span class="d-add">+  <span class="s-com">// straight so they never trigger a split.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> straight = (i: number, j: number) =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> s = arc[j] - arc[i];</span>
+<span class="d-add">+    <span class="s-kw">return</span> s &gt; <span class="s-num">0</span> ? <span class="s-fn">crow</span>(i, j) / s : <span class="s-num">1</span>;</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-kw">const</span> out: <span class="s-type">PathResult</span>[] = [];</span>
+<span class="d-add">+  <span class="s-kw">const</span> emit = (i0: number, i1: number) =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">let</span> w = <span class="s-num">0</span>;</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">let</span> i = i0; i &lt; i1; i++) w += <span class="s-fn">weightOf</span>(path.edges[i]);</span>
+<span class="d-add">+    out.<span class="s-fn">push</span>({</span>
+<span class="d-add">+      edges: path.edges.<span class="s-fn">slice</span>(i0, i1),</span>
+<span class="d-add">+      nodes: path.nodes.<span class="s-fn">slice</span>(i0, i1 + <span class="s-num">1</span>),</span>
+<span class="d-add">+      weight: w,</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-kw">const</span> rec = (i0: number, i1: number, depth: number) =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">if</span> (i1 - i0 &lt; <span class="s-num">4</span> || depth &gt;= <span class="s-type">ROUTE_SPLIT_MAX_DEPTH</span>) {</span>
+<span class="d-add">+      <span class="s-fn">emit</span>(i0, i1);</span>
+<span class="d-add">+      <span class="s-kw">return</span>;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-com">// Worst window: for each end j, judge the longest window fitting the arc</span></span>
+<span class="d-add">+    <span class="s-com">// budget. Windows under 60% full are skipped (edge-of-path stubs).</span></span>
+<span class="d-add">+    <span class="s-kw">let</span> worst = <span class="s-num">1</span>;</span>
+<span class="d-add">+    <span class="s-kw">let</span> wi = -<span class="s-num">1</span>;</span>
+<span class="d-add">+    <span class="s-kw">let</span> wj = -<span class="s-num">1</span>;</span>
+<span class="d-add">+    {</span>
+<span class="d-add">+      <span class="s-kw">let</span> i = i0;</span>
+<span class="d-add">+      <span class="s-kw">for</span> (<span class="s-kw">let</span> j = i0 + <span class="s-num">1</span>; j &lt;= i1; j++) {</span>
+<span class="d-add">+        <span class="s-kw">while</span> (arc[j] - arc[i] &gt; <span class="s-type">ROUTE_WINDOW_M</span> &amp;&amp; i &lt; j - <span class="s-num">1</span>) i++;</span>
+<span class="d-add">+        <span class="s-kw">if</span> (arc[j] - arc[i] &lt; <span class="s-type">ROUTE_WINDOW_M</span> * <span class="s-num">0.6</span>) <span class="s-kw">continue</span>;</span>
+<span class="d-add">+        <span class="s-kw">const</span> r = <span class="s-fn">straight</span>(i, j);</span>
+<span class="d-add">+        <span class="s-kw">if</span> (r &lt; worst) {</span>
+<span class="d-add">+          worst = r;</span>
+<span class="d-add">+          wi = i;</span>
+<span class="d-add">+          wj = j;</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-kw">let</span> k = -<span class="s-num">1</span>;</span>
+<span class="d-add">+    <span class="s-kw">if</span> (worst &lt; <span class="s-type">ROUTE_WINDOW_STRAIGHTNESS_MIN</span>) {</span>
+<span class="d-add">+      <span class="s-com">// Split at the excursion apex: the farthest point from the window start.</span></span>
+<span class="d-add">+      <span class="s-kw">let</span> best = -<span class="s-num">1</span>;</span>
+<span class="d-add">+      <span class="s-kw">for</span> (<span class="s-kw">let</span> m = wi + <span class="s-num">1</span>; m &lt; wj; m++) {</span>
+<span class="d-add">+        <span class="s-kw">const</span> d = <span class="s-fn">crow</span>(wi, m);</span>
+<span class="d-add">+        <span class="s-kw">if</span> (d &gt; best) {</span>
+<span class="d-add">+          best = d;</span>
+<span class="d-add">+          k = m;</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-kw">if</span> (k &lt;= i0 &amp;&amp; <span class="s-fn">straight</span>(i0, i1) &lt; <span class="s-type">ROUTE_STRAIGHTNESS_MIN</span>) {</span>
+<span class="d-add">+      <span class="s-com">// Whole stretch comes back on itself: split where both halves are</span></span>
+<span class="d-add">+      <span class="s-com">// straightest (maximize the weaker half).</span></span>
+<span class="d-add">+      <span class="s-kw">let</span> best = -<span class="s-num">1</span>;</span>
+<span class="d-add">+      <span class="s-kw">for</span> (<span class="s-kw">let</span> m = i0 + <span class="s-num">1</span>; m &lt; i1; m++) {</span>
+<span class="d-add">+        <span class="s-kw">const</span> v = <span class="s-type">Math</span>.<span class="s-fn">min</span>(<span class="s-fn">straight</span>(i0, m), <span class="s-fn">straight</span>(m, i1));</span>
+<span class="d-add">+        <span class="s-kw">if</span> (v &gt; best) {</span>
+<span class="d-add">+          best = v;</span>
+<span class="d-add">+          k = m;</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-kw">if</span> (k &lt;= i0 || k &gt;= i1) {</span>
+<span class="d-add">+      <span class="s-fn">emit</span>(i0, i1);</span>
+<span class="d-add">+      <span class="s-kw">return</span>;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-fn">rec</span>(i0, k, depth + <span class="s-num">1</span>);</span>
+<span class="d-add">+    <span class="s-fn">rec</span>(k, i1, depth + <span class="s-num">1</span>);</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">rec</span>(<span class="s-num">0</span>, n, <span class="s-num">0</span>);</span>
+<span class="d-add">+  <span class="s-kw">return</span> out;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">interface</span> <span class="s-type">RouteProposalOptions</span> {</span>
+<span class="d-ctx">   limit?: number;</span>
+<span class="d-ctx">   jaccardThreshold?: number;</span>
+<span class="d-ctx">   minNet?: number;</span>
+<span class="d-ctx">   minRouteScore?: number;</span>
+<span class="d-ctx">   minRouteEdges?: number;</span>
+<span class="d-add">+  <span class="s-com">/** Min-distance gate: minimum BLOCKS a corridor must span (MIN_ROUTE_BLOCKS). */</span></span>
+<span class="d-add">+  minRouteBlocks?: number;</span>
+<span class="d-ctx">   <span class="s-com">/** Hard ceiling override for the corridor length budget (meters). */</span></span>
+<span class="d-ctx">   maxRouteLengthM?: number;</span>
+<span class="d-ctx"> <span class="s-com">  /** Prebuilt edge→block index for `topo` (GraphLayer already holds one).</span></span>
+<span class="d-hunk">@@ -792,6 +933,7 @@ export function createRouteProposalJob(</span>
+<span class="d-ctx">   <span class="s-kw">const</span> minNet = opts.minNet ?? <span class="s-type">MIN_NET</span>;</span>
+<span class="d-ctx">   <span class="s-kw">const</span> minRouteScore = opts.minRouteScore ?? <span class="s-type">MIN_ROUTE_SCORE</span>;</span>
+<span class="d-ctx">   <span class="s-kw">const</span> minRouteEdges = opts.minRouteEdges ?? <span class="s-type">MIN_ROUTE_EDGES</span>;</span>
+<span class="d-add">+  <span class="s-kw">const</span> minRouteBlocks = opts.minRouteBlocks ?? <span class="s-type">MIN_ROUTE_BLOCKS</span>;</span>
+<span class="d-ctx">   <span class="s-kw">const</span> maxRouteLengthM = opts.maxRouteLengthM ?? <span class="s-type">ROUTE_LENGTH_MAX_M</span>;</span>
+<span class="d-ctx">   <span class="s-kw">const</span> blockIndex = opts.blockIndex !== <span class="s-lit">undefined</span> ? opts.blockIndex : <span class="s-fn">buildBlockIndex</span>(topo);</span>
+<span class="d-ctx">   <span class="s-kw">const</span> netsPerType = <span class="s-fn">netsByType</span>(edgeVoteTypes, topo.nEdges, legend.length);</span>
+<span class="d-hunk">@@ -812,33 +954,41 @@ export function createRouteProposalJob(</span>
+<span class="d-ctx">     <span class="s-kw">const</span> nets = netsPerType[legendIdx];</span>
+<span class="d-ctx">     <span class="s-kw">const</span> typeAdj = <span class="s-fn">buildTypeAdj</span>(topo, adj, nets, minNet);</span>
+<span class="d-ctx">     <span class="s-kw">const</span> typeProposals: <span class="s-type">RouteProposal</span>[] = [];</span>
+<span class="d-add">+    <span class="s-kw">const</span> lengthOf = (e: number) =&gt; <span class="s-fn">edgeLengthMeters</span>(topo, e);</span>
+<span class="d-add">+    <span class="s-kw">const</span> weightOf = (e: number) =&gt; nets.<span class="s-kw">get</span>(e) ?? <span class="s-num">0</span>;</span>
+<span class="d-add">+    <span class="s-kw">const</span> latLngOf = (nid: number) =&gt; <span class="s-fn">nodeLatLng</span>(topo, nid);</span>
+<span class="d-ctx">     <span class="s-kw">for</span> (<span class="s-kw">const</span> compAdj <span class="s-kw">of</span> <span class="s-fn">connectedComponents</span>(typeAdj)) {</span>
+<span class="d-ctx">       <span class="s-kw">for</span> (<span class="s-kw">const</span> peeled <span class="s-kw">of</span> <span class="s-fn">peelPaths</span>(compAdj)) {</span>
+<span class="d-del">-        <span class="s-com">// Trim to the support-earned meter budget BEFORE the activity gates,</span></span>
+<span class="d-del">-        <span class="s-com">// so the gates judge the corridor that will actually be shown.</span></span>
+<span class="d-del">-        <span class="s-kw">const</span> path = <span class="s-fn">capPathToLengthBudget</span>(</span>
+<span class="d-del">-          peeled,</span>
+<span class="d-del">-          <span class="s-fn">routeLengthBudgetM</span>(peeled.weight, maxRouteLengthM),</span>
+<span class="d-del">-          (e) =&gt; <span class="s-fn">edgeLengthMeters</span>(topo, e),</span>
+<span class="d-del">-          (e) =&gt; nets.<span class="s-kw">get</span>(e) ?? <span class="s-num">0</span>,</span>
+<span class="d-del">-        );</span>
+<span class="d-del">-        <span class="s-kw">if</span> (path.weight &lt; minRouteScore || path.edges.length &lt; minRouteEdges) <span class="s-kw">continue</span>;</span>
+<span class="d-del">-        <span class="s-kw">const</span> { blocks, blockEdgeIds } = <span class="s-fn">groupBlocks</span>(path.edges, topo, blockIndex);</span>
+<span class="d-del">-        <span class="s-kw">const</span> a = path.nodes[<span class="s-num">0</span>];</span>
+<span class="d-del">-        <span class="s-kw">const</span> b = path.nodes[path.nodes.length - <span class="s-num">1</span>];</span>
+<span class="d-del">-        <span class="s-kw">const</span> [aLat, aLng] = <span class="s-fn">nodeLatLng</span>(topo, a);</span>
+<span class="d-del">-        <span class="s-kw">const</span> [bLat, bLng] = <span class="s-fn">nodeLatLng</span>(topo, b);</span>
+<span class="d-del">-        typeProposals.<span class="s-fn">push</span>({</span>
+<span class="d-del">-          id: <span class="s-fn">proposalIdOf</span>(legendIdx, path.edges),</span>
+<span class="d-del">-          label,</span>
+<span class="d-del">-          legendIdx,</span>
+<span class="d-del">-          score: path.weight,</span>
+<span class="d-del">-          edgeIds: path.edges,</span>
+<span class="d-del">-          blocks,</span>
+<span class="d-del">-          blockEdgeIds,</span>
+<span class="d-del">-          anchors: [a, b],</span>
+<span class="d-del">-          anchorCoords: [{ lat: aLat, lng: aLng }, { lat: bLat, lng: bLng }],</span>
+<span class="d-del">-        });</span>
+<span class="d-add">+        <span class="s-com">// Split loop-backs FIRST (a snake becomes several straight corridors),</span></span>
+<span class="d-add">+        <span class="s-com">// then trim each fragment to the meter budget ITS OWN support earned,</span></span>
+<span class="d-add">+        <span class="s-com">// BEFORE the activity gates — the gates judge the corridor that will</span></span>
+<span class="d-add">+        <span class="s-com">// actually be shown.</span></span>
+<span class="d-add">+        <span class="s-kw">for</span> (<span class="s-kw">const</span> frag <span class="s-kw">of</span> <span class="s-fn">splitLoopyPath</span>(peeled, lengthOf, latLngOf, weightOf)) {</span>
+<span class="d-add">+          <span class="s-kw">const</span> path = <span class="s-fn">capPathToLengthBudget</span>(</span>
+<span class="d-add">+            frag,</span>
+<span class="d-add">+            <span class="s-fn">routeLengthBudgetM</span>(frag.weight, maxRouteLengthM),</span>
+<span class="d-add">+            lengthOf,</span>
+<span class="d-add">+            weightOf,</span>
+<span class="d-add">+          );</span>
+<span class="d-add">+          <span class="s-kw">if</span> (path.weight &lt; minRouteScore || path.edges.length &lt; minRouteEdges) <span class="s-kw">continue</span>;</span>
+<span class="d-add">+          <span class="s-kw">const</span> { blocks, blockEdgeIds } = <span class="s-fn">groupBlocks</span>(path.edges, topo, blockIndex);</span>
+<span class="d-add">+          <span class="s-kw">if</span> (blocks.length &lt; minRouteBlocks) <span class="s-kw">continue</span>;</span>
+<span class="d-add">+          <span class="s-kw">const</span> a = path.nodes[<span class="s-num">0</span>];</span>
+<span class="d-add">+          <span class="s-kw">const</span> b = path.nodes[path.nodes.length - <span class="s-num">1</span>];</span>
+<span class="d-add">+          <span class="s-kw">const</span> [aLat, aLng] = <span class="s-fn">nodeLatLng</span>(topo, a);</span>
+<span class="d-add">+          <span class="s-kw">const</span> [bLat, bLng] = <span class="s-fn">nodeLatLng</span>(topo, b);</span>
+<span class="d-add">+          typeProposals.<span class="s-fn">push</span>({</span>
+<span class="d-add">+            id: <span class="s-fn">proposalIdOf</span>(legendIdx, path.edges),</span>
+<span class="d-add">+            label,</span>
+<span class="d-add">+            legendIdx,</span>
+<span class="d-add">+            score: path.weight,</span>
+<span class="d-add">+            edgeIds: path.edges,</span>
+<span class="d-add">+            blocks,</span>
+<span class="d-add">+            blockEdgeIds,</span>
+<span class="d-add">+            anchors: [a, b],</span>
+<span class="d-add">+            anchorCoords: [{ lat: aLat, lng: aLng }, { lat: bLat, lng: bLng }],</span>
+<span class="d-add">+          });</span>
+<span class="d-add">+        }</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     <span class="s-kw">return</span> <span class="s-fn">dedupeRoutes</span>(typeProposals, jaccardThreshold);</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+            <span class="stat"><span class="d-add">+179</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">GraphLayer · route proposals (RBTP)</span>
+        <span class="ctx-sum">unit tests for the clustering pipeline (ported from the old server suite)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">routeProposals.test.ts</span>
+        <span class="ctx-sum">~850 LOC — wire/coverage/pipeline suites on micro-graphs</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Wire / shape / coverage suites</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">compute() helper</span><span class="ol-sum">now pins minRouteBlocks: 1 — micro-graphs probe mechanics, not the gate</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Clustering suites (nets, peeling, dedupe, budget)</span><span class="ol-sum">unchanged, all still pass</span></li><li class="changed"><span class="ol-label">min-blocks gate suite</span><span class="ol-sum">NEW: default drops &lt; 5 blocks; counts BLOCKS not edges; override works</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">splitLoopyPath suite</span><span class="ol-sum">NEW: straight/hairpin/buried-detour/weights/short/determinism</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">U-corridor integration test</span><span class="ol-sum">NEW: a hot U on a real topology becomes ≥ 2 leg proposals</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>compute() pins minRouteBlocks: 1 (single spot — 53 existing tests unchanged)</li><li>computeDefault() — direct call so the REAL 5-block default is what&#x27;s tested</li><li>mkPath() — synthetic meter-space paths with injectable per-edge weights</li><li>hairpin / buried-detour geometry fixtures with fragment-partition assertions</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeProposals.test.ts b/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+<span class="d-meta">index 4a9a4e4..e8004df 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+<span class="d-hunk">@@ -14,8 +14,11 @@ import {</span>
+<span class="d-ctx">   dedupeRoutes,</span>
+<span class="d-ctx">   capPathToLengthBudget,</span>
+<span class="d-ctx">   routeLengthBudgetM,</span>
+<span class="d-add">+  splitLoopyPath,</span>
+<span class="d-ctx">   <span class="s-type">MIN_ROUTE_SCORE</span>,</span>
+<span class="d-ctx">   <span class="s-type">MIN_ROUTE_EDGES</span>,</span>
+<span class="d-add">+  <span class="s-type">MIN_ROUTE_BLOCKS</span>,</span>
+<span class="d-add">+  <span class="s-type">ROUTE_STRAIGHTNESS_MIN</span>,</span>
+<span class="d-ctx">   <span class="s-type">ROUTE_LENGTH_BASE_M</span>,</span>
+<span class="d-ctx">   <span class="s-type">ROUTE_LENGTH_PER_SQRT_SCORE_M</span>,</span>
+<span class="d-ctx">   <span class="s-type">ROUTE_LENGTH_MAX_M</span>,</span>
+<span class="d-hunk">@@ -211,10 +214,12 @@ function compute(</span>
+<span class="d-ctx">   blockIds?: number[],</span>
+<span class="d-ctx"> ): <span class="s-type">RouteProposal</span>[] {</span>
+<span class="d-ctx">   <span class="s-kw">const</span> topo = <span class="s-fn">makeTopo</span>(edges, blockIds);</span>
+<span class="d-add">+  <span class="s-com">// minRouteBlocks: 1 — these micro-graphs probe the clustering mechanics, not</span></span>
+<span class="d-add">+  <span class="s-com">// the min-distance gate (which has its own suite below with the real default).</span></span>
+<span class="d-ctx">   <span class="s-kw">return</span> <span class="s-fn">computeRouteProposals</span>(topo, <span class="s-fn">buildNodeAdj</span>(topo), {</span>
+<span class="d-ctx">     edge_vote_types: voteTypes,</span>
+<span class="d-ctx">     vote_type_legend: <span class="s-type">LEGEND</span>,</span>
+<span class="d-del">-  }, opts);</span>
+<span class="d-add">+  }, { minRouteBlocks: <span class="s-num">1</span>, ...opts });</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-kw">function</span> <span class="s-fn">bareRoute</span>(over: <span class="s-type">Partial</span>&lt;<span class="s-type">RouteProposal</span>&gt;): <span class="s-type">RouteProposal</span> {</span>
+<span class="d-hunk">@@ -651,3 +656,176 @@ describe(&quot;computeRouteProposals — route/point kind filter&quot;, () =&gt; {</span>
+<span class="d-ctx">     <span class="s-fn">expect</span>(unknownKind.<span class="s-fn">map</span>((p) =&gt; p.label)).<span class="s-fn">toEqual</span>([<span class="s-str">&quot;Bike lane&quot;</span>]);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-com">// ==========================================================================</span></span>
+<span class="d-add">+<span class="s-com">// Min-blocks gate — a corridor must span at least MIN_ROUTE_BLOCKS blocks</span></span>
+<span class="d-add">+<span class="s-com">// ==========================================================================</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-fn">describe</span>(<span class="s-str">&quot;computeRouteProposals — min-blocks gate&quot;</span>, () =&gt; {</span>
+<span class="d-add">+  <span class="s-kw">const</span> hot = (n: number): <span class="s-type">Evt</span> =&gt;</span>
+<span class="d-add">+    <span class="s-fn">evt</span>(...<span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: n }, (): [number, number, number][] =&gt; [[<span class="s-type">BIKE</span>, <span class="s-num">5</span>, <span class="s-num">0</span>]]));</span>
+<span class="d-add">+  <span class="s-kw">const</span> chain = (n: number): [number, number][] =&gt;</span>
+<span class="d-add">+    <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: n }, (_, i) =&gt; [i, i + <span class="s-num">1</span>]);</span>
+<span class="d-add">+  <span class="s-com">// Direct call — no helper — so the REAL default gate applies.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> computeDefault = (edges: [number, number][], votes: <span class="s-type">Evt</span>, blockIds?: number[]) =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> topo = <span class="s-fn">makeTopo</span>(edges, blockIds);</span>
+<span class="d-add">+    <span class="s-kw">return</span> <span class="s-fn">computeRouteProposals</span>(topo, <span class="s-fn">buildNodeAdj</span>(topo), {</span>
+<span class="d-add">+      edge_vote_types: votes,</span>
+<span class="d-add">+      vote_type_legend: <span class="s-type">LEGEND</span>,</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;drops corridors spanning fewer than MIN_ROUTE_BLOCKS blocks by default&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(<span class="s-type">MIN_ROUTE_BLOCKS</span>).<span class="s-fn">toBe</span>(<span class="s-num">5</span>);</span>
+<span class="d-add">+    <span class="s-com">// 4 singleton blocks — hot, but reads as a point, not a route.</span></span>
+<span class="d-add">+    <span class="s-fn">expect</span>(<span class="s-fn">computeDefault</span>(<span class="s-fn">chain</span>(<span class="s-num">4</span>), <span class="s-fn">hot</span>(<span class="s-num">4</span>))).<span class="s-fn">toEqual</span>([]);</span>
+<span class="d-add">+    <span class="s-com">// 5 blocks is exactly enough.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> ps = <span class="s-fn">computeDefault</span>(<span class="s-fn">chain</span>(<span class="s-num">5</span>), <span class="s-fn">hot</span>(<span class="s-num">5</span>));</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(ps).<span class="s-fn">toHaveLength</span>(<span class="s-num">1</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(ps[<span class="s-num">0</span>].blocks).<span class="s-fn">toHaveLength</span>(<span class="s-num">5</span>);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;counts BLOCKS, not edges — a many-edge path over few blocks is dropped&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-com">// 6 chain edges mapped into 3 blocks: plenty of edges, too little distance.</span></span>
+<span class="d-add">+    <span class="s-fn">expect</span>(<span class="s-fn">computeDefault</span>(<span class="s-fn">chain</span>(<span class="s-num">6</span>), <span class="s-fn">hot</span>(<span class="s-num">6</span>), [<span class="s-num">0</span>, <span class="s-num">0</span>, <span class="s-num">1</span>, <span class="s-num">1</span>, <span class="s-num">2</span>, <span class="s-num">2</span>])).<span class="s-fn">toEqual</span>([]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;is overridable via minRouteBlocks&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> ps = <span class="s-fn">compute</span>(<span class="s-fn">chain</span>(<span class="s-num">2</span>), <span class="s-fn">hot</span>(<span class="s-num">2</span>), { minRouteBlocks: <span class="s-num">1</span> });</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(ps).<span class="s-fn">toHaveLength</span>(<span class="s-num">1</span>);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-com">// ==========================================================================</span></span>
+<span class="d-add">+<span class="s-com">// splitLoopyPath — corridors are split where they turn back on themselves</span></span>
+<span class="d-add">+<span class="s-com">// ==========================================================================</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-fn">describe</span>(<span class="s-str">&quot;splitLoopyPath&quot;</span>, () =&gt; {</span>
+<span class="d-add">+  <span class="s-com">// Synthetic geometry: points in METERS near lat 0, so 1m of x ≈ 1/111320°</span></span>
+<span class="d-add">+  <span class="s-com">// of longitude and 1m of y ≈ 1/110574° of latitude.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> mkPath = (pts: [number, number][], weights?: number[]) =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> n = pts.length - <span class="s-num">1</span>;</span>
+<span class="d-add">+    <span class="s-kw">const</span> latLngOf = (i: number): [number, number] =&gt;</span>
+<span class="d-add">+      [pts[i][<span class="s-num">1</span>] / <span class="s-num">110574</span>, pts[i][<span class="s-num">0</span>] / <span class="s-num">111320</span>];</span>
+<span class="d-add">+    <span class="s-kw">const</span> lengthOf = (e: number) =&gt;</span>
+<span class="d-add">+      <span class="s-type">Math</span>.<span class="s-fn">hypot</span>(pts[e + <span class="s-num">1</span>][<span class="s-num">0</span>] - pts[e][<span class="s-num">0</span>], pts[e + <span class="s-num">1</span>][<span class="s-num">1</span>] - pts[e][<span class="s-num">1</span>]);</span>
+<span class="d-add">+    <span class="s-kw">const</span> weightOf = (e: number) =&gt; weights?.[e] ?? <span class="s-num">1</span>;</span>
+<span class="d-add">+    <span class="s-kw">const</span> path: <span class="s-type">PathResult</span> = {</span>
+<span class="d-add">+      edges: <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: n }, (_, i) =&gt; i),</span>
+<span class="d-add">+      nodes: <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: n + <span class="s-num">1</span> }, (_, i) =&gt; i),</span>
+<span class="d-add">+      weight: <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: n }, (_, i) =&gt; <span class="s-fn">weightOf</span>(i)).<span class="s-fn">reduce</span>((a, b) =&gt; a + b, <span class="s-num">0</span>),</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+    <span class="s-kw">return</span> { path, lengthOf, latLngOf, weightOf };</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+  <span class="s-kw">const</span> straightnessOf = (</span>
+<span class="d-add">+    frag: <span class="s-type">PathResult</span>,</span>
+<span class="d-add">+    pts: [number, number][],</span>
+<span class="d-add">+    lengthOf: (e: number) =&gt; number,</span>
+<span class="d-add">+  ) =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> a = pts[frag.nodes[<span class="s-num">0</span>]];</span>
+<span class="d-add">+    <span class="s-kw">const</span> b = pts[frag.nodes[frag.nodes.length - <span class="s-num">1</span>]];</span>
+<span class="d-add">+    <span class="s-kw">const</span> arc = frag.edges.<span class="s-fn">reduce</span>((s, e) =&gt; s + <span class="s-fn">lengthOf</span>(e), <span class="s-num">0</span>);</span>
+<span class="d-add">+    <span class="s-kw">return</span> <span class="s-type">Math</span>.<span class="s-fn">hypot</span>(b[<span class="s-num">0</span>] - a[<span class="s-num">0</span>], b[<span class="s-num">1</span>] - a[<span class="s-num">1</span>]) / arc;</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;keeps a straight corridor whole&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> pts: [number, number][] = <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: <span class="s-num">11</span> }, (_, i) =&gt; [<span class="s-num">100</span> * i, <span class="s-num">0</span>]);</span>
+<span class="d-add">+    <span class="s-kw">const</span> { path, lengthOf, latLngOf, weightOf } = <span class="s-fn">mkPath</span>(pts);</span>
+<span class="d-add">+    <span class="s-kw">const</span> frags = <span class="s-fn">splitLoopyPath</span>(path, lengthOf, latLngOf, weightOf);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(frags).<span class="s-fn">toHaveLength</span>(<span class="s-num">1</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(frags[<span class="s-num">0</span>].edges).<span class="s-fn">toEqual</span>(path.edges);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;splits a hairpin at its apex into two straight-ish halves&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-com">// Out 1km east along y=0, jog north 100m, back 1km west along y=100.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> out: [number, number][] = <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: <span class="s-num">6</span> }, (_, i) =&gt; [<span class="s-num">200</span> * i, <span class="s-num">0</span>]);</span>
+<span class="d-add">+    <span class="s-kw">const</span> back: [number, number][] = <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: <span class="s-num">6</span> }, (_, i) =&gt; [<span class="s-num">1000</span> - <span class="s-num">200</span> * i, <span class="s-num">100</span>]);</span>
+<span class="d-add">+    <span class="s-kw">const</span> pts = [...out, ...back];</span>
+<span class="d-add">+    <span class="s-kw">const</span> { path, lengthOf, latLngOf, weightOf } = <span class="s-fn">mkPath</span>(pts);</span>
+<span class="d-add">+    <span class="s-kw">const</span> frags = <span class="s-fn">splitLoopyPath</span>(path, lengthOf, latLngOf, weightOf);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(frags.length).<span class="s-fn">toBeGreaterThanOrEqual</span>(<span class="s-num">2</span>);</span>
+<span class="d-add">+    <span class="s-com">// Every fragment is straighter than the split threshold, and the fragments</span></span>
+<span class="d-add">+    <span class="s-com">// partition the original path in order.</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">const</span> f <span class="s-kw">of</span> frags) {</span>
+<span class="d-add">+      <span class="s-fn">expect</span>(<span class="s-fn">straightnessOf</span>(f, pts, lengthOf)).<span class="s-fn">toBeGreaterThanOrEqual</span>(<span class="s-type">ROUTE_STRAIGHTNESS_MIN</span>);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(frags.<span class="s-fn">flatMap</span>((f) =&gt; f.edges)).<span class="s-fn">toEqual</span>(path.edges);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;splits a double-back buried in an otherwise straight corridor (window rule)&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-com">// 3km straight line with a 400m out-and-back spur at x=1500. Endpoint</span></span>
+<span class="d-add">+    <span class="s-com">// straightness stays high (~0.79), so only the WINDOW rule can see it.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> pts: [number, number][] = [];</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">let</span> x = <span class="s-num">0</span>; x &lt;= <span class="s-num">1500</span>; x += <span class="s-num">100</span>) pts.<span class="s-fn">push</span>([x, <span class="s-num">0</span>]);</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">let</span> y = <span class="s-num">100</span>; y &lt;= <span class="s-num">400</span>; y += <span class="s-num">100</span>) pts.<span class="s-fn">push</span>([<span class="s-num">1500</span>, y]);   <span class="s-com">// out</span></span>
+<span class="d-add">+    pts.<span class="s-fn">push</span>([<span class="s-num">1520</span>, <span class="s-num">400</span>]);                                        <span class="s-com">// tip</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">let</span> y = <span class="s-num">300</span>; y &gt;= <span class="s-num">0</span>; y -= <span class="s-num">100</span>) pts.<span class="s-fn">push</span>([<span class="s-num">1520</span>, y]);      <span class="s-com">// back</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">let</span> x = <span class="s-num">1600</span>; x &lt;= <span class="s-num">3000</span>; x += <span class="s-num">100</span>) pts.<span class="s-fn">push</span>([x, <span class="s-num">0</span>]);</span>
+<span class="d-add">+    <span class="s-kw">const</span> { path, lengthOf, latLngOf, weightOf } = <span class="s-fn">mkPath</span>(pts);</span>
+<span class="d-add">+    <span class="s-kw">const</span> frags = <span class="s-fn">splitLoopyPath</span>(path, lengthOf, latLngOf, weightOf);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(frags.length).<span class="s-fn">toBeGreaterThanOrEqual</span>(<span class="s-num">2</span>);</span>
+<span class="d-add">+    <span class="s-com">// The out-leg and the back-leg never share a fragment: no fragment holds</span></span>
+<span class="d-add">+    <span class="s-com">// both a node at (1500, 400) and one at (1520, 300)-side of the spur.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> tipIdx = pts.<span class="s-fn">findIndex</span>(([x, y]) =&gt; x === <span class="s-num">1520</span> &amp;&amp; y === <span class="s-num">400</span>);</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">const</span> f <span class="s-kw">of</span> frags) {</span>
+<span class="d-add">+      <span class="s-kw">const</span> hasOut = f.nodes.<span class="s-fn">some</span>((n) =&gt; n &lt; tipIdx &amp;&amp; pts[n][<span class="s-num">1</span>] === <span class="s-num">400</span>);</span>
+<span class="d-add">+      <span class="s-kw">const</span> hasBack = f.nodes.<span class="s-fn">some</span>((n) =&gt; n &gt; tipIdx &amp;&amp; pts[n][<span class="s-num">1</span>] &gt; <span class="s-num">0</span> &amp;&amp; pts[n][<span class="s-num">0</span>] === <span class="s-num">1520</span>);</span>
+<span class="d-add">+      <span class="s-fn">expect</span>(hasOut &amp;&amp; hasBack).<span class="s-fn">toBe</span>(<span class="s-lit">false</span>);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(frags.<span class="s-fn">flatMap</span>((f) =&gt; f.edges)).<span class="s-fn">toEqual</span>(path.edges);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;recomputes fragment weights from weightOf and preserves the total&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> out: [number, number][] = <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: <span class="s-num">6</span> }, (_, i) =&gt; [<span class="s-num">200</span> * i, <span class="s-num">0</span>]);</span>
+<span class="d-add">+    <span class="s-kw">const</span> back: [number, number][] = <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: <span class="s-num">6</span> }, (_, i) =&gt; [<span class="s-num">1000</span> - <span class="s-num">200</span> * i, <span class="s-num">100</span>]);</span>
+<span class="d-add">+    <span class="s-kw">const</span> pts = [...out, ...back];</span>
+<span class="d-add">+    <span class="s-kw">const</span> weights = <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: pts.length - <span class="s-num">1</span> }, (_, i) =&gt; i + <span class="s-num">1</span>);</span>
+<span class="d-add">+    <span class="s-kw">const</span> { path, lengthOf, latLngOf, weightOf } = <span class="s-fn">mkPath</span>(pts, weights);</span>
+<span class="d-add">+    <span class="s-kw">const</span> frags = <span class="s-fn">splitLoopyPath</span>(path, lengthOf, latLngOf, weightOf);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(frags.length).<span class="s-fn">toBeGreaterThanOrEqual</span>(<span class="s-num">2</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(frags.<span class="s-fn">reduce</span>((s, f) =&gt; s + f.weight, <span class="s-num">0</span>)).<span class="s-fn">toBe</span>(path.weight);</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">const</span> f <span class="s-kw">of</span> frags) {</span>
+<span class="d-add">+      <span class="s-fn">expect</span>(f.weight).<span class="s-fn">toBe</span>(f.edges.<span class="s-fn">reduce</span>((s, e) =&gt; s + <span class="s-fn">weightOf</span>(e), <span class="s-num">0</span>));</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;returns short paths (&lt; 4 edges) unsplit, however loopy&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> pts: [number, number][] = [[<span class="s-num">0</span>, <span class="s-num">0</span>], [<span class="s-num">500</span>, <span class="s-num">0</span>], [<span class="s-num">500</span>, <span class="s-num">20</span>], [<span class="s-num">0</span>, <span class="s-num">20</span>]];</span>
+<span class="d-add">+    <span class="s-kw">const</span> { path, lengthOf, latLngOf, weightOf } = <span class="s-fn">mkPath</span>(pts);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(<span class="s-fn">splitLoopyPath</span>(path, lengthOf, latLngOf, weightOf)).<span class="s-fn">toEqual</span>([path]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;is deterministic&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> out: [number, number][] = <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: <span class="s-num">8</span> }, (_, i) =&gt; [<span class="s-num">150</span> * i, <span class="s-num">0</span>]);</span>
+<span class="d-add">+    <span class="s-kw">const</span> back: [number, number][] = <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: <span class="s-num">8</span> }, (_, i) =&gt; [<span class="s-num">1050</span> - <span class="s-num">150</span> * i, <span class="s-num">60</span>]);</span>
+<span class="d-add">+    <span class="s-kw">const</span> pts = [...out, ...back];</span>
+<span class="d-add">+    <span class="s-kw">const</span> { path, lengthOf, latLngOf, weightOf } = <span class="s-fn">mkPath</span>(pts);</span>
+<span class="d-add">+    <span class="s-kw">const</span> a = <span class="s-fn">splitLoopyPath</span>(path, lengthOf, latLngOf, weightOf);</span>
+<span class="d-add">+    <span class="s-kw">const</span> b = <span class="s-fn">splitLoopyPath</span>(path, lengthOf, latLngOf, weightOf);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(a).<span class="s-fn">toEqual</span>(b);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-fn">describe</span>(<span class="s-str">&quot;computeRouteProposals — loop-back corridors become several proposals&quot;</span>, () =&gt; {</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;splits a hot U-shaped corridor into its two straight legs&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-com">// A U on a real topology: 8 edges south, 2 east, 8 north — every edge</span></span>
+<span class="d-add">+    <span class="s-com">// equally hot. One snake before; two straight corridors after.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> nodes: [number, number][] = [];</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">let</span> i = <span class="s-num">0</span>; i &lt;= <span class="s-num">8</span>; i++) nodes.<span class="s-fn">push</span>([<span class="s-num">40.7</span> + <span class="s-num">0.001</span> * (<span class="s-num">8</span> - i), -<span class="s-num">74.0</span>]);          <span class="s-com">// west leg ↓</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">let</span> i = <span class="s-num">1</span>; i &lt;= <span class="s-num">2</span>; i++) nodes.<span class="s-fn">push</span>([<span class="s-num">40.7</span>, -<span class="s-num">74.0</span> + <span class="s-num">0.001</span> * i]);                <span class="s-com">// bottom →</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">let</span> i = <span class="s-num">1</span>; i &lt;= <span class="s-num">8</span>; i++) nodes.<span class="s-fn">push</span>([<span class="s-num">40.7</span> + <span class="s-num">0.001</span> * i, -<span class="s-num">74.0</span> + <span class="s-num">0.002</span>]);        <span class="s-com">// east leg ↑</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> edges: [number, number][] = <span class="s-type">Array</span>.<span class="s-kw">from</span>({ length: nodes.length - <span class="s-num">1</span> }, (_, i) =&gt; [i, i + <span class="s-num">1</span>]);</span>
+<span class="d-add">+    <span class="s-kw">const</span> topo = <span class="s-fn">topologyFromJson</span>({ nodes, edges: edges.<span class="s-fn">map</span>(([u, v]) =&gt; [u, v, <span class="s-str">&quot;&quot;</span>]) });</span>
+<span class="d-add">+    <span class="s-kw">const</span> ps = <span class="s-fn">computeRouteProposals</span>(topo, <span class="s-fn">buildNodeAdj</span>(topo), {</span>
+<span class="d-add">+      edge_vote_types: edges.<span class="s-fn">map</span>((): [number, number, number][] =&gt; [[<span class="s-type">BIKE</span>, <span class="s-num">5</span>, <span class="s-num">0</span>]]),</span>
+<span class="d-add">+      vote_type_legend: <span class="s-type">LEGEND</span>,</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(ps.length).<span class="s-fn">toBeGreaterThanOrEqual</span>(<span class="s-num">2</span>);</span>
+<span class="d-add">+    <span class="s-com">// No proposal contains edges from both vertical legs (indices ≤7 vs ≥10).</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">const</span> p <span class="s-kw">of</span> ps) {</span>
+<span class="d-add">+      <span class="s-kw">const</span> west = p.edgeIds.<span class="s-fn">some</span>((e) =&gt; e &lt;= <span class="s-num">7</span>);</span>
+<span class="d-add">+      <span class="s-kw">const</span> east = p.edgeIds.<span class="s-fn">some</span>((e) =&gt; e &gt;= <span class="s-num">10</span>);</span>
+<span class="d-add">+      <span class="s-fn">expect</span>(west &amp;&amp; east).<span class="s-fn">toBe</span>(<span class="s-lit">false</span>);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+    </section>
+    
+
+    <section class="card" id="harness">
+      <div class="tag">Diagnostics · real-data harness</div>
+      <h2>4 · A stats harness that runs the real pipeline on real data</h2>
+      <h3>Symptom</h3>
+      <p>Proposal-shape regressions were only visible by eyeballing the map — there was no way to measure length / straightness / block-count distributions against real vote data.</p>
+      <h3>Root cause</h3>
+      <ul><li>The unit tests run on micro-graphs; the perf test only times. Neither sees the shapes that 1.79 M imported votes produce.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>New <code>client-react/scripts/routepropStats.ts</code> (vite-node): fetches the live local Flask's binary topology (GTB2) + vote arrays, runs the REAL <code>computeRouteProposals</code> with the map's own kind resolver and block index, and prints per-proposal score / edges / blocks / length / endpoint straightness / worst-800 m-window straightness plus distribution summaries.</li>
+<li>Usage: <code>cd client-react &amp;&amp; node_modules/.bin/vite-node scripts/routepropStats.ts [slug ...]</code> (defaults to nyc-bikes + nyc-walkways).</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details>
+          <summary><span class="fname">client-react/scripts/routepropStats.ts</span>
+            <span class="stat"><span class="d-add">+127</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">diagnostics · route-proposal stats</span>
+        <span class="ctx-sum">runs the real client pipeline against a live local Flask and prints shape distributions</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">routepropStats.ts</span>
+        <span class="ctx-sum">~140 LOC — fetch GTB2 + votes, computeRouteProposals, per-proposal metrics</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Metric helpers</span><span class="ol-sum">haversine, endpoint straightness, worst-800 m-window straightness</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Fetch + decode</span><span class="ol-sum">?format=bin GTB2 → decodeTopologyBin; /api/graph-votes; map kindOf from /api/maps</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Run + report</span><span class="ol-sum">console.table per proposal + min/med/p90/max + threshold counts</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>the whole file is new — vite-node script, no app code imported beyond the pure pipeline modules</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/scripts/routepropStats.ts b/client-react/scripts/routepropStats.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..bada4dc</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/scripts/routepropStats.ts</span>
+<span class="d-hunk">@@ -0,0 +1,127 @@</span>
+<span class="d-add">+<span class="s-com">// Route-proposal diagnostics — run the REAL client clustering pipeline</span></span>
+<span class="d-add">+<span class="s-com">// (computeRouteProposals) against a live local Flask&#x27;s topology + votes and</span></span>
+<span class="d-add">+<span class="s-com">// report length / straightness / block-count distributions for the ranked</span></span>
+<span class="d-add">+<span class="s-com">// proposals. Used to tune the corridor length budget, the min-blocks gate,</span></span>
+<span class="d-add">+<span class="s-com">// and the loop-back splitter against real (imported) vote data.</span></span>
+<span class="d-add">+<span class="s-com">//</span></span>
+<span class="d-add">+<span class="s-com">// Usage: cd client-react &amp;&amp; node_modules/.bin/vite-node scripts/routepropStats.ts [slug ...]</span></span>
+<span class="d-add">+<span class="s-com">//        (defaults to nyc-bikes nyc-walkways; Flask must be up on :5001)</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">import</span> {</span>
+<span class="d-add">+  computeRouteProposals,</span>
+<span class="d-add">+  <span class="s-kw">type</span> <span class="s-type">RouteProposal</span>,</span>
+<span class="d-add">+} <span class="s-kw">from</span> <span class="s-str">&quot;../src/components/GraphLayer/routeProposals&quot;</span>;</span>
+<span class="d-add">+<span class="s-kw">import</span> {</span>
+<span class="d-add">+  decodeTopologyBin,</span>
+<span class="d-add">+  buildNodeAdj,</span>
+<span class="d-add">+  buildBlockIndex,</span>
+<span class="d-add">+  edgeLengthMeters,</span>
+<span class="d-add">+  nodeLatLng,</span>
+<span class="d-add">+  <span class="s-kw">type</span> <span class="s-type">GraphTopology</span>,</span>
+<span class="d-add">+} <span class="s-kw">from</span> <span class="s-str">&quot;../src/components/GraphLayer/graphTopology&quot;</span>;</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">const</span> <span class="s-type">BASE</span> = process.env.<span class="s-type">API_BASE</span> ?? <span class="s-str">&quot;http://localhost:5001&quot;</span>;</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">function</span> <span class="s-fn">haversineM</span>(a: [number, number], b: [number, number]): number {</span>
+<span class="d-add">+  <span class="s-kw">const</span> <span class="s-type">R</span> = <span class="s-num">6371000</span>;</span>
+<span class="d-add">+  <span class="s-kw">const</span> dLat = ((b[<span class="s-num">0</span>] - a[<span class="s-num">0</span>]) * <span class="s-type">Math</span>.<span class="s-type">PI</span>) / <span class="s-num">180</span>;</span>
+<span class="d-add">+  <span class="s-kw">const</span> dLng = ((b[<span class="s-num">1</span>] - a[<span class="s-num">1</span>]) * <span class="s-type">Math</span>.<span class="s-type">PI</span>) / <span class="s-num">180</span>;</span>
+<span class="d-add">+  <span class="s-kw">const</span> la1 = (a[<span class="s-num">0</span>] * <span class="s-type">Math</span>.<span class="s-type">PI</span>) / <span class="s-num">180</span>;</span>
+<span class="d-add">+  <span class="s-kw">const</span> la2 = (b[<span class="s-num">0</span>] * <span class="s-type">Math</span>.<span class="s-type">PI</span>) / <span class="s-num">180</span>;</span>
+<span class="d-add">+  <span class="s-kw">const</span> h = <span class="s-type">Math</span>.<span class="s-fn">sin</span>(dLat / <span class="s-num">2</span>) ** <span class="s-num">2</span> + <span class="s-type">Math</span>.<span class="s-fn">cos</span>(la1) * <span class="s-type">Math</span>.<span class="s-fn">cos</span>(la2) * <span class="s-type">Math</span>.<span class="s-fn">sin</span>(dLng / <span class="s-num">2</span>) ** <span class="s-num">2</span>;</span>
+<span class="d-add">+  <span class="s-kw">return</span> <span class="s-num">2</span> * <span class="s-type">R</span> * <span class="s-type">Math</span>.<span class="s-fn">asin</span>(<span class="s-type">Math</span>.<span class="s-fn">sqrt</span>(h));</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">function</span> <span class="s-fn">pathLenM</span>(topo: <span class="s-type">GraphTopology</span>, p: <span class="s-type">RouteProposal</span>): number {</span>
+<span class="d-add">+  <span class="s-kw">return</span> p.edgeIds.<span class="s-fn">reduce</span>((s, e) =&gt; s + <span class="s-fn">edgeLengthMeters</span>(topo, e), <span class="s-num">0</span>);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-com">/** Endpoint displacement / arc length — 1.0 is a ruler, ~0.33 a U-turn. */</span></span>
+<span class="d-add">+<span class="s-kw">function</span> <span class="s-fn">straightness</span>(topo: <span class="s-type">GraphTopology</span>, p: <span class="s-type">RouteProposal</span>): number {</span>
+<span class="d-add">+  <span class="s-kw">const</span> len = <span class="s-fn">pathLenM</span>(topo, p);</span>
+<span class="d-add">+  <span class="s-kw">if</span> (len &lt;= <span class="s-num">0</span>) <span class="s-kw">return</span> <span class="s-num">1</span>;</span>
+<span class="d-add">+  <span class="s-kw">const</span> d = <span class="s-fn">haversineM</span>(<span class="s-fn">nodeLatLng</span>(topo, p.anchors[<span class="s-num">0</span>]), <span class="s-fn">nodeLatLng</span>(topo, p.anchors[<span class="s-num">1</span>]));</span>
+<span class="d-add">+  <span class="s-kw">return</span> d / len;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-com">/** Worst window straightness: min over ~800m arc windows of crow/arc — catches</span></span>
+<span class="d-add">+<span class="s-com"> *  a hairpin buried inside an otherwise straight corridor. */</span></span>
+<span class="d-add">+<span class="s-kw">function</span> <span class="s-fn">worstWindowStraightness</span>(topo: <span class="s-type">GraphTopology</span>, p: <span class="s-type">RouteProposal</span>, windowM = <span class="s-num">800</span>): number {</span>
+<span class="d-add">+  <span class="s-kw">const</span> nodes = p.edgeIds.length + <span class="s-num">1</span>;</span>
+<span class="d-add">+  <span class="s-kw">if</span> (nodes &lt; <span class="s-num">3</span>) <span class="s-kw">return</span> <span class="s-num">1</span>;</span>
+<span class="d-add">+  <span class="s-com">// Rebuild the node chain from anchors[0] along edgeIds.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> chain: number[] = [p.anchors[<span class="s-num">0</span>]];</span>
+<span class="d-add">+  <span class="s-kw">let</span> cur = p.anchors[<span class="s-num">0</span>];</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">const</span> e <span class="s-kw">of</span> p.edgeIds) {</span>
+<span class="d-add">+    <span class="s-kw">const</span> u = topo.ends[<span class="s-num">2</span> * e], v = topo.ends[<span class="s-num">2</span> * e + <span class="s-num">1</span>];</span>
+<span class="d-add">+    cur = u === cur ? v : u;</span>
+<span class="d-add">+    chain.<span class="s-fn">push</span>(cur);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  <span class="s-kw">const</span> arc: number[] = [<span class="s-num">0</span>];</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">let</span> i = <span class="s-num">0</span>; i &lt; p.edgeIds.length; i++) arc.<span class="s-fn">push</span>(arc[i] + <span class="s-fn">edgeLengthMeters</span>(topo, p.edgeIds[i]));</span>
+<span class="d-add">+  <span class="s-kw">let</span> worst = <span class="s-num">1</span>;</span>
+<span class="d-add">+  <span class="s-kw">let</span> i = <span class="s-num">0</span>;</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">let</span> j = <span class="s-num">1</span>; j &lt; chain.length; j++) {</span>
+<span class="d-add">+    <span class="s-kw">while</span> (arc[j] - arc[i] &gt; windowM &amp;&amp; i &lt; j - <span class="s-num">1</span>) i++;</span>
+<span class="d-add">+    <span class="s-kw">const</span> span = arc[j] - arc[i];</span>
+<span class="d-add">+    <span class="s-kw">if</span> (span &lt; windowM * <span class="s-num">0.6</span>) <span class="s-kw">continue</span>; <span class="s-com">// window not full — skip edge effects</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> crow = <span class="s-fn">haversineM</span>(<span class="s-fn">nodeLatLng</span>(topo, chain[i]), <span class="s-fn">nodeLatLng</span>(topo, chain[j]));</span>
+<span class="d-add">+    worst = <span class="s-type">Math</span>.<span class="s-fn">min</span>(worst, crow / span);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  <span class="s-kw">return</span> worst;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">async</span> <span class="s-kw">function</span> <span class="s-fn">fetchMapCfg</span>(slug: string) {</span>
+<span class="d-add">+  <span class="s-kw">const</span> r = <span class="s-kw">await</span> <span class="s-fn">fetch</span>(<span class="s-str">`${BASE}/api/maps`</span>);</span>
+<span class="d-add">+  <span class="s-kw">const</span> d = <span class="s-kw">await</span> r.<span class="s-fn">json</span>();</span>
+<span class="d-add">+  <span class="s-kw">const</span> m = (d.maps <span class="s-kw">as</span> any[]).<span class="s-fn">find</span>((x) =&gt; x.slug === slug);</span>
+<span class="d-add">+  <span class="s-kw">if</span> (!m) <span class="s-kw">throw</span> <span class="s-kw">new</span> <span class="s-fn">Error</span>(<span class="s-str">`map ${slug} not found`</span>);</span>
+<span class="d-add">+  <span class="s-kw">return</span> m;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">async</span> <span class="s-kw">function</span> <span class="s-fn">run</span>(slug: string) {</span>
+<span class="d-add">+  <span class="s-kw">const</span> cfg = <span class="s-kw">await</span> <span class="s-fn">fetchMapCfg</span>(slug);</span>
+<span class="d-add">+  <span class="s-kw">const</span> mode = cfg.mode;</span>
+<span class="d-add">+  <span class="s-kw">const</span> kinds = <span class="s-kw">new</span> <span class="s-type">Map</span>&lt;string, <span class="s-str">&quot;point&quot;</span> | <span class="s-str">&quot;route&quot;</span>&gt;();</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">const</span> vt <span class="s-kw">of</span> [...(cfg.voteTypes ?? []), ...(cfg.searchVoteTypes ?? [])]) {</span>
+<span class="d-add">+    <span class="s-kw">if</span> (vt.label &amp;&amp; (vt.kind === <span class="s-str">&quot;point&quot;</span> || vt.kind === <span class="s-str">&quot;route&quot;</span>)) kinds.<span class="s-kw">set</span>(vt.label, vt.kind);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  <span class="s-kw">const</span> kindOf = (label: string) =&gt; kinds.<span class="s-kw">get</span>(label) ?? <span class="s-lit">null</span>;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-kw">const</span> t0 = <span class="s-type">Date</span>.<span class="s-fn">now</span>();</span>
+<span class="d-add">+  <span class="s-kw">const</span> binR = <span class="s-kw">await</span> <span class="s-fn">fetch</span>(<span class="s-str">`${BASE}/api/graph-topology?map=${slug}&amp;format=bin`</span>);</span>
+<span class="d-add">+  <span class="s-kw">if</span> (!binR.ok) <span class="s-kw">throw</span> <span class="s-kw">new</span> <span class="s-fn">Error</span>(<span class="s-str">`topology ${binR.status}`</span>);</span>
+<span class="d-add">+  <span class="s-kw">const</span> topo = <span class="s-fn">decodeTopologyBin</span>(<span class="s-kw">await</span> binR.<span class="s-fn">arrayBuffer</span>());</span>
+<span class="d-add">+  <span class="s-kw">const</span> votesR = <span class="s-kw">await</span> <span class="s-fn">fetch</span>(<span class="s-str">`${BASE}/api/graph-votes?map=${slug}&amp;mode=${mode}`</span>);</span>
+<span class="d-add">+  <span class="s-kw">if</span> (!votesR.ok) <span class="s-kw">throw</span> <span class="s-kw">new</span> <span class="s-fn">Error</span>(<span class="s-str">`votes ${votesR.status}`</span>);</span>
+<span class="d-add">+  <span class="s-kw">const</span> votes = <span class="s-kw">await</span> votesR.<span class="s-fn">json</span>();</span>
+<span class="d-add">+  <span class="s-kw">const</span> adj = <span class="s-fn">buildNodeAdj</span>(topo);</span>
+<span class="d-add">+  <span class="s-kw">const</span> blockIndex = <span class="s-fn">buildBlockIndex</span>(topo);</span>
+<span class="d-add">+  <span class="s-kw">const</span> tFetch = <span class="s-type">Date</span>.<span class="s-fn">now</span>() - t0;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-kw">const</span> t1 = <span class="s-type">Date</span>.<span class="s-fn">now</span>();</span>
+<span class="d-add">+  <span class="s-kw">const</span> props = <span class="s-fn">computeRouteProposals</span>(topo, adj, votes, { kindOf, blockIndex });</span>
+<span class="d-add">+  <span class="s-kw">const</span> tCompute = <span class="s-type">Date</span>.<span class="s-fn">now</span>() - t1;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  console.<span class="s-fn">log</span>(<span class="s-str">`\n=== ${slug} (mode=${mode}) — ${topo.nEdges} edges, fetch ${tFetch}ms, compute ${tCompute}ms ===`</span>);</span>
+<span class="d-add">+  console.<span class="s-fn">log</span>(<span class="s-str">`proposals: ${props.length}`</span>);</span>
+<span class="d-add">+  <span class="s-kw">const</span> rows = props.<span class="s-fn">map</span>((p, i) =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> len = <span class="s-fn">pathLenM</span>(topo, p);</span>
+<span class="d-add">+    <span class="s-kw">const</span> st = <span class="s-fn">straightness</span>(topo, p);</span>
+<span class="d-add">+    <span class="s-kw">const</span> ww = <span class="s-fn">worstWindowStraightness</span>(topo, p);</span>
+<span class="d-add">+    <span class="s-kw">return</span> { i, id: p.id, label: p.label.<span class="s-fn">slice</span>(<span class="s-num">0</span>, <span class="s-num">28</span>), score: p.score, edges: p.edgeIds.length, blocks: p.blocks.length, lenM: <span class="s-type">Math</span>.<span class="s-fn">round</span>(len), straight: +st.<span class="s-fn">toFixed</span>(<span class="s-num">2</span>), worstWin: +ww.<span class="s-fn">toFixed</span>(<span class="s-num">2</span>) };</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+  console.<span class="s-fn">table</span>(rows);</span>
+<span class="d-add">+  <span class="s-kw">const</span> lens = rows.<span class="s-fn">map</span>((r) =&gt; r.lenM).<span class="s-fn">sort</span>((a, b) =&gt; a - b);</span>
+<span class="d-add">+  <span class="s-kw">const</span> q = (arr: number[], f: number) =&gt; arr[<span class="s-type">Math</span>.<span class="s-fn">min</span>(arr.length - <span class="s-num">1</span>, <span class="s-type">Math</span>.<span class="s-fn">floor</span>(f * arr.length))];</span>
+<span class="d-add">+  <span class="s-kw">if</span> (rows.length) {</span>
+<span class="d-add">+    console.<span class="s-fn">log</span>(<span class="s-str">`lenM  min/med/p90/max: ${lens[0]} / ${q(lens, 0.5)} / ${q(lens, 0.9)} / ${lens[lens.length - 1]}`</span>);</span>
+<span class="d-add">+    console.<span class="s-fn">log</span>(<span class="s-str">`straightness &lt; 0.55: ${rows.filter((r) =&gt; r.straight &lt; 0.55).length}/${rows.length}   worstWindow &lt; 0.4: ${rows.filter((r) =&gt; r.worstWin &lt; 0.4).length}/${rows.length}`</span>);</span>
+<span class="d-add">+    console.<span class="s-fn">log</span>(<span class="s-str">`blocks &lt; 5: ${rows.filter((r) =&gt; r.blocks &lt; 5).length}/${rows.length}`</span>);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">const</span> slugs = process.argv.<span class="s-fn">slice</span>(<span class="s-num">2</span>).<span class="s-fn">filter</span>((a) =&gt; !a.<span class="s-fn">startsWith</span>(<span class="s-str">&quot;-&quot;</span>));</span>
+<span class="d-add">+<span class="s-kw">for</span> (<span class="s-kw">const</span> slug <span class="s-kw">of</span> slugs.length ? slugs : [<span class="s-str">&quot;nyc-bikes&quot;</span>, <span class="s-str">&quot;nyc-walkways&quot;</span>]) {</span>
+<span class="d-add">+  <span class="s-kw">await</span> <span class="s-fn">run</span>(slug);</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Baseline (before the change), nyc-bikes top-20: straightness &lt; 0.55 on 2 corridors (0.22, 0.32); buried hairpin (worst 800 m window &lt; 0.4) on 6; three corridors pinned at the 10.5 km ceiling; nyc-walkways shipped a 100 m / 3-block route pin.</li>
+<li>After: 0 / 20 below either straightness bar on nyc-bikes; every top corridor reads as a line (endpoint straightness 0.61–0.97). The former #3 snake (straight 0.32) became two straight corridors (0.87 / 0.91) that BOTH rank top-5; the stub route pins are gone from nyc-walkways.</li>
+<li>Median corridor length rose 3,065 → 3,961 m — splitting doesn't shorten the list, it replaces sub-100-score stubs at ranks 9–15 with 700–2,900-score straight fragments of the former snakes.</li>
+<li>Compute time on the 3.3 M-edge NYC graph unchanged: 924 ms vs 934 ms baseline (the splitter is O(path · depth) on peeled paths only).</li>
+<li>Unit tests: 10 new (min-blocks gate: default drop &lt; 5 blocks, blocks-not-edges, override; splitLoopyPath: straight kept whole, hairpin apex split, buried-detour window rule, fragment weight recomputation, &lt; 4-edge passthrough, determinism; plus a topology-level U-corridor → two straight proposals test). Full client suite 241 passed / 1 skipped; <code>tsc -b</code> clean.</li>
+<li>Existing 53 route-proposal tests untouched semantically — the micro-graph helper pins <code>minRouteBlocks: 1</code> so they keep probing clustering mechanics, not the gate.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-bikes</code> and hover the top few diamond pins: each highlighted corridor should read as one long, roughly straight line — no corridor that runs out an avenue and comes back the parallel one.</li>
+<li>On <code>http://localhost:3000/m/nyc-walkways</code>, confirm the tiny “Add bike lane” route diamond (a ~100 m stub near the Improve-sidewalk corridors) is gone; its edge should still show a square PBTP pin if it's the hottest of its type.</li>
+<li>Click a diamond pin and confirm selection/voting still covers every block of the corridor (the auto-select ring and the vote cast are unchanged code paths).</li>
+<li>Reload the page twice: the same pins in the same order (determinism — ids are content-derived).</li>
+<li>Optionally re-run the numbers: <code>cd client-react &amp;&amp; node_modules/.bin/vite-node scripts/routepropStats.ts nyc-bikes</code> — expect 0/20 under both straightness bars.</li></ul>
+  </section>
+
+
+
+  <footer>
+    Generated from <code>changelog/changes-routeprop.diff</code> by <code>changelog/build_routeprop_report.py</code>.
+    Regenerate after further edits with
+    <code>git diff -- client-react/src/components/GraphLayer/routeProposals.ts client-react/src/components/GraphLayer/routeProposals.test.ts client-react/scripts/routepropStats.ts &gt; changelog/changes-routeprop.diff &amp;&amp; python changelog/build_routeprop_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

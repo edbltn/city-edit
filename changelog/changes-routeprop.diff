@@ -1,0 +1,593 @@
+diff --git a/client-react/scripts/routepropStats.ts b/client-react/scripts/routepropStats.ts
+new file mode 100644
+index 0000000..bada4dc
+--- /dev/null
++++ b/client-react/scripts/routepropStats.ts
+@@ -0,0 +1,127 @@
++// Route-proposal diagnostics — run the REAL client clustering pipeline
++// (computeRouteProposals) against a live local Flask's topology + votes and
++// report length / straightness / block-count distributions for the ranked
++// proposals. Used to tune the corridor length budget, the min-blocks gate,
++// and the loop-back splitter against real (imported) vote data.
++//
++// Usage: cd client-react && node_modules/.bin/vite-node scripts/routepropStats.ts [slug ...]
++//        (defaults to nyc-bikes nyc-walkways; Flask must be up on :5001)
++
++import {
++  computeRouteProposals,
++  type RouteProposal,
++} from "../src/components/GraphLayer/routeProposals";
++import {
++  decodeTopologyBin,
++  buildNodeAdj,
++  buildBlockIndex,
++  edgeLengthMeters,
++  nodeLatLng,
++  type GraphTopology,
++} from "../src/components/GraphLayer/graphTopology";
++
++const BASE = process.env.API_BASE ?? "http://localhost:5001";
++
++function haversineM(a: [number, number], b: [number, number]): number {
++  const R = 6371000;
++  const dLat = ((b[0] - a[0]) * Math.PI) / 180;
++  const dLng = ((b[1] - a[1]) * Math.PI) / 180;
++  const la1 = (a[0] * Math.PI) / 180;
++  const la2 = (b[0] * Math.PI) / 180;
++  const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
++  return 2 * R * Math.asin(Math.sqrt(h));
++}
++
++function pathLenM(topo: GraphTopology, p: RouteProposal): number {
++  return p.edgeIds.reduce((s, e) => s + edgeLengthMeters(topo, e), 0);
++}
++
++/** Endpoint displacement / arc length — 1.0 is a ruler, ~0.33 a U-turn. */
++function straightness(topo: GraphTopology, p: RouteProposal): number {
++  const len = pathLenM(topo, p);
++  if (len <= 0) return 1;
++  const d = haversineM(nodeLatLng(topo, p.anchors[0]), nodeLatLng(topo, p.anchors[1]));
++  return d / len;
++}
++
++/** Worst window straightness: min over ~800m arc windows of crow/arc — catches
++ *  a hairpin buried inside an otherwise straight corridor. */
++function worstWindowStraightness(topo: GraphTopology, p: RouteProposal, windowM = 800): number {
++  const nodes = p.edgeIds.length + 1;
++  if (nodes < 3) return 1;
++  // Rebuild the node chain from anchors[0] along edgeIds.
++  const chain: number[] = [p.anchors[0]];
++  let cur = p.anchors[0];
++  for (const e of p.edgeIds) {
++    const u = topo.ends[2 * e], v = topo.ends[2 * e + 1];
++    cur = u === cur ? v : u;
++    chain.push(cur);
++  }
++  const arc: number[] = [0];
++  for (let i = 0; i < p.edgeIds.length; i++) arc.push(arc[i] + edgeLengthMeters(topo, p.edgeIds[i]));
++  let worst = 1;
++  let i = 0;
++  for (let j = 1; j < chain.length; j++) {
++    while (arc[j] - arc[i] > windowM && i < j - 1) i++;
++    const span = arc[j] - arc[i];
++    if (span < windowM * 0.6) continue; // window not full — skip edge effects
++    const crow = haversineM(nodeLatLng(topo, chain[i]), nodeLatLng(topo, chain[j]));
++    worst = Math.min(worst, crow / span);
++  }
++  return worst;
++}
++
++async function fetchMapCfg(slug: string) {
++  const r = await fetch(`${BASE}/api/maps`);
++  const d = await r.json();
++  const m = (d.maps as any[]).find((x) => x.slug === slug);
++  if (!m) throw new Error(`map ${slug} not found`);
++  return m;
++}
++
++async function run(slug: string) {
++  const cfg = await fetchMapCfg(slug);
++  const mode = cfg.mode;
++  const kinds = new Map<string, "point" | "route">();
++  for (const vt of [...(cfg.voteTypes ?? []), ...(cfg.searchVoteTypes ?? [])]) {
++    if (vt.label && (vt.kind === "point" || vt.kind === "route")) kinds.set(vt.label, vt.kind);
++  }
++  const kindOf = (label: string) => kinds.get(label) ?? null;
++
++  const t0 = Date.now();
++  const binR = await fetch(`${BASE}/api/graph-topology?map=${slug}&format=bin`);
++  if (!binR.ok) throw new Error(`topology ${binR.status}`);
++  const topo = decodeTopologyBin(await binR.arrayBuffer());
++  const votesR = await fetch(`${BASE}/api/graph-votes?map=${slug}&mode=${mode}`);
++  if (!votesR.ok) throw new Error(`votes ${votesR.status}`);
++  const votes = await votesR.json();
++  const adj = buildNodeAdj(topo);
++  const blockIndex = buildBlockIndex(topo);
++  const tFetch = Date.now() - t0;
++
++  const t1 = Date.now();
++  const props = computeRouteProposals(topo, adj, votes, { kindOf, blockIndex });
++  const tCompute = Date.now() - t1;
++
++  console.log(`\n=== ${slug} (mode=${mode}) — ${topo.nEdges} edges, fetch ${tFetch}ms, compute ${tCompute}ms ===`);
++  console.log(`proposals: ${props.length}`);
++  const rows = props.map((p, i) => {
++    const len = pathLenM(topo, p);
++    const st = straightness(topo, p);
++    const ww = worstWindowStraightness(topo, p);
++    return { i, id: p.id, label: p.label.slice(0, 28), score: p.score, edges: p.edgeIds.length, blocks: p.blocks.length, lenM: Math.round(len), straight: +st.toFixed(2), worstWin: +ww.toFixed(2) };
++  });
++  console.table(rows);
++  const lens = rows.map((r) => r.lenM).sort((a, b) => a - b);
++  const q = (arr: number[], f: number) => arr[Math.min(arr.length - 1, Math.floor(f * arr.length))];
++  if (rows.length) {
++    console.log(`lenM  min/med/p90/max: ${lens[0]} / ${q(lens, 0.5)} / ${q(lens, 0.9)} / ${lens[lens.length - 1]}`);
++    console.log(`straightness < 0.55: ${rows.filter((r) => r.straight < 0.55).length}/${rows.length}   worstWindow < 0.4: ${rows.filter((r) => r.worstWin < 0.4).length}/${rows.length}`);
++    console.log(`blocks < 5: ${rows.filter((r) => r.blocks < 5).length}/${rows.length}`);
++  }
++}
++
++const slugs = process.argv.slice(2).filter((a) => !a.startsWith("-"));
++for (const slug of slugs.length ? slugs : ["nyc-bikes", "nyc-walkways"]) {
++  await run(slug);
++}
+diff --git a/client-react/src/components/GraphLayer/routeProposals.test.ts b/client-react/src/components/GraphLayer/routeProposals.test.ts
+index 4a9a4e4..e8004df 100644
+--- a/client-react/src/components/GraphLayer/routeProposals.test.ts
++++ b/client-react/src/components/GraphLayer/routeProposals.test.ts
+@@ -14,8 +14,11 @@ import {
+   dedupeRoutes,
+   capPathToLengthBudget,
+   routeLengthBudgetM,
++  splitLoopyPath,
+   MIN_ROUTE_SCORE,
+   MIN_ROUTE_EDGES,
++  MIN_ROUTE_BLOCKS,
++  ROUTE_STRAIGHTNESS_MIN,
+   ROUTE_LENGTH_BASE_M,
+   ROUTE_LENGTH_PER_SQRT_SCORE_M,
+   ROUTE_LENGTH_MAX_M,
+@@ -211,10 +214,12 @@ function compute(
+   blockIds?: number[],
+ ): RouteProposal[] {
+   const topo = makeTopo(edges, blockIds);
++  // minRouteBlocks: 1 — these micro-graphs probe the clustering mechanics, not
++  // the min-distance gate (which has its own suite below with the real default).
+   return computeRouteProposals(topo, buildNodeAdj(topo), {
+     edge_vote_types: voteTypes,
+     vote_type_legend: LEGEND,
+-  }, opts);
++  }, { minRouteBlocks: 1, ...opts });
+ }
+ 
+ function bareRoute(over: Partial<RouteProposal>): RouteProposal {
+@@ -651,3 +656,176 @@ describe("computeRouteProposals — route/point kind filter", () => {
+     expect(unknownKind.map((p) => p.label)).toEqual(["Bike lane"]);
+   });
+ });
++
++// ==========================================================================
++// Min-blocks gate — a corridor must span at least MIN_ROUTE_BLOCKS blocks
++// ==========================================================================
++
++describe("computeRouteProposals — min-blocks gate", () => {
++  const hot = (n: number): Evt =>
++    evt(...Array.from({ length: n }, (): [number, number, number][] => [[BIKE, 5, 0]]));
++  const chain = (n: number): [number, number][] =>
++    Array.from({ length: n }, (_, i) => [i, i + 1]);
++  // Direct call — no helper — so the REAL default gate applies.
++  const computeDefault = (edges: [number, number][], votes: Evt, blockIds?: number[]) => {
++    const topo = makeTopo(edges, blockIds);
++    return computeRouteProposals(topo, buildNodeAdj(topo), {
++      edge_vote_types: votes,
++      vote_type_legend: LEGEND,
++    });
++  };
++
++  it("drops corridors spanning fewer than MIN_ROUTE_BLOCKS blocks by default", () => {
++    expect(MIN_ROUTE_BLOCKS).toBe(5);
++    // 4 singleton blocks — hot, but reads as a point, not a route.
++    expect(computeDefault(chain(4), hot(4))).toEqual([]);
++    // 5 blocks is exactly enough.
++    const ps = computeDefault(chain(5), hot(5));
++    expect(ps).toHaveLength(1);
++    expect(ps[0].blocks).toHaveLength(5);
++  });
++
++  it("counts BLOCKS, not edges — a many-edge path over few blocks is dropped", () => {
++    // 6 chain edges mapped into 3 blocks: plenty of edges, too little distance.
++    expect(computeDefault(chain(6), hot(6), [0, 0, 1, 1, 2, 2])).toEqual([]);
++  });
++
++  it("is overridable via minRouteBlocks", () => {
++    const ps = compute(chain(2), hot(2), { minRouteBlocks: 1 });
++    expect(ps).toHaveLength(1);
++  });
++});
++
++// ==========================================================================
++// splitLoopyPath — corridors are split where they turn back on themselves
++// ==========================================================================
++
++describe("splitLoopyPath", () => {
++  // Synthetic geometry: points in METERS near lat 0, so 1m of x ≈ 1/111320°
++  // of longitude and 1m of y ≈ 1/110574° of latitude.
++  const mkPath = (pts: [number, number][], weights?: number[]) => {
++    const n = pts.length - 1;
++    const latLngOf = (i: number): [number, number] =>
++      [pts[i][1] / 110574, pts[i][0] / 111320];
++    const lengthOf = (e: number) =>
++      Math.hypot(pts[e + 1][0] - pts[e][0], pts[e + 1][1] - pts[e][1]);
++    const weightOf = (e: number) => weights?.[e] ?? 1;
++    const path: PathResult = {
++      edges: Array.from({ length: n }, (_, i) => i),
++      nodes: Array.from({ length: n + 1 }, (_, i) => i),
++      weight: Array.from({ length: n }, (_, i) => weightOf(i)).reduce((a, b) => a + b, 0),
++    };
++    return { path, lengthOf, latLngOf, weightOf };
++  };
++  const straightnessOf = (
++    frag: PathResult,
++    pts: [number, number][],
++    lengthOf: (e: number) => number,
++  ) => {
++    const a = pts[frag.nodes[0]];
++    const b = pts[frag.nodes[frag.nodes.length - 1]];
++    const arc = frag.edges.reduce((s, e) => s + lengthOf(e), 0);
++    return Math.hypot(b[0] - a[0], b[1] - a[1]) / arc;
++  };
++
++  it("keeps a straight corridor whole", () => {
++    const pts: [number, number][] = Array.from({ length: 11 }, (_, i) => [100 * i, 0]);
++    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
++    const frags = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
++    expect(frags).toHaveLength(1);
++    expect(frags[0].edges).toEqual(path.edges);
++  });
++
++  it("splits a hairpin at its apex into two straight-ish halves", () => {
++    // Out 1km east along y=0, jog north 100m, back 1km west along y=100.
++    const out: [number, number][] = Array.from({ length: 6 }, (_, i) => [200 * i, 0]);
++    const back: [number, number][] = Array.from({ length: 6 }, (_, i) => [1000 - 200 * i, 100]);
++    const pts = [...out, ...back];
++    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
++    const frags = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
++    expect(frags.length).toBeGreaterThanOrEqual(2);
++    // Every fragment is straighter than the split threshold, and the fragments
++    // partition the original path in order.
++    for (const f of frags) {
++      expect(straightnessOf(f, pts, lengthOf)).toBeGreaterThanOrEqual(ROUTE_STRAIGHTNESS_MIN);
++    }
++    expect(frags.flatMap((f) => f.edges)).toEqual(path.edges);
++  });
++
++  it("splits a double-back buried in an otherwise straight corridor (window rule)", () => {
++    // 3km straight line with a 400m out-and-back spur at x=1500. Endpoint
++    // straightness stays high (~0.79), so only the WINDOW rule can see it.
++    const pts: [number, number][] = [];
++    for (let x = 0; x <= 1500; x += 100) pts.push([x, 0]);
++    for (let y = 100; y <= 400; y += 100) pts.push([1500, y]);   // out
++    pts.push([1520, 400]);                                        // tip
++    for (let y = 300; y >= 0; y -= 100) pts.push([1520, y]);      // back
++    for (let x = 1600; x <= 3000; x += 100) pts.push([x, 0]);
++    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
++    const frags = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
++    expect(frags.length).toBeGreaterThanOrEqual(2);
++    // The out-leg and the back-leg never share a fragment: no fragment holds
++    // both a node at (1500, 400) and one at (1520, 300)-side of the spur.
++    const tipIdx = pts.findIndex(([x, y]) => x === 1520 && y === 400);
++    for (const f of frags) {
++      const hasOut = f.nodes.some((n) => n < tipIdx && pts[n][1] === 400);
++      const hasBack = f.nodes.some((n) => n > tipIdx && pts[n][1] > 0 && pts[n][0] === 1520);
++      expect(hasOut && hasBack).toBe(false);
++    }
++    expect(frags.flatMap((f) => f.edges)).toEqual(path.edges);
++  });
++
++  it("recomputes fragment weights from weightOf and preserves the total", () => {
++    const out: [number, number][] = Array.from({ length: 6 }, (_, i) => [200 * i, 0]);
++    const back: [number, number][] = Array.from({ length: 6 }, (_, i) => [1000 - 200 * i, 100]);
++    const pts = [...out, ...back];
++    const weights = Array.from({ length: pts.length - 1 }, (_, i) => i + 1);
++    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts, weights);
++    const frags = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
++    expect(frags.length).toBeGreaterThanOrEqual(2);
++    expect(frags.reduce((s, f) => s + f.weight, 0)).toBe(path.weight);
++    for (const f of frags) {
++      expect(f.weight).toBe(f.edges.reduce((s, e) => s + weightOf(e), 0));
++    }
++  });
++
++  it("returns short paths (< 4 edges) unsplit, however loopy", () => {
++    const pts: [number, number][] = [[0, 0], [500, 0], [500, 20], [0, 20]];
++    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
++    expect(splitLoopyPath(path, lengthOf, latLngOf, weightOf)).toEqual([path]);
++  });
++
++  it("is deterministic", () => {
++    const out: [number, number][] = Array.from({ length: 8 }, (_, i) => [150 * i, 0]);
++    const back: [number, number][] = Array.from({ length: 8 }, (_, i) => [1050 - 150 * i, 60]);
++    const pts = [...out, ...back];
++    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
++    const a = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
++    const b = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
++    expect(a).toEqual(b);
++  });
++});
++
++describe("computeRouteProposals — loop-back corridors become several proposals", () => {
++  it("splits a hot U-shaped corridor into its two straight legs", () => {
++    // A U on a real topology: 8 edges south, 2 east, 8 north — every edge
++    // equally hot. One snake before; two straight corridors after.
++    const nodes: [number, number][] = [];
++    for (let i = 0; i <= 8; i++) nodes.push([40.7 + 0.001 * (8 - i), -74.0]);          // west leg ↓
++    for (let i = 1; i <= 2; i++) nodes.push([40.7, -74.0 + 0.001 * i]);                // bottom →
++    for (let i = 1; i <= 8; i++) nodes.push([40.7 + 0.001 * i, -74.0 + 0.002]);        // east leg ↑
++    const edges: [number, number][] = Array.from({ length: nodes.length - 1 }, (_, i) => [i, i + 1]);
++    const topo = topologyFromJson({ nodes, edges: edges.map(([u, v]) => [u, v, ""]) });
++    const ps = computeRouteProposals(topo, buildNodeAdj(topo), {
++      edge_vote_types: edges.map((): [number, number, number][] => [[BIKE, 5, 0]]),
++      vote_type_legend: LEGEND,
++    });
++    expect(ps.length).toBeGreaterThanOrEqual(2);
++    // No proposal contains edges from both vertical legs (indices ≤7 vs ≥10).
++    for (const p of ps) {
++      const west = p.edgeIds.some((e) => e <= 7);
++      const east = p.edgeIds.some((e) => e >= 10);
++      expect(west && east).toBe(false);
++    }
++  });
++});
+diff --git a/client-react/src/components/GraphLayer/routeProposals.ts b/client-react/src/components/GraphLayer/routeProposals.ts
+index 79877bd..f35d4b1 100644
+--- a/client-react/src/components/GraphLayer/routeProposals.ts
++++ b/client-react/src/components/GraphLayer/routeProposals.ts
+@@ -308,9 +308,11 @@ export function chooseAnchorOrderBefore(
+ // kind types are skipped — their votes surface as PBTP pins): net-positive
+ // subgraph → connected components (the deterministic replacement for the
+ // server's Leiden step — components localize; path peeling separates parallel
+-// corridors inside one component) → peel heaviest simple paths → trim each to
+-// its support-earned meter budget (capPathToLengthBudget) → activity gates →
+-// block projection → same-type dedupe → rank + cap.
++// corridors inside one component) → peel heaviest simple paths → split each at
++// its loop-back points into straight-ish corridors (splitLoopyPath) → trim
++// each to its support-earned meter budget (capPathToLengthBudget) → activity
++// gates (score, edges, blocks) → block projection → same-type dedupe → rank +
++// cap.
+ //
+ // Determinism contract: NO randomness, NO clock. Every iteration order and
+ // tie-break is by ascending edge/node id, so the same (topology, vote state)
+@@ -329,6 +331,10 @@ export const PEEL_DOMINANCE = 0.25;
+ export const MIN_ROUTE_SCORE = 3;
+ /** High-activity gate: minimum number of path edges. */
+ export const MIN_ROUTE_EDGES = 2;
++/** Min-distance gate: a corridor must span at least this many BLOCKS. Anything
++ *  shorter reads as a point, not a route — and its votes still surface as a
++ *  PBTP pin, so nothing is lost by dropping the stub corridor. */
++export const MIN_ROUTE_BLOCKS = 5;
+ /** Global cap on the ranked proposal list. */
+ export const DEFAULT_LIMIT = 20;
+ /** Same-type edge-set Jaccard at/above which two routes are duplicates. */
+@@ -355,12 +361,147 @@ export function routeLengthBudgetM(score: number, maxM = ROUTE_LENGTH_MAX_M): nu
+   return Math.min(maxM, earned);
+ }
+ 
++// ── Loop-back splitting ─────────────────────────────────────────────────────
++// The peel extends by heaviest arc with no regard for direction, so a hot
++// region yields corridors that snake or double back — and the length budget
++// happily fills with the loop. A proposal should read as a corridor: a long,
++// roughly straight line. Straightness of a stretch is measured as
++// crow-flies(endpoints) / arc length (1.0 = ruler, ~0.33 = U-turn); a path is
++// split where it turns back on itself and each side re-judged recursively, so
++// one snake becomes several straight corridors that then earn their own
++// length budgets and pass the activity gates independently.
++/** Split when endpoint straightness of the whole stretch falls below this.
++ *  Calibration: an L-corner or a grid staircase sits near 0.71, a half-circle
++ *  arc at 0.64, a U-turn at ~0.33 — so 0.55 keeps corners and gentle arcs and
++ *  splits anything that meaningfully comes back on itself. */
++export const ROUTE_STRAIGHTNESS_MIN = 0.55;
++/** Hairpin detector: slide a window of this arc length along the path… */
++export const ROUTE_WINDOW_M = 800;
++/** …and split when any window's straightness falls below this — catches a
++ *  local double-back buried in an otherwise straight corridor, which the
++ *  endpoint measure can't see. */
++export const ROUTE_WINDOW_STRAIGHTNESS_MIN = 0.4;
++/** Recursion bound (≤ 2^depth fragments per peeled path). */
++export const ROUTE_SPLIT_MAX_DEPTH = 6;
++
++/**
++ * Split a peeled path at its loop-back points into straight-ish fragments.
++ * Two triggers, checked per stretch: a WINDOW that doubles back (split at the
++ * excursion apex — the window point farthest from its start) and a whole
++ * stretch that ends near where it began (split at the point that maximizes the
++ * weaker half's straightness). Fragments recurse until straight, too short to
++ * judge (< 4 edges), or ROUTE_SPLIT_MAX_DEPTH. Deterministic: pure arithmetic
++ * over node coordinates, ties keep the earliest index. Fragment weights are
++ * recomputed from `weightOf` (simple paths — edges are distinct).
++ */
++export function splitLoopyPath(
++  path: PathResult,
++  lengthOf: (edgeId: number) => number,
++  latLngOf: (nodeId: number) => [number, number],
++  weightOf: (edgeId: number) => number,
++): PathResult[] {
++  const n = path.edges.length;
++  if (n < 4) return [path];
++
++  // Planar meters (equirectangular — fine at city scale, and deterministic).
++  const lat0 = (latLngOf(path.nodes[0])[0] * Math.PI) / 180;
++  const kx = 111320 * Math.cos(lat0);
++  const ky = 110574;
++  const xs = new Float64Array(n + 1);
++  const ys = new Float64Array(n + 1);
++  for (let i = 0; i <= n; i++) {
++    const [lat, lng] = latLngOf(path.nodes[i]);
++    xs[i] = lng * kx;
++    ys[i] = lat * ky;
++  }
++  const arc = new Float64Array(n + 2);
++  for (let i = 0; i < n; i++) arc[i + 1] = arc[i] + lengthOf(path.edges[i]);
++  const crow = (i: number, j: number) => Math.hypot(xs[j] - xs[i], ys[j] - ys[i]);
++  // Straightness of the stretch i..j; degenerate (zero-arc) stretches count as
++  // straight so they never trigger a split.
++  const straight = (i: number, j: number) => {
++    const s = arc[j] - arc[i];
++    return s > 0 ? crow(i, j) / s : 1;
++  };
++
++  const out: PathResult[] = [];
++  const emit = (i0: number, i1: number) => {
++    let w = 0;
++    for (let i = i0; i < i1; i++) w += weightOf(path.edges[i]);
++    out.push({
++      edges: path.edges.slice(i0, i1),
++      nodes: path.nodes.slice(i0, i1 + 1),
++      weight: w,
++    });
++  };
++
++  const rec = (i0: number, i1: number, depth: number) => {
++    if (i1 - i0 < 4 || depth >= ROUTE_SPLIT_MAX_DEPTH) {
++      emit(i0, i1);
++      return;
++    }
++    // Worst window: for each end j, judge the longest window fitting the arc
++    // budget. Windows under 60% full are skipped (edge-of-path stubs).
++    let worst = 1;
++    let wi = -1;
++    let wj = -1;
++    {
++      let i = i0;
++      for (let j = i0 + 1; j <= i1; j++) {
++        while (arc[j] - arc[i] > ROUTE_WINDOW_M && i < j - 1) i++;
++        if (arc[j] - arc[i] < ROUTE_WINDOW_M * 0.6) continue;
++        const r = straight(i, j);
++        if (r < worst) {
++          worst = r;
++          wi = i;
++          wj = j;
++        }
++      }
++    }
++    let k = -1;
++    if (worst < ROUTE_WINDOW_STRAIGHTNESS_MIN) {
++      // Split at the excursion apex: the farthest point from the window start.
++      let best = -1;
++      for (let m = wi + 1; m < wj; m++) {
++        const d = crow(wi, m);
++        if (d > best) {
++          best = d;
++          k = m;
++        }
++      }
++    }
++    if (k <= i0 && straight(i0, i1) < ROUTE_STRAIGHTNESS_MIN) {
++      // Whole stretch comes back on itself: split where both halves are
++      // straightest (maximize the weaker half).
++      let best = -1;
++      for (let m = i0 + 1; m < i1; m++) {
++        const v = Math.min(straight(i0, m), straight(m, i1));
++        if (v > best) {
++          best = v;
++          k = m;
++        }
++      }
++    }
++    if (k <= i0 || k >= i1) {
++      emit(i0, i1);
++      return;
++    }
++    rec(i0, k, depth + 1);
++    rec(k, i1, depth + 1);
++  };
++
++  rec(0, n, 0);
++  return out;
++}
++
+ export interface RouteProposalOptions {
+   limit?: number;
+   jaccardThreshold?: number;
+   minNet?: number;
+   minRouteScore?: number;
+   minRouteEdges?: number;
++  /** Min-distance gate: minimum BLOCKS a corridor must span (MIN_ROUTE_BLOCKS). */
++  minRouteBlocks?: number;
+   /** Hard ceiling override for the corridor length budget (meters). */
+   maxRouteLengthM?: number;
+   /** Prebuilt edge→block index for `topo` (GraphLayer already holds one).
+@@ -792,6 +933,7 @@ export function createRouteProposalJob(
+   const minNet = opts.minNet ?? MIN_NET;
+   const minRouteScore = opts.minRouteScore ?? MIN_ROUTE_SCORE;
+   const minRouteEdges = opts.minRouteEdges ?? MIN_ROUTE_EDGES;
++  const minRouteBlocks = opts.minRouteBlocks ?? MIN_ROUTE_BLOCKS;
+   const maxRouteLengthM = opts.maxRouteLengthM ?? ROUTE_LENGTH_MAX_M;
+   const blockIndex = opts.blockIndex !== undefined ? opts.blockIndex : buildBlockIndex(topo);
+   const netsPerType = netsByType(edgeVoteTypes, topo.nEdges, legend.length);
+@@ -812,33 +954,41 @@ export function createRouteProposalJob(
+     const nets = netsPerType[legendIdx];
+     const typeAdj = buildTypeAdj(topo, adj, nets, minNet);
+     const typeProposals: RouteProposal[] = [];
++    const lengthOf = (e: number) => edgeLengthMeters(topo, e);
++    const weightOf = (e: number) => nets.get(e) ?? 0;
++    const latLngOf = (nid: number) => nodeLatLng(topo, nid);
+     for (const compAdj of connectedComponents(typeAdj)) {
+       for (const peeled of peelPaths(compAdj)) {
+-        // Trim to the support-earned meter budget BEFORE the activity gates,
+-        // so the gates judge the corridor that will actually be shown.
+-        const path = capPathToLengthBudget(
+-          peeled,
+-          routeLengthBudgetM(peeled.weight, maxRouteLengthM),
+-          (e) => edgeLengthMeters(topo, e),
+-          (e) => nets.get(e) ?? 0,
+-        );
+-        if (path.weight < minRouteScore || path.edges.length < minRouteEdges) continue;
+-        const { blocks, blockEdgeIds } = groupBlocks(path.edges, topo, blockIndex);
+-        const a = path.nodes[0];
+-        const b = path.nodes[path.nodes.length - 1];
+-        const [aLat, aLng] = nodeLatLng(topo, a);
+-        const [bLat, bLng] = nodeLatLng(topo, b);
+-        typeProposals.push({
+-          id: proposalIdOf(legendIdx, path.edges),
+-          label,
+-          legendIdx,
+-          score: path.weight,
+-          edgeIds: path.edges,
+-          blocks,
+-          blockEdgeIds,
+-          anchors: [a, b],
+-          anchorCoords: [{ lat: aLat, lng: aLng }, { lat: bLat, lng: bLng }],
+-        });
++        // Split loop-backs FIRST (a snake becomes several straight corridors),
++        // then trim each fragment to the meter budget ITS OWN support earned,
++        // BEFORE the activity gates — the gates judge the corridor that will
++        // actually be shown.
++        for (const frag of splitLoopyPath(peeled, lengthOf, latLngOf, weightOf)) {
++          const path = capPathToLengthBudget(
++            frag,
++            routeLengthBudgetM(frag.weight, maxRouteLengthM),
++            lengthOf,
++            weightOf,
++          );
++          if (path.weight < minRouteScore || path.edges.length < minRouteEdges) continue;
++          const { blocks, blockEdgeIds } = groupBlocks(path.edges, topo, blockIndex);
++          if (blocks.length < minRouteBlocks) continue;
++          const a = path.nodes[0];
++          const b = path.nodes[path.nodes.length - 1];
++          const [aLat, aLng] = nodeLatLng(topo, a);
++          const [bLat, bLng] = nodeLatLng(topo, b);
++          typeProposals.push({
++            id: proposalIdOf(legendIdx, path.edges),
++            label,
++            legendIdx,
++            score: path.weight,
++            edgeIds: path.edges,
++            blocks,
++            blockEdgeIds,
++            anchors: [a, b],
++            anchorCoords: [{ lat: aLat, lng: aLng }, { lat: bLat, lng: bLng }],
++          });
++        }
+       }
+     }
+     return dedupeRoutes(typeProposals, jaccardThreshold);

@@ -14,8 +14,11 @@ import {
   dedupeRoutes,
   capPathToLengthBudget,
   routeLengthBudgetM,
+  splitLoopyPath,
   MIN_ROUTE_SCORE,
   MIN_ROUTE_EDGES,
+  MIN_ROUTE_BLOCKS,
+  ROUTE_STRAIGHTNESS_MIN,
   ROUTE_LENGTH_BASE_M,
   ROUTE_LENGTH_PER_SQRT_SCORE_M,
   ROUTE_LENGTH_MAX_M,
@@ -211,10 +214,12 @@ function compute(
   blockIds?: number[],
 ): RouteProposal[] {
   const topo = makeTopo(edges, blockIds);
+  // minRouteBlocks: 1 — these micro-graphs probe the clustering mechanics, not
+  // the min-distance gate (which has its own suite below with the real default).
   return computeRouteProposals(topo, buildNodeAdj(topo), {
     edge_vote_types: voteTypes,
     vote_type_legend: LEGEND,
-  }, opts);
+  }, { minRouteBlocks: 1, ...opts });
 }
 
 function bareRoute(over: Partial<RouteProposal>): RouteProposal {
@@ -649,5 +654,178 @@ describe("computeRouteProposals — route/point kind filter", () => {
       { kindOf: () => null },
     );
     expect(unknownKind.map((p) => p.label)).toEqual(["Bike lane"]);
+  });
+});
+
+// ==========================================================================
+// Min-blocks gate — a corridor must span at least MIN_ROUTE_BLOCKS blocks
+// ==========================================================================
+
+describe("computeRouteProposals — min-blocks gate", () => {
+  const hot = (n: number): Evt =>
+    evt(...Array.from({ length: n }, (): [number, number, number][] => [[BIKE, 5, 0]]));
+  const chain = (n: number): [number, number][] =>
+    Array.from({ length: n }, (_, i) => [i, i + 1]);
+  // Direct call — no helper — so the REAL default gate applies.
+  const computeDefault = (edges: [number, number][], votes: Evt, blockIds?: number[]) => {
+    const topo = makeTopo(edges, blockIds);
+    return computeRouteProposals(topo, buildNodeAdj(topo), {
+      edge_vote_types: votes,
+      vote_type_legend: LEGEND,
+    });
+  };
+
+  it("drops corridors spanning fewer than MIN_ROUTE_BLOCKS blocks by default", () => {
+    expect(MIN_ROUTE_BLOCKS).toBe(5);
+    // 4 singleton blocks — hot, but reads as a point, not a route.
+    expect(computeDefault(chain(4), hot(4))).toEqual([]);
+    // 5 blocks is exactly enough.
+    const ps = computeDefault(chain(5), hot(5));
+    expect(ps).toHaveLength(1);
+    expect(ps[0].blocks).toHaveLength(5);
+  });
+
+  it("counts BLOCKS, not edges — a many-edge path over few blocks is dropped", () => {
+    // 6 chain edges mapped into 3 blocks: plenty of edges, too little distance.
+    expect(computeDefault(chain(6), hot(6), [0, 0, 1, 1, 2, 2])).toEqual([]);
+  });
+
+  it("is overridable via minRouteBlocks", () => {
+    const ps = compute(chain(2), hot(2), { minRouteBlocks: 1 });
+    expect(ps).toHaveLength(1);
+  });
+});
+
+// ==========================================================================
+// splitLoopyPath — corridors are split where they turn back on themselves
+// ==========================================================================
+
+describe("splitLoopyPath", () => {
+  // Synthetic geometry: points in METERS near lat 0, so 1m of x ≈ 1/111320°
+  // of longitude and 1m of y ≈ 1/110574° of latitude.
+  const mkPath = (pts: [number, number][], weights?: number[]) => {
+    const n = pts.length - 1;
+    const latLngOf = (i: number): [number, number] =>
+      [pts[i][1] / 110574, pts[i][0] / 111320];
+    const lengthOf = (e: number) =>
+      Math.hypot(pts[e + 1][0] - pts[e][0], pts[e + 1][1] - pts[e][1]);
+    const weightOf = (e: number) => weights?.[e] ?? 1;
+    const path: PathResult = {
+      edges: Array.from({ length: n }, (_, i) => i),
+      nodes: Array.from({ length: n + 1 }, (_, i) => i),
+      weight: Array.from({ length: n }, (_, i) => weightOf(i)).reduce((a, b) => a + b, 0),
+    };
+    return { path, lengthOf, latLngOf, weightOf };
+  };
+  const straightnessOf = (
+    frag: PathResult,
+    pts: [number, number][],
+    lengthOf: (e: number) => number,
+  ) => {
+    const a = pts[frag.nodes[0]];
+    const b = pts[frag.nodes[frag.nodes.length - 1]];
+    const arc = frag.edges.reduce((s, e) => s + lengthOf(e), 0);
+    return Math.hypot(b[0] - a[0], b[1] - a[1]) / arc;
+  };
+
+  it("keeps a straight corridor whole", () => {
+    const pts: [number, number][] = Array.from({ length: 11 }, (_, i) => [100 * i, 0]);
+    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
+    const frags = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
+    expect(frags).toHaveLength(1);
+    expect(frags[0].edges).toEqual(path.edges);
+  });
+
+  it("splits a hairpin at its apex into two straight-ish halves", () => {
+    // Out 1km east along y=0, jog north 100m, back 1km west along y=100.
+    const out: [number, number][] = Array.from({ length: 6 }, (_, i) => [200 * i, 0]);
+    const back: [number, number][] = Array.from({ length: 6 }, (_, i) => [1000 - 200 * i, 100]);
+    const pts = [...out, ...back];
+    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
+    const frags = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
+    expect(frags.length).toBeGreaterThanOrEqual(2);
+    // Every fragment is straighter than the split threshold, and the fragments
+    // partition the original path in order.
+    for (const f of frags) {
+      expect(straightnessOf(f, pts, lengthOf)).toBeGreaterThanOrEqual(ROUTE_STRAIGHTNESS_MIN);
+    }
+    expect(frags.flatMap((f) => f.edges)).toEqual(path.edges);
+  });
+
+  it("splits a double-back buried in an otherwise straight corridor (window rule)", () => {
+    // 3km straight line with a 400m out-and-back spur at x=1500. Endpoint
+    // straightness stays high (~0.79), so only the WINDOW rule can see it.
+    const pts: [number, number][] = [];
+    for (let x = 0; x <= 1500; x += 100) pts.push([x, 0]);
+    for (let y = 100; y <= 400; y += 100) pts.push([1500, y]);   // out
+    pts.push([1520, 400]);                                        // tip
+    for (let y = 300; y >= 0; y -= 100) pts.push([1520, y]);      // back
+    for (let x = 1600; x <= 3000; x += 100) pts.push([x, 0]);
+    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
+    const frags = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
+    expect(frags.length).toBeGreaterThanOrEqual(2);
+    // The out-leg and the back-leg never share a fragment: no fragment holds
+    // both a node at (1500, 400) and one at (1520, 300)-side of the spur.
+    const tipIdx = pts.findIndex(([x, y]) => x === 1520 && y === 400);
+    for (const f of frags) {
+      const hasOut = f.nodes.some((n) => n < tipIdx && pts[n][1] === 400);
+      const hasBack = f.nodes.some((n) => n > tipIdx && pts[n][1] > 0 && pts[n][0] === 1520);
+      expect(hasOut && hasBack).toBe(false);
+    }
+    expect(frags.flatMap((f) => f.edges)).toEqual(path.edges);
+  });
+
+  it("recomputes fragment weights from weightOf and preserves the total", () => {
+    const out: [number, number][] = Array.from({ length: 6 }, (_, i) => [200 * i, 0]);
+    const back: [number, number][] = Array.from({ length: 6 }, (_, i) => [1000 - 200 * i, 100]);
+    const pts = [...out, ...back];
+    const weights = Array.from({ length: pts.length - 1 }, (_, i) => i + 1);
+    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts, weights);
+    const frags = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
+    expect(frags.length).toBeGreaterThanOrEqual(2);
+    expect(frags.reduce((s, f) => s + f.weight, 0)).toBe(path.weight);
+    for (const f of frags) {
+      expect(f.weight).toBe(f.edges.reduce((s, e) => s + weightOf(e), 0));
+    }
+  });
+
+  it("returns short paths (< 4 edges) unsplit, however loopy", () => {
+    const pts: [number, number][] = [[0, 0], [500, 0], [500, 20], [0, 20]];
+    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
+    expect(splitLoopyPath(path, lengthOf, latLngOf, weightOf)).toEqual([path]);
+  });
+
+  it("is deterministic", () => {
+    const out: [number, number][] = Array.from({ length: 8 }, (_, i) => [150 * i, 0]);
+    const back: [number, number][] = Array.from({ length: 8 }, (_, i) => [1050 - 150 * i, 60]);
+    const pts = [...out, ...back];
+    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
+    const a = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
+    const b = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
+    expect(a).toEqual(b);
+  });
+});
+
+describe("computeRouteProposals — loop-back corridors become several proposals", () => {
+  it("splits a hot U-shaped corridor into its two straight legs", () => {
+    // A U on a real topology: 8 edges south, 2 east, 8 north — every edge
+    // equally hot. One snake before; two straight corridors after.
+    const nodes: [number, number][] = [];
+    for (let i = 0; i <= 8; i++) nodes.push([40.7 + 0.001 * (8 - i), -74.0]);          // west leg ↓
+    for (let i = 1; i <= 2; i++) nodes.push([40.7, -74.0 + 0.001 * i]);                // bottom →
+    for (let i = 1; i <= 8; i++) nodes.push([40.7 + 0.001 * i, -74.0 + 0.002]);        // east leg ↑
+    const edges: [number, number][] = Array.from({ length: nodes.length - 1 }, (_, i) => [i, i + 1]);
+    const topo = topologyFromJson({ nodes, edges: edges.map(([u, v]) => [u, v, ""]) });
+    const ps = computeRouteProposals(topo, buildNodeAdj(topo), {
+      edge_vote_types: edges.map((): [number, number, number][] => [[BIKE, 5, 0]]),
+      vote_type_legend: LEGEND,
+    });
+    expect(ps.length).toBeGreaterThanOrEqual(2);
+    // No proposal contains edges from both vertical legs (indices ≤7 vs ≥10).
+    for (const p of ps) {
+      const west = p.edgeIds.some((e) => e <= 7);
+      const east = p.edgeIds.some((e) => e >= 10);
+      expect(west && east).toBe(false);
+    }
   });
 });

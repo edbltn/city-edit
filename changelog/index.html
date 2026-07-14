@@ -29,6 +29,24 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-14-routeprop-straightness.html">
+    <div class="date">2026-07-14</div>
+    <h2>Route proposals prefer long straight lines — loop-back splitting + a min-blocks gate</h2>
+    <p>Yesterday's 3× corridor length budget exposed what the greedy peel always did: it extends by
+    weight with no regard for direction, so on the imported-data maps the top route proposals shipped
+    as multi-kilometre snakes — 2 of nyc-bikes' top-20 ended ~2&nbsp;km from their start after
+    9–10&nbsp;km of path, 6 more hid an 800&nbsp;m hairpin — while other maps surfaced 100&nbsp;m,
+    3-block stubs as route pins. No hard max distance: instead the clustering became shape-aware. A new
+    splitLoopyPath() splits every peeled path where it turns back on itself (sliding-window rule for
+    buried hairpins, endpoint rule for U-turns; thresholds calibrated so L-corners, grid staircases and
+    gentle arcs survive), each fragment earns its own support-based length budget, and a new
+    MIN_ROUTE_BLOCKS&nbsp;=&nbsp;5 gate drops corridors under 5 blocks (their votes still surface as
+    point pins). Verified against real data with a new vite-node stats harness running the actual
+    client pipeline: 0/20 loopy corridors on nyc-bikes (was 8/20 by either straightness measure), the
+    former #3 snake became two straight top-5 corridors, stubs gone, byte-identical determinism
+    preserved, compute time unchanged at ~920&nbsp;ms.</p>
+  </a>
+
   <a class="entry" href="./2026-07-13-map-load-oom-and-scaling.html">
     <div class="date">2026-07-13</div>
     <h2>Map-load OOM fix, compact-array graphs, 30-tenant scaling</h2>
