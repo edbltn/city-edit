@@ -29,6 +29,22 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-14-citibike-counter-votes.html">
+    <div class="date">2026-07-14</div>
+    <h2>Citibike import correction — a bike-legality graph votes back</h2>
+    <p>Imported Citibike rides are pedestrianized on purpose — the gap between how a pedestrian moves
+    and where a bike may go IS the vote — but the ingest upvoted the whole foot path, over-crediting
+    corridors that already carry bikes (worst where lanes already exist, near stations). New
+    correction pipeline: a second OSRM dataset built with a flattened v5.25.0 bicycle profile
+    (shortest-legal-path, no pushing-the-bike, no ferries) re-routes each of the 14,523 ingested
+    nyc-bikes rides pinned to its own voted corridor by via-points; every upvoted edge lying within
+    the route's 20&nbsp;m corridor gets a direction=−1 cast under the ride's own voter identity
+    (device_id&nbsp;=&nbsp;sha256(ride_id)). Edge-id overlap was a dead end — the doubled graph and
+    NYC's separately-mapped protected lanes cap it at ~3% — so coverage is geometric. Ground truth:
+    cycleways countered hardest (86.5%), pedestrian/path/steps survive most. What stays upvoted is
+    what a bike can't ride: parks, plazas, stairs, counter-one-way stretches.</p>
+  </a>
+
   <a class="entry" href="./2026-07-14-unify-cluster-explode.html">
     <div class="date">2026-07-14</div>
     <h2>Click-to-explode works for route-based top proposals — one cluster engine for both pin kinds</h2>

@@ -1,0 +1,1385 @@
+diff --git a/osrm/bicycle-flat.lua b/osrm/bicycle-flat.lua
+new file mode 100644
+index 0000000..66d36ab
+--- /dev/null
++++ b/osrm/bicycle-flat.lua
+@@ -0,0 +1,659 @@
++-- Bicycle profile — FLAT (shortest-legal-path) variant for import corrections.
++--
++-- Extracted verbatim from osrm/osrm-backend:v5.25.0 /opt/bicycle.lua (the same
++-- pinned image the foot dataset builds with), then patched so a route answers
++-- one question only: "could a bike have LEGALLY RIDDEN this trip, and along
++-- which stretches?" Used by scripts/build_bike_osrm.sh + server/counter_lyft.py
++-- to subtract imported bikeshare votes wherever the ridden street would have
++-- carried a bike anyway, leaving only pedestrian-only / counter-one-way
++-- stretches upvoted. Deltas from stock:
++--
++--   1. weight_name 'duration' → 'distance': route choice is the shortest legal
++--      path, not the fastest — so between via-points sampled along the ride's
++--      voted path the router hugs that path wherever riding it is legal,
++--      instead of detouring to faster parallel streets.
++--   2. bike_push_handler gutted: stock converts foot-only ways (footway/
++--      pedestrian/steps, bicycle=dismount) into slow pushing_bike edges.
++--      Pushing is walking — exactly the signal we must NOT subtract — so here
++--      those ways stay inaccessible and can never appear in a route.
++--   3. use_public_transport=false, route_speeds/platform_speeds emptied: no
++--      ferries, trains, or station platforms; trips cross rivers on bridges
++--      they could ride, or detour.
++
++api_version = 4
++
++Set = require('lib/set')
++Sequence = require('lib/sequence')
++Handlers = require("lib/way_handlers")
++find_access_tag = require("lib/access").find_access_tag
++limit = require("lib/maxspeed").limit
++Measure = require("lib/measure")
++
++function setup()
++  local default_speed = 15
++  local walking_speed = 4
++
++  return {
++    properties = {
++      u_turn_penalty                = 20,
++      traffic_light_penalty         = 2,
++      --weight_name                   = 'cyclability',
++      weight_name                   = 'distance',
++      process_call_tagless_node     = false,
++      max_speed_for_map_matching    = 110/3.6, -- kmph -> m/s
++      use_turn_restrictions         = false,
++      continue_straight_at_waypoint = false,
++      mode_change_penalty           = 30,
++    },
++
++    default_mode              = mode.cycling,
++    default_speed             = default_speed,
++    walking_speed             = walking_speed,
++    oneway_handling           = true,
++    turn_penalty              = 6,
++    turn_bias                 = 1.4,
++    use_public_transport      = false,
++
++    allowed_start_modes = Set {
++      mode.cycling,
++      mode.pushing_bike
++    },
++
++    barrier_blacklist = Set {
++      'yes',
++      'wall',
++      'fence'
++    },
++
++    access_tag_whitelist = Set {
++      'yes',
++      'permissive',
++      'designated'
++    },
++
++    access_tag_blacklist = Set {
++      'no',
++      'private',
++      'agricultural',
++      'forestry',
++      'delivery',
++      -- When a way is tagged with `use_sidepath` a parallel way suitable for
++      -- cyclists is mapped and must be used instead (by law). This tag is
++      -- used on ways that normally may be used by cyclists, but not when
++      -- a signposted parallel cycleway is available. For purposes of routing
++      -- cyclists, this value should be treated as 'no access for bicycles'.
++      'use_sidepath'
++    },
++
++    restricted_access_tag_list = Set { },
++
++    restricted_highway_whitelist = Set { },
++
++    -- tags disallow access to in combination with highway=service
++    service_access_tag_blacklist = Set { },
++
++    construction_whitelist = Set {
++      'no',
++      'widening',
++      'minor',
++    },
++
++    access_tags_hierarchy = Sequence {
++      'bicycle',
++      'vehicle',
++      'access'
++    },
++
++    restrictions = Set {
++      'bicycle'
++    },
++
++    cycleway_tags = Set {
++      'track',
++      'lane',
++      'share_busway',
++      'sharrow',
++      'shared',
++      'shared_lane'
++    },
++
++    opposite_cycleway_tags = Set {
++      'opposite',
++      'opposite_lane',
++      'opposite_track',
++    },
++
++    -- reduce the driving speed by 30% for unsafe roads
++    -- only used for cyclability metric
++    unsafe_highway_list = {
++      primary = 0.5,
++      secondary = 0.65,
++      tertiary = 0.8,
++      primary_link = 0.5,
++      secondary_link = 0.65,
++      tertiary_link = 0.8,
++    },
++
++    service_penalties = {
++      alley             = 0.5,
++    },
++
++    bicycle_speeds = {
++      cycleway = default_speed,
++      primary = default_speed,
++      primary_link = default_speed,
++      secondary = default_speed,
++      secondary_link = default_speed,
++      tertiary = default_speed,
++      tertiary_link = default_speed,
++      residential = default_speed,
++      unclassified = default_speed,
++      living_street = default_speed,
++      road = default_speed,
++      service = default_speed,
++      track = 12,
++      path = 12
++    },
++
++    pedestrian_speeds = {
++      footway = walking_speed,
++      pedestrian = walking_speed,
++      steps = 2
++    },
++
++    railway_speeds = {
++      train = 10,
++      railway = 10,
++      subway = 10,
++      light_rail = 10,
++      monorail = 10,
++      tram = 10
++    },
++
++    platform_speeds = { },
++
++    amenity_speeds = {
++      parking = 10,
++      parking_entrance = 10
++    },
++
++    man_made_speeds = {
++      pier = walking_speed
++    },
++
++    route_speeds = { },
++
++    bridge_speeds = {
++      movable = 5
++    },
++
++    surface_speeds = {
++      asphalt = default_speed,
++      ["cobblestone:flattened"] = 10,
++      paving_stones = 10,
++      compacted = 10,
++      cobblestone = 6,
++      unpaved = 6,
++      fine_gravel = 6,
++      gravel = 6,
++      pebblestone = 6,
++      ground = 6,
++      dirt = 6,
++      earth = 6,
++      grass = 6,
++      mud = 3,
++      sand = 3,
++      sett = 10
++    },
++
++    classes = Sequence {
++        'ferry', 'tunnel'
++    },
++
++    -- Which classes should be excludable
++    -- This increases memory usage so its disabled by default.
++    excludable = Sequence {
++--        Set {'ferry'}
++    },
++
++    tracktype_speeds = {
++    },
++
++    smoothness_speeds = {
++    },
++
++    avoid = Set {
++      'impassable',
++      'construction'
++    }
++  }
++end
++
++function process_node(profile, node, result)
++  -- parse access and barrier tags
++  local highway = node:get_value_by_key("highway")
++  local is_crossing = highway and highway == "crossing"
++
++  local access = find_access_tag(node, profile.access_tags_hierarchy)
++  if access and access ~= "" then
++    -- access restrictions on crossing nodes are not relevant for
++    -- the traffic on the road
++    if profile.access_tag_blacklist[access] and not is_crossing then
++      result.barrier = true
++    end
++  else
++    local barrier = node:get_value_by_key("barrier")
++    if barrier and "" ~= barrier then
++      if profile.barrier_blacklist[barrier] then
++        result.barrier = true
++      end
++    end
++  end
++
++  -- check if node is a traffic light
++  local tag = node:get_value_by_key("highway")
++  if tag and "traffic_signals" == tag then
++    result.traffic_lights = true
++  end
++end
++
++function handle_bicycle_tags(profile,way,result,data)
++    -- initial routability check, filters out buildings, boundaries, etc
++  data.route = way:get_value_by_key("route")
++  data.man_made = way:get_value_by_key("man_made")
++  data.railway = way:get_value_by_key("railway")
++  data.amenity = way:get_value_by_key("amenity")
++  data.public_transport = way:get_value_by_key("public_transport")
++  data.bridge = way:get_value_by_key("bridge")
++
++  if (not data.highway or data.highway == '') and
++  (not data.route or data.route == '') and
++  (not profile.use_public_transport or not data.railway or data.railway=='') and
++  (not data.amenity or data.amenity=='') and
++  (not data.man_made or data.man_made=='') and
++  (not data.public_transport or data.public_transport=='') and
++  (not data.bridge or data.bridge=='')
++  then
++    return false
++  end
++
++  -- access
++  data.access = find_access_tag(way, profile.access_tags_hierarchy)
++  if data.access and profile.access_tag_blacklist[data.access] then
++    return false
++  end
++
++  -- other tags
++  data.junction = way:get_value_by_key("junction")
++  data.maxspeed = Measure.get_max_speed(way:get_value_by_key ("maxspeed")) or 0
++  data.maxspeed_forward = Measure.get_max_speed(way:get_value_by_key("maxspeed:forward")) or 0
++  data.maxspeed_backward = Measure.get_max_speed(way:get_value_by_key("maxspeed:backward")) or 0
++  data.barrier = way:get_value_by_key("barrier")
++  data.oneway = way:get_value_by_key("oneway")
++  data.oneway_bicycle = way:get_value_by_key("oneway:bicycle")
++  data.cycleway = way:get_value_by_key("cycleway")
++  data.cycleway_left = way:get_value_by_key("cycleway:left")
++  data.cycleway_right = way:get_value_by_key("cycleway:right")
++  data.duration = way:get_value_by_key("duration")
++  data.service = way:get_value_by_key("service")
++  data.foot = way:get_value_by_key("foot")
++  data.foot_forward = way:get_value_by_key("foot:forward")
++  data.foot_backward = way:get_value_by_key("foot:backward")
++  data.bicycle = way:get_value_by_key("bicycle")
++
++  speed_handler(profile,way,result,data)
++
++  oneway_handler(profile,way,result,data)
++
++  cycleway_handler(profile,way,result,data)
++
++  bike_push_handler(profile,way,result,data)
++
++
++  -- maxspeed
++  limit( result, data.maxspeed, data.maxspeed_forward, data.maxspeed_backward )
++
++  -- not routable if no speed assigned
++  -- this avoid assertions in debug builds
++  if result.forward_speed <= 0 and result.duration <= 0 then
++    result.forward_mode = mode.inaccessible
++  end
++  if result.backward_speed <= 0 and result.duration <= 0 then
++    result.backward_mode = mode.inaccessible
++  end
++
++  safety_handler(profile,way,result,data)
++end
++
++
++
++function speed_handler(profile,way,result,data)
++
++  data.way_type_allows_pushing = false
++
++  -- speed
++  local bridge_speed = profile.bridge_speeds[data.bridge]
++  if (bridge_speed and bridge_speed > 0) then
++    data.highway = data.bridge
++    if data.duration and durationIsValid(data.duration) then
++      result.duration = math.max( parseDuration(data.duration), 1 )
++    end
++    result.forward_speed = bridge_speed
++    result.backward_speed = bridge_speed
++    data.way_type_allows_pushing = true
++  elseif profile.route_speeds[data.route] then
++    -- ferries (doesn't cover routes tagged using relations)
++    result.forward_mode = mode.ferry
++    result.backward_mode = mode.ferry
++    if data.duration and durationIsValid(data.duration) then
++      result.duration = math.max( 1, parseDuration(data.duration) )
++    else
++       result.forward_speed = profile.route_speeds[data.route]
++       result.backward_speed = profile.route_speeds[data.route]
++    end
++  -- railway platforms (old tagging scheme)
++  elseif data.railway and profile.platform_speeds[data.railway] then
++    result.forward_speed = profile.platform_speeds[data.railway]
++    result.backward_speed = profile.platform_speeds[data.railway]
++    data.way_type_allows_pushing = true
++  -- public_transport platforms (new tagging platform)
++  elseif data.public_transport and profile.platform_speeds[data.public_transport] then
++    result.forward_speed = profile.platform_speeds[data.public_transport]
++    result.backward_speed = profile.platform_speeds[data.public_transport]
++    data.way_type_allows_pushing = true
++  -- railways
++  elseif profile.use_public_transport and data.railway and profile.railway_speeds[data.railway] and profile.access_tag_whitelist[data.access] then
++    result.forward_mode = mode.train
++    result.backward_mode = mode.train
++    result.forward_speed = profile.railway_speeds[data.railway]
++    result.backward_speed = profile.railway_speeds[data.railway]
++  elseif data.amenity and profile.amenity_speeds[data.amenity] then
++    -- parking areas
++    result.forward_speed = profile.amenity_speeds[data.amenity]
++    result.backward_speed = profile.amenity_speeds[data.amenity]
++    data.way_type_allows_pushing = true
++  elseif profile.bicycle_speeds[data.highway] then
++    -- regular ways
++    result.forward_speed = profile.bicycle_speeds[data.highway]
++    result.backward_speed = profile.bicycle_speeds[data.highway]
++    data.way_type_allows_pushing = true
++  elseif data.access and profile.access_tag_whitelist[data.access]  then
++    -- unknown way, but valid access tag
++    result.forward_speed = profile.default_speed
++    result.backward_speed = profile.default_speed
++    data.way_type_allows_pushing = true
++  end
++end
++
++function oneway_handler(profile,way,result,data)
++  -- oneway
++  data.implied_oneway = data.junction == "roundabout" or data.junction == "circular" or data.highway == "motorway"
++  data.reverse = false
++
++  if data.oneway_bicycle == "yes" or data.oneway_bicycle == "1" or data.oneway_bicycle == "true" then
++    result.backward_mode = mode.inaccessible
++  elseif data.oneway_bicycle == "no" or data.oneway_bicycle == "0" or data.oneway_bicycle == "false" then
++   -- prevent other cases
++  elseif data.oneway_bicycle == "-1" then
++    result.forward_mode = mode.inaccessible
++    data.reverse = true
++  elseif data.oneway == "yes" or data.oneway == "1" or data.oneway == "true" then
++    result.backward_mode = mode.inaccessible
++  elseif data.oneway == "no" or data.oneway == "0" or data.oneway == "false" then
++    -- prevent other cases
++  elseif data.oneway == "-1" then
++    result.forward_mode = mode.inaccessible
++    data.reverse = true
++  elseif data.implied_oneway then
++    result.backward_mode = mode.inaccessible
++  end
++end
++
++function cycleway_handler(profile,way,result,data)
++  -- cycleway
++  data.has_cycleway_forward = false
++  data.has_cycleway_backward = false
++  data.is_twoway = result.forward_mode ~= mode.inaccessible and result.backward_mode ~= mode.inaccessible and not data.implied_oneway
++
++  -- cycleways on normal roads
++  if data.is_twoway then
++    if data.cycleway and profile.cycleway_tags[data.cycleway] then
++      data.has_cycleway_backward = true
++      data.has_cycleway_forward = true
++    end
++    if (data.cycleway_right and profile.cycleway_tags[data.cycleway_right]) or (data.cycleway_left and profile.opposite_cycleway_tags[data.cycleway_left]) then
++      data.has_cycleway_forward = true
++    end
++    if (data.cycleway_left and profile.cycleway_tags[data.cycleway_left]) or (data.cycleway_right and profile.opposite_cycleway_tags[data.cycleway_right]) then
++      data.has_cycleway_backward = true
++    end
++  else
++    local has_twoway_cycleway = (data.cycleway and profile.opposite_cycleway_tags[data.cycleway]) or (data.cycleway_right and profile.opposite_cycleway_tags[data.cycleway_right]) or (data.cycleway_left and profile.opposite_cycleway_tags[data.cycleway_left])
++    local has_opposite_cycleway = (data.cycleway_left and profile.opposite_cycleway_tags[data.cycleway_left]) or (data.cycleway_right and profile.opposite_cycleway_tags[data.cycleway_right])
++    local has_oneway_cycleway = (data.cycleway and profile.cycleway_tags[data.cycleway]) or (data.cycleway_right and profile.cycleway_tags[data.cycleway_right]) or (data.cycleway_left and profile.cycleway_tags[data.cycleway_left])
++
++    -- set cycleway even though it is an one-way if opposite is tagged
++    if has_twoway_cycleway then
++      data.has_cycleway_backward = true
++      data.has_cycleway_forward = true
++    elseif has_opposite_cycleway then
++      if not data.reverse then
++        data.has_cycleway_backward = true
++      else
++        data.has_cycleway_forward = true
++      end
++    elseif has_oneway_cycleway then
++      if not data.reverse then
++        data.has_cycleway_forward = true
++      else
++        data.has_cycleway_backward = true
++      end
++
++    end
++  end
++
++  if data.has_cycleway_backward then
++    result.backward_mode = mode.cycling
++    result.backward_speed = profile.bicycle_speeds["cycleway"]
++  end
++
++  if data.has_cycleway_forward then
++    result.forward_mode = mode.cycling
++    result.forward_speed = profile.bicycle_speeds["cycleway"]
++  end
++end
++
++function bike_push_handler(profile,way,result,data)
++  -- FLAT variant: never fall back to pushing the bike. A stretch you can only
++  -- walk (footway/pedestrian/steps, or bicycle=dismount) must stay out of the
++  -- graph so it can never be subtracted from the imported votes.
++  if data.bicycle == "dismount" then
++    result.forward_mode = mode.inaccessible
++    result.backward_mode = mode.inaccessible
++    result.forward_speed = -1
++    result.backward_speed = -1
++  end
++end
++
++function safety_handler(profile,way,result,data)
++  -- convert duration into cyclability
++  if profile.properties.weight_name == 'cyclability' then
++    local safety_penalty = profile.unsafe_highway_list[data.highway] or 1.
++    local is_unsafe = safety_penalty < 1
++
++    -- primaries that are one ways are probably huge primaries where the lanes need to be separated
++    if is_unsafe and data.highway == 'primary' and not data.is_twoway then
++      safety_penalty = safety_penalty * 0.5
++    end
++    if is_unsafe and data.highway == 'secondary' and not data.is_twoway then
++      safety_penalty = safety_penalty * 0.6
++    end
++
++    local forward_is_unsafe = is_unsafe and not data.has_cycleway_forward
++    local backward_is_unsafe = is_unsafe and not data.has_cycleway_backward
++    local is_undesireable = data.highway == "service" and profile.service_penalties[data.service]
++    local forward_penalty = 1.
++    local backward_penalty = 1.
++    if forward_is_unsafe then
++      forward_penalty = math.min(forward_penalty, safety_penalty)
++    end
++    if backward_is_unsafe then
++       backward_penalty = math.min(backward_penalty, safety_penalty)
++    end
++
++    if is_undesireable then
++       forward_penalty = math.min(forward_penalty, profile.service_penalties[data.service])
++       backward_penalty = math.min(backward_penalty, profile.service_penalties[data.service])
++    end
++
++    if result.forward_speed > 0 then
++      -- convert from km/h to m/s
++      result.forward_rate = result.forward_speed / 3.6 * forward_penalty
++    end
++    if result.backward_speed > 0 then
++      -- convert from km/h to m/s
++      result.backward_rate = result.backward_speed / 3.6 * backward_penalty
++    end
++    if result.duration > 0 then
++      result.weight = result.duration / forward_penalty
++    end
++
++    if data.highway == "bicycle" then
++      safety_bonus = safety_bonus + 0.2
++      if result.forward_speed > 0 then
++        -- convert from km/h to m/s
++        result.forward_rate = result.forward_speed / 3.6 * safety_bonus
++      end
++      if result.backward_speed > 0 then
++        -- convert from km/h to m/s
++        result.backward_rate = result.backward_speed / 3.6 * safety_bonus
++      end
++      if result.duration > 0 then
++        result.weight = result.duration / safety_bonus
++      end
++    end
++  end
++end
++
++
++
++function process_way(profile, way, result)
++  -- the initial filtering of ways based on presence of tags
++  -- affects processing times significantly, because all ways
++  -- have to be checked.
++  -- to increase performance, prefetching and initial tag check
++  -- is done directly instead of via a handler.
++
++  -- in general we should try to abort as soon as
++  -- possible if the way is not routable, to avoid doing
++  -- unnecessary work. this implies we should check things that
++  -- commonly forbids access early, and handle edge cases later.
++
++  -- data table for storing intermediate values during processing
++
++  local data = {
++    -- prefetch tags
++    highway = way:get_value_by_key('highway'),
++
++    route = nil,
++    man_made = nil,
++    railway = nil,
++    amenity = nil,
++    public_transport = nil,
++    bridge = nil,
++
++    access = nil,
++
++    junction = nil,
++    maxspeed = nil,
++    maxspeed_forward = nil,
++    maxspeed_backward = nil,
++    barrier = nil,
++    oneway = nil,
++    oneway_bicycle = nil,
++    cycleway = nil,
++    cycleway_left = nil,
++    cycleway_right = nil,
++    duration = nil,
++    service = nil,
++    foot = nil,
++    foot_forward = nil,
++    foot_backward = nil,
++    bicycle = nil,
++
++    way_type_allows_pushing = false,
++    has_cycleway_forward = false,
++    has_cycleway_backward = false,
++    is_twoway = true,
++    reverse = false,
++    implied_oneway = false
++  }
++
++  local handlers = Sequence {
++    -- set the default mode for this profile. if can be changed later
++    -- in case it turns we're e.g. on a ferry
++    WayHandlers.default_mode,
++
++    -- check various tags that could indicate that the way is not
++    -- routable. this includes things like status=impassable,
++    -- toll=yes and oneway=reversible
++    WayHandlers.blocked_ways,
++
++    -- our main handler
++    handle_bicycle_tags,
++
++    -- compute speed taking into account way type, maxspeed tags, etc.
++    WayHandlers.surface,
++
++    -- handle turn lanes and road classification, used for guidance
++    WayHandlers.classification,
++
++    -- handle allowed start/end modes
++    WayHandlers.startpoint,
++
++    -- handle roundabouts
++    WayHandlers.roundabouts,
++
++    -- set name, ref and pronunciation
++    WayHandlers.names,
++
++    -- set classes
++    WayHandlers.classes,
++
++    -- set weight properties of the way
++    WayHandlers.weights
++  }
++
++  WayHandlers.run(profile, way, result, data, handlers)
++end
++
++function process_turn(profile, turn)
++  -- compute turn penalty as angle^2, with a left/right bias
++  local normalized_angle = turn.angle / 90.0
++  if normalized_angle >= 0.0 then
++    turn.duration = normalized_angle * normalized_angle * profile.turn_penalty / profile.turn_bias
++  else
++    turn.duration = normalized_angle * normalized_angle * profile.turn_penalty * profile.turn_bias
++  end
++
++  if turn.is_u_turn then
++    turn.duration = turn.duration + profile.properties.u_turn_penalty
++  end
++
++  if turn.has_traffic_light then
++     turn.duration = turn.duration + profile.properties.traffic_light_penalty
++  end
++  if profile.properties.weight_name == 'cyclability' then
++    turn.weight = turn.duration
++  end
++  if turn.source_mode == mode.cycling and turn.target_mode ~= mode.cycling then
++    turn.weight = turn.weight + profile.properties.mode_change_penalty
++  end
++end
++
++return {
++  setup = setup,
++  process_way = process_way,
++  process_node = process_node,
++  process_turn = process_turn
++}
+diff --git a/scripts/build_bike_osrm.sh b/scripts/build_bike_osrm.sh
+new file mode 100755
+index 0000000..3ca9113
+--- /dev/null
++++ b/scripts/build_bike_osrm.sh
+@@ -0,0 +1,81 @@
++#!/bin/bash
++# Build (and optionally serve) a per-city BICYCLE-profile OSRM dataset.
++#
++# Purpose: bulk-import corrections. Citibike trips are ingested as votes by
++# routing them through the FOOT profile ("pedestrianized"); to subtract the
++# stretches a legal bike route would have used anyway (import_lyft counterpart:
++# server/counter_lyft.py), we need a bike-based routing graph over the same OSM
++# snapshot. Building from the city's own server/osm_data/<city>/source.osm.pbf
++# guarantees OSM node ids align with the votable graph, so bike-route
++# annotations resolve through the same osm_nodes_to_edge_ids mapping.
++#
++# The profile is osrm/bicycle-flat.lua: the image's stock bicycle.lua (same
++# pinned v5.25.0 as the foot build) patched to route by shortest LEGAL path —
++# distance-weighted, no pushing-the-bike fallback onto foot-only ways, no
++# ferries. One-way restrictions and foot-only exclusions are exactly the
++# divergences the counter-vote pass must leave unscathed; see the header of
++# bicycle-flat.lua for the full delta list.
++#
++# Usage:
++#   scripts/build_bike_osrm.sh <city> [--serve [port]]
++#
++# Output: server/osm_data/<city>/osrm-bike/bike.osrm* (dir is gitignored via
++# server/osm_data/). --serve runs a detached container named
++# city-edit-osrm-bike-<city> on the given host port (default 5006; NOT 5000 —
++# macOS AirPlay squats it — and not 5005, the merged foot instance).
++set -euo pipefail
++
++REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
++OSRM_IMAGE="osrm/osrm-backend:v5.25.0"
++
++CITY="${1:?usage: build_bike_osrm.sh <city> [--serve [port]]}"
++shift
++SERVE=0
++PORT=5006
++if [ "${1:-}" = "--serve" ]; then
++  SERVE=1
++  PORT="${2:-5006}"
++fi
++
++# Keep in sync with server/cities.py (bbox there is south,west,north,east;
++# osmium wants west,south,east,north) — same duplication as osrm/build-merged.sh.
++case "$CITY" in
++  nyc)     BBOX="-74.2591,40.4774,-73.7004,40.9176" ;;
++  sf)      BBOX="-122.516,37.700,-122.354,37.832" ;;
++  chicago) BBOX="-87.75,41.78,-87.58,42.02" ;;
++  dc)      BBOX="-77.12,38.79,-76.91,39.00" ;;
++  philly)  BBOX="-75.280,39.867,-74.956,40.138" ;;
++  *) echo "ERROR: unknown city '$CITY'" >&2; exit 1 ;;
++esac
++
++SRC_PBF="$REPO_DIR/server/osm_data/$CITY/source.osm.pbf"
++OUT_DIR="$REPO_DIR/server/osm_data/$CITY/osrm-bike"
++[ -f "$SRC_PBF" ] || { echo "ERROR: $SRC_PBF missing (run refresh_osm.py first)" >&2; exit 1; }
++mkdir -p "$OUT_DIR"
++
++if [ ! -f "$OUT_DIR/bike.osrm.cell_metrics" ]; then
++  # Clip first: nyc's source.osm.pbf is the whole-state extract; the clipped
++  # city file keeps osrm-extract inside Docker Desktop's RAM budget.
++  if [ ! -f "$OUT_DIR/bike.osm.pbf" ]; then
++    echo "[bike-osrm] Clipping $CITY to $BBOX"
++    osmium extract -b "$BBOX" "$SRC_PBF" -o "$OUT_DIR/bike.osm.pbf" --overwrite
++  fi
++  echo "[bike-osrm] osrm-extract (bicycle-flat profile) ..."
++  docker run --rm -v "$OUT_DIR":/data -v "$REPO_DIR/osrm/bicycle-flat.lua":/profiles/bicycle-flat.lua:ro \
++    "$OSRM_IMAGE" osrm-extract -p /profiles/bicycle-flat.lua /data/bike.osm.pbf
++  echo "[bike-osrm] osrm-partition ..."
++  docker run --rm -v "$OUT_DIR":/data "$OSRM_IMAGE" osrm-partition /data/bike.osrm
++  echo "[bike-osrm] osrm-customize ..."
++  docker run --rm -v "$OUT_DIR":/data "$OSRM_IMAGE" osrm-customize /data/bike.osrm
++  echo "[bike-osrm] Build complete: $OUT_DIR/bike.osrm*"
++else
++  echo "[bike-osrm] Using existing dataset in $OUT_DIR"
++fi
++
++if [ "$SERVE" = 1 ]; then
++  NAME="city-edit-osrm-bike-$CITY"
++  docker rm -f "$NAME" >/dev/null 2>&1 || true
++  echo "[bike-osrm] Serving on localhost:$PORT (container $NAME)"
++  docker run -d --name "$NAME" -p "$PORT:5000" -v "$OUT_DIR":/data "$OSRM_IMAGE" \
++    osrm-routed --algorithm mld --ip 0.0.0.0 --port 5000 /data/bike.osrm
++fi
+diff --git a/server/counter_lyft.py b/server/counter_lyft.py
+new file mode 100644
+index 0000000..f20f999
+--- /dev/null
++++ b/server/counter_lyft.py
+@@ -0,0 +1,513 @@
++#!/usr/bin/env python3
++"""
++Counter-vote pass for Lyft bikeshare imports (the import_lyft.py corrective).
++
++import_lyft.py ingests bikeshare rides by routing them through the FOOT
++profile ("pedestrianized") and upvoting every edge. That over-credits streets
++a legal bike route would have used anyway — especially corridors that already
++have bike lanes near stations. This script subtracts that signal: for every
++ingested ride it routes the SAME trip through a bike-legality OSRM
++(scripts/build_bike_osrm.sh, profile osrm/bicycle-flat.lua — shortest LEGAL
++path, no pushing-the-bike onto foot-only ways) and casts direction=-1, with
++the ride's own voter_id and vote type, on the upvoted edges the bike route
++covers. Only the divergent stretches — pedestrian-only paths and
++counter-one-way riding a bike can't legally use — keep their upvotes.
++
++Two structural choices make "covers" mean "this stretch was legally ridable":
++
++1. Via-guided routing. The voted edge set is re-ordered into a path (walking
++   the edges from the endpoint nearest the trip start) and every
++   ~VIA_STRIDE-th node along it becomes an OSRM via-point. With the flat
++   profile routing by shortest legal distance, the bike route then follows
++   the ride's own corridor wherever a bike may ride it and detours only
++   around the stretches it can't — it never wanders off to a faster parallel
++   avenue and spares the corridor by accident. Rides whose voted set doesn't
++   reconstruct into a clean path (round trips, resnap fragments) fall back to
++   plain endpoint-to-endpoint routing.
++
++2. Geometric corridor coverage, not edge-id overlap. Edge ids can't see the
++   two cases that matter most: the votable graph stores parallel duplicate
++   edges per node pair (ids resolve to either copy), and NYC protected bike
++   lanes are separate OSM ways running parallel to the roadway the foot
++   route walked — same street, zero shared ids. So a voted edge is countered
++   when it lies bodily inside the bike route's corridor: both endpoints AND
++   its midpoint within COVER_DIST_M (20 m — half an avenue's width, well
++   under the ~80 m to the next parallel street) of the route polyline. A
++   pedestrian-park or counter-one-way stretch forces the bike route a block
++   away, putting its edges far outside the corridor: structurally
++   un-subtractable.
++
++Ingested rides are recognized by identity, not bookkeeping: import_lyft casts
++with voter_id = ride_id, which the server stores as device_id =
++sha256(ride_id)[:16], so hashing the ride_ids in the cached monthly zips
++(server/lyft_data/) recovers exactly the imported devices and their trip
++endpoints. Human voters never match.
++
++Idempotent: re-running plans no-ops (the voter's prior direction is already
++-1), so a second pass changes nothing.
++
++Usage:
++    # Build + serve the bike graph first:
++    #   scripts/build_bike_osrm.sh nyc --serve 5006
++    python -u counter_lyft.py --city nyc --map nyc-bikes \
++        --api-base http://localhost:5001
++
++    # Inspect without voting:
++    python -u counter_lyft.py --city nyc --map nyc-bikes --dry-run
++
++Requires: aiohttp, pandas, requests (same as import_lyft.py)
++"""
++
++import argparse
++import asyncio
++import hashlib
++import sys
++import time
++import zipfile
++from collections import defaultdict
++from io import BytesIO
++from pathlib import Path
++
++import aiohttp
++import numpy as np
++import pandas as pd
++import requests
++from dotenv import load_dotenv
++
++load_dotenv()  # DATABASE_URL, read at import by database.py
++
++from cities import get_city
++from database import get_cursor
++from graph_registry import CityGraph
++from import_lyft import LYFT_SOURCES, fetch_map_mode, health_check
++
++CACHE_DIR = Path(__file__).parent / "lyft_data"
++RIDE_COLS = ["ride_id", "start_lat", "start_lng", "end_lat", "end_lng"]
++VIA_STRIDE = 8       # sample every Nth path node as an OSRM via-point (~250m)
++MAX_VIAS = 40        # long rides widen the stride instead of growing the URL
++COVER_DIST_M = 20.0  # corridor half-width for "the bike route covers this edge"
++M_PER_DEG_LAT = 110540.0
++M_PER_DEG_LON_EQ = 111320.0  # × cos(lat)
++
++
++def log(msg: str):
++    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
++
++
++def device_of(ride_id: str) -> str:
++    """The server-side device_id an imported ride votes under (app._resolve_user)."""
++    return hashlib.sha256(ride_id.encode()).hexdigest()[:16]
++
++
++# ── DB: the imported votes to counter ────────────────────────────────────────
++
++def load_upvotes(map_slug: str) -> dict[str, dict[int, set[int]]]:
++    """{device_id: {vote_type_id: {edge_id}}} of current upvotes on the map."""
++    votes: dict[str, dict[int, set[int]]] = defaultdict(lambda: defaultdict(set))
++    with get_cursor() as cur:
++        cur.execute(
++            "SELECT device_id, vote_type_id, edge_id FROM edge_votes "
++            "WHERE map_slug = %s AND direction = 1",
++            (map_slug,),
++        )
++        for device_id, vt_id, edge_id in cur.fetchall():
++            votes[device_id][vt_id].add(edge_id)
++    return votes
++
++
++def load_vote_type_labels(vt_ids: set[int]) -> dict[int, str]:
++    if not vt_ids:
++        return {}
++    with get_cursor() as cur:
++        cur.execute(
++            "SELECT id, label FROM vote_types WHERE id = ANY(%s)",
++            (list(vt_ids),),
++        )
++        return dict(cur.fetchall())
++
++
++# ── Cached trip zips: recover ride endpoints for imported devices ────────────
++
++def iter_cached_csvs(city_id: str):
++    """Yield (zip_name, DataFrame[RIDE_COLS]) for every cached monthly zip."""
++    infix = LYFT_SOURCES[city_id]["infix"]
++    zips = sorted(CACHE_DIR.glob(f"*-{infix}-tripdata.zip"))
++    if not zips:
++        sys.exit(f"ERROR: no cached {infix} zips in {CACHE_DIR}. "
++                 "The counter pass needs the same monthly files the import used.")
++    for zip_path in zips:
++        with zipfile.ZipFile(zip_path) as zf:
++            for name in zf.namelist():
++                if name.startswith("__MACOSX") or name.endswith("/"):
++                    continue
++                if name.endswith(".csv"):
++                    with zf.open(name) as f:
++                        yield zip_path.name, pd.read_csv(
++                            f, usecols=RIDE_COLS, low_memory=False)
++                elif name.endswith(".zip"):
++                    with zf.open(name) as f:
++                        with zipfile.ZipFile(BytesIO(f.read())) as inner:
++                            for iname in inner.namelist():
++                                if iname.endswith(".csv") and not iname.startswith("__MACOSX"):
++                                    with inner.open(iname) as cf:
++                                        yield zip_path.name, pd.read_csv(
++                                            cf, usecols=RIDE_COLS, low_memory=False)
++
++
++def match_rides(city_id: str, devices: set[str]) -> dict[str, tuple]:
++    """{device_id: (ride_id, start(lat,lon), end(lat,lon))} for imported rides."""
++    matched: dict[str, tuple] = {}
++    for zip_name, df in iter_cached_csvs(city_id):
++        df = df.dropna(subset=RIDE_COLS)
++        for row in df.itertuples(index=False):
++            rid = str(row.ride_id)
++            dev = device_of(rid)
++            if dev in devices and dev not in matched:
++                matched[dev] = (
++                    rid,
++                    (float(row.start_lat), float(row.start_lng)),
++                    (float(row.end_lat), float(row.end_lng)),
++                )
++        log(f"  {zip_name}: matched {len(matched)}/{len(devices)} devices so far")
++        if len(matched) == len(devices):
++            break
++    return matched
++
++
++# ── Bike routing → overlap edges ─────────────────────────────────────────────
++
++def voted_path_vias(graph, edge_ids: set[int], start) -> list[tuple[float, float]]:
++    """Ordered (lat, lon) via-points sampled along the ride's voted path.
++
++    Rebuilds the path by walking the voted edge set from the degree-1 node
++    nearest the trip start, preferring neighbors that still have onward edges
++    (so resnap spurs don't dead-end the walk early). Returns [] when the set
++    has no walkable path structure (round trips, heavy fragmentation) — the
++    caller then routes endpoint-to-endpoint.
++    """
++    adj: dict[int, list[tuple[int, int]]] = defaultdict(list)
++    for eid in edge_ids:
++        a, b = (int(x) for x in graph.edge_ends[eid])
++        adj[a].append((b, eid))
++        adj[b].append((a, eid))
++    deg1 = [n for n, nbrs in adj.items() if len(nbrs) == 1]
++    if not deg1:
++        return []
++
++    def dist2(n):
++        lat, lon = graph.node_coords[n]
++        return (lat - start[0]) ** 2 + (lon - start[1]) ** 2
++
++    cur = min(deg1, key=dist2)
++    used: set[int] = set()
++    order = [cur]
++    while True:
++        nxt = [(nb, eid) for nb, eid in adj[cur] if eid not in used]
++        if not nxt:
++            break
++        # Prefer a continuation (neighbor with onward unused edges) over a spur.
++        nb, eid = next(
++            ((nb, eid) for nb, eid in nxt
++             if any(e2 != eid and e2 not in used for _, e2 in adj[nb])),
++            nxt[0],
++        )
++        used.add(eid)
++        order.append(nb)
++        cur = nb
++    if len(used) < max(2, len(edge_ids) // 2):
++        return []  # walk covered too little of the set to trust its order
++
++    inner = order[1:-1]
++    stride = max(VIA_STRIDE, -(-len(inner) // MAX_VIAS))
++    return [(float(graph.node_coords[n][0]), float(graph.node_coords[n][1]))
++            for n in inner[stride - 1::stride]]
++
++
++async def bike_route_geometry(session, osrm_base, start, end, vias) -> np.ndarray | None:
++    """Route start→(vias)→end on the bike graph; return [N,2] (lat, lon), or None."""
++    points = [start, *vias, end]
++    coords = ";".join(f"{lon},{lat}" for lat, lon in points)
++    url = (f"{osrm_base}/route/v1/cycling/{coords}"
++           "?overview=full&geometries=geojson&steps=false")
++    for attempt in range(3):
++        try:
++            async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
++                if resp.status != 200:
++                    if attempt < 2:
++                        await asyncio.sleep(2 ** attempt)
++                        continue
++                    return None
++                data = await resp.json()
++        except Exception:
++            if attempt < 2:
++                await asyncio.sleep(2 ** attempt)
++                continue
++            return None
++        break
++    if data.get("code") != "Ok" or not data.get("routes"):
++        return None
++    coords = data["routes"][0].get("geometry", {}).get("coordinates", [])
++    if len(coords) < 2:
++        return None
++    return np.array([(c[1], c[0]) for c in coords], dtype=np.float64)
++
++
++def covered_edges(graph, edge_ids: set[int], route_latlon: np.ndarray) -> set[int]:
++    """Voted edges lying bodily inside the bike route's corridor.
++
++    An edge counts only when BOTH endpoints and its midpoint are within
++    COVER_DIST_M of the route polyline — a perpendicular street crossed at an
++    intersection has its far endpoint a block away, so it never qualifies.
++    Distances are computed in a local equirectangular projection (meters).
++    """
++    if not edge_ids or route_latlon is None:
++        return set()
++    lat0 = float(route_latlon[0, 0])
++    kx = M_PER_DEG_LON_EQ * np.cos(np.radians(lat0))
++
++    def to_xy(latlon):
++        return np.stack([latlon[..., 1] * kx, latlon[..., 0] * M_PER_DEG_LAT], axis=-1)
++
++    poly = to_xy(route_latlon)
++    eids = np.fromiter(edge_ids, dtype=np.int64, count=len(edge_ids))
++    ends = graph.edge_ends[eids]
++    p1 = to_xy(graph.node_coords[ends[:, 0]])
++    p2 = to_xy(graph.node_coords[ends[:, 1]])
++    pts = np.concatenate([p1, p2, (p1 + p2) / 2])  # endpoints then midpoints
++
++    a, b = poly[:-1], poly[1:]
++    ab = b - a
++    ab2 = (ab ** 2).sum(1)
++    ab2[ab2 == 0] = 1e-9
++    ap = pts[:, None, :] - a[None, :, :]
++    t = np.clip((ap * ab[None]).sum(-1) / ab2[None], 0.0, 1.0)
++    proj = a[None] + t[..., None] * ab[None]
++    dmin = np.sqrt(((pts[:, None, :] - proj) ** 2).sum(-1)).min(1)
++
++    k = len(eids)
++    ok = (dmin[:k] <= COVER_DIST_M) & (dmin[k:2 * k] <= COVER_DIST_M) \
++        & (dmin[2 * k:] <= COVER_DIST_M)
++    return {int(e) for e in eids[ok]}
++
++
++class Stats:
++    def __init__(self, total: int):
++        self.total = total
++        self.processed = 0
++        self.route_failed = 0
++        self.no_overlap = 0
++        self.vote_failed = 0
++        self.countered = 0
++        self.via_guided = 0
++        self.edges_upvoted = 0
++        self.edges_downvoted = 0
++        self.edges_cleared = 0
++        self.lock = asyncio.Lock()
++
++    async def bump_quiet(self, **kw):
++        """Count without advancing `processed` (per-ride sub-events)."""
++        async with self.lock:
++            for k, v in kw.items():
++                setattr(self, k, getattr(self, k) + v)
++
++    async def bump(self, **kw):
++        async with self.lock:
++            self.processed += 1
++            for k, v in kw.items():
++                setattr(self, k, getattr(self, k) + v)
++            if self.processed % 200 == 0:
++                log(f"[{self.processed}/{self.total}] countered={self.countered} "
++                    f"no_overlap={self.no_overlap} route_failed={self.route_failed} "
++                    f"vote_failed={self.vote_failed} via={self.via_guided} | edges: "
++                    f"{self.edges_downvoted} down / {self.edges_upvoted} upvoted "
++                    f"(+{self.edges_cleared} cleared)")
++
++
++async def counter_one(session, args, device, ride, vt_edges, vt_labels, graph,
++                      vote_mode, stats):
++    """Bike-route one ride and downvote the overlap with its prior upvotes."""
++    rid, start, end = ride
++    n_up = sum(len(s) for s in vt_edges.values())
++    all_edges = set().union(*vt_edges.values())
++    vias = voted_path_vias(graph, all_edges, start) if len(all_edges) >= 4 else []
++    geom = await bike_route_geometry(session, args.bike_osrm_url, start, end, vias)
++    if geom is None and vias:
++        # A via may have snapped somewhere unroutable; the plain trip still
++        # tells us which stretches a bike could have used.
++        vias = []
++        geom = await bike_route_geometry(session, args.bike_osrm_url, start, end, [])
++    if geom is None:
++        await stats.bump(route_failed=1, edges_upvoted=n_up)
++        return
++    if vias:
++        await stats.bump_quiet(via_guided=1)
++    bike_set = covered_edges(graph, all_edges, geom)
++
++    downs, cleared = 0, 0
++    any_overlap = False
++    ok = True
++    for vt_id, edges in vt_edges.items():
++        overlap = sorted(edges & bike_set)
++        if not overlap:
++            continue
++        any_overlap = True
++        label = vt_labels.get(vt_id)
++        if label is None:
++            ok = False
++            continue
++        if args.dry_run:
++            downs += len(overlap)
++            continue
++        payload = {
++            "map": args.map_slug, "mode": vote_mode, "vote_type": label,
++            "voter_id": rid, "edge_ids": overlap, "direction": -1,
++            "ip_from_voter": True,
++        }
++        for attempt in range(3):
++            try:
++                async with session.post(
++                    f"{args.api_base}/api/vote", json=payload,
++                    timeout=aiohttp.ClientTimeout(total=120),
++                ) as resp:
++                    if resp.status != 200:
++                        if attempt < 2:
++                            await asyncio.sleep(2 ** attempt)
++                            continue
++                        ok = False
++                        break
++                    body = await resp.json()
++                    if body.get("success"):
++                        downs += len(overlap)
++                        # Edges unvoted beyond the cast set: upvotes in touched
++                        # blocks that the bike route only partially covered.
++                        cleared += len(body.get("cleared", []))
++                    else:
++                        ok = False
++                    break
++            except Exception:
++                if attempt < 2:
++                    await asyncio.sleep(2 ** attempt)
++                    continue
++                ok = False
++                break
++
++    if not any_overlap:
++        await stats.bump(no_overlap=1, edges_upvoted=n_up)
++    elif ok:
++        await stats.bump(countered=1, edges_upvoted=n_up,
++                         edges_downvoted=downs, edges_cleared=cleared)
++    else:
++        await stats.bump(vote_failed=1, edges_upvoted=n_up, edges_downvoted=downs,
++                         edges_cleared=cleared)
++
++
++async def run_async(args, work, vt_labels, graph, vote_mode) -> Stats:
++    stats = Stats(len(work))
++    sem = asyncio.Semaphore(args.concurrency)
++    connector = aiohttp.TCPConnector(limit=args.concurrency * 2, ssl=False)
++    async with aiohttp.ClientSession(connector=connector) as session:
++        async def throttled(device, ride, vt_edges):
++            async with sem:
++                await counter_one(session, args, device, ride, vt_edges,
++                                  vt_labels, graph, vote_mode, stats)
++
++        tasks = [asyncio.create_task(throttled(d, r, v)) for d, r, v in work]
++        await asyncio.gather(*tasks)
++    return stats
++
++
++# ── Entry point ──────────────────────────────────────────────────────────────
++
++def main():
++    parser = argparse.ArgumentParser(
++        description="Downvote imported bikeshare votes where a bike route overlaps")
++    parser.add_argument("--city", required=True,
++                        help=f"City id ({', '.join(LYFT_SOURCES)})")
++    parser.add_argument("--map", dest="map_slug", required=True,
++                        help="Map slug holding the imported votes (e.g. nyc-bikes)")
++    parser.add_argument("--mode", help="Vote namespace; defaults to the map's mode")
++    parser.add_argument("--bike-osrm-url", default="http://localhost:5006",
++                        help="Bicycle-profile OSRM (scripts/build_bike_osrm.sh)")
++    parser.add_argument("--api-base", default="http://localhost:8080",
++                        help="City Edit API base URL")
++    parser.add_argument("--concurrency", type=int, default=4)
++    parser.add_argument("--limit", type=int,
++                        help="Counter at most N rides (smoke runs)")
++    parser.add_argument("--dry-run", action="store_true",
++                        help="Compute overlaps and report; cast nothing")
++    args = parser.parse_args()
++    args.api_base = args.api_base.rstrip("/")
++    args.bike_osrm_url = args.bike_osrm_url.rstrip("/")
++
++    city = get_city(args.city)
++    if not city or args.city not in LYFT_SOURCES:
++        sys.exit(f"ERROR: unknown or unsupported city '{args.city}'")
++
++    # Bike OSRM must be up before we spend minutes on DB/zip scans.
++    try:
++        requests.get(f"{args.bike_osrm_url}/route/v1/cycling/"
++                     f"{city.center[1]},{city.center[0]};"
++                     f"{city.center[1]},{city.center[0]}", timeout=10)
++    except requests.RequestException:
++        sys.exit(f"ERROR: bike OSRM not reachable at {args.bike_osrm_url}. "
++                 f"Run scripts/build_bike_osrm.sh {args.city} --serve first.")
++
++    log(f"Loading upvotes for map '{args.map_slug}' ...")
++    votes = load_upvotes(args.map_slug)
++    log(f"  {len(votes)} devices with upvotes")
++
++    log("Matching devices against cached ride zips ...")
++    matched = match_rides(args.city, set(votes))
++    unmatched = len(votes) - len(matched)
++    log(f"  {len(matched)} imported rides matched "
++        f"({unmatched} devices unmatched — human/agent voters, left alone)")
++    if not matched:
++        sys.exit("ERROR: no imported rides matched. Wrong --city/--map, or the "
++                 "monthly zips the import used are no longer in lyft_data/.")
++
++    vt_ids = {vt for dev in matched for vt in votes[dev]}
++    vt_labels = load_vote_type_labels(vt_ids)
++    log(f"  vote types to counter: "
++        f"{', '.join(f'{i}={vt_labels.get(i)!r}' for i in sorted(vt_ids))}")
++
++    log(f"Loading {args.city} votable graph (node-id mapping) ...")
++    graph = CityGraph(city)
++    graph.ensure_loaded()
++    log(f"  {graph.n_nodes} nodes / {graph.n_edges} edges")
++
++    vote_mode = None
++    if not args.dry_run:
++        if not health_check(args.api_base):
++            sys.exit(f"ERROR: backend not healthy at {args.api_base}")
++        vote_mode = args.mode or fetch_map_mode(args.api_base, args.map_slug)
++        if not vote_mode:
++            sys.exit(f"ERROR: could not resolve mode for map '{args.map_slug}'; "
++                     "pass --mode explicitly.")
++        log(f"Target: map={args.map_slug} mode={vote_mode} via {args.api_base}")
++
++    work = [(dev, matched[dev], votes[dev]) for dev in sorted(matched)]
++    if args.limit:
++        work = work[:args.limit]
++    log(f"{'DRY RUN: analyzing' if args.dry_run else 'Counter-voting'} "
++        f"{len(work)} rides (concurrency={args.concurrency}) ...")
++
++    t0 = time.time()
++    stats = asyncio.run(run_async(args, work, vt_labels, graph, vote_mode))
++    log(f"Done in {time.time() - t0:.1f}s")
++    log(f"  Rides processed:     {stats.processed}")
++    log(f"  Via-guided routes:   {stats.via_guided} "
++        f"(rest routed endpoint-to-endpoint)")
++    log(f"  Countered:           {stats.countered}")
++    log(f"  No overlap:          {stats.no_overlap} (fully divergent — left alone)")
++    log(f"  Route failed:        {stats.route_failed} (left alone)")
++    log(f"  Vote failed:         {stats.vote_failed}")
++    log(f"  Edges upvoted:       {stats.edges_upvoted}")
++    log(f"  Edges downvoted:     {stats.edges_downvoted} "
++        f"({100 * stats.edges_downvoted / max(1, stats.edges_upvoted):.1f}% of upvotes)")
++    log(f"  Edges cleared:       {stats.edges_cleared} (partial-block clears)")
++    if args.dry_run:
++        log("  (dry run — nothing cast)")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/server/tests/unit/test_counter_lyft.py b/server/tests/unit/test_counter_lyft.py
+new file mode 100644
+index 0000000..e6462a9
+--- /dev/null
++++ b/server/tests/unit/test_counter_lyft.py
+@@ -0,0 +1,108 @@
++"""Unit tests for counter_lyft's pure geometry core: voted-path via ordering
++(voted_path_vias) and corridor coverage (covered_edges). Both run on a tiny
++synthetic graph — no OSRM, DB, or Flask.
++"""
++import numpy as np
++import pytest
++
++from counter_lyft import COVER_DIST_M, M_PER_DEG_LAT, covered_edges, voted_path_vias
++
++
++class FakeGraph:
++    """The two CityGraph fields the geometry helpers read."""
++
++    def __init__(self, coords, ends):
++        self.node_coords = np.asarray(coords, dtype=np.float64)
++        self.edge_ends = np.asarray(ends, dtype=np.int32)
++
++
++DEG = 1.0 / M_PER_DEG_LAT  # ≈ one meter of latitude, in degrees
++
++
++def line_graph(n: int) -> FakeGraph:
++    """n nodes strung west→east along the equator, 100 m apart, n-1 edges."""
++    coords = [(0.0, i * 100 * DEG) for i in range(n)]
++    ends = [(i, i + 1) for i in range(n - 1)]
++    return FakeGraph(coords, ends)
++
++
++# ── voted_path_vias ──────────────────────────────────────────────────────────
++
++def test_vias_walk_orders_path_from_trip_start():
++    g = line_graph(30)
++    edges = set(range(29))
++    # Trip starts at the EAST end: the walk must begin there and move west.
++    vias = voted_path_vias(g, edges, start=(0.0, 29 * 100 * DEG))
++    assert vias, "a clean 29-edge path must produce via points"
++    lons = [lon for _, lon in vias]
++    assert lons == sorted(lons, reverse=True), "vias must be ordered from the start"
++
++
++def test_vias_prefers_continuation_over_spur():
++    # Path 0-1-2-3-4 with a one-edge spur hanging off node 2 (node 5).
++    coords = [(0.0, i * 100 * DEG) for i in range(5)] + [(100 * DEG, 2 * 100 * DEG)]
++    ends = [(0, 1), (1, 2), (2, 3), (3, 4), (2, 5)]
++    g = FakeGraph(coords, ends)
++    vias = voted_path_vias(g, {0, 1, 2, 3, 4}, start=(0.0, 0.0))
++    # The walk must reach node 4 (main line), not die at the node-5 spur.
++    assert vias == [] or all(lat == 0.0 for lat, _ in vias)
++
++
++def test_vias_empty_for_loop():
++    # A closed square has no degree-1 node to anchor the walk.
++    coords = [(0.0, 0.0), (0.0, 100 * DEG), (100 * DEG, 100 * DEG), (100 * DEG, 0.0)]
++    ends = [(0, 1), (1, 2), (2, 3), (3, 0)]
++    g = FakeGraph(coords, ends)
++    assert voted_path_vias(g, {0, 1, 2, 3}, start=(0.0, 0.0)) == []
++
++
++def test_vias_empty_when_walk_covers_too_little():
++    # Two far-apart path fragments: the walk finishes one and strands the other.
++    coords = ([(0.0, i * 100 * DEG) for i in range(3)]
++              + [(0.5, 0.0), (0.5, 100 * DEG), (0.5, 200 * DEG), (0.5, 300 * DEG),
++                 (0.5, 400 * DEG), (0.5, 500 * DEG), (0.5, 600 * DEG)])
++    ends = [(0, 1), (1, 2)] + [(i, i + 1) for i in range(3, 9)]
++    g = FakeGraph(coords, ends)
++    assert voted_path_vias(g, set(range(8)), start=(0.0, 0.0)) == []
++
++
++# ── covered_edges ────────────────────────────────────────────────────────────
++
++def test_covers_edges_on_and_near_the_route():
++    g = line_graph(10)
++    # Route runs exactly along the voted line.
++    route = np.array([(0.0, 0.0), (0.0, 9 * 100 * DEG)])
++    assert covered_edges(g, set(range(9)), route) == set(range(9))
++
++
++def test_parallel_edge_within_corridor_is_covered():
++    # Voted edge sits 10 m north of the route (a sidewalk beside the roadway).
++    off = 10 * DEG
++    g = FakeGraph([(off, 0.0), (off, 100 * DEG)], [(0, 1)])
++    route = np.array([(0.0, -100 * DEG), (0.0, 200 * DEG)])
++    assert covered_edges(g, {0}, route) == {0}
++
++
++def test_parallel_street_outside_corridor_survives():
++    # A parallel street 80 m away (the next block) must NOT be covered.
++    off = 80 * DEG
++    g = FakeGraph([(off, 0.0), (off, 100 * DEG)], [(0, 1)])
++    route = np.array([(0.0, -100 * DEG), (0.0, 200 * DEG)])
++    assert covered_edges(g, {0}, route) == set()
++
++
++def test_crossing_edge_survives():
++    # An edge crossing the route at a right angle touches it at one endpoint,
++    # but its midpoint (50 m) and far endpoint (100 m) are outside the
++    # corridor — the both-endpoints-and-midpoint rule must reject it.
++    g = FakeGraph([(0.0, 0.0), (100 * DEG, 0.0)], [(0, 1)])
++    route = np.array([(0.0, -200 * DEG), (0.0, 200 * DEG)])
++    assert COVER_DIST_M < 50
++    assert covered_edges(g, {0}, route) == set()
++
++
++def test_covered_edges_empty_inputs():
++    g = line_graph(3)
++    route = np.array([(0.0, 0.0), (0.0, 100 * DEG)])
++    assert covered_edges(g, set(), route) == set()
++    assert covered_edges(g, {0}, None) == set()
