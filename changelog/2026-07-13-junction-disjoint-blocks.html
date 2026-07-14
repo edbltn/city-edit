@@ -1,0 +1,839 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Disjoint junction cells — the Voronoi trim stops asking permission, membership follows the cut — 2026-07-13</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.25; }
+  pre.diff span { display: block; white-space: pre; }
+  pre.diff span span { display: inline; }
+
+  .s-kw { color: #a52a5a; }
+  .s-str { color: #0a3069; }
+  .s-com { color: #77716a; font-style: italic; }
+  .s-num { color: #0550ae; }
+  .s-lit { color: #0550ae; }
+  .s-fn { color: #6639ba; }
+  .s-type { color: #953800; }
+  .s-prop { color: #116329; }
+  .s-tag { color: #116329; }
+  .s-attr { color: #0550ae; }
+  .s-dec { color: #6639ba; }
+
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Disjoint junction cells — the Voronoi trim stops asking permission, membership follows the cut</h1>
+    <div class="dateline">2026-07-13 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#diagnosis">1</a>
+<a href="#fix">2</a>
+<a href="#api">3</a>
+<a href="#deploy">4</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a>
+  </nav>
+
+  <p class="lede">Some prod NYC intersection blocks rendered stacked on top of each other. Root cause: the
+  graph-first builder's Voronoi trim between overlapping junction cells was vetoed whenever a cut would
+  evict a member node or detach a captured edge — and at big multi-node intersections something always
+  crossed the bisector, so 4,880 junction pairs (10% of NYC's cells) shipped overlapping. The fix inverts
+  the priority, matching the builder's own corridor rule: geometry wins — cuts apply unconditionally,
+  sliver cells are absorbed into their neighbour — and stranded membership is re-homed to whichever
+  polygon actually holds it now (midpoint cell/corridor, line-touch fallback, clipped tube graft last).
+  Result: zero overlapping junction pairs on test-cp and NYC, audit still 100% mapped / 100%
+  edge∩polygon. Shipped to prod with a new artifacts-only overlay image (digest-pinned base, block
+  artifacts only) because another agent was deploying code the same afternoon — their new NYC graph is
+  exactly what the shipped bake is stamped against.</p>
+
+  
+    <section class="card" id="diagnosis">
+      <div class="tag">Diagnosis · prod NYC</div>
+      <h2>1 · Why intersection blocks overlapped in prod</h2>
+      <h3>Symptom</h3>
+      <p>On the production NYC maps some intersection blocks visibly stack — two junction polygons drawn on top of each other, double-tinted, outlines crossing. Blocks were assumed to be “voronoi'd” into a partition.</p>
+      <h3>Root cause</h3>
+      <ul><li>Blocks were never a global Voronoi partition: a junction cell is the convex hull of its member nodes (⊕ 8 m) ∪ its captured edges' tubes, and the only Voronoi-like step is a pairwise bisector trim between overlapping junction cells.</li>
+<li>That trim was <strong>vetoed</strong> whenever the cut would evict a member node or detach a captured edge (“the audit invariants win over aesthetics”). Big multi-node intersections always have some captured crosswalk/driveway stub past the bisector, so both directions of the cut got vetoed and the full pre-trim overlap shipped.</li>
+<li>Quantified in the then-shipped NYC bake (scan of <code>blocks_final_nyc.geojson</code>): <strong>4,880 junction-cell pairs overlapped by ≥ 1 m²</strong> — median 179 m², max ~800 m² — involving 8,164 cells, 10.2% of the 80,199 junction cells. In ~3,800 pairs <em>neither</em> side had been cut.</li>
+<li>Not bikes-specific: blocks are baked per city+network and only <code>nyc:streets</code> has a bake, so every NYC streets map shares the same polygons. The vote model was never affected — <code>edge_blocks_streets.npy</code> maps each edge to exactly one block; the overlap was purely visual.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Diagnosis only in this section — the scan lives at <code>scratchpad/diag_junction_overlaps.py</code> (session scratch; parameterized by <code>CITY</code>, streams the geojson, STRtree pairwise intersection areas, bisector-side classification).</li></ul>
+      
+    </section>
+    
+
+    <section class="card" id="fix">
+      <div class="tag">Pipeline · unconditional trim</div>
+      <h2>2 · Cuts apply unconditionally; stranded membership is re-homed, not protected</h2>
+      <h3>Symptom</h3>
+      <p>The veto protected the 100% edge∩polygon audit by refusing cuts — geometry was distorted to preserve membership, exactly opposite to the builder's own “membership follows the final geometry” rule used for corridor edges eaten by junction cells.</p>
+      <h3>Root cause</h3>
+      <ul><li>The veto predates the corridor-edge reassignment pass. Junction-vs-junction was the one place where membership still overruled geometry.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Unconditional bisector cuts</strong>: where two junction cells overlap by ≥ 1 m², each is cut at the perpendicular bisector of the two clusters' member centroids — no member/edge veto. A cell left with &lt; 1 m² on its own side of a bisector is geometrically one intersection with that neighbour and is <strong>absorbed</strong> into it (members, captured edges, geometry). Absorption grows the survivor, so the trim sweeps to a fixpoint (≤ 4 processing sweeps + a measure-only sweep; 2 suffice in practice).</li>
+<li><strong>Stranded-edge re-home</strong> (new pass, after corridor geometry exists): a captured edge left outside its now-smaller cell moves to the cell or corridor containing its midpoint, falling back to any cell the line still touches — the same membership-follows-geometry rule corridor edges already used. 4,299 edges re-homed on the shipped NYC bake.</li>
+<li><strong>Clipped tube grafts</strong>: an edge NO polygon holds gets its tube grafted back onto its own cell, clipped against neighbour cells (safe — no cell touches the line, else it would have re-homed), so a graft cannot re-stack junctions. 60 grafts on NYC; the residual overlap count is re-measured post-graft and stamped into the meta.</li>
+<li>Meta gains <code>cells_absorbed</code>, <code>residual_overlap_pairs</code>, <code>junction_edges_rehomed</code>, <code>junction_tube_grafts</code>.</li>
+<li>Results: test-cp — 869 cuts, 92 re-homed, 2 grafts, <strong>0 overlapping pairs</strong>, audit 100%/100%. NYC (against the serving image's graph, etag <code>b0ca56f8…</code>) — 45k+ cuts, <strong>residual_overlap_pairs 0</strong>, audit 100% mapped / 100% edge∩polygon, independently confirmed by the geojson scan.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details>
+          <summary><span class="fname">server/streetscape_blocks/build_blocks_graph_first.py</span>
+            <span class="stat"><span class="d-add">+147</span> / <span class="d-del">-40</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">blocks pipeline · THE builder</span>
+        <span class="ctx-sum">one pass: topological grouping → polygons from the groups → baked mapping</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_blocks_graph_first.py</span>
+        <span class="ctx-sum">~700 LOC — clusters, grouping, fixpoint, geometry, audit, emit</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Docstring + imports</span><span class="ol-sum">stage-4 description rewritten; STATION_NETWORKS/load_station_graph imported</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Graph load</span><span class="ol-sum">array-native CityGraph: node_coords/edge_ends + provider re-read for name/class</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">1 · junction clusters</span><span class="ol-sum">deg≥3 union-find within 18m (unchanged)</span></li><li class="dim"><span class="ol-label">2 · edge grouping (total)</span><span class="ol-sum">same-cluster · ≤30m crosswalk stubs · corridors (unchanged)</span></li><li class="dim"><span class="ol-label">3 · degeneracy fixpoint</span><span class="ol-sum">A/V1/V2/B rules (unchanged)</span></li><li class="changed"><span class="ol-label">4 · geometry — Voronoi trim</span><span class="ol-sum">UNCONDITIONAL cuts · absorb-on-sliver · sweep to fixpoint · compaction</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">4 · geometry — corridor tubes</span><span class="ol-sum">minus junction cells; corridor-edge reassignment (unchanged)</span></li><li class="changed"><span class="ol-label">4 · geometry — stranded re-home</span><span class="ol-sum">NEW pass: cell/corridor by midpoint → line-touch → clipped tube graft</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">5 · emit + meta</span><span class="ol-sum">cells_absorbed / residual_overlap_pairs / junction_edges_rehomed / junction_tube_grafts</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">6 · audit</span><span class="ol-sum">100% mapped + 100% edge∩polygon (unchanged, still passes)</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>graph load — g.node_coords/g.edge_ends + provider.get_graph_for_bbox for rclass/names (etag-order contract)</li><li>absorb(i, j) — fold a sliver cell&#x27;s members/edges/geometry into its neighbour</li><li>trim loop — unconditional cut at the member-centroid bisector; ≤4 sweeps + measure-only sweep</li><li>re-home pass — stranded captured edges → midpoint cell/corridor → line-touch cell → clipped graft</li><li>post-graft residual re-measure — meta reflects the shipped polygons</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_blocks_graph_first.py b/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-meta">index 30874fc..2b8930d 100644</span>
+<span class="d-meta">--- a/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-hunk">@@ -32,12 +32,16 @@ edge∩polygon overlap hold by construction:</span>
+<span class="d-ctx">   <span class="s-num">4</span>. <span class="s-type">GEOMETRY</span> <span class="s-type">FROM</span> <span class="s-type">MEMBERSHIP</span>: a junction cell <span class="s-kw">is</span> the <span class="s-type">CONVEX</span> <span class="s-type">HULL</span> of its</span>
+<span class="d-ctx">      member <span class="s-fn">nodes</span> (⊕ pad) unioned <span class="s-kw">with</span> its captured edges<span class="s-str">&#x27; tubes — a compact</span></span>
+<span class="d-ctx">      intersection footprint, <span class="s-kw">not</span> a bulbous disc union — then bisector-trimmed</span>
+<span class="d-del">-     (<span class="s-type">Voronoi</span>-style) against overlapping neighbour cells, skipping any cut</span>
+<span class="d-del">-     that would evict a member node <span class="s-kw">or</span> detach a captured edge; a corridor <span class="s-kw">is</span></span>
+<span class="d-del">-     the union of its member-edge <span class="s-fn">tubes</span> (per-<span class="s-kw">class</span> half-width) minus the</span>
+<span class="d-del">-     junction cells, so corridor-vs-junction stays <span class="s-fn">disjoint</span> (junctions win).</span>
+<span class="d-del">-     <span class="s-type">A</span> corridor edge left entirely inside junction cells <span class="s-kw">is</span> <span class="s-type">REASSIGNED</span> to the</span>
+<span class="d-del">-     cell containing its midpoint — membership follows the final geometry, so</span>
+<span class="d-add">+     (<span class="s-type">Voronoi</span>-style) against overlapping neighbour cells <span class="s-type">UNCONDITIONALLY</span>, so</span>
+<span class="d-add">+     abutting junctions get a straight shared boundary instead of stacked</span>
+<span class="d-add">+     blobs; a cell left <span class="s-kw">with</span> &lt; <span class="s-num">1</span> m² on its own side of a bisector <span class="s-kw">is</span></span>
+<span class="d-add">+     geometrically one intersection <span class="s-kw">with</span> that neighbour <span class="s-kw">and</span> <span class="s-kw">is</span> <span class="s-type">ABSORBED</span> into</span>
+<span class="d-add">+     it. <span class="s-type">A</span> corridor <span class="s-kw">is</span> the union of its member-edge <span class="s-fn">tubes</span> (per-<span class="s-kw">class</span></span>
+<span class="d-add">+     half-width) minus the junction cells, so corridor-vs-junction stays</span>
+<span class="d-add">+     <span class="s-fn">disjoint</span> (junctions win). <span class="s-type">Membership</span> follows the final geometry: a</span>
+<span class="d-add">+     corridor edge left entirely inside junction cells <span class="s-kw">is</span> <span class="s-type">REASSIGNED</span> to the</span>
+<span class="d-add">+     cell containing its midpoint, <span class="s-kw">and</span> a captured edge a cut stranded outside</span>
+<span class="d-add">+     its own cell <span class="s-kw">is</span> <span class="s-type">RE</span>-<span class="s-type">HOMED</span> to the cell <span class="s-kw">or</span> corridor that holds it now — so</span>
+<span class="d-ctx">      edge∩polygon overlap <span class="s-kw">is</span> total.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-fn">Outputs</span> (same contract the server + tippecanoe already consume):</span>
+<span class="d-hunk">@@ -70,7 +74,7 @@ from shapely.geometry import Polygon, mapping  # noqa: E402</span>
+<span class="d-ctx"> <span class="s-kw">from</span> scipy.spatial <span class="s-kw">import</span> cKDTree  <span class="s-com"># noqa: E402</span></span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-kw">from</span> cities <span class="s-kw">import</span> <span class="s-type">CITIES</span>  <span class="s-com"># noqa: E402</span></span>
+<span class="d-del">-<span class="s-kw">from</span> graph_registry <span class="s-kw">import</span> <span class="s-type">CityGraph</span>  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+<span class="s-kw">from</span> graph_registry <span class="s-kw">import</span> <span class="s-type">CityGraph</span>, <span class="s-type">STATION_NETWORKS</span>, load_station_graph  <span class="s-com"># noqa: E402</span></span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-type">CITY</span> = os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;CITY&quot;</span>, <span class="s-str">&quot;nyc&quot;</span>)</span>
+<span class="d-ctx"> <span class="s-type">NETWORK</span> = os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;NETWORK&quot;</span>, <span class="s-str">&quot;streets&quot;</span>)</span>
+<span class="d-hunk">@@ -172,11 +176,22 @@ def main():</span>
+<span class="d-ctx">     city = <span class="s-type">CITIES</span>[<span class="s-type">CITY</span>]</span>
+<span class="d-ctx">     g = <span class="s-fn">CityGraph</span>(city, redis_client=<span class="s-lit">None</span>, network=<span class="s-type">NETWORK</span>)</span>
+<span class="d-ctx">     g.<span class="s-fn">ensure_loaded</span>()</span>
+<span class="d-del">-    nodes = np.<span class="s-fn">asarray</span>(g.nodes, dtype=np.float64)          <span class="s-com"># [N,2] = (lat, lon)</span></span>
+<span class="d-add">+    nodes = np.<span class="s-fn">asarray</span>(g.node_coords, dtype=np.float64)    <span class="s-com"># [N,2] = (lat, lon)</span></span>
+<span class="d-ctx">     n_nodes = <span class="s-fn">len</span>(nodes)</span>
+<span class="d-del">-    ends = np.<span class="s-fn">array</span>([(e[<span class="s-num">0</span>], e[<span class="s-num">1</span>]) <span class="s-kw">for</span> e <span class="s-kw">in</span> g.edges], dtype=np.int64)</span>
+<span class="d-del">-    rclass = np.<span class="s-fn">array</span>([<span class="s-fn">str</span>(e[<span class="s-num">3</span>]) <span class="s-kw">if</span> <span class="s-fn">len</span>(e) &gt; <span class="s-num">3</span> <span class="s-kw">else</span> <span class="s-str">&quot;&quot;</span> <span class="s-kw">for</span> e <span class="s-kw">in</span> g.edges])</span>
+<span class="d-del">-    names = [e[<span class="s-num">2</span>] <span class="s-kw">if</span> <span class="s-fn">len</span>(e) &gt; <span class="s-num">2</span> <span class="s-kw">else</span> <span class="s-lit">None</span> <span class="s-kw">for</span> e <span class="s-kw">in</span> g.edges]</span>
+<span class="d-add">+    ends = np.<span class="s-fn">asarray</span>(g.edge_ends, dtype=np.int64)         <span class="s-com"># [E,2] = (u, v)</span></span>
+<span class="d-add">+    <span class="s-com"># Array-native CityGraph drops per-edge name/highway at load; pull them</span></span>
+<span class="d-add">+    <span class="s-com"># from the same provider output the topology (and its etag) is built from,</span></span>
+<span class="d-add">+    <span class="s-com"># so the edge order here IS the etag contract&#x27;s order.</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-type">NETWORK</span> <span class="s-kw">in</span> <span class="s-type">STATION_NETWORKS</span>:</span>
+<span class="d-add">+        data = <span class="s-fn">load_station_graph</span>(<span class="s-type">NETWORK</span>)</span>
+<span class="d-add">+    <span class="s-kw">else</span>:</span>
+<span class="d-add">+        data = g.provider.<span class="s-fn">get_graph_for_bbox</span>(*city.bbox)</span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-fn">len</span>(data[<span class="s-str">&quot;edges&quot;</span>]) != <span class="s-fn">len</span>(ends):</span>
+<span class="d-add">+        <span class="s-kw">raise</span> <span class="s-fn">RuntimeError</span>(<span class="s-str">f&quot;provider edges ({len(data[&#x27;edges&#x27;])}) != loaded &quot;</span></span>
+<span class="d-add">+                           <span class="s-str">f&quot;topology edges ({len(ends)})&quot;</span>)</span>
+<span class="d-add">+    rclass = np.<span class="s-fn">array</span>([<span class="s-fn">str</span>(e[<span class="s-num">3</span>]) <span class="s-kw">if</span> <span class="s-fn">len</span>(e) &gt; <span class="s-num">3</span> <span class="s-kw">else</span> <span class="s-str">&quot;&quot;</span> <span class="s-kw">for</span> e <span class="s-kw">in</span> data[<span class="s-str">&quot;edges&quot;</span>]])</span>
+<span class="d-add">+    names = [e[<span class="s-num">2</span>] <span class="s-kw">if</span> <span class="s-fn">len</span>(e) &gt; <span class="s-num">2</span> <span class="s-kw">else</span> <span class="s-lit">None</span> <span class="s-kw">for</span> e <span class="s-kw">in</span> data[<span class="s-str">&quot;edges&quot;</span>]]</span>
+<span class="d-add">+    <span class="s-kw">del</span> data</span>
+<span class="d-ctx">     n_edges = <span class="s-fn">len</span>(ends)</span>
+<span class="d-ctx">     not_self = ends[:, <span class="s-num">0</span>] != ends[:, <span class="s-num">1</span>]</span>
+<span class="d-ctx">     <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] {CITY}:{NETWORK} — {n_nodes} nodes, {n_edges} edges &quot;</span></span>
+<span class="d-hunk">@@ -430,9 +445,16 @@ def main():</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-com"># Voronoi trim: where two cells overlap, cut each at the perpendicular</span></span>
+<span class="d-ctx">     <span class="s-com"># bisector of the two clusters&#x27; member centroids — abutting junctions get</span></span>
+<span class="d-del">-    <span class="s-com"># a straight shared boundary instead of stacked blobs. A cut that would</span></span>
+<span class="d-del">-    <span class="s-com"># evict a member node or detach a captured edge is skipped: the audit</span></span>
+<span class="d-del">-    <span class="s-com"># invariants (every member touches its polygon) win over aesthetics.</span></span>
+<span class="d-add">+    <span class="s-com"># a straight shared boundary instead of stacked blobs. Cuts are</span></span>
+<span class="d-add">+    <span class="s-com"># UNCONDITIONAL: a captured edge a cut strands outside its cell is</span></span>
+<span class="d-add">+    <span class="s-com"># re-homed once corridor geometry exists (membership follows the final</span></span>
+<span class="d-add">+    <span class="s-com"># geometry, same as the corridor-edge reassignment below). The old veto</span></span>
+<span class="d-add">+    <span class="s-com"># (&quot;skip a cut that would evict a member node / detach a captured edge&quot;)</span></span>
+<span class="d-add">+    <span class="s-com"># shipped ~4.9k visibly stacked junction pairs on nyc — big multi-node</span></span>
+<span class="d-add">+    <span class="s-com"># intersections always had some captured stub past the bisector. A cell</span></span>
+<span class="d-add">+    <span class="s-com"># left with &lt; 1 m² on its own side of a bisector IS its neighbour&#x27;s</span></span>
+<span class="d-add">+    <span class="s-com"># intersection and is absorbed into it; absorption grows the survivor,</span></span>
+<span class="d-add">+    <span class="s-com"># so sweep to a fixpoint (2 sweeps in practice, last sweep measure-only).</span></span>
+<span class="d-ctx">     <span class="s-kw">def</span> <span class="s-fn">halfplane</span>(c, nb, span=<span class="s-num">200.0</span>):</span>
+<span class="d-ctx">         <span class="s-str">&quot;&quot;&quot;Rectangle covering c&#x27;s side of the perpendicular bisector toward nb.&quot;&quot;&quot;</span></span>
+<span class="d-ctx">         d = <span class="s-fn">float</span>(np.<span class="s-fn">hypot</span>(*(nb - c)))</span>
+<span class="d-hunk">@@ -446,30 +468,56 @@ def main():</span>
+<span class="d-ctx">                         m + span * v - <span class="s-num">2</span> * span * u])</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     cells_trimmed = <span class="s-num">0</span></span>
+<span class="d-del">-    <span class="s-kw">if</span> <span class="s-fn">len</span>(cells) &gt; <span class="s-num">1</span>:</span>
+<span class="d-del">-        pre_tree = <span class="s-fn">STRtree</span>(cells)</span>
+<span class="d-del">-        qi, qj = pre_tree.<span class="s-fn">query</span>(np.<span class="s-fn">array</span>(cells, dtype=object),</span>
+<span class="d-del">-                                predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-del">-        <span class="s-kw">for</span> a, b <span class="s-kw">in</span> <span class="s-fn">zip</span>(qi, qj):</span>
+<span class="d-del">-            <span class="s-kw">if</span> a &gt;= b:</span>
+<span class="d-del">-                <span class="s-kw">continue</span></span>
+<span class="d-del">-            <span class="s-kw">for</span> i, j <span class="s-kw">in</span> ((<span class="s-fn">int</span>(a), <span class="s-fn">int</span>(b)), (<span class="s-fn">int</span>(b), <span class="s-fn">int</span>(a))):</span>
+<span class="d-add">+    cells_absorbed = <span class="s-num">0</span></span>
+<span class="d-add">+    residual_pairs = <span class="s-num">0</span></span>
+<span class="d-add">+    cell_alive = [<span class="s-lit">True</span>] * <span class="s-fn">len</span>(cells)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">absorb</span>(i: int, j: int):</span>
+<span class="d-add">+        <span class="s-str">&quot;&quot;&quot;Fold cell i (members, captured edges, geometry) into cell j.&quot;&quot;&quot;</span></span>
+<span class="d-add">+        <span class="s-kw">nonlocal</span> cells_absorbed</span>
+<span class="d-add">+        ki, kj = live_cl[i], live_cl[j]</span>
+<span class="d-add">+        edge_cluster[edge_cluster == ki] = kj</span>
+<span class="d-add">+        node_cluster[cl_members[ki]] = kj</span>
+<span class="d-add">+        cl_members[kj] = np.<span class="s-fn">concatenate</span>([cl_members[kj], cl_members[ki]])</span>
+<span class="d-add">+        cl_members[ki] = cl_members[ki][:<span class="s-num">0</span>]</span>
+<span class="d-add">+        cells[j] = <span class="s-fn">union_all</span>([cells[j], cells[i]])</span>
+<span class="d-add">+        cell_ctr[j] = node_xy[cl_members[kj]].<span class="s-fn">mean</span>(axis=<span class="s-num">0</span>)</span>
+<span class="d-add">+        cell_alive[i] = <span class="s-lit">False</span></span>
+<span class="d-add">+        cells_absorbed += <span class="s-num">1</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">for</span> sweep <span class="s-kw">in</span> <span class="s-fn">range</span>(<span class="s-num">5</span>):</span>
+<span class="d-add">+        idxs = [i <span class="s-kw">for</span> i <span class="s-kw">in</span> <span class="s-fn">range</span>(<span class="s-fn">len</span>(cells)) <span class="s-kw">if</span> cell_alive[i]]</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-fn">len</span>(idxs) &lt; <span class="s-num">2</span>:</span>
+<span class="d-add">+            <span class="s-kw">break</span></span>
+<span class="d-add">+        alive_geoms = np.<span class="s-fn">array</span>([cells[i] <span class="s-kw">for</span> i <span class="s-kw">in</span> idxs], dtype=object)</span>
+<span class="d-add">+        tree = <span class="s-fn">STRtree</span>(<span class="s-fn">list</span>(alive_geoms))</span>
+<span class="d-add">+        qi, qj = tree.<span class="s-fn">query</span>(alive_geoms, predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-add">+        pairs = [(idxs[<span class="s-fn">int</span>(a)], idxs[<span class="s-fn">int</span>(b)]) <span class="s-kw">for</span> a, b <span class="s-kw">in</span> <span class="s-fn">zip</span>(qi, qj)</span>
+<span class="d-add">+                 <span class="s-kw">if</span> a &lt; b <span class="s-kw">and</span> cells[idxs[<span class="s-fn">int</span>(a)]].<span class="s-fn">intersection</span>(</span>
+<span class="d-add">+                     cells[idxs[<span class="s-fn">int</span>(b)]]).area &gt;= <span class="s-num">1.0</span>]</span>
+<span class="d-add">+        residual_pairs = <span class="s-fn">len</span>(pairs)</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-kw">not</span> pairs <span class="s-kw">or</span> sweep == <span class="s-num">4</span>:</span>
+<span class="d-add">+            <span class="s-kw">break</span></span>
+<span class="d-add">+        <span class="s-kw">for</span> a, b <span class="s-kw">in</span> pairs:</span>
+<span class="d-add">+            <span class="s-kw">for</span> i, j <span class="s-kw">in</span> ((a, b), (b, a)):</span>
+<span class="d-add">+                <span class="s-kw">if</span> <span class="s-kw">not</span> (cell_alive[i] <span class="s-kw">and</span> cell_alive[j]):</span>
+<span class="d-add">+                    <span class="s-kw">break</span></span>
+<span class="d-ctx">                 hp = <span class="s-fn">halfplane</span>(cell_ctr[i], cell_ctr[j])</span>
+<span class="d-del">-                <span class="s-kw">if</span> hp <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-del">-                    <span class="s-kw">continue</span></span>
+<span class="d-add">+                <span class="s-kw">if</span> hp <span class="s-kw">is</span> <span class="s-lit">None</span>:                       <span class="s-com"># coincident centroids</span></span>
+<span class="d-add">+                    <span class="s-fn">absorb</span>(i, j)</span>
+<span class="d-add">+                    <span class="s-kw">break</span></span>
+<span class="d-ctx">                 cut = cells[i].<span class="s-fn">intersection</span>(hp)</span>
+<span class="d-del">-                <span class="s-kw">if</span> cut.is_empty <span class="s-kw">or</span> cut.area &lt; <span class="s-num">1.0</span>:</span>
+<span class="d-del">-                    <span class="s-kw">continue</span></span>
+<span class="d-del">-                k = live_cl[i]</span>
+<span class="d-del">-                <span class="s-kw">if</span> <span class="s-kw">not</span> shapely.<span class="s-fn">dwithin</span>(</span>
+<span class="d-del">-                        shapely.<span class="s-fn">points</span>(node_xy[cl_members[k]]), cut, <span class="s-num">0.01</span>).<span class="s-fn">all</span>():</span>
+<span class="d-del">-                    <span class="s-kw">continue</span></span>
+<span class="d-del">-                captured = np.<span class="s-fn">where</span>(edge_cluster == k)[<span class="s-num">0</span>]</span>
+<span class="d-del">-                <span class="s-kw">if</span> <span class="s-fn">len</span>(captured) <span class="s-kw">and</span> <span class="s-fn">any</span>(cut.<span class="s-fn">distance</span>(l) &gt; <span class="s-num">1e-6</span></span>
+<span class="d-del">-                                         <span class="s-kw">for</span> l <span class="s-kw">in</span> <span class="s-fn">edge_lines</span>(captured)):</span>
+<span class="d-del">-                    <span class="s-kw">continue</span></span>
+<span class="d-del">-                cells[i] = cut</span>
+<span class="d-del">-                cells_trimmed += <span class="s-num">1</span></span>
+<span class="d-add">+                <span class="s-kw">if</span> cut.is_empty <span class="s-kw">or</span> cut.area &lt; <span class="s-num">1.0</span>:   <span class="s-com"># i lies on j&#x27;s side</span></span>
+<span class="d-add">+                    <span class="s-fn">absorb</span>(i, j)</span>
+<span class="d-add">+                    <span class="s-kw">break</span></span>
+<span class="d-add">+                <span class="s-kw">if</span> cut.area &lt; cells[i].area - <span class="s-num">1e-6</span>:</span>
+<span class="d-add">+                    cells[i] = cut</span>
+<span class="d-add">+                    cells_trimmed += <span class="s-num">1</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> cells_absorbed:</span>
+<span class="d-add">+        keep = [i <span class="s-kw">for</span> i <span class="s-kw">in</span> <span class="s-fn">range</span>(<span class="s-fn">len</span>(cells)) <span class="s-kw">if</span> cell_alive[i]]</span>
+<span class="d-add">+        cells = [cells[i] <span class="s-kw">for</span> i <span class="s-kw">in</span> keep]</span>
+<span class="d-add">+        live_cl = [live_cl[i] <span class="s-kw">for</span> i <span class="s-kw">in</span> keep]</span>
+<span class="d-add">+        cell_ctr = [cell_ctr[i] <span class="s-kw">for</span> i <span class="s-kw">in</span> keep]</span>
+<span class="d-ctx">     cell_tree = <span class="s-fn">STRtree</span>(cells) <span class="s-kw">if</span> cells <span class="s-kw">else</span> <span class="s-lit">None</span></span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-com"># Corridor tubes minus junction cells (junctions win where they meet, so</span></span>
+<span class="d-hunk">@@ -509,11 +557,66 @@ def main():</span>
+<span class="d-ctx">         corridors[c] = stay</span>
+<span class="d-ctx">         <span class="s-kw">if</span> <span class="s-kw">not</span> stay <span class="s-kw">and</span> c <span class="s-kw">in</span> corr_polys:</span>
+<span class="d-ctx">             <span class="s-kw">del</span> corr_polys[c]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># Junction membership follows the final geometry too: an unconditional</span></span>
+<span class="d-add">+    <span class="s-com"># bisector cut can strand a captured edge outside its own (now smaller)</span></span>
+<span class="d-add">+    <span class="s-com"># cell. Re-home each stranded edge to the polygon that actually holds it</span></span>
+<span class="d-add">+    <span class="s-com"># now — the cell or corridor containing its midpoint, falling back to any</span></span>
+<span class="d-add">+    <span class="s-com"># cell the line still touches. An edge NO polygon holds gets its tube</span></span>
+<span class="d-add">+    <span class="s-com"># grafted back onto its own cell, clipped against neighbour cells (safe:</span></span>
+<span class="d-add">+    <span class="s-com"># no cell touches the line, else it would have been re-homed) so the</span></span>
+<span class="d-add">+    <span class="s-com"># graft cannot re-stack junction cells; counted (near-zero in practice).</span></span>
+<span class="d-add">+    rehomed = <span class="s-num">0</span></span>
+<span class="d-add">+    grafts = <span class="s-num">0</span></span>
+<span class="d-add">+    corr_ids = <span class="s-fn">list</span>(corr_polys.<span class="s-fn">keys</span>())</span>
+<span class="d-add">+    corr_tree = <span class="s-fn">STRtree</span>([corr_polys[c] <span class="s-kw">for</span> c <span class="s-kw">in</span> corr_ids]) <span class="s-kw">if</span> corr_ids <span class="s-kw">else</span> <span class="s-lit">None</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> idx, k <span class="s-kw">in</span> <span class="s-fn">enumerate</span>(live_cl):</span>
+<span class="d-add">+        <span class="s-kw">for</span> eid <span class="s-kw">in</span> np.<span class="s-fn">where</span>(edge_cluster == k)[<span class="s-num">0</span>]:</span>
+<span class="d-add">+            line = <span class="s-fn">LineString</span>([node_xy[ends[eid, <span class="s-num">0</span>]], node_xy[ends[eid, <span class="s-num">1</span>]]])</span>
+<span class="d-add">+            <span class="s-kw">if</span> line.<span class="s-fn">distance</span>(cells[idx]) &lt;= <span class="s-num">1e-6</span>:</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            mid = shapely.<span class="s-fn">points</span>((node_xy[ends[eid, <span class="s-num">0</span>]] + node_xy[ends[eid, <span class="s-num">1</span>]]) / <span class="s-num">2.0</span>)</span>
+<span class="d-add">+            hit = cell_tree.<span class="s-fn">query</span>(mid, predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(hit):</span>
+<span class="d-add">+                edge_cluster[eid] = live_cl[<span class="s-fn">int</span>(hit[<span class="s-num">0</span>])]</span>
+<span class="d-add">+                rehomed += <span class="s-num">1</span></span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            hit = corr_tree.<span class="s-fn">query</span>(mid, predicate=<span class="s-str">&quot;intersects&quot;</span>) <span class="s-kw">if</span> corr_tree <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span> <span class="s-kw">else</span> []</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(hit):</span>
+<span class="d-add">+                edge_cluster[eid] = -<span class="s-num">1</span></span>
+<span class="d-add">+                corridors[corr_ids[<span class="s-fn">int</span>(hit[<span class="s-num">0</span>])]].<span class="s-fn">append</span>(<span class="s-fn">int</span>(eid))</span>
+<span class="d-add">+                rehomed += <span class="s-num">1</span></span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            hit = cell_tree.<span class="s-fn">query</span>(line, predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(hit):</span>
+<span class="d-add">+                edge_cluster[eid] = live_cl[<span class="s-fn">int</span>(hit[<span class="s-num">0</span>])]</span>
+<span class="d-add">+                rehomed += <span class="s-num">1</span></span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            patch = <span class="s-fn">tube_of</span>([eid])</span>
+<span class="d-add">+            near = [<span class="s-fn">int</span>(n) <span class="s-kw">for</span> n <span class="s-kw">in</span> cell_tree.<span class="s-fn">query</span>(patch, predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-add">+                    <span class="s-kw">if</span> <span class="s-fn">int</span>(n) != idx]</span>
+<span class="d-add">+            <span class="s-kw">if</span> near:</span>
+<span class="d-add">+                patch = shapely.<span class="s-fn">difference</span>(</span>
+<span class="d-add">+                    patch, <span class="s-fn">union_all</span>([cells[n] <span class="s-kw">for</span> n <span class="s-kw">in</span> near]))</span>
+<span class="d-add">+            cells[idx] = <span class="s-fn">union_all</span>([cells[idx], patch])</span>
+<span class="d-add">+            grafts += <span class="s-num">1</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> grafts:</span>
+<span class="d-add">+        <span class="s-com"># Grafts changed geometry after the trim&#x27;s residual measurement —</span></span>
+<span class="d-add">+        <span class="s-com"># re-measure so the stamped meta reflects the shipped polygons.</span></span>
+<span class="d-add">+        tree = <span class="s-fn">STRtree</span>(cells)</span>
+<span class="d-add">+        qi, qj = tree.<span class="s-fn">query</span>(np.<span class="s-fn">array</span>(cells, dtype=object),</span>
+<span class="d-add">+                            predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-add">+        residual_pairs = <span class="s-fn">sum</span>(</span>
+<span class="d-add">+            <span class="s-num">1</span> <span class="s-kw">for</span> a, b <span class="s-kw">in</span> <span class="s-fn">zip</span>(qi, qj)</span>
+<span class="d-add">+            <span class="s-kw">if</span> a &lt; b <span class="s-kw">and</span> cells[<span class="s-fn">int</span>(a)].<span class="s-fn">intersection</span>(cells[<span class="s-fn">int</span>(b)]).area &gt;= <span class="s-num">1.0</span>)</span>
+<span class="d-ctx">     <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] geometry: {len(corr_polys)} corridor tubes, {len(cells)} &quot;</span></span>
+<span class="d-del">-          <span class="s-str">f&quot;junction cells ({cells_trimmed} bisector-trimmed; &quot;</span></span>
+<span class="d-del">-          <span class="s-str">f&quot;{empty_junctions} edge-less clusters skipped — corridor tubes &quot;</span></span>
+<span class="d-del">-          <span class="s-str">f&quot;cover those forks); {reassigned} intersection-interior edges &quot;</span></span>
+<span class="d-del">-          <span class="s-str">f&quot;moved to their junction cell ({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+          <span class="s-str">f&quot;junction cells ({cells_trimmed} bisector cuts, {cells_absorbed} &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;absorbed into a neighbour, {residual_pairs} overlapping pairs &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;left; {empty_junctions} edge-less clusters skipped — corridor &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;tubes cover those forks); {reassigned} intersection-interior &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;edges moved to their junction cell, {rehomed} stranded junction &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;edges re-homed, {grafts} tube grafts ({time.time()-t0:.0f}s)&quot;</span>,</span>
+<span class="d-add">+          flush=<span class="s-lit">True</span>)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-com"># ── 5. Emit: dense block ids, geojson + npy + meta ─────────────────────</span></span>
+<span class="d-ctx">     <span class="s-kw">def</span> <span class="s-fn">to_ll</span>(geom):</span>
+<span class="d-hunk">@@ -603,7 +706,11 @@ def main():</span>
+<span class="d-ctx">         <span class="s-str">&quot;parallel_corridors_merged&quot;</span>: corridors_merged,</span>
+<span class="d-ctx">         <span class="s-str">&quot;equivalent_clusters_merged&quot;</span>: clusters_merged,</span>
+<span class="d-ctx">         <span class="s-str">&quot;cells_bisector_trimmed&quot;</span>: cells_trimmed,</span>
+<span class="d-add">+        <span class="s-str">&quot;cells_absorbed&quot;</span>: cells_absorbed,</span>
+<span class="d-add">+        <span class="s-str">&quot;residual_overlap_pairs&quot;</span>: residual_pairs,</span>
+<span class="d-ctx">         <span class="s-str">&quot;edges_reassigned_to_cells&quot;</span>: reassigned,</span>
+<span class="d-add">+        <span class="s-str">&quot;junction_edges_rehomed&quot;</span>: rehomed,</span>
+<span class="d-add">+        <span class="s-str">&quot;junction_tube_grafts&quot;</span>: grafts,</span>
+<span class="d-ctx">         <span class="s-str">&quot;empty_junctions_skipped&quot;</span>: empty_junctions,</span>
+<span class="d-ctx">         <span class="s-str">&quot;edges_overlap_ok&quot;</span>: overlapping, <span class="s-str">&quot;edges_overlap_checked&quot;</span>: checked,</span>
+<span class="d-ctx">         <span class="s-str">&quot;node_capture_len_m&quot;</span>: <span class="s-type">NODE_CAPTURE_LEN_M</span>, <span class="s-str">&quot;stub_max_m&quot;</span>: <span class="s-type">STUB_MAX_M</span>,</span></pre>
+        </details>
+        
+    </section>
+    
+
+    <section class="card" id="api">
+      <div class="tag">Pipeline · array-native CityGraph</div>
+      <h2>3 · The builder works again on the compact-arrays graph runtime</h2>
+      <h3>Symptom</h3>
+      <p>The builder crashed on load — <code>AttributeError: 'CityGraph' object has no attribute 'nodes'</code> — for ANY city, before any block logic ran.</p>
+      <h3>Root cause</h3>
+      <ul><li>The compact-arrays refactor (<code>9962396</code>) made CityGraph array-native (<code>node_coords</code>/<code>edge_ends</code>, per-edge name/highway no longer retained) and the builder was not adapted — a pre-existing break at HEAD, surfaced by this re-bake.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Nodes/edges come from <code>g.node_coords</code>/<code>g.edge_ends</code>; per-edge road-class + name are re-read from <code>g.provider.get_graph_for_bbox(*city.bbox)</code> — the exact output the topology (and its etag) is built from, so edge order is the etag contract's order (length-mismatch guard included). Station networks keep working via <code>load_station_graph</code>.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details>
+          <summary><span class="fname">server/streetscape_blocks/build_blocks_graph_first.py</span>
+            <span class="stat"><span class="d-add">+147</span> / <span class="d-del">-40</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">blocks pipeline · THE builder</span>
+        <span class="ctx-sum">one pass: topological grouping → polygons from the groups → baked mapping</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_blocks_graph_first.py</span>
+        <span class="ctx-sum">~700 LOC — clusters, grouping, fixpoint, geometry, audit, emit</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Docstring + imports</span><span class="ol-sum">stage-4 description rewritten; STATION_NETWORKS/load_station_graph imported</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Graph load</span><span class="ol-sum">array-native CityGraph: node_coords/edge_ends + provider re-read for name/class</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">1 · junction clusters</span><span class="ol-sum">deg≥3 union-find within 18m (unchanged)</span></li><li class="dim"><span class="ol-label">2 · edge grouping (total)</span><span class="ol-sum">same-cluster · ≤30m crosswalk stubs · corridors (unchanged)</span></li><li class="dim"><span class="ol-label">3 · degeneracy fixpoint</span><span class="ol-sum">A/V1/V2/B rules (unchanged)</span></li><li class="changed"><span class="ol-label">4 · geometry — Voronoi trim</span><span class="ol-sum">UNCONDITIONAL cuts · absorb-on-sliver · sweep to fixpoint · compaction</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">4 · geometry — corridor tubes</span><span class="ol-sum">minus junction cells; corridor-edge reassignment (unchanged)</span></li><li class="changed"><span class="ol-label">4 · geometry — stranded re-home</span><span class="ol-sum">NEW pass: cell/corridor by midpoint → line-touch → clipped tube graft</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">5 · emit + meta</span><span class="ol-sum">cells_absorbed / residual_overlap_pairs / junction_edges_rehomed / junction_tube_grafts</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">6 · audit</span><span class="ol-sum">100% mapped + 100% edge∩polygon (unchanged, still passes)</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>graph load — g.node_coords/g.edge_ends + provider.get_graph_for_bbox for rclass/names (etag-order contract)</li><li>absorb(i, j) — fold a sliver cell&#x27;s members/edges/geometry into its neighbour</li><li>trim loop — unconditional cut at the member-centroid bisector; ≤4 sweeps + measure-only sweep</li><li>re-home pass — stranded captured edges → midpoint cell/corridor → line-touch cell → clipped graft</li><li>post-graft residual re-measure — meta reflects the shipped polygons</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_blocks_graph_first.py b/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-meta">index 30874fc..2b8930d 100644</span>
+<span class="d-meta">--- a/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-hunk">@@ -32,12 +32,16 @@ edge∩polygon overlap hold by construction:</span>
+<span class="d-ctx">   <span class="s-num">4</span>. <span class="s-type">GEOMETRY</span> <span class="s-type">FROM</span> <span class="s-type">MEMBERSHIP</span>: a junction cell <span class="s-kw">is</span> the <span class="s-type">CONVEX</span> <span class="s-type">HULL</span> of its</span>
+<span class="d-ctx">      member <span class="s-fn">nodes</span> (⊕ pad) unioned <span class="s-kw">with</span> its captured edges<span class="s-str">&#x27; tubes — a compact</span></span>
+<span class="d-ctx">      intersection footprint, <span class="s-kw">not</span> a bulbous disc union — then bisector-trimmed</span>
+<span class="d-del">-     (<span class="s-type">Voronoi</span>-style) against overlapping neighbour cells, skipping any cut</span>
+<span class="d-del">-     that would evict a member node <span class="s-kw">or</span> detach a captured edge; a corridor <span class="s-kw">is</span></span>
+<span class="d-del">-     the union of its member-edge <span class="s-fn">tubes</span> (per-<span class="s-kw">class</span> half-width) minus the</span>
+<span class="d-del">-     junction cells, so corridor-vs-junction stays <span class="s-fn">disjoint</span> (junctions win).</span>
+<span class="d-del">-     <span class="s-type">A</span> corridor edge left entirely inside junction cells <span class="s-kw">is</span> <span class="s-type">REASSIGNED</span> to the</span>
+<span class="d-del">-     cell containing its midpoint — membership follows the final geometry, so</span>
+<span class="d-add">+     (<span class="s-type">Voronoi</span>-style) against overlapping neighbour cells <span class="s-type">UNCONDITIONALLY</span>, so</span>
+<span class="d-add">+     abutting junctions get a straight shared boundary instead of stacked</span>
+<span class="d-add">+     blobs; a cell left <span class="s-kw">with</span> &lt; <span class="s-num">1</span> m² on its own side of a bisector <span class="s-kw">is</span></span>
+<span class="d-add">+     geometrically one intersection <span class="s-kw">with</span> that neighbour <span class="s-kw">and</span> <span class="s-kw">is</span> <span class="s-type">ABSORBED</span> into</span>
+<span class="d-add">+     it. <span class="s-type">A</span> corridor <span class="s-kw">is</span> the union of its member-edge <span class="s-fn">tubes</span> (per-<span class="s-kw">class</span></span>
+<span class="d-add">+     half-width) minus the junction cells, so corridor-vs-junction stays</span>
+<span class="d-add">+     <span class="s-fn">disjoint</span> (junctions win). <span class="s-type">Membership</span> follows the final geometry: a</span>
+<span class="d-add">+     corridor edge left entirely inside junction cells <span class="s-kw">is</span> <span class="s-type">REASSIGNED</span> to the</span>
+<span class="d-add">+     cell containing its midpoint, <span class="s-kw">and</span> a captured edge a cut stranded outside</span>
+<span class="d-add">+     its own cell <span class="s-kw">is</span> <span class="s-type">RE</span>-<span class="s-type">HOMED</span> to the cell <span class="s-kw">or</span> corridor that holds it now — so</span>
+<span class="d-ctx">      edge∩polygon overlap <span class="s-kw">is</span> total.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-fn">Outputs</span> (same contract the server + tippecanoe already consume):</span>
+<span class="d-hunk">@@ -70,7 +74,7 @@ from shapely.geometry import Polygon, mapping  # noqa: E402</span>
+<span class="d-ctx"> <span class="s-kw">from</span> scipy.spatial <span class="s-kw">import</span> cKDTree  <span class="s-com"># noqa: E402</span></span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-kw">from</span> cities <span class="s-kw">import</span> <span class="s-type">CITIES</span>  <span class="s-com"># noqa: E402</span></span>
+<span class="d-del">-<span class="s-kw">from</span> graph_registry <span class="s-kw">import</span> <span class="s-type">CityGraph</span>  <span class="s-com"># noqa: E402</span></span>
+<span class="d-add">+<span class="s-kw">from</span> graph_registry <span class="s-kw">import</span> <span class="s-type">CityGraph</span>, <span class="s-type">STATION_NETWORKS</span>, load_station_graph  <span class="s-com"># noqa: E402</span></span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-type">CITY</span> = os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;CITY&quot;</span>, <span class="s-str">&quot;nyc&quot;</span>)</span>
+<span class="d-ctx"> <span class="s-type">NETWORK</span> = os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;NETWORK&quot;</span>, <span class="s-str">&quot;streets&quot;</span>)</span>
+<span class="d-hunk">@@ -172,11 +176,22 @@ def main():</span>
+<span class="d-ctx">     city = <span class="s-type">CITIES</span>[<span class="s-type">CITY</span>]</span>
+<span class="d-ctx">     g = <span class="s-fn">CityGraph</span>(city, redis_client=<span class="s-lit">None</span>, network=<span class="s-type">NETWORK</span>)</span>
+<span class="d-ctx">     g.<span class="s-fn">ensure_loaded</span>()</span>
+<span class="d-del">-    nodes = np.<span class="s-fn">asarray</span>(g.nodes, dtype=np.float64)          <span class="s-com"># [N,2] = (lat, lon)</span></span>
+<span class="d-add">+    nodes = np.<span class="s-fn">asarray</span>(g.node_coords, dtype=np.float64)    <span class="s-com"># [N,2] = (lat, lon)</span></span>
+<span class="d-ctx">     n_nodes = <span class="s-fn">len</span>(nodes)</span>
+<span class="d-del">-    ends = np.<span class="s-fn">array</span>([(e[<span class="s-num">0</span>], e[<span class="s-num">1</span>]) <span class="s-kw">for</span> e <span class="s-kw">in</span> g.edges], dtype=np.int64)</span>
+<span class="d-del">-    rclass = np.<span class="s-fn">array</span>([<span class="s-fn">str</span>(e[<span class="s-num">3</span>]) <span class="s-kw">if</span> <span class="s-fn">len</span>(e) &gt; <span class="s-num">3</span> <span class="s-kw">else</span> <span class="s-str">&quot;&quot;</span> <span class="s-kw">for</span> e <span class="s-kw">in</span> g.edges])</span>
+<span class="d-del">-    names = [e[<span class="s-num">2</span>] <span class="s-kw">if</span> <span class="s-fn">len</span>(e) &gt; <span class="s-num">2</span> <span class="s-kw">else</span> <span class="s-lit">None</span> <span class="s-kw">for</span> e <span class="s-kw">in</span> g.edges]</span>
+<span class="d-add">+    ends = np.<span class="s-fn">asarray</span>(g.edge_ends, dtype=np.int64)         <span class="s-com"># [E,2] = (u, v)</span></span>
+<span class="d-add">+    <span class="s-com"># Array-native CityGraph drops per-edge name/highway at load; pull them</span></span>
+<span class="d-add">+    <span class="s-com"># from the same provider output the topology (and its etag) is built from,</span></span>
+<span class="d-add">+    <span class="s-com"># so the edge order here IS the etag contract&#x27;s order.</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-type">NETWORK</span> <span class="s-kw">in</span> <span class="s-type">STATION_NETWORKS</span>:</span>
+<span class="d-add">+        data = <span class="s-fn">load_station_graph</span>(<span class="s-type">NETWORK</span>)</span>
+<span class="d-add">+    <span class="s-kw">else</span>:</span>
+<span class="d-add">+        data = g.provider.<span class="s-fn">get_graph_for_bbox</span>(*city.bbox)</span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-fn">len</span>(data[<span class="s-str">&quot;edges&quot;</span>]) != <span class="s-fn">len</span>(ends):</span>
+<span class="d-add">+        <span class="s-kw">raise</span> <span class="s-fn">RuntimeError</span>(<span class="s-str">f&quot;provider edges ({len(data[&#x27;edges&#x27;])}) != loaded &quot;</span></span>
+<span class="d-add">+                           <span class="s-str">f&quot;topology edges ({len(ends)})&quot;</span>)</span>
+<span class="d-add">+    rclass = np.<span class="s-fn">array</span>([<span class="s-fn">str</span>(e[<span class="s-num">3</span>]) <span class="s-kw">if</span> <span class="s-fn">len</span>(e) &gt; <span class="s-num">3</span> <span class="s-kw">else</span> <span class="s-str">&quot;&quot;</span> <span class="s-kw">for</span> e <span class="s-kw">in</span> data[<span class="s-str">&quot;edges&quot;</span>]])</span>
+<span class="d-add">+    names = [e[<span class="s-num">2</span>] <span class="s-kw">if</span> <span class="s-fn">len</span>(e) &gt; <span class="s-num">2</span> <span class="s-kw">else</span> <span class="s-lit">None</span> <span class="s-kw">for</span> e <span class="s-kw">in</span> data[<span class="s-str">&quot;edges&quot;</span>]]</span>
+<span class="d-add">+    <span class="s-kw">del</span> data</span>
+<span class="d-ctx">     n_edges = <span class="s-fn">len</span>(ends)</span>
+<span class="d-ctx">     not_self = ends[:, <span class="s-num">0</span>] != ends[:, <span class="s-num">1</span>]</span>
+<span class="d-ctx">     <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] {CITY}:{NETWORK} — {n_nodes} nodes, {n_edges} edges &quot;</span></span>
+<span class="d-hunk">@@ -430,9 +445,16 @@ def main():</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-com"># Voronoi trim: where two cells overlap, cut each at the perpendicular</span></span>
+<span class="d-ctx">     <span class="s-com"># bisector of the two clusters&#x27; member centroids — abutting junctions get</span></span>
+<span class="d-del">-    <span class="s-com"># a straight shared boundary instead of stacked blobs. A cut that would</span></span>
+<span class="d-del">-    <span class="s-com"># evict a member node or detach a captured edge is skipped: the audit</span></span>
+<span class="d-del">-    <span class="s-com"># invariants (every member touches its polygon) win over aesthetics.</span></span>
+<span class="d-add">+    <span class="s-com"># a straight shared boundary instead of stacked blobs. Cuts are</span></span>
+<span class="d-add">+    <span class="s-com"># UNCONDITIONAL: a captured edge a cut strands outside its cell is</span></span>
+<span class="d-add">+    <span class="s-com"># re-homed once corridor geometry exists (membership follows the final</span></span>
+<span class="d-add">+    <span class="s-com"># geometry, same as the corridor-edge reassignment below). The old veto</span></span>
+<span class="d-add">+    <span class="s-com"># (&quot;skip a cut that would evict a member node / detach a captured edge&quot;)</span></span>
+<span class="d-add">+    <span class="s-com"># shipped ~4.9k visibly stacked junction pairs on nyc — big multi-node</span></span>
+<span class="d-add">+    <span class="s-com"># intersections always had some captured stub past the bisector. A cell</span></span>
+<span class="d-add">+    <span class="s-com"># left with &lt; 1 m² on its own side of a bisector IS its neighbour&#x27;s</span></span>
+<span class="d-add">+    <span class="s-com"># intersection and is absorbed into it; absorption grows the survivor,</span></span>
+<span class="d-add">+    <span class="s-com"># so sweep to a fixpoint (2 sweeps in practice, last sweep measure-only).</span></span>
+<span class="d-ctx">     <span class="s-kw">def</span> <span class="s-fn">halfplane</span>(c, nb, span=<span class="s-num">200.0</span>):</span>
+<span class="d-ctx">         <span class="s-str">&quot;&quot;&quot;Rectangle covering c&#x27;s side of the perpendicular bisector toward nb.&quot;&quot;&quot;</span></span>
+<span class="d-ctx">         d = <span class="s-fn">float</span>(np.<span class="s-fn">hypot</span>(*(nb - c)))</span>
+<span class="d-hunk">@@ -446,30 +468,56 @@ def main():</span>
+<span class="d-ctx">                         m + span * v - <span class="s-num">2</span> * span * u])</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     cells_trimmed = <span class="s-num">0</span></span>
+<span class="d-del">-    <span class="s-kw">if</span> <span class="s-fn">len</span>(cells) &gt; <span class="s-num">1</span>:</span>
+<span class="d-del">-        pre_tree = <span class="s-fn">STRtree</span>(cells)</span>
+<span class="d-del">-        qi, qj = pre_tree.<span class="s-fn">query</span>(np.<span class="s-fn">array</span>(cells, dtype=object),</span>
+<span class="d-del">-                                predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-del">-        <span class="s-kw">for</span> a, b <span class="s-kw">in</span> <span class="s-fn">zip</span>(qi, qj):</span>
+<span class="d-del">-            <span class="s-kw">if</span> a &gt;= b:</span>
+<span class="d-del">-                <span class="s-kw">continue</span></span>
+<span class="d-del">-            <span class="s-kw">for</span> i, j <span class="s-kw">in</span> ((<span class="s-fn">int</span>(a), <span class="s-fn">int</span>(b)), (<span class="s-fn">int</span>(b), <span class="s-fn">int</span>(a))):</span>
+<span class="d-add">+    cells_absorbed = <span class="s-num">0</span></span>
+<span class="d-add">+    residual_pairs = <span class="s-num">0</span></span>
+<span class="d-add">+    cell_alive = [<span class="s-lit">True</span>] * <span class="s-fn">len</span>(cells)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">absorb</span>(i: int, j: int):</span>
+<span class="d-add">+        <span class="s-str">&quot;&quot;&quot;Fold cell i (members, captured edges, geometry) into cell j.&quot;&quot;&quot;</span></span>
+<span class="d-add">+        <span class="s-kw">nonlocal</span> cells_absorbed</span>
+<span class="d-add">+        ki, kj = live_cl[i], live_cl[j]</span>
+<span class="d-add">+        edge_cluster[edge_cluster == ki] = kj</span>
+<span class="d-add">+        node_cluster[cl_members[ki]] = kj</span>
+<span class="d-add">+        cl_members[kj] = np.<span class="s-fn">concatenate</span>([cl_members[kj], cl_members[ki]])</span>
+<span class="d-add">+        cl_members[ki] = cl_members[ki][:<span class="s-num">0</span>]</span>
+<span class="d-add">+        cells[j] = <span class="s-fn">union_all</span>([cells[j], cells[i]])</span>
+<span class="d-add">+        cell_ctr[j] = node_xy[cl_members[kj]].<span class="s-fn">mean</span>(axis=<span class="s-num">0</span>)</span>
+<span class="d-add">+        cell_alive[i] = <span class="s-lit">False</span></span>
+<span class="d-add">+        cells_absorbed += <span class="s-num">1</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">for</span> sweep <span class="s-kw">in</span> <span class="s-fn">range</span>(<span class="s-num">5</span>):</span>
+<span class="d-add">+        idxs = [i <span class="s-kw">for</span> i <span class="s-kw">in</span> <span class="s-fn">range</span>(<span class="s-fn">len</span>(cells)) <span class="s-kw">if</span> cell_alive[i]]</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-fn">len</span>(idxs) &lt; <span class="s-num">2</span>:</span>
+<span class="d-add">+            <span class="s-kw">break</span></span>
+<span class="d-add">+        alive_geoms = np.<span class="s-fn">array</span>([cells[i] <span class="s-kw">for</span> i <span class="s-kw">in</span> idxs], dtype=object)</span>
+<span class="d-add">+        tree = <span class="s-fn">STRtree</span>(<span class="s-fn">list</span>(alive_geoms))</span>
+<span class="d-add">+        qi, qj = tree.<span class="s-fn">query</span>(alive_geoms, predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-add">+        pairs = [(idxs[<span class="s-fn">int</span>(a)], idxs[<span class="s-fn">int</span>(b)]) <span class="s-kw">for</span> a, b <span class="s-kw">in</span> <span class="s-fn">zip</span>(qi, qj)</span>
+<span class="d-add">+                 <span class="s-kw">if</span> a &lt; b <span class="s-kw">and</span> cells[idxs[<span class="s-fn">int</span>(a)]].<span class="s-fn">intersection</span>(</span>
+<span class="d-add">+                     cells[idxs[<span class="s-fn">int</span>(b)]]).area &gt;= <span class="s-num">1.0</span>]</span>
+<span class="d-add">+        residual_pairs = <span class="s-fn">len</span>(pairs)</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-kw">not</span> pairs <span class="s-kw">or</span> sweep == <span class="s-num">4</span>:</span>
+<span class="d-add">+            <span class="s-kw">break</span></span>
+<span class="d-add">+        <span class="s-kw">for</span> a, b <span class="s-kw">in</span> pairs:</span>
+<span class="d-add">+            <span class="s-kw">for</span> i, j <span class="s-kw">in</span> ((a, b), (b, a)):</span>
+<span class="d-add">+                <span class="s-kw">if</span> <span class="s-kw">not</span> (cell_alive[i] <span class="s-kw">and</span> cell_alive[j]):</span>
+<span class="d-add">+                    <span class="s-kw">break</span></span>
+<span class="d-ctx">                 hp = <span class="s-fn">halfplane</span>(cell_ctr[i], cell_ctr[j])</span>
+<span class="d-del">-                <span class="s-kw">if</span> hp <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-del">-                    <span class="s-kw">continue</span></span>
+<span class="d-add">+                <span class="s-kw">if</span> hp <span class="s-kw">is</span> <span class="s-lit">None</span>:                       <span class="s-com"># coincident centroids</span></span>
+<span class="d-add">+                    <span class="s-fn">absorb</span>(i, j)</span>
+<span class="d-add">+                    <span class="s-kw">break</span></span>
+<span class="d-ctx">                 cut = cells[i].<span class="s-fn">intersection</span>(hp)</span>
+<span class="d-del">-                <span class="s-kw">if</span> cut.is_empty <span class="s-kw">or</span> cut.area &lt; <span class="s-num">1.0</span>:</span>
+<span class="d-del">-                    <span class="s-kw">continue</span></span>
+<span class="d-del">-                k = live_cl[i]</span>
+<span class="d-del">-                <span class="s-kw">if</span> <span class="s-kw">not</span> shapely.<span class="s-fn">dwithin</span>(</span>
+<span class="d-del">-                        shapely.<span class="s-fn">points</span>(node_xy[cl_members[k]]), cut, <span class="s-num">0.01</span>).<span class="s-fn">all</span>():</span>
+<span class="d-del">-                    <span class="s-kw">continue</span></span>
+<span class="d-del">-                captured = np.<span class="s-fn">where</span>(edge_cluster == k)[<span class="s-num">0</span>]</span>
+<span class="d-del">-                <span class="s-kw">if</span> <span class="s-fn">len</span>(captured) <span class="s-kw">and</span> <span class="s-fn">any</span>(cut.<span class="s-fn">distance</span>(l) &gt; <span class="s-num">1e-6</span></span>
+<span class="d-del">-                                         <span class="s-kw">for</span> l <span class="s-kw">in</span> <span class="s-fn">edge_lines</span>(captured)):</span>
+<span class="d-del">-                    <span class="s-kw">continue</span></span>
+<span class="d-del">-                cells[i] = cut</span>
+<span class="d-del">-                cells_trimmed += <span class="s-num">1</span></span>
+<span class="d-add">+                <span class="s-kw">if</span> cut.is_empty <span class="s-kw">or</span> cut.area &lt; <span class="s-num">1.0</span>:   <span class="s-com"># i lies on j&#x27;s side</span></span>
+<span class="d-add">+                    <span class="s-fn">absorb</span>(i, j)</span>
+<span class="d-add">+                    <span class="s-kw">break</span></span>
+<span class="d-add">+                <span class="s-kw">if</span> cut.area &lt; cells[i].area - <span class="s-num">1e-6</span>:</span>
+<span class="d-add">+                    cells[i] = cut</span>
+<span class="d-add">+                    cells_trimmed += <span class="s-num">1</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> cells_absorbed:</span>
+<span class="d-add">+        keep = [i <span class="s-kw">for</span> i <span class="s-kw">in</span> <span class="s-fn">range</span>(<span class="s-fn">len</span>(cells)) <span class="s-kw">if</span> cell_alive[i]]</span>
+<span class="d-add">+        cells = [cells[i] <span class="s-kw">for</span> i <span class="s-kw">in</span> keep]</span>
+<span class="d-add">+        live_cl = [live_cl[i] <span class="s-kw">for</span> i <span class="s-kw">in</span> keep]</span>
+<span class="d-add">+        cell_ctr = [cell_ctr[i] <span class="s-kw">for</span> i <span class="s-kw">in</span> keep]</span>
+<span class="d-ctx">     cell_tree = <span class="s-fn">STRtree</span>(cells) <span class="s-kw">if</span> cells <span class="s-kw">else</span> <span class="s-lit">None</span></span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-com"># Corridor tubes minus junction cells (junctions win where they meet, so</span></span>
+<span class="d-hunk">@@ -509,11 +557,66 @@ def main():</span>
+<span class="d-ctx">         corridors[c] = stay</span>
+<span class="d-ctx">         <span class="s-kw">if</span> <span class="s-kw">not</span> stay <span class="s-kw">and</span> c <span class="s-kw">in</span> corr_polys:</span>
+<span class="d-ctx">             <span class="s-kw">del</span> corr_polys[c]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># Junction membership follows the final geometry too: an unconditional</span></span>
+<span class="d-add">+    <span class="s-com"># bisector cut can strand a captured edge outside its own (now smaller)</span></span>
+<span class="d-add">+    <span class="s-com"># cell. Re-home each stranded edge to the polygon that actually holds it</span></span>
+<span class="d-add">+    <span class="s-com"># now — the cell or corridor containing its midpoint, falling back to any</span></span>
+<span class="d-add">+    <span class="s-com"># cell the line still touches. An edge NO polygon holds gets its tube</span></span>
+<span class="d-add">+    <span class="s-com"># grafted back onto its own cell, clipped against neighbour cells (safe:</span></span>
+<span class="d-add">+    <span class="s-com"># no cell touches the line, else it would have been re-homed) so the</span></span>
+<span class="d-add">+    <span class="s-com"># graft cannot re-stack junction cells; counted (near-zero in practice).</span></span>
+<span class="d-add">+    rehomed = <span class="s-num">0</span></span>
+<span class="d-add">+    grafts = <span class="s-num">0</span></span>
+<span class="d-add">+    corr_ids = <span class="s-fn">list</span>(corr_polys.<span class="s-fn">keys</span>())</span>
+<span class="d-add">+    corr_tree = <span class="s-fn">STRtree</span>([corr_polys[c] <span class="s-kw">for</span> c <span class="s-kw">in</span> corr_ids]) <span class="s-kw">if</span> corr_ids <span class="s-kw">else</span> <span class="s-lit">None</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> idx, k <span class="s-kw">in</span> <span class="s-fn">enumerate</span>(live_cl):</span>
+<span class="d-add">+        <span class="s-kw">for</span> eid <span class="s-kw">in</span> np.<span class="s-fn">where</span>(edge_cluster == k)[<span class="s-num">0</span>]:</span>
+<span class="d-add">+            line = <span class="s-fn">LineString</span>([node_xy[ends[eid, <span class="s-num">0</span>]], node_xy[ends[eid, <span class="s-num">1</span>]]])</span>
+<span class="d-add">+            <span class="s-kw">if</span> line.<span class="s-fn">distance</span>(cells[idx]) &lt;= <span class="s-num">1e-6</span>:</span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            mid = shapely.<span class="s-fn">points</span>((node_xy[ends[eid, <span class="s-num">0</span>]] + node_xy[ends[eid, <span class="s-num">1</span>]]) / <span class="s-num">2.0</span>)</span>
+<span class="d-add">+            hit = cell_tree.<span class="s-fn">query</span>(mid, predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(hit):</span>
+<span class="d-add">+                edge_cluster[eid] = live_cl[<span class="s-fn">int</span>(hit[<span class="s-num">0</span>])]</span>
+<span class="d-add">+                rehomed += <span class="s-num">1</span></span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            hit = corr_tree.<span class="s-fn">query</span>(mid, predicate=<span class="s-str">&quot;intersects&quot;</span>) <span class="s-kw">if</span> corr_tree <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span> <span class="s-kw">else</span> []</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(hit):</span>
+<span class="d-add">+                edge_cluster[eid] = -<span class="s-num">1</span></span>
+<span class="d-add">+                corridors[corr_ids[<span class="s-fn">int</span>(hit[<span class="s-num">0</span>])]].<span class="s-fn">append</span>(<span class="s-fn">int</span>(eid))</span>
+<span class="d-add">+                rehomed += <span class="s-num">1</span></span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            hit = cell_tree.<span class="s-fn">query</span>(line, predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(hit):</span>
+<span class="d-add">+                edge_cluster[eid] = live_cl[<span class="s-fn">int</span>(hit[<span class="s-num">0</span>])]</span>
+<span class="d-add">+                rehomed += <span class="s-num">1</span></span>
+<span class="d-add">+                <span class="s-kw">continue</span></span>
+<span class="d-add">+            patch = <span class="s-fn">tube_of</span>([eid])</span>
+<span class="d-add">+            near = [<span class="s-fn">int</span>(n) <span class="s-kw">for</span> n <span class="s-kw">in</span> cell_tree.<span class="s-fn">query</span>(patch, predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-add">+                    <span class="s-kw">if</span> <span class="s-fn">int</span>(n) != idx]</span>
+<span class="d-add">+            <span class="s-kw">if</span> near:</span>
+<span class="d-add">+                patch = shapely.<span class="s-fn">difference</span>(</span>
+<span class="d-add">+                    patch, <span class="s-fn">union_all</span>([cells[n] <span class="s-kw">for</span> n <span class="s-kw">in</span> near]))</span>
+<span class="d-add">+            cells[idx] = <span class="s-fn">union_all</span>([cells[idx], patch])</span>
+<span class="d-add">+            grafts += <span class="s-num">1</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> grafts:</span>
+<span class="d-add">+        <span class="s-com"># Grafts changed geometry after the trim&#x27;s residual measurement —</span></span>
+<span class="d-add">+        <span class="s-com"># re-measure so the stamped meta reflects the shipped polygons.</span></span>
+<span class="d-add">+        tree = <span class="s-fn">STRtree</span>(cells)</span>
+<span class="d-add">+        qi, qj = tree.<span class="s-fn">query</span>(np.<span class="s-fn">array</span>(cells, dtype=object),</span>
+<span class="d-add">+                            predicate=<span class="s-str">&quot;intersects&quot;</span>)</span>
+<span class="d-add">+        residual_pairs = <span class="s-fn">sum</span>(</span>
+<span class="d-add">+            <span class="s-num">1</span> <span class="s-kw">for</span> a, b <span class="s-kw">in</span> <span class="s-fn">zip</span>(qi, qj)</span>
+<span class="d-add">+            <span class="s-kw">if</span> a &lt; b <span class="s-kw">and</span> cells[<span class="s-fn">int</span>(a)].<span class="s-fn">intersection</span>(cells[<span class="s-fn">int</span>(b)]).area &gt;= <span class="s-num">1.0</span>)</span>
+<span class="d-ctx">     <span class="s-fn">print</span>(<span class="s-str">f&quot;[gf] geometry: {len(corr_polys)} corridor tubes, {len(cells)} &quot;</span></span>
+<span class="d-del">-          <span class="s-str">f&quot;junction cells ({cells_trimmed} bisector-trimmed; &quot;</span></span>
+<span class="d-del">-          <span class="s-str">f&quot;{empty_junctions} edge-less clusters skipped — corridor tubes &quot;</span></span>
+<span class="d-del">-          <span class="s-str">f&quot;cover those forks); {reassigned} intersection-interior edges &quot;</span></span>
+<span class="d-del">-          <span class="s-str">f&quot;moved to their junction cell ({time.time()-t0:.0f}s)&quot;</span>, flush=<span class="s-lit">True</span>)</span>
+<span class="d-add">+          <span class="s-str">f&quot;junction cells ({cells_trimmed} bisector cuts, {cells_absorbed} &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;absorbed into a neighbour, {residual_pairs} overlapping pairs &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;left; {empty_junctions} edge-less clusters skipped — corridor &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;tubes cover those forks); {reassigned} intersection-interior &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;edges moved to their junction cell, {rehomed} stranded junction &quot;</span></span>
+<span class="d-add">+          <span class="s-str">f&quot;edges re-homed, {grafts} tube grafts ({time.time()-t0:.0f}s)&quot;</span>,</span>
+<span class="d-add">+          flush=<span class="s-lit">True</span>)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-com"># ── 5. Emit: dense block ids, geojson + npy + meta ─────────────────────</span></span>
+<span class="d-ctx">     <span class="s-kw">def</span> <span class="s-fn">to_ll</span>(geom):</span>
+<span class="d-hunk">@@ -603,7 +706,11 @@ def main():</span>
+<span class="d-ctx">         <span class="s-str">&quot;parallel_corridors_merged&quot;</span>: corridors_merged,</span>
+<span class="d-ctx">         <span class="s-str">&quot;equivalent_clusters_merged&quot;</span>: clusters_merged,</span>
+<span class="d-ctx">         <span class="s-str">&quot;cells_bisector_trimmed&quot;</span>: cells_trimmed,</span>
+<span class="d-add">+        <span class="s-str">&quot;cells_absorbed&quot;</span>: cells_absorbed,</span>
+<span class="d-add">+        <span class="s-str">&quot;residual_overlap_pairs&quot;</span>: residual_pairs,</span>
+<span class="d-ctx">         <span class="s-str">&quot;edges_reassigned_to_cells&quot;</span>: reassigned,</span>
+<span class="d-add">+        <span class="s-str">&quot;junction_edges_rehomed&quot;</span>: rehomed,</span>
+<span class="d-add">+        <span class="s-str">&quot;junction_tube_grafts&quot;</span>: grafts,</span>
+<span class="d-ctx">         <span class="s-str">&quot;empty_junctions_skipped&quot;</span>: empty_junctions,</span>
+<span class="d-ctx">         <span class="s-str">&quot;edges_overlap_ok&quot;</span>: overlapping, <span class="s-str">&quot;edges_overlap_checked&quot;</span>: checked,</span>
+<span class="d-ctx">         <span class="s-str">&quot;node_capture_len_m&quot;</span>: <span class="s-type">NODE_CAPTURE_LEN_M</span>, <span class="s-str">&quot;stub_max_m&quot;</span>: <span class="s-type">STUB_MAX_M</span>,</span></pre>
+        </details>
+        
+    </section>
+    
+
+    <section class="card" id="deploy">
+      <div class="tag">Deploy · artifacts-only overlay</div>
+      <h2>4 · Shipping blocks while another agent ships code</h2>
+      <h3>Symptom</h3>
+      <p>Prod moved mid-flight: the serving image gained a NEW NYC graph (etag <code>b0ca56f8…</code>, 3,305,042 edges) baked by parallel deploys the same afternoon, and the working tree carried another agent's uncommitted server edits that must not ship.</p>
+      <h3>Root cause</h3>
+      <ul><li>A blocks bake is only valid against the exact graph the serving image loads — <code>graph_registry</code> hard-rejects a mapping whose stamped topology_etag doesn't match. And <code>Dockerfile.blocks-overlay</code> copies <code>server/*.py</code> + a fresh client build, which would sweep in-flight work into prod.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>New <code>Dockerfile.blocks-artifacts-overlay</code>: FROM the digest-pinned serving image, <code>COPY .blocks-staging/ ./osm_data/</code> — nothing else. The most surgical deploy the repo has.</li>
+<li>Procedure: pull the serving revision's image digest → <code>docker cp</code> its <code>osm_data/nyc</code> graph out → swap it under the local bake (local graph + bake backed up and restored after) → re-bake + tippecanoe → stage <code>.blocks-staging/nyc/</code> → build the overlay pinned to that digest → <code>gcloud run services update</code>.</li>
+<li>Prod DB snapshot taken first (<code>~/city-edit-prod-backups/20260713-234529/</code>, 24 MB dump + sql.gz), per the always-backup rule.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details>
+          <summary><span class="fname">Dockerfile.blocks-artifacts-overlay</span>
+            <span class="stat"><span class="d-add">+21</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill on">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">deploy · overlay images</span>
+        <span class="ctx-sum">surgical prod deploys that reuse the serving image&#x27;s baked graphs</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Dockerfile.blocks-artifacts-overlay</span>
+        <span class="ctx-sum">21 lines — FROM pinned base, COPY .blocks-staging/ only</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Header contract</span><span class="ol-sum">artifacts must be baked against the BASE IMAGE&#x27;s own graphs</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">FROM ${BASE_IMAGE}</span><span class="ol-sum">digest-pinned serving image — code/client/nginx untouched</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">COPY .blocks-staging/</span><span class="ol-sum">per-city edge_blocks npy/json + blocks.pmtiles over osm_data</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>the whole file is new — the artifacts-only sibling of Dockerfile.blocks-overlay</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/Dockerfile.blocks-artifacts-overlay b/Dockerfile.blocks-artifacts-overlay</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..b7d80b1</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/Dockerfile.blocks-artifacts-overlay</span>
+<span class="d-hunk">@@ -0,0 +1,21 @@</span>
+<span class="d-add">+# Blocks ARTIFACTS-ONLY overlay — the most surgical deploy we have.</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# Overlays refreshed Layer-2 block artifacts (edge_blocks_&lt;network&gt;.npy/.json</span>
+<span class="d-add">+# + blocks.pmtiles per city, staged in .blocks-staging/&lt;city&gt;/) onto the</span>
+<span class="d-add">+# CURRENT serving image and changes NOTHING else: no server code, no client</span>
+<span class="d-add">+# build, no nginx config. Use this when the working tree carries unrelated</span>
+<span class="d-add">+# in-flight work that must not ship (Dockerfile.blocks-overlay, by contrast,</span>
+<span class="d-add">+# also copies server/*.py + a fresh client build).</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# The staged artifacts MUST be baked against the BASE IMAGE&#x27;s own graphs</span>
+<span class="d-add">+# (docker cp them out of the image first) — graph_registry hard-rejects a</span>
+<span class="d-add">+# mapping whose stamped topology_etag doesn&#x27;t match the live graph.</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# BASE_IMAGE must be the exact digest-pinned image currently serving prod.</span>
+<span class="d-add">+</span>
+<span class="d-add">+ARG BASE_IMAGE</span>
+<span class="d-add">+</span>
+<span class="d-add">+FROM ${BASE_IMAGE}</span>
+<span class="d-add">+WORKDIR /app</span>
+<span class="d-add">+</span>
+<span class="d-add">+COPY .blocks-staging/ ./osm_data/</span></pre>
+        </details>
+        
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Old-bake scan (the diagnosis): 4,880 pairs ≥ 1 m² / 8,164 cells (10.18%) / median 179 m², p90 322 m², max 797 m²; worst example blocks 282231/282232 at 40.644825, −73.974653.</li>
+<li>test-cp re-bake: 869 bisector cuts, 0 absorbed, 92 stranded edges re-homed, 2 clipped grafts — geojson scan: <strong>0 pairs ≥ 1 m²</strong> (was 3 before graft clipping); audit 72,924/72,924 mapped, 72,924/72,924 touching (100%/100%).</li>
+<li>NYC re-bake against the local graph (etag <code>a89beee7…</code>): 45,780 cuts, 4,299 re-homed, 60 grafts, <code>residual_overlap_pairs 0</code>; independent scan of 290,138 features: <strong>0 overlapping pairs</strong> (14,529 pairs touch — shared Voronoi boundaries, as designed).</li>
+<li>NYC ship bake against the SERVING image's graph (etag <code>b0ca56f8…</code>, 3,305,042 edges — prod gained a new graph from parallel deploys the same afternoon, so the local-graph bake could not ship): 45,814 cuts, 4,339 re-homed, 63 clipped grafts, <code>residual_overlap_pairs 0</code>, audit 3,305,042/3,305,042 mapped + touching (100%/100%), blocks_sha256 <code>720da8e4…</code>, n_blocks 290,513; independent scan: <strong>0 pairs ≥ 1 m²</strong> across 80,308 cells (14,542 touching pairs — shared boundaries).</li>
+<li>Prod DB backed up first (<code>~/city-edit-prod-backups/20260713-234529/</code>). Deployed as revision <code>desire-path-mapper-00095-bj8</code> (100% traffic), overlay image <code>sha256:3501050b…</code> pinned on base <code>sha256:585184f1…</code> (revision 00094's exact digest, re-checked for drift just before the build; no Cloud Builds in flight).</li>
+<li>Post-deploy: <code>/api/graph-votes?map=nyc-walkways</code> serves n_blocks 290,513 + blocks_version <code>720da8e4…</code> with topology_version unchanged <code>b0ca56f8…</code> (no resnap needed); <code>/api/tiles/nyc/blocks.pmtiles</code> content-length 83,237,399 == the staged artifact byte-for-byte, mtime of the deploy.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open the prod NYC map at 40.644825, −73.974653 (the worst former overlap): the two intersection blocks should now share a straight boundary instead of stacking.</li>
+<li>Pan a few dense Manhattan intersections at z17–18: junction polygons should abut, never double-tint; corridor tubes unchanged.</li>
+<li>Click inside a former overlap zone: exactly one block rings, and the pinned card's block matches the polygon under the cursor.</li>
+<li>Cast a test vote on an NYC streets map: the block lights, and <code>/api/graph-votes?map=…</code> returns the new <code>blocks_version</code> with <code>n_blocks</code> matching the new bake.</li>
+<li>If any map shows an empty heatmap + revision-mismatch loop after the deploy, bump <code>vote_rev:&lt;slug&gt;</code> in prod Redis (the etag/body 304-desync trap).</li></ul>
+  </section>
+
+
+
+  <footer>
+    Generated from <code>changelog/changes-junction-disjoint.diff</code> by <code>changelog/build_junction_disjoint_report.py</code>.
+    Regenerate after further edits with
+    <code>git diff 1f5f782 8fb0df3 -- server/streetscape_blocks/build_blocks_graph_first.py Dockerfile.blocks-artifacts-overlay &gt; changelog/changes-junction-disjoint.diff &amp;&amp; python changelog/build_junction_disjoint_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

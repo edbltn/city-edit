@@ -1,0 +1,272 @@
+diff --git a/Dockerfile.blocks-artifacts-overlay b/Dockerfile.blocks-artifacts-overlay
+new file mode 100644
+index 0000000..b7d80b1
+--- /dev/null
++++ b/Dockerfile.blocks-artifacts-overlay
+@@ -0,0 +1,21 @@
++# Blocks ARTIFACTS-ONLY overlay — the most surgical deploy we have.
++#
++# Overlays refreshed Layer-2 block artifacts (edge_blocks_<network>.npy/.json
++# + blocks.pmtiles per city, staged in .blocks-staging/<city>/) onto the
++# CURRENT serving image and changes NOTHING else: no server code, no client
++# build, no nginx config. Use this when the working tree carries unrelated
++# in-flight work that must not ship (Dockerfile.blocks-overlay, by contrast,
++# also copies server/*.py + a fresh client build).
++#
++# The staged artifacts MUST be baked against the BASE IMAGE's own graphs
++# (docker cp them out of the image first) — graph_registry hard-rejects a
++# mapping whose stamped topology_etag doesn't match the live graph.
++#
++# BASE_IMAGE must be the exact digest-pinned image currently serving prod.
++
++ARG BASE_IMAGE
++
++FROM ${BASE_IMAGE}
++WORKDIR /app
++
++COPY .blocks-staging/ ./osm_data/
+diff --git a/server/streetscape_blocks/build_blocks_graph_first.py b/server/streetscape_blocks/build_blocks_graph_first.py
+index 30874fc..2b8930d 100644
+--- a/server/streetscape_blocks/build_blocks_graph_first.py
++++ b/server/streetscape_blocks/build_blocks_graph_first.py
+@@ -32,12 +32,16 @@ edge∩polygon overlap hold by construction:
+   4. GEOMETRY FROM MEMBERSHIP: a junction cell is the CONVEX HULL of its
+      member nodes (⊕ pad) unioned with its captured edges' tubes — a compact
+      intersection footprint, not a bulbous disc union — then bisector-trimmed
+-     (Voronoi-style) against overlapping neighbour cells, skipping any cut
+-     that would evict a member node or detach a captured edge; a corridor is
+-     the union of its member-edge tubes (per-class half-width) minus the
+-     junction cells, so corridor-vs-junction stays disjoint (junctions win).
+-     A corridor edge left entirely inside junction cells is REASSIGNED to the
+-     cell containing its midpoint — membership follows the final geometry, so
++     (Voronoi-style) against overlapping neighbour cells UNCONDITIONALLY, so
++     abutting junctions get a straight shared boundary instead of stacked
++     blobs; a cell left with < 1 m² on its own side of a bisector is
++     geometrically one intersection with that neighbour and is ABSORBED into
++     it. A corridor is the union of its member-edge tubes (per-class
++     half-width) minus the junction cells, so corridor-vs-junction stays
++     disjoint (junctions win). Membership follows the final geometry: a
++     corridor edge left entirely inside junction cells is REASSIGNED to the
++     cell containing its midpoint, and a captured edge a cut stranded outside
++     its own cell is RE-HOMED to the cell or corridor that holds it now — so
+      edge∩polygon overlap is total.
+ 
+ Outputs (same contract the server + tippecanoe already consume):
+@@ -70,7 +74,7 @@ from shapely.geometry import Polygon, mapping  # noqa: E402
+ from scipy.spatial import cKDTree  # noqa: E402
+ 
+ from cities import CITIES  # noqa: E402
+-from graph_registry import CityGraph  # noqa: E402
++from graph_registry import CityGraph, STATION_NETWORKS, load_station_graph  # noqa: E402
+ 
+ CITY = os.environ.get("CITY", "nyc")
+ NETWORK = os.environ.get("NETWORK", "streets")
+@@ -172,11 +176,22 @@ def main():
+     city = CITIES[CITY]
+     g = CityGraph(city, redis_client=None, network=NETWORK)
+     g.ensure_loaded()
+-    nodes = np.asarray(g.nodes, dtype=np.float64)          # [N,2] = (lat, lon)
++    nodes = np.asarray(g.node_coords, dtype=np.float64)    # [N,2] = (lat, lon)
+     n_nodes = len(nodes)
+-    ends = np.array([(e[0], e[1]) for e in g.edges], dtype=np.int64)
+-    rclass = np.array([str(e[3]) if len(e) > 3 else "" for e in g.edges])
+-    names = [e[2] if len(e) > 2 else None for e in g.edges]
++    ends = np.asarray(g.edge_ends, dtype=np.int64)         # [E,2] = (u, v)
++    # Array-native CityGraph drops per-edge name/highway at load; pull them
++    # from the same provider output the topology (and its etag) is built from,
++    # so the edge order here IS the etag contract's order.
++    if NETWORK in STATION_NETWORKS:
++        data = load_station_graph(NETWORK)
++    else:
++        data = g.provider.get_graph_for_bbox(*city.bbox)
++    if len(data["edges"]) != len(ends):
++        raise RuntimeError(f"provider edges ({len(data['edges'])}) != loaded "
++                           f"topology edges ({len(ends)})")
++    rclass = np.array([str(e[3]) if len(e) > 3 else "" for e in data["edges"]])
++    names = [e[2] if len(e) > 2 else None for e in data["edges"]]
++    del data
+     n_edges = len(ends)
+     not_self = ends[:, 0] != ends[:, 1]
+     print(f"[gf] {CITY}:{NETWORK} — {n_nodes} nodes, {n_edges} edges "
+@@ -430,9 +445,16 @@ def main():
+ 
+     # Voronoi trim: where two cells overlap, cut each at the perpendicular
+     # bisector of the two clusters' member centroids — abutting junctions get
+-    # a straight shared boundary instead of stacked blobs. A cut that would
+-    # evict a member node or detach a captured edge is skipped: the audit
+-    # invariants (every member touches its polygon) win over aesthetics.
++    # a straight shared boundary instead of stacked blobs. Cuts are
++    # UNCONDITIONAL: a captured edge a cut strands outside its cell is
++    # re-homed once corridor geometry exists (membership follows the final
++    # geometry, same as the corridor-edge reassignment below). The old veto
++    # ("skip a cut that would evict a member node / detach a captured edge")
++    # shipped ~4.9k visibly stacked junction pairs on nyc — big multi-node
++    # intersections always had some captured stub past the bisector. A cell
++    # left with < 1 m² on its own side of a bisector IS its neighbour's
++    # intersection and is absorbed into it; absorption grows the survivor,
++    # so sweep to a fixpoint (2 sweeps in practice, last sweep measure-only).
+     def halfplane(c, nb, span=200.0):
+         """Rectangle covering c's side of the perpendicular bisector toward nb."""
+         d = float(np.hypot(*(nb - c)))
+@@ -446,30 +468,56 @@ def main():
+                         m + span * v - 2 * span * u])
+ 
+     cells_trimmed = 0
+-    if len(cells) > 1:
+-        pre_tree = STRtree(cells)
+-        qi, qj = pre_tree.query(np.array(cells, dtype=object),
+-                                predicate="intersects")
+-        for a, b in zip(qi, qj):
+-            if a >= b:
+-                continue
+-            for i, j in ((int(a), int(b)), (int(b), int(a))):
++    cells_absorbed = 0
++    residual_pairs = 0
++    cell_alive = [True] * len(cells)
++
++    def absorb(i: int, j: int):
++        """Fold cell i (members, captured edges, geometry) into cell j."""
++        nonlocal cells_absorbed
++        ki, kj = live_cl[i], live_cl[j]
++        edge_cluster[edge_cluster == ki] = kj
++        node_cluster[cl_members[ki]] = kj
++        cl_members[kj] = np.concatenate([cl_members[kj], cl_members[ki]])
++        cl_members[ki] = cl_members[ki][:0]
++        cells[j] = union_all([cells[j], cells[i]])
++        cell_ctr[j] = node_xy[cl_members[kj]].mean(axis=0)
++        cell_alive[i] = False
++        cells_absorbed += 1
++
++    for sweep in range(5):
++        idxs = [i for i in range(len(cells)) if cell_alive[i]]
++        if len(idxs) < 2:
++            break
++        alive_geoms = np.array([cells[i] for i in idxs], dtype=object)
++        tree = STRtree(list(alive_geoms))
++        qi, qj = tree.query(alive_geoms, predicate="intersects")
++        pairs = [(idxs[int(a)], idxs[int(b)]) for a, b in zip(qi, qj)
++                 if a < b and cells[idxs[int(a)]].intersection(
++                     cells[idxs[int(b)]]).area >= 1.0]
++        residual_pairs = len(pairs)
++        if not pairs or sweep == 4:
++            break
++        for a, b in pairs:
++            for i, j in ((a, b), (b, a)):
++                if not (cell_alive[i] and cell_alive[j]):
++                    break
+                 hp = halfplane(cell_ctr[i], cell_ctr[j])
+-                if hp is None:
+-                    continue
++                if hp is None:                       # coincident centroids
++                    absorb(i, j)
++                    break
+                 cut = cells[i].intersection(hp)
+-                if cut.is_empty or cut.area < 1.0:
+-                    continue
+-                k = live_cl[i]
+-                if not shapely.dwithin(
+-                        shapely.points(node_xy[cl_members[k]]), cut, 0.01).all():
+-                    continue
+-                captured = np.where(edge_cluster == k)[0]
+-                if len(captured) and any(cut.distance(l) > 1e-6
+-                                         for l in edge_lines(captured)):
+-                    continue
+-                cells[i] = cut
+-                cells_trimmed += 1
++                if cut.is_empty or cut.area < 1.0:   # i lies on j's side
++                    absorb(i, j)
++                    break
++                if cut.area < cells[i].area - 1e-6:
++                    cells[i] = cut
++                    cells_trimmed += 1
++    if cells_absorbed:
++        keep = [i for i in range(len(cells)) if cell_alive[i]]
++        cells = [cells[i] for i in keep]
++        live_cl = [live_cl[i] for i in keep]
++        cell_ctr = [cell_ctr[i] for i in keep]
+     cell_tree = STRtree(cells) if cells else None
+ 
+     # Corridor tubes minus junction cells (junctions win where they meet, so
+@@ -509,11 +557,66 @@ def main():
+         corridors[c] = stay
+         if not stay and c in corr_polys:
+             del corr_polys[c]
++
++    # Junction membership follows the final geometry too: an unconditional
++    # bisector cut can strand a captured edge outside its own (now smaller)
++    # cell. Re-home each stranded edge to the polygon that actually holds it
++    # now — the cell or corridor containing its midpoint, falling back to any
++    # cell the line still touches. An edge NO polygon holds gets its tube
++    # grafted back onto its own cell, clipped against neighbour cells (safe:
++    # no cell touches the line, else it would have been re-homed) so the
++    # graft cannot re-stack junction cells; counted (near-zero in practice).
++    rehomed = 0
++    grafts = 0
++    corr_ids = list(corr_polys.keys())
++    corr_tree = STRtree([corr_polys[c] for c in corr_ids]) if corr_ids else None
++    for idx, k in enumerate(live_cl):
++        for eid in np.where(edge_cluster == k)[0]:
++            line = LineString([node_xy[ends[eid, 0]], node_xy[ends[eid, 1]]])
++            if line.distance(cells[idx]) <= 1e-6:
++                continue
++            mid = shapely.points((node_xy[ends[eid, 0]] + node_xy[ends[eid, 1]]) / 2.0)
++            hit = cell_tree.query(mid, predicate="intersects")
++            if len(hit):
++                edge_cluster[eid] = live_cl[int(hit[0])]
++                rehomed += 1
++                continue
++            hit = corr_tree.query(mid, predicate="intersects") if corr_tree is not None else []
++            if len(hit):
++                edge_cluster[eid] = -1
++                corridors[corr_ids[int(hit[0])]].append(int(eid))
++                rehomed += 1
++                continue
++            hit = cell_tree.query(line, predicate="intersects")
++            if len(hit):
++                edge_cluster[eid] = live_cl[int(hit[0])]
++                rehomed += 1
++                continue
++            patch = tube_of([eid])
++            near = [int(n) for n in cell_tree.query(patch, predicate="intersects")
++                    if int(n) != idx]
++            if near:
++                patch = shapely.difference(
++                    patch, union_all([cells[n] for n in near]))
++            cells[idx] = union_all([cells[idx], patch])
++            grafts += 1
++    if grafts:
++        # Grafts changed geometry after the trim's residual measurement —
++        # re-measure so the stamped meta reflects the shipped polygons.
++        tree = STRtree(cells)
++        qi, qj = tree.query(np.array(cells, dtype=object),
++                            predicate="intersects")
++        residual_pairs = sum(
++            1 for a, b in zip(qi, qj)
++            if a < b and cells[int(a)].intersection(cells[int(b)]).area >= 1.0)
+     print(f"[gf] geometry: {len(corr_polys)} corridor tubes, {len(cells)} "
+-          f"junction cells ({cells_trimmed} bisector-trimmed; "
+-          f"{empty_junctions} edge-less clusters skipped — corridor tubes "
+-          f"cover those forks); {reassigned} intersection-interior edges "
+-          f"moved to their junction cell ({time.time()-t0:.0f}s)", flush=True)
++          f"junction cells ({cells_trimmed} bisector cuts, {cells_absorbed} "
++          f"absorbed into a neighbour, {residual_pairs} overlapping pairs "
++          f"left; {empty_junctions} edge-less clusters skipped — corridor "
++          f"tubes cover those forks); {reassigned} intersection-interior "
++          f"edges moved to their junction cell, {rehomed} stranded junction "
++          f"edges re-homed, {grafts} tube grafts ({time.time()-t0:.0f}s)",
++          flush=True)
+ 
+     # ── 5. Emit: dense block ids, geojson + npy + meta ─────────────────────
+     def to_ll(geom):
+@@ -603,7 +706,11 @@ def main():
+         "parallel_corridors_merged": corridors_merged,
+         "equivalent_clusters_merged": clusters_merged,
+         "cells_bisector_trimmed": cells_trimmed,
++        "cells_absorbed": cells_absorbed,
++        "residual_overlap_pairs": residual_pairs,
+         "edges_reassigned_to_cells": reassigned,
++        "junction_edges_rehomed": rehomed,
++        "junction_tube_grafts": grafts,
+         "empty_junctions_skipped": empty_junctions,
+         "edges_overlap_ok": overlapping, "edges_overlap_checked": checked,
+         "node_capture_len_m": NODE_CAPTURE_LEN_M, "stub_max_m": STUB_MAX_M,
