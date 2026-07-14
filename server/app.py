@@ -670,7 +670,11 @@ def _prewarm():
         warmed = 0
         for m in list_maps():
             try:
-                _build_graph_votes_body(resolve_map(m["slug"]))
+                rmap = resolve_map(m["slug"])
+                _build_graph_votes_body(rmap)
+                # Pre-gzip the topology blob too, so no tenant's first visitor
+                # pays the one-time ~1-2s compression of the big cities.
+                rmap.graph.topology_binary_gz()
                 warmed += 1
             except Exception as e:
                 logger.warning(f"[STARTUP] Pre-warm '{m['slug']}' failed: {e}")
@@ -1818,15 +1822,23 @@ def graph_topology():
         # version rides along so a re-baked mapping (same topology) busts too.
         blocks_tag = f"-{rmap.graph.blocks_version}" if rmap.graph.blocks_version else ""
         bin_etag = (rmap.graph.topology_etag or '"x"')[:-1] + f'-bin2{blocks_tag}"'
-        if request.headers.get("If-None-Match") == bin_etag:
+        # Tolerate a weak validator: responses gzipped by nginx historically
+        # reached clients with W/-prefixed etags.
+        inm = (request.headers.get("If-None-Match") or "").removeprefix("W/")
+        if inm == bin_etag:
             resp = app.response_class(status=304)
             resp.headers["ETag"] = bin_etag
             resp.headers["Cache-Control"] = "public, max-age=86400"
             return resp
+        wants_gzip = "gzip" in (request.headers.get("Accept-Encoding") or "")
         resp = app.response_class(
-            response=rmap.graph.topology_binary(), status=200,
-            mimetype="application/octet-stream",
+            response=(rmap.graph.topology_binary_gz() if wants_gzip
+                      else rmap.graph.topology_binary()),
+            status=200, mimetype="application/octet-stream",
         )
+        if wants_gzip:
+            resp.headers["Content-Encoding"] = "gzip"
+        resp.headers["Vary"] = "Accept-Encoding"
         resp.headers["Cache-Control"] = "public, max-age=86400"
         resp.headers["ETag"] = bin_etag
         return resp

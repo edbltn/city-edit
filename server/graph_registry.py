@@ -203,6 +203,7 @@ class CityGraph:
         self.topology_json: str | None = None
         self.topology_etag: str | None = None
         self.topology_bin: bytes | None = None
+        self.topology_bin_gz: bytes | None = None
         # Lazily-built kdtrees: node tree for point-vote snapping, edge-midpoint
         # tree for the vote migration (kept off the hot load path).
         self._node_tree: cKDTree | None = None
@@ -357,6 +358,20 @@ class CityGraph:
             )
         return self.topology_bin
 
+    def topology_binary_gz(self) -> bytes:
+        """Pre-gzipped GTB2 blob, built once per load and served verbatim.
+
+        nginx used to gzip the ~37MB NYC blob PER REQUEST (~0.4 core-seconds
+        each) — a 30-tenant join wave burned ~12 core-seconds and starved every
+        cheap endpoint on the instance. Level 6 once (~16MB) beats level 1
+        every time. zlib releases the GIL, so the one-time build doesn't stall
+        the gevent hub. Serving Content-Encoding: gzip directly also stops
+        nginx weakening the ETag (W/...), so conditional requests 304 again."""
+        if self.topology_bin_gz is None:
+            import gzip as _gzip
+            self.topology_bin_gz = _gzip.compress(self.topology_binary(), 6)
+        return self.topology_bin_gz
+
     def _ensure_node_tree(self) -> cKDTree | None:
         self.ensure_loaded()
         if self._node_tree is None and self.n_nodes:
@@ -444,6 +459,7 @@ class CityGraph:
         self.topology_json = None
         self.topology_etag = None
         self.topology_bin = None
+        self.topology_bin_gz = None
         self._node_tree = None
         self._edge_mid_tree = None
 
