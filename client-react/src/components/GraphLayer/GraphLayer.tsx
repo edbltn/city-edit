@@ -874,6 +874,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const edgeIndexRef = useRef<Flatbush | null>(null);
   const nodeIndexRef = useRef<Flatbush | null>(null);
   const redrawTimeoutRef = useRef<number | null>(null);
+  // Timer backstop for the rAF redraw — see scheduleRedraw.
+  const redrawFallbackRef = useRef<number | null>(null);
   const isZoomingRef = useRef(false);
   // The map state the heatmap bitmap was last painted at: the zoom, and the
   // lat/lng sitting at the canvas's top-left corner (container point 0,0). The
@@ -1946,6 +1948,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     }
 
     return () => {
+      if (redrawTimeoutRef.current) cancelAnimationFrame(redrawTimeoutRef.current);
+      if (redrawFallbackRef.current) window.clearTimeout(redrawFallbackRef.current);
+      redrawTimeoutRef.current = null;
+      redrawFallbackRef.current = null;
       if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
       if (hoverCanvas.parentNode) hoverCanvas.parentNode.removeChild(hoverCanvas);
     };
@@ -2483,6 +2489,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const data = graphDataRef.current;
     if (!hoverCanvas || !hoverCtx) return;
 
+    // Same mid-zoom guard as redraw(): a highlight painted against a
+    // mid-animation pane transform (route-highlight/select events can land
+    // here) draws the white corridors offset from the map and they stay that
+    // way until the next repaint. zoomend's redraw re-invokes this.
+    if (isZoomingRef.current) return;
+
     const size = map.getSize();
     hoverCanvas.width = size.x;
     hoverCanvas.height = size.y;
@@ -2598,6 +2610,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
     if (!canvas || !ctx || !data) return;
 
+    // Never paint mid-zoom: container/layer projections are inconsistent while
+    // the pane transform is animating, so a paint here (e.g. triggered by a WS
+    // delta) lands misaligned — and STAYS misaligned if the zoomend repaint is
+    // dropped. zoomend always schedules a redraw, so deferring loses nothing.
+    if (isZoomingRef.current) return;
+
     const size = map.getSize();
     canvas.width = size.x;
     canvas.height = size.y;
@@ -2605,6 +2623,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const topLeft = map.containerPointToLayerPoint([0, 0]);
     L.DomUtil.setPosition(canvas, topLeft);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Record the camera this bitmap is painted at — BEFORE any early return, so
+    // block maps (where the canvas holds only highlights) still anchor the
+    // zoom-anim ride and the drift failsafe in ensureAnchored.
+    drawStateRef.current = { zoom: map.getZoom(), nw: map.containerPointToLatLng([0, 0]) };
 
     if (!data.ends || !data.coords) return;
 
@@ -2776,21 +2799,38 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     ctx.globalCompositeOperation = "source-over";
     ctx.globalAlpha = 1.0;
 
-    // Record the map state this bitmap was painted at, so a subsequent zoom
-    // animation can scale/translate the existing pixels to the target zoom.
-    drawStateRef.current = { zoom, nw: map.containerPointToLatLng([0, 0]) };
-
     redrawHoverHighlightRef.current();
   }, [map, mapStyle.heat, mapStyle.basemap, mapStyle.heatComposite, mapStyle.selection]);
 
-  // Schedule redraw
+  // Schedule redraw. rAF is the fast path; the timer is a backstop because rAF
+  // never fires in hidden/occluded windows — without it a zoomend repaint can be
+  // dropped entirely, leaving the bitmap anchored at the OLD zoom (visible as a
+  // scaled/offset heatmap once the window surfaces).
   const scheduleRedraw = useCallback(() => {
     if (redrawTimeoutRef.current) cancelAnimationFrame(redrawTimeoutRef.current);
-    redrawTimeoutRef.current = requestAnimationFrame(redraw);
+    if (redrawFallbackRef.current) window.clearTimeout(redrawFallbackRef.current);
+    redrawTimeoutRef.current = requestAnimationFrame(() => {
+      redrawTimeoutRef.current = null;
+      if (redrawFallbackRef.current) {
+        window.clearTimeout(redrawFallbackRef.current);
+        redrawFallbackRef.current = null;
+      }
+      redraw();
+    });
+    redrawFallbackRef.current = window.setTimeout(() => {
+      redrawFallbackRef.current = null;
+      if (redrawTimeoutRef.current) {
+        cancelAnimationFrame(redrawTimeoutRef.current);
+        redrawTimeoutRef.current = null;
+      }
+      redraw();
+    }, 200);
   }, [redraw]);
 
   const scheduleRedrawRef = useRef(scheduleRedraw);
   useEffect(() => { scheduleRedrawRef.current = scheduleRedraw; }, [scheduleRedraw]);
+  const redrawRef = useRef(redraw);
+  useEffect(() => { redrawRef.current = redraw; }, [redraw]);
 
   // Map event listeners — topology is pre-loaded, just redraw on pan/zoom
   useEffect(() => {
@@ -2846,17 +2886,38 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     };
     const handleResize = () => scheduleRedrawRef.current();
 
+    // Failsafe re-anchor: the bitmap records the zoom it was painted at; if it
+    // disagrees with the map's zoom while no zoom is in flight, the zoomend
+    // repaint was dropped (frozen rAF, interrupted animation) and the canvas is
+    // sitting misaligned. Repaint synchronously — don't re-enter the rAF path
+    // that already failed. Checked per move frame (a number compare) and on
+    // visibility restore, since a hidden window is where rAF freezes.
+    const ensureAnchored = () => {
+      if (isZoomingRef.current) return;
+      const painted = drawStateRef.current;
+      if (!painted || painted.zoom === map.getZoom()) return;
+      dwarn("topo", `anchor drift: bitmap painted at z${painted.zoom}, map at z${map.getZoom()} — repainting`);
+      redrawRef.current();
+    };
+    const handleVisibility = () => {
+      if (!document.hidden) ensureAnchored();
+    };
+
     map.on("zoomstart", handleZoomStart);
     map.on("zoomanim", handleZoomAnim);
     map.on("zoomend", handleZoomEnd);
     map.on("moveend", handleMoveEnd);
     map.on("resize", handleResize);
+    map.on("move", ensureAnchored);
+    document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       map.off("zoomstart", handleZoomStart);
       map.off("zoomanim", handleZoomAnim);
       map.off("zoomend", handleZoomEnd);
       map.off("moveend", handleMoveEnd);
       map.off("resize", handleResize);
+      map.off("move", ensureAnchored);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [map]);
 

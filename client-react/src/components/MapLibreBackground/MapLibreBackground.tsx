@@ -338,28 +338,47 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
       el.style.transform = `translate3d(${q.x}px, ${q.y}px, 0) scale(${scale})`;
     };
 
-    // At transition end Leaflet fires `move` (→ syncCamera jumpTo) then
-    // `zoomend`, in the same tick. Clearing the transform here lands in the
-    // same compositor frame as MapLibre's re-render of the final camera (its
-    // rAF runs before paint), so the crisp frame swaps in without a flash.
-    const handleZoomEnd = () => {
+    // Failsafe re-anchor. The happy path at zoom end is: final `move` →
+    // syncCamera jumpTo, then `zoomend` clears the ride transform in the same
+    // compositor frame as MapLibre's re-render (its rAF runs before paint), so
+    // the crisp frame swaps in without a flash. But every link in that chain
+    // can drop — a zoomend without a final move, a rAF frozen in an occluded
+    // window, an interrupted animation — and then the GL frame sits at a STALE
+    // camera, misaligned with every Leaflet-drawn layer until the next
+    // interaction. So on zoomend/moveend/visibility-restore: clear any leftover
+    // ride transform, re-jump the camera unconditionally, and force one GL
+    // repaint. Each step is a cheap no-op when nothing drifted.
+    const reconcile = () => {
       const el = containerRef.current;
-      if (!el || !el.style.transform) return;
-      el.style.transition = "";
-      el.style.transform = "";
+      const ml = mapRef.current;
+      if (!el || !ml) return;
+      if ((leafletMap as unknown as { _animatingZoom?: boolean })._animatingZoom) return;
+      if (el.style.transform) {
+        el.style.transition = "";
+        el.style.transform = "";
+      }
+      syncCamera();
+      ml.triggerRepaint();
+    };
+    const handleVisibility = () => {
+      if (!document.hidden) reconcile();
     };
 
     // Sync on every move frame for smooth panning
     leafletMap.on("move", syncCamera);
     leafletMap.on("zoomanim", handleZoomAnim);
-    leafletMap.on("zoomend", handleZoomEnd);
+    leafletMap.on("zoomend", reconcile);
+    leafletMap.on("moveend", reconcile);
+    document.addEventListener("visibilitychange", handleVisibility);
     // Initial sync
     syncCamera();
 
     return () => {
       leafletMap.off("move", syncCamera);
       leafletMap.off("zoomanim", handleZoomAnim);
-      leafletMap.off("zoomend", handleZoomEnd);
+      leafletMap.off("zoomend", reconcile);
+      leafletMap.off("moveend", reconcile);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [leafletMap]);
 

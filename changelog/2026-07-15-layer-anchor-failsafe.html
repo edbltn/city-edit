@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layer-anchor failsafes — the map can no longer stay misaligned — 2026-07-15</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Layer-anchor failsafes — the map can no longer stay misaligned</h1>
+    <div class="dateline">2026-07-15 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#anchor">1</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">A screenshot pair showed the white route layer sitting offset from the block heat —
+  differently at each zoom — then healing on its own. The projection math was fine; the re-anchor
+  chain after zoom animations was fragile. Five failsafes now make every layer converge back onto
+  the map no matter which link drops.</p>
+
+  
+    <section class="card" id="anchor">
+      <div class="tag">Frontend</div>
+      <h2>1 · Transient layer misalignment — and why it could persist</h2>
+      <h3>Symptom</h3>
+      <p>Screenshots at two zooms showed the white route/highlight layer offset from the block heat + base map underneath, with a different offset at each zoom. The drift self-healed on the next interaction — the signature of a <em>stale frame</em>, not bad projection math.</p>
+      <h3>Root cause</h3>
+      <ul><li>Two renderers share the screen: Leaflet (SVG routes, pins, the highlight canvases) and MapLibre GL (base map + block heat). Both “ride” Leaflet's animated zoom with a CSS transform hack, then re-anchor afterwards — and both re-anchors hang off a fragile chain: MapLibre's camera is only re-synced by Leaflet's final <code>move</code> event, and the canvas repaint is scheduled on a bare <code>requestAnimationFrame</code>.</li>
+<li>Any dropped link leaves a layer painted for the OLD camera: a <code>zoomend</code> that arrives without a final <code>move</code>, an rAF that never fires (rAF freezes entirely in hidden/occluded windows — a known trap on this project), or a repaint that lands <em>mid-animation</em> and bakes inconsistent transforms into the bitmap (WS deltas and route-highlight events can trigger paints at any time).</li>
+<li>On block maps the exposure was worse: <code>drawStateRef</code> — the record of which camera the canvas bitmap was painted at — was only ever written on the no-blocks code path, so on block maps (exactly the maps in the screenshots) the zoom-anim ride and any drift detection flew blind.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Never paint mid-zoom.</strong> <code>redraw()</code> and <code>redrawHoverHighlight()</code> bail while a zoom is in flight — a paint against a mid-animation pane transform lands misaligned and stays that way if the zoomend repaint drops. zoomend always schedules a redraw, so deferring loses nothing.</li>
+<li><strong>Always record the painted camera.</strong> <code>drawStateRef</code> is now stamped at the top of every paint, before any early return — block maps included — so the ride and the failsafe below always know the bitmap's true anchor.</li>
+<li><strong>Timer backstop for the rAF repaint.</strong> <code>scheduleRedraw()</code> arms a 200&nbsp;ms <code>setTimeout</code> alongside the rAF; whichever fires first wins and cancels the other. Timers are throttled but still run in hidden windows — rAF does not.</li>
+<li><strong>Drift check on every move frame + visibility restore.</strong> <code>ensureAnchored()</code> compares the bitmap's painted zoom to the map's zoom (a number compare); on mismatch outside a zoom it logs <code>[topo] anchor drift…</code> and repaints <em>synchronously</em> — not via the rAF path that already failed once.</li>
+<li><strong>MapLibre <code>reconcile()</code>.</strong> On <code>zoomend</code>, <code>moveend</code>, and visibility restore: clear any leftover ride transform, re-jump the camera <em>unconditionally</em> (no longer trusting that a final <code>move</code> preceded zoomend), and <code>triggerRepaint()</code> to force one GL frame. Each step is a cheap no-op when nothing drifted.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx — mid-zoom paint guards, unconditional drawStateRef, rAF timer backstop, ensureAnchored drift check</li>
+<li>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx — reconcile() on zoomend / moveend / visibilitychange</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Frontend: <code>tsc --noEmit</code> — clean.</li>
+<li>Frontend: <code>vitest run</code> — 244 passed, 1 skipped.</li>
+<li>Dev stack: Vite (:3000) + Flask (:5001) serving; Vite confirmed serving the new <code>reconcile</code> code.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-walkways?tab=anchor</code>, zoom with wheel + the +/− control + pinch: the heat/highlights should track the base map through and after every zoom.</li>
+<li>Select a route proposal (white corridor), then zoom several levels quickly, interrupting animations mid-flight — the white corridor should land exactly on its blocks every time.</li>
+<li>Hide the window mid-zoom (Cmd-H or fully occlude it), wait 2s, bring it back — layers should be aligned on return (the visibilitychange reconcile), and any repair logs as <code>[topo] anchor drift</code> in a debug tab.</li>
+<li>While a route highlight is up, cast a vote from a second tab so a WS delta arrives, then zoom — no misaligned white corridor should ever persist after the zoom settles.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+67</span> / <span class="d-del">-6</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">the canvas heatmap + topology loader + proposal-marker renderer — the heart of the map</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~5000 LOC — load topology+votes, paint the heat/highlight canvases, hit-test, render proposals</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Module helpers</span><span class="ol-sum">decodeTopologyBin, buildEdgeIndex, votesMatchTopology, buildNodeAdj</span></li><li class="changed"><span class="ol-label">Component state &amp; refs</span><span class="ol-sum">canvas / topology refs, drawStateRef, NEW redrawFallbackRef</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Canvas init</span><span class="ol-sum">create heat + hover canvases; cleanup now cancels pending rAF/timer</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Topology + vote loading</span><span class="ol-sum">version → IndexedDB cache → network fetch → paint</span></li><li class="changed"><span class="ol-label">redrawHoverHighlight</span><span class="ol-sum">white corridor/edge/node rings — now guarded against mid-zoom paints</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">redraw — heat passes</span><span class="ol-sum">mid-zoom guard + drawStateRef stamped before every early return</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">scheduleRedraw</span><span class="ol-sum">rAF fast path + NEW 200ms timer backstop (rAF freezes when hidden)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Map event handlers (pan / zoom)</span><span class="ol-sum">zoomanim ride; NEW ensureAnchored drift check on move + visibilitychange</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Hover / hit-testing · indicator markers</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>redrawFallbackRef — timer backstop handle next to redrawTimeoutRef</li><li>canvas init cleanup — cancel pending rAF + timer on unmount</li><li>redrawHoverHighlight — bail while isZoomingRef (mid-zoom paints land misaligned)</li><li>redraw — same mid-zoom guard; drawStateRef stamped BEFORE the block-map early return</li><li>redraw — old late drawStateRef assignment removed (now redundant)</li><li>scheduleRedraw — rAF + 200ms setTimeout race; first to fire cancels the other</li><li>ensureAnchored — painted-zoom vs map-zoom compare on move/visibilitychange → synchronous repaint + dwarn</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 950d4d1..1d2dab4 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -874,6 +874,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   const edgeIndexRef = useRef&lt;Flatbush | null&gt;(null);</span>
+<span class="d-ctx">   const nodeIndexRef = useRef&lt;Flatbush | null&gt;(null);</span>
+<span class="d-ctx">   const redrawTimeoutRef = useRef&lt;number | null&gt;(null);</span>
+<span class="d-add">+  // Timer backstop for the rAF redraw — see scheduleRedraw.</span>
+<span class="d-add">+  const redrawFallbackRef = useRef&lt;number | null&gt;(null);</span>
+<span class="d-ctx">   const isZoomingRef = useRef(false);</span>
+<span class="d-ctx">   // The map state the heatmap bitmap was last painted at: the zoom, and the</span>
+<span class="d-ctx">   // lat/lng sitting at the canvas&#x27;s top-left corner (container point 0,0). The</span>
+<span class="d-hunk">@@ -1946,6 +1948,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     return () =&gt; {</span>
+<span class="d-add">+      if (redrawTimeoutRef.current) cancelAnimationFrame(redrawTimeoutRef.current);</span>
+<span class="d-add">+      if (redrawFallbackRef.current) window.clearTimeout(redrawFallbackRef.current);</span>
+<span class="d-add">+      redrawTimeoutRef.current = null;</span>
+<span class="d-add">+      redrawFallbackRef.current = null;</span>
+<span class="d-ctx">       if (canvas.parentNode) canvas.parentNode.removeChild(canvas);</span>
+<span class="d-ctx">       if (hoverCanvas.parentNode) hoverCanvas.parentNode.removeChild(hoverCanvas);</span>
+<span class="d-ctx">     };</span>
+<span class="d-hunk">@@ -2483,6 +2489,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     const data = graphDataRef.current;</span>
+<span class="d-ctx">     if (!hoverCanvas || !hoverCtx) return;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    // Same mid-zoom guard as redraw(): a highlight painted against a</span>
+<span class="d-add">+    // mid-animation pane transform (route-highlight/select events can land</span>
+<span class="d-add">+    // here) draws the white corridors offset from the map and they stay that</span>
+<span class="d-add">+    // way until the next repaint. zoomend&#x27;s redraw re-invokes this.</span>
+<span class="d-add">+    if (isZoomingRef.current) return;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     const size = map.getSize();</span>
+<span class="d-ctx">     hoverCanvas.width = size.x;</span>
+<span class="d-ctx">     hoverCanvas.height = size.y;</span>
+<span class="d-hunk">@@ -2598,6 +2610,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     if (!canvas || !ctx || !data) return;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    // Never paint mid-zoom: container/layer projections are inconsistent while</span>
+<span class="d-add">+    // the pane transform is animating, so a paint here (e.g. triggered by a WS</span>
+<span class="d-add">+    // delta) lands misaligned — and STAYS misaligned if the zoomend repaint is</span>
+<span class="d-add">+    // dropped. zoomend always schedules a redraw, so deferring loses nothing.</span>
+<span class="d-add">+    if (isZoomingRef.current) return;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     const size = map.getSize();</span>
+<span class="d-ctx">     canvas.width = size.x;</span>
+<span class="d-ctx">     canvas.height = size.y;</span>
+<span class="d-hunk">@@ -2606,6 +2624,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     L.DomUtil.setPosition(canvas, topLeft);</span>
+<span class="d-ctx">     ctx.clearRect(0, 0, canvas.width, canvas.height);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    // Record the camera this bitmap is painted at — BEFORE any early return, so</span>
+<span class="d-add">+    // block maps (where the canvas holds only highlights) still anchor the</span>
+<span class="d-add">+    // zoom-anim ride and the drift failsafe in ensureAnchored.</span>
+<span class="d-add">+    drawStateRef.current = { zoom: map.getZoom(), nw: map.containerPointToLatLng([0, 0]) };</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     if (!data.ends || !data.coords) return;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     // Blocks are the heat display (MapLibre fill layer): skip the per-edge canvas</span>
+<span class="d-hunk">@@ -2776,21 +2799,38 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     ctx.globalCompositeOperation = &quot;source-over&quot;;</span>
+<span class="d-ctx">     ctx.globalAlpha = 1.0;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    // Record the map state this bitmap was painted at, so a subsequent zoom</span>
+<span class="d-del">-    // animation can scale/translate the existing pixels to the target zoom.</span>
+<span class="d-del">-    drawStateRef.current = { zoom, nw: map.containerPointToLatLng([0, 0]) };</span>
+<span class="d-del">-</span>
+<span class="d-ctx">     redrawHoverHighlightRef.current();</span>
+<span class="d-ctx">   }, [map, mapStyle.heat, mapStyle.basemap, mapStyle.heatComposite, mapStyle.selection]);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // Schedule redraw</span>
+<span class="d-add">+  // Schedule redraw. rAF is the fast path; the timer is a backstop because rAF</span>
+<span class="d-add">+  // never fires in hidden/occluded windows — without it a zoomend repaint can be</span>
+<span class="d-add">+  // dropped entirely, leaving the bitmap anchored at the OLD zoom (visible as a</span>
+<span class="d-add">+  // scaled/offset heatmap once the window surfaces).</span>
+<span class="d-ctx">   const scheduleRedraw = useCallback(() =&gt; {</span>
+<span class="d-ctx">     if (redrawTimeoutRef.current) cancelAnimationFrame(redrawTimeoutRef.current);</span>
+<span class="d-del">-    redrawTimeoutRef.current = requestAnimationFrame(redraw);</span>
+<span class="d-add">+    if (redrawFallbackRef.current) window.clearTimeout(redrawFallbackRef.current);</span>
+<span class="d-add">+    redrawTimeoutRef.current = requestAnimationFrame(() =&gt; {</span>
+<span class="d-add">+      redrawTimeoutRef.current = null;</span>
+<span class="d-add">+      if (redrawFallbackRef.current) {</span>
+<span class="d-add">+        window.clearTimeout(redrawFallbackRef.current);</span>
+<span class="d-add">+        redrawFallbackRef.current = null;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+      redraw();</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+    redrawFallbackRef.current = window.setTimeout(() =&gt; {</span>
+<span class="d-add">+      redrawFallbackRef.current = null;</span>
+<span class="d-add">+      if (redrawTimeoutRef.current) {</span>
+<span class="d-add">+        cancelAnimationFrame(redrawTimeoutRef.current);</span>
+<span class="d-add">+        redrawTimeoutRef.current = null;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+      redraw();</span>
+<span class="d-add">+    }, 200);</span>
+<span class="d-ctx">   }, [redraw]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const scheduleRedrawRef = useRef(scheduleRedraw);</span>
+<span class="d-ctx">   useEffect(() =&gt; { scheduleRedrawRef.current = scheduleRedraw; }, [scheduleRedraw]);</span>
+<span class="d-add">+  const redrawRef = useRef(redraw);</span>
+<span class="d-add">+  useEffect(() =&gt; { redrawRef.current = redraw; }, [redraw]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Map event listeners — topology is pre-loaded, just redraw on pan/zoom</span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-hunk">@@ -2846,17 +2886,38 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx">     const handleResize = () =&gt; scheduleRedrawRef.current();</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    // Failsafe re-anchor: the bitmap records the zoom it was painted at; if it</span>
+<span class="d-add">+    // disagrees with the map&#x27;s zoom while no zoom is in flight, the zoomend</span>
+<span class="d-add">+    // repaint was dropped (frozen rAF, interrupted animation) and the canvas is</span>
+<span class="d-add">+    // sitting misaligned. Repaint synchronously — don&#x27;t re-enter the rAF path</span>
+<span class="d-add">+    // that already failed. Checked per move frame (a number compare) and on</span>
+<span class="d-add">+    // visibility restore, since a hidden window is where rAF freezes.</span>
+<span class="d-add">+    const ensureAnchored = () =&gt; {</span>
+<span class="d-add">+      if (isZoomingRef.current) return;</span>
+<span class="d-add">+      const painted = drawStateRef.current;</span>
+<span class="d-add">+      if (!painted || painted.zoom === map.getZoom()) return;</span>
+<span class="d-add">+      dwarn(&quot;topo&quot;, `anchor drift: bitmap painted at z${painted.zoom}, map at z${map.getZoom()} — repainting`);</span>
+<span class="d-add">+      redrawRef.current();</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+    const handleVisibility = () =&gt; {</span>
+<span class="d-add">+      if (!document.hidden) ensureAnchored();</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     map.on(&quot;zoomstart&quot;, handleZoomStart);</span>
+<span class="d-ctx">     map.on(&quot;zoomanim&quot;, handleZoomAnim);</span>
+<span class="d-ctx">     map.on(&quot;zoomend&quot;, handleZoomEnd);</span>
+<span class="d-ctx">     map.on(&quot;moveend&quot;, handleMoveEnd);</span>
+<span class="d-ctx">     map.on(&quot;resize&quot;, handleResize);</span>
+<span class="d-add">+    map.on(&quot;move&quot;, ensureAnchored);</span>
+<span class="d-add">+    document.addEventListener(&quot;visibilitychange&quot;, handleVisibility);</span>
+<span class="d-ctx">     return () =&gt; {</span>
+<span class="d-ctx">       map.off(&quot;zoomstart&quot;, handleZoomStart);</span>
+<span class="d-ctx">       map.off(&quot;zoomanim&quot;, handleZoomAnim);</span>
+<span class="d-ctx">       map.off(&quot;zoomend&quot;, handleZoomEnd);</span>
+<span class="d-ctx">       map.off(&quot;moveend&quot;, handleMoveEnd);</span>
+<span class="d-ctx">       map.off(&quot;resize&quot;, handleResize);</span>
+<span class="d-add">+      map.off(&quot;move&quot;, ensureAnchored);</span>
+<span class="d-add">+      document.removeEventListener(&quot;visibilitychange&quot;, handleVisibility);</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx">   }, [map]);</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+            <span class="stat"><span class="d-add">+29</span> / <span class="d-del">-10</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/MapLibreBackground</span>
+        <span class="ctx-sum">the MapLibre GL base map + block heat, camera-synced from Leaflet</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapLibreBackground.tsx</span>
+        <span class="ctx-sum">~540 LOC — GL style, camera sync, block feature-state heat</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Style build</span><span class="ol-sum">carto raster + blocks PMTiles + heat/select paint</span></li><li class="dim"><span class="ol-label">Map init / block resolver</span><span class="ol-sum">maplibregl.Map, blockAtResolver</span></li><li class="changed"><span class="ol-label">Camera sync effect</span><span class="ol-sum">move→jumpTo, zoomanim ride; zoomend/moveend/visibility → NEW reconcile()</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Block heat feature-state</span><span class="ol-sum">diff-applied heat + selection</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>reconcile() — clear leftover ride transform, unconditional syncCamera, triggerRepaint; skips while _animatingZoom</li><li>handleZoomEnd replaced — zoomend no longer trusts a preceding final move event</li><li>moveend + document visibilitychange wired to reconcile (with cleanup)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index f2fd906..3ea36c1 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -338,28 +338,47 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">       el.style.transform = `translate3d(${q.x}px, ${q.y}px, 0) scale(${scale})`;</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    // At transition end Leaflet fires `move` (→ syncCamera jumpTo) then</span>
+<span class="d-del">-    // `zoomend`, in the same tick. Clearing the transform here lands in the</span>
+<span class="d-del">-    // same compositor frame as MapLibre&#x27;s re-render of the final camera (its</span>
+<span class="d-del">-    // rAF runs before paint), so the crisp frame swaps in without a flash.</span>
+<span class="d-del">-    const handleZoomEnd = () =&gt; {</span>
+<span class="d-add">+    // Failsafe re-anchor. The happy path at zoom end is: final `move` →</span>
+<span class="d-add">+    // syncCamera jumpTo, then `zoomend` clears the ride transform in the same</span>
+<span class="d-add">+    // compositor frame as MapLibre&#x27;s re-render (its rAF runs before paint), so</span>
+<span class="d-add">+    // the crisp frame swaps in without a flash. But every link in that chain</span>
+<span class="d-add">+    // can drop — a zoomend without a final move, a rAF frozen in an occluded</span>
+<span class="d-add">+    // window, an interrupted animation — and then the GL frame sits at a STALE</span>
+<span class="d-add">+    // camera, misaligned with every Leaflet-drawn layer until the next</span>
+<span class="d-add">+    // interaction. So on zoomend/moveend/visibility-restore: clear any leftover</span>
+<span class="d-add">+    // ride transform, re-jump the camera unconditionally, and force one GL</span>
+<span class="d-add">+    // repaint. Each step is a cheap no-op when nothing drifted.</span>
+<span class="d-add">+    const reconcile = () =&gt; {</span>
+<span class="d-ctx">       const el = containerRef.current;</span>
+<span class="d-del">-      if (!el || !el.style.transform) return;</span>
+<span class="d-del">-      el.style.transition = &quot;&quot;;</span>
+<span class="d-del">-      el.style.transform = &quot;&quot;;</span>
+<span class="d-add">+      const ml = mapRef.current;</span>
+<span class="d-add">+      if (!el || !ml) return;</span>
+<span class="d-add">+      if ((leafletMap as unknown as { _animatingZoom?: boolean })._animatingZoom) return;</span>
+<span class="d-add">+      if (el.style.transform) {</span>
+<span class="d-add">+        el.style.transition = &quot;&quot;;</span>
+<span class="d-add">+        el.style.transform = &quot;&quot;;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+      syncCamera();</span>
+<span class="d-add">+      ml.triggerRepaint();</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+    const handleVisibility = () =&gt; {</span>
+<span class="d-add">+      if (!document.hidden) reconcile();</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     // Sync on every move frame for smooth panning</span>
+<span class="d-ctx">     leafletMap.on(&quot;move&quot;, syncCamera);</span>
+<span class="d-ctx">     leafletMap.on(&quot;zoomanim&quot;, handleZoomAnim);</span>
+<span class="d-del">-    leafletMap.on(&quot;zoomend&quot;, handleZoomEnd);</span>
+<span class="d-add">+    leafletMap.on(&quot;zoomend&quot;, reconcile);</span>
+<span class="d-add">+    leafletMap.on(&quot;moveend&quot;, reconcile);</span>
+<span class="d-add">+    document.addEventListener(&quot;visibilitychange&quot;, handleVisibility);</span>
+<span class="d-ctx">     // Initial sync</span>
+<span class="d-ctx">     syncCamera();</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     return () =&gt; {</span>
+<span class="d-ctx">       leafletMap.off(&quot;move&quot;, syncCamera);</span>
+<span class="d-ctx">       leafletMap.off(&quot;zoomanim&quot;, handleZoomAnim);</span>
+<span class="d-del">-      leafletMap.off(&quot;zoomend&quot;, handleZoomEnd);</span>
+<span class="d-add">+      leafletMap.off(&quot;zoomend&quot;, reconcile);</span>
+<span class="d-add">+      leafletMap.off(&quot;moveend&quot;, reconcile);</span>
+<span class="d-add">+      document.removeEventListener(&quot;visibilitychange&quot;, handleVisibility);</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx">   }, [leafletMap]);</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_anchor_failsafe_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

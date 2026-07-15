@@ -29,6 +29,24 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-15-layer-anchor-failsafe.html">
+    <div class="date">2026-07-15</div>
+    <h2>Layer-anchor failsafes — the map can no longer stay misaligned</h2>
+    <p>Screenshots caught the white route layer offset from the block heat — differently at each
+    zoom — then healing on its own. The projection math was fine; both zoom-animation "rides"
+    (the GL container transform and the heat/highlight canvas transform) re-anchor through a
+    fragile chain — MapLibre's camera resynced only by Leaflet's final <code>move</code> event,
+    the canvas repaint on a bare rAF (which freezes entirely in hidden/occluded windows), and
+    mid-animation paints from WS deltas baking inconsistent transforms into the bitmap. On block
+    maps the bitmap's painted-camera record (<code>drawStateRef</code>) was never even written.
+    Five failsafes: paints are deferred while a zoom is in flight, the painted camera is stamped
+    on every paint, the rAF repaint gets a 200&nbsp;ms timer backstop, an
+    <code>ensureAnchored()</code> drift check on every move frame + visibility restore repaints
+    synchronously when bitmap zoom ≠ map zoom, and a MapLibre <code>reconcile()</code> on
+    zoomend/moveend/visibility clears leftover ride transforms, re-jumps the camera
+    unconditionally, and forces one GL frame. Each is a cheap no-op when nothing drifted.</p>
+  </a>
+
   <a class="entry" href="./2026-07-14-citibike-counter-votes.html">
     <div class="date">2026-07-14</div>
     <h2>Citibike import correction — a bike-legality graph votes back</h2>
