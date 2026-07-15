@@ -311,8 +311,8 @@ export function chooseAnchorOrderBefore(
 // corridors inside one component) → peel heaviest simple paths → split each at
 // its loop-back points into straight-ish corridors (splitLoopyPath) → trim
 // each to its support-earned meter budget (capPathToLengthBudget) → activity
-// gates (score, edges, blocks) → block projection → same-type dedupe → rank +
-// cap.
+// gates (score, edges, blocks) → block projection → same-type dedupe → rank
+// with a per-type diversity quota (MAX_PER_TYPE) + cap.
 //
 // Determinism contract: NO randomness, NO clock. Every iteration order and
 // tie-break is by ascending edge/node id, so the same (topology, vote state)
@@ -337,6 +337,12 @@ export const MIN_ROUTE_EDGES = 2;
 export const MIN_ROUTE_BLOCKS = 5;
 /** Global cap on the ranked proposal list. */
 export const DEFAULT_LIMIT = 20;
+/** Type-diversity quota: at most this many proposals of ONE vote type in the
+ *  ranked list. Without it, bulk-imported types (scores in the tens of
+ *  thousands) fill every slot and organic types never surface — Broadway's
+ *  net-strongest corridor ("Add sharrow", score 237) ranked #87 behind 86
+ *  imported-type corridors. Slots the quota can't fill backfill by pure score. */
+export const MAX_PER_TYPE = 4;
 /** Same-type edge-set Jaccard at/above which two routes are duplicates. */
 export const DEFAULT_JACCARD = 0.5;
 
@@ -496,6 +502,8 @@ export function splitLoopyPath(
 
 export interface RouteProposalOptions {
   limit?: number;
+  /** Max proposals of one vote type in the ranked list (MAX_PER_TYPE). */
+  maxPerType?: number;
   jaccardThreshold?: number;
   minNet?: number;
   minRouteScore?: number;
@@ -929,6 +937,7 @@ export function createRouteProposalJob(
   const legend = data.vote_type_legend ?? [];
   const edgeVoteTypes = data.edge_vote_types ?? [];
   const limit = opts.limit ?? DEFAULT_LIMIT;
+  const maxPerType = opts.maxPerType ?? MAX_PER_TYPE;
   const jaccardThreshold = opts.jaccardThreshold ?? DEFAULT_JACCARD;
   const minNet = opts.minNet ?? MIN_NET;
   const minRouteScore = opts.minRouteScore ?? MIN_ROUTE_SCORE;
@@ -995,9 +1004,32 @@ export function createRouteProposalJob(
   };
 
   const finish = (perType: RouteProposal[][]): RouteProposal[] => {
+    const byScore = (a: RouteProposal, b: RouteProposal) =>
+      b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     const all = perType.flat();
-    all.sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    return all.slice(0, limit);
+    all.sort(byScore);
+    // Diversity pass: walk by score, admitting at most `maxPerType` per vote
+    // type; leftover slots backfill from the skipped (5th-and-up of their type)
+    // by score. Final list re-sorted so callers still see pure score order.
+    const taken: RouteProposal[] = [];
+    const skipped: RouteProposal[] = [];
+    const perTypeCount = new Map<number, number>();
+    for (const p of all) {
+      const c = perTypeCount.get(p.legendIdx) ?? 0;
+      if (c < maxPerType) {
+        perTypeCount.set(p.legendIdx, c + 1);
+        taken.push(p);
+      } else {
+        skipped.push(p);
+      }
+    }
+    const ranked = taken.slice(0, limit);
+    for (const p of skipped) {
+      if (ranked.length >= limit) break;
+      ranked.push(p);
+    }
+    ranked.sort(byScore);
+    return ranked;
   };
 
   return { types, step, finish };

@@ -414,6 +414,53 @@ describe("computeRouteProposals — activity gates", () => {
   });
 });
 
+describe("computeRouteProposals — per-type diversity quota (MAX_PER_TYPE)", () => {
+  // Six disjoint hot BIKE corridors (scores 60,58,…,50) + one weak TREE
+  // corridor (score 9). Pure score ranking would fill any small limit with
+  // BIKE alone; the quota admits at most 4 BIKEs before other types.
+  const edges: [number, number][] = [];
+  const votes: [number, number, number][][] = [];
+  for (let i = 0; i < 6; i++) {
+    const base = i * 10;
+    edges.push([base, base + 1], [base + 1, base + 2]);
+    votes.push([[BIKE, 30 - i, 0]], [[BIKE, 30 - i, 0]]);
+  }
+  edges.push([100, 101], [101, 102]);
+  votes.push([[TREE, 5, 0]], [[TREE, 4, 0]]);
+  edges.push([110, 111], [111, 112]);
+  votes.push([[TREE, 4, 0]], [[TREE, 3, 0]]);
+
+  it("admits at most 4 of one type, so a weaker type surfaces", () => {
+    const ps = compute(edges, evt(...votes), { limit: 5 });
+    const bikes = ps.filter((p) => p.legendIdx === BIKE);
+    const trees = ps.filter((p) => p.legendIdx === TREE);
+    expect(bikes).toHaveLength(4);
+    expect(trees).toHaveLength(1);
+    // The 4 admitted BIKEs are the strongest 4, and order is still by score.
+    expect(bikes.map((p) => p.score)).toEqual([60, 58, 56, 54]);
+    expect(ps.map((p) => p.score)).toEqual([60, 58, 56, 54, 9]);
+  });
+
+  it("backfills unused slots by pure score when types run out", () => {
+    // Only BIKE corridors exist: the quota (4) can't fill limit 5, so the
+    // 5th-best BIKE backfills rather than returning a short list.
+    const bikeOnly = edges.slice(0, 12);
+    const bikeVotes = votes.slice(0, 12);
+    const ps = compute(bikeOnly, evt(...bikeVotes), { limit: 5 });
+    expect(ps).toHaveLength(5);
+    expect(ps.map((p) => p.score)).toEqual([60, 58, 56, 54, 52]);
+  });
+
+  it("is overridable via maxPerType", () => {
+    // Quota 2: both TREEs are admitted (9 and 7); one BIKE backfills the
+    // remaining slot by score.
+    const ps = compute(edges, evt(...votes), { limit: 5, maxPerType: 2 });
+    expect(ps.filter((p) => p.legendIdx === TREE)).toHaveLength(2);
+    expect(ps.filter((p) => p.legendIdx === BIKE)).toHaveLength(3);
+    expect(ps.map((p) => p.score)).toEqual([60, 58, 56, 9, 7]);
+  });
+});
+
 describe("computeRouteProposals — ranking, cap, anchors", () => {
   it("ranks by score desc and caps at the limit", () => {
     const ps = compute(
