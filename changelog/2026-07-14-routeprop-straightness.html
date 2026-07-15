@@ -115,7 +115,8 @@
   <nav class="toc"><a href="#diagnosis">1</a>
 <a href="#gate">2</a>
 <a href="#split">3</a>
-<a href="#harness">4</a>
+<a href="#quota">4</a>
+<a href="#harness">5</a>
     <a href="#verify">Verification</a><a href="#checklist">Checklist</a>
   </nav>
 
@@ -129,7 +130,13 @@
   fragment earns its own support-based length budget, and a new <code>MIN_ROUTE_BLOCKS = 5</code> gate
   drops corridors that don't span at least 5 blocks (their votes still show as point pins). Verified
   against real data with a new vite-node stats harness: 0/20 loopy corridors on nyc-bikes (was 8/20 by
-  either measure), stubs gone, determinism contract intact, compute time unchanged.</p>
+  either measure), stubs gone, determinism contract intact, compute time unchanged.
+  <br><br>Follow-up (2026-07-15): “bright Broadway has no proposal” traced with a new street-trace
+  harness — half counter-vote import working as designed (Broadway's big four types are now deeply
+  net-negative; heat shows up+down so downvotes brighten it), half a real ranking flaw: the top-20 was
+  pure score, so imported mega-types buried Broadway's genuine sharrow/signal corridors at #87/#96. A
+  per-type diversity quota (<code>MAX_PER_TYPE = 4</code>, score-backfilled) lifts them to #16/#17 and
+  the list now spans 7 vote types.</p>
 
   
     <section class="card" id="diagnosis">
@@ -190,7 +197,7 @@
       <h3>Diffs — files touched (click to expand)</h3>
         <details>
           <summary><span class="fname">client-react/src/components/GraphLayer/routeProposals.ts</span>
-            <span class="stat"><span class="d-add">+178</span> / <span class="d-del">-28</span></span>
+            <span class="stat"><span class="d-add">+212</span> / <span class="d-del">-30</span></span>
           </summary>
           
     <div class="ctx">
@@ -211,7 +218,7 @@
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
-        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Wire parsing + marker shape</span><span class="ol-sum">parseRouteProposal, diamond vs square</span></li><li class="dim"><span class="ol-label">Coverage / dedupe / corridor geometry</span><span class="ol-sum">isRouteCovered, corridorCoordinates, anchor ordering</span></li><li class="changed"><span class="ol-label">Pipeline constants + gates</span><span class="ol-sum">MIN_NET, PEEL_*, MIN_ROUTE_SCORE/EDGES — NEW: MIN_ROUTE_BLOCKS = 5</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Corridor length budget</span><span class="ol-sum">routeLengthBudgetM — 2700 + 660·√score, cap 10500 (unchanged)</span></li><li class="changed"><span class="ol-label">Loop-back splitting</span><span class="ol-sum">NEW: splitLoopyPath — window rule (hairpins) + endpoint rule (U-turns), recursive</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">capPathToLengthBudget</span><span class="ol-sum">best-weight window within the meter budget (unchanged)</span></li><li class="dim"><span class="ol-label">netsByType / buildTypeAdj / components / peeling</span><span class="ol-sum">per-type net-positive subgraph → heaviest simple paths (unchanged)</span></li><li class="changed"><span class="ol-label">createRouteProposalJob · step()</span><span class="ol-sum">peel → SPLIT → cap → gates (score, edges, NEW blocks) → blocks → dedupe</span><span class="ol-tag">changed</span></li></ul>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Wire parsing + marker shape</span><span class="ol-sum">parseRouteProposal, diamond vs square</span></li><li class="dim"><span class="ol-label">Coverage / dedupe / corridor geometry</span><span class="ol-sum">isRouteCovered, corridorCoordinates, anchor ordering</span></li><li class="changed"><span class="ol-label">Pipeline constants + gates</span><span class="ol-sum">MIN_NET, PEEL_*, MIN_ROUTE_SCORE/EDGES — NEW: MIN_ROUTE_BLOCKS = 5, MAX_PER_TYPE = 4</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Corridor length budget</span><span class="ol-sum">routeLengthBudgetM — 2700 + 660·√score, cap 10500 (unchanged)</span></li><li class="changed"><span class="ol-label">Loop-back splitting</span><span class="ol-sum">NEW: splitLoopyPath — window rule (hairpins) + endpoint rule (U-turns), recursive</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">capPathToLengthBudget</span><span class="ol-sum">best-weight window within the meter budget (unchanged)</span></li><li class="dim"><span class="ol-label">netsByType / buildTypeAdj / components / peeling</span><span class="ol-sum">per-type net-positive subgraph → heaviest simple paths (unchanged)</span></li><li class="changed"><span class="ol-label">createRouteProposalJob · step()</span><span class="ol-sum">peel → SPLIT → cap → gates (score, edges, NEW blocks) → blocks → dedupe</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">createRouteProposalJob · finish()</span><span class="ol-sum">rank by score → NEW per-type quota (≤4/type, score backfill) → cap</span><span class="ol-tag">changed</span></li></ul>
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">Changed blocks (top → bottom)</div>
@@ -220,7 +227,7 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeProposals.ts b/client-react/src/components/GraphLayer/routeProposals.ts</span>
-<span class="d-meta">index 79877bd..f35d4b1 100644</span>
+<span class="d-meta">index 79877bd..4099872 100644</span>
 <span class="d-meta">--- a/client-react/src/components/GraphLayer/routeProposals.ts</span>
 <span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeProposals.ts</span>
 <span class="d-hunk">@@ -308,9 +308,11 @@ export function chooseAnchorOrderBefore(</span>
@@ -233,12 +240,12 @@
 <span class="d-add">+<span class="s-com">// corridors inside one component) → peel heaviest simple paths → split each at</span></span>
 <span class="d-add">+<span class="s-com">// its loop-back points into straight-ish corridors (splitLoopyPath) → trim</span></span>
 <span class="d-add">+<span class="s-com">// each to its support-earned meter budget (capPathToLengthBudget) → activity</span></span>
-<span class="d-add">+<span class="s-com">// gates (score, edges, blocks) → block projection → same-type dedupe → rank +</span></span>
-<span class="d-add">+<span class="s-com">// cap.</span></span>
+<span class="d-add">+<span class="s-com">// gates (score, edges, blocks) → block projection → same-type dedupe → rank</span></span>
+<span class="d-add">+<span class="s-com">// with a per-type diversity quota (MAX_PER_TYPE) + cap.</span></span>
 <span class="d-ctx"> <span class="s-com">//</span></span>
 <span class="d-ctx"> <span class="s-com">// Determinism contract: NO randomness, NO clock. Every iteration order and</span></span>
 <span class="d-ctx"> <span class="s-com">// tie-break is by ascending edge/node id, so the same (topology, vote state)</span></span>
-<span class="d-hunk">@@ -329,6 +331,10 @@ export const PEEL_DOMINANCE = 0.25;</span>
+<span class="d-hunk">@@ -329,8 +331,18 @@ export const PEEL_DOMINANCE = 0.25;</span>
 <span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">MIN_ROUTE_SCORE</span> = <span class="s-num">3</span>;</span>
 <span class="d-ctx"> <span class="s-com">/** High-activity gate: minimum number of path edges. */</span></span>
 <span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">MIN_ROUTE_EDGES</span> = <span class="s-num">2</span>;</span>
@@ -248,8 +255,16 @@
 <span class="d-add">+<span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">MIN_ROUTE_BLOCKS</span> = <span class="s-num">5</span>;</span>
 <span class="d-ctx"> <span class="s-com">/** Global cap on the ranked proposal list. */</span></span>
 <span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">DEFAULT_LIMIT</span> = <span class="s-num">20</span>;</span>
+<span class="d-add">+<span class="s-com">/** Type-diversity quota: at most this many proposals of ONE vote type in the</span></span>
+<span class="d-add">+<span class="s-com"> *  ranked list. Without it, bulk-imported types (scores in the tens of</span></span>
+<span class="d-add">+<span class="s-com"> *  thousands) fill every slot and organic types never surface — Broadway&#x27;s</span></span>
+<span class="d-add">+<span class="s-com"> *  net-strongest corridor (&quot;Add sharrow&quot;, score 237) ranked #87 behind 86</span></span>
+<span class="d-add">+<span class="s-com"> *  imported-type corridors. Slots the quota can&#x27;t fill backfill by pure score. */</span></span>
+<span class="d-add">+<span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">MAX_PER_TYPE</span> = <span class="s-num">4</span>;</span>
 <span class="d-ctx"> <span class="s-com">/** Same-type edge-set Jaccard at/above which two routes are duplicates. */</span></span>
-<span class="d-hunk">@@ -355,12 +361,147 @@ export function routeLengthBudgetM(score: number, maxM = ROUTE_LENGTH_MAX_M): nu</span>
+<span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">DEFAULT_JACCARD</span> = <span class="s-num">0.5</span>;</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -355,12 +367,149 @@ export function routeLengthBudgetM(score: number, maxM = ROUTE_LENGTH_MAX_M): nu</span>
 <span class="d-ctx">   <span class="s-kw">return</span> <span class="s-type">Math</span>.<span class="s-fn">min</span>(maxM, earned);</span>
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
@@ -388,6 +403,8 @@
 <span class="d-add">+</span>
 <span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">interface</span> <span class="s-type">RouteProposalOptions</span> {</span>
 <span class="d-ctx">   limit?: number;</span>
+<span class="d-add">+  <span class="s-com">/** Max proposals of one vote type in the ranked list (MAX_PER_TYPE). */</span></span>
+<span class="d-add">+  maxPerType?: number;</span>
 <span class="d-ctx">   jaccardThreshold?: number;</span>
 <span class="d-ctx">   minNet?: number;</span>
 <span class="d-ctx">   minRouteScore?: number;</span>
@@ -397,7 +414,12 @@
 <span class="d-ctx">   <span class="s-com">/** Hard ceiling override for the corridor length budget (meters). */</span></span>
 <span class="d-ctx">   maxRouteLengthM?: number;</span>
 <span class="d-ctx"> <span class="s-com">  /** Prebuilt edge→block index for `topo` (GraphLayer already holds one).</span></span>
-<span class="d-hunk">@@ -792,6 +933,7 @@ export function createRouteProposalJob(</span>
+<span class="d-hunk">@@ -788,10 +937,12 @@ export function createRouteProposalJob(</span>
+<span class="d-ctx">   <span class="s-kw">const</span> legend = data.vote_type_legend ?? [];</span>
+<span class="d-ctx">   <span class="s-kw">const</span> edgeVoteTypes = data.edge_vote_types ?? [];</span>
+<span class="d-ctx">   <span class="s-kw">const</span> limit = opts.limit ?? <span class="s-type">DEFAULT_LIMIT</span>;</span>
+<span class="d-add">+  <span class="s-kw">const</span> maxPerType = opts.maxPerType ?? <span class="s-type">MAX_PER_TYPE</span>;</span>
+<span class="d-ctx">   <span class="s-kw">const</span> jaccardThreshold = opts.jaccardThreshold ?? <span class="s-type">DEFAULT_JACCARD</span>;</span>
 <span class="d-ctx">   <span class="s-kw">const</span> minNet = opts.minNet ?? <span class="s-type">MIN_NET</span>;</span>
 <span class="d-ctx">   <span class="s-kw">const</span> minRouteScore = opts.minRouteScore ?? <span class="s-type">MIN_ROUTE_SCORE</span>;</span>
 <span class="d-ctx">   <span class="s-kw">const</span> minRouteEdges = opts.minRouteEdges ?? <span class="s-type">MIN_ROUTE_EDGES</span>;</span>
@@ -405,7 +427,7 @@
 <span class="d-ctx">   <span class="s-kw">const</span> maxRouteLengthM = opts.maxRouteLengthM ?? <span class="s-type">ROUTE_LENGTH_MAX_M</span>;</span>
 <span class="d-ctx">   <span class="s-kw">const</span> blockIndex = opts.blockIndex !== <span class="s-lit">undefined</span> ? opts.blockIndex : <span class="s-fn">buildBlockIndex</span>(topo);</span>
 <span class="d-ctx">   <span class="s-kw">const</span> netsPerType = <span class="s-fn">netsByType</span>(edgeVoteTypes, topo.nEdges, legend.length);</span>
-<span class="d-hunk">@@ -812,33 +954,41 @@ export function createRouteProposalJob(</span>
+<span class="d-hunk">@@ -812,42 +963,73 @@ export function createRouteProposalJob(</span>
 <span class="d-ctx">     <span class="s-kw">const</span> nets = netsPerType[legendIdx];</span>
 <span class="d-ctx">     <span class="s-kw">const</span> typeAdj = <span class="s-fn">buildTypeAdj</span>(topo, adj, nets, minNet);</span>
 <span class="d-ctx">     <span class="s-kw">const</span> typeProposals: <span class="s-type">RouteProposal</span>[] = [];</span>
@@ -471,12 +493,46 @@
 <span class="d-add">+        }</span>
 <span class="d-ctx">       }</span>
 <span class="d-ctx">     }</span>
-<span class="d-ctx">     <span class="s-kw">return</span> <span class="s-fn">dedupeRoutes</span>(typeProposals, jaccardThreshold);</span></pre>
+<span class="d-ctx">     <span class="s-kw">return</span> <span class="s-fn">dedupeRoutes</span>(typeProposals, jaccardThreshold);</span>
+<span class="d-ctx">   };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-kw">const</span> finish = (perType: <span class="s-type">RouteProposal</span>[][]): <span class="s-type">RouteProposal</span>[] =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> byScore = (a: <span class="s-type">RouteProposal</span>, b: <span class="s-type">RouteProposal</span>) =&gt;</span>
+<span class="d-add">+      b.score - a.score || (a.id &lt; b.id ? -<span class="s-num">1</span> : a.id &gt; b.id ? <span class="s-num">1</span> : <span class="s-num">0</span>);</span>
+<span class="d-ctx">     <span class="s-kw">const</span> all = perType.<span class="s-fn">flat</span>();</span>
+<span class="d-del">-    all.<span class="s-fn">sort</span>((a, b) =&gt; b.score - a.score || (a.id &lt; b.id ? -<span class="s-num">1</span> : a.id &gt; b.id ? <span class="s-num">1</span> : <span class="s-num">0</span>));</span>
+<span class="d-del">-    <span class="s-kw">return</span> all.<span class="s-fn">slice</span>(<span class="s-num">0</span>, limit);</span>
+<span class="d-add">+    all.<span class="s-fn">sort</span>(byScore);</span>
+<span class="d-add">+    <span class="s-com">// Diversity pass: walk by score, admitting at most `maxPerType` per vote</span></span>
+<span class="d-add">+    <span class="s-com">// type; leftover slots backfill from the skipped (5th-and-up of their type)</span></span>
+<span class="d-add">+    <span class="s-com">// by score. Final list re-sorted so callers still see pure score order.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> taken: <span class="s-type">RouteProposal</span>[] = [];</span>
+<span class="d-add">+    <span class="s-kw">const</span> skipped: <span class="s-type">RouteProposal</span>[] = [];</span>
+<span class="d-add">+    <span class="s-kw">const</span> perTypeCount = <span class="s-kw">new</span> <span class="s-type">Map</span>&lt;number, number&gt;();</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">const</span> p <span class="s-kw">of</span> all) {</span>
+<span class="d-add">+      <span class="s-kw">const</span> c = perTypeCount.<span class="s-kw">get</span>(p.legendIdx) ?? <span class="s-num">0</span>;</span>
+<span class="d-add">+      <span class="s-kw">if</span> (c &lt; maxPerType) {</span>
+<span class="d-add">+        perTypeCount.<span class="s-kw">set</span>(p.legendIdx, c + <span class="s-num">1</span>);</span>
+<span class="d-add">+        taken.<span class="s-fn">push</span>(p);</span>
+<span class="d-add">+      } <span class="s-kw">else</span> {</span>
+<span class="d-add">+        skipped.<span class="s-fn">push</span>(p);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-kw">const</span> ranked = taken.<span class="s-fn">slice</span>(<span class="s-num">0</span>, limit);</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">const</span> p <span class="s-kw">of</span> skipped) {</span>
+<span class="d-add">+      <span class="s-kw">if</span> (ranked.length &gt;= limit) <span class="s-kw">break</span>;</span>
+<span class="d-add">+      ranked.<span class="s-fn">push</span>(p);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    ranked.<span class="s-fn">sort</span>(byScore);</span>
+<span class="d-add">+    <span class="s-kw">return</span> ranked;</span>
+<span class="d-ctx">   };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-kw">return</span> { types, step, finish };</span></pre>
         </details>
         
         <details>
           <summary><span class="fname">client-react/src/components/GraphLayer/routeProposals.test.ts</span>
-            <span class="stat"><span class="d-add">+179</span> / <span class="d-del">-1</span></span>
+            <span class="stat"><span class="d-add">+226</span> / <span class="d-del">-1</span></span>
           </summary>
           
     <div class="ctx">
@@ -506,7 +562,7 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeProposals.test.ts b/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
-<span class="d-meta">index 4a9a4e4..e8004df 100644</span>
+<span class="d-meta">index 4a9a4e4..e55a061 100644</span>
 <span class="d-meta">--- a/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
 <span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
 <span class="d-hunk">@@ -14,8 +14,11 @@ import {</span>
@@ -535,7 +591,61 @@
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx"> <span class="s-kw">function</span> <span class="s-fn">bareRoute</span>(over: <span class="s-type">Partial</span>&lt;<span class="s-type">RouteProposal</span>&gt;): <span class="s-type">RouteProposal</span> {</span>
-<span class="d-hunk">@@ -651,3 +656,176 @@ describe(&quot;computeRouteProposals — route/point kind filter&quot;, () =&gt; {</span>
+<span class="d-hunk">@@ -409,6 +414,53 @@ describe(&quot;computeRouteProposals — activity gates&quot;, () =&gt; {</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+<span class="s-fn">describe</span>(<span class="s-str">&quot;computeRouteProposals — per-type diversity quota (MAX_PER_TYPE)&quot;</span>, () =&gt; {</span>
+<span class="d-add">+  <span class="s-com">// Six disjoint hot BIKE corridors (scores 60,58,…,50) + one weak TREE</span></span>
+<span class="d-add">+  <span class="s-com">// corridor (score 9). Pure score ranking would fill any small limit with</span></span>
+<span class="d-add">+  <span class="s-com">// BIKE alone; the quota admits at most 4 BIKEs before other types.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> edges: [number, number][] = [];</span>
+<span class="d-add">+  <span class="s-kw">const</span> votes: [number, number, number][][] = [];</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">let</span> i = <span class="s-num">0</span>; i &lt; <span class="s-num">6</span>; i++) {</span>
+<span class="d-add">+    <span class="s-kw">const</span> base = i * <span class="s-num">10</span>;</span>
+<span class="d-add">+    edges.<span class="s-fn">push</span>([base, base + <span class="s-num">1</span>], [base + <span class="s-num">1</span>, base + <span class="s-num">2</span>]);</span>
+<span class="d-add">+    votes.<span class="s-fn">push</span>([[<span class="s-type">BIKE</span>, <span class="s-num">30</span> - i, <span class="s-num">0</span>]], [[<span class="s-type">BIKE</span>, <span class="s-num">30</span> - i, <span class="s-num">0</span>]]);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  edges.<span class="s-fn">push</span>([<span class="s-num">100</span>, <span class="s-num">101</span>], [<span class="s-num">101</span>, <span class="s-num">102</span>]);</span>
+<span class="d-add">+  votes.<span class="s-fn">push</span>([[<span class="s-type">TREE</span>, <span class="s-num">5</span>, <span class="s-num">0</span>]], [[<span class="s-type">TREE</span>, <span class="s-num">4</span>, <span class="s-num">0</span>]]);</span>
+<span class="d-add">+  edges.<span class="s-fn">push</span>([<span class="s-num">110</span>, <span class="s-num">111</span>], [<span class="s-num">111</span>, <span class="s-num">112</span>]);</span>
+<span class="d-add">+  votes.<span class="s-fn">push</span>([[<span class="s-type">TREE</span>, <span class="s-num">4</span>, <span class="s-num">0</span>]], [[<span class="s-type">TREE</span>, <span class="s-num">3</span>, <span class="s-num">0</span>]]);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;admits at most 4 of one type, so a weaker type surfaces&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> ps = <span class="s-fn">compute</span>(edges, <span class="s-fn">evt</span>(...votes), { limit: <span class="s-num">5</span> });</span>
+<span class="d-add">+    <span class="s-kw">const</span> bikes = ps.<span class="s-fn">filter</span>((p) =&gt; p.legendIdx === <span class="s-type">BIKE</span>);</span>
+<span class="d-add">+    <span class="s-kw">const</span> trees = ps.<span class="s-fn">filter</span>((p) =&gt; p.legendIdx === <span class="s-type">TREE</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(bikes).<span class="s-fn">toHaveLength</span>(<span class="s-num">4</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(trees).<span class="s-fn">toHaveLength</span>(<span class="s-num">1</span>);</span>
+<span class="d-add">+    <span class="s-com">// The 4 admitted BIKEs are the strongest 4, and order is still by score.</span></span>
+<span class="d-add">+    <span class="s-fn">expect</span>(bikes.<span class="s-fn">map</span>((p) =&gt; p.score)).<span class="s-fn">toEqual</span>([<span class="s-num">60</span>, <span class="s-num">58</span>, <span class="s-num">56</span>, <span class="s-num">54</span>]);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(ps.<span class="s-fn">map</span>((p) =&gt; p.score)).<span class="s-fn">toEqual</span>([<span class="s-num">60</span>, <span class="s-num">58</span>, <span class="s-num">56</span>, <span class="s-num">54</span>, <span class="s-num">9</span>]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;backfills unused slots by pure score when types run out&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-com">// Only BIKE corridors exist: the quota (4) can&#x27;t fill limit 5, so the</span></span>
+<span class="d-add">+    <span class="s-com">// 5th-best BIKE backfills rather than returning a short list.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> bikeOnly = edges.<span class="s-fn">slice</span>(<span class="s-num">0</span>, <span class="s-num">12</span>);</span>
+<span class="d-add">+    <span class="s-kw">const</span> bikeVotes = votes.<span class="s-fn">slice</span>(<span class="s-num">0</span>, <span class="s-num">12</span>);</span>
+<span class="d-add">+    <span class="s-kw">const</span> ps = <span class="s-fn">compute</span>(bikeOnly, <span class="s-fn">evt</span>(...bikeVotes), { limit: <span class="s-num">5</span> });</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(ps).<span class="s-fn">toHaveLength</span>(<span class="s-num">5</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(ps.<span class="s-fn">map</span>((p) =&gt; p.score)).<span class="s-fn">toEqual</span>([<span class="s-num">60</span>, <span class="s-num">58</span>, <span class="s-num">56</span>, <span class="s-num">54</span>, <span class="s-num">52</span>]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;is overridable via maxPerType&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-com">// Quota 2: both TREEs are admitted (9 and 7); one BIKE backfills the</span></span>
+<span class="d-add">+    <span class="s-com">// remaining slot by score.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> ps = <span class="s-fn">compute</span>(edges, <span class="s-fn">evt</span>(...votes), { limit: <span class="s-num">5</span>, maxPerType: <span class="s-num">2</span> });</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(ps.<span class="s-fn">filter</span>((p) =&gt; p.legendIdx === <span class="s-type">TREE</span>)).<span class="s-fn">toHaveLength</span>(<span class="s-num">2</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(ps.<span class="s-fn">filter</span>((p) =&gt; p.legendIdx === <span class="s-type">BIKE</span>)).<span class="s-fn">toHaveLength</span>(<span class="s-num">3</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(ps.<span class="s-fn">map</span>((p) =&gt; p.score)).<span class="s-fn">toEqual</span>([<span class="s-num">60</span>, <span class="s-num">58</span>, <span class="s-num">56</span>, <span class="s-num">9</span>, <span class="s-num">7</span>]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> <span class="s-fn">describe</span>(<span class="s-str">&quot;computeRouteProposals — ranking, cap, anchors&quot;</span>, () =&gt; {</span>
+<span class="d-ctx">   <span class="s-fn">it</span>(<span class="s-str">&quot;ranks by score desc and caps at the limit&quot;</span>, () =&gt; {</span>
+<span class="d-ctx">     <span class="s-kw">const</span> ps = <span class="s-fn">compute</span>(</span>
+<span class="d-hunk">@@ -651,3 +703,176 @@ describe(&quot;computeRouteProposals — route/point kind filter&quot;, () =&gt; {</span>
 <span class="d-ctx">     <span class="s-fn">expect</span>(unknownKind.<span class="s-fn">map</span>((p) =&gt; p.label)).<span class="s-fn">toEqual</span>([<span class="s-str">&quot;Bike lane&quot;</span>]);</span>
 <span class="d-ctx">   });</span>
 <span class="d-ctx"> });</span>
@@ -717,16 +827,32 @@
     </section>
     
 
+    <section class="card" id="quota">
+      <div class="tag">Client clustering · type-diversity quota</div>
+      <h2>4 · Why bright Broadway had no proposal — and the per-type quota that fixes the half that was ours</h2>
+      <h3>Symptom</h3>
+      <p>Broadway glows on the nyc-bikes heatmap but carried no route proposal pin at all (2026-07-15, after the Citibike counter-vote import).</p>
+      <h3>Root cause</h3>
+      <ul><li>Half of it is the counter-import working as designed: Broadway already carries bike lanes, so bike-legal routes blanket it and the big four imported types went deeply net-negative there (<code>Add bike lane</code>: 6,735 up / 16,979 down; protected lane net −15,623). Heat displays <em>up + down</em>, so the countering made Broadway <em>brighter</em> while the net ≥ 1 fabric the clustering runs on became confetti (longest contiguous net-positive run along Broadway: 2 edges). Traced stage-by-stage with <code>scripts/broadwayDiag.ts</code>.</li>
+<li>The other half was ours: the votes that DO coherently support Broadway — the uncountered types <code>Add sharrow</code> (score 237, 160 of its 237 edges on Broadway, straightness 0.97, 3.1 km) and <code>Add bike signal phase</code> (185) — ranked #87 and #96, because the global top-20 was pure score and the imported mega-types filled every slot.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>MAX_PER_TYPE = 4</code> (option <code>maxPerType</code>): the ranked list admits at most 4 proposals per vote type, walking by score; leftover slots backfill by pure score when candidate diversity runs out (a one-type map still fills its limit); the final list is re-sorted by score so callers see the same contract. Deterministic.</li>
+<li>Result on nyc-bikes: Broadway's sharrow and signal-phase corridors rank #16/#17 and the top-20 spans 7 vote types instead of 4. The net-negative types' absence from Broadway is correct behavior — the counter-import's whole point is that Broadway already carries bikes.</li></ul>
+      
+    </section>
+    
+
     <section class="card" id="harness">
       <div class="tag">Diagnostics · real-data harness</div>
-      <h2>4 · A stats harness that runs the real pipeline on real data</h2>
+      <h2>5 · Stats + street-trace harnesses that run the real pipeline on real data</h2>
       <h3>Symptom</h3>
       <p>Proposal-shape regressions were only visible by eyeballing the map — there was no way to measure length / straightness / block-count distributions against real vote data.</p>
       <h3>Root cause</h3>
       <ul><li>The unit tests run on micro-graphs; the perf test only times. Neither sees the shapes that 1.79 M imported votes produce.</li></ul>
       <h3>What changed</h3>
       <ul><li>New <code>client-react/scripts/routepropStats.ts</code> (vite-node): fetches the live local Flask's binary topology (GTB2) + vote arrays, runs the REAL <code>computeRouteProposals</code> with the map's own kind resolver and block index, and prints per-proposal score / edges / blocks / length / endpoint straightness / worst-800 m-window straightness plus distribution summaries.</li>
-<li>Usage: <code>cd client-react &amp;&amp; node_modules/.bin/vite-node scripts/routepropStats.ts [slug ...]</code> (defaults to nyc-bikes + nyc-walkways).</li></ul>
+<li>Usage: <code>cd client-react &amp;&amp; node_modules/.bin/vite-node scripts/routepropStats.ts [slug ...]</code> (defaults to nyc-bikes + nyc-walkways).</li>
+<li>Companion <code>scripts/broadwayDiag.ts</code>: selects a street's edges geometrically (waypoint polyline, ≤30 m, parallel), then traces them through every pipeline stage — raw up/down per type, net ≥ 1 contiguity map along the street, component membership, and which final proposals touch it. This is what pinpointed the Broadway story in §5.</li></ul>
       <h3>Diffs — files touched (click to expand)</h3>
         <details>
           <summary><span class="fname">client-react/scripts/routepropStats.ts</span>
@@ -894,6 +1020,253 @@
 <span class="d-add">+}</span></pre>
         </details>
         
+        <details>
+          <summary><span class="fname">client-react/scripts/broadwayDiag.ts</span>
+            <span class="stat"><span class="d-add">+208</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">diagnostics · street pipeline trace</span>
+        <span class="ctx-sum">why does street X (bright on the heatmap) have no route proposal?</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">broadwayDiag.ts</span>
+        <span class="ctx-sum">~200 LOC — geometric street selection + per-stage pipeline trace</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Street selection</span><span class="ol-sum">waypoint polyline (Bowling Green → Columbia), ≤30 m midpoint, parallel filter</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Per-type vote table</span><span class="ol-sum">up / down / net / net≥1 edges on the street&#x27;s edges</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Contiguity map</span><span class="ol-sum">#/x/. run-length view of net≥1 vs countered vs unvoted along the street</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Final-proposal overlap + component BFS</span><span class="ol-sum">which ranked proposals touch the street; size of its net-positive component</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>the whole file is new — swap the BROADWAY waypoint list to trace any other street</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/scripts/broadwayDiag.ts b/client-react/scripts/broadwayDiag.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..c6dc275</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/scripts/broadwayDiag.ts</span>
+<span class="d-hunk">@@ -0,0 +1,208 @@</span>
+<span class="d-add">+<span class="s-com">// Diagnostic: why isn&#x27;t Broadway (bright on the heatmap) a top route proposal?</span></span>
+<span class="d-add">+<span class="s-com">// Traces Broadway&#x27;s edges through every RBTP pipeline stage: raw votes → nets</span></span>
+<span class="d-add">+<span class="s-com">// → MIN_NET subgraph → components → peeled paths → final ranked proposals.</span></span>
+<span class="d-add">+<span class="s-com">//</span></span>
+<span class="d-add">+<span class="s-com">// Usage: cd client-react &amp;&amp; node_modules/.bin/vite-node scripts/broadwayDiag.ts [slug]</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">import</span> {</span>
+<span class="d-add">+  computeRouteProposals,</span>
+<span class="d-add">+  <span class="s-type">MIN_NET</span>,</span>
+<span class="d-add">+  <span class="s-kw">type</span> <span class="s-type">RouteProposal</span>,</span>
+<span class="d-add">+} <span class="s-kw">from</span> <span class="s-str">&quot;../src/components/GraphLayer/routeProposals&quot;</span>;</span>
+<span class="d-add">+<span class="s-kw">import</span> {</span>
+<span class="d-add">+  decodeTopologyBin,</span>
+<span class="d-add">+  buildNodeAdj,</span>
+<span class="d-add">+  buildBlockIndex,</span>
+<span class="d-add">+  adjEdgesOf,</span>
+<span class="d-add">+  nodeLatLng,</span>
+<span class="d-add">+  <span class="s-kw">type</span> <span class="s-type">GraphTopology</span>,</span>
+<span class="d-add">+} <span class="s-kw">from</span> <span class="s-str">&quot;../src/components/GraphLayer/graphTopology&quot;</span>;</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">const</span> <span class="s-type">BASE</span> = process.env.<span class="s-type">API_BASE</span> ?? <span class="s-str">&quot;http://localhost:5001&quot;</span>;</span>
+<span class="d-add">+<span class="s-kw">const</span> <span class="s-type">SLUG</span> = process.argv[<span class="s-num">2</span>] ?? <span class="s-str">&quot;nyc-bikes&quot;</span>;</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-com">// Broadway, Bowling Green → Columbia (approx waypoints).</span></span>
+<span class="d-add">+<span class="s-kw">const</span> <span class="s-type">BROADWAY</span>: [number, number][] = [</span>
+<span class="d-add">+  [<span class="s-num">40.7047</span>, -<span class="s-num">74.0132</span>], [<span class="s-num">40.7105</span>, -<span class="s-num">74.0100</span>], [<span class="s-num">40.7145</span>, -<span class="s-num">74.0067</span>],</span>
+<span class="d-add">+  [<span class="s-num">40.7193</span>, -<span class="s-num">74.0003</span>], [<span class="s-num">40.7255</span>, -<span class="s-num">73.9967</span>], [<span class="s-num">40.7300</span>, -<span class="s-num">73.9938</span>],</span>
+<span class="d-add">+  [<span class="s-num">40.7359</span>, -<span class="s-num">73.9908</span>], [<span class="s-num">40.7411</span>, -<span class="s-num">73.9897</span>], [<span class="s-num">40.7484</span>, -<span class="s-num">73.9877</span>],</span>
+<span class="d-add">+  [<span class="s-num">40.7530</span>, -<span class="s-num">73.9870</span>], [<span class="s-num">40.7580</span>, -<span class="s-num">73.9855</span>], [<span class="s-num">40.7630</span>, -<span class="s-num">73.9838</span>],</span>
+<span class="d-add">+  [<span class="s-num">40.7679</span>, -<span class="s-num">73.9819</span>], [<span class="s-num">40.7736</span>, -<span class="s-num">73.9822</span>], [<span class="s-num">40.7787</span>, -<span class="s-num">73.9819</span>],</span>
+<span class="d-add">+  [<span class="s-num">40.7833</span>, -<span class="s-num">73.9799</span>], [<span class="s-num">40.7885</span>, -<span class="s-num">73.9765</span>], [<span class="s-num">40.7942</span>, -<span class="s-num">73.9722</span>],</span>
+<span class="d-add">+  [<span class="s-num">40.8005</span>, -<span class="s-num">73.9680</span>], [<span class="s-num">40.8075</span>, -<span class="s-num">73.9641</span>],</span>
+<span class="d-add">+];</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">const</span> <span class="s-type">KY</span> = <span class="s-num">110574</span>;</span>
+<span class="d-add">+<span class="s-kw">const</span> kx = <span class="s-num">111320</span> * <span class="s-type">Math</span>.<span class="s-fn">cos</span>((<span class="s-num">40.75</span> * <span class="s-type">Math</span>.<span class="s-type">PI</span>) / <span class="s-num">180</span>);</span>
+<span class="d-add">+<span class="s-kw">const</span> toXY = ([lat, lng]: [number, number]) =&gt; [lng * kx, lat * <span class="s-type">KY</span>] <span class="s-kw">as</span> [number, number];</span>
+<span class="d-add">+<span class="s-kw">const</span> <span class="s-type">BXY</span> = <span class="s-type">BROADWAY</span>.<span class="s-fn">map</span>(toXY);</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-com">/** Distance (m) from point p to segment ab, plus the segment&#x27;s unit direction. */</span></span>
+<span class="d-add">+<span class="s-kw">function</span> <span class="s-fn">segDist</span>(p: [number, number], a: [number, number], b: [number, number]) {</span>
+<span class="d-add">+  <span class="s-kw">const</span> vx = b[<span class="s-num">0</span>] - a[<span class="s-num">0</span>], vy = b[<span class="s-num">1</span>] - a[<span class="s-num">1</span>];</span>
+<span class="d-add">+  <span class="s-kw">const</span> len = <span class="s-type">Math</span>.<span class="s-fn">hypot</span>(vx, vy);</span>
+<span class="d-add">+  <span class="s-kw">const</span> t = <span class="s-type">Math</span>.<span class="s-fn">max</span>(<span class="s-num">0</span>, <span class="s-type">Math</span>.<span class="s-fn">min</span>(<span class="s-num">1</span>, ((p[<span class="s-num">0</span>] - a[<span class="s-num">0</span>]) * vx + (p[<span class="s-num">1</span>] - a[<span class="s-num">1</span>]) * vy) / (len * len)));</span>
+<span class="d-add">+  <span class="s-kw">const</span> dx = p[<span class="s-num">0</span>] - (a[<span class="s-num">0</span>] + t * vx), dy = p[<span class="s-num">1</span>] - (a[<span class="s-num">1</span>] + t * vy);</span>
+<span class="d-add">+  <span class="s-kw">return</span> { d: <span class="s-type">Math</span>.<span class="s-fn">hypot</span>(dx, dy), ux: vx / len, uy: vy / len };</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">function</span> <span class="s-fn">main2</span>(topo: <span class="s-type">GraphTopology</span>, votes: any) {</span>
+<span class="d-add">+  <span class="s-kw">const</span> { nEdges, ends } = topo;</span>
+<span class="d-add">+  <span class="s-kw">const</span> mid = (e: number): [number, number] =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> a = <span class="s-fn">toXY</span>(<span class="s-fn">nodeLatLng</span>(topo, ends[<span class="s-num">2</span> * e]));</span>
+<span class="d-add">+    <span class="s-kw">const</span> b = <span class="s-fn">toXY</span>(<span class="s-fn">nodeLatLng</span>(topo, ends[<span class="s-num">2</span> * e + <span class="s-num">1</span>]));</span>
+<span class="d-add">+    <span class="s-kw">return</span> [(a[<span class="s-num">0</span>] + b[<span class="s-num">0</span>]) / <span class="s-num">2</span>, (a[<span class="s-num">1</span>] + b[<span class="s-num">1</span>]) / <span class="s-num">2</span>];</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-com">// ── Stage 0: which edges ARE Broadway (≤30m from the polyline, parallel) ──</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> bway: number[] = [];</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">let</span> e = <span class="s-num">0</span>; e &lt; nEdges; e++) {</span>
+<span class="d-add">+    <span class="s-kw">const</span> u = ends[<span class="s-num">2</span> * e], v = ends[<span class="s-num">2</span> * e + <span class="s-num">1</span>];</span>
+<span class="d-add">+    <span class="s-kw">if</span> (u === v) <span class="s-kw">continue</span>;</span>
+<span class="d-add">+    <span class="s-kw">const</span> m = <span class="s-fn">mid</span>(e);</span>
+<span class="d-add">+    <span class="s-kw">let</span> best = { d: <span class="s-lit">Infinity</span>, ux: <span class="s-num">0</span>, uy: <span class="s-num">0</span> };</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">let</span> i = <span class="s-num">0</span>; i &lt; <span class="s-type">BXY</span>.length - <span class="s-num">1</span>; i++) {</span>
+<span class="d-add">+      <span class="s-kw">const</span> r = <span class="s-fn">segDist</span>(m, <span class="s-type">BXY</span>[i], <span class="s-type">BXY</span>[i + <span class="s-num">1</span>]);</span>
+<span class="d-add">+      <span class="s-kw">if</span> (r.d &lt; best.d) best = r;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-kw">if</span> (best.d &gt; <span class="s-num">30</span>) <span class="s-kw">continue</span>;</span>
+<span class="d-add">+    <span class="s-kw">const</span> a = <span class="s-fn">toXY</span>(<span class="s-fn">nodeLatLng</span>(topo, u));</span>
+<span class="d-add">+    <span class="s-kw">const</span> b = <span class="s-fn">toXY</span>(<span class="s-fn">nodeLatLng</span>(topo, v));</span>
+<span class="d-add">+    <span class="s-kw">const</span> el = <span class="s-type">Math</span>.<span class="s-fn">hypot</span>(b[<span class="s-num">0</span>] - a[<span class="s-num">0</span>], b[<span class="s-num">1</span>] - a[<span class="s-num">1</span>]);</span>
+<span class="d-add">+    <span class="s-kw">if</span> (el &lt; <span class="s-num">1</span>) <span class="s-kw">continue</span>;</span>
+<span class="d-add">+    <span class="s-kw">const</span> dot = <span class="s-type">Math</span>.<span class="s-fn">abs</span>(((b[<span class="s-num">0</span>] - a[<span class="s-num">0</span>]) / el) * best.ux + ((b[<span class="s-num">1</span>] - a[<span class="s-num">1</span>]) / el) * best.uy);</span>
+<span class="d-add">+    <span class="s-kw">if</span> (dot &gt;= <span class="s-num">0.7</span>) bway.<span class="s-fn">push</span>(e);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  <span class="s-kw">const</span> bwaySet = <span class="s-kw">new</span> <span class="s-fn">Set</span>(bway);</span>
+<span class="d-add">+  console.<span class="s-fn">log</span>(<span class="s-str">`Broadway edges (≤30m, parallel): ${bway.length}`</span>);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-com">// ── Stage 1: votes on those edges, per type ──</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> legend: string[] = votes.vote_type_legend ?? [];</span>
+<span class="d-add">+  <span class="s-kw">const</span> evt: [number, number, number][][] = votes.edge_vote_types ?? [];</span>
+<span class="d-add">+  <span class="s-kw">type</span> <span class="s-type">Agg</span> = { edges: number; up: number; dn: number; netPos: number; netZeroWithVotes: number };</span>
+<span class="d-add">+  <span class="s-kw">const</span> perType = <span class="s-kw">new</span> <span class="s-type">Map</span>&lt;number, <span class="s-type">Agg</span>&gt;();</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">const</span> e <span class="s-kw">of</span> bway) {</span>
+<span class="d-add">+    <span class="s-kw">const</span> pairs = evt[e];</span>
+<span class="d-add">+    <span class="s-kw">if</span> (!pairs) <span class="s-kw">continue</span>;</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">const</span> [t, up, dn] <span class="s-kw">of</span> pairs) {</span>
+<span class="d-add">+      <span class="s-kw">let</span> a = perType.<span class="s-kw">get</span>(t);</span>
+<span class="d-add">+      <span class="s-kw">if</span> (!a) perType.<span class="s-kw">set</span>(t, (a = { edges: <span class="s-num">0</span>, up: <span class="s-num">0</span>, dn: <span class="s-num">0</span>, netPos: <span class="s-num">0</span>, netZeroWithVotes: <span class="s-num">0</span> }));</span>
+<span class="d-add">+      a.edges++;</span>
+<span class="d-add">+      a.up += up;</span>
+<span class="d-add">+      a.dn += dn;</span>
+<span class="d-add">+      <span class="s-kw">if</span> (up - dn &gt;= <span class="s-type">MIN_NET</span>) a.netPos++;</span>
+<span class="d-add">+      <span class="s-kw">else</span> <span class="s-kw">if</span> (up + dn &gt; <span class="s-num">0</span>) a.netZeroWithVotes++;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  console.<span class="s-fn">log</span>(<span class="s-str">&quot;\nPer vote type on Broadway edges:&quot;</span>);</span>
+<span class="d-add">+  <span class="s-kw">const</span> rows = [...perType.<span class="s-fn">entries</span>()]</span>
+<span class="d-add">+    .<span class="s-fn">map</span>(([t, a]) =&gt; ({</span>
+<span class="d-add">+      <span class="s-kw">type</span>: legend[t]?.<span class="s-fn">slice</span>(<span class="s-num">0</span>, <span class="s-num">30</span>), t,</span>
+<span class="d-add">+      votedEdges: a.edges, up: a.up, down: a.dn, net: a.up - a.dn,</span>
+<span class="d-add">+      <span class="s-str">&quot;net≥1 edges&quot;</span>: a.netPos, <span class="s-str">&quot;net≤0 (voted)&quot;</span>: a.netZeroWithVotes,</span>
+<span class="d-add">+    }))</span>
+<span class="d-add">+    .<span class="s-fn">sort</span>((x, y) =&gt; (y.up + y.down) - (x.up + x.down));</span>
+<span class="d-add">+  console.<span class="s-fn">table</span>(rows.<span class="s-fn">slice</span>(<span class="s-num">0</span>, <span class="s-num">12</span>));</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-com">// ── Stage 2: contiguity of the net-positive subgraph along Broadway ──</span></span>
+<span class="d-add">+  <span class="s-com">// For the top-activity types: order Broadway edges by projection along the</span></span>
+<span class="d-add">+  <span class="s-com">// polyline and measure runs of net≥1 vs gaps.</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> proj = (e: number) =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> m = <span class="s-fn">mid</span>(e);</span>
+<span class="d-add">+    <span class="s-kw">let</span> best = <span class="s-lit">Infinity</span>, s = <span class="s-num">0</span>, acc = <span class="s-num">0</span>;</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">let</span> i = <span class="s-num">0</span>; i &lt; <span class="s-type">BXY</span>.length - <span class="s-num">1</span>; i++) {</span>
+<span class="d-add">+      <span class="s-kw">const</span> r = <span class="s-fn">segDist</span>(m, <span class="s-type">BXY</span>[i], <span class="s-type">BXY</span>[i + <span class="s-num">1</span>]);</span>
+<span class="d-add">+      <span class="s-kw">const</span> segLen = <span class="s-type">Math</span>.<span class="s-fn">hypot</span>(<span class="s-type">BXY</span>[i + <span class="s-num">1</span>][<span class="s-num">0</span>] - <span class="s-type">BXY</span>[i][<span class="s-num">0</span>], <span class="s-type">BXY</span>[i + <span class="s-num">1</span>][<span class="s-num">1</span>] - <span class="s-type">BXY</span>[i][<span class="s-num">1</span>]);</span>
+<span class="d-add">+      <span class="s-kw">if</span> (r.d &lt; best) {</span>
+<span class="d-add">+        best = r.d;</span>
+<span class="d-add">+        <span class="s-kw">const</span> vx = <span class="s-type">BXY</span>[i + <span class="s-num">1</span>][<span class="s-num">0</span>] - <span class="s-type">BXY</span>[i][<span class="s-num">0</span>], vy = <span class="s-type">BXY</span>[i + <span class="s-num">1</span>][<span class="s-num">1</span>] - <span class="s-type">BXY</span>[i][<span class="s-num">1</span>];</span>
+<span class="d-add">+        <span class="s-kw">const</span> t = <span class="s-type">Math</span>.<span class="s-fn">max</span>(<span class="s-num">0</span>, <span class="s-type">Math</span>.<span class="s-fn">min</span>(<span class="s-num">1</span>, ((m[<span class="s-num">0</span>] - <span class="s-type">BXY</span>[i][<span class="s-num">0</span>]) * vx + (m[<span class="s-num">1</span>] - <span class="s-type">BXY</span>[i][<span class="s-num">1</span>]) * vy) / (segLen * segLen)));</span>
+<span class="d-add">+        s = acc + t * segLen;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+      acc += segLen;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-kw">return</span> s;</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+  <span class="s-kw">const</span> ordered = [...bway].<span class="s-fn">sort</span>((a, b) =&gt; <span class="s-fn">proj</span>(a) - <span class="s-fn">proj</span>(b));</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">const</span> { t, <span class="s-kw">type</span> } <span class="s-kw">of</span> rows.<span class="s-fn">slice</span>(<span class="s-num">0</span>, <span class="s-num">4</span>)) {</span>
+<span class="d-add">+    <span class="s-kw">const</span> marks = ordered.<span class="s-fn">map</span>((e) =&gt; {</span>
+<span class="d-add">+      <span class="s-kw">const</span> pair = (evt[e] ?? []).<span class="s-fn">find</span>((p) =&gt; p[<span class="s-num">0</span>] === t);</span>
+<span class="d-add">+      <span class="s-kw">if</span> (!pair) <span class="s-kw">return</span> <span class="s-str">&quot;.&quot;</span>;</span>
+<span class="d-add">+      <span class="s-kw">return</span> pair[<span class="s-num">1</span>] - pair[<span class="s-num">2</span>] &gt;= <span class="s-type">MIN_NET</span> ? <span class="s-str">&quot;#&quot;</span> : <span class="s-str">&quot;x&quot;</span>; <span class="s-com">// # net≥1, x voted-but-net≤0</span></span>
+<span class="d-add">+    });</span>
+<span class="d-add">+    <span class="s-com">// Compress: longest # run and total # vs x.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> s = marks.<span class="s-fn">join</span>(<span class="s-str">&quot;&quot;</span>);</span>
+<span class="d-add">+    <span class="s-kw">const</span> runs = s.<span class="s-fn">split</span>(/[^#]+/).<span class="s-fn">filter</span>(<span class="s-type">Boolean</span>).<span class="s-fn">map</span>((r) =&gt; r.length).<span class="s-fn">sort</span>((a, b) =&gt; b - a);</span>
+<span class="d-add">+    console.<span class="s-fn">log</span>(<span class="s-str">`\n[${type}] along Broadway (${ordered.length} edges): net≥1=${(s.match(/#/g) ?? []).length}, voted-net≤0=${(s.match(/x/g) ?? []).length}, unvoted=${(s.match(/\./g) ?? []).length}`</span>);</span>
+<span class="d-add">+    console.<span class="s-fn">log</span>(<span class="s-str">`  longest net≥1 runs: ${runs.slice(0, 8).join(&quot;, &quot;)}`</span>);</span>
+<span class="d-add">+    console.<span class="s-fn">log</span>(<span class="s-str">`  map: ${s.slice(0, 400)}`</span>);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-com">// ── Stage 3: do the FINAL proposals touch Broadway? ──</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> adj = <span class="s-fn">buildNodeAdj</span>(topo);</span>
+<span class="d-add">+  <span class="s-kw">const</span> blockIndex = <span class="s-fn">buildBlockIndex</span>(topo);</span>
+<span class="d-add">+  <span class="s-kw">const</span> t0 = <span class="s-type">Date</span>.<span class="s-fn">now</span>();</span>
+<span class="d-add">+  <span class="s-kw">const</span> ps = <span class="s-fn">computeRouteProposals</span>(topo, adj, votes, { blockIndex, limit: <span class="s-num">100</span> });</span>
+<span class="d-add">+  console.<span class="s-fn">log</span>(<span class="s-str">`\ncomputeRouteProposals limit=100: ${ps.length} proposals in ${Date.now() - t0}ms`</span>);</span>
+<span class="d-add">+  <span class="s-kw">const</span> touching = ps</span>
+<span class="d-add">+    .<span class="s-fn">map</span>((p, rank) =&gt; ({ rank, p, n: p.edgeIds.<span class="s-fn">filter</span>((e) =&gt; bwaySet.<span class="s-fn">has</span>(e)).length }))</span>
+<span class="d-add">+    .<span class="s-fn">filter</span>((r) =&gt; r.n &gt; <span class="s-num">0</span>);</span>
+<span class="d-add">+  console.<span class="s-fn">log</span>(<span class="s-str">`proposals touching Broadway: ${touching.length}`</span>);</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">const</span> r <span class="s-kw">of</span> touching.<span class="s-fn">slice</span>(<span class="s-num">0</span>, <span class="s-num">10</span>)) {</span>
+<span class="d-add">+    console.<span class="s-fn">log</span>(<span class="s-str">`  #${r.rank} ${r.p.label.slice(0, 28)} score=${r.p.score} edges=${r.p.edgeIds.length} onBway=${r.n}`</span>);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-com">// ── Stage 4: is Broadway&#x27;s net-positive fabric connected to a monster</span></span>
+<span class="d-add">+  <span class="s-com">// component (which would explain peel exhaustion)? For the top type, BFS the</span></span>
+<span class="d-add">+  <span class="s-com">// component containing the most Broadway edges and report its size + the</span></span>
+<span class="d-add">+  <span class="s-com">// component&#x27;s peel-relevant numbers. ──</span></span>
+<span class="d-add">+  <span class="s-kw">const</span> topT = rows[<span class="s-num">0</span>].t;</span>
+<span class="d-add">+  <span class="s-kw">const</span> nets = <span class="s-kw">new</span> <span class="s-type">Map</span>&lt;number, number&gt;();</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">let</span> e = <span class="s-num">0</span>; e &lt; nEdges; e++) {</span>
+<span class="d-add">+    <span class="s-kw">const</span> pairs = evt[e];</span>
+<span class="d-add">+    <span class="s-kw">if</span> (!pairs) <span class="s-kw">continue</span>;</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">const</span> [t, up, dn] <span class="s-kw">of</span> pairs) <span class="s-kw">if</span> (t === topT) nets.<span class="s-kw">set</span>(e, (nets.<span class="s-kw">get</span>(e) ?? <span class="s-num">0</span>) + up - dn);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  <span class="s-kw">const</span> eligible = <span class="s-kw">new</span> <span class="s-type">Set</span>&lt;number&gt;();</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">const</span> [e, w] <span class="s-kw">of</span> nets) <span class="s-kw">if</span> (w &gt;= <span class="s-type">MIN_NET</span> &amp;&amp; ends[<span class="s-num">2</span> * e] !== ends[<span class="s-num">2</span> * e + <span class="s-num">1</span>]) eligible.<span class="s-fn">add</span>(e);</span>
+<span class="d-add">+  <span class="s-kw">const</span> nodeSeen = <span class="s-kw">new</span> <span class="s-type">Set</span>&lt;number&gt;();</span>
+<span class="d-add">+  <span class="s-kw">let</span> bestComp: { nodes: number; edges: number; bwayEdges: number; weight: number } | <span class="s-lit">null</span> = <span class="s-lit">null</span>;</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">const</span> seed <span class="s-kw">of</span> eligible) {</span>
+<span class="d-add">+    <span class="s-kw">const</span> su = ends[<span class="s-num">2</span> * seed];</span>
+<span class="d-add">+    <span class="s-kw">if</span> (nodeSeen.<span class="s-fn">has</span>(su)) <span class="s-kw">continue</span>;</span>
+<span class="d-add">+    <span class="s-kw">const</span> queue = [su];</span>
+<span class="d-add">+    nodeSeen.<span class="s-fn">add</span>(su);</span>
+<span class="d-add">+    <span class="s-kw">let</span> compEdges = <span class="s-num">0</span>, compBway = <span class="s-num">0</span>, compW = <span class="s-num">0</span>;</span>
+<span class="d-add">+    <span class="s-kw">const</span> seenE = <span class="s-kw">new</span> <span class="s-type">Set</span>&lt;number&gt;();</span>
+<span class="d-add">+    <span class="s-kw">for</span> (<span class="s-kw">let</span> h = <span class="s-num">0</span>; h &lt; queue.length; h++) {</span>
+<span class="d-add">+      <span class="s-kw">const</span> nid = queue[h];</span>
+<span class="d-add">+      <span class="s-kw">const</span> row = <span class="s-fn">adjEdgesOf</span>(adj, nid);</span>
+<span class="d-add">+      <span class="s-kw">for</span> (<span class="s-kw">let</span> i = <span class="s-num">0</span>; i &lt; row.length; i++) {</span>
+<span class="d-add">+        <span class="s-kw">const</span> e = row[i];</span>
+<span class="d-add">+        <span class="s-kw">if</span> (!eligible.<span class="s-fn">has</span>(e) || seenE.<span class="s-fn">has</span>(e)) <span class="s-kw">continue</span>;</span>
+<span class="d-add">+        seenE.<span class="s-fn">add</span>(e);</span>
+<span class="d-add">+        compEdges++;</span>
+<span class="d-add">+        compW += nets.<span class="s-kw">get</span>(e) ?? <span class="s-num">0</span>;</span>
+<span class="d-add">+        <span class="s-kw">if</span> (bwaySet.<span class="s-fn">has</span>(e)) compBway++;</span>
+<span class="d-add">+        <span class="s-kw">const</span> u = ends[<span class="s-num">2</span> * e], v = ends[<span class="s-num">2</span> * e + <span class="s-num">1</span>];</span>
+<span class="d-add">+        <span class="s-kw">const</span> nxt = u === nid ? v : u;</span>
+<span class="d-add">+        <span class="s-kw">if</span> (!nodeSeen.<span class="s-fn">has</span>(nxt)) {</span>
+<span class="d-add">+          nodeSeen.<span class="s-fn">add</span>(nxt);</span>
+<span class="d-add">+          queue.<span class="s-fn">push</span>(nxt);</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    <span class="s-kw">if</span> (compBway &gt; <span class="s-num">0</span> &amp;&amp; (!bestComp || compBway &gt; bestComp.bwayEdges)) {</span>
+<span class="d-add">+      bestComp = { nodes: queue.length, edges: compEdges, bwayEdges: compBway, weight: compW };</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  console.<span class="s-fn">log</span>(<span class="s-str">`\n[${legend[topT]}] component holding the most Broadway edges:`</span>, bestComp);</span>
+<span class="d-add">+  console.<span class="s-fn">log</span>(<span class="s-str">`(eligible net≥1 edges for this type overall: ${eligible.size})`</span>);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">const</span> binR = <span class="s-kw">await</span> <span class="s-fn">fetch</span>(<span class="s-str">`${BASE}/api/graph-topology?map=${SLUG}&amp;format=bin`</span>);</span>
+<span class="d-add">+<span class="s-kw">const</span> topo = <span class="s-fn">decodeTopologyBin</span>(<span class="s-kw">await</span> binR.<span class="s-fn">arrayBuffer</span>());</span>
+<span class="d-add">+<span class="s-kw">const</span> cfg = <span class="s-kw">await</span> (<span class="s-kw">await</span> <span class="s-fn">fetch</span>(<span class="s-str">`${BASE}/api/maps`</span>)).<span class="s-fn">json</span>();</span>
+<span class="d-add">+<span class="s-kw">const</span> mode = cfg.maps.<span class="s-fn">find</span>((m: any) =&gt; m.slug === <span class="s-type">SLUG</span>)?.mode ?? <span class="s-str">&quot;walk&quot;</span>;</span>
+<span class="d-add">+<span class="s-kw">const</span> votes = <span class="s-kw">await</span> (<span class="s-kw">await</span> <span class="s-fn">fetch</span>(<span class="s-str">`${BASE}/api/graph-votes?map=${SLUG}&amp;mode=${mode}`</span>)).<span class="s-fn">json</span>();</span>
+<span class="d-add">+<span class="s-fn">main2</span>(topo, votes);</span></pre>
+        </details>
+        
     </section>
     
 
@@ -905,7 +1278,8 @@
 <li>Median corridor length rose 3,065 → 3,961 m — splitting doesn't shorten the list, it replaces sub-100-score stubs at ranks 9–15 with 700–2,900-score straight fragments of the former snakes.</li>
 <li>Compute time on the 3.3 M-edge NYC graph unchanged: 924 ms vs 934 ms baseline (the splitter is O(path · depth) on peeled paths only).</li>
 <li>Unit tests: 10 new (min-blocks gate: default drop &lt; 5 blocks, blocks-not-edges, override; splitLoopyPath: straight kept whole, hairpin apex split, buried-detour window rule, fragment weight recomputation, &lt; 4-edge passthrough, determinism; plus a topology-level U-corridor → two straight proposals test). Full client suite 241 passed / 1 skipped; <code>tsc -b</code> clean.</li>
-<li>Existing 53 route-proposal tests untouched semantically — the micro-graph helper pins <code>minRouteBlocks: 1</code> so they keep probing clustering mechanics, not the gate.</li></ul>
+<li>Existing 53 route-proposal tests untouched semantically — the micro-graph helper pins <code>minRouteBlocks: 1</code> so they keep probing clustering mechanics, not the gate.</li>
+<li>Quota follow-up (2026-07-15, after the counter-vote import): broadwayDiag traced 4,732 Broadway edges — big four types net-negative (worst −15,623), longest net ≥ 1 run 2 edges, sharrow/signal corridors ranked #87/#96 pre-quota. Post-quota top-20: sharrow #16, signal #17, 7 vote types represented, all 20 still straight (0/20 under either straightness bar) and ≥ 5 blocks. 3 new quota tests; suite 244 passed; tsc clean.</li></ul>
   </section>
 
   <section class="card checklist" id="checklist">
@@ -915,7 +1289,9 @@
 <li>On <code>http://localhost:3000/m/nyc-walkways</code>, confirm the tiny “Add bike lane” route diamond (a ~100 m stub near the Improve-sidewalk corridors) is gone; its edge should still show a square PBTP pin if it's the hottest of its type.</li>
 <li>Click a diamond pin and confirm selection/voting still covers every block of the corridor (the auto-select ring and the vote cast are unchanged code paths).</li>
 <li>Reload the page twice: the same pins in the same order (determinism — ids are content-derived).</li>
-<li>Optionally re-run the numbers: <code>cd client-react &amp;&amp; node_modules/.bin/vite-node scripts/routepropStats.ts nyc-bikes</code> — expect 0/20 under both straightness bars.</li></ul>
+<li>Optionally re-run the numbers: <code>cd client-react &amp;&amp; node_modules/.bin/vite-node scripts/routepropStats.ts nyc-bikes</code> — expect 0/20 under both straightness bars.</li>
+<li>On nyc-bikes, look for the “Add sharrow” diamond along Broadway (midtown→uptown, ~3 km) and an “Add bike signal phase” one nearby — Broadway's surviving net-positive corridors. The big four bike-lane types staying absent from Broadway is the counter-import being right, not a bug.</li>
+<li>Check the top-20 legend mix: proposals should span ~7 vote types (was 4) — no type more than 4 pins.</li></ul>
   </section>
 
 
@@ -923,7 +1299,7 @@
   <footer>
     Generated from <code>changelog/changes-routeprop.diff</code> by <code>changelog/build_routeprop_report.py</code>.
     Regenerate after further edits with
-    <code>git diff -- client-react/src/components/GraphLayer/routeProposals.ts client-react/src/components/GraphLayer/routeProposals.test.ts client-react/scripts/routepropStats.ts &gt; changelog/changes-routeprop.diff &amp;&amp; python changelog/build_routeprop_report.py</code>.
+    <code>git diff dc81a6c HEAD -- client-react/src/components/GraphLayer/routeProposals.ts client-react/src/components/GraphLayer/routeProposals.test.ts client-react/scripts/routepropStats.ts client-react/scripts/broadwayDiag.ts &gt; changelog/changes-routeprop.diff &amp;&amp; python changelog/build_routeprop_report.py</code>.
   </footer>
 </div>
 </body>

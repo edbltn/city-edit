@@ -74,7 +74,12 @@
     point pins). Verified against real data with a new vite-node stats harness running the actual
     client pipeline: 0/20 loopy corridors on nyc-bikes (was 8/20 by either straightness measure), the
     former #3 snake became two straight top-5 corridors, stubs gone, byte-identical determinism
-    preserved, compute time unchanged at ~920&nbsp;ms.</p>
+    preserved, compute time unchanged at ~920&nbsp;ms. Follow-up (07-15): "bright Broadway has no
+    proposal" traced with a street-trace harness — half counter-import working as designed (Broadway's
+    big four types now deeply net-negative; heat shows up+down so downvotes brighten it), half a real
+    ranking flaw (pure-score top-20 buried Broadway's genuine sharrow/signal corridors at #87/#96
+    behind the imported mega-types). A per-type diversity quota — MAX_PER_TYPE&nbsp;=&nbsp;4,
+    score-backfilled — lifts them to #16/#17; the top-20 now spans 7 vote types.</p>
   </a>
 
   <a class="entry" href="./2026-07-13-map-load-oom-and-scaling.html">

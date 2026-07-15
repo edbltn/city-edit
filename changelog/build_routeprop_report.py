@@ -156,9 +156,43 @@ SECTIONS = [
         ],
     },
     {
+        "id": "quota",
+        "tag": "Client clustering · type-diversity quota",
+        "title": "4 · Why bright Broadway had no proposal — and the per-type quota that fixes the half that was ours",
+        "symptom": (
+            "Broadway glows on the nyc-bikes heatmap but carried no route proposal pin at all "
+            "(2026-07-15, after the Citibike counter-vote import)."
+        ),
+        "cause": [
+            "Half of it is the counter-import working as designed: Broadway already carries bike "
+            "lanes, so bike-legal routes blanket it and the big four imported types went deeply "
+            "net-negative there (<code>Add bike lane</code>: 6,735 up / 16,979 down; protected lane "
+            "net −15,623). Heat displays <em>up + down</em>, so the countering made Broadway "
+            "<em>brighter</em> while the net ≥ 1 fabric the clustering runs on became confetti "
+            "(longest contiguous net-positive run along Broadway: 2 edges). Traced stage-by-stage "
+            "with <code>scripts/broadwayDiag.ts</code>.",
+            "The other half was ours: the votes that DO coherently support Broadway — the "
+            "uncountered types <code>Add sharrow</code> (score 237, 160 of its 237 edges on "
+            "Broadway, straightness 0.97, 3.1 km) and <code>Add bike signal phase</code> (185) — "
+            "ranked #87 and #96, because the global top-20 was pure score and the imported "
+            "mega-types filled every slot.",
+        ],
+        "fixes": [
+            "<code>MAX_PER_TYPE = 4</code> (option <code>maxPerType</code>): the ranked list admits "
+            "at most 4 proposals per vote type, walking by score; leftover slots backfill by pure "
+            "score when candidate diversity runs out (a one-type map still fills its limit); the "
+            "final list is re-sorted by score so callers see the same contract. Deterministic.",
+            "Result on nyc-bikes: Broadway's sharrow and signal-phase corridors rank #16/#17 and "
+            "the top-20 spans 7 vote types instead of 4. The net-negative types' absence from "
+            "Broadway is correct behavior — the counter-import's whole point is that Broadway "
+            "already carries bikes.",
+        ],
+        "files": [],
+    },
+    {
         "id": "harness",
         "tag": "Diagnostics · real-data harness",
-        "title": "4 · A stats harness that runs the real pipeline on real data",
+        "title": "5 · Stats + street-trace harnesses that run the real pipeline on real data",
         "symptom": (
             "Proposal-shape regressions were only visible by eyeballing the map — there was no way to "
             "measure length / straightness / block-count distributions against real vote data."
@@ -175,8 +209,15 @@ SECTIONS = [
             "worst-800 m-window straightness plus distribution summaries.",
             "Usage: <code>cd client-react &amp;&amp; node_modules/.bin/vite-node "
             "scripts/routepropStats.ts [slug ...]</code> (defaults to nyc-bikes + nyc-walkways).",
+            "Companion <code>scripts/broadwayDiag.ts</code>: selects a street's edges geometrically "
+            "(waypoint polyline, ≤30 m, parallel), then traces them through every pipeline stage — "
+            "raw up/down per type, net ≥ 1 contiguity map along the street, component membership, "
+            "and which final proposals touch it. This is what pinpointed the Broadway story in §5.",
         ],
-        "files": ["client-react/scripts/routepropStats.ts"],
+        "files": [
+            "client-react/scripts/routepropStats.ts",
+            "client-react/scripts/broadwayDiag.ts",
+        ],
     },
 ]
 
@@ -197,6 +238,11 @@ VERIFY = [
     "→ two straight proposals test). Full client suite 241 passed / 1 skipped; <code>tsc -b</code> clean.",
     "Existing 53 route-proposal tests untouched semantically — the micro-graph helper pins "
     "<code>minRouteBlocks: 1</code> so they keep probing clustering mechanics, not the gate.",
+    "Quota follow-up (2026-07-15, after the counter-vote import): broadwayDiag traced 4,732 "
+    "Broadway edges — big four types net-negative (worst −15,623), longest net ≥ 1 run 2 edges, "
+    "sharrow/signal corridors ranked #87/#96 pre-quota. Post-quota top-20: sharrow #16, signal #17, "
+    "7 vote types represented, all 20 still straight (0/20 under either straightness bar) and "
+    "≥ 5 blocks. 3 new quota tests; suite 244 passed; tsc clean.",
 ]
 
 CHECKLIST = [
@@ -211,6 +257,11 @@ CHECKLIST = [
     "Reload the page twice: the same pins in the same order (determinism — ids are content-derived).",
     "Optionally re-run the numbers: <code>cd client-react &amp;&amp; node_modules/.bin/vite-node "
     "scripts/routepropStats.ts nyc-bikes</code> — expect 0/20 under both straightness bars.",
+    "On nyc-bikes, look for the “Add sharrow” diamond along Broadway (midtown→uptown, ~3 km) and an "
+    "“Add bike signal phase” one nearby — Broadway's surviving net-positive corridors. The big four "
+    "bike-lane types staying absent from Broadway is the counter-import being right, not a bug.",
+    "Check the top-20 legend mix: proposals should span ~7 vote types (was 4) — no type more than "
+    "4 pins.",
 ]
 
 
@@ -267,12 +318,13 @@ FILE_CONTEXT = {
         "outline": [
             ("Wire parsing + marker shape", "parseRouteProposal, diamond vs square", False),
             ("Coverage / dedupe / corridor geometry", "isRouteCovered, corridorCoordinates, anchor ordering", False),
-            ("Pipeline constants + gates", "MIN_NET, PEEL_*, MIN_ROUTE_SCORE/EDGES — NEW: MIN_ROUTE_BLOCKS = 5", True),
+            ("Pipeline constants + gates", "MIN_NET, PEEL_*, MIN_ROUTE_SCORE/EDGES — NEW: MIN_ROUTE_BLOCKS = 5, MAX_PER_TYPE = 4", True),
             ("Corridor length budget", "routeLengthBudgetM — 2700 + 660·√score, cap 10500 (unchanged)", False),
             ("Loop-back splitting", "NEW: splitLoopyPath — window rule (hairpins) + endpoint rule (U-turns), recursive", True),
             ("capPathToLengthBudget", "best-weight window within the meter budget (unchanged)", False),
             ("netsByType / buildTypeAdj / components / peeling", "per-type net-positive subgraph → heaviest simple paths (unchanged)", False),
             ("createRouteProposalJob · step()", "peel → SPLIT → cap → gates (score, edges, NEW blocks) → blocks → dedupe", True),
+            ("createRouteProposalJob · finish()", "rank by score → NEW per-type quota (≤4/type, score backfill) → cap", True),
         ],
         "blocks": [
             "MIN_ROUTE_BLOCKS = 5 — the min-distance gate, in BLOCK units (what the UI selects/votes)",
@@ -312,6 +364,20 @@ FILE_CONTEXT = {
         ],
         "blocks": [
             "the whole file is new — vite-node script, no app code imported beyond the pure pipeline modules",
+        ],
+    },
+    "client-react/scripts/broadwayDiag.ts": {
+        "on": ["Flask API", "React / Leaflet client"],
+        "module": ("diagnostics · street pipeline trace", "why does street X (bright on the heatmap) have no route proposal?"),
+        "file": ("broadwayDiag.ts", "~200 LOC — geometric street selection + per-stage pipeline trace"),
+        "outline": [
+            ("Street selection", "waypoint polyline (Bowling Green → Columbia), ≤30 m midpoint, parallel filter", True),
+            ("Per-type vote table", "up / down / net / net≥1 edges on the street's edges", True),
+            ("Contiguity map", "#/x/. run-length view of net≥1 vs countered vs unvoted along the street", True),
+            ("Final-proposal overlap + component BFS", "which ranked proposals touch the street; size of its net-positive component", True),
+        ],
+        "blocks": [
+            "the whole file is new — swap the BROADWAY waypoint list to trace any other street",
         ],
     },
 }
@@ -500,7 +566,13 @@ def main():
   fragment earns its own support-based length budget, and a new <code>MIN_ROUTE_BLOCKS = 5</code> gate
   drops corridors that don't span at least 5 blocks (their votes still show as point pins). Verified
   against real data with a new vite-node stats harness: 0/20 loopy corridors on nyc-bikes (was 8/20 by
-  either measure), stubs gone, determinism contract intact, compute time unchanged.</p>
+  either measure), stubs gone, determinism contract intact, compute time unchanged.
+  <br><br>Follow-up (2026-07-15): “bright Broadway has no proposal” traced with a new street-trace
+  harness — half counter-vote import working as designed (Broadway's big four types are now deeply
+  net-negative; heat shows up+down so downvotes brighten it), half a real ranking flaw: the top-20 was
+  pure score, so imported mega-types buried Broadway's genuine sharrow/signal corridors at #87/#96. A
+  per-type diversity quota (<code>MAX_PER_TYPE = 4</code>, score-backfilled) lifts them to #16/#17 and
+  the list now spans 7 vote types.</p>
 
   {sections_html}
 
@@ -521,7 +593,7 @@ def main():
   <footer>
     Generated from <code>changelog/changes-routeprop.diff</code> by <code>changelog/build_routeprop_report.py</code>.
     Regenerate after further edits with
-    <code>git diff -- client-react/src/components/GraphLayer/routeProposals.ts client-react/src/components/GraphLayer/routeProposals.test.ts client-react/scripts/routepropStats.ts &gt; changelog/changes-routeprop.diff &amp;&amp; python changelog/build_routeprop_report.py</code>.
+    <code>git diff dc81a6c HEAD -- client-react/src/components/GraphLayer/routeProposals.ts client-react/src/components/GraphLayer/routeProposals.test.ts client-react/scripts/routepropStats.ts client-react/scripts/broadwayDiag.ts &gt; changelog/changes-routeprop.diff &amp;&amp; python changelog/build_routeprop_report.py</code>.
   </footer>
 </div>
 </body>
