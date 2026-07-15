@@ -217,12 +217,25 @@ export const TopBar = memo(function TopBar() {
             <ModeSwitcher />
           </div>
 
-          <button
-            className="btn-header"
-            onClick={() => setShowHowItWorks(true)}
-          >
-            How it Works
-          </button>
+          {/* One grid cell: .topbar-actions is a strict 2×2 grid (4-across in
+              landscape), so both buttons share a wrapper to keep 4 children. */}
+          <div className="header-btn-group">
+            <button
+              className="btn-header"
+              onClick={() => setShowHowItWorks(true)}
+            >
+              How it Works
+            </button>
+
+            <a
+              className="btn-header btn-donate"
+              href="https://donate.cityedit.org"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Donate
+            </a>
+          </div>
 
           <div className={`vote-switcher-group ${(canVote || (start.coords && end.coords)) ? "" : "hidden-reserve"}`}>
             <span className="mode-prefix-label">Vote:</span>

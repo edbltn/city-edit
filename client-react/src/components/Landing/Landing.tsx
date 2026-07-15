@@ -217,6 +217,9 @@ export function Landing() {
         <a href="https://sphericalharmonics.org/" className="landing-footer-link">
           sphericalharmonics.org
         </a>
+        <a href="https://donate.cityedit.org" className="landing-footer-link">
+          Donate
+        </a>
       </footer>
 
       {proposeOpen && <ProposeMapModal onClose={() => setProposeOpen(false)} />}

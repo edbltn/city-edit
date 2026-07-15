@@ -58,6 +58,23 @@
   }
 }
 
+/* How-it-Works + Donate share one .topbar-actions grid cell */
+.header-btn-group {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.header-btn-group .btn-header {
+  flex: 1;
+}
+
+/* Donate is an external link styled as a header button */
+.btn-donate {
+  text-decoration: none;
+}
+
 /* Loading state pulse animation for route fields */
 .route-field-value.loading {
   animation: pulse 1.5s ease-in-out infinite;
