@@ -484,6 +484,7 @@ variable "custom_domains" {
     "walkways.cityedit.org",
     "ebikes.cityedit.org",
     "demo.cityedit.org",
+    "donate.cityedit.org",
   ]
 }
 
