@@ -214,6 +214,12 @@ def init_db():
             # (page load) and seq-scanned the map's rows per request without it.
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_map_vt_created "
                            "ON edge_votes(map_slug, vote_type_id, created_at)")
+            # Serves get_voter_type_rows — the prior-state read on EVERY cast's
+            # clear-then-cast plan. Without it that read is a full scan of the
+            # map's rows (measured 9.4s per vote on prod nyc-bikes at 1.9M rows;
+            # 0.2ms with it). The identity key can't help: it leads with edge_id.
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_map_vt_device "
+                           "ON edge_votes(map_slug, vote_type_id, device_id)")
 
             # Vote-type lists: named collections (preset or user-created custom).
             cursor.execute("""

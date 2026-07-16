@@ -38,6 +38,15 @@ server/osm_data/
 # needed in the image, don't upload to Cloud Build.
 server/lyft_data/
 
+# Blocks-pipeline artifacts + its private venv (multi-GB bake outputs; images
+# get baked blocks via osm_data / the blocks overlays, never from here) and
+# one-off QGIS exports.
+server/streetscape_blocks/output/
+server/streetscape_blocks/cache/
+server/streetscape_blocks/env/
+server/streetscape_blocks/eval/
+exports/
+
 # DB dumps
 *.dump
 

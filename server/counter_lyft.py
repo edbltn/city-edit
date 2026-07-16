@@ -61,6 +61,7 @@ Requires: aiohttp, pandas, requests (same as import_lyft.py)
 import argparse
 import asyncio
 import hashlib
+import os
 import sys
 import time
 import zipfile
@@ -80,6 +81,7 @@ from cities import get_city
 from database import get_cursor
 from graph_registry import CityGraph
 from import_lyft import LYFT_SOURCES, fetch_map_mode, health_check
+from python_router import PythonRouter
 
 CACHE_DIR = Path(__file__).parent / "lyft_data"
 RIDE_COLS = ["ride_id", "start_lat", "start_lng", "end_lat", "end_lng"]
@@ -101,18 +103,24 @@ def device_of(ride_id: str) -> str:
 
 # ── DB: the imported votes to counter ────────────────────────────────────────
 
-def load_upvotes(map_slug: str) -> dict[str, dict[int, set[int]]]:
-    """{device_id: {vote_type_id: {edge_id}}} of current upvotes on the map."""
+def load_upvotes(map_slug: str) -> tuple[dict[str, dict[int, set[int]]], set[str]]:
+    """({device_id: {vote_type_id: {edge_id}}}, {import-marked device_id}).
+
+    The marker set is devices whose rows carry ip_hash == device_id — the
+    ip_from_voter signature only bulk imports produce (humans get an IP hash)."""
     votes: dict[str, dict[int, set[int]]] = defaultdict(lambda: defaultdict(set))
+    marked: set[str] = set()
     with get_cursor() as cur:
         cur.execute(
-            "SELECT device_id, vote_type_id, edge_id FROM edge_votes "
-            "WHERE map_slug = %s AND direction = 1",
+            "SELECT device_id, vote_type_id, edge_id, (ip_hash = device_id) "
+            "FROM edge_votes WHERE map_slug = %s AND direction = 1",
             (map_slug,),
         )
-        for device_id, vt_id, edge_id in cur.fetchall():
+        for device_id, vt_id, edge_id, marker in cur.fetchall():
             votes[device_id][vt_id].add(edge_id)
-    return votes
+            if marker:
+                marked.add(device_id)
+    return votes, marked
 
 
 def load_vote_type_labels(vt_ids: set[int]) -> dict[int, str]:
@@ -176,14 +184,13 @@ def match_rides(city_id: str, devices: set[str]) -> dict[str, tuple]:
 
 # ── Bike routing → overlap edges ─────────────────────────────────────────────
 
-def voted_path_vias(graph, edge_ids: set[int], start) -> list[tuple[float, float]]:
-    """Ordered (lat, lon) via-points sampled along the ride's voted path.
+def _walk_voted_path(graph, edge_ids: set[int], start) -> list[int]:
+    """Ordered node positions along the voted path, or [] if unwalkable.
 
-    Rebuilds the path by walking the voted edge set from the degree-1 node
-    nearest the trip start, preferring neighbors that still have onward edges
-    (so resnap spurs don't dead-end the walk early). Returns [] when the set
-    has no walkable path structure (round trips, heavy fragmentation) — the
-    caller then routes endpoint-to-endpoint.
+    Walks the voted edge set from the degree-1 node nearest `start` (any
+    degree-1 node when start is None), preferring neighbors that still have
+    onward edges (so resnap spurs don't dead-end the walk early). [] when the
+    set has no walkable path structure (round trips, heavy fragmentation).
     """
     adj: dict[int, list[tuple[int, int]]] = defaultdict(list)
     for eid in edge_ids:
@@ -194,11 +201,13 @@ def voted_path_vias(graph, edge_ids: set[int], start) -> list[tuple[float, float
     if not deg1:
         return []
 
-    def dist2(n):
-        lat, lon = graph.node_coords[n]
-        return (lat - start[0]) ** 2 + (lon - start[1]) ** 2
-
-    cur = min(deg1, key=dist2)
+    if start is not None:
+        def dist2(n):
+            lat, lon = graph.node_coords[n]
+            return (lat - start[0]) ** 2 + (lon - start[1]) ** 2
+        cur = min(deg1, key=dist2)
+    else:
+        cur = deg1[0]
     used: set[int] = set()
     order = [cur]
     while True:
@@ -216,11 +225,69 @@ def voted_path_vias(graph, edge_ids: set[int], start) -> list[tuple[float, float
         cur = nb
     if len(used) < max(2, len(edge_ids) // 2):
         return []  # walk covered too little of the set to trust its order
+    return order
 
+
+def _vias_from_order(graph, order: list[int]) -> list[tuple[float, float]]:
     inner = order[1:-1]
     stride = max(VIA_STRIDE, -(-len(inner) // MAX_VIAS))
     return [(float(graph.node_coords[n][0]), float(graph.node_coords[n][1]))
             for n in inner[stride - 1::stride]]
+
+
+def voted_path_vias(graph, edge_ids: set[int], start) -> list[tuple[float, float]]:
+    """Ordered (lat, lon) via-points sampled along the ride's voted path."""
+    order = _walk_voted_path(graph, edge_ids, start)
+    return _vias_from_order(graph, order) if order else []
+
+
+def reconstructed_trip(graph, edge_ids: set[int]):
+    """(start, end, vias) recovered from the voted edges themselves, or None.
+
+    For import rows whose ride ids are no longer published anywhere (their
+    voter_id preimage is gone), the trip endpoints ARE the voted path's own
+    ends. Which end was the true start is unknowable, so the caller routes
+    BOTH directions and intersects coverage — one-way legality then never
+    depends on the guess (a counter-one-way stretch fails coverage in at
+    least one direction and survives).
+
+    Twice-resnapped vote sets are topologically shredded (each resnap picks
+    among parallel duplicate edges, so consecutive edges stop sharing nodes)
+    but their midpoints still trace the corridor — so when the node walk
+    fails, fall back to pure geometry: endpoints ≈ the farthest-apart pair of
+    edge midpoints, via order by greedy nearest-neighbor chaining from one end.
+    """
+    order = _walk_voted_path(graph, edge_ids, None)
+    if order and len(order) >= 4:
+        start = (float(graph.node_coords[order[0]][0]), float(graph.node_coords[order[0]][1]))
+        end = (float(graph.node_coords[order[-1]][0]), float(graph.node_coords[order[-1]][1]))
+        return start, end, _vias_from_order(graph, order)
+
+    if len(edge_ids) < 4:
+        return None
+    eids = np.fromiter(edge_ids, dtype=np.int64, count=len(edge_ids))
+    ends = graph.edge_ends[eids]
+    mids = (graph.node_coords[ends[:, 0]] + graph.node_coords[ends[:, 1]]) / 2
+    lat0 = float(mids[:, 0].mean())
+    xy = np.stack([mids[:, 1] * M_PER_DEG_LON_EQ * np.cos(np.radians(lat0)),
+                   mids[:, 0] * M_PER_DEG_LAT], axis=1)
+    # Farthest-pair approximation: farthest from centroid, then farthest from it.
+    i0 = int(((xy - xy.mean(0)) ** 2).sum(1).argmax())
+    i1 = int(((xy - xy[i0]) ** 2).sum(1).argmax())
+    # Greedy nearest-neighbor chain from one end orders midpoints along the corridor.
+    order_idx = [i0]
+    remaining = set(range(len(xy))) - {i0}
+    cur = i0
+    while remaining:
+        nxt = min(remaining, key=lambda j: ((xy[j] - xy[cur]) ** 2).sum())
+        order_idx.append(nxt)
+        remaining.discard(nxt)
+        cur = nxt
+    stride = max(VIA_STRIDE, -(-max(0, len(order_idx) - 2) // MAX_VIAS))
+    vias = [(float(mids[j, 0]), float(mids[j, 1]))
+            for j in order_idx[1:-1][stride - 1::stride]]
+    return ((float(mids[i0, 0]), float(mids[i0, 1])),
+            (float(mids[i1, 0]), float(mids[i1, 1])), vias)
 
 
 async def bike_route_geometry(session, osrm_base, start, end, vias) -> np.ndarray | None:
@@ -299,6 +366,7 @@ class Stats:
         self.vote_failed = 0
         self.countered = 0
         self.via_guided = 0
+        self.reconstructed = 0
         self.edges_upvoted = 0
         self.edges_downvoted = 0
         self.edges_cleared = 0
@@ -329,19 +397,39 @@ async def counter_one(session, args, device, ride, vt_edges, vt_labels, graph,
     rid, start, end = ride
     n_up = sum(len(s) for s in vt_edges.values())
     all_edges = set().union(*vt_edges.values())
-    vias = voted_path_vias(graph, all_edges, start) if len(all_edges) >= 4 else []
-    geom = await bike_route_geometry(session, args.bike_osrm_url, start, end, vias)
-    if geom is None and vias:
-        # A via may have snapped somewhere unroutable; the plain trip still
-        # tells us which stretches a bike could have used.
-        vias = []
-        geom = await bike_route_geometry(session, args.bike_osrm_url, start, end, [])
-    if geom is None:
-        await stats.bump(route_failed=1, edges_upvoted=n_up)
-        return
-    if vias:
-        await stats.bump_quiet(via_guided=1)
-    bike_set = covered_edges(graph, all_edges, geom)
+
+    if rid is None:
+        # Reconstructed trip (no published ride): endpoints from the voted
+        # path's own ends, routed BOTH ways; coverage is the intersection, so
+        # the unknowable true direction can never mark a one-way stretch.
+        rec = reconstructed_trip(graph, all_edges)
+        if rec is None:
+            await stats.bump(route_failed=1, edges_upvoted=n_up)
+            return
+        start, end, vias = rec
+        g1 = await bike_route_geometry(session, args.bike_osrm_url, start, end, vias)
+        g2 = await bike_route_geometry(session, args.bike_osrm_url, end, start,
+                                       list(reversed(vias)))
+        if g1 is None or g2 is None:
+            await stats.bump(route_failed=1, edges_upvoted=n_up)
+            return
+        await stats.bump_quiet(via_guided=1, reconstructed=1)
+        bike_set = (covered_edges(graph, all_edges, g1)
+                    & covered_edges(graph, all_edges, g2))
+    else:
+        vias = voted_path_vias(graph, all_edges, start) if len(all_edges) >= 4 else []
+        geom = await bike_route_geometry(session, args.bike_osrm_url, start, end, vias)
+        if geom is None and vias:
+            # A via may have snapped somewhere unroutable; the plain trip still
+            # tells us which stretches a bike could have used.
+            vias = []
+            geom = await bike_route_geometry(session, args.bike_osrm_url, start, end, [])
+        if geom is None:
+            await stats.bump(route_failed=1, edges_upvoted=n_up)
+            return
+        if vias:
+            await stats.bump_quiet(via_guided=1)
+        bike_set = covered_edges(graph, all_edges, geom)
 
     downs, cleared = 0, 0
     any_overlap = False
@@ -360,13 +448,19 @@ async def counter_one(session, args, device, ride, vt_edges, vt_labels, graph,
             continue
         payload = {
             "map": args.map_slug, "mode": vote_mode, "vote_type": label,
-            "voter_id": rid, "edge_ids": overlap, "direction": -1,
+            "voter_id": rid or device, "edge_ids": overlap, "direction": -1,
             "ip_from_voter": True,
         }
+        headers = {}
+        if rid is None:
+            # Act as the stored device directly (its voter_id preimage is
+            # unpublished); requires the backend's admin token.
+            payload["admin_device_id"] = device
+            headers["X-Admin-Token"] = args.admin_token or ""
         for attempt in range(3):
             try:
                 async with session.post(
-                    f"{args.api_base}/api/vote", json=payload,
+                    f"{args.api_base}/api/vote", json=payload, headers=headers,
                     timeout=aiohttp.ClientTimeout(total=120),
                 ) as resp:
                     if resp.status != 200:
@@ -431,8 +525,27 @@ def main():
     parser.add_argument("--api-base", default="http://localhost:8080",
                         help="City Edit API base URL")
     parser.add_argument("--concurrency", type=int, default=4)
+    parser.add_argument("--graph-dir",
+                        help="Directory with the TARGET deployment's "
+                             "walk_graph_arrays.npz. Required when countering a "
+                             "remote backend: DB edge ids live in that "
+                             "deployment's topology space, so vias/coverage must "
+                             "use its graph, not the local build (extract with "
+                             "docker cp from the serving image).")
     parser.add_argument("--limit", type=int,
                         help="Counter at most N rides (smoke runs)")
+    parser.add_argument("--reconstruct-unmatched", action="store_true",
+                        help="Also counter import-marked devices whose ride ids "
+                             "match no cached month: endpoints come from the "
+                             "voted path's own ends, routed both directions "
+                             "with coverage intersected. Needs --admin-token "
+                             "(casts act as the stored device directly).")
+    parser.add_argument("--only-unmatched", action="store_true",
+                        help="With --reconstruct-unmatched: process ONLY the "
+                             "reconstructed devices (skip re-analyzing rides "
+                             "already countered by a prior matched pass).")
+    parser.add_argument("--admin-token", default=os.environ.get("ADMIN_TOKEN"),
+                        help="Backend ADMIN_TOKEN for --reconstruct-unmatched")
     parser.add_argument("--dry-run", action="store_true",
                         help="Compute overlaps and report; cast nothing")
     args = parser.parse_args()
@@ -453,25 +566,31 @@ def main():
                  f"Run scripts/build_bike_osrm.sh {args.city} --serve first.")
 
     log(f"Loading upvotes for map '{args.map_slug}' ...")
-    votes = load_upvotes(args.map_slug)
-    log(f"  {len(votes)} devices with upvotes")
+    votes, marked = load_upvotes(args.map_slug)
+    log(f"  {len(votes)} devices with upvotes ({len(marked)} import-marked)")
 
     log("Matching devices against cached ride zips ...")
     matched = match_rides(args.city, set(votes))
-    unmatched = len(votes) - len(matched)
-    log(f"  {len(matched)} imported rides matched "
-        f"({unmatched} devices unmatched — human/agent voters, left alone)")
-    if not matched:
+    reconstruct = sorted(marked - set(matched)) if args.reconstruct_unmatched else []
+    unmatched = len(votes) - len(matched) - len(reconstruct)
+    log(f"  {len(matched)} imported rides matched, {len(reconstruct)} import-marked "
+        f"but unpublished (reconstructing), {unmatched} left alone")
+    if not matched and not reconstruct:
         sys.exit("ERROR: no imported rides matched. Wrong --city/--map, or the "
                  "monthly zips the import used are no longer in lyft_data/.")
+    if reconstruct and not args.dry_run and not args.admin_token:
+        sys.exit("ERROR: --reconstruct-unmatched needs --admin-token (or ADMIN_TOKEN env)")
 
-    vt_ids = {vt for dev in matched for vt in votes[dev]}
+    vt_ids = {vt for dev in list(matched) + reconstruct for vt in votes[dev]}
     vt_labels = load_vote_type_labels(vt_ids)
     log(f"  vote types to counter: "
         f"{', '.join(f'{i}={vt_labels.get(i)!r}' for i in sorted(vt_ids))}")
 
-    log(f"Loading {args.city} votable graph (node-id mapping) ...")
+    log(f"Loading {args.city} votable graph "
+        f"({args.graph_dir or city.data_dir}) ...")
     graph = CityGraph(city)
+    if args.graph_dir:
+        graph.provider = PythonRouter(data_dir=args.graph_dir)
     graph.ensure_loaded()
     log(f"  {graph.n_nodes} nodes / {graph.n_edges} edges")
 
@@ -485,7 +604,9 @@ def main():
                      "pass --mode explicitly.")
         log(f"Target: map={args.map_slug} mode={vote_mode} via {args.api_base}")
 
-    work = [(dev, matched[dev], votes[dev]) for dev in sorted(matched)]
+    work = ([] if args.only_unmatched else
+            [(dev, matched[dev], votes[dev]) for dev in sorted(matched)])
+    work += [(dev, (None, None, None), votes[dev]) for dev in reconstruct]
     if args.limit:
         work = work[:args.limit]
     log(f"{'DRY RUN: analyzing' if args.dry_run else 'Counter-voting'} "
@@ -497,6 +618,8 @@ def main():
     log(f"  Rides processed:     {stats.processed}")
     log(f"  Via-guided routes:   {stats.via_guided} "
         f"(rest routed endpoint-to-endpoint)")
+    log(f"  Reconstructed trips: {stats.reconstructed} "
+        f"(both-direction coverage intersection)")
     log(f"  Countered:           {stats.countered}")
     log(f"  No overlap:          {stats.no_overlap} (fully divergent — left alone)")
     log(f"  Route failed:        {stats.route_failed} (left alone)")

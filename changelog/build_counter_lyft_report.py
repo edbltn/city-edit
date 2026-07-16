@@ -3,11 +3,10 @@
 
 Run from repo root: python changelog/build_counter_lyft_report.py
 Reads changelog/changes-counter-lyft.diff (captured with:
-  git add -N osrm/bicycle-flat.lua scripts/build_bike_osrm.sh \
-    server/counter_lyft.py server/tests/unit/test_counter_lyft.py &&
-  git diff -- osrm/bicycle-flat.lua scripts/build_bike_osrm.sh \
+  git diff dc81a6c -- osrm/bicycle-flat.lua scripts/build_bike_osrm.sh \
     server/counter_lyft.py server/tests/unit/test_counter_lyft.py \
-    > changelog/changes-counter-lyft.diff),
+    server/app.py server/database.py .gcloudignore \
+    > changelog/changes-counter-lyft.diff  — dc81a6c is the pre-workstream base),
 writes changelog/2026-07-14-citibike-counter-votes.html
 
 Modeled on build_junction_disjoint_report.py (same styles + hierarchical
@@ -160,10 +159,82 @@ SECTIONS = [
         ],
         "files": ["server/counter_lyft.py", "server/tests/unit/test_counter_lyft.py"],
     },
+    {
+        "id": "prod",
+        "tag": "Prod rollout · 2026-07-15",
+        "title": "4 · Prod rollout — and the resnap prod turned out to need first",
+        "symptom": (
+            "Dry-running the counter pass against the prod DB produced nonsense coverage on two "
+            "maps (sf-bike-lanes 0.5%, chicago-bikes 4.8%) while nyc-bikes looked plausible — the "
+            "kind of asymmetry that means the data, not the code, is wrong."
+        ),
+        "cause": [
+            "Prod's stored votes were <strong>stale against prod's serving graphs</strong>: "
+            "comparing each row's lat/lon anchor against its edge id's midpoint in the serving "
+            "topology showed sf-bike-lanes 99.9% misaligned (median 4.5 km!), chicago-bikes 97.4%, "
+            "nyc-bikes 33%, ny-bike-lanes/nyc-trees/nyc-bus-map ~100%, nyc-walkways 1.7%. A "
+            "graph-shifting deploy had gone out without the resnap step "
+            "(docs: resnap-on-deploy) — those heatmaps were painting votes on the wrong streets "
+            "in prod, independent of this workstream.",
+        ],
+        "fixes": [
+            "Full prod DB snapshot first (<code>~/city-edit-prod-backups/20260715T224016Z/"
+            "prod-full.dump</code>, 43 MB, checksummed).",
+            "<strong>Resnap driven from the operator machine</strong> with the serving image's own "
+            "graph arrays (digest <code>050fd6b7…</code>, etags verified identical to live "
+            "<code>/api/graph-votes</code>), through the repo's vote_migration machinery: atomic "
+            "per-map DB rewrite → Redis aggregate rebuild via the Memorystore tunnel → "
+            "<code>vote_rev</code> bumped +1000 so every cache invalidates. All seven misaligned "
+            "maps healed to ≤0.4% residual; nyc-bikes merged only 20 collision rows of 1.77 M.",
+            "Overlay code deploy (revision <code>desire-path-mapper-00098-7ft</code>, base pinned "
+            "on the serving digest) shipping counter_lyft tooling + current branch state; "
+            "<code>.gcloudignore</code> also learned to exclude 6.6 GB of blocks-bake artifacts "
+            "that every Cloud Build had been uploading.",
+            "Counter passes with <code>--graph-dir</code> (new flag: remote passes must use the "
+            "TARGET deployment's graphs — DB edge ids live in its topology space): prod "
+            "sf-bike-lanes 348/349 rides countered (72.9% of upvotes), prod chicago-bikes 239/239 "
+            "(69.3%), prod nyc-bikes (see Verification), plus local sf (73.9%) and chicago "
+            "(79.5%). Zero route/vote failures across every pass.",
+            "Two more prod finds along the way: <strong>every cast on prod was paying a "
+            "9.4-second full scan</strong> — <code>get_voter_type_rows</code> (the prior-state "
+            "read behind clear-then-cast) had no usable index (the identity key leads with "
+            "edge_id). New <code>idx_edge_votes_map_vt_device</code>, created CONCURRENTLY on "
+            "prod mid-pass: 9,453&nbsp;ms → 0.198&nbsp;ms; human votes on big maps get the same "
+            "win. And bulk casts now run through a <strong>scratch Flask wired to prod</strong> "
+            "(prod graphs/blocks + tunnelled DB/Memorystore; app.py gained REDIS_PORT) rather "
+            "than the public API — same code path, ~50× the throughput, block aggregates "
+            "maintained correctly.",
+            "The identity join also exposed a second, earlier prod import batch (3,647 "
+            "import-marked devices, 314 k rows, cast 2026-05-29) whose ride ids appear in NO "
+            "published Citibike file (probed 2025-12 → 2026-06 plus the JC extracts) — its "
+            "voter_id preimages are simply gone. New <code>--reconstruct-unmatched</code> mode: "
+            "the trip is recovered from the voted edges themselves (endpoints = farthest-apart "
+            "midpoints, vias by nearest-neighbor chaining — twice-resnapped sets are "
+            "topologically shredded, every edge disjoint, so reconstruction is geometric), "
+            "routed in BOTH directions with coverage intersected, so the unknowable true "
+            "direction can never counter a one-way stretch. Casting as a stored device without "
+            "its hash preimage required a new admin-token-gated <code>admin_device_id</code> "
+            "override in <code>/api/vote</code>. Deliberately conservative: ~36% of those "
+            "upvotes countered vs ~77% for matched rides.",
+        ],
+        "files": ["server/app.py", "server/database.py", ".gcloudignore"],
+    },
 ]
 
 # Filled from the full nyc-bikes run (see scratch log counter-run-nyc.log).
 VERIFY = [
+    "<strong>Prod end state (2026-07-15)</strong>: nyc-bikes 1,243,406 rows against / 603,344 for "
+    "(main pass: 11,060 matched rides, 77.0% of upvotes flipped; reconstructed pass: 3,634 of "
+    "3,647 unpublished-ride imports, 35.8% — conservative by design; 12 residual failures "
+    "≈ 0.06% of edges). sf-bike-lanes 34,425 / 12,590 (72.9%); chicago-bikes 20,818 / 8,825 "
+    "(69.3%). Zero route failures everywhere. Live serving: 80% / 76% / 72% of voted edges now "
+    "net-negative, block layers intact (n_blocks 289,647 / 45,712 / 140,248).",
+    "Prod resnap verification: all seven misaligned maps healed to ≤ 0.4% anchor-vs-edge "
+    "residual (was 33–100%); bd:/bagg:/bver purged per map and lazily rebuilt from Postgres "
+    "(nyc-bikes rebuild: 174 s on-instance); revisions bumped so every cache invalidated.",
+    "Prod deploy: revision <code>desire-path-mapper-00098-7ft</code> (overlay image "
+    "<code>1e16f40f…</code> pinned on serving digest <code>050fd6b7…</code>), /health green, "
+    "graph-votes serving with unchanged topology etags.",
     "Full nyc-bikes pass (two runs — the first was killed externally at ~8,800/14,523 rides; the "
     "pass is idempotent so the relaunch converged): <strong>0 route failures, 0 vote failures</strong> "
     "across all rides; 4,975 rides fully divergent (left alone, mostly round trips at one station). "
@@ -301,6 +372,45 @@ FILE_CONTEXT = {
             "voted_path_vias — degree-1 anchor nearest trip start, continuation-over-spur walk, fragment fallback",
             "covered_edges — local-meters projection, vectorized min distance to route polyline, 3-point rule",
             "counter_one — via-guided route (endpoint fallback) → per-vt overlap → direction=-1 casts",
+        ],
+    },
+    "server/app.py": {
+        "on": ["Flask API", "Redis"],
+        "module": ("Flask backend · server/", "HTTP + WS routes; the single /api/vote codepath every cast goes through"),
+        "file": ("app.py", "~2080 LOC — three surgical touches for operator runs + cast cost"),
+        "outline": [
+            ("Redis setup", "REDIS_PORT env honored (tunnelled Memorystore on :6380; 6379 is local dev)", True),
+            ("_resolve_user", "admin-token-gated admin_device_id: act as a stored device whose voter_id preimage is gone", True),
+            ("cast_vote — per-IP cap", "skipped for ip_from_voter casts (their ip is unique per voter by construction)", True),
+            ("everything else", "routes, caches, warmup, WS — untouched", False),
+        ],
+        "blocks": [
+            "redis_port = REDIS_PORT env (3 constructors)",
+            "_resolve_user — admin_device_id verbatim when _admin_authorized()",
+            "ip_device_counts skipped when ip_from_voter",
+        ],
+    },
+    "server/database.py": {
+        "on": ["Flask API"],
+        "module": ("Flask backend · server/", "Postgres layer: schema migrations, vote reads/writes"),
+        "file": ("database.py", "~800 LOC — one new index in the boot migration"),
+        "outline": [
+            ("init migrations", "idx_edge_votes_map_vt_device — serves get_voter_type_rows (9.4s → 0.2ms on prod nyc-bikes)", True),
+            ("everything else", "untouched", False),
+        ],
+        "blocks": [
+            "CREATE INDEX IF NOT EXISTS idx_edge_votes_map_vt_device (map_slug, vote_type_id, device_id)",
+        ],
+    },
+    ".gcloudignore": {
+        "on": ["nginx", "Flask API"],
+        "module": ("deploy · build context", "what gcloud builds submit uploads"),
+        "file": (".gcloudignore", "excludes 6.6 GB of blocks-bake artifacts + QGIS exports every build had been uploading"),
+        "outline": [
+            ("blocks artifacts + exports", "streetscape_blocks output/cache/env/eval + exports/", True),
+        ],
+        "blocks": [
+            "server/streetscape_blocks/{output,cache,env,eval}/ + exports/",
         ],
     },
     "server/tests/unit/test_counter_lyft.py": {
@@ -518,7 +628,7 @@ def main():
   <footer>
     Generated from <code>changelog/changes-counter-lyft.diff</code> by <code>changelog/build_counter_lyft_report.py</code>.
     Regenerate after further edits with
-    <code>git diff -- osrm/bicycle-flat.lua scripts/build_bike_osrm.sh server/counter_lyft.py server/tests/unit/test_counter_lyft.py &gt; changelog/changes-counter-lyft.diff &amp;&amp; python changelog/build_counter_lyft_report.py</code>.
+    <code>git diff dc81a6c -- osrm/bicycle-flat.lua scripts/build_bike_osrm.sh server/counter_lyft.py server/tests/unit/test_counter_lyft.py server/app.py server/database.py .gcloudignore &gt; changelog/changes-counter-lyft.diff &amp;&amp; python changelog/build_counter_lyft_report.py</code>.
   </footer>
 </div>
 </body>

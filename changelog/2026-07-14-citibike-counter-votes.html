@@ -112,6 +112,7 @@
   <nav class="toc"><a href="#why">1</a>
 <a href="#graph">2</a>
 <a href="#counter">3</a>
+<a href="#prod">4</a>
     <a href="#verify">Verification</a><a href="#checklist">Checklist</a>
   </nav>
 
@@ -988,7 +989,7 @@
       <h3>Diffs — files touched (click to expand)</h3>
         <details>
           <summary><span class="fname">server/counter_lyft.py</span>
-            <span class="stat"><span class="d-add">+513</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+636</span> / <span class="d-del">-0</span></span>
           </summary>
           
     <div class="ctx">
@@ -1019,10 +1020,10 @@
     
           <pre class="diff"><span class="d-meta">diff --git a/server/counter_lyft.py b/server/counter_lyft.py</span>
 <span class="d-meta">new file mode 100644</span>
-<span class="d-meta">index 0000000..f20f999</span>
+<span class="d-meta">index 0000000..7c07338</span>
 <span class="d-meta">--- /dev/null</span>
 <span class="d-meta">+++ b/server/counter_lyft.py</span>
-<span class="d-hunk">@@ -0,0 +1,513 @@</span>
+<span class="d-hunk">@@ -0,0 +1,636 @@</span>
 <span class="d-add">+<span class="s-com">#!/usr/bin/env python3</span></span>
 <span class="d-add">+<span class="s-str">&quot;&quot;&quot;</span></span>
 <span class="d-add">+<span class="s-type">Counter</span>-vote <span class="s-kw">pass</span> <span class="s-kw">for</span> <span class="s-type">Lyft</span> bikeshare <span class="s-fn">imports</span> (the import_lyft.py corrective).</span>
@@ -1086,6 +1087,7 @@
 <span class="d-add">+<span class="s-kw">import</span> argparse</span>
 <span class="d-add">+<span class="s-kw">import</span> asyncio</span>
 <span class="d-add">+<span class="s-kw">import</span> hashlib</span>
+<span class="d-add">+<span class="s-kw">import</span> os</span>
 <span class="d-add">+<span class="s-kw">import</span> sys</span>
 <span class="d-add">+<span class="s-kw">import</span> time</span>
 <span class="d-add">+<span class="s-kw">import</span> zipfile</span>
@@ -1105,6 +1107,7 @@
 <span class="d-add">+<span class="s-kw">from</span> database <span class="s-kw">import</span> get_cursor</span>
 <span class="d-add">+<span class="s-kw">from</span> graph_registry <span class="s-kw">import</span> <span class="s-type">CityGraph</span></span>
 <span class="d-add">+<span class="s-kw">from</span> import_lyft <span class="s-kw">import</span> <span class="s-type">LYFT_SOURCES</span>, fetch_map_mode, health_check</span>
+<span class="d-add">+<span class="s-kw">from</span> python_router <span class="s-kw">import</span> <span class="s-type">PythonRouter</span></span>
 <span class="d-add">+</span>
 <span class="d-add">+<span class="s-type">CACHE_DIR</span> = <span class="s-fn">Path</span>(__file__).parent / <span class="s-str">&quot;lyft_data&quot;</span></span>
 <span class="d-add">+<span class="s-type">RIDE_COLS</span> = [<span class="s-str">&quot;ride_id&quot;</span>, <span class="s-str">&quot;start_lat&quot;</span>, <span class="s-str">&quot;start_lng&quot;</span>, <span class="s-str">&quot;end_lat&quot;</span>, <span class="s-str">&quot;end_lng&quot;</span>]</span>
@@ -1126,18 +1129,24 @@
 <span class="d-add">+</span>
 <span class="d-add">+<span class="s-com"># ── DB: the imported votes to counter ────────────────────────────────────────</span></span>
 <span class="d-add">+</span>
-<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">load_upvotes</span>(map_slug: str) -&gt; dict[str, dict[int, set[int]]]:</span>
-<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;{device_id: {vote_type_id: {edge_id}}} of current upvotes on the map.&quot;&quot;&quot;</span></span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">load_upvotes</span>(map_slug: str) -&gt; tuple[dict[str, dict[int, set[int]]], set[str]]:</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;({device_id: {vote_type_id: {edge_id}}}, {import-marked device_id}).</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-type">The</span> marker set <span class="s-kw">is</span> devices whose rows carry ip_hash == device_id — the</span>
+<span class="d-add">+    ip_from_voter signature only bulk imports <span class="s-fn">produce</span> (humans get an <span class="s-type">IP</span> hash).<span class="s-str">&quot;&quot;&quot;</span></span>
 <span class="d-add">+    votes: dict[str, dict[int, set[int]]] = <span class="s-fn">defaultdict</span>(<span class="s-kw">lambda</span>: <span class="s-fn">defaultdict</span>(set))</span>
+<span class="d-add">+    marked: set[str] = <span class="s-fn">set</span>()</span>
 <span class="d-add">+    <span class="s-kw">with</span> <span class="s-fn">get_cursor</span>() <span class="s-kw">as</span> cur:</span>
 <span class="d-add">+        cur.<span class="s-fn">execute</span>(</span>
-<span class="d-add">+            <span class="s-str">&quot;SELECT device_id, vote_type_id, edge_id FROM edge_votes &quot;</span></span>
-<span class="d-add">+            <span class="s-str">&quot;WHERE map_slug = %s AND direction = 1&quot;</span>,</span>
+<span class="d-add">+            <span class="s-str">&quot;SELECT device_id, vote_type_id, edge_id, (ip_hash = device_id) &quot;</span></span>
+<span class="d-add">+            <span class="s-str">&quot;FROM edge_votes WHERE map_slug = %s AND direction = 1&quot;</span>,</span>
 <span class="d-add">+            (map_slug,),</span>
 <span class="d-add">+        )</span>
-<span class="d-add">+        <span class="s-kw">for</span> device_id, vt_id, edge_id <span class="s-kw">in</span> cur.<span class="s-fn">fetchall</span>():</span>
+<span class="d-add">+        <span class="s-kw">for</span> device_id, vt_id, edge_id, marker <span class="s-kw">in</span> cur.<span class="s-fn">fetchall</span>():</span>
 <span class="d-add">+            votes[device_id][vt_id].<span class="s-fn">add</span>(edge_id)</span>
-<span class="d-add">+    <span class="s-kw">return</span> votes</span>
+<span class="d-add">+            <span class="s-kw">if</span> marker:</span>
+<span class="d-add">+                marked.<span class="s-fn">add</span>(device_id)</span>
+<span class="d-add">+    <span class="s-kw">return</span> votes, marked</span>
 <span class="d-add">+</span>
 <span class="d-add">+</span>
 <span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">load_vote_type_labels</span>(vt_ids: set[int]) -&gt; dict[int, str]:</span>
@@ -1201,14 +1210,13 @@
 <span class="d-add">+</span>
 <span class="d-add">+<span class="s-com"># ── Bike routing → overlap edges ─────────────────────────────────────────────</span></span>
 <span class="d-add">+</span>
-<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">voted_path_vias</span>(graph, edge_ids: set[int], start) -&gt; list[tuple[float, float]]:</span>
-<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Ordered (lat, lon) via-points sampled along the ride&#x27;s voted path.</span></span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">_walk_voted_path</span>(graph, edge_ids: set[int], start) -&gt; list[int]:</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Ordered node positions along the voted path, or [] if unwalkable.</span></span>
 <span class="d-add">+</span>
-<span class="d-add">+    <span class="s-type">Rebuilds</span> the path by walking the voted edge set <span class="s-kw">from</span> the degree-<span class="s-num">1</span> node</span>
-<span class="d-add">+    nearest the trip start, preferring neighbors that still have onward edges</span>
-<span class="d-add">+    (so resnap spurs don<span class="s-str">&#x27;t dead-end the walk early). Returns [] when the set</span></span>
-<span class="d-add">+    has no walkable path <span class="s-fn">structure</span> (round trips, heavy fragmentation) — the</span>
-<span class="d-add">+    caller then routes endpoint-to-endpoint.</span>
+<span class="d-add">+    <span class="s-type">Walks</span> the voted edge set <span class="s-kw">from</span> the degree-<span class="s-num">1</span> node nearest `start` (any</span>
+<span class="d-add">+    degree-<span class="s-num">1</span> node when start <span class="s-kw">is</span> <span class="s-lit">None</span>), preferring neighbors that still have</span>
+<span class="d-add">+    onward <span class="s-fn">edges</span> (so resnap spurs don<span class="s-str">&#x27;t dead-end the walk early). [] when the</span></span>
+<span class="d-add">+    set has no walkable path <span class="s-fn">structure</span> (round trips, heavy fragmentation).</span>
 <span class="d-add">+    <span class="s-str">&quot;&quot;&quot;</span></span>
 <span class="d-add">+    adj: dict[int, list[tuple[int, int]]] = <span class="s-fn">defaultdict</span>(list)</span>
 <span class="d-add">+    <span class="s-kw">for</span> eid <span class="s-kw">in</span> edge_ids:</span>
@@ -1219,11 +1227,13 @@
 <span class="d-add">+    <span class="s-kw">if</span> <span class="s-kw">not</span> deg1:</span>
 <span class="d-add">+        <span class="s-kw">return</span> []</span>
 <span class="d-add">+</span>
-<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">dist2</span>(n):</span>
-<span class="d-add">+        lat, lon = graph.node_coords[n]</span>
-<span class="d-add">+        <span class="s-kw">return</span> (lat - start[<span class="s-num">0</span>]) ** <span class="s-num">2</span> + (lon - start[<span class="s-num">1</span>]) ** <span class="s-num">2</span></span>
-<span class="d-add">+</span>
-<span class="d-add">+    cur = <span class="s-fn">min</span>(deg1, key=dist2)</span>
+<span class="d-add">+    <span class="s-kw">if</span> start <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+        <span class="s-kw">def</span> <span class="s-fn">dist2</span>(n):</span>
+<span class="d-add">+            lat, lon = graph.node_coords[n]</span>
+<span class="d-add">+            <span class="s-kw">return</span> (lat - start[<span class="s-num">0</span>]) ** <span class="s-num">2</span> + (lon - start[<span class="s-num">1</span>]) ** <span class="s-num">2</span></span>
+<span class="d-add">+        cur = <span class="s-fn">min</span>(deg1, key=dist2)</span>
+<span class="d-add">+    <span class="s-kw">else</span>:</span>
+<span class="d-add">+        cur = deg1[<span class="s-num">0</span>]</span>
 <span class="d-add">+    used: set[int] = <span class="s-fn">set</span>()</span>
 <span class="d-add">+    order = [cur]</span>
 <span class="d-add">+    <span class="s-kw">while</span> <span class="s-lit">True</span>:</span>
@@ -1241,11 +1251,69 @@
 <span class="d-add">+        cur = nb</span>
 <span class="d-add">+    <span class="s-kw">if</span> <span class="s-fn">len</span>(used) &lt; <span class="s-fn">max</span>(<span class="s-num">2</span>, <span class="s-fn">len</span>(edge_ids) // <span class="s-num">2</span>):</span>
 <span class="d-add">+        <span class="s-kw">return</span> []  <span class="s-com"># walk covered too little of the set to trust its order</span></span>
+<span class="d-add">+    <span class="s-kw">return</span> order</span>
 <span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">_vias_from_order</span>(graph, order: list[int]) -&gt; list[tuple[float, float]]:</span>
 <span class="d-add">+    inner = order[<span class="s-num">1</span>:-<span class="s-num">1</span>]</span>
 <span class="d-add">+    stride = <span class="s-fn">max</span>(<span class="s-type">VIA_STRIDE</span>, -(-<span class="s-fn">len</span>(inner) // <span class="s-type">MAX_VIAS</span>))</span>
 <span class="d-add">+    <span class="s-kw">return</span> [(<span class="s-fn">float</span>(graph.node_coords[n][<span class="s-num">0</span>]), <span class="s-fn">float</span>(graph.node_coords[n][<span class="s-num">1</span>]))</span>
 <span class="d-add">+            <span class="s-kw">for</span> n <span class="s-kw">in</span> inner[stride - <span class="s-num">1</span>::stride]]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">voted_path_vias</span>(graph, edge_ids: set[int], start) -&gt; list[tuple[float, float]]:</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Ordered (lat, lon) via-points sampled along the ride&#x27;s voted path.&quot;&quot;&quot;</span></span>
+<span class="d-add">+    order = <span class="s-fn">_walk_voted_path</span>(graph, edge_ids, start)</span>
+<span class="d-add">+    <span class="s-kw">return</span> <span class="s-fn">_vias_from_order</span>(graph, order) <span class="s-kw">if</span> order <span class="s-kw">else</span> []</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">reconstructed_trip</span>(graph, edge_ids: set[int]):</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;(start, end, vias) recovered from the voted edges themselves, or None.</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-type">For</span> <span class="s-kw">import</span> rows whose ride ids are no longer published <span class="s-fn">anywhere</span> (their</span>
+<span class="d-add">+    voter_id preimage <span class="s-kw">is</span> gone), the trip endpoints <span class="s-type">ARE</span> the voted path<span class="s-str">&#x27;s own</span></span>
+<span class="d-add">+    ends. <span class="s-type">Which</span> end was the true start <span class="s-kw">is</span> unknowable, so the caller routes</span>
+<span class="d-add">+    <span class="s-type">BOTH</span> directions <span class="s-kw">and</span> intersects coverage — one-way legality then never</span>
+<span class="d-add">+    depends on the <span class="s-fn">guess</span> (a counter-one-way stretch fails coverage <span class="s-kw">in</span> at</span>
+<span class="d-add">+    least one direction <span class="s-kw">and</span> survives).</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-type">Twice</span>-resnapped vote sets are topologically <span class="s-fn">shredded</span> (each resnap picks</span>
+<span class="d-add">+    among parallel duplicate edges, so consecutive edges stop sharing nodes)</span>
+<span class="d-add">+    but their midpoints still trace the corridor — so when the node walk</span>
+<span class="d-add">+    fails, fall back to pure geometry: endpoints ≈ the farthest-apart pair of</span>
+<span class="d-add">+    edge midpoints, via order by greedy nearest-neighbor chaining <span class="s-kw">from</span> one end.</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;</span></span>
+<span class="d-add">+    order = <span class="s-fn">_walk_voted_path</span>(graph, edge_ids, <span class="s-lit">None</span>)</span>
+<span class="d-add">+    <span class="s-kw">if</span> order <span class="s-kw">and</span> <span class="s-fn">len</span>(order) &gt;= <span class="s-num">4</span>:</span>
+<span class="d-add">+        start = (<span class="s-fn">float</span>(graph.node_coords[order[<span class="s-num">0</span>]][<span class="s-num">0</span>]), <span class="s-fn">float</span>(graph.node_coords[order[<span class="s-num">0</span>]][<span class="s-num">1</span>]))</span>
+<span class="d-add">+        end = (<span class="s-fn">float</span>(graph.node_coords[order[-<span class="s-num">1</span>]][<span class="s-num">0</span>]), <span class="s-fn">float</span>(graph.node_coords[order[-<span class="s-num">1</span>]][<span class="s-num">1</span>]))</span>
+<span class="d-add">+        <span class="s-kw">return</span> start, end, <span class="s-fn">_vias_from_order</span>(graph, order)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-fn">len</span>(edge_ids) &lt; <span class="s-num">4</span>:</span>
+<span class="d-add">+        <span class="s-kw">return</span> <span class="s-lit">None</span></span>
+<span class="d-add">+    eids = np.<span class="s-fn">fromiter</span>(edge_ids, dtype=np.int64, count=<span class="s-fn">len</span>(edge_ids))</span>
+<span class="d-add">+    ends = graph.edge_ends[eids]</span>
+<span class="d-add">+    mids = (graph.node_coords[ends[:, <span class="s-num">0</span>]] + graph.node_coords[ends[:, <span class="s-num">1</span>]]) / <span class="s-num">2</span></span>
+<span class="d-add">+    lat0 = <span class="s-fn">float</span>(mids[:, <span class="s-num">0</span>].<span class="s-fn">mean</span>())</span>
+<span class="d-add">+    xy = np.<span class="s-fn">stack</span>([mids[:, <span class="s-num">1</span>] * <span class="s-type">M_PER_DEG_LON_EQ</span> * np.<span class="s-fn">cos</span>(np.<span class="s-fn">radians</span>(lat0)),</span>
+<span class="d-add">+                   mids[:, <span class="s-num">0</span>] * <span class="s-type">M_PER_DEG_LAT</span>], axis=<span class="s-num">1</span>)</span>
+<span class="d-add">+    <span class="s-com"># Farthest-pair approximation: farthest from centroid, then farthest from it.</span></span>
+<span class="d-add">+    i0 = <span class="s-fn">int</span>(((xy - xy.<span class="s-fn">mean</span>(<span class="s-num">0</span>)) ** <span class="s-num">2</span>).<span class="s-fn">sum</span>(<span class="s-num">1</span>).<span class="s-fn">argmax</span>())</span>
+<span class="d-add">+    i1 = <span class="s-fn">int</span>(((xy - xy[i0]) ** <span class="s-num">2</span>).<span class="s-fn">sum</span>(<span class="s-num">1</span>).<span class="s-fn">argmax</span>())</span>
+<span class="d-add">+    <span class="s-com"># Greedy nearest-neighbor chain from one end orders midpoints along the corridor.</span></span>
+<span class="d-add">+    order_idx = [i0]</span>
+<span class="d-add">+    remaining = <span class="s-fn">set</span>(<span class="s-fn">range</span>(<span class="s-fn">len</span>(xy))) - {i0}</span>
+<span class="d-add">+    cur = i0</span>
+<span class="d-add">+    <span class="s-kw">while</span> remaining:</span>
+<span class="d-add">+        nxt = <span class="s-fn">min</span>(remaining, key=<span class="s-kw">lambda</span> j: ((xy[j] - xy[cur]) ** <span class="s-num">2</span>).<span class="s-fn">sum</span>())</span>
+<span class="d-add">+        order_idx.<span class="s-fn">append</span>(nxt)</span>
+<span class="d-add">+        remaining.<span class="s-fn">discard</span>(nxt)</span>
+<span class="d-add">+        cur = nxt</span>
+<span class="d-add">+    stride = <span class="s-fn">max</span>(<span class="s-type">VIA_STRIDE</span>, -(-<span class="s-fn">max</span>(<span class="s-num">0</span>, <span class="s-fn">len</span>(order_idx) - <span class="s-num">2</span>) // <span class="s-type">MAX_VIAS</span>))</span>
+<span class="d-add">+    vias = [(<span class="s-fn">float</span>(mids[j, <span class="s-num">0</span>]), <span class="s-fn">float</span>(mids[j, <span class="s-num">1</span>]))</span>
+<span class="d-add">+            <span class="s-kw">for</span> j <span class="s-kw">in</span> order_idx[<span class="s-num">1</span>:-<span class="s-num">1</span>][stride - <span class="s-num">1</span>::stride]]</span>
+<span class="d-add">+    <span class="s-kw">return</span> ((<span class="s-fn">float</span>(mids[i0, <span class="s-num">0</span>]), <span class="s-fn">float</span>(mids[i0, <span class="s-num">1</span>])),</span>
+<span class="d-add">+            (<span class="s-fn">float</span>(mids[i1, <span class="s-num">0</span>]), <span class="s-fn">float</span>(mids[i1, <span class="s-num">1</span>])), vias)</span>
 <span class="d-add">+</span>
 <span class="d-add">+</span>
 <span class="d-add">+<span class="s-kw">async</span> <span class="s-kw">def</span> <span class="s-fn">bike_route_geometry</span>(session, osrm_base, start, end, vias) -&gt; np.ndarray | <span class="s-lit">None</span>:</span>
@@ -1324,6 +1392,7 @@
 <span class="d-add">+        <span class="s-lit">self</span>.vote_failed = <span class="s-num">0</span></span>
 <span class="d-add">+        <span class="s-lit">self</span>.countered = <span class="s-num">0</span></span>
 <span class="d-add">+        <span class="s-lit">self</span>.via_guided = <span class="s-num">0</span></span>
+<span class="d-add">+        <span class="s-lit">self</span>.reconstructed = <span class="s-num">0</span></span>
 <span class="d-add">+        <span class="s-lit">self</span>.edges_upvoted = <span class="s-num">0</span></span>
 <span class="d-add">+        <span class="s-lit">self</span>.edges_downvoted = <span class="s-num">0</span></span>
 <span class="d-add">+        <span class="s-lit">self</span>.edges_cleared = <span class="s-num">0</span></span>
@@ -1354,19 +1423,39 @@
 <span class="d-add">+    rid, start, end = ride</span>
 <span class="d-add">+    n_up = <span class="s-fn">sum</span>(<span class="s-fn">len</span>(s) <span class="s-kw">for</span> s <span class="s-kw">in</span> vt_edges.<span class="s-fn">values</span>())</span>
 <span class="d-add">+    all_edges = <span class="s-fn">set</span>().<span class="s-fn">union</span>(*vt_edges.<span class="s-fn">values</span>())</span>
-<span class="d-add">+    vias = <span class="s-fn">voted_path_vias</span>(graph, all_edges, start) <span class="s-kw">if</span> <span class="s-fn">len</span>(all_edges) &gt;= <span class="s-num">4</span> <span class="s-kw">else</span> []</span>
-<span class="d-add">+    geom = <span class="s-kw">await</span> <span class="s-fn">bike_route_geometry</span>(session, args.bike_osrm_url, start, end, vias)</span>
-<span class="d-add">+    <span class="s-kw">if</span> geom <span class="s-kw">is</span> <span class="s-lit">None</span> <span class="s-kw">and</span> vias:</span>
-<span class="d-add">+        <span class="s-com"># A via may have snapped somewhere unroutable; the plain trip still</span></span>
-<span class="d-add">+        <span class="s-com"># tells us which stretches a bike could have used.</span></span>
-<span class="d-add">+        vias = []</span>
-<span class="d-add">+        geom = <span class="s-kw">await</span> <span class="s-fn">bike_route_geometry</span>(session, args.bike_osrm_url, start, end, [])</span>
-<span class="d-add">+    <span class="s-kw">if</span> geom <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
-<span class="d-add">+        <span class="s-kw">await</span> stats.<span class="s-fn">bump</span>(route_failed=<span class="s-num">1</span>, edges_upvoted=n_up)</span>
-<span class="d-add">+        <span class="s-kw">return</span></span>
-<span class="d-add">+    <span class="s-kw">if</span> vias:</span>
-<span class="d-add">+        <span class="s-kw">await</span> stats.<span class="s-fn">bump_quiet</span>(via_guided=<span class="s-num">1</span>)</span>
-<span class="d-add">+    bike_set = <span class="s-fn">covered_edges</span>(graph, all_edges, geom)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">if</span> rid <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+        <span class="s-com"># Reconstructed trip (no published ride): endpoints from the voted</span></span>
+<span class="d-add">+        <span class="s-com"># path&#x27;s own ends, routed BOTH ways; coverage is the intersection, so</span></span>
+<span class="d-add">+        <span class="s-com"># the unknowable true direction can never mark a one-way stretch.</span></span>
+<span class="d-add">+        rec = <span class="s-fn">reconstructed_trip</span>(graph, all_edges)</span>
+<span class="d-add">+        <span class="s-kw">if</span> rec <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+            <span class="s-kw">await</span> stats.<span class="s-fn">bump</span>(route_failed=<span class="s-num">1</span>, edges_upvoted=n_up)</span>
+<span class="d-add">+            <span class="s-kw">return</span></span>
+<span class="d-add">+        start, end, vias = rec</span>
+<span class="d-add">+        g1 = <span class="s-kw">await</span> <span class="s-fn">bike_route_geometry</span>(session, args.bike_osrm_url, start, end, vias)</span>
+<span class="d-add">+        g2 = <span class="s-kw">await</span> <span class="s-fn">bike_route_geometry</span>(session, args.bike_osrm_url, end, start,</span>
+<span class="d-add">+                                       <span class="s-fn">list</span>(<span class="s-fn">reversed</span>(vias)))</span>
+<span class="d-add">+        <span class="s-kw">if</span> g1 <span class="s-kw">is</span> <span class="s-lit">None</span> <span class="s-kw">or</span> g2 <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+            <span class="s-kw">await</span> stats.<span class="s-fn">bump</span>(route_failed=<span class="s-num">1</span>, edges_upvoted=n_up)</span>
+<span class="d-add">+            <span class="s-kw">return</span></span>
+<span class="d-add">+        <span class="s-kw">await</span> stats.<span class="s-fn">bump_quiet</span>(via_guided=<span class="s-num">1</span>, reconstructed=<span class="s-num">1</span>)</span>
+<span class="d-add">+        bike_set = (<span class="s-fn">covered_edges</span>(graph, all_edges, g1)</span>
+<span class="d-add">+                    &amp; <span class="s-fn">covered_edges</span>(graph, all_edges, g2))</span>
+<span class="d-add">+    <span class="s-kw">else</span>:</span>
+<span class="d-add">+        vias = <span class="s-fn">voted_path_vias</span>(graph, all_edges, start) <span class="s-kw">if</span> <span class="s-fn">len</span>(all_edges) &gt;= <span class="s-num">4</span> <span class="s-kw">else</span> []</span>
+<span class="d-add">+        geom = <span class="s-kw">await</span> <span class="s-fn">bike_route_geometry</span>(session, args.bike_osrm_url, start, end, vias)</span>
+<span class="d-add">+        <span class="s-kw">if</span> geom <span class="s-kw">is</span> <span class="s-lit">None</span> <span class="s-kw">and</span> vias:</span>
+<span class="d-add">+            <span class="s-com"># A via may have snapped somewhere unroutable; the plain trip still</span></span>
+<span class="d-add">+            <span class="s-com"># tells us which stretches a bike could have used.</span></span>
+<span class="d-add">+            vias = []</span>
+<span class="d-add">+            geom = <span class="s-kw">await</span> <span class="s-fn">bike_route_geometry</span>(session, args.bike_osrm_url, start, end, [])</span>
+<span class="d-add">+        <span class="s-kw">if</span> geom <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+            <span class="s-kw">await</span> stats.<span class="s-fn">bump</span>(route_failed=<span class="s-num">1</span>, edges_upvoted=n_up)</span>
+<span class="d-add">+            <span class="s-kw">return</span></span>
+<span class="d-add">+        <span class="s-kw">if</span> vias:</span>
+<span class="d-add">+            <span class="s-kw">await</span> stats.<span class="s-fn">bump_quiet</span>(via_guided=<span class="s-num">1</span>)</span>
+<span class="d-add">+        bike_set = <span class="s-fn">covered_edges</span>(graph, all_edges, geom)</span>
 <span class="d-add">+</span>
 <span class="d-add">+    downs, cleared = <span class="s-num">0</span>, <span class="s-num">0</span></span>
 <span class="d-add">+    any_overlap = <span class="s-lit">False</span></span>
@@ -1385,13 +1474,19 @@
 <span class="d-add">+            <span class="s-kw">continue</span></span>
 <span class="d-add">+        payload = {</span>
 <span class="d-add">+            <span class="s-str">&quot;map&quot;</span>: args.map_slug, <span class="s-str">&quot;mode&quot;</span>: vote_mode, <span class="s-str">&quot;vote_type&quot;</span>: label,</span>
-<span class="d-add">+            <span class="s-str">&quot;voter_id&quot;</span>: rid, <span class="s-str">&quot;edge_ids&quot;</span>: overlap, <span class="s-str">&quot;direction&quot;</span>: -<span class="s-num">1</span>,</span>
+<span class="d-add">+            <span class="s-str">&quot;voter_id&quot;</span>: rid <span class="s-kw">or</span> device, <span class="s-str">&quot;edge_ids&quot;</span>: overlap, <span class="s-str">&quot;direction&quot;</span>: -<span class="s-num">1</span>,</span>
 <span class="d-add">+            <span class="s-str">&quot;ip_from_voter&quot;</span>: <span class="s-lit">True</span>,</span>
 <span class="d-add">+        }</span>
+<span class="d-add">+        headers = {}</span>
+<span class="d-add">+        <span class="s-kw">if</span> rid <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+            <span class="s-com"># Act as the stored device directly (its voter_id preimage is</span></span>
+<span class="d-add">+            <span class="s-com"># unpublished); requires the backend&#x27;s admin token.</span></span>
+<span class="d-add">+            payload[<span class="s-str">&quot;admin_device_id&quot;</span>] = device</span>
+<span class="d-add">+            headers[<span class="s-str">&quot;X-Admin-Token&quot;</span>] = args.admin_token <span class="s-kw">or</span> <span class="s-str">&quot;&quot;</span></span>
 <span class="d-add">+        <span class="s-kw">for</span> attempt <span class="s-kw">in</span> <span class="s-fn">range</span>(<span class="s-num">3</span>):</span>
 <span class="d-add">+            <span class="s-kw">try</span>:</span>
 <span class="d-add">+                <span class="s-kw">async</span> <span class="s-kw">with</span> session.<span class="s-fn">post</span>(</span>
-<span class="d-add">+                    <span class="s-str">f&quot;{args.api_base}/api/vote&quot;</span>, json=payload,</span>
+<span class="d-add">+                    <span class="s-str">f&quot;{args.api_base}/api/vote&quot;</span>, json=payload, headers=headers,</span>
 <span class="d-add">+                    timeout=aiohttp.<span class="s-fn">ClientTimeout</span>(total=<span class="s-num">120</span>),</span>
 <span class="d-add">+                ) <span class="s-kw">as</span> resp:</span>
 <span class="d-add">+                    <span class="s-kw">if</span> resp.status != <span class="s-num">200</span>:</span>
@@ -1456,8 +1551,27 @@
 <span class="d-add">+    parser.<span class="s-fn">add_argument</span>(<span class="s-str">&quot;--api-base&quot;</span>, default=<span class="s-str">&quot;http://localhost:8080&quot;</span>,</span>
 <span class="d-add">+                        help=<span class="s-str">&quot;City Edit API base URL&quot;</span>)</span>
 <span class="d-add">+    parser.<span class="s-fn">add_argument</span>(<span class="s-str">&quot;--concurrency&quot;</span>, type=int, default=<span class="s-num">4</span>)</span>
+<span class="d-add">+    parser.<span class="s-fn">add_argument</span>(<span class="s-str">&quot;--graph-dir&quot;</span>,</span>
+<span class="d-add">+                        help=<span class="s-str">&quot;Directory with the TARGET deployment&#x27;s &quot;</span></span>
+<span class="d-add">+                             <span class="s-str">&quot;walk_graph_arrays.npz. Required when countering a &quot;</span></span>
+<span class="d-add">+                             <span class="s-str">&quot;remote backend: DB edge ids live in that &quot;</span></span>
+<span class="d-add">+                             <span class="s-str">&quot;deployment&#x27;s topology space, so vias/coverage must &quot;</span></span>
+<span class="d-add">+                             <span class="s-str">&quot;use its graph, not the local build (extract with &quot;</span></span>
+<span class="d-add">+                             <span class="s-str">&quot;docker cp from the serving image).&quot;</span>)</span>
 <span class="d-add">+    parser.<span class="s-fn">add_argument</span>(<span class="s-str">&quot;--limit&quot;</span>, type=int,</span>
 <span class="d-add">+                        help=<span class="s-str">&quot;Counter at most N rides (smoke runs)&quot;</span>)</span>
+<span class="d-add">+    parser.<span class="s-fn">add_argument</span>(<span class="s-str">&quot;--reconstruct-unmatched&quot;</span>, action=<span class="s-str">&quot;store_true&quot;</span>,</span>
+<span class="d-add">+                        help=<span class="s-str">&quot;Also counter import-marked devices whose ride ids &quot;</span></span>
+<span class="d-add">+                             <span class="s-str">&quot;match no cached month: endpoints come from the &quot;</span></span>
+<span class="d-add">+                             <span class="s-str">&quot;voted path&#x27;s own ends, routed both directions &quot;</span></span>
+<span class="d-add">+                             <span class="s-str">&quot;with coverage intersected. Needs --admin-token &quot;</span></span>
+<span class="d-add">+                             <span class="s-str">&quot;(casts act as the stored device directly).&quot;</span>)</span>
+<span class="d-add">+    parser.<span class="s-fn">add_argument</span>(<span class="s-str">&quot;--only-unmatched&quot;</span>, action=<span class="s-str">&quot;store_true&quot;</span>,</span>
+<span class="d-add">+                        help=<span class="s-str">&quot;With --reconstruct-unmatched: process ONLY the &quot;</span></span>
+<span class="d-add">+                             <span class="s-str">&quot;reconstructed devices (skip re-analyzing rides &quot;</span></span>
+<span class="d-add">+                             <span class="s-str">&quot;already countered by a prior matched pass).&quot;</span>)</span>
+<span class="d-add">+    parser.<span class="s-fn">add_argument</span>(<span class="s-str">&quot;--admin-token&quot;</span>, default=os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;ADMIN_TOKEN&quot;</span>),</span>
+<span class="d-add">+                        help=<span class="s-str">&quot;Backend ADMIN_TOKEN for --reconstruct-unmatched&quot;</span>)</span>
 <span class="d-add">+    parser.<span class="s-fn">add_argument</span>(<span class="s-str">&quot;--dry-run&quot;</span>, action=<span class="s-str">&quot;store_true&quot;</span>,</span>
 <span class="d-add">+                        help=<span class="s-str">&quot;Compute overlaps and report; cast nothing&quot;</span>)</span>
 <span class="d-add">+    args = parser.<span class="s-fn">parse_args</span>()</span>
@@ -1478,25 +1592,31 @@
 <span class="d-add">+                 <span class="s-str">f&quot;Run scripts/build_bike_osrm.sh {args.city} --serve first.&quot;</span>)</span>
 <span class="d-add">+</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;Loading upvotes for map &#x27;{args.map_slug}&#x27; ...&quot;</span>)</span>
-<span class="d-add">+    votes = <span class="s-fn">load_upvotes</span>(args.map_slug)</span>
-<span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  {len(votes)} devices with upvotes&quot;</span>)</span>
+<span class="d-add">+    votes, marked = <span class="s-fn">load_upvotes</span>(args.map_slug)</span>
+<span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  {len(votes)} devices with upvotes ({len(marked)} import-marked)&quot;</span>)</span>
 <span class="d-add">+</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">&quot;Matching devices against cached ride zips ...&quot;</span>)</span>
 <span class="d-add">+    matched = <span class="s-fn">match_rides</span>(args.city, <span class="s-fn">set</span>(votes))</span>
-<span class="d-add">+    unmatched = <span class="s-fn">len</span>(votes) - <span class="s-fn">len</span>(matched)</span>
-<span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  {len(matched)} imported rides matched &quot;</span></span>
-<span class="d-add">+        <span class="s-str">f&quot;({unmatched} devices unmatched — human/agent voters, left alone)&quot;</span>)</span>
-<span class="d-add">+    <span class="s-kw">if</span> <span class="s-kw">not</span> matched:</span>
+<span class="d-add">+    reconstruct = <span class="s-fn">sorted</span>(marked - <span class="s-fn">set</span>(matched)) <span class="s-kw">if</span> args.reconstruct_unmatched <span class="s-kw">else</span> []</span>
+<span class="d-add">+    unmatched = <span class="s-fn">len</span>(votes) - <span class="s-fn">len</span>(matched) - <span class="s-fn">len</span>(reconstruct)</span>
+<span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  {len(matched)} imported rides matched, {len(reconstruct)} import-marked &quot;</span></span>
+<span class="d-add">+        <span class="s-str">f&quot;but unpublished (reconstructing), {unmatched} left alone&quot;</span>)</span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-kw">not</span> matched <span class="s-kw">and</span> <span class="s-kw">not</span> reconstruct:</span>
 <span class="d-add">+        sys.<span class="s-fn">exit</span>(<span class="s-str">&quot;ERROR: no imported rides matched. Wrong --city/--map, or the &quot;</span></span>
 <span class="d-add">+                 <span class="s-str">&quot;monthly zips the import used are no longer in lyft_data/.&quot;</span>)</span>
+<span class="d-add">+    <span class="s-kw">if</span> reconstruct <span class="s-kw">and</span> <span class="s-kw">not</span> args.dry_run <span class="s-kw">and</span> <span class="s-kw">not</span> args.admin_token:</span>
+<span class="d-add">+        sys.<span class="s-fn">exit</span>(<span class="s-str">&quot;ERROR: --reconstruct-unmatched needs --admin-token (or ADMIN_TOKEN env)&quot;</span>)</span>
 <span class="d-add">+</span>
-<span class="d-add">+    vt_ids = {vt <span class="s-kw">for</span> dev <span class="s-kw">in</span> matched <span class="s-kw">for</span> vt <span class="s-kw">in</span> votes[dev]}</span>
+<span class="d-add">+    vt_ids = {vt <span class="s-kw">for</span> dev <span class="s-kw">in</span> <span class="s-fn">list</span>(matched) + reconstruct <span class="s-kw">for</span> vt <span class="s-kw">in</span> votes[dev]}</span>
 <span class="d-add">+    vt_labels = <span class="s-fn">load_vote_type_labels</span>(vt_ids)</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  vote types to counter: &quot;</span></span>
 <span class="d-add">+        <span class="s-str">f&quot;{&#x27;, &#x27;.join(f&#x27;{i}={vt_labels.get(i)!r}&#x27; for i in sorted(vt_ids))}&quot;</span>)</span>
 <span class="d-add">+</span>
-<span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;Loading {args.city} votable graph (node-id mapping) ...&quot;</span>)</span>
+<span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;Loading {args.city} votable graph &quot;</span></span>
+<span class="d-add">+        <span class="s-str">f&quot;({args.graph_dir or city.data_dir}) ...&quot;</span>)</span>
 <span class="d-add">+    graph = <span class="s-fn">CityGraph</span>(city)</span>
+<span class="d-add">+    <span class="s-kw">if</span> args.graph_dir:</span>
+<span class="d-add">+        graph.provider = <span class="s-fn">PythonRouter</span>(data_dir=args.graph_dir)</span>
 <span class="d-add">+    graph.<span class="s-fn">ensure_loaded</span>()</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  {graph.n_nodes} nodes / {graph.n_edges} edges&quot;</span>)</span>
 <span class="d-add">+</span>
@@ -1510,7 +1630,9 @@
 <span class="d-add">+                     <span class="s-str">&quot;pass --mode explicitly.&quot;</span>)</span>
 <span class="d-add">+        <span class="s-fn">log</span>(<span class="s-str">f&quot;Target: map={args.map_slug} mode={vote_mode} via {args.api_base}&quot;</span>)</span>
 <span class="d-add">+</span>
-<span class="d-add">+    work = [(dev, matched[dev], votes[dev]) <span class="s-kw">for</span> dev <span class="s-kw">in</span> <span class="s-fn">sorted</span>(matched)]</span>
+<span class="d-add">+    work = ([] <span class="s-kw">if</span> args.only_unmatched <span class="s-kw">else</span></span>
+<span class="d-add">+            [(dev, matched[dev], votes[dev]) <span class="s-kw">for</span> dev <span class="s-kw">in</span> <span class="s-fn">sorted</span>(matched)])</span>
+<span class="d-add">+    work += [(dev, (<span class="s-lit">None</span>, <span class="s-lit">None</span>, <span class="s-lit">None</span>), votes[dev]) <span class="s-kw">for</span> dev <span class="s-kw">in</span> reconstruct]</span>
 <span class="d-add">+    <span class="s-kw">if</span> args.limit:</span>
 <span class="d-add">+        work = work[:args.limit]</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;{&#x27;DRY RUN: analyzing&#x27; if args.dry_run else &#x27;Counter-voting&#x27;} &quot;</span></span>
@@ -1522,6 +1644,8 @@
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  Rides processed:     {stats.processed}&quot;</span>)</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  Via-guided routes:   {stats.via_guided} &quot;</span></span>
 <span class="d-add">+        <span class="s-str">f&quot;(rest routed endpoint-to-endpoint)&quot;</span>)</span>
+<span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  Reconstructed trips: {stats.reconstructed} &quot;</span></span>
+<span class="d-add">+        <span class="s-str">f&quot;(both-direction coverage intersection)&quot;</span>)</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  Countered:           {stats.countered}&quot;</span>)</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  No overlap:          {stats.no_overlap} (fully divergent — left alone)&quot;</span>)</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  Route failed:        {stats.route_failed} (left alone)&quot;</span>)</span>
@@ -1540,7 +1664,7 @@
         
         <details>
           <summary><span class="fname">server/tests/unit/test_counter_lyft.py</span>
-            <span class="stat"><span class="d-add">+108</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+143</span> / <span class="d-del">-0</span></span>
           </summary>
           
     <div class="ctx">
@@ -1571,10 +1695,10 @@
     
           <pre class="diff"><span class="d-meta">diff --git a/server/tests/unit/test_counter_lyft.py b/server/tests/unit/test_counter_lyft.py</span>
 <span class="d-meta">new file mode 100644</span>
-<span class="d-meta">index 0000000..e6462a9</span>
+<span class="d-meta">index 0000000..dd5efa4</span>
 <span class="d-meta">--- /dev/null</span>
 <span class="d-meta">+++ b/server/tests/unit/test_counter_lyft.py</span>
-<span class="d-hunk">@@ -0,0 +1,108 @@</span>
+<span class="d-hunk">@@ -0,0 +1,143 @@</span>
 <span class="d-add">+<span class="s-str">&quot;&quot;&quot;Unit tests for counter_lyft&#x27;s pure geometry core: voted-path via ordering</span></span>
 <span class="d-add">+(voted_path_vias) <span class="s-kw">and</span> corridor <span class="s-fn">coverage</span> (covered_edges). <span class="s-type">Both</span> run on a tiny</span>
 <span class="d-add">+synthetic graph — no <span class="s-type">OSRM</span>, <span class="s-type">DB</span>, <span class="s-kw">or</span> <span class="s-type">Flask</span>.</span>
@@ -1582,7 +1706,8 @@
 <span class="d-add">+<span class="s-kw">import</span> numpy <span class="s-kw">as</span> np</span>
 <span class="d-add">+<span class="s-kw">import</span> pytest</span>
 <span class="d-add">+</span>
-<span class="d-add">+<span class="s-kw">from</span> counter_lyft <span class="s-kw">import</span> <span class="s-type">COVER_DIST_M</span>, <span class="s-type">M_PER_DEG_LAT</span>, covered_edges, voted_path_vias</span>
+<span class="d-add">+<span class="s-kw">from</span> counter_lyft <span class="s-kw">import</span> (<span class="s-type">COVER_DIST_M</span>, <span class="s-type">M_PER_DEG_LAT</span>, covered_edges,</span>
+<span class="d-add">+                          reconstructed_trip, voted_path_vias)</span>
 <span class="d-add">+</span>
 <span class="d-add">+</span>
 <span class="d-add">+<span class="s-kw">class</span> <span class="s-type">FakeGraph</span>:</span>
@@ -1643,6 +1768,40 @@
 <span class="d-add">+    <span class="s-kw">assert</span> <span class="s-fn">voted_path_vias</span>(g, <span class="s-fn">set</span>(<span class="s-fn">range</span>(<span class="s-num">8</span>)), start=(<span class="s-num">0.0</span>, <span class="s-num">0.0</span>)) == []</span>
 <span class="d-add">+</span>
 <span class="d-add">+</span>
+<span class="d-add">+<span class="s-com"># ── reconstructed_trip ───────────────────────────────────────────────────────</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">test_reconstructed_trip_recovers_path_ends</span>():</span>
+<span class="d-add">+    g = <span class="s-fn">line_graph</span>(<span class="s-num">30</span>)</span>
+<span class="d-add">+    rec = <span class="s-fn">reconstructed_trip</span>(g, <span class="s-fn">set</span>(<span class="s-fn">range</span>(<span class="s-num">29</span>)))</span>
+<span class="d-add">+    <span class="s-kw">assert</span> rec <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span></span>
+<span class="d-add">+    start, end, vias = rec</span>
+<span class="d-add">+    ends = {start[<span class="s-num">1</span>], end[<span class="s-num">1</span>]}</span>
+<span class="d-add">+    <span class="s-kw">assert</span> ends == {<span class="s-num">0.0</span>, <span class="s-num">29</span> * <span class="s-num">100</span> * <span class="s-type">DEG</span>}, <span class="s-str">&quot;endpoints must be the path&#x27;s own ends&quot;</span></span>
+<span class="d-add">+    <span class="s-kw">assert</span> vias, <span class="s-str">&quot;a 29-edge path must yield via points&quot;</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">test_reconstructed_trip_geometric_fallback_for_disconnected_set</span>():</span>
+<span class="d-add">+    <span class="s-com"># Twice-resnapped sets are topologically shredded: disjoint edges strung</span></span>
+<span class="d-add">+    <span class="s-com"># along a corridor. The geometric fallback must still recover endpoints</span></span>
+<span class="d-add">+    <span class="s-com"># near the corridor&#x27;s extremes.</span></span>
+<span class="d-add">+    coords = []</span>
+<span class="d-add">+    ends = []</span>
+<span class="d-add">+    <span class="s-kw">for</span> i <span class="s-kw">in</span> <span class="s-fn">range</span>(<span class="s-num">10</span>):  <span class="s-com"># 10 disjoint edges west→east, 200 m apart</span></span>
+<span class="d-add">+        coords += [(<span class="s-num">0.0</span>, (<span class="s-num">2</span> * i) * <span class="s-num">100</span> * <span class="s-type">DEG</span>), (<span class="s-num">0.0</span>, (<span class="s-num">2</span> * i + <span class="s-num">1</span>) * <span class="s-num">100</span> * <span class="s-type">DEG</span>)]</span>
+<span class="d-add">+        ends.<span class="s-fn">append</span>((<span class="s-num">2</span> * i, <span class="s-num">2</span> * i + <span class="s-num">1</span>))</span>
+<span class="d-add">+    g = <span class="s-fn">FakeGraph</span>(coords, ends)</span>
+<span class="d-add">+    rec = <span class="s-fn">reconstructed_trip</span>(g, <span class="s-fn">set</span>(<span class="s-fn">range</span>(<span class="s-num">10</span>)))</span>
+<span class="d-add">+    <span class="s-kw">assert</span> rec <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span></span>
+<span class="d-add">+    start, end, _ = rec</span>
+<span class="d-add">+    span = <span class="s-fn">abs</span>(end[<span class="s-num">1</span>] - start[<span class="s-num">1</span>])</span>
+<span class="d-add">+    <span class="s-kw">assert</span> span &gt; <span class="s-num">15</span> * <span class="s-num">100</span> * <span class="s-type">DEG</span>, <span class="s-str">&quot;endpoints must span most of the corridor&quot;</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">test_reconstructed_trip_none_when_too_small</span>():</span>
+<span class="d-add">+    g = <span class="s-fn">line_graph</span>(<span class="s-num">3</span>)</span>
+<span class="d-add">+    <span class="s-kw">assert</span> <span class="s-fn">reconstructed_trip</span>(g, {<span class="s-num">0</span>, <span class="s-num">1</span>}) <span class="s-kw">is</span> <span class="s-lit">None</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
 <span class="d-add">+<span class="s-com"># ── covered_edges ────────────────────────────────────────────────────────────</span></span>
 <span class="d-add">+</span>
 <span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">test_covers_edges_on_and_near_the_route</span>():</span>
@@ -1688,10 +1847,236 @@
     </section>
     
 
+    <section class="card" id="prod">
+      <div class="tag">Prod rollout · 2026-07-15</div>
+      <h2>4 · Prod rollout — and the resnap prod turned out to need first</h2>
+      <h3>Symptom</h3>
+      <p>Dry-running the counter pass against the prod DB produced nonsense coverage on two maps (sf-bike-lanes 0.5%, chicago-bikes 4.8%) while nyc-bikes looked plausible — the kind of asymmetry that means the data, not the code, is wrong.</p>
+      <h3>Root cause</h3>
+      <ul><li>Prod's stored votes were <strong>stale against prod's serving graphs</strong>: comparing each row's lat/lon anchor against its edge id's midpoint in the serving topology showed sf-bike-lanes 99.9% misaligned (median 4.5 km!), chicago-bikes 97.4%, nyc-bikes 33%, ny-bike-lanes/nyc-trees/nyc-bus-map ~100%, nyc-walkways 1.7%. A graph-shifting deploy had gone out without the resnap step (docs: resnap-on-deploy) — those heatmaps were painting votes on the wrong streets in prod, independent of this workstream.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Full prod DB snapshot first (<code>~/city-edit-prod-backups/20260715T224016Z/prod-full.dump</code>, 43 MB, checksummed).</li>
+<li><strong>Resnap driven from the operator machine</strong> with the serving image's own graph arrays (digest <code>050fd6b7…</code>, etags verified identical to live <code>/api/graph-votes</code>), through the repo's vote_migration machinery: atomic per-map DB rewrite → Redis aggregate rebuild via the Memorystore tunnel → <code>vote_rev</code> bumped +1000 so every cache invalidates. All seven misaligned maps healed to ≤0.4% residual; nyc-bikes merged only 20 collision rows of 1.77 M.</li>
+<li>Overlay code deploy (revision <code>desire-path-mapper-00098-7ft</code>, base pinned on the serving digest) shipping counter_lyft tooling + current branch state; <code>.gcloudignore</code> also learned to exclude 6.6 GB of blocks-bake artifacts that every Cloud Build had been uploading.</li>
+<li>Counter passes with <code>--graph-dir</code> (new flag: remote passes must use the TARGET deployment's graphs — DB edge ids live in its topology space): prod sf-bike-lanes 348/349 rides countered (72.9% of upvotes), prod chicago-bikes 239/239 (69.3%), prod nyc-bikes (see Verification), plus local sf (73.9%) and chicago (79.5%). Zero route/vote failures across every pass.</li>
+<li>Two more prod finds along the way: <strong>every cast on prod was paying a 9.4-second full scan</strong> — <code>get_voter_type_rows</code> (the prior-state read behind clear-then-cast) had no usable index (the identity key leads with edge_id). New <code>idx_edge_votes_map_vt_device</code>, created CONCURRENTLY on prod mid-pass: 9,453&nbsp;ms → 0.198&nbsp;ms; human votes on big maps get the same win. And bulk casts now run through a <strong>scratch Flask wired to prod</strong> (prod graphs/blocks + tunnelled DB/Memorystore; app.py gained REDIS_PORT) rather than the public API — same code path, ~50× the throughput, block aggregates maintained correctly.</li>
+<li>The identity join also exposed a second, earlier prod import batch (3,647 import-marked devices, 314 k rows, cast 2026-05-29) whose ride ids appear in NO published Citibike file (probed 2025-12 → 2026-06 plus the JC extracts) — its voter_id preimages are simply gone. New <code>--reconstruct-unmatched</code> mode: the trip is recovered from the voted edges themselves (endpoints = farthest-apart midpoints, vias by nearest-neighbor chaining — twice-resnapped sets are topologically shredded, every edge disjoint, so reconstruction is geometric), routed in BOTH directions with coverage intersected, so the unknowable true direction can never counter a one-way stretch. Casting as a stored device without its hash preimage required a new admin-token-gated <code>admin_device_id</code> override in <code>/api/vote</code>. Deliberately conservative: ~36% of those upvotes countered vs ~77% for matched rides.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+21</span> / <span class="d-del">-6</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask backend · server/</span>
+        <span class="ctx-sum">HTTP + WS routes; the single /api/vote codepath every cast goes through</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~2080 LOC — three surgical touches for operator runs + cast cost</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Redis setup</span><span class="ol-sum">REDIS_PORT env honored (tunnelled Memorystore on :6380; 6379 is local dev)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_resolve_user</span><span class="ol-sum">admin-token-gated admin_device_id: act as a stored device whose voter_id preimage is gone</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">cast_vote — per-IP cap</span><span class="ol-sum">skipped for ip_from_voter casts (their ip is unique per voter by construction)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">everything else</span><span class="ol-sum">routes, caches, warmup, WS — untouched</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>redis_port = REDIS_PORT env (3 constructors)</li><li>_resolve_user — admin_device_id verbatim when _admin_authorized()</li><li>ip_device_counts skipped when ip_from_voter</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index c9fa2ae..01c4333 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -97,9 +97,12 @@ DEFAULT_MAP_SLUG = &quot;nyc-walkways&quot;</span>
+<span class="d-ctx"> <span class="s-com"># ── Redis ──────────────────────────────────────────────────────────────────</span></span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> redis_host = os.environ.<span class="s-fn">get</span>(<span class="s-str">&#x27;REDIS_HOST&#x27;</span>, <span class="s-str">&#x27;localhost&#x27;</span>)</span>
+<span class="d-del">-redis_client = redis.<span class="s-fn">Redis</span>(host=redis_host, port=<span class="s-num">6379</span>, db=<span class="s-num">0</span>, decode_responses=<span class="s-lit">True</span>)</span>
+<span class="d-add">+<span class="s-com"># REDIS_PORT matters for operator runs against a tunnelled prod Memorystore</span></span>
+<span class="d-add">+<span class="s-com"># (e.g. localhost:6380) where 6379 is the local dev instance.</span></span>
+<span class="d-add">+redis_port = <span class="s-fn">int</span>(os.environ.<span class="s-fn">get</span>(<span class="s-str">&#x27;REDIS_PORT&#x27;</span>, <span class="s-str">&#x27;6379&#x27;</span>))</span>
+<span class="d-add">+redis_client = redis.<span class="s-fn">Redis</span>(host=redis_host, port=redis_port, db=<span class="s-num">0</span>, decode_responses=<span class="s-lit">True</span>)</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-logger.<span class="s-fn">info</span>(<span class="s-str">f&quot;[REDIS] Connecting to Redis at: {redis_host}:6379&quot;</span>)</span>
+<span class="d-add">+logger.<span class="s-fn">info</span>(<span class="s-str">f&quot;[REDIS] Connecting to Redis at: {redis_host}:{redis_port}&quot;</span>)</span>
+<span class="d-ctx"> <span class="s-kw">try</span>:</span>
+<span class="d-ctx">     redis_info = redis_client.<span class="s-fn">info</span>(<span class="s-str">&quot;server&quot;</span>)</span>
+<span class="d-ctx">     logger.<span class="s-fn">info</span>(<span class="s-str">f&quot;[REDIS] Connected — v{redis_info.get(&#x27;redis_version&#x27;, &#x27;?&#x27;)}&quot;</span>)</span>
+<span class="d-hunk">@@ -730,7 +733,7 @@ if os.environ.get(&quot;SKIP_WARMUP&quot;) != &quot;1&quot;:</span>
+<span class="d-ctx"> <span class="s-com"># One pubsub listener + coalesced fan-out for every WebSocket client (see</span></span>
+<span class="d-ctx"> <span class="s-com"># delta_hub.py). Its thread starts lazily on the first subscription.</span></span>
+<span class="d-ctx"> delta_hub = delta_hub_mod.<span class="s-fn">DeltaHub</span>(</span>
+<span class="d-del">-    <span class="s-kw">lambda</span>: redis.<span class="s-fn">Redis</span>(host=redis_host, port=<span class="s-num">6379</span>, db=<span class="s-num">0</span>, decode_responses=<span class="s-lit">True</span>))</span>
+<span class="d-add">+    <span class="s-kw">lambda</span>: redis.<span class="s-fn">Redis</span>(host=redis_host, port=redis_port, db=<span class="s-num">0</span>, decode_responses=<span class="s-lit">True</span>))</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-com"># ── Helpers ────────────────────────────────────────────────────────────────</span></span>
+<span class="d-hunk">@@ -750,7 +753,16 @@ def _resolve_user(data_or_args, ip_from_voter: bool = False) -&gt; tuple[str, str]:</span>
+<span class="d-ctx">     `ip_from_voter` ties ip_hash to the per-voter id instead of the request <span class="s-type">IP</span>.</span>
+<span class="d-ctx">     <span class="s-type">Bulk</span> <span class="s-fn">imports</span> (<span class="s-type">Lyft</span>/<span class="s-type">Citibike</span>) all originate <span class="s-kw">from</span> one source <span class="s-type">IP</span> but represent</span>
+<span class="d-ctx">     thousands of distinct rides; <span class="s-kw">with</span> this set each ride <span class="s-kw">is</span> unique on <span class="s-type">BOTH</span> the</span>
+<span class="d-del">-    device <span class="s-kw">and</span> <span class="s-type">IP</span> axes, so the per-<span class="s-type">IP</span> cap never collapses an <span class="s-kw">import</span>.<span class="s-str">&quot;&quot;&quot;</span></span>
+<span class="d-add">+    device <span class="s-kw">and</span> <span class="s-type">IP</span> axes, so the per-<span class="s-type">IP</span> cap never collapses an <span class="s-kw">import</span>.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    `admin_device_id` (admin-token-gated) acts <span class="s-kw">as</span> an <span class="s-type">EXISTING</span> device verbatim,</span>
+<span class="d-add">+    skipping the voter_id hash. <span class="s-type">Operator</span> corrections need it <span class="s-kw">for</span> stored rows</span>
+<span class="d-add">+    whose voter_id preimage <span class="s-kw">is</span> <span class="s-fn">gone</span> (e.g. countering an <span class="s-kw">import</span> batch whose ride</span>
+<span class="d-add">+    ids are no longer published — counter_lyft --reconstruct-unmatched).<span class="s-str">&quot;&quot;&quot;</span></span>
+<span class="d-add">+    admin_device = data_or_args.<span class="s-fn">get</span>(<span class="s-str">&quot;admin_device_id&quot;</span>)</span>
+<span class="d-add">+    <span class="s-kw">if</span> admin_device <span class="s-kw">and</span> <span class="s-fn">_admin_authorized</span>():</span>
+<span class="d-add">+        admin_device = <span class="s-fn">str</span>(admin_device)[:<span class="s-num">16</span>]</span>
+<span class="d-add">+        <span class="s-kw">return</span> admin_device, admin_device <span class="s-kw">if</span> ip_from_voter <span class="s-kw">else</span> <span class="s-fn">get_client_ip</span>()</span>
+<span class="d-ctx">     ip_hash = <span class="s-fn">get_client_ip</span>()</span>
+<span class="d-ctx">     voter_id = data_or_args.<span class="s-fn">get</span>(<span class="s-str">&quot;voter_id&quot;</span>)</span>
+<span class="d-ctx">     device_id = hashlib.<span class="s-fn">sha256</span>(<span class="s-fn">str</span>(voter_id).<span class="s-fn">encode</span>()).<span class="s-fn">hexdigest</span>()[:<span class="s-num">16</span>] <span class="s-kw">if</span> voter_id <span class="s-kw">else</span> ip_hash</span>
+<span class="d-hunk">@@ -1281,9 +1293,12 @@ def cast_vote():</span>
+<span class="d-ctx">         <span class="s-com"># Soft per-IP cap: how many OTHER devices this IP already has on each</span></span>
+<span class="d-ctx">         <span class="s-com"># edge+type. A brand-new vote from a fresh device is dropped once the IP</span></span>
+<span class="d-ctx">         <span class="s-com"># is at the cap (re-votes/reversals by the same device are exempt).</span></span>
+<span class="d-add">+        <span class="s-com"># ip_from_voter casts skip the lookup entirely: their ip_hash is unique</span></span>
+<span class="d-add">+        <span class="s-com"># per voter by construction, so no other device can share it and the</span></span>
+<span class="d-add">+        <span class="s-com"># count is always zero — the query is pure cost on bulk imports.</span></span>
+<span class="d-ctx">         ip_device_counts = <span class="s-fn">count_devices_per_ip_for_edges</span>(</span>
+<span class="d-ctx">             slug, edge_ids, vt_id, ip_hash, device_id</span>
+<span class="d-del">-        ) <span class="s-kw">if</span> direction != <span class="s-num">0</span> <span class="s-kw">else</span> {}</span>
+<span class="d-add">+        ) <span class="s-kw">if</span> direction != <span class="s-num">0</span> <span class="s-kw">and</span> <span class="s-kw">not</span> data.<span class="s-fn">get</span>(<span class="s-str">&quot;ip_from_voter&quot;</span>) <span class="s-kw">else</span> {}</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         <span class="s-com"># voter_lock serializes this voter&#x27;s read-modify-write ACROSS instances</span></span>
+<span class="d-ctx">         <span class="s-com"># (Redis); the stripe serializes it within THIS process. Both are scoped</span></span>
+<span class="d-hunk">@@ -1442,7 +1457,7 @@ def _resnap_city_maps(city_id: str) -&gt; None:</span>
+<span class="d-ctx"> <span class="s-kw">def</span> <span class="s-fn">_start_graph_reload_listener</span>():</span>
+<span class="d-ctx">     <span class="s-str">&quot;&quot;&quot;Auto-heal votes when a city&#x27;s graph is rebuilt (refresh_osm publishes here).&quot;&quot;&quot;</span></span>
+<span class="d-ctx">     <span class="s-kw">def</span> <span class="s-fn">listener</span>():</span>
+<span class="d-del">-        ps_client = redis.<span class="s-fn">Redis</span>(host=redis_host, port=<span class="s-num">6379</span>, db=<span class="s-num">0</span>, decode_responses=<span class="s-lit">True</span>)</span>
+<span class="d-add">+        ps_client = redis.<span class="s-fn">Redis</span>(host=redis_host, port=redis_port, db=<span class="s-num">0</span>, decode_responses=<span class="s-lit">True</span>)</span>
+<span class="d-ctx">         ps = ps_client.<span class="s-fn">pubsub</span>()</span>
+<span class="d-ctx">         ps.<span class="s-fn">subscribe</span>(<span class="s-str">&quot;graph_reload&quot;</span>)</span>
+<span class="d-ctx">         logger.<span class="s-fn">info</span>(<span class="s-str">&quot;[PUBSUB] Subscribed to graph_reload&quot;</span>)</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/database.py</span>
+            <span class="stat"><span class="d-add">+6</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask backend · server/</span>
+        <span class="ctx-sum">Postgres layer: schema migrations, vote reads/writes</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">database.py</span>
+        <span class="ctx-sum">~800 LOC — one new index in the boot migration</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">init migrations</span><span class="ol-sum">idx_edge_votes_map_vt_device — serves get_voter_type_rows (9.4s → 0.2ms on prod nyc-bikes)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">everything else</span><span class="ol-sum">untouched</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>CREATE INDEX IF NOT EXISTS idx_edge_votes_map_vt_device (map_slug, vote_type_id, device_id)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/database.py b/server/database.py</span>
+<span class="d-meta">index 10a11f3..878642f 100644</span>
+<span class="d-meta">--- a/server/database.py</span>
+<span class="d-meta">+++ b/server/database.py</span>
+<span class="d-hunk">@@ -214,6 +214,12 @@ def init_db():</span>
+<span class="d-ctx">             <span class="s-com"># (page load) and seq-scanned the map&#x27;s rows per request without it.</span></span>
+<span class="d-ctx">             cursor.<span class="s-fn">execute</span>(<span class="s-str">&quot;CREATE INDEX IF NOT EXISTS idx_edge_votes_map_vt_created &quot;</span></span>
+<span class="d-ctx">                            <span class="s-str">&quot;ON edge_votes(map_slug, vote_type_id, created_at)&quot;</span>)</span>
+<span class="d-add">+            <span class="s-com"># Serves get_voter_type_rows — the prior-state read on EVERY cast&#x27;s</span></span>
+<span class="d-add">+            <span class="s-com"># clear-then-cast plan. Without it that read is a full scan of the</span></span>
+<span class="d-add">+            <span class="s-com"># map&#x27;s rows (measured 9.4s per vote on prod nyc-bikes at 1.9M rows;</span></span>
+<span class="d-add">+            <span class="s-com"># 0.2ms with it). The identity key can&#x27;t help: it leads with edge_id.</span></span>
+<span class="d-add">+            cursor.<span class="s-fn">execute</span>(<span class="s-str">&quot;CREATE INDEX IF NOT EXISTS idx_edge_votes_map_vt_device &quot;</span></span>
+<span class="d-add">+                           <span class="s-str">&quot;ON edge_votes(map_slug, vote_type_id, device_id)&quot;</span>)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">             <span class="s-com"># Vote-type lists: named collections (preset or user-created custom).</span></span>
+<span class="d-ctx">             cursor.<span class="s-fn">execute</span>(<span class="s-str">&quot;&quot;&quot;</span></span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">.gcloudignore</span>
+            <span class="stat"><span class="d-add">+9</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill on">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">deploy · build context</span>
+        <span class="ctx-sum">what gcloud builds submit uploads</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">.gcloudignore</span>
+        <span class="ctx-sum">excludes 6.6 GB of blocks-bake artifacts + QGIS exports every build had been uploading</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">blocks artifacts + exports</span><span class="ol-sum">streetscape_blocks output/cache/env/eval + exports/</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>server/streetscape_blocks/{output,cache,env,eval}/ + exports/</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/.gcloudignore b/.gcloudignore</span>
+<span class="d-meta">index fe113aa..4396d30 100644</span>
+<span class="d-meta">--- a/.gcloudignore</span>
+<span class="d-meta">+++ b/.gcloudignore</span>
+<span class="d-hunk">@@ -38,6 +38,15 @@ server/osm_data/</span>
+<span class="d-ctx"> # needed in the image, don&#x27;t upload to Cloud Build.</span>
+<span class="d-ctx"> server/lyft_data/</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# Blocks-pipeline artifacts + its private venv (multi-GB bake outputs; images</span>
+<span class="d-add">+# get baked blocks via osm_data / the blocks overlays, never from here) and</span>
+<span class="d-add">+# one-off QGIS exports.</span>
+<span class="d-add">+server/streetscape_blocks/output/</span>
+<span class="d-add">+server/streetscape_blocks/cache/</span>
+<span class="d-add">+server/streetscape_blocks/env/</span>
+<span class="d-add">+server/streetscape_blocks/eval/</span>
+<span class="d-add">+exports/</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> # DB dumps</span>
+<span class="d-ctx"> *.dump</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+    </section>
+    
+
   <section class="card verify" id="verify">
     <div class="tag">Verification</div>
     <h2>What was run</h2>
-    <ul><li>Full nyc-bikes pass (two runs — the first was killed externally at ~8,800/14,523 rides; the pass is idempotent so the relaunch converged): <strong>0 route failures, 0 vote failures</strong> across all rides; 4,975 rides fully divergent (left alone, mostly round trips at one station). DB end state: of 1,790,211 nyc-bikes upvote rows, <strong>1,354,898 (75.7%) flipped to direction=−1</strong> under 14,240 imported devices, 399,335 remain +1, ~36 k unvoted by partial-block clears (one-direction-per-block invariant).</li>
+    <ul><li><strong>Prod end state (2026-07-15)</strong>: nyc-bikes 1,243,406 rows against / 603,344 for (main pass: 11,060 matched rides, 77.0% of upvotes flipped; reconstructed pass: 3,634 of 3,647 unpublished-ride imports, 35.8% — conservative by design; 12 residual failures ≈ 0.06% of edges). sf-bike-lanes 34,425 / 12,590 (72.9%); chicago-bikes 20,818 / 8,825 (69.3%). Zero route failures everywhere. Live serving: 80% / 76% / 72% of voted edges now net-negative, block layers intact (n_blocks 289,647 / 45,712 / 140,248).</li>
+<li>Prod resnap verification: all seven misaligned maps healed to ≤ 0.4% anchor-vs-edge residual (was 33–100%); bd:/bagg:/bver purged per map and lazily rebuilt from Postgres (nyc-bikes rebuild: 174 s on-instance); revisions bumped so every cache invalidated.</li>
+<li>Prod deploy: revision <code>desire-path-mapper-00098-7ft</code> (overlay image <code>1e16f40f…</code> pinned on serving digest <code>050fd6b7…</code>), /health green, graph-votes serving with unchanged topology etags.</li>
+<li>Full nyc-bikes pass (two runs — the first was killed externally at ~8,800/14,523 rides; the pass is idempotent so the relaunch converged): <strong>0 route failures, 0 vote failures</strong> across all rides; 4,975 rides fully divergent (left alone, mostly round trips at one station). DB end state: of 1,790,211 nyc-bikes upvote rows, <strong>1,354,898 (75.7%) flipped to direction=−1</strong> under 14,240 imported devices, 399,335 remain +1, ~36 k unvoted by partial-block clears (one-direction-per-block invariant).</li>
 <li>Serving path: <code>/api/graph-votes?map=nyc-bikes&amp;mode=bikepaths</code> now returns 144,957 net-negative voted edges (83.4%) vs 28,864 net-positive survivors; revision bumped (18080) via the normal publish_delta path — no cache surgery needed.</li>
 <li>Human votes untouched: the 15 unmatched devices and the human-suggested vote types (49, 74420, 74421, …) kept their rows bit-for-bit.</li>
 <li>Unit tests: <code>tests/unit/test_counter_lyft.py</code> — 9 passed (path ordering from either trip end, spur preference, loop/fragment fallbacks, corridor cover/crossing/parallel-street cases against COVER_DIST_M).</li>
@@ -1715,7 +2100,7 @@
   <footer>
     Generated from <code>changelog/changes-counter-lyft.diff</code> by <code>changelog/build_counter_lyft_report.py</code>.
     Regenerate after further edits with
-    <code>git diff -- osrm/bicycle-flat.lua scripts/build_bike_osrm.sh server/counter_lyft.py server/tests/unit/test_counter_lyft.py &gt; changelog/changes-counter-lyft.diff &amp;&amp; python changelog/build_counter_lyft_report.py</code>.
+    <code>git diff dc81a6c -- osrm/bicycle-flat.lua scripts/build_bike_osrm.sh server/counter_lyft.py server/tests/unit/test_counter_lyft.py server/app.py server/database.py .gcloudignore &gt; changelog/changes-counter-lyft.diff &amp;&amp; python changelog/build_counter_lyft_report.py</code>.
   </footer>
 </div>
 </body>

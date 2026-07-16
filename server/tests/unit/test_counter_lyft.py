@@ -5,7 +5,8 @@ synthetic graph — no OSRM, DB, or Flask.
 import numpy as np
 import pytest
 
-from counter_lyft import COVER_DIST_M, M_PER_DEG_LAT, covered_edges, voted_path_vias
+from counter_lyft import (COVER_DIST_M, M_PER_DEG_LAT, covered_edges,
+                          reconstructed_trip, voted_path_vias)
 
 
 class FakeGraph:
@@ -64,6 +65,40 @@ def test_vias_empty_when_walk_covers_too_little():
     ends = [(0, 1), (1, 2)] + [(i, i + 1) for i in range(3, 9)]
     g = FakeGraph(coords, ends)
     assert voted_path_vias(g, set(range(8)), start=(0.0, 0.0)) == []
+
+
+# ── reconstructed_trip ───────────────────────────────────────────────────────
+
+def test_reconstructed_trip_recovers_path_ends():
+    g = line_graph(30)
+    rec = reconstructed_trip(g, set(range(29)))
+    assert rec is not None
+    start, end, vias = rec
+    ends = {start[1], end[1]}
+    assert ends == {0.0, 29 * 100 * DEG}, "endpoints must be the path's own ends"
+    assert vias, "a 29-edge path must yield via points"
+
+
+def test_reconstructed_trip_geometric_fallback_for_disconnected_set():
+    # Twice-resnapped sets are topologically shredded: disjoint edges strung
+    # along a corridor. The geometric fallback must still recover endpoints
+    # near the corridor's extremes.
+    coords = []
+    ends = []
+    for i in range(10):  # 10 disjoint edges west→east, 200 m apart
+        coords += [(0.0, (2 * i) * 100 * DEG), (0.0, (2 * i + 1) * 100 * DEG)]
+        ends.append((2 * i, 2 * i + 1))
+    g = FakeGraph(coords, ends)
+    rec = reconstructed_trip(g, set(range(10)))
+    assert rec is not None
+    start, end, _ = rec
+    span = abs(end[1] - start[1])
+    assert span > 15 * 100 * DEG, "endpoints must span most of the corridor"
+
+
+def test_reconstructed_trip_none_when_too_small():
+    g = line_graph(3)
+    assert reconstructed_trip(g, {0, 1}) is None
 
 
 # ── covered_edges ────────────────────────────────────────────────────────────

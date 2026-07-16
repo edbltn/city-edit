@@ -97,9 +97,12 @@ DEFAULT_MAP_SLUG = "nyc-walkways"
 # ── Redis ──────────────────────────────────────────────────────────────────
 
 redis_host = os.environ.get('REDIS_HOST', 'localhost')
-redis_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
+# REDIS_PORT matters for operator runs against a tunnelled prod Memorystore
+# (e.g. localhost:6380) where 6379 is the local dev instance.
+redis_port = int(os.environ.get('REDIS_PORT', '6379'))
+redis_client = redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
 
-logger.info(f"[REDIS] Connecting to Redis at: {redis_host}:6379")
+logger.info(f"[REDIS] Connecting to Redis at: {redis_host}:{redis_port}")
 try:
     redis_info = redis_client.info("server")
     logger.info(f"[REDIS] Connected — v{redis_info.get('redis_version', '?')}")
@@ -730,7 +733,7 @@ if os.environ.get("SKIP_WARMUP") != "1":
 # One pubsub listener + coalesced fan-out for every WebSocket client (see
 # delta_hub.py). Its thread starts lazily on the first subscription.
 delta_hub = delta_hub_mod.DeltaHub(
-    lambda: redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True))
+    lambda: redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True))
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -750,7 +753,16 @@ def _resolve_user(data_or_args, ip_from_voter: bool = False) -> tuple[str, str]:
     `ip_from_voter` ties ip_hash to the per-voter id instead of the request IP.
     Bulk imports (Lyft/Citibike) all originate from one source IP but represent
     thousands of distinct rides; with this set each ride is unique on BOTH the
-    device and IP axes, so the per-IP cap never collapses an import."""
+    device and IP axes, so the per-IP cap never collapses an import.
+
+    `admin_device_id` (admin-token-gated) acts as an EXISTING device verbatim,
+    skipping the voter_id hash. Operator corrections need it for stored rows
+    whose voter_id preimage is gone (e.g. countering an import batch whose ride
+    ids are no longer published — counter_lyft --reconstruct-unmatched)."""
+    admin_device = data_or_args.get("admin_device_id")
+    if admin_device and _admin_authorized():
+        admin_device = str(admin_device)[:16]
+        return admin_device, admin_device if ip_from_voter else get_client_ip()
     ip_hash = get_client_ip()
     voter_id = data_or_args.get("voter_id")
     device_id = hashlib.sha256(str(voter_id).encode()).hexdigest()[:16] if voter_id else ip_hash
@@ -1281,9 +1293,12 @@ def cast_vote():
         # Soft per-IP cap: how many OTHER devices this IP already has on each
         # edge+type. A brand-new vote from a fresh device is dropped once the IP
         # is at the cap (re-votes/reversals by the same device are exempt).
+        # ip_from_voter casts skip the lookup entirely: their ip_hash is unique
+        # per voter by construction, so no other device can share it and the
+        # count is always zero — the query is pure cost on bulk imports.
         ip_device_counts = count_devices_per_ip_for_edges(
             slug, edge_ids, vt_id, ip_hash, device_id
-        ) if direction != 0 else {}
+        ) if direction != 0 and not data.get("ip_from_voter") else {}
 
         # voter_lock serializes this voter's read-modify-write ACROSS instances
         # (Redis); the stripe serializes it within THIS process. Both are scoped
@@ -1442,7 +1457,7 @@ def _resnap_city_maps(city_id: str) -> None:
 def _start_graph_reload_listener():
     """Auto-heal votes when a city's graph is rebuilt (refresh_osm publishes here)."""
     def listener():
-        ps_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
+        ps_client = redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
         ps = ps_client.pubsub()
         ps.subscribe("graph_reload")
         logger.info("[PUBSUB] Subscribed to graph_reload")
