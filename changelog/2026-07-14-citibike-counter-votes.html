@@ -989,7 +989,7 @@
       <h3>Diffs — files touched (click to expand)</h3>
         <details>
           <summary><span class="fname">server/counter_lyft.py</span>
-            <span class="stat"><span class="d-add">+636</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+702</span> / <span class="d-del">-0</span></span>
           </summary>
           
     <div class="ctx">
@@ -1020,10 +1020,10 @@
     
           <pre class="diff"><span class="d-meta">diff --git a/server/counter_lyft.py b/server/counter_lyft.py</span>
 <span class="d-meta">new file mode 100644</span>
-<span class="d-meta">index 0000000..7c07338</span>
+<span class="d-meta">index 0000000..f50091d</span>
 <span class="d-meta">--- /dev/null</span>
 <span class="d-meta">+++ b/server/counter_lyft.py</span>
-<span class="d-hunk">@@ -0,0 +1,636 @@</span>
+<span class="d-hunk">@@ -0,0 +1,702 @@</span>
 <span class="d-add">+<span class="s-com">#!/usr/bin/env python3</span></span>
 <span class="d-add">+<span class="s-str">&quot;&quot;&quot;</span></span>
 <span class="d-add">+<span class="s-type">Counter</span>-vote <span class="s-kw">pass</span> <span class="s-kw">for</span> <span class="s-type">Lyft</span> bikeshare <span class="s-fn">imports</span> (the import_lyft.py corrective).</span>
@@ -1071,6 +1071,12 @@
 <span class="d-add">+</span>
 <span class="d-add">+<span class="s-type">Idempotent</span>: re-running plans no-<span class="s-fn">ops</span> (the voter<span class="s-str">&#x27;s prior direction is already</span></span>
 <span class="d-add">+-<span class="s-num">1</span>), so a second <span class="s-kw">pass</span> changes nothing.</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-type">A</span> running tally <span class="s-fn">gate</span> (<span class="s-type">NetGate</span>) keeps <span class="s-fn">every</span> (vote_type, edge) tally at ≥ <span class="s-num">0</span>:</span>
+<span class="d-add">+a flip <span class="s-kw">is</span> a −<span class="s-num">2</span> swing so it<span class="s-str">&#x27;s only cast while the tally stays positive; when</span></span>
+<span class="d-add">+exactly one upvote remains the device<span class="s-str">&#x27;s vote is REMOVED (direction 0) instead;</span></span>
+<span class="d-add">+edges already at zero are left alone. <span class="s-type">The</span> correction cancels imported signal —</span>
+<span class="d-add">+it never manufactures net-negative streets.</span>
 <span class="d-add">+</span>
 <span class="d-add">+<span class="s-type">Usage</span>:</span>
 <span class="d-add">+    <span class="s-com"># Build + serve the bike graph first:</span></span>
@@ -1147,6 +1153,44 @@
 <span class="d-add">+            <span class="s-kw">if</span> marker:</span>
 <span class="d-add">+                marked.<span class="s-fn">add</span>(device_id)</span>
 <span class="d-add">+    <span class="s-kw">return</span> votes, marked</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">load_net_counts</span>(map_slug: str) -&gt; dict[tuple[int, int], int]:</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;{(vote_type_id, edge_id): SUM(direction)} — the tally the gate runs on.&quot;&quot;&quot;</span></span>
+<span class="d-add">+    <span class="s-kw">with</span> <span class="s-fn">get_cursor</span>() <span class="s-kw">as</span> cur:</span>
+<span class="d-add">+        cur.<span class="s-fn">execute</span>(</span>
+<span class="d-add">+            <span class="s-str">&quot;SELECT vote_type_id, edge_id, SUM(direction) FROM edge_votes &quot;</span></span>
+<span class="d-add">+            <span class="s-str">&quot;WHERE map_slug = %s GROUP BY 1, 2&quot;</span>,</span>
+<span class="d-add">+            (map_slug,),</span>
+<span class="d-add">+        )</span>
+<span class="d-add">+        <span class="s-kw">return</span> {(<span class="s-fn">int</span>(vt), <span class="s-fn">int</span>(e)): <span class="s-fn">int</span>(n) <span class="s-kw">for</span> vt, e, n <span class="s-kw">in</span> cur.<span class="s-fn">fetchall</span>()}</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">class</span> <span class="s-type">NetGate</span>:</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Running per-(vote_type, edge) tally guard: a counter cast must never</span></span>
+<span class="d-add">+    push a tally below zero.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-type">A</span> <span class="s-fn">flip</span> (+<span class="s-num">1</span> → −<span class="s-num">1</span>) moves the tally by −<span class="s-num">2</span>, so it<span class="s-str">&#x27;s only allowed while the</span></span>
+<span class="d-add">+    tally <span class="s-kw">is</span> ≥ <span class="s-num">2</span>; at exactly <span class="s-num">1</span> the device<span class="s-str">&#x27;s vote is REMOVED instead</span></span>
+<span class="d-add">+    (direction <span class="s-num">0</span> — tally lands on <span class="s-num">0</span>, never negative); at ≤ <span class="s-num">0</span> the edge <span class="s-kw">is</span></span>
+<span class="d-add">+    left alone. <span class="s-type">Synchronous</span> mutation <span class="s-kw">is</span> safe under <span class="s-fn">asyncio</span> (no <span class="s-kw">await</span> inside).</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">__init__</span>(<span class="s-lit">self</span>, net: dict[tuple[int, int], int]):</span>
+<span class="d-add">+        <span class="s-lit">self</span>.net = net</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">take</span>(<span class="s-lit">self</span>, vt_id: int, edges) -&gt; tuple[list[int], list[int]]:</span>
+<span class="d-add">+        <span class="s-str">&quot;&quot;&quot;Split covered edges into (flip_to_against, remove_vote).&quot;&quot;&quot;</span></span>
+<span class="d-add">+        flips, zeros = [], []</span>
+<span class="d-add">+        <span class="s-kw">for</span> e <span class="s-kw">in</span> edges:</span>
+<span class="d-add">+            n = <span class="s-lit">self</span>.net.<span class="s-fn">get</span>((vt_id, e), <span class="s-num">0</span>)</span>
+<span class="d-add">+            <span class="s-kw">if</span> n &gt;= <span class="s-num">2</span>:</span>
+<span class="d-add">+                flips.<span class="s-fn">append</span>(e)</span>
+<span class="d-add">+                <span class="s-lit">self</span>.net[(vt_id, e)] = n - <span class="s-num">2</span></span>
+<span class="d-add">+            <span class="s-kw">elif</span> n == <span class="s-num">1</span>:</span>
+<span class="d-add">+                zeros.<span class="s-fn">append</span>(e)</span>
+<span class="d-add">+                <span class="s-lit">self</span>.net[(vt_id, e)] = <span class="s-num">0</span></span>
+<span class="d-add">+        <span class="s-kw">return</span> flips, zeros</span>
 <span class="d-add">+</span>
 <span class="d-add">+</span>
 <span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">load_vote_type_labels</span>(vt_ids: set[int]) -&gt; dict[int, str]:</span>
@@ -1395,6 +1439,7 @@
 <span class="d-add">+        <span class="s-lit">self</span>.reconstructed = <span class="s-num">0</span></span>
 <span class="d-add">+        <span class="s-lit">self</span>.edges_upvoted = <span class="s-num">0</span></span>
 <span class="d-add">+        <span class="s-lit">self</span>.edges_downvoted = <span class="s-num">0</span></span>
+<span class="d-add">+        <span class="s-lit">self</span>.edges_zeroed = <span class="s-num">0</span></span>
 <span class="d-add">+        <span class="s-lit">self</span>.edges_cleared = <span class="s-num">0</span></span>
 <span class="d-add">+        <span class="s-lit">self</span>.lock = asyncio.<span class="s-fn">Lock</span>()</span>
 <span class="d-add">+</span>
@@ -1418,7 +1463,7 @@
 <span class="d-add">+</span>
 <span class="d-add">+</span>
 <span class="d-add">+<span class="s-kw">async</span> <span class="s-kw">def</span> <span class="s-fn">counter_one</span>(session, args, device, ride, vt_edges, vt_labels, graph,</span>
-<span class="d-add">+                      vote_mode, stats):</span>
+<span class="d-add">+                      vote_mode, gate, stats):</span>
 <span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Bike-route one ride and downvote the overlap with its prior upvotes.&quot;&quot;&quot;</span></span>
 <span class="d-add">+    rid, start, end = ride</span>
 <span class="d-add">+    n_up = <span class="s-fn">sum</span>(<span class="s-fn">len</span>(s) <span class="s-kw">for</span> s <span class="s-kw">in</span> vt_edges.<span class="s-fn">values</span>())</span>
@@ -1457,25 +1502,12 @@
 <span class="d-add">+            <span class="s-kw">await</span> stats.<span class="s-fn">bump_quiet</span>(via_guided=<span class="s-num">1</span>)</span>
 <span class="d-add">+        bike_set = <span class="s-fn">covered_edges</span>(graph, all_edges, geom)</span>
 <span class="d-add">+</span>
-<span class="d-add">+    downs, cleared = <span class="s-num">0</span>, <span class="s-num">0</span></span>
-<span class="d-add">+    any_overlap = <span class="s-lit">False</span></span>
-<span class="d-add">+    ok = <span class="s-lit">True</span></span>
-<span class="d-add">+    <span class="s-kw">for</span> vt_id, edges <span class="s-kw">in</span> vt_edges.<span class="s-fn">items</span>():</span>
-<span class="d-add">+        overlap = <span class="s-fn">sorted</span>(edges &amp; bike_set)</span>
-<span class="d-add">+        <span class="s-kw">if</span> <span class="s-kw">not</span> overlap:</span>
-<span class="d-add">+            <span class="s-kw">continue</span></span>
-<span class="d-add">+        any_overlap = <span class="s-lit">True</span></span>
-<span class="d-add">+        label = vt_labels.<span class="s-fn">get</span>(vt_id)</span>
-<span class="d-add">+        <span class="s-kw">if</span> label <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
-<span class="d-add">+            ok = <span class="s-lit">False</span></span>
-<span class="d-add">+            <span class="s-kw">continue</span></span>
-<span class="d-add">+        <span class="s-kw">if</span> args.dry_run:</span>
-<span class="d-add">+            downs += <span class="s-fn">len</span>(overlap)</span>
-<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+    <span class="s-kw">async</span> <span class="s-kw">def</span> <span class="s-fn">cast</span>(label, cast_edges, direction):</span>
+<span class="d-add">+        <span class="s-str">&quot;&quot;&quot;POST one directional cast; returns the response body or None.&quot;&quot;&quot;</span></span>
 <span class="d-add">+        payload = {</span>
 <span class="d-add">+            <span class="s-str">&quot;map&quot;</span>: args.map_slug, <span class="s-str">&quot;mode&quot;</span>: vote_mode, <span class="s-str">&quot;vote_type&quot;</span>: label,</span>
-<span class="d-add">+            <span class="s-str">&quot;voter_id&quot;</span>: rid <span class="s-kw">or</span> device, <span class="s-str">&quot;edge_ids&quot;</span>: overlap, <span class="s-str">&quot;direction&quot;</span>: -<span class="s-num">1</span>,</span>
-<span class="d-add">+            <span class="s-str">&quot;ip_from_voter&quot;</span>: <span class="s-lit">True</span>,</span>
+<span class="d-add">+            <span class="s-str">&quot;voter_id&quot;</span>: rid <span class="s-kw">or</span> device, <span class="s-str">&quot;edge_ids&quot;</span>: cast_edges,</span>
+<span class="d-add">+            <span class="s-str">&quot;direction&quot;</span>: direction, <span class="s-str">&quot;ip_from_voter&quot;</span>: <span class="s-lit">True</span>,</span>
 <span class="d-add">+        }</span>
 <span class="d-add">+        headers = {}</span>
 <span class="d-add">+        <span class="s-kw">if</span> rid <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
@@ -1493,35 +1525,65 @@
 <span class="d-add">+                        <span class="s-kw">if</span> attempt &lt; <span class="s-num">2</span>:</span>
 <span class="d-add">+                            <span class="s-kw">await</span> asyncio.<span class="s-fn">sleep</span>(<span class="s-num">2</span> ** attempt)</span>
 <span class="d-add">+                            <span class="s-kw">continue</span></span>
-<span class="d-add">+                        ok = <span class="s-lit">False</span></span>
-<span class="d-add">+                        <span class="s-kw">break</span></span>
+<span class="d-add">+                        <span class="s-kw">return</span> <span class="s-lit">None</span></span>
 <span class="d-add">+                    body = <span class="s-kw">await</span> resp.<span class="s-fn">json</span>()</span>
-<span class="d-add">+                    <span class="s-kw">if</span> body.<span class="s-fn">get</span>(<span class="s-str">&quot;success&quot;</span>):</span>
-<span class="d-add">+                        downs += <span class="s-fn">len</span>(overlap)</span>
-<span class="d-add">+                        <span class="s-com"># Edges unvoted beyond the cast set: upvotes in touched</span></span>
-<span class="d-add">+                        <span class="s-com"># blocks that the bike route only partially covered.</span></span>
-<span class="d-add">+                        cleared += <span class="s-fn">len</span>(body.<span class="s-fn">get</span>(<span class="s-str">&quot;cleared&quot;</span>, []))</span>
-<span class="d-add">+                    <span class="s-kw">else</span>:</span>
-<span class="d-add">+                        ok = <span class="s-lit">False</span></span>
-<span class="d-add">+                    <span class="s-kw">break</span></span>
+<span class="d-add">+                    <span class="s-kw">return</span> body <span class="s-kw">if</span> body.<span class="s-fn">get</span>(<span class="s-str">&quot;success&quot;</span>) <span class="s-kw">else</span> <span class="s-lit">None</span></span>
 <span class="d-add">+            <span class="s-kw">except</span> <span class="s-type">Exception</span>:</span>
 <span class="d-add">+                <span class="s-kw">if</span> attempt &lt; <span class="s-num">2</span>:</span>
 <span class="d-add">+                    <span class="s-kw">await</span> asyncio.<span class="s-fn">sleep</span>(<span class="s-num">2</span> ** attempt)</span>
 <span class="d-add">+                    <span class="s-kw">continue</span></span>
+<span class="d-add">+                <span class="s-kw">return</span> <span class="s-lit">None</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    downs, zeroed, cleared = <span class="s-num">0</span>, <span class="s-num">0</span>, <span class="s-num">0</span></span>
+<span class="d-add">+    any_overlap = <span class="s-lit">False</span></span>
+<span class="d-add">+    ok = <span class="s-lit">True</span></span>
+<span class="d-add">+    <span class="s-kw">for</span> vt_id, edges <span class="s-kw">in</span> vt_edges.<span class="s-fn">items</span>():</span>
+<span class="d-add">+        overlap = <span class="s-fn">sorted</span>(edges &amp; bike_set)</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-kw">not</span> overlap:</span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        <span class="s-com"># Tally gate: never push a (vote_type, edge) tally below zero — flip</span></span>
+<span class="d-add">+        <span class="s-com"># only edges that keep a positive tally, downgrade the last upvote to</span></span>
+<span class="d-add">+        <span class="s-com"># a removal, and leave already-zeroed edges alone entirely.</span></span>
+<span class="d-add">+        flips, zeros = gate.<span class="s-fn">take</span>(vt_id, overlap)</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-kw">not</span> flips <span class="s-kw">and</span> <span class="s-kw">not</span> zeros:</span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        any_overlap = <span class="s-lit">True</span></span>
+<span class="d-add">+        label = vt_labels.<span class="s-fn">get</span>(vt_id)</span>
+<span class="d-add">+        <span class="s-kw">if</span> label <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+            ok = <span class="s-lit">False</span></span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        <span class="s-kw">if</span> args.dry_run:</span>
+<span class="d-add">+            downs += <span class="s-fn">len</span>(flips)</span>
+<span class="d-add">+            zeroed += <span class="s-fn">len</span>(zeros)</span>
+<span class="d-add">+            <span class="s-kw">continue</span></span>
+<span class="d-add">+        <span class="s-kw">if</span> flips:</span>
+<span class="d-add">+            body = <span class="s-kw">await</span> <span class="s-fn">cast</span>(label, flips, -<span class="s-num">1</span>)</span>
+<span class="d-add">+            <span class="s-kw">if</span> body <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
 <span class="d-add">+                ok = <span class="s-lit">False</span></span>
-<span class="d-add">+                <span class="s-kw">break</span></span>
+<span class="d-add">+            <span class="s-kw">else</span>:</span>
+<span class="d-add">+                downs += <span class="s-fn">len</span>(flips)</span>
+<span class="d-add">+                <span class="s-com"># Edges unvoted beyond the cast set: upvotes in touched</span></span>
+<span class="d-add">+                <span class="s-com"># blocks that the bike route only partially covered.</span></span>
+<span class="d-add">+                cleared += <span class="s-fn">len</span>(body.<span class="s-fn">get</span>(<span class="s-str">&quot;cleared&quot;</span>, []))</span>
+<span class="d-add">+        <span class="s-kw">if</span> zeros:</span>
+<span class="d-add">+            body = <span class="s-kw">await</span> <span class="s-fn">cast</span>(label, zeros, <span class="s-num">0</span>)</span>
+<span class="d-add">+            <span class="s-kw">if</span> body <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+                ok = <span class="s-lit">False</span></span>
+<span class="d-add">+            <span class="s-kw">else</span>:</span>
+<span class="d-add">+                zeroed += <span class="s-fn">len</span>(zeros)</span>
+<span class="d-add">+                cleared += <span class="s-fn">len</span>(body.<span class="s-fn">get</span>(<span class="s-str">&quot;cleared&quot;</span>, []))</span>
 <span class="d-add">+</span>
 <span class="d-add">+    <span class="s-kw">if</span> <span class="s-kw">not</span> any_overlap:</span>
 <span class="d-add">+        <span class="s-kw">await</span> stats.<span class="s-fn">bump</span>(no_overlap=<span class="s-num">1</span>, edges_upvoted=n_up)</span>
 <span class="d-add">+    <span class="s-kw">elif</span> ok:</span>
-<span class="d-add">+        <span class="s-kw">await</span> stats.<span class="s-fn">bump</span>(countered=<span class="s-num">1</span>, edges_upvoted=n_up,</span>
-<span class="d-add">+                         edges_downvoted=downs, edges_cleared=cleared)</span>
+<span class="d-add">+        <span class="s-kw">await</span> stats.<span class="s-fn">bump</span>(countered=<span class="s-num">1</span>, edges_upvoted=n_up, edges_downvoted=downs,</span>
+<span class="d-add">+                         edges_zeroed=zeroed, edges_cleared=cleared)</span>
 <span class="d-add">+    <span class="s-kw">else</span>:</span>
 <span class="d-add">+        <span class="s-kw">await</span> stats.<span class="s-fn">bump</span>(vote_failed=<span class="s-num">1</span>, edges_upvoted=n_up, edges_downvoted=downs,</span>
-<span class="d-add">+                         edges_cleared=cleared)</span>
+<span class="d-add">+                         edges_zeroed=zeroed, edges_cleared=cleared)</span>
 <span class="d-add">+</span>
 <span class="d-add">+</span>
-<span class="d-add">+<span class="s-kw">async</span> <span class="s-kw">def</span> <span class="s-fn">run_async</span>(args, work, vt_labels, graph, vote_mode) -&gt; <span class="s-type">Stats</span>:</span>
+<span class="d-add">+<span class="s-kw">async</span> <span class="s-kw">def</span> <span class="s-fn">run_async</span>(args, work, vt_labels, graph, vote_mode, gate) -&gt; <span class="s-type">Stats</span>:</span>
 <span class="d-add">+    stats = <span class="s-fn">Stats</span>(<span class="s-fn">len</span>(work))</span>
 <span class="d-add">+    sem = asyncio.<span class="s-fn">Semaphore</span>(args.concurrency)</span>
 <span class="d-add">+    connector = aiohttp.<span class="s-fn">TCPConnector</span>(limit=args.concurrency * <span class="s-num">2</span>, ssl=<span class="s-lit">False</span>)</span>
@@ -1529,7 +1591,7 @@
 <span class="d-add">+        <span class="s-kw">async</span> <span class="s-kw">def</span> <span class="s-fn">throttled</span>(device, ride, vt_edges):</span>
 <span class="d-add">+            <span class="s-kw">async</span> <span class="s-kw">with</span> sem:</span>
 <span class="d-add">+                <span class="s-kw">await</span> <span class="s-fn">counter_one</span>(session, args, device, ride, vt_edges,</span>
-<span class="d-add">+                                  vt_labels, graph, vote_mode, stats)</span>
+<span class="d-add">+                                  vt_labels, graph, vote_mode, gate, stats)</span>
 <span class="d-add">+</span>
 <span class="d-add">+        tasks = [asyncio.<span class="s-fn">create_task</span>(<span class="s-fn">throttled</span>(d, r, v)) <span class="s-kw">for</span> d, r, v <span class="s-kw">in</span> work]</span>
 <span class="d-add">+        <span class="s-kw">await</span> asyncio.<span class="s-fn">gather</span>(*tasks)</span>
@@ -1594,6 +1656,8 @@
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;Loading upvotes for map &#x27;{args.map_slug}&#x27; ...&quot;</span>)</span>
 <span class="d-add">+    votes, marked = <span class="s-fn">load_upvotes</span>(args.map_slug)</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  {len(votes)} devices with upvotes ({len(marked)} import-marked)&quot;</span>)</span>
+<span class="d-add">+    gate = <span class="s-fn">NetGate</span>(<span class="s-fn">load_net_counts</span>(args.map_slug))</span>
+<span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  tally gate over {len(gate.net)} (vote_type, edge) pairs&quot;</span>)</span>
 <span class="d-add">+</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">&quot;Matching devices against cached ride zips ...&quot;</span>)</span>
 <span class="d-add">+    matched = <span class="s-fn">match_rides</span>(args.city, <span class="s-fn">set</span>(votes))</span>
@@ -1639,7 +1703,7 @@
 <span class="d-add">+        <span class="s-str">f&quot;{len(work)} rides (concurrency={args.concurrency}) ...&quot;</span>)</span>
 <span class="d-add">+</span>
 <span class="d-add">+    t0 = time.<span class="s-fn">time</span>()</span>
-<span class="d-add">+    stats = asyncio.<span class="s-fn">run</span>(<span class="s-fn">run_async</span>(args, work, vt_labels, graph, vote_mode))</span>
+<span class="d-add">+    stats = asyncio.<span class="s-fn">run</span>(<span class="s-fn">run_async</span>(args, work, vt_labels, graph, vote_mode, gate))</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;Done in {time.time() - t0:.1f}s&quot;</span>)</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  Rides processed:     {stats.processed}&quot;</span>)</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  Via-guided routes:   {stats.via_guided} &quot;</span></span>
@@ -1653,6 +1717,8 @@
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  Edges upvoted:       {stats.edges_upvoted}&quot;</span>)</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  Edges downvoted:     {stats.edges_downvoted} &quot;</span></span>
 <span class="d-add">+        <span class="s-str">f&quot;({100 * stats.edges_downvoted / max(1, stats.edges_upvoted):.1f}% of upvotes)&quot;</span>)</span>
+<span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  Edges zeroed:        {stats.edges_zeroed} &quot;</span></span>
+<span class="d-add">+        <span class="s-str">f&quot;(last upvote removed instead of flipped — tally floor)&quot;</span>)</span>
 <span class="d-add">+    <span class="s-fn">log</span>(<span class="s-str">f&quot;  Edges cleared:       {stats.edges_cleared} (partial-block clears)&quot;</span>)</span>
 <span class="d-add">+    <span class="s-kw">if</span> args.dry_run:</span>
 <span class="d-add">+        <span class="s-fn">log</span>(<span class="s-str">&quot;  (dry run — nothing cast)&quot;</span>)</span>
@@ -1664,7 +1730,7 @@
         
         <details>
           <summary><span class="fname">server/tests/unit/test_counter_lyft.py</span>
-            <span class="stat"><span class="d-add">+143</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+170</span> / <span class="d-del">-0</span></span>
           </summary>
           
     <div class="ctx">
@@ -1695,10 +1761,10 @@
     
           <pre class="diff"><span class="d-meta">diff --git a/server/tests/unit/test_counter_lyft.py b/server/tests/unit/test_counter_lyft.py</span>
 <span class="d-meta">new file mode 100644</span>
-<span class="d-meta">index 0000000..dd5efa4</span>
+<span class="d-meta">index 0000000..1526704</span>
 <span class="d-meta">--- /dev/null</span>
 <span class="d-meta">+++ b/server/tests/unit/test_counter_lyft.py</span>
-<span class="d-hunk">@@ -0,0 +1,143 @@</span>
+<span class="d-hunk">@@ -0,0 +1,170 @@</span>
 <span class="d-add">+<span class="s-str">&quot;&quot;&quot;Unit tests for counter_lyft&#x27;s pure geometry core: voted-path via ordering</span></span>
 <span class="d-add">+(voted_path_vias) <span class="s-kw">and</span> corridor <span class="s-fn">coverage</span> (covered_edges). <span class="s-type">Both</span> run on a tiny</span>
 <span class="d-add">+synthetic graph — no <span class="s-type">OSRM</span>, <span class="s-type">DB</span>, <span class="s-kw">or</span> <span class="s-type">Flask</span>.</span>
@@ -1706,7 +1772,7 @@
 <span class="d-add">+<span class="s-kw">import</span> numpy <span class="s-kw">as</span> np</span>
 <span class="d-add">+<span class="s-kw">import</span> pytest</span>
 <span class="d-add">+</span>
-<span class="d-add">+<span class="s-kw">from</span> counter_lyft <span class="s-kw">import</span> (<span class="s-type">COVER_DIST_M</span>, <span class="s-type">M_PER_DEG_LAT</span>, covered_edges,</span>
+<span class="d-add">+<span class="s-kw">from</span> counter_lyft <span class="s-kw">import</span> (<span class="s-type">COVER_DIST_M</span>, <span class="s-type">M_PER_DEG_LAT</span>, <span class="s-type">NetGate</span>, covered_edges,</span>
 <span class="d-add">+                          reconstructed_trip, voted_path_vias)</span>
 <span class="d-add">+</span>
 <span class="d-add">+</span>
@@ -1802,6 +1868,33 @@
 <span class="d-add">+    <span class="s-kw">assert</span> <span class="s-fn">reconstructed_trip</span>(g, {<span class="s-num">0</span>, <span class="s-num">1</span>}) <span class="s-kw">is</span> <span class="s-lit">None</span></span>
 <span class="d-add">+</span>
 <span class="d-add">+</span>
+<span class="d-add">+<span class="s-com"># ── NetGate ──────────────────────────────────────────────────────────────────</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">test_gate_splits_by_running_tally</span>():</span>
+<span class="d-add">+    <span class="s-com"># vt 7: edge 1 has 3 ups (flip → 1 left), edge 2 has 1 (remove), edge 3 has 0.</span></span>
+<span class="d-add">+    gate = <span class="s-fn">NetGate</span>({(<span class="s-num">7</span>, <span class="s-num">1</span>): <span class="s-num">3</span>, (<span class="s-num">7</span>, <span class="s-num">2</span>): <span class="s-num">1</span>, (<span class="s-num">7</span>, <span class="s-num">3</span>): <span class="s-num">0</span>})</span>
+<span class="d-add">+    flips, zeros = gate.<span class="s-fn">take</span>(<span class="s-num">7</span>, [<span class="s-num">1</span>, <span class="s-num">2</span>, <span class="s-num">3</span>, <span class="s-num">4</span>])</span>
+<span class="d-add">+    <span class="s-kw">assert</span> flips == [<span class="s-num">1</span>]</span>
+<span class="d-add">+    <span class="s-kw">assert</span> zeros == [<span class="s-num">2</span>]</span>
+<span class="d-add">+    <span class="s-kw">assert</span> gate.net[(<span class="s-num">7</span>, <span class="s-num">1</span>)] == <span class="s-num">1</span> <span class="s-kw">and</span> gate.net[(<span class="s-num">7</span>, <span class="s-num">2</span>)] == <span class="s-num">0</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">test_gate_never_goes_negative_across_devices</span>():</span>
+<span class="d-add">+    <span class="s-com"># Three devices flip the same 5-up edge: two flips (−2 each) drop the tally</span></span>
+<span class="d-add">+    <span class="s-com"># to 1, the third device&#x27;s vote is removed → tally ends at exactly 0.</span></span>
+<span class="d-add">+    gate = <span class="s-fn">NetGate</span>({(<span class="s-num">7</span>, <span class="s-num">9</span>): <span class="s-num">5</span>})</span>
+<span class="d-add">+    results = [gate.<span class="s-fn">take</span>(<span class="s-num">7</span>, [<span class="s-num">9</span>]) <span class="s-kw">for</span> _ <span class="s-kw">in</span> <span class="s-fn">range</span>(<span class="s-num">4</span>)]</span>
+<span class="d-add">+    <span class="s-kw">assert</span> results[<span class="s-num">0</span>] == ([<span class="s-num">9</span>], []) <span class="s-kw">and</span> results[<span class="s-num">1</span>] == ([<span class="s-num">9</span>], [])</span>
+<span class="d-add">+    <span class="s-kw">assert</span> results[<span class="s-num">2</span>] == ([], [<span class="s-num">9</span>]), <span class="s-str">&quot;last positive upvote is removed, not flipped&quot;</span></span>
+<span class="d-add">+    <span class="s-kw">assert</span> results[<span class="s-num">3</span>] == ([], []), <span class="s-str">&quot;an already-zeroed edge is left alone&quot;</span></span>
+<span class="d-add">+    <span class="s-kw">assert</span> gate.net[(<span class="s-num">7</span>, <span class="s-num">9</span>)] == <span class="s-num">0</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">test_gate_is_per_vote_type</span>():</span>
+<span class="d-add">+    gate = <span class="s-fn">NetGate</span>({(<span class="s-num">7</span>, <span class="s-num">1</span>): <span class="s-num">2</span>})</span>
+<span class="d-add">+    <span class="s-kw">assert</span> gate.<span class="s-fn">take</span>(<span class="s-num">8</span>, [<span class="s-num">1</span>]) == ([], []), <span class="s-str">&quot;another type&#x27;s tally must not leak&quot;</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
 <span class="d-add">+<span class="s-com"># ── covered_edges ────────────────────────────────────────────────────────────</span></span>
 <span class="d-add">+</span>
 <span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">test_covers_edges_on_and_near_the_route</span>():</span>
@@ -1860,7 +1953,8 @@
 <li>Overlay code deploy (revision <code>desire-path-mapper-00098-7ft</code>, base pinned on the serving digest) shipping counter_lyft tooling + current branch state; <code>.gcloudignore</code> also learned to exclude 6.6 GB of blocks-bake artifacts that every Cloud Build had been uploading.</li>
 <li>Counter passes with <code>--graph-dir</code> (new flag: remote passes must use the TARGET deployment's graphs — DB edge ids live in its topology space): prod sf-bike-lanes 348/349 rides countered (72.9% of upvotes), prod chicago-bikes 239/239 (69.3%), prod nyc-bikes (see Verification), plus local sf (73.9%) and chicago (79.5%). Zero route/vote failures across every pass.</li>
 <li>Two more prod finds along the way: <strong>every cast on prod was paying a 9.4-second full scan</strong> — <code>get_voter_type_rows</code> (the prior-state read behind clear-then-cast) had no usable index (the identity key leads with edge_id). New <code>idx_edge_votes_map_vt_device</code>, created CONCURRENTLY on prod mid-pass: 9,453&nbsp;ms → 0.198&nbsp;ms; human votes on big maps get the same win. And bulk casts now run through a <strong>scratch Flask wired to prod</strong> (prod graphs/blocks + tunnelled DB/Memorystore; app.py gained REDIS_PORT) rather than the public API — same code path, ~50× the throughput, block aggregates maintained correctly.</li>
-<li>The identity join also exposed a second, earlier prod import batch (3,647 import-marked devices, 314 k rows, cast 2026-05-29) whose ride ids appear in NO published Citibike file (probed 2025-12 → 2026-06 plus the JC extracts) — its voter_id preimages are simply gone. New <code>--reconstruct-unmatched</code> mode: the trip is recovered from the voted edges themselves (endpoints = farthest-apart midpoints, vias by nearest-neighbor chaining — twice-resnapped sets are topologically shredded, every edge disjoint, so reconstruction is geometric), routed in BOTH directions with coverage intersected, so the unknowable true direction can never counter a one-way stretch. Casting as a stored device without its hash preimage required a new admin-token-gated <code>admin_device_id</code> override in <code>/api/vote</code>. Deliberately conservative: ~36% of those upvotes countered vs ~77% for matched rides.</li></ul>
+<li>The identity join also exposed a second, earlier prod import batch (3,647 import-marked devices, 314 k rows, cast 2026-05-29) whose ride ids appear in NO published Citibike file (probed 2025-12 → 2026-06 plus the JC extracts) — its voter_id preimages are simply gone. New <code>--reconstruct-unmatched</code> mode: the trip is recovered from the voted edges themselves (endpoints = farthest-apart midpoints, vias by nearest-neighbor chaining — twice-resnapped sets are topologically shredded, every edge disjoint, so reconstruction is geometric), routed in BOTH directions with coverage intersected, so the unknowable true direction can never counter a one-way stretch. Casting as a stored device without its hash preimage required a new admin-token-gated <code>admin_device_id</code> override in <code>/api/vote</code>. Deliberately conservative: ~36% of those upvotes countered vs ~77% for matched rides.</li>
+<li><strong>Tally floor (2026-07-21)</strong>: flipping +1 → −1 is a −2 swing, so heavily-covered edges went net-negative — the correction was manufacturing against-signal instead of just cancelling. Fixed in both directions: a one-off prod sweep deleted the newest excess IMPORT down-rows per net-negative (edge, type) tally — 990,049 rows across the three maps, human downvotes untouched — flooring every tally at 0; and counter_lyft gained a running <code>NetGate</code>: a flip is only cast while the tally stays positive, the last remaining upvote is REMOVED (direction 0) instead of flipped, and zeroed edges are left alone — future passes structurally cannot push any tally below zero.</li></ul>
       <h3>Diffs — files touched (click to expand)</h3>
         <details>
           <summary><span class="fname">server/app.py</span>
@@ -2073,7 +2167,8 @@
   <section class="card verify" id="verify">
     <div class="tag">Verification</div>
     <h2>What was run</h2>
-    <ul><li><strong>Prod end state (2026-07-15)</strong>: nyc-bikes 1,243,406 rows against / 603,344 for (main pass: 11,060 matched rides, 77.0% of upvotes flipped; reconstructed pass: 3,634 of 3,647 unpublished-ride imports, 35.8% — conservative by design; 12 residual failures ≈ 0.06% of edges). sf-bike-lanes 34,425 / 12,590 (72.9%); chicago-bikes 20,818 / 8,825 (69.3%). Zero route failures everywhere. Live serving: 80% / 76% / 72% of voted edges now net-negative, block layers intact (n_blocks 289,647 / 45,712 / 140,248).</li>
+    <ul><li><strong>Tally floor verification (2026-07-21)</strong>: pre-floor the maps served 142,997 / 17,451 / 14,083 net-negative edges (nyc/sf/chicago); post-floor <strong>1 / 1 / 0</strong> — the survivors are two organic human downvotes, preserved by design. Redis + block aggregates rebuilt, revisions bumped; backup <code>~/city-edit-prod-backups/20260722T034602Z/prod-full-pre-floor.dump</code>. A gated dry-run against the floored DB confirms a re-run casts flips only where tallies remain positive.</li>
+<li><strong>Prod end state (2026-07-15)</strong>: nyc-bikes 1,243,406 rows against / 603,344 for (main pass: 11,060 matched rides, 77.0% of upvotes flipped; reconstructed pass: 3,634 of 3,647 unpublished-ride imports, 35.8% — conservative by design; 12 residual failures ≈ 0.06% of edges). sf-bike-lanes 34,425 / 12,590 (72.9%); chicago-bikes 20,818 / 8,825 (69.3%). Zero route failures everywhere. Live serving: 80% / 76% / 72% of voted edges now net-negative, block layers intact (n_blocks 289,647 / 45,712 / 140,248).</li>
 <li>Prod resnap verification: all seven misaligned maps healed to ≤ 0.4% anchor-vs-edge residual (was 33–100%); bd:/bagg:/bver purged per map and lazily rebuilt from Postgres (nyc-bikes rebuild: 174 s on-instance); revisions bumped so every cache invalidated.</li>
 <li>Prod deploy: revision <code>desire-path-mapper-00098-7ft</code> (overlay image <code>1e16f40f…</code> pinned on serving digest <code>050fd6b7…</code>), /health green, graph-votes serving with unchanged topology etags.</li>
 <li>Full nyc-bikes pass (two runs — the first was killed externally at ~8,800/14,523 rides; the pass is idempotent so the relaunch converged): <strong>0 route failures, 0 vote failures</strong> across all rides; 4,975 rides fully divergent (left alone, mostly round trips at one station). DB end state: of 1,790,211 nyc-bikes upvote rows, <strong>1,354,898 (75.7%) flipped to direction=−1</strong> under 14,240 imported devices, 399,335 remain +1, ~36 k unvoted by partial-block clears (one-direction-per-block invariant).</li>

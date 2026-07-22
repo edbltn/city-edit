@@ -216,6 +216,15 @@ SECTIONS = [
             "its hash preimage required a new admin-token-gated <code>admin_device_id</code> "
             "override in <code>/api/vote</code>. Deliberately conservative: ~36% of those "
             "upvotes countered vs ~77% for matched rides.",
+            "<strong>Tally floor (2026-07-21)</strong>: flipping +1 → −1 is a −2 swing, so "
+            "heavily-covered edges went net-negative — the correction was manufacturing "
+            "against-signal instead of just cancelling. Fixed in both directions: a one-off prod "
+            "sweep deleted the newest excess IMPORT down-rows per net-negative (edge, type) "
+            "tally — 990,049 rows across the three maps, human downvotes untouched — flooring "
+            "every tally at 0; and counter_lyft gained a running <code>NetGate</code>: a flip is "
+            "only cast while the tally stays positive, the last remaining upvote is REMOVED "
+            "(direction 0) instead of flipped, and zeroed edges are left alone — future passes "
+            "structurally cannot push any tally below zero.",
         ],
         "files": ["server/app.py", "server/database.py", ".gcloudignore"],
     },
@@ -223,6 +232,13 @@ SECTIONS = [
 
 # Filled from the full nyc-bikes run (see scratch log counter-run-nyc.log).
 VERIFY = [
+    "<strong>Tally floor verification (2026-07-21)</strong>: pre-floor the maps served 142,997 / "
+    "17,451 / 14,083 net-negative edges (nyc/sf/chicago); post-floor <strong>1 / 1 / 0</strong> — "
+    "the survivors are two organic human downvotes, preserved by design. Redis + block "
+    "aggregates rebuilt, revisions bumped; backup "
+    "<code>~/city-edit-prod-backups/20260722T034602Z/prod-full-pre-floor.dump</code>. A gated "
+    "dry-run against the floored DB confirms a re-run casts flips only where tallies remain "
+    "positive.",
     "<strong>Prod end state (2026-07-15)</strong>: nyc-bikes 1,243,406 rows against / 603,344 for "
     "(main pass: 11,060 matched rides, 77.0% of upvotes flipped; reconstructed pass: 3,634 of "
     "3,647 unpublished-ride imports, 35.8% — conservative by design; 12 residual failures "

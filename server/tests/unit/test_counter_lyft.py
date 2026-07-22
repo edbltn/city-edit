@@ -5,7 +5,7 @@ synthetic graph — no OSRM, DB, or Flask.
 import numpy as np
 import pytest
 
-from counter_lyft import (COVER_DIST_M, M_PER_DEG_LAT, covered_edges,
+from counter_lyft import (COVER_DIST_M, M_PER_DEG_LAT, NetGate, covered_edges,
                           reconstructed_trip, voted_path_vias)
 
 
@@ -99,6 +99,33 @@ def test_reconstructed_trip_geometric_fallback_for_disconnected_set():
 def test_reconstructed_trip_none_when_too_small():
     g = line_graph(3)
     assert reconstructed_trip(g, {0, 1}) is None
+
+
+# ── NetGate ──────────────────────────────────────────────────────────────────
+
+def test_gate_splits_by_running_tally():
+    # vt 7: edge 1 has 3 ups (flip → 1 left), edge 2 has 1 (remove), edge 3 has 0.
+    gate = NetGate({(7, 1): 3, (7, 2): 1, (7, 3): 0})
+    flips, zeros = gate.take(7, [1, 2, 3, 4])
+    assert flips == [1]
+    assert zeros == [2]
+    assert gate.net[(7, 1)] == 1 and gate.net[(7, 2)] == 0
+
+
+def test_gate_never_goes_negative_across_devices():
+    # Three devices flip the same 5-up edge: two flips (−2 each) drop the tally
+    # to 1, the third device's vote is removed → tally ends at exactly 0.
+    gate = NetGate({(7, 9): 5})
+    results = [gate.take(7, [9]) for _ in range(4)]
+    assert results[0] == ([9], []) and results[1] == ([9], [])
+    assert results[2] == ([], [9]), "last positive upvote is removed, not flipped"
+    assert results[3] == ([], []), "an already-zeroed edge is left alone"
+    assert gate.net[(7, 9)] == 0
+
+
+def test_gate_is_per_vote_type():
+    gate = NetGate({(7, 1): 2})
+    assert gate.take(8, [1]) == ([], []), "another type's tally must not leak"
 
 
 # ── covered_edges ────────────────────────────────────────────────────────────

@@ -46,6 +46,12 @@ endpoints. Human voters never match.
 Idempotent: re-running plans no-ops (the voter's prior direction is already
 -1), so a second pass changes nothing.
 
+A running tally gate (NetGate) keeps every (vote_type, edge) tally at ≥ 0:
+a flip is a −2 swing so it's only cast while the tally stays positive; when
+exactly one upvote remains the device's vote is REMOVED (direction 0) instead;
+edges already at zero are left alone. The correction cancels imported signal —
+it never manufactures net-negative streets.
+
 Usage:
     # Build + serve the bike graph first:
     #   scripts/build_bike_osrm.sh nyc --serve 5006
@@ -121,6 +127,44 @@ def load_upvotes(map_slug: str) -> tuple[dict[str, dict[int, set[int]]], set[str
             if marker:
                 marked.add(device_id)
     return votes, marked
+
+
+def load_net_counts(map_slug: str) -> dict[tuple[int, int], int]:
+    """{(vote_type_id, edge_id): SUM(direction)} — the tally the gate runs on."""
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT vote_type_id, edge_id, SUM(direction) FROM edge_votes "
+            "WHERE map_slug = %s GROUP BY 1, 2",
+            (map_slug,),
+        )
+        return {(int(vt), int(e)): int(n) for vt, e, n in cur.fetchall()}
+
+
+class NetGate:
+    """Running per-(vote_type, edge) tally guard: a counter cast must never
+    push a tally below zero.
+
+    A flip (+1 → −1) moves the tally by −2, so it's only allowed while the
+    tally is ≥ 2; at exactly 1 the device's vote is REMOVED instead
+    (direction 0 — tally lands on 0, never negative); at ≤ 0 the edge is
+    left alone. Synchronous mutation is safe under asyncio (no await inside).
+    """
+
+    def __init__(self, net: dict[tuple[int, int], int]):
+        self.net = net
+
+    def take(self, vt_id: int, edges) -> tuple[list[int], list[int]]:
+        """Split covered edges into (flip_to_against, remove_vote)."""
+        flips, zeros = [], []
+        for e in edges:
+            n = self.net.get((vt_id, e), 0)
+            if n >= 2:
+                flips.append(e)
+                self.net[(vt_id, e)] = n - 2
+            elif n == 1:
+                zeros.append(e)
+                self.net[(vt_id, e)] = 0
+        return flips, zeros
 
 
 def load_vote_type_labels(vt_ids: set[int]) -> dict[int, str]:
@@ -369,6 +413,7 @@ class Stats:
         self.reconstructed = 0
         self.edges_upvoted = 0
         self.edges_downvoted = 0
+        self.edges_zeroed = 0
         self.edges_cleared = 0
         self.lock = asyncio.Lock()
 
@@ -392,7 +437,7 @@ class Stats:
 
 
 async def counter_one(session, args, device, ride, vt_edges, vt_labels, graph,
-                      vote_mode, stats):
+                      vote_mode, gate, stats):
     """Bike-route one ride and downvote the overlap with its prior upvotes."""
     rid, start, end = ride
     n_up = sum(len(s) for s in vt_edges.values())
@@ -431,25 +476,12 @@ async def counter_one(session, args, device, ride, vt_edges, vt_labels, graph,
             await stats.bump_quiet(via_guided=1)
         bike_set = covered_edges(graph, all_edges, geom)
 
-    downs, cleared = 0, 0
-    any_overlap = False
-    ok = True
-    for vt_id, edges in vt_edges.items():
-        overlap = sorted(edges & bike_set)
-        if not overlap:
-            continue
-        any_overlap = True
-        label = vt_labels.get(vt_id)
-        if label is None:
-            ok = False
-            continue
-        if args.dry_run:
-            downs += len(overlap)
-            continue
+    async def cast(label, cast_edges, direction):
+        """POST one directional cast; returns the response body or None."""
         payload = {
             "map": args.map_slug, "mode": vote_mode, "vote_type": label,
-            "voter_id": rid or device, "edge_ids": overlap, "direction": -1,
-            "ip_from_voter": True,
+            "voter_id": rid or device, "edge_ids": cast_edges,
+            "direction": direction, "ip_from_voter": True,
         }
         headers = {}
         if rid is None:
@@ -467,35 +499,65 @@ async def counter_one(session, args, device, ride, vt_edges, vt_labels, graph,
                         if attempt < 2:
                             await asyncio.sleep(2 ** attempt)
                             continue
-                        ok = False
-                        break
+                        return None
                     body = await resp.json()
-                    if body.get("success"):
-                        downs += len(overlap)
-                        # Edges unvoted beyond the cast set: upvotes in touched
-                        # blocks that the bike route only partially covered.
-                        cleared += len(body.get("cleared", []))
-                    else:
-                        ok = False
-                    break
+                    return body if body.get("success") else None
             except Exception:
                 if attempt < 2:
                     await asyncio.sleep(2 ** attempt)
                     continue
+                return None
+
+    downs, zeroed, cleared = 0, 0, 0
+    any_overlap = False
+    ok = True
+    for vt_id, edges in vt_edges.items():
+        overlap = sorted(edges & bike_set)
+        if not overlap:
+            continue
+        # Tally gate: never push a (vote_type, edge) tally below zero — flip
+        # only edges that keep a positive tally, downgrade the last upvote to
+        # a removal, and leave already-zeroed edges alone entirely.
+        flips, zeros = gate.take(vt_id, overlap)
+        if not flips and not zeros:
+            continue
+        any_overlap = True
+        label = vt_labels.get(vt_id)
+        if label is None:
+            ok = False
+            continue
+        if args.dry_run:
+            downs += len(flips)
+            zeroed += len(zeros)
+            continue
+        if flips:
+            body = await cast(label, flips, -1)
+            if body is None:
                 ok = False
-                break
+            else:
+                downs += len(flips)
+                # Edges unvoted beyond the cast set: upvotes in touched
+                # blocks that the bike route only partially covered.
+                cleared += len(body.get("cleared", []))
+        if zeros:
+            body = await cast(label, zeros, 0)
+            if body is None:
+                ok = False
+            else:
+                zeroed += len(zeros)
+                cleared += len(body.get("cleared", []))
 
     if not any_overlap:
         await stats.bump(no_overlap=1, edges_upvoted=n_up)
     elif ok:
-        await stats.bump(countered=1, edges_upvoted=n_up,
-                         edges_downvoted=downs, edges_cleared=cleared)
+        await stats.bump(countered=1, edges_upvoted=n_up, edges_downvoted=downs,
+                         edges_zeroed=zeroed, edges_cleared=cleared)
     else:
         await stats.bump(vote_failed=1, edges_upvoted=n_up, edges_downvoted=downs,
-                         edges_cleared=cleared)
+                         edges_zeroed=zeroed, edges_cleared=cleared)
 
 
-async def run_async(args, work, vt_labels, graph, vote_mode) -> Stats:
+async def run_async(args, work, vt_labels, graph, vote_mode, gate) -> Stats:
     stats = Stats(len(work))
     sem = asyncio.Semaphore(args.concurrency)
     connector = aiohttp.TCPConnector(limit=args.concurrency * 2, ssl=False)
@@ -503,7 +565,7 @@ async def run_async(args, work, vt_labels, graph, vote_mode) -> Stats:
         async def throttled(device, ride, vt_edges):
             async with sem:
                 await counter_one(session, args, device, ride, vt_edges,
-                                  vt_labels, graph, vote_mode, stats)
+                                  vt_labels, graph, vote_mode, gate, stats)
 
         tasks = [asyncio.create_task(throttled(d, r, v)) for d, r, v in work]
         await asyncio.gather(*tasks)
@@ -568,6 +630,8 @@ def main():
     log(f"Loading upvotes for map '{args.map_slug}' ...")
     votes, marked = load_upvotes(args.map_slug)
     log(f"  {len(votes)} devices with upvotes ({len(marked)} import-marked)")
+    gate = NetGate(load_net_counts(args.map_slug))
+    log(f"  tally gate over {len(gate.net)} (vote_type, edge) pairs")
 
     log("Matching devices against cached ride zips ...")
     matched = match_rides(args.city, set(votes))
@@ -613,7 +677,7 @@ def main():
         f"{len(work)} rides (concurrency={args.concurrency}) ...")
 
     t0 = time.time()
-    stats = asyncio.run(run_async(args, work, vt_labels, graph, vote_mode))
+    stats = asyncio.run(run_async(args, work, vt_labels, graph, vote_mode, gate))
     log(f"Done in {time.time() - t0:.1f}s")
     log(f"  Rides processed:     {stats.processed}")
     log(f"  Via-guided routes:   {stats.via_guided} "
@@ -627,6 +691,8 @@ def main():
     log(f"  Edges upvoted:       {stats.edges_upvoted}")
     log(f"  Edges downvoted:     {stats.edges_downvoted} "
         f"({100 * stats.edges_downvoted / max(1, stats.edges_upvoted):.1f}% of upvotes)")
+    log(f"  Edges zeroed:        {stats.edges_zeroed} "
+        f"(last upvote removed instead of flipped — tally floor)")
     log(f"  Edges cleared:       {stats.edges_cleared} (partial-block clears)")
     if args.dry_run:
         log("  (dry run — nothing cast)")
