@@ -55,7 +55,7 @@ import {
 } from "./graphTopology";
 import { materializeBlocks, selectionVoteRows } from "../../utils/blockSelection";
 import { iconForLabel, iconSrc, mapStyleForTheme, pointTypeForLabel } from "../../themes";
-import { buildHeatRampStops, sampleHeatRamp, HEAT_PEAK_POS } from "../../mapStyles";
+import { buildHeatRampStops, buildPinRampStops, sampleHeatRamp, HEAT_PEAK_POS } from "../../mapStyles";
 import {
   getCachedTopology,
   setCachedTopology,
@@ -3975,7 +3975,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // (peak), never the incandescent tip — bright is the heatmap's job. The
     // bucketed color keys the icon cache so equally-hot pins of a label still
     // share one divIcon (and so a re-render doesn't churn setIcon every frame).
-    const rampStops = buildHeatRampStops(mapStyle.heat, mapStyle.basemap);
+    // buildPinRampStops: the heat ramp on dark basemaps, but accent-anchored on
+    // light ones, whose multiply ramps read as greys on a pin ring.
+    const rampStops = buildPinRampStops(mapStyle);
     const rankedCounts = Array.from(new Set(placed.map((m) => m.w.count).filter((c) => c > 0)))
       .sort((a, b) => a - b);
     const heatOf = (count: number): number =>
@@ -4331,7 +4333,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // RBTP family, capped at HEAT_PEAK_POS — see indicatorMarkers) so the two
     // marker kinds read as one visual system: each diamond gets its own hue
     // off the map's ramp by ranking, the hottest wearing peak.
-    const rampStops = buildHeatRampStops(mapStyle.heat, mapStyle.basemap);
+    const rampStops = buildPinRampStops(mapStyle);
     const rankedScores = Array.from(new Set(routeProposals.map((p) => p.score).filter((s) => s > 0)))
       .sort((a, b) => a - b);
     const heatOf = (score: number): number =>

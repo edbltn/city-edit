@@ -248,6 +248,29 @@ function parseRgb(s: string): [number, number, number] {
   return m ? [Number(m[0]), Number(m[1]), Number(m[2])] : [0, 0, 0];
 }
 
+/** Parse `#rrggbb` or `rgb(r, g, b)` into RGB components. Accent colors are
+ *  authored as hex; ramp colors as rgb() — the pin ramp needs both. */
+function parseColor(s: string): [number, number, number] {
+  const hex = s.match(/^#([0-9a-f]{6})$/i);
+  if (hex) {
+    const n = parseInt(hex[1], 16);
+    return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+  }
+  return parseRgb(s);
+}
+
+function mixRgb(
+  a: [number, number, number],
+  b: [number, number, number],
+  f: number,
+): [number, number, number] {
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * f),
+    Math.round(a[1] + (b[1] - a[1]) * f),
+    Math.round(a[2] + (b[2] - a[2]) * f),
+  ];
+}
+
 /** Ramp position of `peak` — the upper extreme of the NAMED ramp colors. The
  *  proposal pins cap their color spectrum here (a pin ring should wear the
  *  ramp's top color, not blaze); only the heatmap itself runs past it into the
@@ -265,6 +288,32 @@ export function buildHeatRampStops(heat: HeatRamp, basemap: Basemap): HeatRampSt
     { pos: 0.65, rgb: parseRgb(heat.hot) },
     { pos: HEAT_PEAK_POS, rgb: parseRgb(heat.peak) },
     { pos: 1, rgb: parseRgb(heatTip(heat, basemap)) },
+  ];
+}
+
+/**
+ * The ramp the TOP-PROPOSAL PINS sample for their glow ring + fill tint.
+ *
+ * Dark basemaps: the heat ramp itself — its additive colors read vivid against
+ * the dark paper, so a pin genuinely glows the hue the heatmap paints.
+ *
+ * Light basemaps: the multiply ramps are engineered to DARKEN the basemap —
+ * pale sand at the cold end, near-black plum/indigo at peak. Painted flat on a
+ * pin ring they read as greys and tans, never as the map's identity color. So
+ * light styles anchor the pin spectrum to the style's ACCENT instead: a pale
+ * accent tint at the lowest rank, climbing to the pure accent on the hottest
+ * pin (sampled at HEAT_PEAK_POS), with an ink-deepened accent above it for the
+ * unused tip. Rank still reads as color depth, and every pin wears the theme.
+ */
+export function buildPinRampStops(style: MapStyle): HeatRampStop[] {
+  if (style.basemap !== "light") return buildHeatRampStops(style.heat, style.basemap);
+  const accent = parseColor(style.accent);
+  const paper = parseColor(style.base);
+  const ink = parseColor(style.selection);
+  return [
+    { pos: 0, rgb: mixRgb(accent, paper, 0.55) },
+    { pos: HEAT_PEAK_POS, rgb: accent },
+    { pos: 1, rgb: mixRgb(accent, ink, 0.3) },
   ];
 }
 

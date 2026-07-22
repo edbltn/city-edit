@@ -29,6 +29,20 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-22-light-pin-theme-colors.html">
+    <div class="date">2026-07-22</div>
+    <h2>Light-mode pins wear the theme — accent-anchored glow + themed selection</h2>
+    <p>On light map styles (terracotta / trees / plum) the top-proposal pin glow rings sampled the
+    multiply heat ramp — colors engineered to darken the basemap, running pale sand to near-black
+    plum — and painted flat on a thin ring they read as greys and tans; a selected pin collapsed to
+    a white box under its ink double ring. New buildPinRampStops(): dark basemaps keep the vivid
+    heat ramp verbatim, light basemaps anchor the pin spectrum to the style's accent (pale tint at
+    the lowest rank → the exact accent on the hottest pin), and selected fills on light paper mix a
+    guaranteed baseline 12% of the accent so a zero-vote selection is never a bare white box.
+    Verified live: terracotta rings on new-york-buses (hottest = #C0674A exactly), dark maps
+    byte-identical.</p>
+  </a>
+
   <a class="entry" href="./2026-07-15-layer-anchor-failsafe.html">
     <div class="date">2026-07-15</div>
     <h2>Layer-anchor failsafes — the map can no longer stay misaligned</h2>

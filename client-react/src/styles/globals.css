@@ -1728,6 +1728,18 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .vote-type-indicator.is-selected .vote-type-indicator-outer,
 .vote-type-indicator.is-selected .vote-type-indicator-inner { stroke: var(--selected-ring, #fff); }
 [data-basemap="light"] .vote-type-indicator.is-selected { --selected-ring: #000; }
+/* On light paper a selected pin's fill was indistinguishable from plain white
+   (the heat tint alone is too faint, and a zero-vote selection has none), so
+   the ink double-ring read as a bare white box. Guarantee a baseline accent
+   tint — the map's identity color — on top of whatever heat tint it earned.
+   `--heat-color` falls back to the accent for the zero-vote case. */
+[data-basemap="light"] .vote-type-indicator.is-selected .vote-type-indicator-fill {
+  fill: color-mix(
+    in srgb,
+    var(--heat-color, var(--accent)) calc(12% + var(--heat, 0) * 26%),
+    var(--paper)
+  );
+}
 .vote-type-indicator.is-start .vote-type-indicator-outer,
 .vote-type-indicator.is-start .vote-type-indicator-inner { stroke: var(--color-start); }
 .vote-type-indicator.is-end .vote-type-indicator-outer,
