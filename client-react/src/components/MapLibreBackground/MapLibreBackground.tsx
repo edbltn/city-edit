@@ -117,6 +117,27 @@ function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification["pai
   };
 }
 
+/**
+ * Swap the blocks source onto the city's z/x/y tile template. The GL map is
+ * created at mount, but the map config (and with it CONFIG.blockTiles) resolves
+ * from the network — whichever comes second must reconcile, so buildStyle reads
+ * CONFIG at map creation and this rebinds on the map's `load` event. setTiles()
+ * reloads the source in place; tile bytes are identical to the pmtiles:// path,
+ * and feature-state lives on the source, so applied heat survives the swap.
+ */
+function rebindBlockTiles(map: maplibregl.Map): void {
+  const blockTiles = CONFIG.blockTiles;
+  if (!blockTiles) return;
+  const src = map.getSource("blocks") as maplibregl.VectorTileSource | undefined;
+  if (!src || typeof src.setTiles !== "function") return;
+  const template = blockTiles.template.startsWith("http")
+    ? blockTiles.template
+    : `${window.location.origin}${blockTiles.template}`;
+  if (src.tiles?.[0] === template) return;
+  src.setTiles([template]);
+  dlog("maplibre", "blocks source rebound to z/x/y template", template);
+}
+
 function buildStyle(
   _graphTilesUrl: string,
   blockTilesUrl: string,
@@ -278,6 +299,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         dlog("maplibre", "load — MapLibre is the base map (raster fallback unmounts)");
         debugState("maplibreLoaded", true);
         onReady?.(true);
+        rebindBlockTiles(map);
       });
       debugState("maplibreLoaded", false);
 
