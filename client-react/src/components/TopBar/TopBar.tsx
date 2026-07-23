@@ -7,6 +7,7 @@ import { HowItWorksModal } from "../HowItWorksModal";
 import { ModeSwitcher } from "../ModeSwitcher";
 import { VoteTypeSelector } from "../VoteTypeSelector";
 import { AddressSearch } from "../AddressSearch";
+import { Logo } from "../Logo";
 import type { LatLng } from "../../types";
 import "./TopBar.css";
 
@@ -111,7 +112,7 @@ export const TopBar = memo(function TopBar() {
   return (
     <header className="topbar">
       <h1 onClick={goToLanding} className="logo-container">
-        <img src="/logo.svg" alt="City Edit" className="logo-img" />
+        <Logo className="logo-img" />
       </h1>
       <div className="logo-mobile-banner" onClick={goToLanding}>
         <svg viewBox="-1 -1 233 24" xmlns="http://www.w3.org/2000/svg" className="logo-mobile-svg">
@@ -120,7 +121,7 @@ export const TopBar = memo(function TopBar() {
             if (!ch) return <rect key={i} x={x} y="0" width="22" height="22" fill="none" stroke="#d4d4d4" strokeWidth="1.5" opacity="0.15"/>;
             return <g key={i}>
               <rect x={x} y="0" width="22" height="22" fill="none" stroke="#d4d4d4" strokeWidth="1.5"/>
-              <text x={x + 11} y="11" fontFamily="monospace" fontSize="14" fontWeight="600" fill="#d4d4d4" textAnchor="middle" dominantBaseline="central">{ch}</text>
+              <text x={x + 11} y="11" fontFamily="var(--font-main)" fontSize="14" fontWeight="600" fill="#d4d4d4" textAnchor="middle" dominantBaseline="central">{ch}</text>
             </g>;
           })}
         </svg>

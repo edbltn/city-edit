@@ -29,19 +29,19 @@
 
   <!-- C -->
   <rect x="1" y="31" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5"/>
-  <text x="13" y="43" font-family="monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">C</text>
+  <text x="13" y="43" font-family="'Red Hat Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">C</text>
 
   <!-- I -->
   <rect x="31" y="31" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5"/>
-  <text x="43" y="43" font-family="monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">I</text>
+  <text x="43" y="43" font-family="'Red Hat Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">I</text>
 
   <!-- T -->
   <rect x="61" y="31" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5"/>
-  <text x="73" y="43" font-family="monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">T</text>
+  <text x="73" y="43" font-family="'Red Hat Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">T</text>
 
   <!-- Y -->
   <rect x="91" y="31" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.3"/>
-  <text x="103" y="43" font-family="monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">Y</text>
+  <text x="103" y="43" font-family="'Red Hat Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">Y</text>
 
   <!-- Empty cells, cols 5-6 -->
   <rect x="121" y="31" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.15"/>
@@ -55,19 +55,19 @@
 
   <!-- E -->
   <rect x="61" y="61" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.3"/>
-  <text x="73" y="73" font-family="monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">E</text>
+  <text x="73" y="73" font-family="'Red Hat Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">E</text>
 
   <!-- D -->
   <rect x="91" y="61" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5"/>
-  <text x="103" y="73" font-family="monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">D</text>
+  <text x="103" y="73" font-family="'Red Hat Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">D</text>
 
   <!-- I -->
   <rect x="121" y="61" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5"/>
-  <text x="133" y="73" font-family="monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">I</text>
+  <text x="133" y="73" font-family="'Red Hat Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">I</text>
 
   <!-- T -->
   <rect x="151" y="61" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5"/>
-  <text x="163" y="73" font-family="monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">T</text>
+  <text x="163" y="73" font-family="'Red Hat Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central">T</text>
 
   <!-- Row 4: [ ] [X] [ ] [ ] [ ] [ ] -->
 
@@ -86,5 +86,5 @@
 
   <!-- BETA (single square, col 6) -->
   <rect x="151" y="91" width="24" height="24" fill="none" stroke="#d4d4d4" stroke-width="1.5" opacity="0.3"/>
-  <text x="163" y="103" font-family="monospace" font-size="7.5" font-weight="400" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central" textLength="18" lengthAdjust="spacingAndGlyphs">BETA</text>
+  <text x="163" y="103" font-family="'Red Hat Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="7.5" font-weight="400" fill="#d4d4d4" text-anchor="middle" dominant-baseline="central" textLength="18" lengthAdjust="spacingAndGlyphs">BETA</text>
 </svg>

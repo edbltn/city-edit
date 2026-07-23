@@ -4,6 +4,7 @@ import {
 } from "../../themes";
 import { CONFIG } from "../../config";
 import { ProposeMapModal } from "../ProposeMap/ProposeMapModal";
+import { Logo } from "../Logo";
 import "./Landing.css";
 
 interface ApiMap {
@@ -144,7 +145,7 @@ export function Landing() {
     <div className="landing">
       <header className="landing-header">
         <a href={homeHref} className="landing-logo-link" aria-label="City Edit home">
-          <img src="/logo.svg" alt="City Edit" className="landing-logo" />
+          <Logo className="landing-logo" />
         </a>
         <p className="landing-tagline">Redraw your city.</p>
       </header>
