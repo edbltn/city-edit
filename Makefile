@@ -7,7 +7,7 @@ SERVICE := desire-path-mapper
 REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/desire-path-mapper/app
 SCREENSHOT_REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/desire-path-mapper/screenshot
 
-.PHONY: help dev redis flask client graphs tiles docker push deploy test test-frontend test-backend test-cloud tf-init tf-plan tf-apply logs clean monitoring monitoring-down loadtest-local loadtest-prod loadtest-verify
+.PHONY: help dev deps deps-down flask client graphs tiles docker push deploy test test-frontend test-backend test-cloud tf-init tf-plan tf-apply logs clean monitoring monitoring-down loadtest-local loadtest-prod loadtest-verify
 
 # Python in the server venv (no activation needed inside make recipes)
 PY := env/bin/python
@@ -23,15 +23,16 @@ LOCUST_FLAGS := $(if $(USERS),--headless --users $(USERS) --spawn-rate $(or $(RA
 help:
 	@echo "Usage: make <target>"
 	@echo ""
-	@echo "Local Development:"
-	@echo "  dev          Build graphs+tiles if needed, then run redis+flask+client (no Docker)"
+	@echo "Local Development (hybrid: Docker deps + host Flask/Vite):"
+	@echo "  dev          Build graphs+tiles if needed, start Docker deps, run flask+client on host"
+	@echo "  deps         Start backing services in Docker (redis, postgres, osrm on :5005)"
+	@echo "  deps-down    Stop the Docker backing services"
 	@echo "  graphs       Build any missing per-city walk graphs"
 	@echo "  tiles        Build per-city PMTiles (dev profile; matches prod content)"
-	@echo "  redis        Start Redis server"
-	@echo "  flask        Start Flask backend"
-	@echo "  client       Start frontend dev server"
+	@echo "  flask        Start Flask backend on the host"
+	@echo "  client       Start frontend dev server on the host"
 	@echo ""
-	@echo "Docker:"
+	@echo "Docker (full stack, alternative to the hybrid loop):"
 	@echo "  docker       Run with Docker Compose"
 	@echo "  docker-dev   Run with Docker Compose (dev mode)"
 	@echo ""
@@ -63,8 +64,13 @@ help:
 	@echo "  logs         Tail Cloud Run logs"
 
 # Local Development
-redis:
-	redis-server
+# Backing services in Docker; the osrmport override publishes OSRM on host :5005
+# (not :5000 — macOS AirPlay squats it) for the host-run Flask.
+deps:
+	docker compose -f docker-compose.yml -f docker-compose.osrmport.yml up -d redis postgres osrm
+
+deps-down:
+	docker compose stop redis postgres osrm
 
 flask:
 	cd server && source env/bin/activate && python app.py
@@ -82,11 +88,10 @@ graphs:
 tiles: graphs
 	cd server && $(PY) build_pmtiles.py --all --profile dev
 
-# Fast non-Docker local stack: ensure graphs + tiles exist, then run redis (if not
-# already up), flask, and the Vite client. Ctrl-C stops flask too; redis is left
-# running (use `make clean` to stop it).
-dev: tiles
-	@redis-cli ping >/dev/null 2>&1 || { echo "Starting redis..."; redis-server --daemonize yes; }
+# The hybrid dev loop: ensure graphs + tiles exist, start the Docker backing
+# services, then run flask + the Vite client on the host. Ctrl-C stops flask
+# too; the Docker services keep running (`make deps-down` to stop them).
+dev: tiles deps
 	@echo "Starting flask (background) + client (foreground)..."
 	@cd server && $(PY) app.py & echo $$! > /tmp/cityedit-flask.pid
 	@trap 'kill `cat /tmp/cityedit-flask.pid` 2>/dev/null; rm -f /tmp/cityedit-flask.pid' EXIT; \
@@ -178,8 +183,7 @@ screenshot-run:
 	gcloud run jobs execute map-screenshot-prod --region=$(REGION) --project=$(PROJECT_ID)
 
 # Utilities
-clean:
-	-pkill -f "redis-server" 2>/dev/null || true
+clean: deps-down
 	-pkill -f "python app.py" 2>/dev/null || true
-	-pkill -f "bun run dev" 2>/dev/null || true
+	-pkill -f "vite" 2>/dev/null || true
 	@echo "Stopped all services"

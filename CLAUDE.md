@@ -119,16 +119,21 @@ Services: `nginx` (port 8080), `flask` (internal, 3 replicas), `osrm` (internal,
 
 ## Local Development
 
-```bash
-# Terminal 1: Redis
-redis-server
+Hybrid loop (canonical — see the README Quickstart): backing services in
+Docker, Flask + Vite on the host for fast edit cycles.
 
-# Terminal 2: Flask
+```bash
+# Backing services (Redis :6379, Postgres :5432, OSRM → host :5005)
+make deps   # = docker compose -f docker-compose.yml -f docker-compose.osrmport.yml up -d redis postgres osrm
+
+# Flask on the host (restart after server/*.py edits; SKIP_PREWARM=1 for fast boots)
 cd server && source env/bin/activate && python app.py
 
-# Terminal 3: Client (auto-reloads on file changes)
+# Client on the host (hot-reloads on file changes)
 cd client-react && npm run dev
 ```
+
+Or all at once: `make dev` (builds missing graphs/tiles first).
 
 ## Connecting to the Prod Database
 
