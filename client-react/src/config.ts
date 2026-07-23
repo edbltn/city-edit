@@ -19,6 +19,11 @@ const wsProtocol =
     ? "wss:"
     : "ws:";
 
+// Dev API host follows the page's hostname (not a hardcoded localhost) so the
+// dev server is testable from a phone on the same network: open the Network
+// URL vite prints and API/WS/tiles resolve to this machine automatically.
+const devHost = typeof window !== "undefined" ? window.location.hostname : "localhost";
+
 export const CONFIG = {
   // Active map slug (set at bootstrap from the URL; empty = legacy single-map mode)
   mapSlug: "",
@@ -55,7 +60,7 @@ export const CONFIG = {
   // PMTiles — graph overlay tiles (built from OSM walk graph). Used only as
   // the fallback when the server doesn't provide a z/x/y tile template.
   graphTilesUrl: isLocalDev
-    ? "http://localhost:5001/api/tiles/graph.pmtiles"
+    ? `http://${devHost}:5001/api/tiles/graph.pmtiles`
     : "/tiles/graph.pmtiles",
 
   // z/x/y vector-tile source for the graph (browser/CDN cacheable, unlike
@@ -64,9 +69,9 @@ export const CONFIG = {
   graphTiles: null as { template: string; minzoom: number; maxzoom: number } | null,
 
   // API & Socket URLs - auto-detect based on environment
-  apiUrl: isLocalDev ? "http://localhost:5001/api" : "/api",
+  apiUrl: isLocalDev ? `http://${devHost}:5001/api` : "/api",
   wsUrl: isLocalDev
-    ? "ws://localhost:5001/ws"
+    ? `ws://${devHost}:5001/ws`
     : `${wsProtocol}//${typeof window !== "undefined" ? window.location.host : ""}/ws`,
 };
 
@@ -99,13 +104,13 @@ export function applyCityConfig(city: CityConfig): void {
   CONFIG.minZoom = minZoom;
   CONFIG.maxZoom = maxZoom;
   if (tilesPath) {
-    CONFIG.graphTilesUrl = isLocalDev ? `http://localhost:5001${tilesPath}` : tilesPath;
+    CONFIG.graphTilesUrl = isLocalDev ? `http://${devHost}:5001${tilesPath}` : tilesPath;
   }
   const tiles = city.tiles;
   if (tiles?.template) {
     CONFIG.graphTiles = {
       ...tiles,
-      template: isLocalDev ? `http://localhost:5001${tiles.template}` : tiles.template,
+      template: isLocalDev ? `http://${devHost}:5001${tiles.template}` : tiles.template,
     };
   }
 }
