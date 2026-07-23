@@ -100,6 +100,7 @@ export function usePathDrag({
   const { snapToGraph, setDragging } = useGraphSnap();
   const isDraggingRef = useRef(false);
   const dragOriginRef = useRef<LatLng | null>(null);
+  const dragStartClientRef = useRef<{ x: number; y: number } | null>(null);
   const [hoverLatLng, setHoverLatLng] = useState<LatLng | null>(null);
 
   // This instance's identity for the module-level hover/drag claims, and its
@@ -176,13 +177,21 @@ export function usePathDrag({
     (e: MouseEvent | TouchEvent) => {
       if (isDraggingRef.current && onSegmentDrag) {
         const pos = getEventPosition(e);
-        const rect = map.getContainer().getBoundingClientRect();
-        const latLng = map.containerPointToLatLng({ x: pos.x - rect.left, y: pos.y - rect.top });
+        // A press-and-release without real movement is a tap, not a drag —
+        // inserting a waypoint at the grab point would be a no-op for the
+        // route but adds a stray marker + recalc (easy to trigger on touch,
+        // e.g. a double-tap landing on the fresh path).
+        const startPos = dragStartClientRef.current;
+        const movedPx = startPos ? Math.hypot(pos.x - startPos.x, pos.y - startPos.y) : Infinity;
+        if (movedPx >= 8) {
+          const rect = map.getContainer().getBoundingClientRect();
+          const latLng = map.containerPointToLatLng({ x: pos.x - rect.left, y: pos.y - rect.top });
 
-        // Snap to nearest graph node/edge
-        const snapped = snapToGraph(latLng.lat, latLng.lng);
-        const finalPos = snapped ?? latLng;
-        onSegmentDrag(segmentIndex, finalPos);
+          // Snap to nearest graph node/edge
+          const snapped = snapToGraph(latLng.lat, latLng.lng);
+          const finalPos = snapped ?? latLng;
+          onSegmentDrag(segmentIndex, finalPos);
+        }
       }
 
       // Cleanup
@@ -192,6 +201,7 @@ export function usePathDrag({
       endDrag();
       removeOverlayFeature(UTIL_SOURCE_ID, trailKeyRef.current);
       dragOriginRef.current = null;
+      dragStartClientRef.current = null;
       setDesirePathDimmed(false);
       document.body.classList.remove("dragging-from-path");
       map.getCanvas().style.cursor = "";
@@ -210,6 +220,7 @@ export function usePathDrag({
     (clientPos: { x: number; y: number }, latlng: LatLng) => {
       isDraggingRef.current = true;
       dragActive = true;
+      dragStartClientRef.current = clientPos;
       setDragging(true);
       setDesirePathDimmed(true);
       document.body.classList.add("dragging-from-path");

@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { isWithinMappedBounds } from "../utils/bounds";
 import type { InputMode } from "../themes";
 import type { LatLng, RoutePoint } from "../types";
@@ -57,11 +57,22 @@ export function useMapClick({
   suppressNextClick,
   onClearSuppress,
 }: UseMapClickOptions) {
+  // Placing the end point re-arms the Start tool immediately, so the second
+  // tap of an accidental double-tap used to wipe the fresh route and drop a
+  // new start pin on top of the end. Ignore map clicks briefly after an end
+  // placement; intentional new routes (taps later than this) are unaffected.
+  const END_PLACEMENT_COOLDOWN_MS = 700;
+  const lastEndPlacementRef = useRef(0);
+
   const handleMapClick = useCallback(
     (latlng: LatLng) => {
       // Skip this click if suppressed (after ghost pin drop)
       if (suppressNextClick?.()) {
         onClearSuppress?.();
+        return;
+      }
+
+      if (Date.now() - lastEndPlacementRef.current < END_PLACEMENT_COOLDOWN_MS) {
         return;
       }
 
@@ -97,6 +108,7 @@ export function useMapClick({
 
       onUpdateEnd(latlng);
       onSetActiveTool("start");
+      lastEndPlacementRef.current = Date.now();
     },
     [
       state.start.coords,
