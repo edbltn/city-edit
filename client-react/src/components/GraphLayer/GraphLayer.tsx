@@ -700,6 +700,17 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     let cancelled = false;
 
     (async () => {
+      // 0. Kick off the authoritative vote fetch immediately — it doesn't
+      //    depend on topology, so it downloads in parallel with the (much
+      //    larger) topology fetch instead of after it.
+      const votesPromise = fetch(
+        `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`
+      ).then((r) => {
+        if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);
+        return r.json();
+      });
+      votesPromise.catch(() => {}); // handled below; avoid unhandled rejection
+
       // 1. Resolve the graph version, then load topology from IndexedDB when it
       //    matches — skipping the multi-MB download and JSON parse entirely.
       let topology: GraphData | null = null;
@@ -752,14 +763,10 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         }
       }
 
-      // 3. Authoritative vote fetch — replaces the cached snapshot and replays
-      //    any deltas that arrived while the fetch was in flight.
+      // 3. Authoritative vote fetch (started in step 0) — replaces the cached
+      //    snapshot and replays any deltas that arrived while it was in flight.
       try {
-        const r = await fetch(
-          `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`
-        );
-        if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);
-        const voteData = await r.json();
+        const voteData = await votesPromise;
         if (cancelled) return;
         graphDataRef.current = { ...topologyRef.current!, ...voteData };
         lastRevRef.current = voteData.rev ?? 0;

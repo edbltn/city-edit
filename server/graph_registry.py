@@ -8,6 +8,7 @@ blob (with ETag) for /api/graph-topology. An LRU bound keeps memory in check whe
 several cities are active. OSRM routers are likewise created per city, each
 pointing at that city's OSRM container.
 """
+import gzip
 import hashlib
 import json
 import logging
@@ -42,6 +43,7 @@ class CityGraph:
         self.osm_to_graph_idx: dict = {}
         self.node_pair_to_edge: dict = {}
         self.topology_json: str | None = None
+        self.topology_gzip: bytes | None = None
         self.topology_etag: str | None = None
 
     def ensure_loaded(self):
@@ -86,6 +88,10 @@ class CityGraph:
         edges_slim = [[e[0], e[1], e[2]] for e in edges]
         topology_json = json.dumps({"nodes": nodes, "edges": edges_slim})
         topology_etag = '"' + hashlib.sha256(topology_json.encode()).hexdigest()[:16] + '"'
+        # Pre-compressed variant served to gzip-accepting clients (~4-5x
+        # smaller; coordinate JSON compresses well). Built once per load so
+        # neither Flask nor nginx re-compresses ~24MB per cold visitor.
+        topology_gzip = gzip.compress(topology_json.encode(), compresslevel=6)
 
         self.nodes = nodes
         self.edges = edges
@@ -95,6 +101,7 @@ class CityGraph:
         self.osm_to_graph_idx = data.get("osm_to_graph_idx", {})
         self.node_pair_to_edge = data.get("node_pair_to_edge", {})
         self.topology_json = topology_json
+        self.topology_gzip = topology_gzip
         self.topology_etag = topology_etag
         self._loaded = True
 
@@ -132,6 +139,7 @@ class CityGraph:
         self.osm_to_graph_idx = {}
         self.node_pair_to_edge = {}
         self.topology_json = None
+        self.topology_gzip = None
         self.topology_etag = None
 
 

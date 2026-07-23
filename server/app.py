@@ -1,3 +1,4 @@
+import gzip
 import json
 import logging
 import os
@@ -148,8 +149,13 @@ _vote_cache: dict[str, dict] = {}
 _proposal_vote_lock = threading.Lock()
 
 
-def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
-    """Build the /api/graph-votes JSON for one map+mode, cached by its revision.
+def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> dict:
+    """Build the /api/graph-votes payload for one map+mode, cached by its revision.
+
+    Returns the cache entry: {"rev", "body" (JSON str), "gz" (gzipped bytes)}.
+    The gzipped variant exists because the vote arrays are mostly zeros and
+    compress ~100x — worth caching once per revision rather than re-encoding
+    per request.
 
     `mode` scopes the legend and heatmap to a single vote namespace (e.g.
     "walkways") so proposals cast under other modes on the same map don't leak
@@ -159,7 +165,7 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
     cache_key = f"{rmap.slug}:{mode}" if mode else rmap.slug
     cached = _vote_cache.get(cache_key)
     if cached and cached["rev"] == rev:
-        return cached["body"]
+        return cached
 
     rmap.graph.ensure_loaded()
     votes = vote_store.read_all(redis_client, rmap.slug)
@@ -172,8 +178,9 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
     arrays["vote_types"] = {str(k): v for k, v in vote_store.all_vote_types().items()}
     body = json.dumps(arrays)
 
-    _vote_cache[cache_key] = {"rev": rev, "body": body}
-    return body
+    entry = {"rev": rev, "body": body, "gz": gzip.compress(body.encode(), compresslevel=6)}
+    _vote_cache[cache_key] = entry
+    return entry
 
 
 def _populate_redis():
@@ -892,11 +899,22 @@ def graph_topology():
         resp = app.response_class(status=304)
         resp.headers["ETag"] = etag
         resp.headers["Cache-Control"] = "public, max-age=86400"
+        resp.headers["Vary"] = "Accept-Encoding"
         return resp
 
-    resp = app.response_class(
-        response=rmap.graph.topology_json, status=200, mimetype="application/json",
-    )
+    # Serve the pre-compressed variant to gzip-accepting clients (~5MB instead
+    # of ~24MB for NYC). Compressed once at graph load; see graph_registry.
+    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "")
+    if accepts_gzip and rmap.graph.topology_gzip is not None:
+        resp = app.response_class(
+            response=rmap.graph.topology_gzip, status=200, mimetype="application/json",
+        )
+        resp.headers["Content-Encoding"] = "gzip"
+    else:
+        resp = app.response_class(
+            response=rmap.graph.topology_json, status=200, mimetype="application/json",
+        )
+    resp.headers["Vary"] = "Accept-Encoding"
     resp.headers["Cache-Control"] = "public, max-age=86400"
     if etag:
         resp.headers["ETag"] = etag
@@ -922,11 +940,22 @@ def graph_votes():
         return resp
 
     try:
-        body = _build_graph_votes_body(rmap, mode)
+        entry = _build_graph_votes_body(rmap, mode)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    resp = app.response_class(response=body, status=200, mimetype="application/json")
+    # Vote arrays are mostly zeros — the cached gzip variant is ~100x smaller.
+    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "")
+    if accepts_gzip and entry.get("gz") is not None:
+        resp = app.response_class(
+            response=entry["gz"], status=200, mimetype="application/json",
+        )
+        resp.headers["Content-Encoding"] = "gzip"
+    else:
+        resp = app.response_class(
+            response=entry["body"], status=200, mimetype="application/json",
+        )
+    resp.headers["Vary"] = "Accept-Encoding"
     resp.headers["Cache-Control"] = "public, max-age=5"
     resp.headers["ETag"] = etag
     return resp
