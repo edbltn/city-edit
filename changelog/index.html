@@ -29,6 +29,22 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-23-perf-interim-borrows.html">
+    <div class="date">2026-07-23</div>
+    <h2>Borrowing perf from Brook's perf-interim PR #7 — early heat, cacheable tiles, and the races the review caught</h2>
+    <p>A borrow pass over the diverged perf-interim branch: nine hand-ported commits. Block heat now
+    paints from the ~57KB sparse vote body <em>before</em> the multi-MB topology decodes (replacing
+    his /api/heat endpoint with a client-only resequencing), spatial-index builds yield to the main
+    thread in 120k chunks, and block tiles get a cacheable z/x/y endpoint (204 empties, hot-tile LRU,
+    mtime_ns ?v, atomic bakes) behind an nginx proxy_cache with aligned nginx/gunicorn keepalives.
+    His gzip/WS-fanout/PG-pooling chunks were skipped as strict ancestors of what we ship; the
+    Leaflet-deletion migration and stable-eid registry were deferred. Verifying the port surfaced a
+    pre-existing prod bug (SWR map_get served an un-enriched city after the first TTL) and the review
+    confirmed three races — all fixed. Plus his Playwright/WS perf harness adapted to our endpoints,
+    and four mobile fixes (retrying reverse-geocode, double-tap end guard, touch snap-marker guard,
+    devHost-aware dev URLs).</p>
+  </a>
+
   <a class="entry" href="./2026-07-23-coldload-swr.html">
     <div class="date">2026-07-23</div>
     <h2>Cutting the cold load — prewarm the right key, revalidate in the background, fetch in parallel</h2>
