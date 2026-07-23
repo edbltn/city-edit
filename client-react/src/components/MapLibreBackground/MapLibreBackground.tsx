@@ -16,6 +16,8 @@ import { setMapLibreStatus } from "../../map/maplibreStatus";
 import { setMapLibreMap } from "../../map/maplibreInstance";
 import { HEAT_SOURCE_ID } from "../GraphLayer/maplibreHeat";
 import { HIGHLIGHT_SOURCE_ID } from "../GraphLayer/maplibreHighlight";
+import { ROUTE_SOURCE_ID, DESIRE_SOURCE_ID } from "../../map/maplibreOverlays";
+import { ROUTE_COLORS } from "../../colors";
 
 // Matches Leaflet's zoom animation duration (0.25s CSS transition) so the
 // MapLibre camera glides in step with Leaflet's animated zoom.
@@ -110,6 +112,92 @@ function heatLayers(heat: HeatRamp): maplibregl.LayerSpecification[] {
   ] as maplibregl.LayerSpecification[];
 }
 
+// Votable-region scrim geometry from CONFIG.mappedBounds: a world-sized outer
+// ring with the city bbox as a hole (dims outside), plus the bbox ring itself
+// for the dashed boundary hairline.
+function boundaryFC(): GeoJSON.FeatureCollection {
+  const { sw, ne } = CONFIG.mappedBounds;
+  const hole: [number, number][] = [
+    [sw.lon, sw.lat],
+    [sw.lon, ne.lat],
+    [ne.lon, ne.lat],
+    [ne.lon, sw.lat],
+    [sw.lon, sw.lat],
+  ];
+  const world: [number, number][] = [
+    [-180, 85], [180, 85], [180, -85], [-180, -85], [-180, 85],
+  ];
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        properties: { part: "scrim" },
+        geometry: { type: "Polygon", coordinates: [world, hole] },
+      },
+      {
+        type: "Feature",
+        properties: { part: "edge" },
+        geometry: { type: "LineString", coordinates: hole },
+      },
+    ],
+  };
+}
+
+// Desire-path ring layers — same hollow-ring construction as the selection
+// highlight (the old SVG erode filter): 1.5px borders around a 4px gap plus a
+// faint interior, in the desire color.
+function desireLayers(): maplibregl.LayerSpecification[] {
+  const round = { "line-cap": "round" as const, "line-join": "round" as const };
+  return [
+    {
+      id: "desire-fill",
+      type: "line",
+      source: DESIRE_SOURCE_ID,
+      layout: round,
+      paint: {
+        "line-color": ROUTE_COLORS.desire.middle,
+        "line-width": 4,
+        "line-opacity": 0.12,
+      },
+    },
+    {
+      id: "desire-ring",
+      type: "line",
+      source: DESIRE_SOURCE_ID,
+      layout: round,
+      paint: {
+        "line-color": ROUTE_COLORS.desire.middle,
+        "line-width": 1.5,
+        "line-gap-width": 4,
+      },
+    },
+  ] as maplibregl.LayerSpecification[];
+}
+
+// Walk-route strokes (glow/edge/core). Leaflet dashArray "5, 7" is in px;
+// MapLibre line-dasharray is in multiples of line-width, hence the divisions.
+function routeLayers(): maplibregl.LayerSpecification[] {
+  const c = ROUTE_COLORS.walk;
+  const stroke = (id: string, color: string, width: number, opacity: number) => ({
+    id,
+    type: "line" as const,
+    source: ROUTE_SOURCE_ID,
+    layout: { "line-cap": "butt" as const, "line-join": "round" as const },
+    paint: {
+      "line-color": color,
+      "line-width": width,
+      "line-opacity": opacity,
+      "line-dasharray": [5 / width, 7 / width],
+    },
+  });
+  return [
+    stroke("route-glow", c.glow, 12, 0.4),
+    stroke("route-edge", c.edge, 8, 0.9),
+    stroke("route-core", c.core, 5, 1),
+  ] as maplibregl.LayerSpecification[];
+}
+
 function buildStyle(
   graphTilesUrl: string,
   tiles: string[],
@@ -142,6 +230,22 @@ function buildStyle(
       [HIGHLIGHT_SOURCE_ID]: {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
+      },
+      // Route + desire-path visuals, pushed by their React components
+      // (see map/maplibreOverlays.ts).
+      [ROUTE_SOURCE_ID]: {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      },
+      [DESIRE_SOURCE_ID]: {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      },
+      // Votable-region scrim: world ring with the city bbox punched out
+      // (GeoJSON polygon hole), plus the bbox ring for the dashed hairline.
+      boundary: {
+        type: "geojson",
+        data: boundaryFC(),
       },
     },
     layers: [
@@ -178,6 +282,28 @@ function buildStyle(
         layout: {
           "line-cap": "round",
           "line-join": "round",
+        },
+      },
+      // Votable-region scrim + dashed boundary hairline. Sits above the graph
+      // baseline but below heat/highlights/routes, matching the old Leaflet
+      // pane order (boundary 405 < graph 430 < desire 440 < route 450).
+      {
+        id: "boundary-scrim",
+        type: "fill",
+        source: "boundary",
+        filter: ["==", ["get", "part"], "scrim"],
+        paint: { "fill-color": "#000", "fill-opacity": 0.12 },
+      },
+      {
+        id: "boundary-edge",
+        type: "line",
+        source: "boundary",
+        filter: ["==", ["get", "part"], "edge"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "rgba(255, 255, 255, 0.35)",
+          "line-width": 1.5,
+          "line-dasharray": [4, 4],
         },
       },
       // Vote heatmap passes (halo → warm → hot → peak) above the baseline network
@@ -224,6 +350,10 @@ function buildStyle(
           "circle-stroke-opacity": ["get", "alpha"] as unknown as number,
         },
       },
+      // Desire path (selection boundary ring), then the walk route on top —
+      // same order as the Leaflet desirePathPane/routePane stack.
+      ...desireLayers(),
+      ...routeLayers(),
     ],
     glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
   };

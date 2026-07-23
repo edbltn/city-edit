@@ -16,6 +16,7 @@ import { useEffect } from "react";
 import { useMap } from "react-leaflet";
 import L from "leaflet";
 import { CONFIG } from "../../config";
+import { useMapLibreLive } from "../../map/maplibreStatus";
 
 const PANE_NAME = "boundaryPane";
 
@@ -50,8 +51,13 @@ const scrimStyle: L.PolylineOptions = {
 
 export function BoundaryLayer() {
   const map = useMap();
+  const live = useMapLibreLive();
 
   useEffect(() => {
+    // GL path: the boundary-scrim/boundary-edge layers in MapLibreBackground
+    // render this from the same CONFIG.mappedBounds. Leaflet polygon is the
+    // no-WebGL fallback only.
+    if (live) return;
     if (!map.getPane(PANE_NAME)) {
       map.createPane(PANE_NAME);
       const pane = map.getPane(PANE_NAME);
@@ -75,7 +81,7 @@ export function BoundaryLayer() {
     return () => {
       scrim.remove();
     };
-  }, [map]);
+  }, [map, live]);
 
   return null;
 }

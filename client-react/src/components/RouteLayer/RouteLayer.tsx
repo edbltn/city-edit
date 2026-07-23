@@ -4,8 +4,33 @@ import { GeoJSON, Marker, useMap } from "react-leaflet";
 import { ROUTE_COLORS } from "../../colors";
 import { kiteGhostIcon } from "../../utils/kiteIcon";
 import { usePathDrag } from "../../hooks";
+import { useMapLibreLive } from "../../map/maplibreStatus";
+import {
+  ROUTE_SOURCE_ID,
+  DESIRE_SOURCE_ID,
+  setOverlayFeature,
+  removeOverlayFeature,
+} from "../../map/maplibreOverlays";
 import type { RouteGeometry, LatLng, SplitDesirePath } from "../../types";
 import type { PathOptions } from "leaflet";
+
+/**
+ * While the GL basemap is live, mirror this layer's geometry into a MapLibre
+ * source (styled by MapLibreBackground) instead of rendering Leaflet SVG.
+ * Interactive hit-lines and markers stay in Leaflet until the camera flip.
+ */
+function useOverlayGeometry(
+  sourceId: string,
+  key: string,
+  geometry: RouteGeometry,
+  live: boolean,
+): void {
+  useEffect(() => {
+    if (!live) return;
+    setOverlayFeature(sourceId, key, geometry as unknown as GeoJSON.Geometry);
+    return () => removeOverlayFeature(sourceId, key);
+  }, [sourceId, key, geometry, live]);
+}
 
 const hoverGhostIcon = kiteGhostIcon(ROUTE_COLORS.desire.middle);
 
@@ -147,8 +172,11 @@ interface RouteLayerProps {
 }
 
 export function RouteLayer({ geometry }: RouteLayerProps) {
+  const live = useMapLibreLive();
   const styles = useMemo(() => getRouteStyles(), []);
   const geometryKey = useMemo(() => makeGeometryKey(geometry.coordinates), [geometry]);
+
+  useOverlayGeometry(ROUTE_SOURCE_ID, `route-${geometryKey}`, geometry, live);
 
   const geojsonData = useMemo(
     () => ({
@@ -158,6 +186,8 @@ export function RouteLayer({ geometry }: RouteLayerProps) {
     }),
     [geometry]
   );
+
+  if (live) return null;
 
   return (
     <>
@@ -185,6 +215,7 @@ interface DesirePathLayerProps {
 
 export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, onPathHoverChange }: DesirePathLayerProps) {
   const map = useMap();
+  const live = useMapLibreLive();
   const { isDraggingRef, hoverLatLng, handleStart, handleHoverMove, handleHoverOut } =
     usePathDrag({ map, geometry, segmentIndex, onSegmentDrag });
 
@@ -208,6 +239,8 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, onP
   const visualStyles = useMemo(() => getDesirePathStyles(), []);
   const geometryKey = useMemo(() => makeGeometryKey(geometry.coordinates), [geometry]);
 
+  useOverlayGeometry(DESIRE_SOURCE_ID, `desire-${segmentIndex}-${geometryKey}`, geometry, live);
+
   const geojsonData = useMemo(
     () => ({
       type: "Feature" as const,
@@ -219,8 +252,9 @@ export function DesirePathLayer({ geometry, segmentIndex = 0, onSegmentDrag, onP
 
   return (
     <>
-      {/* Visual layer with contour filter (SVG renderer for filter support) */}
-      {visualStyles.map((style, index) => (
+      {/* Visual layer — GL desire-ring layers when live; Leaflet SVG with the
+          contour filter as the no-WebGL fallback */}
+      {!live && visualStyles.map((style, index) => (
         <GeoJSON
           key={`desire-visual-${index}-${geometryKey}`}
           data={geojsonData}
@@ -275,6 +309,7 @@ interface SplitDesirePathLayerProps {
 
 export function SplitDesirePathLayer({ splitPath, onSegmentDrag, onPathHoverChange }: SplitDesirePathLayerProps) {
   const map = useMap();
+  const live = useMapLibreLive();
   const { isDraggingRef, hoverLatLng, handleStart, handleHoverMove, handleHoverOut } =
     usePathDrag({ map, geometry: splitPath.geometry, segmentIndex: splitPath.segmentIndex, onSegmentDrag });
 
@@ -300,6 +335,8 @@ export function SplitDesirePathLayer({ splitPath, onSegmentDrag, onPathHoverChan
     [splitPath]
   );
 
+  useOverlayGeometry(DESIRE_SOURCE_ID, `split-${splitPath.id}-${geometryKey}`, splitPath.geometry, live);
+
   const geojsonData = useMemo(
     () => ({
       type: "Feature" as const,
@@ -311,8 +348,9 @@ export function SplitDesirePathLayer({ splitPath, onSegmentDrag, onPathHoverChan
 
   return (
     <>
-      {/* Visual layer with contour filter (SVG renderer for filter support) */}
-      {visualStyles.map((style, index) => (
+      {/* Visual layer — GL desire-ring layers when live; Leaflet SVG with the
+          contour filter as the no-WebGL fallback */}
+      {!live && visualStyles.map((style, index) => (
         <GeoJSON
           key={`split-${splitPath.id}-${index}-${geometryKey}`}
           data={geojsonData}

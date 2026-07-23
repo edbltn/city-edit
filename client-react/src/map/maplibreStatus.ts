@@ -7,6 +7,8 @@
 // graph-edges layer already draws the network on the GPU).
 // ==========================================================================
 
+import { useSyncExternalStore } from "react";
+
 export type MapLibreStatus = "pending" | "ready" | "failed";
 
 let status: MapLibreStatus = "pending";
@@ -30,4 +32,16 @@ export function isMapLibreReady(): boolean {
 export function onMapLibreStatus(l: (s: MapLibreStatus) => void): () => void {
   listeners.add(l);
   return () => listeners.delete(l);
+}
+
+/**
+ * React hook: true while the GL basemap is live. Components use this to
+ * switch between rendering their visuals as MapLibre layers vs. the legacy
+ * Leaflet path (the no-WebGL fallback).
+ */
+export function useMapLibreLive(): boolean {
+  return useSyncExternalStore(
+    (cb) => onMapLibreStatus(cb),
+    () => status === "ready",
+  );
 }
