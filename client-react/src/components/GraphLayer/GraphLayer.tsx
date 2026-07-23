@@ -555,16 +555,57 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   // (which can snap to a neighboring edge).
   const pinnedEdgeOverrideRef = useRef<number | null>(null);
 
-  // Push the current pinned/hover rings to the GL highlight source. The
-  // hover-suppressed-when-pinned rule is applied here so the sync module
-  // stays dumb. Stable (reads refs only).
+  // When the pinned selection is a top proposal, trace the connected corridor
+  // of edges carrying the same vote type (net > 0) — the whole voted stretch
+  // lights up in GIS-selection yellow, not just the clicked segment. BFS over
+  // the node adjacency, capped to keep pathological blobs bounded.
+  const CORRIDOR_MAX_EDGES = 400;
+  const computeCorridor = useCallback((): number[] | null => {
+    const pinned = pinnedTargetRef.current;
+    const data = graphDataRef.current;
+    const adj = nodeAdjRef.current;
+    if (!pinned || pinned.kind !== "edge" || !data?.edge_vote_types || !adj) return null;
+    const winner = winnersRef.current.find((w) => w.edgeIdx === pinned.index);
+    if (!winner) return null;
+
+    const carriesType = (i: number): boolean => {
+      const e = data.edges[i];
+      if (!e || e[0] === e[1]) return false;
+      return ((data.edge_vote_types ?? [])[i] ?? []).some(
+        ([li, up, down]) => li === winner.legendIdx && (up ?? 0) - (down ?? 0) > 0
+      );
+    };
+
+    const visited = new Set<number>([pinned.index]);
+    const queue: number[] = [pinned.index];
+    while (queue.length > 0 && visited.size < CORRIDOR_MAX_EDGES) {
+      const e = data.edges[queue.shift()!];
+      if (!e) continue;
+      for (const n of [e[0], e[1]]) {
+        for (const ne of adj[n] ?? []) {
+          if (!visited.has(ne) && carriesType(ne)) {
+            visited.add(ne);
+            queue.push(ne);
+          }
+        }
+      }
+    }
+    // A lone segment is already shown by the white ring — no corridor needed.
+    return visited.size > 1 ? [...visited] : null;
+  }, []);
+
+  // Push the current pinned/hover rings (+ corridor) to the GL highlight
+  // source. The hover-suppressed-when-pinned rule is applied here so the sync
+  // module stays dumb. Stable (reads refs only).
   const syncHighlights = useCallback(() => {
     const pinned = pinnedTargetRef.current;
     const hover = hoverTargetRef.current;
     const hoverIsPinned = pinned && hover
       && hover.kind === pinned.kind && hover.index === pinned.index;
-    syncHighlightsToMapLibre(graphDataRef.current, pinned, hoverIsPinned ? null : hover);
-  }, []);
+    syncHighlightsToMapLibre(
+      graphDataRef.current, pinned, hoverIsPinned ? null : hover, computeCorridor(),
+    );
+  }, [computeCorridor]);
 
   // Increments when a geocode resolves, forcing tooltip re-render
   const [geocodeVersion, setGeocodeVersion] = useState(0);

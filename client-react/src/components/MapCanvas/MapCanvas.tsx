@@ -15,7 +15,7 @@ import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { CONFIG } from "../../config";
-import { DESIRE_PATH, ROUTE_COLORS } from "../../colors";
+import { DESIRE_PATH, ROUTE_COLORS, SELECTION_YELLOW } from "../../colors";
 import { maplibreRasterTiles, type HeatRamp, type MapStyle } from "../../mapStyles";
 import { setMapLibreStatus } from "../../map/maplibreStatus";
 import { setMapLibreMap } from "../../map/maplibreInstance";
@@ -339,14 +339,46 @@ function buildStyle(
       },
       // Vote heatmap passes (halo → warm → hot → peak) above the baseline network
       ...heatLayers(heat),
+      // GIS-style yellow selection: the connected corridor of edges sharing a
+      // selected top proposal's vote type (QGIS/ArcGIS selection look). Sits
+      // under the white rings so the exact clicked segment still reads.
+      {
+        id: "highlight-corridor-glow",
+        type: "line",
+        source: HIGHLIGHT_SOURCE_ID,
+        filter: ["==", ["get", "kind"], "corridor"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": SELECTION_YELLOW,
+          "line-width": 10,
+          "line-opacity": 0.25,
+        },
+      },
+      {
+        id: "highlight-corridor",
+        type: "line",
+        source: HIGHLIGHT_SOURCE_ID,
+        filter: ["==", ["get", "kind"], "corridor"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": SELECTION_YELLOW,
+          "line-width": 3.5,
+          "line-opacity": 0.9,
+        },
+      },
       // Selection rings, above the heat. Ring geometry mirrors the old canvas
       // renderer: edges get 1.5px white borders around a 4px gap plus a faint
       // interior; nodes get a 3.5px circle with a 1.5px stroke (outer edge 5px).
+      // geometry-type normalizes MultiLineString → "LineString", so the ring
+      // layers must exclude the corridor feature explicitly.
       {
         id: "highlight-edge-fill",
         type: "line",
         source: HIGHLIGHT_SOURCE_ID,
-        filter: ["==", ["geometry-type"], "LineString"],
+        filter: ["all",
+          ["==", ["geometry-type"], "LineString"],
+          ["!=", ["get", "kind"], "corridor"],
+        ],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#ffffff",
@@ -358,7 +390,10 @@ function buildStyle(
         id: "highlight-edge-ring",
         type: "line",
         source: HIGHLIGHT_SOURCE_ID,
-        filter: ["==", ["geometry-type"], "LineString"],
+        filter: ["all",
+          ["==", ["geometry-type"], "LineString"],
+          ["!=", ["get", "kind"], "corridor"],
+        ],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#ffffff",

@@ -65,7 +65,7 @@ function targetFeature(
     if (!a || !b) return null;
     return {
       type: "Feature",
-      properties: { alpha },
+      properties: { alpha, kind: "ring" },
       geometry: {
         type: "LineString",
         coordinates: [[a[1], a[0]], [b[1], b[0]]],
@@ -76,23 +76,53 @@ function targetFeature(
   if (!node) return null;
   return {
     type: "Feature",
-    properties: { alpha },
+    properties: { alpha, kind: "ring" },
     geometry: { type: "Point", coordinates: [node[1], node[0]] },
   };
 }
 
+// The GIS-style yellow selection: every edge in the corridor as one
+// MultiLineString, styled by the highlight-corridor layers in MapCanvas.
+function corridorFeature(
+  data: Pick<GraphData, "nodes" | "edges">,
+  edgeIds: number[],
+): GeoJSON.Feature | null {
+  const lines: [number, number][][] = [];
+  for (const i of edgeIds) {
+    const e = data.edges[i];
+    if (!e || e[0] === e[1]) continue;
+    const a = data.nodes[e[0]];
+    const b = data.nodes[e[1]];
+    if (!a || !b) continue;
+    lines.push([[a[1], a[0]], [b[1], b[0]]]);
+  }
+  if (lines.length === 0) return null;
+  return {
+    type: "Feature",
+    properties: { kind: "corridor" },
+    geometry: { type: "MultiLineString", coordinates: lines },
+  };
+}
+
 /**
- * Set the current highlights. Pass null to clear either slot. When hover
+ * Set the current highlights. Pass null to clear any slot. When hover
  * resolves to the pinned target the caller suppresses it (same rule as the
- * canvas renderer), so this never double-draws.
+ * canvas renderer), so this never double-draws. `corridor` is the connected
+ * set of edges sharing the selected top proposal's vote type — rendered as
+ * the QGIS-style yellow selection under the rings.
  */
 export function syncHighlightsToMapLibre(
   data: Pick<GraphData, "nodes" | "edges"> | null,
   pinned: HighlightTarget | null,
   hover: HighlightTarget | null,
+  corridor: number[] | null = null,
 ): void {
   const features: GeoJSON.Feature[] = [];
   if (data) {
+    if (corridor?.length) {
+      const f = corridorFeature(data, corridor);
+      if (f) features.push(f);
+    }
     if (pinned) {
       const f = targetFeature(data, pinned, 1.0);
       if (f) features.push(f);
