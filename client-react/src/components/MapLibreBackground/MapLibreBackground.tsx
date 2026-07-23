@@ -15,6 +15,7 @@ import { maplibreRasterTiles, type HeatRamp, type MapStyle } from "../../mapStyl
 import { setMapLibreStatus } from "../../map/maplibreStatus";
 import { setMapLibreMap } from "../../map/maplibreInstance";
 import { HEAT_SOURCE_ID } from "../GraphLayer/maplibreHeat";
+import { HIGHLIGHT_SOURCE_ID } from "../GraphLayer/maplibreHighlight";
 
 // Matches Leaflet's zoom animation duration (0.25s CSS transition) so the
 // MapLibre camera glides in step with Leaflet's animated zoom.
@@ -137,6 +138,11 @@ function buildStyle(
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
       },
+      // Hover/pinned selection rings — at most two features (see maplibreHighlight.ts).
+      [HIGHLIGHT_SOURCE_ID]: {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      },
     },
     layers: [
       // Background fill (shows through before tiles load) — matches the map style.
@@ -176,6 +182,48 @@ function buildStyle(
       },
       // Vote heatmap passes (halo → warm → hot → peak) above the baseline network
       ...heatLayers(heat),
+      // Selection rings, above the heat. Ring geometry mirrors the canvas
+      // renderer: edges get 1.5px white borders around a 4px gap plus a faint
+      // interior; nodes get a 3.5px circle with a 1.5px stroke (outer edge 5px).
+      {
+        id: "highlight-edge-fill",
+        type: "line",
+        source: HIGHLIGHT_SOURCE_ID,
+        filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#ffffff",
+          "line-width": 4,
+          "line-opacity": ["*", 0.12, ["get", "alpha"]] as unknown as number,
+        },
+      },
+      {
+        id: "highlight-edge-ring",
+        type: "line",
+        source: HIGHLIGHT_SOURCE_ID,
+        filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#ffffff",
+          "line-width": 1.5,
+          "line-gap-width": 4,
+          "line-opacity": ["get", "alpha"] as unknown as number,
+        },
+      },
+      {
+        id: "highlight-node",
+        type: "circle",
+        source: HIGHLIGHT_SOURCE_ID,
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: {
+          "circle-radius": 3.5,
+          "circle-color": "#ffffff",
+          "circle-opacity": ["*", 0.12, ["get", "alpha"]] as unknown as number,
+          "circle-stroke-width": 1.5,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-opacity": ["get", "alpha"] as unknown as number,
+        },
+      },
     ],
     glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
   };

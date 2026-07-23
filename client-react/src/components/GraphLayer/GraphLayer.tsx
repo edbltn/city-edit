@@ -19,6 +19,7 @@ import { CONFIG } from "../../config";
 import { withMap, getMapSlug } from "../../map/runtime";
 import { isMapLibreReady, onMapLibreStatus } from "../../map/maplibreStatus";
 import { syncHeatToMapLibre } from "./maplibreHeat";
+import { syncHighlightsToMapLibre } from "./maplibreHighlight";
 import { useWebSocketContext } from "../../context/WebSocketContext";
 import { useGraphSnap, useTheme, useHeatmap } from "../../context";
 import type { GraphData } from "../../types";
@@ -978,6 +979,19 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     const data = graphDataRef.current;
     if (!hoverCanvas || !hoverCtx) return;
 
+    // GL path: highlights render as MapLibre ring layers that track the
+    // camera for free — the hover canvas stays blank. The hover-suppressed-
+    // when-pinned rule is applied here so the sync module stays dumb.
+    if (isMapLibreReady()) {
+      hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
+      const pinned = pinnedTargetRef.current;
+      const hover = hoverTargetRef.current;
+      const hoverIsPinned = pinned && hover
+        && hover.kind === pinned.kind && hover.index === pinned.index;
+      syncHighlightsToMapLibre(data, pinned, hoverIsPinned ? null : hover);
+      return;
+    }
+
     const size = map.getSize();
     hoverCanvas.width = size.x;
     hoverCanvas.height = size.y;
@@ -1295,6 +1309,10 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       if (hoverCanvas && hoverCtx) hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
       hoverTargetRef.current = null;
       setHoverTarget(null);
+      // GL mode: drop the hover ring from the highlight source too. The pinned
+      // ring stays — as a GL layer it tracks the zoom animation, which the
+      // canvas renderer couldn't do.
+      if (isMapLibreReady()) redrawHoverHighlightRef.current();
     };
 
     // Scale/translate the last-drawn bitmap from its reference view to the
