@@ -20,6 +20,10 @@ export interface VoteTypeWinner {
   label: string;
   edgeIdx: number;
   count: number; // net (up − down) for this vote type on the winning edge
+  /** Edge midpoint, present on server-provided winners (/api/heat) so
+   *  indicators can render before the topology download completes. */
+  midLat?: number;
+  midLng?: number;
 }
 
 /**

@@ -20,8 +20,9 @@ the slots of edges that no longer exist — their votes stay addressed, the
 geometry is just gone. Tombstones (and OSM self-loops) are recognizable as
 from_idx == to_idx and are skipped by hit-testing, heat, tiles, and lookups.
 
-File: osm_data/<city>/edge_registry.json — a build artifact that ships beside
-walk_graph.pkl and MUST be updated whenever the pkl is rebuilt
+File: osm_data/<city>/edge_registry.json.gz — committed to the repo (see the
+.gitignore carve-out) so image builds start from the pinned assignment; it
+MUST be updated whenever the pkl is rebuilt
 (refresh_osm.py does this; see also build_pmtiles.py which bakes eids into
 tile feature ids).
 
@@ -29,13 +30,18 @@ Usage:
     python edge_registry.py --city nyc     # seed/update the registry for a city
     python edge_registry.py --selftest     # synthetic rebuild/shuffle test
 """
+import gzip
 import json
 import logging
 import os
 
 logger = logging.getLogger(__name__)
 
-REGISTRY_FILENAME = "edge_registry.json"
+# Stored gzipped (~5MB vs ~22MB for NYC) so it can live in the repo and ship
+# with image builds — the registry MUST persist across rebuilds or every
+# deploy would silently re-key the votes it exists to protect.
+REGISTRY_FILENAME = "edge_registry.json.gz"
+LEGACY_FILENAME = "edge_registry.json"
 REGISTRY_VERSION = 1
 
 # Placeholder for a retired eid's slot: degenerate (from == to) so every
@@ -49,10 +55,15 @@ def registry_path(data_dir: str) -> str:
 
 def load_registry(data_dir: str) -> dict | None:
     path = registry_path(data_dir)
-    if not os.path.exists(path):
-        return None
-    with open(path) as f:
-        reg = json.load(f)
+    if os.path.exists(path):
+        with gzip.open(path, "rt") as f:
+            reg = json.load(f)
+    else:
+        legacy = os.path.join(data_dir, LEGACY_FILENAME)
+        if not os.path.exists(legacy):
+            return None
+        with open(legacy) as f:
+            reg = json.load(f)
     if reg.get("version") != REGISTRY_VERSION:
         raise ValueError(f"Unsupported edge registry version in {path}: {reg.get('version')}")
     return reg
@@ -61,7 +72,7 @@ def load_registry(data_dir: str) -> dict | None:
 def save_registry(data_dir: str, registry: dict) -> None:
     path = registry_path(data_dir)
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    with gzip.open(tmp, "wt", compresslevel=6) as f:
         json.dump(registry, f, separators=(",", ":"))
     os.replace(tmp, path)
 

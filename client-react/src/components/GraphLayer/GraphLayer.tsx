@@ -777,7 +777,16 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       fetch(`${CONFIG.apiUrl}/heat?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((fc) => {
-          if (!cancelled && fc) primeHeatFromServer(fc as GeoJSON.FeatureCollection);
+          if (cancelled || !fc) return;
+          primeHeatFromServer(fc as GeoJSON.FeatureCollection);
+          // Server-computed top proposals (with midpoints) let the indicator
+          // icons appear alongside the heat, seconds before the topology
+          // download finishes. The locally-computed winners replace them once
+          // votes+topology land (identical unless votes changed in between).
+          const winners = (fc as { winners?: VoteTypeWinner[] }).winners;
+          if (winners?.length && winnersRef.current.length === 0) {
+            setStableWinners(winners);
+          }
         })
         .catch(() => {});
 
@@ -1325,22 +1334,31 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
 
   const indicatorMarkers = useMemo(() => {
     if (currentZoom < INDICATOR_MIN_ZOOM) return null;
+    if (winners.length === 0) return null;
     const topology = topologyRef.current;
-    if (!topology || winners.length === 0) return null;
 
     // Resolve every winner to its edge-midpoint once up front so click handlers
     // can measure on-screen distance between icons for cluster detection.
+    // Topology is authoritative; server-provided midpoints (heat fast path)
+    // place icons before the topology download completes.
     const placed = winners
       .map((w) => {
-        const edge = topology.edges[w.edgeIdx];
-        if (!edge || edge[0] === edge[1]) return null;
-        const [fromIdx, toIdx] = edge;
-        const fromNode = topology.nodes[fromIdx];
-        const toNode = topology.nodes[toIdx];
-        if (!fromNode || !toNode) return null;
-        const midLat = (fromNode[0] + toNode[0]) / 2;
-        const midLng = (fromNode[1] + toNode[1]) / 2;
-        return { w, midLat, midLng };
+        const edge = topology?.edges[w.edgeIdx];
+        if (edge && edge[0] !== edge[1]) {
+          const fromNode = topology!.nodes[edge[0]];
+          const toNode = topology!.nodes[edge[1]];
+          if (fromNode && toNode) {
+            return {
+              w,
+              midLat: (fromNode[0] + toNode[0]) / 2,
+              midLng: (fromNode[1] + toNode[1]) / 2,
+            };
+          }
+        }
+        if (w.midLat != null && w.midLng != null) {
+          return { w, midLat: w.midLat, midLng: w.midLng };
+        }
+        return null;
       })
       .filter(Boolean) as Array<{
       w: VoteTypeWinner;

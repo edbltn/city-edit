@@ -22,6 +22,13 @@ RUN uv pip install --system --no-cache -r requirements.txt gunicorn
 
 COPY server/*.py ./
 
+# Stable edge-id registries (committed to the repo): copied in BEFORE the
+# graph builds so every image keeps existing votes' edge ids stable across
+# rebuilds (see server/edge_registry.py). Cities without a committed registry
+# get an in-image identity seed (their votes are still rebuild-vulnerable
+# until a registry is committed for them too).
+COPY server/osm_data/ osm_data/
+
 # Build routing graphs during image build (bakes per-city graphs into image).
 # Separate processes so each city's osmnx memory is freed before the next.
 RUN mkdir -p osm_data && \

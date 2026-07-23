@@ -188,8 +188,11 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> dict:
         "rev": rev,
         "body": body,
         "gz": gzip.compress(body.encode(), compresslevel=6),
-        # Kept for /api/heat so it can build its GeoJSON without re-reading Redis.
+        # Kept for /api/heat so it can build its GeoJSON + top-proposal winners
+        # without re-reading Redis.
         "edge_votes": arrays["edge_votes"],
+        "edge_vote_types": arrays.get("edge_vote_types") or [],
+        "vote_type_legend": arrays.get("vote_type_legend") or [],
     }
     _vote_cache[cache_key] = entry
     return entry
@@ -201,6 +204,47 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> dict:
 # multi-MB topology download. Cached per (map, mode, revision), gzipped.
 
 _heat_cache: dict[str, dict] = {}
+
+TOP_PROPOSAL_LIMIT = 10
+
+
+def _select_top_proposals(legend, edge_vote_types, salt: int, limit: int = TOP_PROPOSAL_LIMIT):
+    """Server mirror of client topProposals.ts: per-type best edge by net
+    support -> one winner per edge -> top `limit` by net (deterministic
+    label-shuffle tiebreak). Shipped with /api/heat so top-proposal indicators
+    appear with the heatmap instead of waiting for the topology download."""
+    best_by_type: dict[int, tuple[int, int]] = {}
+    for edge_idx, pairs in enumerate(edge_vote_types):
+        if not pairs:
+            continue
+        for li, up, down in pairs:
+            count = (up or 0) - (down or 0)
+            cur = best_by_type.get(li)
+            if cur is None or count > cur[1]:
+                best_by_type[li] = (edge_idx, count)
+
+    winners = []
+    for li, (edge_idx, count) in best_by_type.items():
+        label = legend[li] if 0 <= li < len(legend) else None
+        if not label or count <= 0:
+            continue
+        winners.append({"legendIdx": li, "label": label, "edgeIdx": edge_idx, "count": count})
+
+    def shuffle_key(label: str) -> int:
+        h = salt & 0xFFFFFFFF
+        for ch in label:
+            h = ((h * 31) + ord(ch)) & 0xFFFFFFFF
+        return h - (1 << 32) if h >= (1 << 31) else h
+
+    def sort_key(w):
+        return (-w["count"], shuffle_key(w["label"]))
+
+    best_by_edge: dict[int, dict] = {}
+    for w in winners:
+        cur = best_by_edge.get(w["edgeIdx"])
+        if cur is None or sort_key(w) < sort_key(cur):
+            best_by_edge[w["edgeIdx"]] = w
+    return sorted(best_by_edge.values(), key=sort_key)[:limit]
 
 
 def _build_heat_entry(rmap: ResolvedMap, mode: str | None = None) -> dict:
@@ -245,7 +289,24 @@ def _build_heat_entry(rmap: ResolvedMap, mode: str | None = None) -> dict:
             },
         })
 
-    body = json.dumps({"type": "FeatureCollection", "features": features})
+    winners = _select_top_proposals(
+        votes_entry.get("vote_type_legend") or [],
+        votes_entry.get("edge_vote_types") or [],
+        salt=rev,
+    )
+    for w in winners:
+        e = edges[w["edgeIdx"]] if w["edgeIdx"] < len(edges) else None
+        if not e or e[0] == e[1]:
+            w["midLat"] = None
+            w["midLng"] = None
+            continue
+        a, b = nodes[e[0]], nodes[e[1]]
+        w["midLat"] = (a[0] + b[0]) / 2
+        w["midLng"] = (a[1] + b[1]) / 2
+    winners = [w for w in winners if w.get("midLat") is not None]
+
+    # "winners" rides along as a GeoJSON foreign member.
+    body = json.dumps({"type": "FeatureCollection", "features": features, "winners": winners})
     entry = {
         "rev": rev,
         "body": body,
