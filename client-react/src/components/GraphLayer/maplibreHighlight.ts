@@ -5,7 +5,7 @@
 // The source holds at most two features (pinned + hover); each is either the
 // hovered edge (LineString) or node (Point) with an `alpha` property (1.0
 // pinned, 0.6 hover — same as the canvas renderer). Layer styling in
-// MapLibreBackground replicates the canvas ring geometry:
+// MapCanvas replicates the canvas ring geometry:
 //   edge: 1.5px white borders around a 4px gap (line-gap-width), plus a faint
 //         4px interior stroke at 0.12 alpha
 //   node: 3.5px-radius circle, 1.5px white stroke, 0.12-alpha interior
@@ -37,7 +37,7 @@ function pushToMap(map: maplibregl.Map | null): void {
   else map.once("load", apply);
 }
 
-// Re-prime whenever MapLibreBackground swaps in a new map instance.
+// Re-prime whenever MapCanvas swaps in a new map instance.
 onMapLibreMap((map) => pushToMap(map));
 
 function targetFeature(

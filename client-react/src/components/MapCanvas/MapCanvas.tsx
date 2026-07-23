@@ -1,42 +1,45 @@
 /**
- * MapLibre GL JS background map — renders base map tiles and the OSM graph
- * from PMTiles. Sits behind the Leaflet overlay (which handles interactive
- * layers: routes, markers, drag-to-insert).
+ * MapCanvas — the interactive MapLibre GL map (formerly MapLibreBackground,
+ * which rendered behind a transparent Leaflet map that owned the camera).
+ * Phase 4 of the migration flipped ownership: this map IS the camera, and all
+ * interaction plumbing reaches it through the MapFacade (Leaflet-style zooms,
+ * see map/facade.ts).
  *
- * Camera is synchronized from the Leaflet map via `move` events.
+ * Owns the style: all sources + layers (basemap raster, PMTiles graph,
+ * boundary scrim, heat halo/warm/hot/peak, highlight rings, desire rings,
+ * route dashes, utility guide lines). The map is recreated on style change;
+ * source-pushing modules re-prime via the maplibreInstance registry.
  */
 
 import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { CONFIG } from "../../config";
-import { DESIRE_PATH } from "../../colors";
+import { DESIRE_PATH, ROUTE_COLORS } from "../../colors";
 import { maplibreRasterTiles, type HeatRamp, type MapStyle } from "../../mapStyles";
 import { setMapLibreStatus } from "../../map/maplibreStatus";
 import { setMapLibreMap } from "../../map/maplibreInstance";
+import { MapFacade, ML_ZOOM_OFFSET } from "../../map/facade";
 import { HEAT_SOURCE_ID } from "../GraphLayer/maplibreHeat";
 import { HIGHLIGHT_SOURCE_ID } from "../GraphLayer/maplibreHighlight";
-import { ROUTE_SOURCE_ID, DESIRE_SOURCE_ID } from "../../map/maplibreOverlays";
-import { ROUTE_COLORS } from "../../colors";
-
-// Matches Leaflet's zoom animation duration (0.25s CSS transition) so the
-// MapLibre camera glides in step with Leaflet's animated zoom.
-const LEAFLET_ZOOM_ANIM_MS = 250;
-
-// Leaflet zoom N = 256·2^N px world; MapLibre zoom N = 512·2^N px world.
-// MapLibre must run one level below Leaflet or the basemap renders at 2×
-// scale relative to the Leaflet-drawn overlays.
-const ML_ZOOM_OFFSET = -1;
+import {
+  ROUTE_SOURCE_ID,
+  DESIRE_SOURCE_ID,
+  UTIL_SOURCE_ID,
+} from "../../map/maplibreOverlays";
+import { getStartupView, setMapViewState } from "../../utils/mapViewState";
+import "maplibre-gl/dist/maplibre-gl.css";
 
 // Register PMTiles protocol once at module level
 const protocol = new Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 
 // The canvas heatmap scaled strokes by 2^((leafletZoom-14)/2). The MapLibre
-// camera runs one level below Leaflet (ML_ZOOM_OFFSET), so the equivalent
-// curve here is sqrt(2)^(zoom-13) — expressed as an exponential interpolation
-// whose endpoints are that curve evaluated at zooms 5 and 21 (factor 1/16 and
-// 16). `base` is a per-feature width expression (a function of vote norm).
+// camera runs one level below Leaflet-style zoom (ML_ZOOM_OFFSET), so the
+// equivalent curve here is sqrt(2)^(zoom-13) — expressed as an exponential
+// interpolation whose endpoints are that curve evaluated at zooms 5 and 21
+// (factor 1/16 and 16). `base` is a per-feature width expression (a function
+// of vote norm).
 function zoomScaled(base: unknown): maplibregl.ExpressionSpecification {
   return [
     "interpolate", ["exponential", Math.SQRT2], ["zoom"],
@@ -46,7 +49,7 @@ function zoomScaled(base: unknown): maplibregl.ExpressionSpecification {
 }
 
 // Vote heatmap layers over the `graph-live` GeoJSON source (voted edges only,
-// pushed by GraphLayer/maplibreHeat.ts). Four passes replicate the canvas
+// pushed by GraphLayer/maplibreHeat.ts). Four passes replicate the old canvas
 // renderer's cross-stroke gradient: wide faint halo → dominant warm stroke →
 // hot core (kicks in past norm 0.2) → bright peak (past 0.7). MapLibre has no
 // additive/multiply blending against the basemap, so stacked translucent
@@ -175,7 +178,7 @@ function desireLayers(): maplibregl.LayerSpecification[] {
   ] as maplibregl.LayerSpecification[];
 }
 
-// Walk-route strokes (glow/edge/core). Leaflet dashArray "5, 7" is in px;
+// Walk-route strokes (glow/edge/core). Leaflet dashArray "5, 7" was in px;
 // MapLibre line-dasharray is in multiples of line-width, hence the divisions.
 function routeLayers(): maplibregl.LayerSpecification[] {
   const c = ROUTE_COLORS.walk;
@@ -208,7 +211,7 @@ function buildStyle(
     version: 8,
     name: "desire-path",
     sources: {
-      // CartoDB raster tiles as base map (same as the Leaflet TileLayer)
+      // CartoDB raster tiles as base map
       "carto-base": {
         type: "raster",
         tiles,
@@ -241,6 +244,11 @@ function buildStyle(
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
       },
+      // Drag trails + waypoint connectors (dashed grey guide lines).
+      [UTIL_SOURCE_ID]: {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      },
       // Votable-region scrim: world ring with the city bbox punched out
       // (GeoJSON polygon hole), plus the bbox ring for the dashed hairline.
       boundary: {
@@ -262,6 +270,21 @@ function buildStyle(
         source: "carto-base",
         minzoom: 0,
         maxzoom: 19,
+      },
+      // Utility guide lines (drag trails, waypoint connectors). Lowest overlay,
+      // matching the old Leaflet overlayPane (400) under graph/desire/route.
+      // Leaflet dashArray "1, 4" px at width 2 → dasharray in width multiples.
+      {
+        id: "util-lines",
+        type: "line",
+        source: UTIL_SOURCE_ID,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#999999",
+          "line-width": 2,
+          "line-opacity": 0.6,
+          "line-dasharray": [0.5, 2],
+        },
       },
       // Graph edges — baseline (0 votes)
       {
@@ -308,7 +331,7 @@ function buildStyle(
       },
       // Vote heatmap passes (halo → warm → hot → peak) above the baseline network
       ...heatLayers(heat),
-      // Selection rings, above the heat. Ring geometry mirrors the canvas
+      // Selection rings, above the heat. Ring geometry mirrors the old canvas
       // renderer: edges get 1.5px white borders around a 4px gap plus a faint
       // interior; nodes get a 3.5px circle with a 1.5px stroke (outer edge 5px).
       {
@@ -351,7 +374,7 @@ function buildStyle(
         },
       },
       // Desire path (selection boundary ring), then the walk route on top —
-      // same order as the Leaflet desirePathPane/routePane stack.
+      // same order as the old Leaflet desirePathPane/routePane stack.
       ...desireLayers(),
       ...routeLayers(),
     ],
@@ -359,22 +382,24 @@ function buildStyle(
   };
 }
 
-interface MapLibreBackgroundProps {
-  /** Leaflet map instance to sync camera from */
-  leafletMap: L.Map | null;
+interface MapCanvasProps {
   /** Active map style — drives basemap tiles + background color */
   mapStyle: MapStyle;
+  /** Receives the live facade (null while unavailable / after teardown) */
+  onFacade: (facade: MapFacade | null) => void;
 }
 
-export function MapLibreBackground({ leafletMap, mapStyle }: MapLibreBackgroundProps) {
+export function MapCanvas({ mapStyle, onFacade }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
 
-  // Initialize MapLibre map (gracefully handles WebGL unavailability)
+  const onFacadeRef = useRef(onFacade);
+  useEffect(() => { onFacadeRef.current = onFacade; }, [onFacade]);
+
   useEffect(() => {
     if (!containerRef.current) return;
 
     try {
+      const view = getStartupView();
       const map = new maplibregl.Map({
         container: containerRef.current,
         style: buildStyle(
@@ -383,11 +408,24 @@ export function MapLibreBackground({ leafletMap, mapStyle }: MapLibreBackgroundP
           mapStyle.base,
           mapStyle.heat,
         ),
-        center: [CONFIG.initialView.lon, CONFIG.initialView.lat],
-        zoom: CONFIG.initialView.zoom + ML_ZOOM_OFFSET,
-        interactive: false,
+        center: [view.lng, view.lat],
+        zoom: view.zoom + ML_ZOOM_OFFSET,
+        minZoom: CONFIG.minZoom + ML_ZOOM_OFFSET,
+        maxZoom: CONFIG.maxZoom + ML_ZOOM_OFFSET,
+        maxBounds: [
+          [CONFIG.nycBounds.sw.lon, CONFIG.nycBounds.sw.lat],
+          [CONFIG.nycBounds.ne.lon, CONFIG.nycBounds.ne.lat],
+        ],
+        // 2D map: no rotation/pitch (parity with the old Leaflet camera).
+        dragRotate: false,
+        pitchWithRotate: false,
+        touchPitch: false,
         attributionControl: false,
       });
+      map.touchZoomRotate.disableRotation();
+      map.keyboard.disableRotation();
+
+      map.addControl(new maplibregl.AttributionControl({ compact: false }), "bottom-right");
 
       map.on("error", (e) => {
         console.warn("MapLibre error (non-fatal):", e.error?.message ?? e);
@@ -398,80 +436,34 @@ export function MapLibreBackground({ leafletMap, mapStyle }: MapLibreBackgroundP
       map.on("load", () => setMapLibreStatus("ready"));
       map.once("idle", () => setMapLibreStatus("ready"));
 
-      mapRef.current = map;
+      // Keep the module-level view state current so share links, theme-switch
+      // URLs, and map recreation all resume from the live camera.
+      const facade = new MapFacade(map);
+      const syncView = () => setMapViewState(facade.getZoom(), facade.getCenter());
+      map.on("moveend", syncView);
+      map.on("zoomend", syncView);
+      syncView();
+
       setMapLibreMap(map);
+      onFacadeRef.current(facade);
 
       return () => {
+        onFacadeRef.current(null);
         setMapLibreMap(null);
         map.remove();
-        mapRef.current = null;
         setMapLibreStatus("pending");
       };
     } catch (err) {
       console.warn("MapLibre GL JS unavailable (WebGL required):", err);
       setMapLibreStatus("failed");
-      // Leaflet TileLayer provides the fallback base map
     }
     // mapStyle is resolved once at bootstrap and stable for the session.
   }, [mapStyle]);
 
-  // Sync camera from Leaflet
-  useEffect(() => {
-    if (!leafletMap) return;
-
-    // True while Leaflet runs its CSS zoom animation. Leaflet doesn't emit
-    // per-frame moves during it, so we drive MapLibre with a matching easeTo
-    // and suppress the jumpTo sync until zoomend.
-    let zoomAnimating = false;
-
-    const syncCamera = () => {
-      const ml = mapRef.current;
-      if (!ml || zoomAnimating) return;
-      const center = leafletMap.getCenter();
-      const zoom = leafletMap.getZoom();
-      ml.jumpTo({
-        center: [center.lng, center.lat],
-        zoom: zoom + ML_ZOOM_OFFSET,
-        bearing: 0,
-        pitch: 0,
-      });
-    };
-
-    const onZoomAnim = (e: L.ZoomAnimEvent) => {
-      const ml = mapRef.current;
-      if (!ml) return;
-      zoomAnimating = true;
-      ml.easeTo({
-        center: [e.center.lng, e.center.lat],
-        zoom: e.zoom + ML_ZOOM_OFFSET,
-        duration: LEAFLET_ZOOM_ANIM_MS,
-        bearing: 0,
-        pitch: 0,
-      });
-    };
-
-    const onZoomEnd = () => {
-      zoomAnimating = false;
-      syncCamera();
-    };
-
-    // Sync on every move frame for smooth panning
-    leafletMap.on("move", syncCamera);
-    leafletMap.on("zoomanim", onZoomAnim);
-    leafletMap.on("zoomend", onZoomEnd);
-    // Initial sync
-    syncCamera();
-
-    return () => {
-      leafletMap.off("move", syncCamera);
-      leafletMap.off("zoomanim", onZoomAnim);
-      leafletMap.off("zoomend", onZoomEnd);
-    };
-  }, [leafletMap]);
-
   return (
     <div
       ref={containerRef}
+      className="map-canvas"
       style={{
         position: "absolute",
         top: 0,

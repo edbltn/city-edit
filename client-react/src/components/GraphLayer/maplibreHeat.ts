@@ -3,7 +3,7 @@
 //
 // Replaces GraphLayer's per-frame canvas strokes with a GeoJSON source of
 // voted edges, styled by four line layers (halo/warm/hot/peak) declared in
-// MapLibreBackground's style. Only edges with votes are pushed — the full
+// MapCanvas's style. Only edges with votes are pushed — the full
 // network is already drawn by the PMTiles graph-edges layer — so setData
 // payloads stay small regardless of graph size.
 //
@@ -36,7 +36,7 @@ function pushToMap(map: maplibregl.Map | null): void {
   else map.once("load", apply);
 }
 
-// Re-prime whenever MapLibreBackground swaps in a new map instance.
+// Re-prime whenever MapCanvas swaps in a new map instance.
 onMapLibreMap((map) => pushToMap(map));
 
 /** Loop-based max (matches GraphLayer.arrayMax) — avoids spread stack limits. */

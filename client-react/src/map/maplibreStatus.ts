@@ -1,10 +1,9 @@
 // ==========================================================================
-// MapLibre basemap status
+// MapLibre map status
 //
-// The MapLibre GL background is the primary basemap when WebGL is available;
-// the Leaflet raster TileLayer is only mounted as a fallback when it isn't.
-// GraphLayer also reads this to skip its zero-vote baseline pass (the PMTiles
-// graph-edges layer already draws the network on the GPU).
+// The MapLibre GL map is the app's only map. "failed" means WebGL is
+// unavailable — MapView shows a notice instead of a map, and the interactive
+// subtree (which requires the facade) never mounts.
 // ==========================================================================
 
 import { useSyncExternalStore } from "react";
@@ -34,11 +33,7 @@ export function onMapLibreStatus(l: (s: MapLibreStatus) => void): () => void {
   return () => listeners.delete(l);
 }
 
-/**
- * React hook: true while the GL basemap is live. Components use this to
- * switch between rendering their visuals as MapLibre layers vs. the legacy
- * Leaflet path (the no-WebGL fallback).
- */
+/** React hook: true while the GL map is live. */
 export function useMapLibreLive(): boolean {
   return useSyncExternalStore(
     (cb) => onMapLibreStatus(cb),

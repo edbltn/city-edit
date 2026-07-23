@@ -1,6 +1,38 @@
 # Leaflet → MapLibre migration handoff
 
-**Status: phases 1–3 done and committed on `perf-interim`. Phase 4 (camera flip + Leaflet removal) remains.**
+**Status: COMPLETE. All 4 phases done on `perf-interim` — MapLibre owns the camera, Leaflet is deleted.**
+
+## Phase 4 outcome (2026-07-22)
+
+- `maplibregl.Map` is the single interactive map (`MapCanvas`, formerly
+  MapLibreBackground). leaflet / react-leaflet / @types/leaflet removed.
+- `src/map/facade.ts` — `MapFacade` wraps the ML map with the Leaflet-style
+  API the code was written against. **Zooms at the facade boundary are
+  Leaflet-style (ML native + 1)**: CONFIG zooms, `?z=` share links,
+  `INDICATOR_MIN_ZOOM`, mapViewState all unchanged. Provided to the map
+  subtree via `src/map/MapFacadeContext.tsx`.
+- `src/components/MapMarker/` — React wrapper over `maplibregl.Marker`
+  reusing the DivIcon HTML (kites, pins, vote-type icons). Marker clicks also
+  fire a map click in ML (unlike Leaflet) — MapView's click handler ignores
+  clicks originating on `.maplibregl-marker`.
+- Drag trails + waypoint connectors → `util-lines` GL source; desire-path
+  dimming during drag → paint properties (`setDesirePathDimmed`).
+- `usePathDrag` uses pure-math hit-testing (10px radius, module-level
+  hover/drag claim so split paths don't double-claim); drag-pan suppressed
+  via the ML event's `preventDefault()`.
+- No-WebGL fallbacks deleted (canvas heat/rings, Leaflet SVG routes, raster
+  TileLayer, BoundaryLayer) — GL failure now shows a notice. GraphLayer lost
+  ~800 lines of canvas renderer; Flatbush hit-testing kept as planned.
+- Verified via `perf/smoke-phase4.mjs` (Playwright): click-to-place + pinned
+  card, hover cards, route solve, drag-to-insert waypoint (ghost + trail),
+  marker drag + snap + recalc, vote cast → GL heat, deep links, zoom control.
+- **Known headless artifact (pre-existing, NOT a phase-4 regression)**:
+  headless Chromium sometimes composites the GL canvas with the bottom band
+  unpainted (viewport-minus-topbar height). Reproduced identically on the
+  phase-3 commit; real browsers unaffected. Affects perf/screenshot harness
+  captures only.
+- Perf victory-lap rerun (`perf/measure.mjs`) still TODO — its
+  instrumentation may assume the old canvas renderer.
 
 Decision: drop the two-map sandwich (MapLibre GL basemap underneath + transparent
 Leaflet on top for interaction) and converge on MapLibre-only. Rationale: the

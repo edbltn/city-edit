@@ -4,11 +4,8 @@
 // Generic keyed-feature registry per GeoJSON source. React components own
 // their features (add on mount/geometry change, remove on unmount); this
 // module rebuilds the source's FeatureCollection and pushes it to the live
-// map, re-priming when MapLibreBackground swaps the instance (style change).
+// map, re-priming when MapCanvas swaps the instance (style change).
 //
-// Only the *visuals* live here. The transparent interactive hit-lines, drag
-// handlers, and markers stay on the Leaflet overlay until camera ownership
-// flips to MapLibre.
 // ==========================================================================
 
 import type maplibregl from "maplibre-gl";
@@ -17,6 +14,9 @@ import { getMapLibreMap, onMapLibreMap } from "./maplibreInstance";
 
 export const ROUTE_SOURCE_ID = "route-path";
 export const DESIRE_SOURCE_ID = "desire-path";
+// Utility guide lines: marker/path drag trails + waypoint connectors (the
+// dashed grey lines that were Leaflet polylines in the overlay pane).
+export const UTIL_SOURCE_ID = "util-lines";
 
 const registries = new Map<string, Map<string, GeoJSON.Feature>>();
 
@@ -61,4 +61,20 @@ export function setOverlayFeature(
 /** Remove one feature from a source (no-op if absent). */
 export function removeOverlayFeature(sourceId: string, key: string): void {
   if (registry(sourceId).delete(key)) pushSource(getMapLibreMap(), sourceId);
+}
+
+// Desire-path dimming during a path/waypoint drag — replaces the old CSS rule
+// that faded the Leaflet desirePathPane to 0.25 ("this section will change").
+const DESIRE_DIM = 0.25;
+
+export function setDesirePathDimmed(dimmed: boolean): void {
+  const map = getMapLibreMap();
+  if (!map || !map.isStyleLoaded()) return;
+  const factor = dimmed ? DESIRE_DIM : 1;
+  if (map.getLayer("desire-fill")) {
+    map.setPaintProperty("desire-fill", "line-opacity", 0.12 * factor);
+  }
+  if (map.getLayer("desire-ring")) {
+    map.setPaintProperty("desire-ring", "line-opacity", factor);
+  }
 }

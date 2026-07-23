@@ -57,9 +57,6 @@ export const CONFIG = {
     ? "http://localhost:5001/api/tiles/graph.pmtiles"
     : "/tiles/graph.pmtiles",
 
-  // Leaflet behaviors
-  preferCanvas: true,
-
   // API & Socket URLs - auto-detect based on environment
   apiUrl: isLocalDev ? "http://localhost:5001/api" : "/api",
   wsUrl: isLocalDev

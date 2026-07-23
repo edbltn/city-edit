@@ -1,5 +1,9 @@
-import { useMemo } from "react";
-import { Polyline } from "react-leaflet";
+import { useEffect, useMemo } from "react";
+import {
+  UTIL_SOURCE_ID,
+  setOverlayFeature,
+  removeOverlayFeature,
+} from "../../map/maplibreOverlays";
 import type { LatLng, SplitDesirePath } from "../../types";
 
 // Minimum distance (in degrees) to show a connector arc
@@ -19,22 +23,18 @@ interface WaypointConnectorsProps {
   splitDesirePaths: SplitDesirePath[];
 }
 
-// Generate a straight line between a waypoint and a path endpoint
-function generateLine(
-  from: LatLng,
-  to: [number, number]
-): [number, number][] {
-  return [
-    [from.lat, from.lng],
-    [to[1], to[0]],
-  ];
+interface Connector {
+  key: string;
+  // GeoJSON [lng, lat] pairs
+  coordinates: [number, number][];
 }
 
+// Straight line between a waypoint and a path endpoint ([lng, lat] target).
 function createConnector(
   waypoint: LatLng,
   target: [number, number],
   key: string
-): { key: string; positions: [number, number][] } | null {
+): Connector | null {
   const dx = target[0] - waypoint.lng;
   const dy = target[1] - waypoint.lat;
   const distance = Math.sqrt(dx * dx + dy * dy);
@@ -45,8 +45,7 @@ function createConnector(
   // Too far - route data is probably stale (waypoint moved but route not recalculated)
   if (distance > MAX_CONNECTOR_DISTANCE) return null;
 
-  const linePoints = generateLine(waypoint, target);
-  return { key, positions: linePoints };
+  return { key, coordinates: [[waypoint.lng, waypoint.lat], target] };
 }
 
 export function WaypointConnectors({
@@ -63,7 +62,7 @@ export function WaypointConnectors({
       return [];
     }
 
-    const arcs: { key: string; positions: [number, number][] }[] = [];
+    const arcs: Connector[] = [];
 
     if (splitDesirePaths.length > 0) {
       // With split paths: each segment's endpoints are the targets
@@ -119,23 +118,19 @@ export function WaypointConnectors({
     return arcs;
   }, [start, end, ghostWaypoints, routeGeometry, splitDesirePaths]);
 
-  if (connectors.length === 0) return null;
+  // Push connectors into the util-lines GL source (dashed grey style lives in
+  // MapCanvas). Keys are stable per slot, so updates replace in place.
+  useEffect(() => {
+    for (const c of connectors) {
+      setOverlayFeature(UTIL_SOURCE_ID, c.key, {
+        type: "LineString",
+        coordinates: c.coordinates,
+      });
+    }
+    return () => {
+      for (const c of connectors) removeOverlayFeature(UTIL_SOURCE_ID, c.key);
+    };
+  }, [connectors]);
 
-  return (
-    <>
-      {connectors.map(({ key, positions }) => (
-        <Polyline
-          key={key}
-          positions={positions}
-          pathOptions={{
-            color: "#999999",
-            weight: 2,
-            opacity: 0.6,
-            dashArray: "1, 4",
-            lineCap: "round",
-          }}
-        />
-      ))}
-    </>
-  );
+  return null;
 }

@@ -1,4 +1,4 @@
-import type L from "leaflet";
+import type { MapFacade } from "../map/facade";
 import { CONFIG } from "../config";
 
 interface MapViewState {
@@ -11,14 +11,29 @@ let current: MapViewState = {
   center: { lat: CONFIG.initialView.lat, lng: CONFIG.initialView.lon },
 };
 
-let mapInstance: L.Map | null = null;
+let mapInstance: MapFacade | null = null;
 
-export function setMapInstance(map: L.Map | null) {
+export function setMapInstance(map: MapFacade | null) {
   mapInstance = map;
 }
 
 export function panTo(coords: { lat: number; lng: number }) {
-  mapInstance?.panTo([coords.lat, coords.lng]);
+  mapInstance?.panTo(coords);
+}
+
+// The camera view the map should (re)create with. First call resolves the
+// URL/city-config initial view (computed lazily so applyCityConfig has run);
+// after that it's the last view synced by MapCanvas — so a style-change map
+// recreation resumes exactly where the user was.
+let seeded = false;
+
+export function getStartupView(): { lat: number; lng: number; zoom: number } {
+  if (!seeded) {
+    seeded = true;
+    const v = getInitialMapView();
+    current = { zoom: v.zoom, center: { lat: v.lat, lng: v.lng } };
+  }
+  return { lat: current.center.lat, lng: current.center.lng, zoom: current.zoom };
 }
 
 export function setMapViewState(zoom: number, center: { lat: number; lng: number }) {

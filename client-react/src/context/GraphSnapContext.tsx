@@ -1,13 +1,13 @@
 import { createContext, useContext, useRef, useCallback, type ReactNode, type MutableRefObject } from "react";
 import type { LatLng } from "../types";
 
-type SnapFn = (map: L.Map, lat: number, lng: number) => LatLng | null;
+type SnapFn = (lat: number, lng: number) => LatLng | null;
 
 interface GraphSnapContextValue {
   /** Register a snap function (called by GraphLayer) */
   setSnapFn: (fn: SnapFn) => void;
   /** Snap a lat/lng to the nearest graph node/edge (on-demand, for dragend) */
-  snapToGraph: (map: L.Map, lat: number, lng: number) => LatLng | null;
+  snapToGraph: (lat: number, lng: number) => LatLng | null;
   /** Current snap position — updated by GraphLayer on every mousemove.
    *  Read this during drag for zero-overhead snapping. */
   currentSnapRef: MutableRefObject<LatLng | null>;
@@ -29,8 +29,8 @@ export function GraphSnapProvider({ children }: { children: ReactNode }) {
     snapFnRef.current = fn;
   }, []);
 
-  const snapToGraph = useCallback((map: L.Map, lat: number, lng: number): LatLng | null => {
-    return snapFnRef.current?.(map, lat, lng) ?? null;
+  const snapToGraph = useCallback((lat: number, lng: number): LatLng | null => {
+    return snapFnRef.current?.(lat, lng) ?? null;
   }, []);
 
   const setCurrentSnap = useCallback((pos: LatLng | null) => {

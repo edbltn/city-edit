@@ -6,3 +6,65 @@
   left: 0;
   z-index: var(--z-map);
 }
+
+/* Default map cursor: crosshair for placing start/end points (MapLibre's
+   default is grab; drag-pans still show grabbing via MapDragCursor). */
+.map-canvas .maplibregl-canvas-container {
+  cursor: crosshair;
+}
+
+.map-zoom-control {
+  position: absolute;
+  right: var(--space-5);
+  bottom: calc(var(--space-5) + 24px); /* clear the attribution line */
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hairline);
+  background: var(--paper);
+}
+
+.map-zoom-control button {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 16px;
+  line-height: 28px;
+  text-align: center;
+  color: var(--ink);
+  background: var(--paper);
+  cursor: pointer;
+  padding: 0;
+}
+
+.map-zoom-control button:last-child {
+  border-bottom: none;
+}
+
+.map-zoom-control button:hover {
+  background: var(--hover-bg);
+}
+
+.map-webgl-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  max-width: 360px;
+  padding: 16px 20px;
+  border: 1px solid var(--hairline);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-main);
+  font-size: 13px;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .map-zoom-control {
+    right: var(--space-2);
+    bottom: calc(var(--space-2) + 24px);
+  }
+}
