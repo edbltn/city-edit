@@ -14,6 +14,7 @@ import { useRoute, useGhostPin, useTheme } from "../../context";
 import { useMapClick } from "../../hooks";
 import { kiteGhostIcon } from "../../utils/kiteIcon";
 import { setMapViewState, setMapInstance, getInitialMapView } from "../../utils/mapViewState";
+import { getMapLibreStatus, onMapLibreStatus, type MapLibreStatus } from "../../map/maplibreStatus";
 import { RouteMarker } from "../RouteMarker";
 import { DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
@@ -201,6 +202,7 @@ export function MapView() {
   const { ghostState } = useGhostPin();
 
   const [leafletMap, setLeafletMap] = useState<L.Map | null>(null);
+  const [mlStatus, setMlStatus] = useState<MapLibreStatus>(() => getMapLibreStatus());
   const [cursorLatLng, setCursorLatLng] = useState<LatLng | null>(null);
   const [isHoveringPath, setIsHoveringPath] = useState(false);
   const [isDraggingMarker, setIsDraggingMarker] = useState(false);
@@ -266,6 +268,16 @@ export function MapView() {
   // Chicago) would mount at the stale NYC default and get clamped off-center.
   const initialMapView = useMemo(() => getInitialMapView(), []);
 
+  // MapLibre is the primary basemap. While it's live, the Leaflet container
+  // goes transparent so the WebGL map shows through; the raster TileLayer is
+  // mounted only if MapLibre failed (no WebGL).
+  useEffect(() => onMapLibreStatus(setMlStatus), []);
+  useEffect(() => {
+    const el = leafletMap?.getContainer();
+    if (!el) return;
+    el.classList.toggle("ml-base", mlStatus === "ready");
+  }, [leafletMap, mlStatus]);
+
   return (
     <>
     {/* MapLibre GL JS background — renders base map + graph from PMTiles */}
@@ -303,17 +315,21 @@ export function MapView() {
         suppress={isHoveringPath || ghostState.isDragging || isDraggingMarker || markerHoverCount > 0}
       />
 
-      {/* Raster tile fallback — visible until MapLibre loads, or when WebGL unavailable.
+      {/* Raster tile fallback — mounted only when MapLibre can't run (no WebGL).
+          Otherwise the MapLibre GL background is the basemap and these tiles
+          would just duplicate downloads and occlude it.
           maxNativeZoom caps tile requests at CartoDB's available zoom and upscales
           beyond it, so deep zoom (maxZoom) doesn't request nonexistent blank tiles. */}
-      <TileLayer
-        key={mapStyle.id}
-        url={mapStyle.tileUrl}
-        subdomains={["a", "b", "c", "d"]}
-        maxZoom={CONFIG.maxZoom}
-        maxNativeZoom={19}
-        attribution={mapStyle.tileAttribution}
-      />
+      {mlStatus === "failed" && (
+        <TileLayer
+          key={mapStyle.id}
+          url={mapStyle.tileUrl}
+          subdomains={["a", "b", "c", "d"]}
+          maxZoom={CONFIG.maxZoom}
+          maxNativeZoom={19}
+          attribution={mapStyle.tileAttribution}
+        />
+      )}
 
       {/* Zoom control in bottom right */}
       <ZoomControl />

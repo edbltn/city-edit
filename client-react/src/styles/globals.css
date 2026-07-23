@@ -1773,3 +1773,9 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
+
+/* MapLibre GL is the live basemap — let it show through the Leaflet container.
+   (Without this, the opaque container background occludes the WebGL map.) */
+.leaflet-container.ml-base {
+  background: transparent !important;
+}

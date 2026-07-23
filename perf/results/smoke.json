@@ -1,0 +1,101 @@
+{
+  "label": "smoke",
+  "url": "http://localhost:3000/m/nyc-bikes?lat=40.722&lng=-74&z=15",
+  "timestamp": "2026-07-13T01:27:58.910Z",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "deviceScaleFactor": 2,
+  "reps": 1,
+  "metrics": {
+    "loadToHeatmapMs": 5221,
+    "pan": {
+      "avgFps": 48.8,
+      "p95FrameMs": 116.8,
+      "maxFrameMs": 633,
+      "jankFramesPerDrag": 47,
+      "redrawDelayMs": 32
+    },
+    "zoom": {
+      "avgFps": 60,
+      "p95FrameMs": 33.7,
+      "maxFrameMs": 50.6,
+      "blackoutMs": 2
+    }
+  },
+  "raw": {
+    "panStats": [
+      {
+        "frames": 93,
+        "avgFps": 8.1,
+        "p95FrameMs": 166.3,
+        "maxFrameMs": 684.4,
+        "jankFrames": 91
+      },
+      {
+        "frames": 113,
+        "avgFps": 18.7,
+        "p95FrameMs": 116.8,
+        "maxFrameMs": 633,
+        "jankFrames": 47
+      },
+      {
+        "frames": 136,
+        "avgFps": 58.3,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 50,
+        "jankFrames": 3
+      },
+      {
+        "frames": 140,
+        "avgFps": 48.8,
+        "p95FrameMs": 33.8,
+        "maxFrameMs": 51,
+        "jankFrames": 20
+      }
+    ],
+    "panRedrawDelays": [
+      60.900000005960464,
+      31.5,
+      8.399999998509884,
+      1.8999999985098839
+    ],
+    "zoomStats": [
+      {
+        "frames": 81,
+        "avgFps": 51.1,
+        "p95FrameMs": 33.7,
+        "maxFrameMs": 51.1,
+        "jankFrames": 10
+      },
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.8,
+        "jankFrames": 0
+      },
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 55,
+        "avgFps": 37.1,
+        "p95FrameMs": 50,
+        "maxFrameMs": 50.6,
+        "jankFrames": 22
+      }
+    ],
+    "zoomBlackouts": [
+      2.2999999970197678,
+      1.6000000014901161,
+      1.1999999955296516,
+      1.1000000014901161
+    ]
+  }
+}

@@ -17,6 +17,8 @@ import L from "leaflet";
 import Flatbush from "flatbush";
 import { CONFIG } from "../../config";
 import { withMap, getMapSlug } from "../../map/runtime";
+import { isMapLibreReady, onMapLibreStatus } from "../../map/maplibreStatus";
+import { syncHeatToMapLibre } from "./maplibreHeat";
 import { useWebSocketContext } from "../../context/WebSocketContext";
 import { useGraphSnap, useTheme, useHeatmap } from "../../context";
 import type { GraphData } from "../../types";
@@ -443,6 +445,12 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   const redrawTimeoutRef = useRef<number | null>(null);
   const isZoomingRef = useRef(false);
 
+  // Map view (center/zoom) at the time of the last full redraw. During zoom
+  // animations the stale bitmap is CSS-transformed from this reference view to
+  // the animated view (same math as L.Renderer._updateTransform), so the
+  // heatmap scales with the map instead of blacking out until zoomend.
+  const drawViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
+
   // Per-zoom projection cache for node layer-points. Leaflet layer-points are
   // stable across pans at a fixed zoom (panning only translates the map pane),
   // so we project each node at most once per zoom and reuse it across all pan
@@ -646,6 +654,9 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       data, tiebreakSaltRef.current, TOP_PROPOSAL_LIMIT,
     ), legendChanged);
     setGraphVoteVersion((v) => v + 1);
+    // Voted edges render as MapLibre line layers when the GL basemap is live;
+    // the canvas redraw below then only handles the hover/pinned highlight.
+    syncHeatToMapLibre(data);
     scheduleRedrawRef.current();
   }, [setStableWinners]);
 
@@ -675,10 +686,10 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     canvas.style.top = "0";
     canvas.style.left = "0";
     canvas.style.pointerEvents = "none";
-    // CSS-level softness: a hint of blur smooths the geometric snap. The blend
-    // mode comes from the map style — `screen` lightens a dark basemap where
-    // heat accumulates; `multiply` darkens a light basemap.
-    canvas.style.filter = "blur(0.6px)";
+    // The blend mode comes from the map style — `screen` lightens a dark
+    // basemap where heat accumulates; `multiply` darkens a light basemap.
+    // (No CSS blur: filters on a full-viewport canvas force the compositor to
+    // re-filter every frame during pans — softness is baked into the strokes.)
     canvas.style.mixBlendMode = mapStyle.heatBlend;
 
     const hoverCanvas = document.createElement("canvas");
@@ -1080,6 +1091,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
 
     const topLeft = map.containerPointToLayerPoint([0, 0]);
     L.DomUtil.setPosition(canvas, topLeft);
+    drawViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (!data.edges || !data.nodes) return;
@@ -1171,15 +1183,21 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     // Phase 1 — zero-vote baseline (source-over, faint white)
     // Drawn before lighter mode so the network outline doesn't itself
     // accumulate at intersections (which would highlight random nodes).
+    // Skipped when the MapLibre basemap is live: its PMTiles graph-edges
+    // layer already draws the full network on the GPU, and this pass is
+    // the bulk of the stroke work (zero-vote edges vastly outnumber voted
+    // ones), so skipping it makes the moveend redraw burst cheap.
     // ----------------------------------------------------------------
-    ctx.globalCompositeOperation = "source-over";
-    ctx.lineWidth = 0.5 * zoomScale;
-    ctx.globalAlpha = 0.05;
-    ctx.strokeStyle = "#ffffff";
-    for (let k = 0; k < count; k++) {
-      const i = edgeAt(k);
-      if ((edgeVotes[i] ?? 0) > 0) continue;
-      drawSeg(i);
+    if (!isMapLibreReady()) {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.lineWidth = 0.5 * zoomScale;
+      ctx.globalAlpha = 0.05;
+      ctx.strokeStyle = "#ffffff";
+      for (let k = 0; k < count; k++) {
+        const i = edgeAt(k);
+        if ((edgeVotes[i] ?? 0) > 0) continue;
+        drawSeg(i);
+      }
     }
 
     // ----------------------------------------------------------------
@@ -1188,7 +1206,16 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     // overlaps; "lighter" composite means RGB channels sum, naturally
     // shifting toward yellow/white as intensity stacks. Only the visible
     // subset is collected/sorted, so this is cheap regardless of graph size.
+    // Skipped when MapLibre is live: the heat-* line layers render the voted
+    // edges on the GPU (see maplibreHeat.ts) and this canvas only draws the
+    // hover/pinned highlight.
     // ----------------------------------------------------------------
+    if (isMapLibreReady()) {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1.0;
+      redrawHoverHighlightRef.current();
+      return;
+    }
     const voted: number[] = [];
     for (let k = 0; k < count; k++) {
       const i = edgeAt(k);
@@ -1249,19 +1276,53 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   const scheduleRedrawRef = useRef(scheduleRedraw);
   useEffect(() => { scheduleRedrawRef.current = scheduleRedraw; }, [scheduleRedraw]);
 
+  // When the GL basemap comes up (or drops), hand the heat rendering over:
+  // refresh re-pushes voted edges to MapLibre and schedules a canvas redraw,
+  // which clears the now-redundant canvas strokes (or restores them on fall-
+  // back to raster tiles).
+  useEffect(() => onMapLibreStatus(() => refreshGraphDisplayRef.current()), []);
+
   // Map event listeners — topology is pre-loaded, just redraw on pan/zoom
   useEffect(() => {
     const handleZoomStart = () => {
       isZoomingRef.current = true;
-      const ctx = ctxRef.current;
-      const canvas = canvasRef.current;
-      if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // The main heatmap canvas is NOT cleared: during the zoom animation the
+      // stale bitmap is CSS-scaled to track the map (see updateZoomTransform),
+      // then redrawn crisp at zoomend. Only the hover ring is dropped — its
+      // target is stale the moment the zoom starts.
       const hoverCtx = hoverCtxRef.current;
       const hoverCanvas = hoverCanvasRef.current;
       if (hoverCanvas && hoverCtx) hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
       hoverTargetRef.current = null;
       setHoverTarget(null);
     };
+
+    // Scale/translate the last-drawn bitmap from its reference view to the
+    // animated view — the same math as L.Renderer._updateTransform (padding 0).
+    // Covers both CSS zoom animations (zoomanim) and per-frame pinch/fly zooms
+    // (zoom), so the heatmap tracks the basemap instead of blacking out.
+    const updateZoomTransform = (center: L.LatLng, zoom: number) => {
+      const dv = drawViewRef.current;
+      const canvas = canvasRef.current;
+      if (!dv || !canvas) return;
+      const scale = map.getZoomScale(zoom, dv.zoom);
+      const viewHalf = map.getSize().multiplyBy(0.5);
+      const currentCenterPoint = map.project(dv.center, zoom);
+      const newPixelOrigin = (map as unknown as {
+        _getNewPixelOrigin(c: L.LatLng, z: number): L.Point;
+      })._getNewPixelOrigin(center, zoom);
+      const offset = viewHalf.multiplyBy(-scale).add(currentCenterPoint).subtract(newPixelOrigin);
+      L.DomUtil.setTransform(canvas, offset, scale);
+    };
+    const handleZoomAnim = (e: L.LeafletEvent) => {
+      const ev = e as L.ZoomAnimEvent;
+      updateZoomTransform(ev.center, ev.zoom);
+    };
+    const handleZoom = () => {
+      // Fires per-frame during pinch zoom / fractional zooms (no zoomanim).
+      if (isZoomingRef.current) updateZoomTransform(map.getCenter(), map.getZoom());
+    };
+
     const handleZoomEnd = () => {
       isZoomingRef.current = false;
       setCurrentZoom(map.getZoom());
@@ -1274,11 +1335,15 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     const handleResize = () => scheduleRedrawRef.current();
 
     map.on("zoomstart", handleZoomStart);
+    map.on("zoomanim", handleZoomAnim);
+    map.on("zoom", handleZoom);
     map.on("zoomend", handleZoomEnd);
     map.on("moveend", handleMoveEnd);
     map.on("resize", handleResize);
     return () => {
       map.off("zoomstart", handleZoomStart);
+      map.off("zoomanim", handleZoomAnim);
+      map.off("zoom", handleZoom);
       map.off("zoomend", handleZoomEnd);
       map.off("moveend", handleMoveEnd);
       map.off("resize", handleResize);

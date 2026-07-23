@@ -8,8 +8,11 @@ export * from "./colors";
 // Detect environment: when running the Vite dev server (any port — including
 // incremented ports for parallel worktrees) talk to Flask directly on :5001.
 // In Docker/production (built bundle served by nginx) use relative paths.
+// VITE_LOCAL_API=1 forces the local-dev URLs in a production build, so
+// `vite build && vite preview` can run against local Flask for perf testing.
 const isLocalDev =
-  typeof window !== "undefined" && import.meta.env.DEV;
+  typeof window !== "undefined" &&
+  (import.meta.env.DEV || import.meta.env.VITE_LOCAL_API === "1");
 
 const wsProtocol =
   typeof window !== "undefined" && window.location.protocol === "https:"
