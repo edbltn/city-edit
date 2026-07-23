@@ -599,6 +599,26 @@ def _build_graph_votes_body_locked(
     return entry
 
 
+def _rebuild_votes_snapshot(rmap: ResolvedMap, mode: str | None, cache_key: str,
+                            lock: threading.Lock) -> None:
+    """Background revalidation for /api/graph-votes (runs on a real OS thread).
+
+    Acquire AND release the single-flight lock here in the worker so the lock
+    never crosses the request-greenlet/thread boundary mid-hold; losing the
+    non-blocking acquire just means a rebuild is already in flight."""
+    if not lock.acquire(blocking=False):
+        return
+    try:
+        rmap.graph.ensure_loaded()
+        fresh_rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+        if _vote_cache_get(cache_key, fresh_rev) is None:
+            _build_graph_votes_body_locked(rmap, mode, fresh_rev, cache_key)
+    except Exception as e:
+        logger.warning(f"[VOTES] background rebuild '{cache_key}' failed: {e}")
+    finally:
+        lock.release()
+
+
 def _sparse_votes_body(arrays: dict, evt: dict, nvt: dict, bvt: dict | None) -> dict:
     """Assemble the format=sparse /api/graph-votes body from the dense arrays.
 
@@ -732,7 +752,12 @@ def _prewarm():
         for m in list_maps():
             try:
                 rmap = resolve_map(m["slug"])
-                _build_graph_votes_body(rmap)
+                # Build the MODE-SCOPED snapshot — the client always requests
+                # mode=<map.mode>, so the cache key is "<slug>:<mode>". The old
+                # modeless build warmed a key no client ever asks for, and the
+                # first visitor per instance still paid the full ~6s build
+                # inline (the dominant cold-load term in the [MAPLOAD] P99).
+                _build_graph_votes_body(rmap, rmap.mode)
                 # Pre-compress the topology blob too, so no tenant's first
                 # visitor pays the one-time ~1-2s compression of the big
                 # cities (brotli is what browsers actually receive).
@@ -931,6 +956,32 @@ _map_get_cache: dict[str, tuple[float, dict]] = {}
 _map_get_locks: dict[str, threading.Lock] = {}
 
 
+def _refresh_map_get(slug: str, lock: threading.Lock) -> None:
+    """Background revalidation for /api/maps/<slug> (runs on a real OS thread).
+
+    get_map's Postgres round-trip (it includes a vote count) takes 1-2s on the
+    small prod instance; running it inline on TTL expiry put that stall on the
+    FIRST request of a page load, serializing everything behind it. Only public
+    maps are ever cached, so refreshing the cache here can't leak a passcode
+    map's config."""
+    if not lock.acquire(blocking=False):
+        return
+    try:
+        m = get_map(slug)
+        if m and not m.get("requiresPasscode"):
+            if len(_map_get_cache) > 256:  # bound: one entry per public map
+                _map_get_cache.clear()
+            _map_get_cache[slug] = (time.monotonic() + 30.0, m)
+        else:
+            # Map deleted or newly passcode-protected: stop serving the stale
+            # public copy immediately.
+            _map_get_cache.pop(slug, None)
+    except Exception as e:
+        logger.warning(f"[MAPS] background refresh '{slug}' failed: {e}")
+    finally:
+        lock.release()
+
+
 @app.route("/api/maps/<slug>", methods=["GET"])
 def map_get(slug):
     cached = _map_get_cache.get(slug)
@@ -939,6 +990,15 @@ def map_get(slug):
         resp.headers["Cache-Control"] = "public, max-age=60"
         return resp
     lock = _map_get_locks.setdefault(slug, threading.Lock())
+    if cached is not None:
+        # Expired but present: serve the stale config NOW and refresh it in the
+        # background. Map config changes rarely; staleness is bounded by the
+        # refresh duration on top of the 30s TTL.
+        _PrewarmThread(target=_refresh_map_get, args=(slug, lock),
+                       name=f"map-swr-{slug}", daemon=True).start()
+        resp = jsonify(cached[1])
+        resp.headers["Cache-Control"] = "public, max-age=60"
+        return resp
     with lock:  # gevent-patched: waiters yield the hub
         cached = _map_get_cache.get(slug)
         if cached and cached[0] > time.monotonic():
@@ -2025,23 +2085,33 @@ def graph_votes():
     )
 
     if not servable:
-        # Stale-while-revalidate: one caller rebuilds; the rest keep serving
-        # the previous snapshot instead of queueing on the build lock (they
-        # only block when there is nothing to serve at all).
         lock = _build_lock_for(cache_key)
-        if lock.acquire(blocking=entry is None):
-            try:
-                rmap.graph.ensure_loaded()
-                fresh_rev = int(
-                    redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
-                entry = (_vote_cache_get(cache_key, fresh_rev)
-                         or _build_graph_votes_body_locked(
-                             rmap, mode, fresh_rev, cache_key))
-            except Exception as e:
-                return jsonify({"error": str(e)}), 500
-            finally:
-                lock.release()
-        # else: a rebuild is in flight — serve the stale entry we hold.
+        if entry is not None:
+            # Stale-while-revalidate, for real: serve the snapshot we hold NOW
+            # and rebuild on a background OS thread (the GIL hands off every few
+            # ms, so the gevent hub keeps serving meanwhile). The rebuild used to
+            # run inline on whichever request drew the short straw — +~6s on a
+            # big map, the dominant cold-load term in the [MAPLOAD] P99, while
+            # every OTHER concurrent caller already served stale. Staleness stays
+            # bounded by the build duration either way; clients reconcile forward
+            # from WS deltas, which carry authoritative counts.
+            _PrewarmThread(target=_rebuild_votes_snapshot,
+                           args=(rmap, mode, cache_key, lock),
+                           name=f"votes-swr-{cache_key}", daemon=True).start()
+        else:
+            # Nothing cached at all (fresh instance past prewarm, LRU eviction,
+            # a blocks re-bake) — there is nothing to serve stale, so this one
+            # request builds inline behind the single-flight lock.
+            with lock:
+                try:
+                    rmap.graph.ensure_loaded()
+                    fresh_rev = int(
+                        redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+                    entry = (_vote_cache_get(cache_key, fresh_rev)
+                             or _build_graph_votes_body_locked(
+                                 rmap, mode, fresh_rev, cache_key))
+                except Exception as e:
+                    return jsonify({"error": str(e)}), 500
 
     # format=sparse: nonzero-only body decoded into typed arrays client-side
     # (~50x smaller download + parse; the dense body OOM'd mobile Safari on

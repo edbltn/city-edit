@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cutting the cold load: prewarm the key clients actually request, revalidate in the background, fetch in parallel — 2026-07-23</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  table.stats { border-collapse: collapse; margin: 10px 0 2px; font-size: 13.5px; }
+  table.stats th, table.stats td { border: 1px solid var(--hairline); padding: 6px 10px; text-align: left; }
+  table.stats th { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: #f7f5ef; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.25; }
+  pre.diff span { display: block; white-space: pre; }
+  pre.diff span span { display: inline; }
+
+  .s-kw { color: #a52a5a; }
+  .s-str { color: #0a3069; }
+  .s-com { color: #77716a; font-style: italic; }
+  .s-num { color: #0550ae; }
+  .s-lit { color: #0550ae; }
+  .s-fn { color: #6639ba; }
+  .s-type { color: #953800; }
+  .s-prop { color: #116329; }
+  .s-tag { color: #116329; }
+  .s-attr { color: #0550ae; }
+  .s-dec { color: #6639ba; }
+
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Cutting the cold load: prewarm the key clients actually request, revalidate in the background, fetch in parallel</h1>
+    <div class="dateline">2026-07-23 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#waterfall">1</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a>
+  </nav>
+
+  <p class="lede">Warm loads are already ~1s; cold loads measured 8.5&ndash;9.9s, and the waterfall said why:
+  every big step ran one-after-another, and the biggest one — the ~6s vote-array build — ran on the request
+  path far more often than it should have. The instance-start prewarm was building the MODELESS snapshot
+  key while every real client requests mode=&lt;map.mode&gt;, so first visitors always built inline; a
+  rev-stale snapshot served instantly to everyone EXCEPT the one caller who won the build lock and paid the
+  rebuild inline; /api/maps/&lt;slug&gt; stalled page starts for 1&ndash;2s on TTL expiry; and the client
+  wouldn't even start fetching votes until the 15MB topology had finished downloading. Four fixes: prewarm
+  the right key, always serve stale + rebuild on a background thread (votes AND map config), and fire the
+  vote fetch in parallel with topology. Expected cold path: ~9s &rarr; ~3&ndash;4s, with the remaining time
+  dominated by the topology download itself.</p>
+
+  
+    <section class="card" id="waterfall">
+      <div class="tag">Measured · prod nyc-bikes</div>
+      <h2>1 · Where the 9 seconds actually went</h2>
+      <h3>Symptom</h3>
+      <p>Cold first loads of bikepaths.cityedit.org measured 8.5–9.9s (three headless-Chrome runs, fresh profile; the [MAPLOAD] beacon agrees), while warm loads are ~950ms. The waterfall showed three fat, fully SERIALIZED terms: /api/maps/nyc-bikes taking 0.05–2s for a 2KB response and blocking everything (the map subtree only mounts after config resolves), the topology download (~15MB brotli, 0.7–1.3s), and — dominating every run — /api/graph-votes at 5.8–6.3s, which could not even START until the topology had finished.</p>
+      <h3>Root cause</h3>
+      <ul><li><strong>The prewarm warmed a key nobody requests.</strong> Instance startup built the MODELESS vote snapshot (cache key <code>slug</code>), but every client requests <code>mode=&lt;map.mode&gt;</code> (key <code>slug:bikepaths</code>) — so the first visitor per instance×map×mode always paid the full ~6s array build inline. Confirmed by curl: first request 5.7s TTFB, subsequent 105ms.</li>
+<li><strong>Stale-while-revalidate wasn't.</strong> When a snapshot went rev-stale past the 2s debounce, every OTHER concurrent caller served the stale body — but the one who won the build lock rebuilt INLINE on the request path, +6s for that unlucky visitor. On an actively voted map this is a steady tax on P99.</li>
+<li><code>/api/maps/&lt;slug&gt;</code> has a 30s in-memory TTL; on expiry one request pays get_map's Postgres round-trip (it includes a vote count — 1–2s on the small prod instance) inline, as the FIRST request of the page load with everything queued behind it.</li>
+<li>The client fetched votes only AFTER the topology download+decode completed, serializing the two biggest requests for no reason — the votes request depends only on slug+mode.</li></ul>
+      <h3>What changed</h3><ul><li>Prewarm builds the mode-scoped snapshot (<code>_build_graph_votes_body(rmap, rmap.mode)</code>) — the key clients actually hit — so a fresh instance serves its first visitor from cache.</li>
+<li>graph_votes: a request holding a stale snapshot now ALWAYS serves it immediately and hands the rebuild to a background OS thread (<code>_rebuild_votes_snapshot</code>, single-flight via non-blocking lock acquire entirely inside the worker). Only the nothing-cached-at-all case (fresh instance past prewarm, LRU eviction, blocks re-bake) still builds inline — there is nothing to serve stale. Staleness stays bounded by the build duration, exactly what concurrent losers already got; clients reconcile forward from WS deltas.</li>
+<li>map_get: same pattern — an expired-but-present config serves stale immediately and refreshes on a background thread (<code>_refresh_map_get</code>); a map that vanished or turned passcode-protected drops out of the cache on refresh.</li>
+<li>GraphLayer kicks the vote fetch off in step 0, concurrent with the version probe and topology download/decode; step 3 just awaits the already-in-flight promise. Safe because MapApp applies the map config BEFORE mounting the map subtree, so getMapSlug() is always resolved here.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details open>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+87</span> / <span class="d-del">-17</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">API entrypoint</span>
+        <span class="ctx-sum">routes, vote snapshot cache, prewarm, WS delta hub wiring</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~2250 LOC — map resolution/caches, vote snapshot LRU + single-flight, graph-votes/topology routes, admin</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">map config caches</span><span class="ol-sum">_map_cache (resolve_map) unchanged; map_get cache gains SWR</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">vote snapshot cache</span><span class="ol-sum">LRU + debounce + single-flight locks (unchanged)</span></li><li class="dim"><span class="ol-label">_build_graph_votes_body(_locked)</span><span class="ol-sum">dense+sparse twin build (unchanged)</span></li><li class="changed"><span class="ol-label">NEW _rebuild_votes_snapshot</span><span class="ol-sum">background revalidation worker — lock acquired AND released in-thread</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_prewarm</span><span class="ol-sum">now builds the MODE-SCOPED snapshot clients actually request</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">routes: maps</span><span class="ol-sum">map_get — NEW _refresh_map_get + serve-stale-on-expiry branch</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">routes: graph-votes</span><span class="ol-sum">stale entry → serve now + background rebuild; empty cache → inline build</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">routes: topology / admin / WS</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>_rebuild_votes_snapshot — non-blocking single-flight, rev re-check inside the lock</li><li>_prewarm — _build_graph_votes_body(rmap, rmap.mode)</li><li>_refresh_map_get + map_get SWR branch — stale config serves while get_map&#x27;s 1-2s Postgres trip runs off-path</li><li>graph_votes — the not-servable fork: entry≠None spawns _PrewarmThread; entry=None builds inline behind the lock</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index feb3e12..c0ad684 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -599,6 +599,26 @@ def _build_graph_votes_body_locked(</span>
+<span class="d-ctx">     <span class="s-kw">return</span> entry</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">_rebuild_votes_snapshot</span>(rmap: <span class="s-type">ResolvedMap</span>, mode: str | <span class="s-lit">None</span>, cache_key: str,</span>
+<span class="d-add">+                            lock: threading.<span class="s-type">Lock</span>) -&gt; <span class="s-lit">None</span>:</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Background revalidation for /api/graph-votes (runs on a real OS thread).</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-type">Acquire</span> <span class="s-type">AND</span> release the single-flight lock here <span class="s-kw">in</span> the worker so the lock</span>
+<span class="d-add">+    never crosses the request-greenlet/thread boundary mid-hold; losing the</span>
+<span class="d-add">+    non-blocking acquire just means a rebuild <span class="s-kw">is</span> already <span class="s-kw">in</span> flight.<span class="s-str">&quot;&quot;&quot;</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-kw">not</span> lock.<span class="s-fn">acquire</span>(blocking=<span class="s-lit">False</span>):</span>
+<span class="d-add">+        <span class="s-kw">return</span></span>
+<span class="d-add">+    <span class="s-kw">try</span>:</span>
+<span class="d-add">+        rmap.graph.<span class="s-fn">ensure_loaded</span>()</span>
+<span class="d-add">+        fresh_rev = <span class="s-fn">int</span>(redis_client.<span class="s-fn">get</span>(vote_store.<span class="s-fn">revision_key</span>(rmap.slug)) <span class="s-kw">or</span> <span class="s-num">0</span>)</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-fn">_vote_cache_get</span>(cache_key, fresh_rev) <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+            <span class="s-fn">_build_graph_votes_body_locked</span>(rmap, mode, fresh_rev, cache_key)</span>
+<span class="d-add">+    <span class="s-kw">except</span> <span class="s-type">Exception</span> <span class="s-kw">as</span> e:</span>
+<span class="d-add">+        logger.<span class="s-fn">warning</span>(<span class="s-str">f&quot;[VOTES] background rebuild &#x27;{cache_key}&#x27; failed: {e}&quot;</span>)</span>
+<span class="d-add">+    <span class="s-kw">finally</span>:</span>
+<span class="d-add">+        lock.<span class="s-fn">release</span>()</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> <span class="s-kw">def</span> <span class="s-fn">_sparse_votes_body</span>(arrays: dict, evt: dict, nvt: dict, bvt: dict | <span class="s-lit">None</span>) -&gt; dict:</span>
+<span class="d-ctx">     <span class="s-str">&quot;&quot;&quot;Assemble the format=sparse /api/graph-votes body from the dense arrays.</span></span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -732,7 +752,12 @@ def _prewarm():</span>
+<span class="d-ctx">         <span class="s-kw">for</span> m <span class="s-kw">in</span> <span class="s-fn">list_maps</span>():</span>
+<span class="d-ctx">             <span class="s-kw">try</span>:</span>
+<span class="d-ctx">                 rmap = <span class="s-fn">resolve_map</span>(m[<span class="s-str">&quot;slug&quot;</span>])</span>
+<span class="d-del">-                <span class="s-fn">_build_graph_votes_body</span>(rmap)</span>
+<span class="d-add">+                <span class="s-com"># Build the MODE-SCOPED snapshot — the client always requests</span></span>
+<span class="d-add">+                <span class="s-com"># mode=&lt;map.mode&gt;, so the cache key is &quot;&lt;slug&gt;:&lt;mode&gt;&quot;. The old</span></span>
+<span class="d-add">+                <span class="s-com"># modeless build warmed a key no client ever asks for, and the</span></span>
+<span class="d-add">+                <span class="s-com"># first visitor per instance still paid the full ~6s build</span></span>
+<span class="d-add">+                <span class="s-com"># inline (the dominant cold-load term in the [MAPLOAD] P99).</span></span>
+<span class="d-add">+                <span class="s-fn">_build_graph_votes_body</span>(rmap, rmap.mode)</span>
+<span class="d-ctx">                 <span class="s-com"># Pre-compress the topology blob too, so no tenant&#x27;s first</span></span>
+<span class="d-ctx">                 <span class="s-com"># visitor pays the one-time ~1-2s compression of the big</span></span>
+<span class="d-ctx">                 <span class="s-com"># cities (brotli is what browsers actually receive).</span></span>
+<span class="d-hunk">@@ -931,6 +956,32 @@ _map_get_cache: dict[str, tuple[float, dict]] = {}</span>
+<span class="d-ctx"> _map_get_locks: dict[str, threading.<span class="s-type">Lock</span>] = {}</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">_refresh_map_get</span>(slug: str, lock: threading.<span class="s-type">Lock</span>) -&gt; <span class="s-lit">None</span>:</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Background revalidation for /api/maps/&lt;slug&gt; (runs on a real OS thread).</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    get_map<span class="s-str">&#x27;s Postgres round-trip (it includes a vote count) takes 1-2s on the</span></span>
+<span class="d-add">+    small prod instance; running it inline on <span class="s-type">TTL</span> expiry put that stall on the</span>
+<span class="d-add">+    <span class="s-type">FIRST</span> request of a page load, serializing everything behind it. <span class="s-type">Only</span> public</span>
+<span class="d-add">+    maps are ever cached, so refreshing the cache here can<span class="s-str">&#x27;t leak a passcode</span></span>
+<span class="d-add">+    map<span class="s-str">&#x27;s config.&quot;&quot;&quot;</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-kw">not</span> lock.<span class="s-fn">acquire</span>(blocking=<span class="s-lit">False</span>):</span>
+<span class="d-add">+        <span class="s-kw">return</span></span>
+<span class="d-add">+    <span class="s-kw">try</span>:</span>
+<span class="d-add">+        m = <span class="s-fn">get_map</span>(slug)</span>
+<span class="d-add">+        <span class="s-kw">if</span> m <span class="s-kw">and</span> <span class="s-kw">not</span> m.<span class="s-fn">get</span>(<span class="s-str">&quot;requiresPasscode&quot;</span>):</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(_map_get_cache) &gt; <span class="s-num">256</span>:  <span class="s-com"># bound: one entry per public map</span></span>
+<span class="d-add">+                _map_get_cache.<span class="s-fn">clear</span>()</span>
+<span class="d-add">+            _map_get_cache[slug] = (time.<span class="s-fn">monotonic</span>() + <span class="s-num">30.0</span>, m)</span>
+<span class="d-add">+        <span class="s-kw">else</span>:</span>
+<span class="d-add">+            <span class="s-com"># Map deleted or newly passcode-protected: stop serving the stale</span></span>
+<span class="d-add">+            <span class="s-com"># public copy immediately.</span></span>
+<span class="d-add">+            _map_get_cache.<span class="s-fn">pop</span>(slug, <span class="s-lit">None</span>)</span>
+<span class="d-add">+    <span class="s-kw">except</span> <span class="s-type">Exception</span> <span class="s-kw">as</span> e:</span>
+<span class="d-add">+        logger.<span class="s-fn">warning</span>(<span class="s-str">f&quot;[MAPS] background refresh &#x27;{slug}&#x27; failed: {e}&quot;</span>)</span>
+<span class="d-add">+    <span class="s-kw">finally</span>:</span>
+<span class="d-add">+        lock.<span class="s-fn">release</span>()</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> <span class="s-dec">@app.route</span>(<span class="s-str">&quot;/api/maps/&lt;slug&gt;&quot;</span>, methods=[<span class="s-str">&quot;GET&quot;</span>])</span>
+<span class="d-ctx"> <span class="s-kw">def</span> <span class="s-fn">map_get</span>(slug):</span>
+<span class="d-ctx">     cached = _map_get_cache.<span class="s-fn">get</span>(slug)</span>
+<span class="d-hunk">@@ -939,6 +990,15 @@ def map_get(slug):</span>
+<span class="d-ctx">         resp.headers[<span class="s-str">&quot;Cache-Control&quot;</span>] = <span class="s-str">&quot;public, max-age=60&quot;</span></span>
+<span class="d-ctx">         <span class="s-kw">return</span> resp</span>
+<span class="d-ctx">     lock = _map_get_locks.<span class="s-fn">setdefault</span>(slug, threading.<span class="s-fn">Lock</span>())</span>
+<span class="d-add">+    <span class="s-kw">if</span> cached <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+        <span class="s-com"># Expired but present: serve the stale config NOW and refresh it in the</span></span>
+<span class="d-add">+        <span class="s-com"># background. Map config changes rarely; staleness is bounded by the</span></span>
+<span class="d-add">+        <span class="s-com"># refresh duration on top of the 30s TTL.</span></span>
+<span class="d-add">+        <span class="s-fn">_PrewarmThread</span>(target=_refresh_map_get, args=(slug, lock),</span>
+<span class="d-add">+                       name=<span class="s-str">f&quot;map-swr-{slug}&quot;</span>, daemon=<span class="s-lit">True</span>).<span class="s-fn">start</span>()</span>
+<span class="d-add">+        resp = <span class="s-fn">jsonify</span>(cached[<span class="s-num">1</span>])</span>
+<span class="d-add">+        resp.headers[<span class="s-str">&quot;Cache-Control&quot;</span>] = <span class="s-str">&quot;public, max-age=60&quot;</span></span>
+<span class="d-add">+        <span class="s-kw">return</span> resp</span>
+<span class="d-ctx">     <span class="s-kw">with</span> lock:  <span class="s-com"># gevent-patched: waiters yield the hub</span></span>
+<span class="d-ctx">         cached = _map_get_cache.<span class="s-fn">get</span>(slug)</span>
+<span class="d-ctx">         <span class="s-kw">if</span> cached <span class="s-kw">and</span> cached[<span class="s-num">0</span>] &gt; time.<span class="s-fn">monotonic</span>():</span>
+<span class="d-hunk">@@ -2025,23 +2085,33 @@ def graph_votes():</span>
+<span class="d-ctx">     )</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-kw">if</span> <span class="s-kw">not</span> servable:</span>
+<span class="d-del">-        <span class="s-com"># Stale-while-revalidate: one caller rebuilds; the rest keep serving</span></span>
+<span class="d-del">-        <span class="s-com"># the previous snapshot instead of queueing on the build lock (they</span></span>
+<span class="d-del">-        <span class="s-com"># only block when there is nothing to serve at all).</span></span>
+<span class="d-ctx">         lock = <span class="s-fn">_build_lock_for</span>(cache_key)</span>
+<span class="d-del">-        <span class="s-kw">if</span> lock.<span class="s-fn">acquire</span>(blocking=entry <span class="s-kw">is</span> <span class="s-lit">None</span>):</span>
+<span class="d-del">-            <span class="s-kw">try</span>:</span>
+<span class="d-del">-                rmap.graph.<span class="s-fn">ensure_loaded</span>()</span>
+<span class="d-del">-                fresh_rev = <span class="s-fn">int</span>(</span>
+<span class="d-del">-                    redis_client.<span class="s-fn">get</span>(vote_store.<span class="s-fn">revision_key</span>(rmap.slug)) <span class="s-kw">or</span> <span class="s-num">0</span>)</span>
+<span class="d-del">-                entry = (<span class="s-fn">_vote_cache_get</span>(cache_key, fresh_rev)</span>
+<span class="d-del">-                         <span class="s-kw">or</span> <span class="s-fn">_build_graph_votes_body_locked</span>(</span>
+<span class="d-del">-                             rmap, mode, fresh_rev, cache_key))</span>
+<span class="d-del">-            <span class="s-kw">except</span> <span class="s-type">Exception</span> <span class="s-kw">as</span> e:</span>
+<span class="d-del">-                <span class="s-kw">return</span> <span class="s-fn">jsonify</span>({<span class="s-str">&quot;error&quot;</span>: <span class="s-fn">str</span>(e)}), <span class="s-num">500</span></span>
+<span class="d-del">-            <span class="s-kw">finally</span>:</span>
+<span class="d-del">-                lock.<span class="s-fn">release</span>()</span>
+<span class="d-del">-        <span class="s-com"># else: a rebuild is in flight — serve the stale entry we hold.</span></span>
+<span class="d-add">+        <span class="s-kw">if</span> entry <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+            <span class="s-com"># Stale-while-revalidate, for real: serve the snapshot we hold NOW</span></span>
+<span class="d-add">+            <span class="s-com"># and rebuild on a background OS thread (the GIL hands off every few</span></span>
+<span class="d-add">+            <span class="s-com"># ms, so the gevent hub keeps serving meanwhile). The rebuild used to</span></span>
+<span class="d-add">+            <span class="s-com"># run inline on whichever request drew the short straw — +~6s on a</span></span>
+<span class="d-add">+            <span class="s-com"># big map, the dominant cold-load term in the [MAPLOAD] P99, while</span></span>
+<span class="d-add">+            <span class="s-com"># every OTHER concurrent caller already served stale. Staleness stays</span></span>
+<span class="d-add">+            <span class="s-com"># bounded by the build duration either way; clients reconcile forward</span></span>
+<span class="d-add">+            <span class="s-com"># from WS deltas, which carry authoritative counts.</span></span>
+<span class="d-add">+            <span class="s-fn">_PrewarmThread</span>(target=_rebuild_votes_snapshot,</span>
+<span class="d-add">+                           args=(rmap, mode, cache_key, lock),</span>
+<span class="d-add">+                           name=<span class="s-str">f&quot;votes-swr-{cache_key}&quot;</span>, daemon=<span class="s-lit">True</span>).<span class="s-fn">start</span>()</span>
+<span class="d-add">+        <span class="s-kw">else</span>:</span>
+<span class="d-add">+            <span class="s-com"># Nothing cached at all (fresh instance past prewarm, LRU eviction,</span></span>
+<span class="d-add">+            <span class="s-com"># a blocks re-bake) — there is nothing to serve stale, so this one</span></span>
+<span class="d-add">+            <span class="s-com"># request builds inline behind the single-flight lock.</span></span>
+<span class="d-add">+            <span class="s-kw">with</span> lock:</span>
+<span class="d-add">+                <span class="s-kw">try</span>:</span>
+<span class="d-add">+                    rmap.graph.<span class="s-fn">ensure_loaded</span>()</span>
+<span class="d-add">+                    fresh_rev = <span class="s-fn">int</span>(</span>
+<span class="d-add">+                        redis_client.<span class="s-fn">get</span>(vote_store.<span class="s-fn">revision_key</span>(rmap.slug)) <span class="s-kw">or</span> <span class="s-num">0</span>)</span>
+<span class="d-add">+                    entry = (<span class="s-fn">_vote_cache_get</span>(cache_key, fresh_rev)</span>
+<span class="d-add">+                             <span class="s-kw">or</span> <span class="s-fn">_build_graph_votes_body_locked</span>(</span>
+<span class="d-add">+                                 rmap, mode, fresh_rev, cache_key))</span>
+<span class="d-add">+                <span class="s-kw">except</span> <span class="s-type">Exception</span> <span class="s-kw">as</span> e:</span>
+<span class="d-add">+                    <span class="s-kw">return</span> <span class="s-fn">jsonify</span>({<span class="s-str">&quot;error&quot;</span>: <span class="s-fn">str</span>(e)}), <span class="s-num">500</span></span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-com"># format=sparse: nonzero-only body decoded into typed arrays client-side</span></span>
+<span class="d-ctx">     <span class="s-com"># (~50x smaller download + parse; the dense body OOM&#x27;d mobile Safari on</span></span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+18</span> / <span class="d-del">-6</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">GraphLayer</span>
+        <span class="ctx-sum">topology + votes loading, heatmap paint, WS delta application, proposals</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~2600 LOC — the mount effect loads topology (IDB-first) then votes, then reconciles deltas</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">NEW step 0 · early vote fetch</span><span class="ol-sum">fires with the version probe, parallel to topology</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">step 1 · version probe + topology</span><span class="ol-sum">IDB-first, version-busted URLs (unchanged)</span></li><li class="dim"><span class="ol-label">step 2 · paint from cached votes</span><span class="ol-sum">unchanged (v4-purged cache is sparse-only)</span></li><li class="changed"><span class="ol-label">step 3 · authoritative votes</span><span class="ol-sum">awaits the step-0 promise instead of fetching here</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">delta application / proposals</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>votesFetchPromise — started before the topology await; noop catch silences unhandled rejection if topology fails first</li><li>step 3 — `const voteRaw = await votesFetchPromise` replaces the serialized fetch</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 4fc9ca6..611774f 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -2185,6 +2185,21 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     <span class="s-kw">let</span> cancelled = <span class="s-lit">false</span>;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     (<span class="s-kw">async</span> () =&gt; {</span>
+<span class="d-add">+      <span class="s-com">// 0. Kick the authoritative vote fetch off immediately, in parallel with</span></span>
+<span class="d-add">+      <span class="s-com">//    the version probe and the topology load/decode: the request depends</span></span>
+<span class="d-add">+      <span class="s-com">//    only on slug+mode. On a cold load it used to start only AFTER the</span></span>
+<span class="d-add">+      <span class="s-com">//    multi-MB topology finished downloading, serializing the two biggest</span></span>
+<span class="d-add">+      <span class="s-com">//    fetches. Step 3 awaits it; the noop catch here only silences the</span></span>
+<span class="d-add">+      <span class="s-com">//    unhandled-rejection warning when topology fails first.</span></span>
+<span class="d-add">+      <span class="s-kw">const</span> votesFetchPromise = <span class="s-fn">fetch</span>(</span>
+<span class="d-add">+        <span class="s-str">`${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&amp;mode=${encodeURIComponent(themeMode)}&amp;format=sparse`</span>,</span>
+<span class="d-add">+        { headers: <span class="s-fn">passcodeHeaders</span>() },</span>
+<span class="d-add">+      ).<span class="s-fn">then</span>((r) =&gt; {</span>
+<span class="d-add">+        <span class="s-kw">if</span> (!r.ok) <span class="s-kw">throw</span> <span class="s-kw">new</span> <span class="s-fn">Error</span>(<span class="s-str">`Vote fetch failed: ${r.status}`</span>);</span>
+<span class="d-add">+        <span class="s-kw">return</span> r.<span class="s-fn">json</span>();</span>
+<span class="d-add">+      });</span>
+<span class="d-add">+      votesFetchPromise.<span class="s-kw">catch</span>(() =&gt; {});</span>
+<span class="d-add">+</span>
+<span class="d-ctx">       <span class="s-com">// 1. Resolve the graph version, then load topology from IndexedDB when it</span></span>
+<span class="d-ctx">       <span class="s-com">//    matches — skipping the multi-MB download and JSON parse entirely.</span></span>
+<span class="d-ctx">       <span class="s-kw">let</span> topology: <span class="s-type">GraphTopology</span> | <span class="s-lit">null</span> = <span class="s-lit">null</span>;</span>
+<span class="d-hunk">@@ -2342,15 +2357,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       <span class="s-com">// 3. Authoritative vote fetch — replaces the cached snapshot and replays</span></span>
+<span class="d-ctx">       <span class="s-com">//    any deltas that arrived while the fetch was in flight.</span></span>
+<span class="d-ctx">       <span class="s-kw">try</span> {</span>
+<span class="d-del">-        <span class="s-kw">const</span> r = <span class="s-kw">await</span> <span class="s-fn">fetch</span>(</span>
+<span class="d-del">-          <span class="s-str">`${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&amp;mode=${encodeURIComponent(themeMode)}&amp;format=sparse`</span>,</span>
+<span class="d-del">-          { headers: <span class="s-fn">passcodeHeaders</span>() }</span>
+<span class="d-del">-        );</span>
+<span class="d-del">-        <span class="s-kw">if</span> (!r.ok) <span class="s-kw">throw</span> <span class="s-kw">new</span> <span class="s-fn">Error</span>(<span class="s-str">`Vote fetch failed: ${r.status}`</span>);</span>
+<span class="d-add">+        <span class="s-com">// Awaits the request started in step 0 (usually already resolved by</span></span>
+<span class="d-add">+        <span class="s-com">// now — it ran concurrently with the topology download/decode).</span></span>
+<span class="d-ctx">         <span class="s-com">// format=sparse: nonzero-only body decoded into typed/holey arrays —</span></span>
+<span class="d-ctx">         <span class="s-com">// the dense body&#x27;s ~9M boxed slots were the mobile-Safari OOM (see</span></span>
+<span class="d-ctx">         <span class="s-com">// utils/sparseVotes.ts). A dense body still decodes as-is (old server).</span></span>
+<span class="d-del">-        <span class="s-kw">const</span> voteRaw = <span class="s-kw">await</span> r.<span class="s-fn">json</span>();</span>
+<span class="d-add">+        <span class="s-kw">const</span> voteRaw = <span class="s-kw">await</span> votesFetchPromise;</span>
+<span class="d-ctx">         <span class="s-kw">const</span> voteData = <span class="s-fn">isSparseVotes</span>(voteRaw) ? <span class="s-fn">decodeSparseVotes</span>(voteRaw) : voteRaw;</span>
+<span class="d-ctx">         <span class="s-kw">if</span> (cancelled) <span class="s-kw">return</span>;</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Measured prod cold loads pre-change: 9.9s / 8.5s / 9.0s (headless Chrome, fresh profile each run); warm 0.9–1.1s. curl isolated the votes term: first hit 5.67s TTFB, cached 0.105s.</li>
+<li>Local SWR exercise: bump <code>vote_rev:nyc-walkways</code>, wait past the 2s debounce — the next request served the STALE body in 4ms with the old rev's ETag; 8s later the fresh rev's ETag was serving (background rebuild completed); no failure lines in the Flask log.</li>
+<li>Local waterfall after the client change: graph-votes now starts at the same millisecond as graph-version, in parallel with the topology fetch (was: strictly after topology completed).</li>
+<li><code>npx tsc --noEmit</code> clean; full client suite 253/253 passing. Server <code>tests/unit</code> has 7 pre-existing failures (stale numpy-vs-list expectations around the vectorized build_arrays — identical with the diff stashed; none touch these handlers).</li>
+<li>getMapSlug()-at-step-0 safety: App.tsx's MapApp resolves + applies the map config before the map subtree mounts, so the early vote fetch can never target the default map by racing config load.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open bikepaths.cityedit.org in a private/incognito window (cold): the loader should clear in roughly 3–4s now, not ~9s.</li>
+<li>Reload normally (warm): still ~1s, heatmap painting from cache.</li>
+<li>Cast a vote on any map, wait ~5s, reload: counts correct after the WS delta reconciles — the snapshot you loaded may be seconds stale by design.</li>
+<li>Watch the System Health map-load row over a few days: cold-load P50/P99 (cached_topo=0) should drop by roughly the 6s build term.</li></ul>
+  </section>
+
+
+
+  <footer>
+    Generated from <code>changelog/changes-coldload-swr.diff</code> by <code>changelog/build_coldload_swr_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

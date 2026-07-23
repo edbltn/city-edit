@@ -2185,6 +2185,21 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     let cancelled = false;
 
     (async () => {
+      // 0. Kick the authoritative vote fetch off immediately, in parallel with
+      //    the version probe and the topology load/decode: the request depends
+      //    only on slug+mode. On a cold load it used to start only AFTER the
+      //    multi-MB topology finished downloading, serializing the two biggest
+      //    fetches. Step 3 awaits it; the noop catch here only silences the
+      //    unhandled-rejection warning when topology fails first.
+      const votesFetchPromise = fetch(
+        `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}&format=sparse`,
+        { headers: passcodeHeaders() },
+      ).then((r) => {
+        if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);
+        return r.json();
+      });
+      votesFetchPromise.catch(() => {});
+
       // 1. Resolve the graph version, then load topology from IndexedDB when it
       //    matches — skipping the multi-MB download and JSON parse entirely.
       let topology: GraphTopology | null = null;
@@ -2342,15 +2357,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       // 3. Authoritative vote fetch — replaces the cached snapshot and replays
       //    any deltas that arrived while the fetch was in flight.
       try {
-        const r = await fetch(
-          `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}&format=sparse`,
-          { headers: passcodeHeaders() }
-        );
-        if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);
+        // Awaits the request started in step 0 (usually already resolved by
+        // now — it ran concurrently with the topology download/decode).
         // format=sparse: nonzero-only body decoded into typed/holey arrays —
         // the dense body's ~9M boxed slots were the mobile-Safari OOM (see
         // utils/sparseVotes.ts). A dense body still decodes as-is (old server).
-        const voteRaw = await r.json();
+        const voteRaw = await votesFetchPromise;
         const voteData = isSparseVotes(voteRaw) ? decodeSparseVotes(voteRaw) : voteRaw;
         if (cancelled) return;
 

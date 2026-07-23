@@ -29,6 +29,21 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-23-coldload-swr.html">
+    <div class="date">2026-07-23</div>
+    <h2>Cutting the cold load — prewarm the right key, revalidate in the background, fetch in parallel</h2>
+    <p>Warm loads were ~1s but cold loads measured 8.5–9.9s on bikepaths, dominated by the ~6s
+    vote-array build running on the request path: the instance prewarm built the MODELESS snapshot key
+    while every client requests mode-scoped, so first visitors always built inline; a rev-stale
+    snapshot served instantly to everyone except the one caller who won the build lock and rebuilt
+    inline; /api/maps/&lt;slug&gt; stalled page starts 1–2s on TTL expiry (get_map's Postgres vote
+    count); and the client didn't start fetching votes until the 15MB topology finished downloading.
+    Now: prewarm builds the mode-scoped key, stale snapshots and map configs always serve immediately
+    with the rebuild/refresh on a background OS thread (single-flight, in-thread lock), and GraphLayer
+    fires the vote fetch in parallel with the topology load. Verified: stale serve in 4ms with the old
+    ETag, fresh ETag 8s later; votes request now starts alongside graph-version.</p>
+  </a>
+
   <a class="entry" href="./2026-07-23-idb-dense-votes-purge.html">
     <div class="date">2026-07-23</div>
     <h2>The crash loop the sparse fix couldn't reach — purging pre-sparse dense vote entries (IndexedDB v4)</h2>
