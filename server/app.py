@@ -915,8 +915,14 @@ def maps_list():
     return resp
 
 
-def _map_response(m: dict):
-    """Enrich a map dict with its city's public config and JSON-ify it."""
+def _enrich_map(m: dict) -> dict:
+    """Attach the city public config + searchable vote types to a map dict.
+
+    EVERY path that puts a map into _map_get_cache must cache the ENRICHED
+    dict — the SWR background refresh used to cache get_map() raw, so after
+    the first TTL expiry clients received an empty `city` (no bounds/center/
+    blockTiles; NYC only looked fine because the client bootstrap defaults
+    to it)."""
     city = get_city(m["cityId"])
     if city:
         m["city"] = city.to_public()
@@ -929,7 +935,12 @@ def _map_response(m: dict):
         vt for vt in fetch_voted_vote_type_labels(m["slug"])
         if vt["label"] not in default_labels
     ]
-    resp = jsonify(m)
+    return m
+
+
+def _map_response(m: dict):
+    """Enrich a map dict with its city's public config and JSON-ify it."""
+    resp = jsonify(_enrich_map(m))
     # This is the prod page-load entry point (resolved per load by slug/subdomain)
     # and was uncached. A passcode map only reaches here once unlocked, so keep its
     # config out of shared caches — per-browser only.
@@ -973,7 +984,7 @@ def _refresh_map_get(slug: str, lock: threading.Lock) -> None:
         if m and not m.get("requiresPasscode"):
             if len(_map_get_cache) > 256:  # bound: one entry per public map
                 _map_get_cache.clear()
-            _map_get_cache[slug] = (time.monotonic() + 30.0, m)
+            _map_get_cache[slug] = (time.monotonic() + 30.0, _enrich_map(m))
         else:
             # Map deleted or newly passcode-protected: stop serving the stale
             # public copy immediately.
