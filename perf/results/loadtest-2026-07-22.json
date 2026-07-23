@@ -1,0 +1,20 @@
+{
+  "label": "gunicorn-gevent-1worker-local",
+  "date": "2026-07-22",
+  "ws": {
+    "clients": 300,
+    "connectInitMs": 813,
+    "fanout": { "received": "300/300", "p50Ms": 59, "p95Ms": 80, "maxMs": 83 },
+    "sustained": { "votes": 20, "clientsComplete": "300/300", "revGaps": 0 }
+  },
+  "visitorStampede100": {
+    "note": "100 simultaneous cold visitors, curl-measured, no nginx cache",
+    "heat": { "p50S": 3.7, "p95S": 4.0 },
+    "topology": { "p50S": 2.2, "p95S": 3.3 },
+    "tilesX200": { "p50S": 1.8, "p95S": 2.7 }
+  },
+  "prodBuildLoad": {
+    "coldHeatmapMs": 3268, "coldStreetsMs": 4470,
+    "warmHeatmapMs": 1438, "warmStreetsMs": 3512
+  }
+}
