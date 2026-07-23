@@ -59,12 +59,16 @@ if (card) {
   }
 }
 
-// 6. Hover a street → hover card appears
-await page.mouse.move(500, 300);
-await page.waitForTimeout(150);
-await page.mouse.move(620, 380, { steps: 10 });
-await page.waitForTimeout(700);
-const hoverCard = await page.$(".graph-proposal-card.is-hover");
+// 6. Hover a street → hover card appears. Topology (and thus hit-testing)
+// deliberately loads after tiles settle, so poll up to 12s for readiness.
+let hoverCard = null;
+for (let tries = 0; tries < 24 && !hoverCard; tries++) {
+  await page.mouse.move(500, 300);
+  await page.waitForTimeout(100);
+  await page.mouse.move(620, 380, { steps: 6 });
+  await page.waitForTimeout(400);
+  hoverCard = await page.$(".graph-proposal-card.is-hover");
+}
 check("hover card on mousemove", !!hoverCard);
 
 // 7. Drag-pan the map (should not throw, cursor logic runs)

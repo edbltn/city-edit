@@ -17,6 +17,7 @@ import Flatbush from "flatbush";
 import { CONFIG } from "../../config";
 import { withMap, getMapSlug } from "../../map/runtime";
 import { useMapFacade } from "../../map/MapFacadeContext";
+import { getMapLibreMap } from "../../map/maplibreInstance";
 import type { MapFacade, MapMouseEvent } from "../../map/facade";
 import { syncHeatToMapLibre, primeHeatFromServer } from "./maplibreHeat";
 import { syncHighlightsToMapLibre } from "./maplibreHighlight";
@@ -188,11 +189,38 @@ const SPREAD_ANIM_MS = 280;   // keep in sync with the CSS transition
 // segment is always among the top few bbox-nearest in practice.
 const INDEX_NEIGHBOR_K = 20;
 
+/** Resolves when the GL map's initial tiles settle, or after maxWaitMs. */
+function tilesSettled(maxWaitMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const ml = getMapLibreMap();
+    if (!ml || (ml.isStyleLoaded() && ml.areTilesLoaded())) {
+      resolve();
+      return;
+    }
+    const done = () => {
+      window.clearTimeout(timer);
+      ml.off("idle", done);
+      resolve();
+    };
+    const timer = window.setTimeout(done, maxWaitMs);
+    ml.on("idle", done);
+  });
+}
+
+// Index builds yield to the main thread between batches so they don't jank
+// the tile/heat animations happening at exactly this moment of the load.
+// Until an index exists, hit-testing simply returns no result (hover lights
+// up ~a second later) — no brute-force fallback, which would scan the full
+// 650k-edge array per mousemove.
+const INDEX_YIELD_BATCH = 120_000;
+const yieldToMain = () => new Promise<void>((r) => setTimeout(r, 0));
+
 /** Build a flatbush spatial index of node points. Done once per graph. */
-function buildNodeIndex(data: Pick<GraphData, "nodes">): Flatbush | null {
+async function buildNodeIndex(data: Pick<GraphData, "nodes">): Promise<Flatbush | null> {
   if (data.nodes.length === 0) return null;
   const idx = new Flatbush(data.nodes.length);
   for (let i = 0; i < data.nodes.length; i++) {
+    if (i > 0 && i % INDEX_YIELD_BATCH === 0) await yieldToMain();
     const node = data.nodes[i];
     // Point bbox: min == max (lng,lat ordering matches the edge index)
     idx.add(node[1], node[0], node[1], node[0]);
@@ -202,10 +230,11 @@ function buildNodeIndex(data: Pick<GraphData, "nodes">): Flatbush | null {
 }
 
 /** Build a flatbush spatial index of edge bounding boxes. Done once per graph. */
-function buildEdgeIndex(data: Pick<GraphData, "nodes" | "edges">): Flatbush | null {
+async function buildEdgeIndex(data: Pick<GraphData, "nodes" | "edges">): Promise<Flatbush | null> {
   if (data.edges.length === 0) return null;
   const idx = new Flatbush(data.edges.length);
   for (let i = 0; i < data.edges.length; i++) {
+    if (i > 0 && i % INDEX_YIELD_BATCH === 0) await yieldToMain();
     const [fromIdx, toIdx] = data.edges[i];
     const fromNode = data.nodes[fromIdx];
     const toNode = data.nodes[toIdx];
@@ -251,16 +280,10 @@ function findNearestEdgeIndex(
   let bestDist = Infinity;
   let bestIdx = -1;
 
-  if (index) {
-    const candidates = index.neighbors(queryLng, queryLat, INDEX_NEIGHBOR_K);
-    for (const i of candidates) {
-      [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);
-    }
-  } else {
-    // Brief fallback while the index is being built
-    for (let i = 0; i < data.edges.length; i++) {
-      [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);
-    }
+  if (!index) return null; // index still building — no selection yet
+  const candidates = index.neighbors(queryLng, queryLat, INDEX_NEIGHBOR_K);
+  for (const i of candidates) {
+    [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);
   }
 
   return bestIdx >= 0 ? bestIdx : null;
@@ -300,8 +323,6 @@ function hitTest(
   if (nodeIndex) {
     const candidates = nodeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K);
     for (const i of candidates) checkNode(i);
-  } else {
-    for (let i = 0; i < data.nodes.length; i++) checkNode(i);
   }
 
   if (bestNode !== null) {
@@ -329,8 +350,6 @@ function hitTest(
   if (edgeIndex) {
     const candidates = edgeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K);
     for (const i of candidates) checkEdge(i);
-  } else {
-    for (let i = 0; i < data.edges.length; i++) checkEdge(i);
   }
 
   if (bestEdge !== null) {
@@ -729,6 +748,15 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       });
       votesPromise.catch(() => {}); // handled below; avoid unhandled rejection
 
+      // 0c. Yield bandwidth to the visual layers: hold the multi-MB topology
+      //     download until the initial tiles settle (or 2.5s), so streets and
+      //     heat aren't competing with it. Deep links skip the wait — they
+      //     need hit-testing to resolve the pinned selection ASAP.
+      const params = new URLSearchParams(window.location.search);
+      const hasDeepLink = params.has("slat") || params.has("elat");
+      if (!hasDeepLink) await tilesSettled(2500);
+      if (cancelled) return;
+
       // 1. Resolve the graph version, then load topology from IndexedDB when it
       //    matches — skipping the multi-MB download and JSON parse entirely.
       let topology: GraphData | null = null;
@@ -763,9 +791,11 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
 
       topologyRef.current = topology;
       graphDataRef.current = topology;
-      edgeIndexRef.current = buildEdgeIndex(topology);
-      nodeIndexRef.current = buildNodeIndex(topology);
       nodeAdjRef.current = buildNodeAdj(topology);
+      edgeIndexRef.current = await buildEdgeIndex(topology);
+      if (cancelled) return;
+      nodeIndexRef.current = await buildNodeIndex(topology);
+      if (cancelled) return;
 
       // 2. Paint immediately from cached votes (same graph version only) so the
       //    heatmap appears without waiting on the network. Skipped when the
@@ -1003,20 +1033,13 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
           onSnapRef.current?.(snapPos);
           setCurrentSnap(snapPos);
         } else {
-          // Fallback: nearest node out of range. Use the node index when
-          // available (top-1 by bbox distance — for points that's exact).
+          // Fallback: nearest node out of range (top-1 by bbox distance —
+          // for points that's exact). Index-only; no result while building.
           const nodeIdx = nodeIndexRef.current;
           let nearestIdx = -1;
           if (nodeIdx) {
             const candidates = nodeIdx.neighbors(e.latlng.lng, e.latlng.lat, 1);
             if (candidates.length > 0) nearestIdx = candidates[0];
-          } else {
-            let nearestDist = Infinity;
-            for (let i = 0; i < data.nodes.length; i++) {
-              const n = data.nodes[i];
-              const d = (n[0] - e.latlng.lat) ** 2 + (n[1] - e.latlng.lng) ** 2;
-              if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
-            }
           }
           if (nearestIdx >= 0) {
             const n = data.nodes[nearestIdx];

@@ -46,9 +46,17 @@ def get_all_nodes_edges(city_id: str):
     return data.get("nodes", []), data.get("edges", []), bbox
 
 
-def build_pmtiles(city_id: str, output_path: str):
-    """Build PMTiles file with MVT-encoded tiles from graph data."""
-    logger.info(f"Building PMTiles for {city_id}: {output_path}")
+def build_pmtiles(city_id: str, output_path: str, include_nodes: bool = False,
+                  slim_edges: bool = True):
+    """Build PMTiles file with MVT-encoded tiles from graph data.
+
+    By default tiles are SLIM: no "nodes" layer (nothing in the map style
+    renders it) and no per-edge properties (the style renders geometry only;
+    names live in the topology payload; the stable eid is the feature id).
+    Measured on NYC z14: full tile 979KB -> edges-only-no-props much smaller.
+    """
+    logger.info(f"Building PMTiles for {city_id}: {output_path} "
+                f"(nodes={include_nodes}, slim_edges={slim_edges})")
 
     nodes, edges, bbox = get_all_nodes_edges(city_id)
     logger.info(f"Got {len(nodes)} nodes and {len(edges)} edges")
@@ -58,8 +66,8 @@ def build_pmtiles(city_id: str, output_path: str):
     # Collect features per tile: (z, x, y) -> {"edges": [...], "nodes": [...]}
     tiles = {}
 
-    # Process nodes
-    for node_idx, (lat, lon) in enumerate(nodes):
+    # Process nodes (opt-in — the default style never renders this layer)
+    for node_idx, (lat, lon) in enumerate(nodes) if include_nodes else []:
         for zoom in range(MIN_ZOOM, MAX_ZOOM + 1):
             tile = mercantile.tile(lon, lat, zoom)
             key = (zoom, tile.x, tile.y)
@@ -89,7 +97,7 @@ def build_pmtiles(city_id: str, output_path: str):
                 "type": "LineString",
                 "coordinates": [[from_lon, from_lat], [to_lon, to_lat]],
             },
-            "properties": {
+            "properties": {} if slim_edges else {
                 "name": name or "",
                 "highway": highway or "",
                 "from_idx": from_idx,
@@ -156,8 +164,8 @@ def build_pmtiles(city_id: str, output_path: str):
                 "minzoom": str(MIN_ZOOM),
                 "maxzoom": str(MAX_ZOOM),
                 "bounds": ",".join(str(b) for b in bbox),
-                "vector_layers": json.dumps([
-                    {
+                "vector_layers": json.dumps(
+                    ([{"id": "edges", "fields": {}}] if slim_edges else [{
                         "id": "edges",
                         "fields": {
                             "name": "String",
@@ -165,12 +173,9 @@ def build_pmtiles(city_id: str, output_path: str):
                             "from_idx": "Number",
                             "to_idx": "Number",
                         },
-                    },
-                    {
-                        "id": "nodes",
-                        "fields": {"node_id": "Number"},
-                    },
-                ]),
+                    }]) + ([{"id": "nodes", "fields": {"node_id": "Number"}}]
+                          if include_nodes else [])
+                ),
             },
         )
 
@@ -184,6 +189,11 @@ if __name__ == "__main__":
     parser.add_argument("--city", default="nyc", help="City id (see cities.py)")
     parser.add_argument("--output", "-o", default=None,
                         help="Output path (default: osm_data/<city>/graph.pmtiles)")
+    parser.add_argument("--include-nodes", action="store_true",
+                        help="Emit the nodes layer (off by default; unused by the style)")
+    parser.add_argument("--full-edge-props", action="store_true",
+                        help="Emit name/highway/from_idx/to_idx edge properties")
     args = parser.parse_args()
     out = args.output or os.path.join("osm_data", args.city, "graph.pmtiles")
-    build_pmtiles(args.city, out)
+    build_pmtiles(args.city, out, include_nodes=args.include_nodes,
+                  slim_edges=not args.full_edge_props)
