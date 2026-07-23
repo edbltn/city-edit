@@ -45,6 +45,9 @@ gcloud config set project google-mpf-ywspom2sxeey
 
 ## Deploying Changes
 
+> **Deploy to [staging](#staging-deploy-here-first) first**, verify, then
+> promote the *same image digest* to prod.
+
 > ## ⚠️ ALWAYS back up the prod DB locally before deploying.
 >
 > Every deploy — no exceptions. Take a fresh local snapshot of Cloud SQL
@@ -91,6 +94,72 @@ gcloud run services update desire-path-mapper \
   --project=google-mpf-ywspom2sxeey \
   --image=us-central1-docker.pkg.dev/google-mpf-ywspom2sxeey/desire-path-mapper/app:latest
 ```
+
+## Staging (deploy here FIRST)
+
+Full plan/rationale: [staging-parity-plan.md](staging-parity-plan.md). Staging
+is a parity copy of the app service — same image digests, same 8Gi/4CPU shape —
+with its own Redis (`desire-path-staging`), its own database (`votes_staging`,
+co-located on the prod Cloud SQL instance), and staging-scoped
+`admin-token-staging` / `secret-key-staging` secrets. OSRM, the previews
+bucket, and the image registry are shared. It runs with `APP_ENV=staging`,
+which gates the client's canonical-subdomain redirect (otherwise testers
+bounce to prod), shows the STAGING ribbon, and noindexes every response.
+
+**The URL is the secret.** The service name carries a random token
+(`ce-stg-<token>`), so its `run.app` URL is unguessable and — because run.app
+uses Google's shared wildcard cert — never published in Certificate
+Transparency logs. Never commit or publicly paste it. Look it up with:
+
+```bash
+cd terraform && terraform output -raw staging_url    # or:
+gcloud run services list --project=google-mpf-ywspom2sxeey --format='value(URL)' | grep ce-stg
+```
+
+To rotate a leaked URL: change `staging_token` in `terraform.tfvars`, targeted
+apply (creates the new service), delete the old one.
+
+### Digest promotion workflow
+
+```bash
+# 1. Build the overlay image (unchanged, ~2-3 min) → note the digest D
+gcloud builds submit --config=cloudbuild.overlay.yaml ...
+
+# 2. Deploy D to STAGING and verify there (load waterfall, smoke vote,
+#    [MAPLOAD] beacons filtered to the staging service name)
+gcloud run services update ce-stg-<token> --region=us-central1 \
+  --project=google-mpf-ywspom2sxeey --image=<registry>/app@sha256:D
+
+# 3. BACKUP PROD DB (mandatory, unchanged), then promote the SAME digest
+gcloud run services update desire-path-mapper --region=us-central1 \
+  --project=google-mpf-ywspom2sxeey --image=<registry>/app@sha256:D
+
+# 4. Served-asset-hash check on prod (unchanged)
+```
+
+Because staging runs the exact digest, graph/edge-id parity is automatic; a
+full-bake deploy (graph changes) rehearses its resnap on staging's DB the same
+way.
+
+### Seeding / refreshing staging data
+
+`make stage-refresh` restores the newest `~/city-edit-prod-backups/*/prod-full.dump`
+into `votes_staging` and flushes staging Redis (the app then self-heals: each
+map's first request replays Postgres → Redis via `_hydrate_map_redis`). It
+needs two bastion tunnels open:
+
+```bash
+# :5433 → Cloud SQL (same tunnel as prod DB access — see below)
+# :6380 → staging Redis (host: cd terraform && terraform output -raw staging_redis_host)
+gcloud compute ssh bastion-prod --zone=us-central1-a \
+  --project=google-mpf-ywspom2sxeey --tunnel-through-iap \
+  --ssh-flag="-N" --ssh-flag="-L 5433:10.39.0.3:5432" \
+  --ssh-flag="-L 6380:<staging-redis-host>:6379"
+```
+
+The staging terraform lives in `terraform/staging.tf` — apply it **only with
+`-target`** on staging resources, and only after the plan shows adds-only (the
+blanket-apply landmines below still stand).
 
 ## Environment & Secrets
 
