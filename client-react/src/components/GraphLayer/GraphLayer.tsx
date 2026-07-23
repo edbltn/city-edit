@@ -545,7 +545,13 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   const suppressHoverRef = useRef(suppressHover);
   useEffect(() => { suppressHoverRef.current = suppressHover; }, [suppressHover]);
 
-  // Pinned tooltip screen position (follows start pin on map pan/zoom)
+  // Selection made by clicking a top-proposal indicator. Independent of the
+  // route start point — selecting a proposal no longer drops a pin; it only
+  // pins the card + highlight. Cleared by the card's X, a plain map click,
+  // or a real pinned point (route start) taking precedence.
+  const [localPinned, setLocalPinned] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Pinned tooltip screen position (follows the selection on map pan/zoom)
   const [pinnedScreenPos, setPinnedScreenPos] = useState<{ x: number; y: number } | null>(null);
   const pinnedRafRef = useRef<number | null>(null);
   // Pinned target (node or edge) for highlight and tooltip
@@ -1114,9 +1120,30 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     };
   }, [map, setCurrentSnap, graphDraggingRef, syncHighlights]);
 
-  // Track pinned tooltip screen position on map pan/zoom
-  const pinnedLat = pinnedPoint?.lat ?? null;
-  const pinnedLng = pinnedPoint?.lng ?? null;
+  // Track pinned tooltip screen position on map pan/zoom. A host-provided
+  // pinned point (route start) takes precedence over the local indicator
+  // selection.
+  const pinnedLat = pinnedPoint?.lat ?? localPinned?.lat ?? null;
+  const pinnedLng = pinnedPoint?.lng ?? localPinned?.lng ?? null;
+
+  // A real pinned point supersedes (and clears) the indicator selection so a
+  // stale proposal doesn't resurface when the start point is later removed.
+  useEffect(() => {
+    if (pinnedPoint) setLocalPinned(null);
+  }, [pinnedPoint]);
+
+  // A plain map click (not on a marker) clears the indicator selection —
+  // matching how clicking away dismisses a selection in GIS tools. Marker
+  // clicks are excluded: the indicator's own click handler manages state.
+  useEffect(() => {
+    const onMapClick = (e: MapMouseEvent) => {
+      const target = e.originalEvent.target as HTMLElement | null;
+      if (target?.closest(".maplibregl-marker")) return;
+      setLocalPinned(null);
+    };
+    map.on("click", onMapClick);
+    return () => map.off("click", onMapClick);
+  }, [map]);
 
   useEffect(() => {
     if (pinnedLat === null || pinnedLng === null) {
@@ -1205,7 +1232,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   let pinnedVoteEdgeId: number | null = null;
   let pinnedPointLatLng: { lat: number; lng: number } | null = null;
   const pinnedTarget = pinnedTargetRef.current;
-  const showPinned = pinnedPoint && pinnedScreenPos && pinnedTarget && data;
+  const showPinned = (pinnedPoint || localPinned) && pinnedScreenPos && pinnedTarget && data;
 
   if (showPinned) {
     if (pinnedTarget.kind === "edge") {
@@ -1403,8 +1430,10 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         clearSpread();
         activateIndicator();
         pinnedEdgeOverrideRef.current = w.edgeIdx;
-        // Lock the start point to the icon's true edge midpoint, not its
-        // temporary fanned-out grid cell — the spread offset is display-only.
+        // Select at the icon's true edge midpoint, not its temporary
+        // fanned-out grid cell — the spread offset is display-only. This
+        // pins the card + yellow corridor WITHOUT dropping a route pin.
+        setLocalPinned({ lat: midLat, lng: midLng });
         onIndicatorClickRef.current?.({ lat: midLat, lng: midLng });
       };
 
@@ -1496,7 +1525,11 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
             ? buildSelectionUrl(pinnedPointLatLng, pinnedWinner?.label ?? pinnedVoteTypes[0]?.label)
             : null}
           onVote={castProposalVote}
-          onRemove={onRemoveSelectedRef.current}
+          onRemove={() => {
+            setLocalPinned(null);
+            // Also clears the start point when the selection came from one.
+            if (pinnedPoint) onRemoveSelectedRef.current?.();
+          }}
           onHoverChange={(over) => {
             overModalRef.current = over;
             // Clear any transient hover card when entering the pinned modal so

@@ -206,17 +206,12 @@ export function MapView() {
     setIsDraggingMarker(false);
   }, []);
 
-  // Indicator click follows the same tool logic as a normal map click.
-  const handleIndicatorClick = useCallback((latlng: LatLng) => {
+  // Selecting a top proposal no longer places a route pin — GraphLayer pins
+  // the card/highlight itself. Any in-progress split-path editing is cleared
+  // so stale ghost waypoints don't linger under the selection.
+  const handleIndicatorClick = useCallback(() => {
     clearSplitPaths();
-    if (activeTool === "end" && start.coords) {
-      setEndPoint(latlng);
-      setActiveTool("start");
-    } else {
-      if (start.coords || end.coords) clearPoints();
-      setStartPoint(latlng);
-    }
-  }, [activeTool, start.coords, end.coords, clearPoints, clearSplitPaths, setStartPoint, setEndPoint, setActiveTool]);
+  }, [clearSplitPaths]);
 
   const { handleMapClick } = useMapClick({
     state: { start, end },
