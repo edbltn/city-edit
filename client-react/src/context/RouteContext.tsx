@@ -504,7 +504,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
 
   const geocodeInto = useCallback(
     (coords: LatLng) => {
-      reverseGeocode(coords.lat, coords.lng).then((address) => {
+      reverseGeocode(coords.lat, coords.lng).then(({ address }) => {
         if (address) patchWaypointAddress(coords, address);
       });
     },

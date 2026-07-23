@@ -186,10 +186,14 @@ function resolveAddress(
   if (!geocodeInFlight.has(key)) {
     geocodeInFlight.add(key);
     reverseGeocode(lat, lng)
-      .then((address) => {
-        // Don't cache null (failure after retries) — allow retry on next hover
-        if (address !== null) {
-          geocodeCache.set(key, address);
+      .then(({ ok, address }) => {
+        // Cache any SERVER answer — including a null address (no named street,
+        // every station-network point), which renders as the lat/lng fallback.
+        // Only failure-after-retries stays uncached so the next hover retries;
+        // caching by ok-ness (not null-ness) is what stops no-address targets
+        // from refetching on every render forever.
+        if (ok) {
+          geocodeCache.set(key, address ?? "");
           onResolved();
         }
       })
@@ -2360,13 +2364,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       // the tile/heat paint happening right now isn't janked; hitTest returns
       // no hit until each ref is set with a COMPLETE index. Clear any stale
       // indexes from a previous effect run first — a mousemove landing in a
-      // yield gap must never pair an old index with the new topology.
+      // yield gap must never pair an old index with the new topology. Build
+      // into locals and install only after the cancelled check, so a torn-down
+      // run never publishes its indexes; redraw() skips frames while the refs
+      // are null, so repaint once they land.
       edgeIndexRef.current = null;
       nodeIndexRef.current = null;
-      edgeIndexRef.current = await buildEdgeIndex(topology);
+      const builtEdgeIndex = await buildEdgeIndex(topology);
       if (cancelled) return;
-      nodeIndexRef.current = await buildNodeIndex(topology);
+      const builtNodeIndex = await buildNodeIndex(topology);
       if (cancelled) return;
+      edgeIndexRef.current = builtEdgeIndex;
+      nodeIndexRef.current = builtNodeIndex;
+      scheduleRedrawRef.current();
 
       // 2. Paint immediately from cached votes (same graph version only) so the
       //    heatmap appears without waiting on the network. Skipped when the
@@ -2436,19 +2446,24 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           }
           if (cancelled) return;
           if (fresh && votesMatchTopology(voteData, fresh)) {
+            // Build the fresh indexes into locals FIRST, then install every
+            // ref in one synchronous block. Assigning topologyRef/the fresh
+            // edge index before the yielding builds finish would let a
+            // mousemove pair the fresh index with the OLD graphDataRef arrays
+            // (out-of-range edge ids → NaN coords → Leaflet throws) — the
+            // exact torn pairing the null-out guard exists to prevent.
+            const freshEdgeIndex = await buildEdgeIndex(fresh);
+            if (cancelled) return;
+            const freshNodeIndex = await buildNodeIndex(fresh);
+            if (cancelled) return;
             topology = fresh;
             topologyRef.current = fresh;
             nodeAdjRef.current = buildNodeAdj(fresh);
             blockIndexRef.current = buildBlockIndex(fresh);
             hasBlocksRef.current = !!fresh.edgeBlockId;
-            // Same stale-index guard as the mount path: null out, then set
-            // each ref only once its yielding rebuild completes.
-            edgeIndexRef.current = null;
-            nodeIndexRef.current = null;
-            edgeIndexRef.current = await buildEdgeIndex(fresh);
-            if (cancelled) return;
-            nodeIndexRef.current = await buildNodeIndex(fresh);
-            if (cancelled) return;
+            edgeIndexRef.current = freshEdgeIndex;
+            nodeIndexRef.current = freshNodeIndex;
+            scheduleRedrawRef.current();
           } else {
             await clearGraphCache();
             setHeatmapLoaded();
@@ -2801,16 +2816,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const mLat = (bounds.getNorth() - bounds.getSouth()) * 0.05;
     const mLng = (bounds.getEast() - bounds.getWest()) * 0.05;
     const edgeIndex = edgeIndexRef.current;
-    const visible = edgeIndex
-      ? edgeIndex.search(
-          bounds.getWest() - mLng,
-          bounds.getSouth() - mLat,
-          bounds.getEast() + mLng,
-          bounds.getNorth() + mLat,
-        )
-      : null;
-    const count = visible ? visible.length : data.nEdges;
-    const edgeAt = (k: number): number => (visible ? visible[k] : k);
+    // No index yet (the chunked build is still yielding): skip the frame
+    // rather than fall back to drawing ALL edges — on NYC that fallback is
+    // 1.97M strokes in one rAF task, a multi-second freeze. The build's
+    // completion schedules a repaint, so nothing is lost.
+    if (!edgeIndex) return;
+    const visible = edgeIndex.search(
+      bounds.getWest() - mLng,
+      bounds.getSouth() - mLat,
+      bounds.getEast() + mLng,
+      bounds.getNorth() + mLat,
+    );
+    const count = visible.length;
+    const edgeAt = (k: number): number => visible[k];
 
     // ----------------------------------------------------------------
     // Phase 1 — zero-vote baseline (source-over, faint white)
