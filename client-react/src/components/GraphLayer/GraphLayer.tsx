@@ -37,6 +37,7 @@ import {
 import { getMyVote, setMyVote, reconcileEdge, type VoteDirection } from "../../utils/myVotes";
 import { getVoterId } from "../../utils/voterIdentity";
 import { buildSelectionUrl, copyToClipboard } from "../../utils/shareLink";
+import { reverseGeocode } from "../../utils/geocode";
 import { CheckIcon } from "../CheckIcon";
 import { MapMarker } from "../MapMarker";
 
@@ -94,20 +95,16 @@ function resolveAddress(
   const cached = geocodeCache.get(key);
   if (cached !== undefined) return cached || formatLatLng(lat, lng);
 
-  // Not cached — show placeholder and fire async fetch
+  // Not cached — show placeholder and fire async (retrying) fetch
   if (!geocodeInFlight.has(key)) {
     geocodeInFlight.add(key);
-    fetch(withMap(`${CONFIG.apiUrl}/reverse-geocode?lat=${lat}&lng=${lng}`))
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data) => {
-        geocodeCache.set(key, data.address || null);
-        onResolved();
-      })
-      .catch(() => {
-        // Don't cache failures — allow retry on next hover
+    reverseGeocode(lat, lng)
+      .then((address) => {
+        // null after retries = give up for now; next hover tries again
+        if (address !== null) {
+          geocodeCache.set(key, address || null);
+          onResolved();
+        }
       })
       .finally(() => {
         geocodeInFlight.delete(key);
@@ -1320,6 +1317,12 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   const selectedEdgeIdx =
     pinnedTarget?.kind === "edge" ? pinnedTarget.index : null;
 
+  // Timestamp of the last indicator touch, so the browser's synthetic click
+  // (fired after touchend) doesn't double-run the handler. Without direct
+  // touchend handling, iOS treats the first tap as hover (the mouseover
+  // handler mutates content) and users had to tap twice to select.
+  const lastIndicatorTouchRef = useRef(0);
+
   const indicatorMarkers = useMemo(() => {
     if (currentZoom < INDICATOR_MIN_ZOOM) return null;
     const topology = topologyRef.current;
@@ -1448,7 +1451,14 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
           zIndex={w.edgeIdx === selectedEdgeIdx ? 2000 : 1000}
           onMouseOver={activateIndicator}
           onMouseOut={deactivateIndicator}
-          onClick={handleClick}
+          onTouchEnd={() => {
+            lastIndicatorTouchRef.current = Date.now();
+            handleClick();
+          }}
+          onClick={() => {
+            if (Date.now() - lastIndicatorTouchRef.current < 700) return;
+            handleClick();
+          }}
         />
       );
     });
