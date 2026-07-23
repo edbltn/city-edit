@@ -1,6 +1,10 @@
 # Staging ↔ Prod Parity — Plan
 
-*Drafted 2026-07-23. Status: proposal, nothing provisioned yet.*
+*Drafted 2026-07-23. Status: **EXECUTED** the same day — stack provisioned
+(terraform/staging.tf), seeded, verified, and the first digest promoted
+staging→prod (rev 00107). Live workflow docs:
+[gcp-deployment.md#staging-deploy-here-first](gcp-deployment.md#staging-deploy-here-first);
+changelog: `changelog/2026-07-23-staging-parity.html`.*
 
 ## Goal
 

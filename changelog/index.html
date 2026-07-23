@@ -63,6 +63,24 @@
     devHost-aware dev URLs).</p>
   </a>
 
+  <a class="entry" href="./2026-07-23-staging-parity.html">
+    <div class="date">2026-07-23</div>
+    <h2>Staging ↔ prod parity — an unguessable staging twin, and digest promotion as the deploy path</h2>
+    <p>City Edit now has a staging environment that runs the exact image digest prod runs next, with
+    its own Redis (keys aren't env-namespaced, so sharing was impossible), a votes_staging database
+    co-located on the prod Cloud SQL instance seeded from a fresh prod dump, and staging-scoped
+    admin/session secrets. The URL is the access control: a random-token run.app service name rides
+    Google's shared wildcard cert, so the hostname never appears in Certificate Transparency logs —
+    which is exactly where a vanity stg.cityedit.org subdomain would have leaked. One APP_ENV=staging
+    flag makes the shared image behave: map configs carry staging:true so the client skips the
+    canonical-subdomain redirect (which would bounce testers to prod) and shows a STAGING ribbon, and
+    every response is noindexed (Flask after_request + an nginx $host map for the statics). Terraform
+    is strictly additive (-target only; 14 adds / 0 changes — prod OSRM read via a data source so its
+    annotation drift can't ride along). The new workflow was exercised end-to-end today: overlay digest
+    → staging → verified (cold 3.9s/warm 1.0s, ribbon, no redirect, seeded heatmap) → prod rev 00107,
+    identical asset hashes on both.</p>
+  </a>
+
   <a class="entry" href="./2026-07-23-coldload-swr.html">
     <div class="date">2026-07-23</div>
     <h2>Cutting the cold load — prewarm the right key, revalidate in the background, fetch in parallel</h2>

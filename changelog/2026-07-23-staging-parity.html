@@ -1,0 +1,1822 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Staging ↔ prod parity: an unguessable staging twin, and digest promotion as the new deploy path — 2026-07-23</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  table.stats { border-collapse: collapse; margin: 10px 0 2px; font-size: 13.5px; }
+  table.stats th, table.stats td { border: 1px solid var(--hairline); padding: 6px 10px; text-align: left; }
+  table.stats th { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: #f7f5ef; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.25; }
+  pre.diff span { display: block; white-space: pre; }
+  pre.diff span span { display: inline; }
+
+  .s-kw { color: #a52a5a; }
+  .s-str { color: #0a3069; }
+  .s-com { color: #77716a; font-style: italic; }
+  .s-num { color: #0550ae; }
+  .s-lit { color: #0550ae; }
+  .s-fn { color: #6639ba; }
+  .s-type { color: #953800; }
+  .s-prop { color: #116329; }
+  .s-tag { color: #116329; }
+  .s-attr { color: #0550ae; }
+  .s-dec { color: #6639ba; }
+
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Staging ↔ prod parity: an unguessable staging twin, and digest promotion as the new deploy path</h1>
+    <div class="dateline">2026-07-23 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#envflag">1</a>
+<a href="#terraform">2</a>
+<a href="#workflow">3</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Other diffs</a>
+  </nav>
+
+  <p class="lede">City Edit now has a staging twin: the exact image digest prod runs, its own Redis and
+  database seeded from a fresh prod dump, at a random-token run.app URL that never appears in any
+  public record (Certificate Transparency killed the pretty-subdomain option). One env flag makes the
+  shared image behave: staging maps skip the canonical-subdomain redirect that would eject testers to
+  prod, every response is noindexed, and a hazard-striped STAGING ribbon marks the screenshots. The
+  deploy path is now build &rarr; staging &rarr; verify &rarr; promote the same digest to prod &mdash;
+  exercised end-to-end today: the staging-flag overlay itself was verified on staging before landing on
+  prod as rev 00107.</p>
+
+  
+    <section class="card" id="envflag">
+      <div class="tag">Code · same image, two behaviors</div>
+      <h2>1 · One env flag, three effects: redirect gate, noindex, ribbon</h2>
+      <h3>Symptom</h3>
+      <p>Staging runs the EXACT image digest prod runs — that's the parity point — so every staging-specific behavior must be env/host-keyed, never baked in. Without a gate, opening any preset map on the staging host would hit the canonical-subdomain redirect in MapApp and bounce the tester straight to prod (e.g. /m/nyc-walkways → walkways.cityedit.org). And an unguessable URL stays unguessable only if it is never indexed after an accidental link.</p>
+      <h3>Root cause</h3>
+      <ul><li><strong>Server:</strong> <code>IS_STAGING</code> (env <code>APP_ENV=staging</code>, set only by the staging terraform) adds <code>staging: true</code> to every map config via <code>_enrich_map</code> — the single choke point all config endpoints flow through — and an <code>after_request</code> hook stamps <code>X-Robots-Tag: noindex, nofollow</code> on every Flask response.</li>
+<li><strong>Client:</strong> MapApp skips <code>subdomainRedirectUrl</code> when the resolved config carries the flag; a fixed STAGING ribbon (bottom-left, hazard-striped, pointer-events: none) renders so screenshots can never be mistaken for prod.</li>
+<li><strong>nginx:</strong> Flask can't header the statics nginx serves itself (SPA shell, /assets, pmtiles), and the config is identical in both environments — so a <code>map $host</code> keys the robots header off the <code>ce-stg-</code> hostname prefix. nginx drops an <code>add_header</code> whose value is empty, so prod hosts are a structural no-op. The header is repeated inside every location that declares its own add_header, because nginx add_header inheritance is all-or-nothing.</li></ul>
+      <h3>What changed</h3><ul><li>Flag OFF (prod, local dev): no <code>staging</code> key in configs, no robots header, redirect behavior unchanged — verified by diffing responses with and without <code>APP_ENV=staging</code> locally, and by a headless prod check post-deploy (cityedit.org/m/nyc-bikes still lands on bikepaths.cityedit.org).</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details open>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+253</span> / <span class="d-del">-20</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">API entrypoint</span>
+        <span class="ctx-sum">routes, map-config enrichment, vote snapshot cache, prewarm</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~2400 LOC — map resolution/caches, graph-votes/topology routes, admin, WS hub</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">imports / env config</span><span class="ol-sum">DATABASE_URL, ADMIN_TOKEN … now also APP_ENV</span></li><li class="dim"><span class="ol-label">vote snapshot cache + prewarm</span><span class="ol-sum">unchanged (rev 00105 SWR shape)</span></li><li class="changed"><span class="ol-label">NEW IS_STAGING + after_request</span><span class="ol-sum">flag + X-Robots-Tag on every Flask response</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_enrich_map</span><span class="ol-sum">city config + searchVoteTypes … now also staging:true</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">map_get / by-subdomain / list</span><span class="ol-sum">all flow through _enrich_map (unchanged)</span></li><li class="dim"><span class="ol-label">graph-votes / topology / admin</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>IS_STAGING = os.environ.get(&quot;APP_ENV&quot;) == &quot;staging&quot; + _staging_noindex after_request hook</li><li>_enrich_map — if IS_STAGING: m[&quot;staging&quot;] = True (single choke point for all config endpoints)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index feb3e12..079bb2f 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -16,6 +16,8 @@ import orjson</span>
+<span class="d-ctx"> <span class="s-kw">import</span> redis</span>
+<span class="d-ctx"> <span class="s-kw">import</span> requests</span>
+<span class="d-ctx"> <span class="s-kw">from</span> dotenv <span class="s-kw">import</span> load_dotenv</span>
+<span class="d-add">+<span class="s-kw">from</span> pmtiles.reader <span class="s-kw">import</span> <span class="s-type">Reader</span> <span class="s-kw">as</span> <span class="s-type">PMTilesReader</span>, <span class="s-type">MmapSource</span></span>
+<span class="d-add">+<span class="s-kw">from</span> pmtiles.tile <span class="s-kw">import</span> <span class="s-type">Compression</span></span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-fn">load_dotenv</span>()</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -599,6 +601,26 @@ def _build_graph_votes_body_locked(</span>
+<span class="d-ctx">     <span class="s-kw">return</span> entry</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">_rebuild_votes_snapshot</span>(rmap: <span class="s-type">ResolvedMap</span>, mode: str | <span class="s-lit">None</span>, cache_key: str,</span>
+<span class="d-add">+                            lock: threading.<span class="s-type">Lock</span>) -&gt; <span class="s-lit">None</span>:</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Background revalidation for /api/graph-votes (runs on a real OS thread).</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-type">Acquire</span> <span class="s-type">AND</span> release the single-flight lock here <span class="s-kw">in</span> the worker so the lock</span>
+<span class="d-add">+    never crosses the request-greenlet/thread boundary mid-hold; losing the</span>
+<span class="d-add">+    non-blocking acquire just means a rebuild <span class="s-kw">is</span> already <span class="s-kw">in</span> flight.<span class="s-str">&quot;&quot;&quot;</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-kw">not</span> lock.<span class="s-fn">acquire</span>(blocking=<span class="s-lit">False</span>):</span>
+<span class="d-add">+        <span class="s-kw">return</span></span>
+<span class="d-add">+    <span class="s-kw">try</span>:</span>
+<span class="d-add">+        rmap.graph.<span class="s-fn">ensure_loaded</span>()</span>
+<span class="d-add">+        fresh_rev = <span class="s-fn">int</span>(redis_client.<span class="s-fn">get</span>(vote_store.<span class="s-fn">revision_key</span>(rmap.slug)) <span class="s-kw">or</span> <span class="s-num">0</span>)</span>
+<span class="d-add">+        <span class="s-kw">if</span> <span class="s-fn">_vote_cache_get</span>(cache_key, fresh_rev) <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+            <span class="s-fn">_build_graph_votes_body_locked</span>(rmap, mode, fresh_rev, cache_key)</span>
+<span class="d-add">+    <span class="s-kw">except</span> <span class="s-type">Exception</span> <span class="s-kw">as</span> e:</span>
+<span class="d-add">+        logger.<span class="s-fn">warning</span>(<span class="s-str">f&quot;[VOTES] background rebuild &#x27;{cache_key}&#x27; failed: {e}&quot;</span>)</span>
+<span class="d-add">+    <span class="s-kw">finally</span>:</span>
+<span class="d-add">+        lock.<span class="s-fn">release</span>()</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> <span class="s-kw">def</span> <span class="s-fn">_sparse_votes_body</span>(arrays: dict, evt: dict, nvt: dict, bvt: dict | <span class="s-lit">None</span>) -&gt; dict:</span>
+<span class="d-ctx">     <span class="s-str">&quot;&quot;&quot;Assemble the format=sparse /api/graph-votes body from the dense arrays.</span></span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -732,7 +754,12 @@ def _prewarm():</span>
+<span class="d-ctx">         <span class="s-kw">for</span> m <span class="s-kw">in</span> <span class="s-fn">list_maps</span>():</span>
+<span class="d-ctx">             <span class="s-kw">try</span>:</span>
+<span class="d-ctx">                 rmap = <span class="s-fn">resolve_map</span>(m[<span class="s-str">&quot;slug&quot;</span>])</span>
+<span class="d-del">-                <span class="s-fn">_build_graph_votes_body</span>(rmap)</span>
+<span class="d-add">+                <span class="s-com"># Build the MODE-SCOPED snapshot — the client always requests</span></span>
+<span class="d-add">+                <span class="s-com"># mode=&lt;map.mode&gt;, so the cache key is &quot;&lt;slug&gt;:&lt;mode&gt;&quot;. The old</span></span>
+<span class="d-add">+                <span class="s-com"># modeless build warmed a key no client ever asks for, and the</span></span>
+<span class="d-add">+                <span class="s-com"># first visitor per instance still paid the full ~6s build</span></span>
+<span class="d-add">+                <span class="s-com"># inline (the dominant cold-load term in the [MAPLOAD] P99).</span></span>
+<span class="d-add">+                <span class="s-fn">_build_graph_votes_body</span>(rmap, rmap.mode)</span>
+<span class="d-ctx">                 <span class="s-com"># Pre-compress the topology blob too, so no tenant&#x27;s first</span></span>
+<span class="d-ctx">                 <span class="s-com"># visitor pays the one-time ~1-2s compression of the big</span></span>
+<span class="d-ctx">                 <span class="s-com"># cities (brotli is what browsers actually receive).</span></span>
+<span class="d-hunk">@@ -888,8 +915,29 @@ def maps_list():</span>
+<span class="d-ctx">     <span class="s-kw">return</span> resp</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-<span class="s-kw">def</span> <span class="s-fn">_map_response</span>(m: dict):</span>
+<span class="d-del">-    <span class="s-str">&quot;&quot;&quot;Enrich a map dict with its city&#x27;s public config and JSON-ify it.&quot;&quot;&quot;</span></span>
+<span class="d-add">+<span class="s-com"># Staging deployments set APP_ENV=staging (terraform staging.tf). The flag rides</span></span>
+<span class="d-add">+<span class="s-com"># the map config to the client — which then skips the canonical-subdomain</span></span>
+<span class="d-add">+<span class="s-com"># redirect (it would bounce testers to prod) and shows a STAGING ribbon — and</span></span>
+<span class="d-add">+<span class="s-com"># marks every Flask response noindex so an accidentally-linked staging URL never</span></span>
+<span class="d-add">+<span class="s-com"># gets crawled. nginx applies the same header to its static responses via a</span></span>
+<span class="d-add">+<span class="s-com"># $host map (deploy/nginx-cloudrun.conf). Prod never sets APP_ENV.</span></span>
+<span class="d-add">+<span class="s-type">IS_STAGING</span> = os.environ.<span class="s-fn">get</span>(<span class="s-str">&quot;APP_ENV&quot;</span>, <span class="s-str">&quot;&quot;</span>).<span class="s-fn">strip</span>().<span class="s-fn">lower</span>() == <span class="s-str">&quot;staging&quot;</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">if</span> <span class="s-type">IS_STAGING</span>:</span>
+<span class="d-add">+    <span class="s-dec">@app.after_request</span></span>
+<span class="d-add">+    <span class="s-kw">def</span> <span class="s-fn">_staging_noindex</span>(resp):</span>
+<span class="d-add">+        resp.headers[<span class="s-str">&quot;X-Robots-Tag&quot;</span>] = <span class="s-str">&quot;noindex, nofollow&quot;</span></span>
+<span class="d-add">+        <span class="s-kw">return</span> resp</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">_enrich_map</span>(m: dict) -&gt; dict:</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Attach the city public config + searchable vote types to a map dict.</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-type">EVERY</span> path that puts a map into _map_get_cache must cache the <span class="s-type">ENRICHED</span></span>
+<span class="d-add">+    dict — the <span class="s-type">SWR</span> background refresh used to cache <span class="s-fn">get_map</span>() raw, so after</span>
+<span class="d-add">+    the first <span class="s-type">TTL</span> expiry clients received an empty `city` (no bounds/center/</span>
+<span class="d-add">+    blockTiles; <span class="s-type">NYC</span> only looked fine because the client bootstrap defaults</span>
+<span class="d-add">+    to it).<span class="s-str">&quot;&quot;&quot;</span></span>
+<span class="d-ctx">     city = <span class="s-fn">get_city</span>(m[<span class="s-str">&quot;cityId&quot;</span>])</span>
+<span class="d-ctx">     <span class="s-kw">if</span> city:</span>
+<span class="d-ctx">         m[<span class="s-str">&quot;city&quot;</span>] = city.<span class="s-fn">to_public</span>()</span>
+<span class="d-hunk">@@ -902,7 +950,14 @@ def _map_response(m: dict):</span>
+<span class="d-ctx">         vt <span class="s-kw">for</span> vt <span class="s-kw">in</span> <span class="s-fn">fetch_voted_vote_type_labels</span>(m[<span class="s-str">&quot;slug&quot;</span>])</span>
+<span class="d-ctx">         <span class="s-kw">if</span> vt[<span class="s-str">&quot;label&quot;</span>] <span class="s-kw">not</span> <span class="s-kw">in</span> default_labels</span>
+<span class="d-ctx">     ]</span>
+<span class="d-del">-    resp = <span class="s-fn">jsonify</span>(m)</span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-type">IS_STAGING</span>:</span>
+<span class="d-add">+        m[<span class="s-str">&quot;staging&quot;</span>] = <span class="s-lit">True</span></span>
+<span class="d-add">+    <span class="s-kw">return</span> m</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">_map_response</span>(m: dict):</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Enrich a map dict with its city&#x27;s public config and JSON-ify it.&quot;&quot;&quot;</span></span>
+<span class="d-add">+    resp = <span class="s-fn">jsonify</span>(<span class="s-fn">_enrich_map</span>(m))</span>
+<span class="d-ctx">     <span class="s-com"># This is the prod page-load entry point (resolved per load by slug/subdomain)</span></span>
+<span class="d-ctx">     <span class="s-com"># and was uncached. A passcode map only reaches here once unlocked, so keep its</span></span>
+<span class="d-ctx">     <span class="s-com"># config out of shared caches — per-browser only.</span></span>
+<span class="d-hunk">@@ -931,6 +986,32 @@ _map_get_cache: dict[str, tuple[float, dict]] = {}</span>
+<span class="d-ctx"> _map_get_locks: dict[str, threading.<span class="s-type">Lock</span>] = {}</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">_refresh_map_get</span>(slug: str, lock: threading.<span class="s-type">Lock</span>) -&gt; <span class="s-lit">None</span>:</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;Background revalidation for /api/maps/&lt;slug&gt; (runs on a real OS thread).</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    get_map<span class="s-str">&#x27;s Postgres round-trip (it includes a vote count) takes 1-2s on the</span></span>
+<span class="d-add">+    small prod instance; running it inline on <span class="s-type">TTL</span> expiry put that stall on the</span>
+<span class="d-add">+    <span class="s-type">FIRST</span> request of a page load, serializing everything behind it. <span class="s-type">Only</span> public</span>
+<span class="d-add">+    maps are ever cached, so refreshing the cache here can<span class="s-str">&#x27;t leak a passcode</span></span>
+<span class="d-add">+    map<span class="s-str">&#x27;s config.&quot;&quot;&quot;</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-kw">not</span> lock.<span class="s-fn">acquire</span>(blocking=<span class="s-lit">False</span>):</span>
+<span class="d-add">+        <span class="s-kw">return</span></span>
+<span class="d-add">+    <span class="s-kw">try</span>:</span>
+<span class="d-add">+        m = <span class="s-fn">get_map</span>(slug)</span>
+<span class="d-add">+        <span class="s-kw">if</span> m <span class="s-kw">and</span> <span class="s-kw">not</span> m.<span class="s-fn">get</span>(<span class="s-str">&quot;requiresPasscode&quot;</span>):</span>
+<span class="d-add">+            <span class="s-kw">if</span> <span class="s-fn">len</span>(_map_get_cache) &gt; <span class="s-num">256</span>:  <span class="s-com"># bound: one entry per public map</span></span>
+<span class="d-add">+                _map_get_cache.<span class="s-fn">clear</span>()</span>
+<span class="d-add">+            _map_get_cache[slug] = (time.<span class="s-fn">monotonic</span>() + <span class="s-num">30.0</span>, <span class="s-fn">_enrich_map</span>(m))</span>
+<span class="d-add">+        <span class="s-kw">else</span>:</span>
+<span class="d-add">+            <span class="s-com"># Map deleted or newly passcode-protected: stop serving the stale</span></span>
+<span class="d-add">+            <span class="s-com"># public copy immediately.</span></span>
+<span class="d-add">+            _map_get_cache.<span class="s-fn">pop</span>(slug, <span class="s-lit">None</span>)</span>
+<span class="d-add">+    <span class="s-kw">except</span> <span class="s-type">Exception</span> <span class="s-kw">as</span> e:</span>
+<span class="d-add">+        logger.<span class="s-fn">warning</span>(<span class="s-str">f&quot;[MAPS] background refresh &#x27;{slug}&#x27; failed: {e}&quot;</span>)</span>
+<span class="d-add">+    <span class="s-kw">finally</span>:</span>
+<span class="d-add">+        lock.<span class="s-fn">release</span>()</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> <span class="s-dec">@app.route</span>(<span class="s-str">&quot;/api/maps/&lt;slug&gt;&quot;</span>, methods=[<span class="s-str">&quot;GET&quot;</span>])</span>
+<span class="d-ctx"> <span class="s-kw">def</span> <span class="s-fn">map_get</span>(slug):</span>
+<span class="d-ctx">     cached = _map_get_cache.<span class="s-fn">get</span>(slug)</span>
+<span class="d-hunk">@@ -939,6 +1020,15 @@ def map_get(slug):</span>
+<span class="d-ctx">         resp.headers[<span class="s-str">&quot;Cache-Control&quot;</span>] = <span class="s-str">&quot;public, max-age=60&quot;</span></span>
+<span class="d-ctx">         <span class="s-kw">return</span> resp</span>
+<span class="d-ctx">     lock = _map_get_locks.<span class="s-fn">setdefault</span>(slug, threading.<span class="s-fn">Lock</span>())</span>
+<span class="d-add">+    <span class="s-kw">if</span> cached <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+        <span class="s-com"># Expired but present: serve the stale config NOW and refresh it in the</span></span>
+<span class="d-add">+        <span class="s-com"># background. Map config changes rarely; staleness is bounded by the</span></span>
+<span class="d-add">+        <span class="s-com"># refresh duration on top of the 30s TTL.</span></span>
+<span class="d-add">+        <span class="s-fn">_PrewarmThread</span>(target=_refresh_map_get, args=(slug, lock),</span>
+<span class="d-add">+                       name=<span class="s-str">f&quot;map-swr-{slug}&quot;</span>, daemon=<span class="s-lit">True</span>).<span class="s-fn">start</span>()</span>
+<span class="d-add">+        resp = <span class="s-fn">jsonify</span>(cached[<span class="s-num">1</span>])</span>
+<span class="d-add">+        resp.headers[<span class="s-str">&quot;Cache-Control&quot;</span>] = <span class="s-str">&quot;public, max-age=60&quot;</span></span>
+<span class="d-add">+        <span class="s-kw">return</span> resp</span>
+<span class="d-ctx">     <span class="s-kw">with</span> lock:  <span class="s-com"># gevent-patched: waiters yield the hub</span></span>
+<span class="d-ctx">         cached = _map_get_cache.<span class="s-fn">get</span>(slug)</span>
+<span class="d-ctx">         <span class="s-kw">if</span> cached <span class="s-kw">and</span> cached[<span class="s-num">0</span>] &gt; time.<span class="s-fn">monotonic</span>():</span>
+<span class="d-hunk">@@ -1802,6 +1892,139 @@ def serve_tiles(filename):</span>
+<span class="d-ctx">     <span class="s-kw">return</span> response</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+<span class="s-com"># ── z/x/y block tiles ────────────────────────────────────────────────────────</span></span>
+<span class="d-add">+<span class="s-com"># Browsers never HTTP-cache the pmtiles:// protocol&#x27;s range requests (206</span></span>
+<span class="d-add">+<span class="s-com"># responses), so warm visits re-download the whole viewport&#x27;s block tiles</span></span>
+<span class="d-add">+<span class="s-com"># (~1MB). These discrete tile URLs are cacheable by the browser, nginx, and any</span></span>
+<span class="d-add">+<span class="s-com"># CDN; the client appends ?v=&lt;blocksVersion&gt; so a re-baked archive busts every</span></span>
+<span class="d-add">+<span class="s-com"># cache. tippecanoe stores tiles gzip-compressed, so the hot path is a</span></span>
+<span class="d-add">+<span class="s-com"># pass-through of stored bytes; the gzip LRU only fills for uncompressed</span></span>
+<span class="d-add">+<span class="s-com"># archives.</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+_TILE_GZIP_LRU_MAX = <span class="s-num">512</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+_tile_readers: dict[str, tuple] = {}  <span class="s-com"># city_id → (reader, header, mtime_ns)</span></span>
+<span class="d-add">+_tile_gzip_lru: <span class="s-str">&quot;OrderedDict[tuple, bytes]&quot;</span> = <span class="s-fn">OrderedDict</span>()</span>
+<span class="d-add">+_tile_lock = threading.<span class="s-fn">Lock</span>()</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">_blocks_tile_reader</span>(city_id: str) -&gt; tuple:</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;(reader, header, mtime_ns) for a city&#x27;s blocks.pmtiles archive.</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    blocks.pmtiles <span class="s-kw">is</span> re-baked <span class="s-type">IN</span> <span class="s-fn">PLACE</span> (lazy re-bake), so the cache <span class="s-kw">is</span> keyed</span>
+<span class="d-add">+    on st_mtime_ns <span class="s-kw">and</span> the archive <span class="s-kw">is</span> reopened whenever it changes. <span class="s-type">Raises</span></span>
+<span class="d-add">+    <span class="s-fn">OSError</span> (incl. <span class="s-type">FileNotFoundError</span>) when the city has no archive.</span>
+<span class="d-add">+    <span class="s-str">&quot;&quot;&quot;</span></span>
+<span class="d-add">+    path = os.path.<span class="s-fn">join</span>(os.path.<span class="s-fn">dirname</span>(__file__), <span class="s-str">&quot;osm_data&quot;</span>, city_id, <span class="s-str">&quot;blocks.pmtiles&quot;</span>)</span>
+<span class="d-add">+    mtime_ns = os.<span class="s-fn">stat</span>(path).st_mtime_ns</span>
+<span class="d-add">+    entry = _tile_readers.<span class="s-fn">get</span>(city_id)</span>
+<span class="d-add">+    <span class="s-kw">if</span> entry <span class="s-kw">and</span> entry[<span class="s-num">2</span>] == mtime_ns:</span>
+<span class="d-add">+        <span class="s-kw">return</span> entry</span>
+<span class="d-add">+    <span class="s-kw">with</span> _tile_lock:</span>
+<span class="d-add">+        entry = _tile_readers.<span class="s-fn">get</span>(city_id)</span>
+<span class="d-add">+        <span class="s-kw">if</span> entry <span class="s-kw">and</span> entry[<span class="s-num">2</span>] == mtime_ns:</span>
+<span class="d-add">+            <span class="s-kw">return</span> entry</span>
+<span class="d-add">+        f = <span class="s-fn">open</span>(path, <span class="s-str">&quot;rb&quot;</span>)  <span class="s-com"># noqa: SIM115 — held open for the mmap&#x27;s lifetime</span></span>
+<span class="d-add">+        reader = <span class="s-fn">PMTilesReader</span>(<span class="s-fn">MmapSource</span>(f))</span>
+<span class="d-add">+        header = reader.<span class="s-fn">header</span>()</span>
+<span class="d-add">+        <span class="s-com"># Drop gzip-LRU entries built from the previous bake. The old reader&#x27;s</span></span>
+<span class="d-add">+        <span class="s-com"># file object is intentionally leaked: another greenlet may still be</span></span>
+<span class="d-add">+        <span class="s-com"># mid-read through its mmap, and re-bakes are rare.</span></span>
+<span class="d-add">+        <span class="s-kw">for</span> key <span class="s-kw">in</span> [k <span class="s-kw">for</span> k <span class="s-kw">in</span> _tile_gzip_lru <span class="s-kw">if</span> k[<span class="s-num">0</span>] == city_id]:</span>
+<span class="d-add">+            <span class="s-kw">del</span> _tile_gzip_lru[key]</span>
+<span class="d-add">+        entry = (reader, header, mtime_ns)</span>
+<span class="d-add">+        _tile_readers[city_id] = entry</span>
+<span class="d-add">+        logger.<span class="s-fn">info</span>(</span>
+<span class="d-add">+            <span class="s-str">f&quot;[TILES] opened {city_id}/blocks.pmtiles &quot;</span></span>
+<span class="d-add">+            <span class="s-str">f&quot;(z{header[&#x27;min_zoom&#x27;]}-{header[&#x27;max_zoom&#x27;]}, &quot;</span></span>
+<span class="d-add">+            <span class="s-str">f&quot;compression={header[&#x27;tile_compression&#x27;].name})&quot;</span></span>
+<span class="d-add">+        )</span>
+<span class="d-add">+        <span class="s-kw">return</span> entry</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-dec">@app.route</span>(<span class="s-str">&quot;/api/tile/&lt;city_id&gt;/blocks/&lt;int:z&gt;/&lt;int:x&gt;/&lt;int:y&gt;.mvt&quot;</span>)</span>
+<span class="d-add">+<span class="s-kw">def</span> <span class="s-fn">blocks_tile</span>(city_id, z, x, y):</span>
+<span class="d-add">+    <span class="s-com"># city_id feeds a filesystem path — only registered cities pass.</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-fn">get_city</span>(city_id) <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+        <span class="s-kw">return</span> <span class="s-fn">jsonify</span>({<span class="s-str">&quot;error&quot;</span>: <span class="s-str">f&quot;Unknown city &#x27;{city_id}&#x27;&quot;</span>}), <span class="s-num">404</span></span>
+<span class="d-add">+    <span class="s-kw">try</span>:</span>
+<span class="d-add">+        reader, header, mtime_ns = <span class="s-fn">_blocks_tile_reader</span>(city_id)</span>
+<span class="d-add">+    <span class="s-kw">except</span> <span class="s-type">Exception</span>:</span>
+<span class="d-add">+        <span class="s-com"># OSError when the city has no archive; anything else = a mid-re-bake</span></span>
+<span class="d-add">+        <span class="s-com"># read of the in-place-written file (header deserialization fails).</span></span>
+<span class="d-add">+        <span class="s-kw">return</span> <span class="s-fn">jsonify</span>({<span class="s-str">&quot;error&quot;</span>: <span class="s-str">f&quot;No block tiles for city &#x27;{city_id}&#x27;&quot;</span>}), <span class="s-num">404</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-kw">not</span> (header[<span class="s-str">&quot;min_zoom&quot;</span>] &lt;= z &lt;= header[<span class="s-str">&quot;max_zoom&quot;</span>]):</span>
+<span class="d-add">+        <span class="s-kw">return</span> <span class="s-fn">jsonify</span>({<span class="s-str">&quot;error&quot;</span>: <span class="s-str">&quot;Zoom out of range&quot;</span>}), <span class="s-num">404</span></span>
+<span class="d-add">+    <span class="s-com"># zxy_to_tileid raises ValueError past (1&lt;&lt;z)-1 — scanners would 500.</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> <span class="s-kw">not</span> (<span class="s-num">0</span> &lt;= x &lt; (<span class="s-num">1</span> &lt;&lt; z) <span class="s-kw">and</span> <span class="s-num">0</span> &lt;= y &lt; (<span class="s-num">1</span> &lt;&lt; z)):</span>
+<span class="d-add">+        <span class="s-kw">return</span> <span class="s-fn">jsonify</span>({<span class="s-str">&quot;error&quot;</span>: <span class="s-str">&quot;Tile out of range&quot;</span>}), <span class="s-num">404</span></span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-com"># Strong per-tile ETag; the ?v= cache-buster (blocksVersion) makes each URL</span></span>
+<span class="d-add">+    <span class="s-com"># unique per bake, so the body behind it is effectively immutable.</span></span>
+<span class="d-add">+    etag = <span class="s-str">f&#x27;&quot;bt-{city_id}-{z}-{x}-{y}-{mtime_ns}&quot;&#x27;</span></span>
+<span class="d-add">+    cache_control = <span class="s-str">&quot;public, max-age=31536000, immutable&quot;</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> request.headers.<span class="s-fn">get</span>(<span class="s-str">&quot;If-None-Match&quot;</span>) == etag:</span>
+<span class="d-add">+        resp = app.<span class="s-fn">response_class</span>(status=<span class="s-num">304</span>)</span>
+<span class="d-add">+        resp.headers[<span class="s-str">&quot;ETag&quot;</span>] = etag</span>
+<span class="d-add">+        resp.headers[<span class="s-str">&quot;Cache-Control&quot;</span>] = cache_control</span>
+<span class="d-add">+        <span class="s-kw">return</span> resp</span>
+<span class="d-add">+</span>
+<span class="d-add">+    stored_gzip = header[<span class="s-str">&quot;tile_compression&quot;</span>] == <span class="s-type">Compression</span>.<span class="s-type">GZIP</span></span>
+<span class="d-add">+    accepts_gzip = <span class="s-str">&quot;gzip&quot;</span> <span class="s-kw">in</span> request.headers.<span class="s-fn">get</span>(<span class="s-str">&quot;Accept-Encoding&quot;</span>, <span class="s-str">&quot;&quot;</span>)</span>
+<span class="d-add">+    key = (city_id, z, x, y)</span>
+<span class="d-add">+    body = <span class="s-lit">None</span></span>
+<span class="d-add">+    <span class="s-kw">if</span> accepts_gzip:</span>
+<span class="d-add">+        <span class="s-com"># Serves both roles: gzip-on-demand cache for uncompressed archives AND</span></span>
+<span class="d-add">+        <span class="s-com"># a hot-tile bytes cache for stored-gzip pass-through — Reader.get</span></span>
+<span class="d-add">+        <span class="s-com"># re-parses the root+leaf directories in pure Python (~5ms, no gevent</span></span>
+<span class="d-add">+        <span class="s-com"># yields) on EVERY call, so a cold-nginx-cache burst would otherwise</span></span>
+<span class="d-add">+        <span class="s-com"># head-of-line-block the worker. Purged on re-bake by mtime key change.</span></span>
+<span class="d-add">+        <span class="s-kw">with</span> _tile_lock:</span>
+<span class="d-add">+            body = _tile_gzip_lru.<span class="s-fn">get</span>(key)</span>
+<span class="d-add">+            <span class="s-kw">if</span> body <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+                _tile_gzip_lru.<span class="s-fn">move_to_end</span>(key)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    <span class="s-kw">if</span> body <span class="s-kw">is</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+        <span class="s-kw">try</span>:</span>
+<span class="d-add">+            data = reader.<span class="s-fn">get</span>(z, x, y)</span>
+<span class="d-add">+        <span class="s-kw">except</span> <span class="s-type">Exception</span>:</span>
+<span class="d-add">+            <span class="s-com"># Mid-re-bake reads of the in-place-written archive can surface as</span></span>
+<span class="d-add">+            <span class="s-com"># deserialization errors — treat as absent rather than 500.</span></span>
+<span class="d-add">+            logger.<span class="s-fn">warning</span>(<span class="s-str">f&quot;[TILES] unreadable tile {city_id}/{z}/{x}/{y}&quot;</span>)</span>
+<span class="d-add">+            <span class="s-kw">return</span> <span class="s-fn">jsonify</span>({<span class="s-str">&quot;error&quot;</span>: <span class="s-str">&quot;Tile unreadable&quot;</span>}), <span class="s-num">404</span></span>
+<span class="d-add">+        <span class="s-kw">if</span> data <span class="s-kw">is</span> <span class="s-lit">None</span> <span class="s-kw">or</span> <span class="s-kw">not</span> data:</span>
+<span class="d-add">+            <span class="s-com"># 204: MapLibre treats an empty 2xx as an empty tile (no error, no</span></span>
+<span class="d-add">+            <span class="s-com"># parent-tile probing) and, unlike a 404, it is cacheable — blocks</span></span>
+<span class="d-add">+            <span class="s-com"># coverage stops at the street network, so water/edge tiles inside</span></span>
+<span class="d-add">+            <span class="s-com"># the pan bounds land here on every pan otherwise.</span></span>
+<span class="d-add">+            resp = app.<span class="s-fn">response_class</span>(status=<span class="s-num">204</span>)</span>
+<span class="d-add">+            resp.headers[<span class="s-str">&quot;ETag&quot;</span>] = etag</span>
+<span class="d-add">+            resp.headers[<span class="s-str">&quot;Cache-Control&quot;</span>] = cache_control</span>
+<span class="d-add">+            <span class="s-kw">return</span> resp</span>
+<span class="d-add">+        <span class="s-kw">if</span> stored_gzip:</span>
+<span class="d-add">+            <span class="s-com"># tippecanoe already gzipped the stored tiles — pass them through</span></span>
+<span class="d-add">+            <span class="s-com"># (decompress only for the rare client that doesn&#x27;t accept gzip).</span></span>
+<span class="d-add">+            body = data <span class="s-kw">if</span> accepts_gzip <span class="s-kw">else</span> gzip.<span class="s-fn">decompress</span>(data)</span>
+<span class="d-add">+        <span class="s-kw">elif</span> accepts_gzip:</span>
+<span class="d-add">+            body = gzip.<span class="s-fn">compress</span>(data, compresslevel=<span class="s-num">6</span>)</span>
+<span class="d-add">+        <span class="s-kw">else</span>:</span>
+<span class="d-add">+            body = data</span>
+<span class="d-add">+        <span class="s-kw">if</span> accepts_gzip <span class="s-kw">and</span> <span class="s-fn">len</span>(body) &lt;= <span class="s-num">131072</span>:</span>
+<span class="d-add">+            <span class="s-kw">with</span> _tile_lock:</span>
+<span class="d-add">+                _tile_gzip_lru[key] = body</span>
+<span class="d-add">+                <span class="s-kw">while</span> <span class="s-fn">len</span>(_tile_gzip_lru) &gt; _TILE_GZIP_LRU_MAX:</span>
+<span class="d-add">+                    _tile_gzip_lru.<span class="s-fn">popitem</span>(last=<span class="s-lit">False</span>)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    resp = app.<span class="s-fn">response_class</span>(response=body, mimetype=<span class="s-str">&quot;application/vnd.mapbox-vector-tile&quot;</span>)</span>
+<span class="d-add">+    <span class="s-kw">if</span> accepts_gzip:</span>
+<span class="d-add">+        <span class="s-com"># In every accepts_gzip branch above, body holds gzip bytes.</span></span>
+<span class="d-add">+        resp.headers[<span class="s-str">&quot;Content-Encoding&quot;</span>] = <span class="s-str">&quot;gzip&quot;</span></span>
+<span class="d-add">+    resp.headers[<span class="s-str">&quot;Vary&quot;</span>] = <span class="s-str">&quot;Accept-Encoding&quot;</span></span>
+<span class="d-add">+    resp.headers[<span class="s-str">&quot;Cache-Control&quot;</span>] = cache_control</span>
+<span class="d-add">+    resp.headers[<span class="s-str">&quot;ETag&quot;</span>] = etag</span>
+<span class="d-add">+    <span class="s-kw">return</span> resp</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> <span class="s-com"># ── Map preview images ───────────────────────────────────────────────────────</span></span>
+<span class="d-ctx"> <span class="s-com"># Previews are captured daily into a private GCS bucket (project enforces Public</span></span>
+<span class="d-ctx"> <span class="s-com"># Access Prevention, so objects can&#x27;t be made public). nginx proxies /previews/</span></span>
+<span class="d-hunk">@@ -2025,23 +2248,33 @@ def graph_votes():</span>
+<span class="d-ctx">     )</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-kw">if</span> <span class="s-kw">not</span> servable:</span>
+<span class="d-del">-        <span class="s-com"># Stale-while-revalidate: one caller rebuilds; the rest keep serving</span></span>
+<span class="d-del">-        <span class="s-com"># the previous snapshot instead of queueing on the build lock (they</span></span>
+<span class="d-del">-        <span class="s-com"># only block when there is nothing to serve at all).</span></span>
+<span class="d-ctx">         lock = <span class="s-fn">_build_lock_for</span>(cache_key)</span>
+<span class="d-del">-        <span class="s-kw">if</span> lock.<span class="s-fn">acquire</span>(blocking=entry <span class="s-kw">is</span> <span class="s-lit">None</span>):</span>
+<span class="d-del">-            <span class="s-kw">try</span>:</span>
+<span class="d-del">-                rmap.graph.<span class="s-fn">ensure_loaded</span>()</span>
+<span class="d-del">-                fresh_rev = <span class="s-fn">int</span>(</span>
+<span class="d-del">-                    redis_client.<span class="s-fn">get</span>(vote_store.<span class="s-fn">revision_key</span>(rmap.slug)) <span class="s-kw">or</span> <span class="s-num">0</span>)</span>
+<span class="d-del">-                entry = (<span class="s-fn">_vote_cache_get</span>(cache_key, fresh_rev)</span>
+<span class="d-del">-                         <span class="s-kw">or</span> <span class="s-fn">_build_graph_votes_body_locked</span>(</span>
+<span class="d-del">-                             rmap, mode, fresh_rev, cache_key))</span>
+<span class="d-del">-            <span class="s-kw">except</span> <span class="s-type">Exception</span> <span class="s-kw">as</span> e:</span>
+<span class="d-del">-                <span class="s-kw">return</span> <span class="s-fn">jsonify</span>({<span class="s-str">&quot;error&quot;</span>: <span class="s-fn">str</span>(e)}), <span class="s-num">500</span></span>
+<span class="d-del">-            <span class="s-kw">finally</span>:</span>
+<span class="d-del">-                lock.<span class="s-fn">release</span>()</span>
+<span class="d-del">-        <span class="s-com"># else: a rebuild is in flight — serve the stale entry we hold.</span></span>
+<span class="d-add">+        <span class="s-kw">if</span> entry <span class="s-kw">is</span> <span class="s-kw">not</span> <span class="s-lit">None</span>:</span>
+<span class="d-add">+            <span class="s-com"># Stale-while-revalidate, for real: serve the snapshot we hold NOW</span></span>
+<span class="d-add">+            <span class="s-com"># and rebuild on a background OS thread (the GIL hands off every few</span></span>
+<span class="d-add">+            <span class="s-com"># ms, so the gevent hub keeps serving meanwhile). The rebuild used to</span></span>
+<span class="d-add">+            <span class="s-com"># run inline on whichever request drew the short straw — +~6s on a</span></span>
+<span class="d-add">+            <span class="s-com"># big map, the dominant cold-load term in the [MAPLOAD] P99, while</span></span>
+<span class="d-add">+            <span class="s-com"># every OTHER concurrent caller already served stale. Staleness stays</span></span>
+<span class="d-add">+            <span class="s-com"># bounded by the build duration either way; clients reconcile forward</span></span>
+<span class="d-add">+            <span class="s-com"># from WS deltas, which carry authoritative counts.</span></span>
+<span class="d-add">+            <span class="s-fn">_PrewarmThread</span>(target=_rebuild_votes_snapshot,</span>
+<span class="d-add">+                           args=(rmap, mode, cache_key, lock),</span>
+<span class="d-add">+                           name=<span class="s-str">f&quot;votes-swr-{cache_key}&quot;</span>, daemon=<span class="s-lit">True</span>).<span class="s-fn">start</span>()</span>
+<span class="d-add">+        <span class="s-kw">else</span>:</span>
+<span class="d-add">+            <span class="s-com"># Nothing cached at all (fresh instance past prewarm, LRU eviction,</span></span>
+<span class="d-add">+            <span class="s-com"># a blocks re-bake) — there is nothing to serve stale, so this one</span></span>
+<span class="d-add">+            <span class="s-com"># request builds inline behind the single-flight lock.</span></span>
+<span class="d-add">+            <span class="s-kw">with</span> lock:</span>
+<span class="d-add">+                <span class="s-kw">try</span>:</span>
+<span class="d-add">+                    rmap.graph.<span class="s-fn">ensure_loaded</span>()</span>
+<span class="d-add">+                    fresh_rev = <span class="s-fn">int</span>(</span>
+<span class="d-add">+                        redis_client.<span class="s-fn">get</span>(vote_store.<span class="s-fn">revision_key</span>(rmap.slug)) <span class="s-kw">or</span> <span class="s-num">0</span>)</span>
+<span class="d-add">+                    entry = (<span class="s-fn">_vote_cache_get</span>(cache_key, fresh_rev)</span>
+<span class="d-add">+                             <span class="s-kw">or</span> <span class="s-fn">_build_graph_votes_body_locked</span>(</span>
+<span class="d-add">+                                 rmap, mode, fresh_rev, cache_key))</span>
+<span class="d-add">+                <span class="s-kw">except</span> <span class="s-type">Exception</span> <span class="s-kw">as</span> e:</span>
+<span class="d-add">+                    <span class="s-kw">return</span> <span class="s-fn">jsonify</span>({<span class="s-str">&quot;error&quot;</span>: <span class="s-fn">str</span>(e)}), <span class="s-num">500</span></span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-com"># format=sparse: nonzero-only body decoded into typed arrays client-side</span></span>
+<span class="d-ctx">     <span class="s-com"># (~50x smaller download + parse; the dense body OOM&#x27;d mobile Safari on</span></span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/App.tsx</span>
+            <span class="stat"><span class="d-add">+7</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">App shell</span>
+        <span class="ctx-sum">map resolution → providers → map subtree; landing vs map routing</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">App.tsx</span>
+        <span class="ctx-sum">~160 LOC — FullScreenLoader, AppContent, MapApp (config resolve + redirect), App</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">FullScreenLoader</span><span class="ol-sum">splash + spinner</span></li><li class="changed"><span class="ol-label">AppContent</span><span class="ol-sum">topbar/map/toasts … now also the STAGING ribbon</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">MapApp · config resolve</span><span class="ol-sum">subdomain redirect now gated on !resolved.staging</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">MapApp · passcode flow</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">App</span><span class="ol-sum">landing-vs-map routing (unchanged)</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>if (resolved?.subdomain &amp;&amp; !resolved.staging) — the redirect gate</li><li>getCurrentMap()?.staging &amp;&amp; &lt;div class=&quot;staging-ribbon&quot;&gt;STAGING&lt;/div&gt;</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/App.tsx b/client-react/src/App.tsx</span>
+<span class="d-meta">index fb8724c..2f9f7f2 100644</span>
+<span class="d-meta">--- a/client-react/src/App.tsx</span>
+<span class="d-meta">+++ b/client-react/src/App.tsx</span>
+<span class="d-hunk">@@ -9,7 +9,7 @@ import { useRoute, useHeatmap } from &quot;./context&quot;;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> { isLandingHost, subdomainRedirectUrl } <span class="s-kw">from</span> <span class="s-str">&quot;./themes&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> {</span>
+<span class="d-ctx">   resolveMapConfig, fetchMapConfig, applyMap, detectMapSlugFromUrl,</span>
+<span class="d-del">-  takePasscodeParam, authWithPasscode,</span>
+<span class="d-add">+  takePasscodeParam, authWithPasscode, getCurrentMap,</span>
+<span class="d-ctx">   <span class="s-kw">type</span> <span class="s-type">MapConfig</span>,</span>
+<span class="d-ctx"> } <span class="s-kw">from</span> <span class="s-str">&quot;./map/runtime&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> { reportMapLoaded } <span class="s-kw">from</span> <span class="s-str">&quot;./utils/loadTelemetry&quot;</span>;</span>
+<span class="d-hunk">@@ -55,6 +55,9 @@ function AppContent() {</span>
+<span class="d-ctx">       &lt;/main&gt;</span>
+<span class="d-ctx">       &lt;<span class="s-type">ErrorToast</span> message={error} onDismiss={clearError} /&gt;</span>
+<span class="d-ctx">       &lt;<span class="s-type">PasscodeGate</span> /&gt;</span>
+<span class="d-add">+      {<span class="s-fn">getCurrentMap</span>()?.staging &amp;&amp; (</span>
+<span class="d-add">+        &lt;div className=<span class="s-str">&quot;staging-ribbon&quot;</span> aria-hidden&gt;<span class="s-type">STAGING</span>&lt;/div&gt;</span>
+<span class="d-add">+      )}</span>
+<span class="d-ctx">       {isInitialLoading &amp;&amp; &lt;<span class="s-type">FullScreenLoader</span> /&gt;}</span>
+<span class="d-ctx">     &lt;/div&gt;</span>
+<span class="d-ctx">   );</span>
+<span class="d-hunk">@@ -78,7 +81,9 @@ function MapApp() {</span>
+<span class="d-ctx">       <span class="s-com">// A map with a canonical subdomain (presets + admin-assigned vanity hosts)</span></span>
+<span class="d-ctx">       <span class="s-com">// settles on that host: send apex /m/&lt;slug&gt; and shared/typed visitors to</span></span>
+<span class="d-ctx">       <span class="s-com">// e.g. bikepaths.cityedit.org, preserving any ?slat/?vt deep-link params.</span></span>
+<span class="d-del">-      <span class="s-kw">if</span> (resolved?.subdomain) {</span>
+<span class="d-add">+      <span class="s-com">// Staging serves the same maps at its own (unguessable) host, so the</span></span>
+<span class="d-add">+      <span class="s-com">// redirect would eject testers to prod — the server flag disables it.</span></span>
+<span class="d-add">+      <span class="s-kw">if</span> (resolved?.subdomain &amp;&amp; !resolved.staging) {</span>
+<span class="d-ctx">         <span class="s-kw">const</span> target = <span class="s-fn">subdomainRedirectUrl</span>(resolved.subdomain);</span>
+<span class="d-ctx">         <span class="s-kw">if</span> (target) {</span>
+<span class="d-ctx">           window.location.<span class="s-fn">replace</span>(target);</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/map/runtime.ts</span>
+            <span class="stat"><span class="d-add">+3</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Runtime map resolution</span>
+        <span class="ctx-sum">URL → map config fetch → CONFIG rebind</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">runtime.ts</span>
+        <span class="ctx-sum">~250 LOC — MapConfig type, resolveMapConfig, applyMap</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">MapConfig interface</span><span class="ol-sum">gains optional staging?: boolean</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">resolve/fetch/apply</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>staging?: boolean — server-driven flag; typed so the gate and ribbon read it safely</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/map/runtime.ts b/client-react/src/map/runtime.ts</span>
+<span class="d-meta">index be149de..08e46ad 100644</span>
+<span class="d-meta">--- a/client-react/src/map/runtime.ts</span>
+<span class="d-meta">+++ b/client-react/src/map/runtime.ts</span>
+<span class="d-hunk">@@ -40,6 +40,9 @@ export interface MapConfig {</span>
+<span class="d-ctx">   subdomain?: string | <span class="s-lit">null</span>;</span>
+<span class="d-ctx">   voteCount?: number;</span>
+<span class="d-ctx">   city?: <span class="s-type">CityConfig</span>;</span>
+<span class="d-add">+<span class="s-com">  /** Server runs with APP_ENV=staging: skip the canonical-subdomain redirect</span></span>
+<span class="d-add">+<span class="s-com">   *  (it would bounce testers to prod) and show the STAGING ribbon. */</span></span>
+<span class="d-add">+  staging?: boolean;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-com">// The map shown when the URL names no slug and the host has no mapped subdomain.</span></span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">client-react/src/styles/globals.css</span>
+            <span class="stat"><span class="d-add">+29</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Global styles</span>
+        <span class="ctx-sum">design tokens, layout, map chrome</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">globals.css</span>
+        <span class="ctx-sum">~2250 LOC — tokens, topbar/sidebar, graph-vote chips, animations</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">tokens / layout / components</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">NEW .staging-ribbon</span><span class="ol-sum">fixed bottom-left hazard-striped badge, pointer-events none</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">animations</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>.staging-ribbon — repeating-linear-gradient hazard stripes, z-index 3000, non-interactive</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
+<span class="d-meta">index b51b2f4..5963dde 100644</span>
+<span class="d-meta">--- a/client-react/src/styles/globals.css</span>
+<span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
+<span class="d-hunk">@@ -2194,6 +2194,35 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+<span class="s-com">/* ==========================================================================</span></span>
+<span class="d-add">+   Staging ribbon — only rendered when the server runs with APP_ENV=staging,</span>
+<span class="d-add">+   so screenshots are never mistaken for prod. Non-interactive by design.</span>
+<span class="d-add">+   ========================================================================== */</span>
+<span class="d-add">+</span>
+<span class="d-add">+.staging-ribbon {</span>
+<span class="d-add">+  <span class="s-prop">position</span>: fixed;</span>
+<span class="d-add">+  <span class="s-prop">left</span>: <span class="s-num">10px</span>;</span>
+<span class="d-add">+  <span class="s-prop">bottom</span>: <span class="s-num">10px</span>;</span>
+<span class="d-add">+  <span class="s-prop">z-index</span>: <span class="s-num">3000</span>;</span>
+<span class="d-add">+  <span class="s-prop">padding</span>: <span class="s-num">3px</span> <span class="s-num">10px</span>;</span>
+<span class="d-add">+  <span class="s-prop">border</span>: <span class="s-num">1px</span> solid rgba(<span class="s-num">0</span>, <span class="s-num">0</span>, <span class="s-num">0</span>, <span class="s-num">0.25</span>);</span>
+<span class="d-add">+  <span class="s-prop">border-radius</span>: <span class="s-num">4px</span>;</span>
+<span class="d-add">+  <span class="s-prop">font-family</span>: var(--font-ui, system-ui, sans-serif);</span>
+<span class="d-add">+  <span class="s-prop">font-size</span>: <span class="s-num">11px</span>;</span>
+<span class="d-add">+  <span class="s-prop">font-weight</span>: <span class="s-num">700</span>;</span>
+<span class="d-add">+  <span class="s-prop">letter-spacing</span>: <span class="s-num">0.12em</span>;</span>
+<span class="d-add">+  <span class="s-prop">color</span>: <span class="s-num">#5c3d00</span>;</span>
+<span class="d-add">+  <span class="s-prop">background</span>: repeating-linear-gradient(</span>
+<span class="d-add">+    -45deg,</span>
+<span class="d-add">+    <span class="s-num">#ffd54a</span> <span class="s-num">0</span> <span class="s-num">10px</span>,</span>
+<span class="d-add">+    <span class="s-num">#ffca1a</span> <span class="s-num">10px</span> <span class="s-num">20px</span></span>
+<span class="d-add">+  );</span>
+<span class="d-add">+  <span class="s-prop">box-shadow</span>: <span class="s-num">0</span> <span class="s-num">1px</span> <span class="s-num">4px</span> rgba(<span class="s-num">0</span>, <span class="s-num">0</span>, <span class="s-num">0</span>, <span class="s-num">0.25</span>);</span>
+<span class="d-add">+  <span class="s-prop">pointer-events</span>: none;</span>
+<span class="d-add">+  <span class="s-prop">user-select</span>: none;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> <span class="s-com">/* ==========================================================================</span></span>
+<span class="d-ctx">    Animations</span>
+<span class="d-ctx">    ========================================================================== */</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">deploy/nginx-cloudrun.conf</span>
+            <span class="stat"><span class="d-add">+56</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill on">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Prod nginx</span>
+        <span class="ctx-sum">static serving, API proxy, tile cache, brotli</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">nginx-cloudrun.conf</span>
+        <span class="ctx-sum">~180 LOC — compression, upstream, tile cache, locations</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">compression / upstream / tile cache</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">NEW map $host $staging_robots</span><span class="ol-sum">ce-stg-* hosts → &quot;noindex, nofollow&quot;, else empty</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">server block + static locations</span><span class="ol-sum">add_header X-Robots-Tag $staging_robots always (×5)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">proxied /api locations</span><span class="ol-sum">unchanged — Flask adds the header itself on staging</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>map $host $staging_robots — empty value on prod hosts means nginx omits the header entirely</li><li>add_header repeated in /assets/, /, @baked_previews, pmtiles — add_header inheritance is all-or-nothing</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/deploy/nginx-cloudrun.conf b/deploy/nginx-cloudrun.conf</span>
+<span class="d-meta">index 54c9ada..3757d92 100644</span>
+<span class="d-meta">--- a/deploy/nginx-cloudrun.conf</span>
+<span class="d-meta">+++ b/deploy/nginx-cloudrun.conf</span>
+<span class="d-hunk">@@ -9,7 +9,7 @@ load_module modules/ngx_http_brotli_filter_module.so;</span>
+<span class="d-ctx"> load_module modules/ngx_http_brotli_static_module.so;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> events {</span>
+<span class="d-del">-    worker_connections 1024;</span>
+<span class="d-add">+    worker_connections 4096;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> http {</span>
+<span class="d-hunk">@@ -31,10 +31,32 @@ http {</span>
+<span class="d-ctx">     gzip_min_length 256;</span>
+<span class="d-ctx">     gzip_proxied any;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    # Staging (service name ce-stg-&lt;token&gt; → host ce-stg-….a.run.app) must never</span>
+<span class="d-add">+    # be indexed — the unguessable URL is the access control. nginx omits an</span>
+<span class="d-add">+    # add_header whose value is empty, so on prod hosts this is a no-op. Flask</span>
+<span class="d-add">+    # adds the same header to proxied responses when APP_ENV=staging; this map</span>
+<span class="d-add">+    # covers the statics nginx serves itself (SPA shell, /assets, pmtiles).</span>
+<span class="d-add">+    map $host $staging_robots {</span>
+<span class="d-add">+        default &quot;&quot;;</span>
+<span class="d-add">+        &quot;~^ce-stg-&quot; &quot;noindex, nofollow&quot;;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     upstream flask {</span>
+<span class="d-ctx">         server 127.0.0.1:5001;</span>
+<span class="d-add">+        keepalive 32;</span>
+<span class="d-add">+        # Retire pooled connections BEFORE gunicorn&#x27;s --keep-alive 75 does: if</span>
+<span class="d-add">+        # gunicorn closes first, a request racing the FIN gets &quot;upstream</span>
+<span class="d-add">+        # prematurely closed&quot; — and POSTs (votes) are never retried.</span>
+<span class="d-add">+        keepalive_timeout 55s;</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    # Tile cache — /api/tile responses are immutable per archive bake (the URL</span>
+<span class="d-add">+    # carries a ?v= cache-buster and a strong ETag); caching them here keeps</span>
+<span class="d-add">+    # repeated viewports off gunicorn. On Cloud Run /tmp is tmpfs (counts</span>
+<span class="d-add">+    # against instance memory), so the cache is capped small.</span>
+<span class="d-add">+    proxy_cache_path /tmp/nginx-tiles levels=1:2 keys_zone=tiles:16m</span>
+<span class="d-add">+                     max_size=128m inactive=7d use_temp_path=off;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     # donate.cityedit.org maps to this service like every other subdomain</span>
+<span class="d-ctx">     # (terraform custom_domains); it exists only to redirect to the donation</span>
+<span class="d-ctx">     # page, so answer it here before the catch-all app server.</span>
+<span class="d-hunk">@@ -50,15 +72,22 @@ http {</span>
+<span class="d-ctx">         root /var/www/html;</span>
+<span class="d-ctx">         index index.html;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+        # Repeated inside every location that declares its own add_header —</span>
+<span class="d-add">+        # nginx&#x27;s add_header inheritance is all-or-nothing, so a location-level</span>
+<span class="d-add">+        # add_header would otherwise drop this one.</span>
+<span class="d-add">+        add_header X-Robots-Tag $staging_robots always;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">         # Content-hashed build assets — safe to cache forever (immutable).</span>
+<span class="d-ctx">         location /assets/ {</span>
+<span class="d-ctx">             add_header Cache-Control &quot;public, max-age=31536000, immutable&quot;;</span>
+<span class="d-add">+            add_header X-Robots-Tag $staging_robots always;</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         location / {</span>
+<span class="d-ctx">             try_files $uri $uri/ /index.html;</span>
+<span class="d-ctx">             # index.html / SPA shell must revalidate so new builds are picked up.</span>
+<span class="d-ctx">             add_header Cache-Control &quot;no-cache&quot;;</span>
+<span class="d-add">+            add_header X-Robots-Tag $staging_robots always;</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         # Map previews are captured daily into a private GCS bucket and streamed</span>
+<span class="d-hunk">@@ -67,6 +96,8 @@ http {</span>
+<span class="d-ctx">         # failure — fall back to the build-time baked PNG under /var/www/html.</span>
+<span class="d-ctx">         location /previews/ {</span>
+<span class="d-ctx">             proxy_pass http://flask;</span>
+<span class="d-add">+            proxy_http_version 1.1;</span>
+<span class="d-add">+            proxy_set_header Connection &quot;&quot;;</span>
+<span class="d-ctx">             proxy_set_header Host $host;</span>
+<span class="d-ctx">             proxy_set_header X-Real-IP $remote_addr;</span>
+<span class="d-ctx">             proxy_intercept_errors on;</span>
+<span class="d-hunk">@@ -76,6 +107,7 @@ http {</span>
+<span class="d-ctx">         location @baked_previews {</span>
+<span class="d-ctx">             root /var/www/html;</span>
+<span class="d-ctx">             add_header Cache-Control &quot;public, max-age=3600&quot;;</span>
+<span class="d-add">+            add_header X-Robots-Tag $staging_robots always;</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         # Per-city PMTiles live at /api/tiles/&lt;city&gt;/graph.pmtiles (same URL Flask</span>
+<span class="d-hunk">@@ -87,10 +119,33 @@ http {</span>
+<span class="d-ctx">             alias /app/osm_data/$1;</span>
+<span class="d-ctx">             add_header Cache-Control &quot;public, max-age=604800&quot;;</span>
+<span class="d-ctx">             add_header Access-Control-Allow-Origin *;</span>
+<span class="d-add">+            add_header X-Robots-Tag $staging_robots always;</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+</span>
+<span class="d-add">+        location /api/tile/ {</span>
+<span class="d-add">+            proxy_pass http://flask;</span>
+<span class="d-add">+            proxy_http_version 1.1;</span>
+<span class="d-add">+            proxy_set_header Connection &quot;&quot;;</span>
+<span class="d-add">+            proxy_set_header Host $host;</span>
+<span class="d-add">+            proxy_cache tiles;</span>
+<span class="d-add">+            # 204 = empty tile (outside blocks coverage) — cache those too.</span>
+<span class="d-add">+            proxy_cache_valid 200 204 7d;</span>
+<span class="d-add">+            proxy_cache_key $uri$is_args$args$http_accept_encoding;</span>
+<span class="d-add">+            # Collapse a cold-instance tile stampede to one upstream request</span>
+<span class="d-add">+            # per tile; timeouts match /api/ — a lazy city graph load freezes</span>
+<span class="d-add">+            # the single gevent worker (NYC ~50s+) and would 504 at the 60s</span>
+<span class="d-add">+            # default, leaving MapLibre with errored tiles until a zoom.</span>
+<span class="d-add">+            proxy_cache_lock on;</span>
+<span class="d-add">+            proxy_cache_lock_timeout 300s;</span>
+<span class="d-add">+            proxy_read_timeout 300;</span>
+<span class="d-add">+            proxy_send_timeout 300;</span>
+<span class="d-add">+            add_header X-Tile-Cache $upstream_cache_status;</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         location /api/ {</span>
+<span class="d-ctx">             proxy_pass http://flask;</span>
+<span class="d-add">+            proxy_http_version 1.1;</span>
+<span class="d-add">+            proxy_set_header Connection &quot;&quot;;</span>
+<span class="d-ctx">             proxy_set_header Host $host;</span>
+<span class="d-ctx">             proxy_set_header X-Real-IP $remote_addr;</span>
+<span class="d-ctx">             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;</span></pre>
+        </details>
+        
+    </section>
+    
+
+    <section class="card" id="terraform">
+      <div class="tag">Infra · 14 adds, 0 changes, 0 destroys</div>
+      <h2>2 · The staging stack: duplicate state, share the stateless</h2>
+      <h3>Symptom</h3>
+      <p>Staging needs to predict prod, which means its own copies of everything that carries state — and shared everything that doesn't. Duplicated: the Cloud Run app service (same 8Gi/4CPU/concurrency-200 shape; minScale 0 / maxScale 2), a second Memorystore Basic 1GB (Redis keys aren't env-namespaced, sharing prod's is impossible; ~$35/mo, the main cost), a <code>votes_staging</code> database + user co-located on the prod Cloud SQL instance, and staging-scoped admin-token/secret-key secrets. Shared: OSRM (stateless, the default compute SA already holds run.invoker), the previews bucket (read-only), and the image registry.</p>
+      <h3>Root cause</h3>
+      <ul><li><strong>The URL is the secret.</strong> The service name carries a random token (<code>ce-stg-&lt;token&gt;</code>, from gitignored terraform.tfvars) — its run.app URL rides Google's shared wildcard cert, so the hostname is never published. A <code>stg.cityedit.org</code> domain mapping was rejected: per-hostname managed certs land in Certificate Transparency logs, where anyone watching <code>%.cityedit.org</code> reads the “unguessable” name within hours. Rotation = new token, targeted apply, delete old.</li>
+<li><strong>OSRM via data source, not resource reference:</strong> referencing <code>google_cloud_run_service.osrm</code> drags prod OSRM into every -target closure — and its gcloud-stamped client-name annotation drift meant the first “staging-only” plan wanted to roll a new prod OSRM revision. A <code>data</code> lookup keeps staging plans strictly additive (the re-plan: 14 add / 0 change / 0 destroy).</li>
+<li><strong>terraform stays out of the deploy loop:</strong> the image is seeded from <code>:latest</code> once; <code>lifecycle.ignore_changes</code> on the image lets gcloud push digests (staging first, then prod) without the next plan fighting them.</li></ul>
+      <h3>What changed</h3><ul><li>Applied with -target only, after verifying the plan showed adds only — the blanket-apply landmines (secret wipe, ebikes domain mapping) still stand and are re-documented in staging.tf's header.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details open>
+          <summary><span class="fname">terraform/staging.tf</span>
+            <span class="stat"><span class="d-add">+301</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Infrastructure</span>
+        <span class="ctx-sum">the staging environment, additively beside prod&#x27;s main.tf</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">staging.tf (NEW)</span>
+        <span class="ctx-sum">~300 LOC — Redis, DB, secrets, Cloud Run service, IAM, outputs</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header — apply rules</span><span class="ol-sum">-target only; adds-only; deploy via gcloud</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">data osrm_live</span><span class="ol-sum">URL lookup without dragging prod OSRM into the plan</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">cache_staging (Redis 1GB)</span><span class="ol-sum">allkeys-lru twin — the ~$35/mo item</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">votes_staging db + user</span><span class="ol-sum">co-located on the prod Cloud SQL instance</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">staging secrets ×3 + IAM</span><span class="ol-sum">database-url / admin-token / secret-key -staging</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">app_staging service</span><span class="ol-sum">prod shape, minScale 0/maxScale 2, APP_ENV=staging, ignore_changes image</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">outputs</span><span class="ol-sum">staging_url (sensitive — the URL IS the secret), staging_redis_host</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>data.google_cloud_run_service.osrm_live — keeps staging plans strictly additive</li><li>google_cloud_run_service.app_staging — name ce-stg-${var.staging_token}</li><li>lifecycle { ignore_changes = [ …containers[0].image ] } — gcloud owns the digest</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/terraform/staging.tf b/terraform/staging.tf</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..f1cde90</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/terraform/staging.tf</span>
+<span class="d-hunk">@@ -0,0 +1,301 @@</span>
+<span class="d-add">+# =============================================================================</span>
+<span class="d-add">+# Staging environment (docs/staging-parity-plan.md)</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# A parity copy of the app service at an UNGUESSABLE URL: the service name</span>
+<span class="d-add">+# carries a random token (var.staging_token), so the default run.app hostname</span>
+<span class="d-add">+# is the access control — Google&#x27;s shared *.a.run.app wildcard cert means the</span>
+<span class="d-add">+# hostname is never published anywhere (unlike a domain mapping, whose</span>
+<span class="d-add">+# per-hostname managed cert would land in Certificate Transparency logs).</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# Staging DUPLICATES the state-bearing pieces (Redis, database, admin/session</span>
+<span class="d-add">+# secrets) and SHARES the stateless ones (OSRM, previews bucket, the container</span>
+<span class="d-add">+# image — staging runs the exact digest prod runs next). It runs as the same</span>
+<span class="d-add">+# default compute service account as prod: identical runtime behavior, and the</span>
+<span class="d-add">+# existing OSRM-invoker + previews grants apply without new IAM.</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# ⚠️ Apply ONLY with -target on these resources (same rule as monitoring.tf):</span>
+<span class="d-add">+#     terraform apply -target=google_redis_instance.cache_staging \</span>
+<span class="d-add">+#                     -target=google_sql_database.votes_staging ...</span>
+<span class="d-add">+# A blanket apply still carries the known prod landmines (secret wipe, ebikes</span>
+<span class="d-add">+# domain mapping). Verify the plan shows ONLY adds before applying.</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# Image updates are pushed with gcloud (deploy staging first, then promote the</span>
+<span class="d-add">+# SAME digest to prod — see docs/gcp-deployment.md); lifecycle.ignore_changes</span>
+<span class="d-add">+# keeps terraform from fighting those digest flips.</span>
+<span class="d-add">+# =============================================================================</span>
+<span class="d-add">+</span>
+<span class="d-add">+variable &quot;staging_token&quot; {</span>
+<span class="d-add">+  description = &quot;Random token embedded in the staging service name (the unguessable URL). Generate once: openssl rand -hex 8. Never commit the value.&quot;</span>
+<span class="d-add">+  type        = string</span>
+<span class="d-add">+  sensitive   = true</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+variable &quot;staging_db_password&quot; {</span>
+<span class="d-add">+  description = &quot;Password for the app_staging PostgreSQL user&quot;</span>
+<span class="d-add">+  type        = string</span>
+<span class="d-add">+  sensitive   = true</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+variable &quot;staging_admin_token&quot; {</span>
+<span class="d-add">+  description = &quot;Staging admin gate token — distinct from prod so a leaked staging token can&#x27;t administer prod&quot;</span>
+<span class="d-add">+  type        = string</span>
+<span class="d-add">+  sensitive   = true</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+variable &quot;staging_secret_key&quot; {</span>
+<span class="d-add">+  description = &quot;Staging session/passcode signing key — distinct from prod&quot;</span>
+<span class="d-add">+  type        = string</span>
+<span class="d-add">+  sensitive   = true</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+# OSRM&#x27;s URL read via a data source, NOT google_cloud_run_service.osrm: a</span>
+<span class="d-add">+# resource reference drags prod OSRM into every -target closure, and any</span>
+<span class="d-add">+# annotation drift there (e.g. gcloud&#x27;s client-name stamps) would make the</span>
+<span class="d-add">+# &quot;staging-only&quot; apply roll a new prod OSRM revision. The data source keeps</span>
+<span class="d-add">+# staging plans strictly additive.</span>
+<span class="d-add">+data &quot;google_cloud_run_service&quot; &quot;osrm_live&quot; {</span>
+<span class="d-add">+  name     = &quot;desire-path-osrm&quot;</span>
+<span class="d-add">+  location = var.region</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Staging Redis. The codebase does not namespace Redis keys per environment,</span>
+<span class="d-add">+# so staging cannot share prod&#x27;s instance — this Basic 1GB twin (~$35/mo) is</span>
+<span class="d-add">+# the main recurring cost of staging. No prevent_destroy: staging is meant to</span>
+<span class="d-add">+# be cheap to tear down / rotate.</span>
+<span class="d-add">+resource &quot;google_redis_instance&quot; &quot;cache_staging&quot; {</span>
+<span class="d-add">+  name           = &quot;desire-path-staging&quot;</span>
+<span class="d-add">+  tier           = &quot;BASIC&quot;</span>
+<span class="d-add">+  memory_size_gb = 1</span>
+<span class="d-add">+  region         = var.region</span>
+<span class="d-add">+</span>
+<span class="d-add">+  redis_version = &quot;REDIS_7_0&quot;</span>
+<span class="d-add">+  display_name  = &quot;City Edit Redis (staging)&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  redis_configs = {</span>
+<span class="d-add">+    maxmemory-policy = &quot;allkeys-lru&quot;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Separate DATABASE on the shared prod Cloud SQL instance (not a second</span>
+<span class="d-add">+# instance): the instance idles most of the day, and a same-instance database</span>
+<span class="d-add">+# keeps seeding trivial (same bastion tunnel, different dbname). Upgrade path</span>
+<span class="d-add">+# if staging load ever shows up in prod queries: its own db-f1-micro.</span>
+<span class="d-add">+resource &quot;google_sql_database&quot; &quot;votes_staging&quot; {</span>
+<span class="d-add">+  name     = &quot;votes_staging&quot;</span>
+<span class="d-add">+  instance = google_sql_database_instance.votes.name</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_sql_user&quot; &quot;app_staging&quot; {</span>
+<span class="d-add">+  name     = &quot;app_staging&quot;</span>
+<span class="d-add">+  instance = google_sql_database_instance.votes.name</span>
+<span class="d-add">+  password = var.staging_db_password</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_secret_manager_secret&quot; &quot;database_url_staging&quot; {</span>
+<span class="d-add">+  secret_id = &quot;database-url-staging&quot;</span>
+<span class="d-add">+  replication {</span>
+<span class="d-add">+    auto {}</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  depends_on = [google_project_service.secretmanager]</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_secret_manager_secret_version&quot; &quot;database_url_staging&quot; {</span>
+<span class="d-add">+  secret      = google_secret_manager_secret.database_url_staging.id</span>
+<span class="d-add">+  secret_data = &quot;postgresql://app_staging:${var.staging_db_password}@${google_sql_database_instance.votes.private_ip_address}:5432/votes_staging&quot;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_secret_manager_secret&quot; &quot;admin_token_staging&quot; {</span>
+<span class="d-add">+  secret_id = &quot;admin-token-staging&quot;</span>
+<span class="d-add">+  replication {</span>
+<span class="d-add">+    auto {}</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  depends_on = [google_project_service.secretmanager]</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_secret_manager_secret_version&quot; &quot;admin_token_staging&quot; {</span>
+<span class="d-add">+  secret      = google_secret_manager_secret.admin_token_staging.id</span>
+<span class="d-add">+  secret_data = var.staging_admin_token</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_secret_manager_secret&quot; &quot;secret_key_staging&quot; {</span>
+<span class="d-add">+  secret_id = &quot;secret-key-staging&quot;</span>
+<span class="d-add">+  replication {</span>
+<span class="d-add">+    auto {}</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  depends_on = [google_project_service.secretmanager]</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_secret_manager_secret_version&quot; &quot;secret_key_staging&quot; {</span>
+<span class="d-add">+  secret      = google_secret_manager_secret.secret_key_staging.id</span>
+<span class="d-add">+  secret_data = var.staging_secret_key</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_secret_manager_secret_iam_member&quot; &quot;cloud_run_db_staging_access&quot; {</span>
+<span class="d-add">+  secret_id = google_secret_manager_secret.database_url_staging.secret_id</span>
+<span class="d-add">+  role      = &quot;roles/secretmanager.secretAccessor&quot;</span>
+<span class="d-add">+  member    = &quot;serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com&quot;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_secret_manager_secret_iam_member&quot; &quot;cloud_run_admin_token_staging_access&quot; {</span>
+<span class="d-add">+  secret_id = google_secret_manager_secret.admin_token_staging.secret_id</span>
+<span class="d-add">+  role      = &quot;roles/secretmanager.secretAccessor&quot;</span>
+<span class="d-add">+  member    = &quot;serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com&quot;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_secret_manager_secret_iam_member&quot; &quot;cloud_run_secret_key_staging_access&quot; {</span>
+<span class="d-add">+  secret_id = google_secret_manager_secret.secret_key_staging.secret_id</span>
+<span class="d-add">+  role      = &quot;roles/secretmanager.secretAccessor&quot;</span>
+<span class="d-add">+  member    = &quot;serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com&quot;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+# The staging app service. Same container shape as prod (8Gi/4CPU/concurrency</span>
+<span class="d-add">+# 200 — parity beats savings: memory behavior is exactly what staging must</span>
+<span class="d-add">+# reproduce) but minScale 0 (≈$0 idle; the cold-start + prewarm window is</span>
+<span class="d-add">+# itself something we want to observe on staging) and maxScale 2.</span>
+<span class="d-add">+resource &quot;google_cloud_run_service&quot; &quot;app_staging&quot; {</span>
+<span class="d-add">+  name     = &quot;ce-stg-${var.staging_token}&quot;</span>
+<span class="d-add">+  location = var.region</span>
+<span class="d-add">+</span>
+<span class="d-add">+  template {</span>
+<span class="d-add">+    spec {</span>
+<span class="d-add">+      container_concurrency = 200</span>
+<span class="d-add">+</span>
+<span class="d-add">+      containers {</span>
+<span class="d-add">+        # :latest only seeds the FIRST revision; day-to-day the digest is</span>
+<span class="d-add">+        # pushed with gcloud (staging first, then the same digest to prod)</span>
+<span class="d-add">+        # and ignore_changes below keeps terraform out of that loop.</span>
+<span class="d-add">+        image = &quot;${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper/app:latest&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+        # Flags staging behavior in app + client: map configs carry</span>
+<span class="d-add">+        # staging:true (redirect gate + ribbon) and every response is</span>
+<span class="d-add">+        # X-Robots-Tag noindexed. See server/app.py IS_STAGING.</span>
+<span class="d-add">+        env {</span>
+<span class="d-add">+          name  = &quot;APP_ENV&quot;</span>
+<span class="d-add">+          value = &quot;staging&quot;</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+</span>
+<span class="d-add">+        env {</span>
+<span class="d-add">+          name  = &quot;REDIS_HOST&quot;</span>
+<span class="d-add">+          value = google_redis_instance.cache_staging.host</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+</span>
+<span class="d-add">+        env {</span>
+<span class="d-add">+          name  = &quot;REDIS_PORT&quot;</span>
+<span class="d-add">+          value = google_redis_instance.cache_staging.port</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+</span>
+<span class="d-add">+        env {</span>
+<span class="d-add">+          name  = &quot;SKIP_WARMUP&quot;</span>
+<span class="d-add">+          value = &quot;0&quot;</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+</span>
+<span class="d-add">+        # Shared with prod: OSRM is stateless/read-only, and the default</span>
+<span class="d-add">+        # compute SA already holds run.invoker on it.</span>
+<span class="d-add">+        env {</span>
+<span class="d-add">+          name  = &quot;OSRM_URL&quot;</span>
+<span class="d-add">+          value = data.google_cloud_run_service.osrm_live.status[0].url</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+</span>
+<span class="d-add">+        env {</span>
+<span class="d-add">+          name = &quot;DATABASE_URL&quot;</span>
+<span class="d-add">+          value_from {</span>
+<span class="d-add">+            secret_key_ref {</span>
+<span class="d-add">+              name = google_secret_manager_secret.database_url_staging.secret_id</span>
+<span class="d-add">+              key  = &quot;latest&quot;</span>
+<span class="d-add">+            }</span>
+<span class="d-add">+          }</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+</span>
+<span class="d-add">+        env {</span>
+<span class="d-add">+          name  = &quot;PREVIEW_BUCKET&quot;</span>
+<span class="d-add">+          value = google_storage_bucket.previews.name</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+</span>
+<span class="d-add">+        env {</span>
+<span class="d-add">+          name = &quot;ADMIN_TOKEN&quot;</span>
+<span class="d-add">+          value_from {</span>
+<span class="d-add">+            secret_key_ref {</span>
+<span class="d-add">+              name = google_secret_manager_secret.admin_token_staging.secret_id</span>
+<span class="d-add">+              key  = &quot;latest&quot;</span>
+<span class="d-add">+            }</span>
+<span class="d-add">+          }</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+</span>
+<span class="d-add">+        env {</span>
+<span class="d-add">+          name = &quot;SECRET_KEY&quot;</span>
+<span class="d-add">+          value_from {</span>
+<span class="d-add">+            secret_key_ref {</span>
+<span class="d-add">+              name = google_secret_manager_secret.secret_key_staging.secret_id</span>
+<span class="d-add">+              key  = &quot;latest&quot;</span>
+<span class="d-add">+            }</span>
+<span class="d-add">+          }</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+</span>
+<span class="d-add">+        resources {</span>
+<span class="d-add">+          limits = {</span>
+<span class="d-add">+            cpu    = &quot;4&quot;</span>
+<span class="d-add">+            memory = &quot;8Gi&quot;</span>
+<span class="d-add">+          }</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+</span>
+<span class="d-add">+        startup_probe {</span>
+<span class="d-add">+          http_get {</span>
+<span class="d-add">+            path = &quot;/health&quot;</span>
+<span class="d-add">+          }</span>
+<span class="d-add">+          initial_delay_seconds = 5</span>
+<span class="d-add">+          period_seconds        = 5</span>
+<span class="d-add">+          failure_threshold     = 120</span>
+<span class="d-add">+          timeout_seconds       = 3</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+</span>
+<span class="d-add">+    metadata {</span>
+<span class="d-add">+      annotations = {</span>
+<span class="d-add">+        &quot;autoscaling.knative.dev/minScale&quot;        = &quot;0&quot;</span>
+<span class="d-add">+        &quot;autoscaling.knative.dev/maxScale&quot;        = &quot;2&quot;</span>
+<span class="d-add">+        &quot;run.googleapis.com/startup-cpu-boost&quot;    = &quot;true&quot;</span>
+<span class="d-add">+        &quot;run.googleapis.com/vpc-access-connector&quot; = google_vpc_access_connector.connector.id</span>
+<span class="d-add">+        &quot;run.googleapis.com/vpc-access-egress&quot;    = &quot;private-ranges-only&quot;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  traffic {</span>
+<span class="d-add">+    percent         = 100</span>
+<span class="d-add">+    latest_revision = true</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  lifecycle {</span>
+<span class="d-add">+    ignore_changes = [template[0].spec[0].containers[0].image]</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  depends_on = [</span>
+<span class="d-add">+    google_project_service.cloud_run,</span>
+<span class="d-add">+    google_artifact_registry_repository.app,</span>
+<span class="d-add">+    google_vpc_access_connector.connector,</span>
+<span class="d-add">+    google_secret_manager_secret_version.database_url_staging,</span>
+<span class="d-add">+    google_secret_manager_secret_iam_member.cloud_run_db_staging_access,</span>
+<span class="d-add">+    google_secret_manager_secret_version.admin_token_staging,</span>
+<span class="d-add">+    google_secret_manager_secret_iam_member.cloud_run_admin_token_staging_access,</span>
+<span class="d-add">+    google_secret_manager_secret_version.secret_key_staging,</span>
+<span class="d-add">+    google_secret_manager_secret_iam_member.cloud_run_secret_key_staging_access,</span>
+<span class="d-add">+  ]</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Public like prod — the unguessable hostname is the gate.</span>
+<span class="d-add">+resource &quot;google_cloud_run_service_iam_member&quot; &quot;public_staging&quot; {</span>
+<span class="d-add">+  service  = google_cloud_run_service.app_staging.name</span>
+<span class="d-add">+  location = google_cloud_run_service.app_staging.location</span>
+<span class="d-add">+  role     = &quot;roles/run.invoker&quot;</span>
+<span class="d-add">+  member   = &quot;allUsers&quot;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+output &quot;staging_url&quot; {</span>
+<span class="d-add">+  value     = google_cloud_run_service.app_staging.status[0].url</span>
+<span class="d-add">+  sensitive = true # the URL IS the secret</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+output &quot;staging_redis_host&quot; {</span>
+<span class="d-add">+  value = google_redis_instance.cache_staging.host</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+    </section>
+    
+
+    <section class="card" id="workflow">
+      <div class="tag">Process · deploy staging-first</div>
+      <h2>3 · Seeding, stage-refresh, and digest promotion</h2>
+      <h3>Symptom</h3>
+      <p>Today's cold-load work was measured live on prod because there was nowhere else to measure it. The payoff of the twin: build the overlay → deploy the digest to staging → verify (load waterfall, smoke checks, [MAPLOAD] beacons filtered to the staging service name) → fresh prod backup → promote the SAME digest to prod → asset-hash check.</p>
+      <h3>Root cause</h3>
+      <ul><li><strong>Seed:</strong> pg_restore of the newest prod dump into <code>votes_staging</code> through the existing bastion tunnel (same instance, different database). No resnap needed: same image ⇒ same graphs ⇒ same edge ids — the invariant that already powers overlay deploys.</li>
+<li><strong>Redis hydrates itself:</strong> <code>_populate_redis</code> at boot and <code>_hydrate_map_redis</code> on each map's first request replay Postgres → Redis, so an initial seed needs no restart at all.</li>
+<li><strong>make stage-refresh:</strong> restore newest dump + FLUSHALL staging Redis (needs the :5433 Cloud SQL and :6380 staging-Redis bastion tunnels). The flush matters on RE-refresh: the hydration paths only fire on empty/underpopulated hashes, so stale staging Redis data would silently survive a reseed without it.</li></ul>
+      <h3>What changed</h3><ul><li>docs/gcp-deployment.md gains the “Staging (deploy here FIRST)” section + promotion commands; CLAUDE.md tells future sessions to deploy staging-first and to treat the staging URL as a secret (looked up via <code>terraform output -raw staging_url</code>, never committed).</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details open>
+          <summary><span class="fname">Makefile</span>
+            <span class="stat"><span class="d-add">+37</span> / <span class="d-del">-17</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Dev/ops targets</span>
+        <span class="ctx-sum">deps, dev loop, deploy, tests, terraform</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Makefile</span>
+        <span class="ctx-sum">~170 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">deps / dev / test targets</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">NEW stage-refresh</span><span class="ol-sum">newest dump → votes_staging + FLUSHALL staging Redis</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">terraform / monitoring targets</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>stage-refresh — guards on both tunnels (:5433 SQL, :6380 staging Redis), pg_restore --clean --if-exists, FLUSHALL</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/Makefile b/Makefile</span>
+<span class="d-meta">index 02ee326..4ef78d0 100644</span>
+<span class="d-meta">--- a/Makefile</span>
+<span class="d-meta">+++ b/Makefile</span>
+<span class="d-hunk">@@ -7,7 +7,7 @@ SERVICE := desire-path-mapper</span>
+<span class="d-ctx"> REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/desire-path-mapper/app</span>
+<span class="d-ctx"> SCREENSHOT_REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/desire-path-mapper/screenshot</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-.PHONY: help dev redis flask client graphs tiles docker push deploy test test-frontend test-backend test-cloud tf-init tf-plan tf-apply logs clean monitoring monitoring-down loadtest-local loadtest-prod loadtest-verify</span>
+<span class="d-add">+.PHONY: help dev deps deps-down flask client graphs tiles docker push deploy test test-frontend test-backend test-cloud tf-init tf-plan tf-apply logs clean monitoring monitoring-down loadtest-local loadtest-prod loadtest-verify</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Python in the server venv (no activation needed inside make recipes)</span>
+<span class="d-ctx"> PY := env/bin/python</span>
+<span class="d-hunk">@@ -23,15 +23,16 @@ LOCUST_FLAGS := $(if $(USERS),--headless --users $(USERS) --spawn-rate $(or $(RA</span>
+<span class="d-ctx"> help:</span>
+<span class="d-ctx"> 	@echo &quot;Usage: make &lt;target&gt;&quot;</span>
+<span class="d-ctx"> 	@echo &quot;&quot;</span>
+<span class="d-del">-	@echo &quot;Local Development:&quot;</span>
+<span class="d-del">-	@echo &quot;  dev          Build graphs+tiles if needed, then run redis+flask+client (no Docker)&quot;</span>
+<span class="d-add">+	@echo &quot;Local Development (hybrid: Docker deps + host Flask/Vite):&quot;</span>
+<span class="d-add">+	@echo &quot;  dev          Build graphs+tiles if needed, start Docker deps, run flask+client on host&quot;</span>
+<span class="d-add">+	@echo &quot;  deps         Start backing services in Docker (redis, postgres, osrm on :5005)&quot;</span>
+<span class="d-add">+	@echo &quot;  deps-down    Stop the Docker backing services&quot;</span>
+<span class="d-ctx"> 	@echo &quot;  graphs       Build any missing per-city walk graphs&quot;</span>
+<span class="d-ctx"> 	@echo &quot;  tiles        Build per-city PMTiles (dev profile; matches prod content)&quot;</span>
+<span class="d-del">-	@echo &quot;  redis        Start Redis server&quot;</span>
+<span class="d-del">-	@echo &quot;  flask        Start Flask backend&quot;</span>
+<span class="d-del">-	@echo &quot;  client       Start frontend dev server&quot;</span>
+<span class="d-add">+	@echo &quot;  flask        Start Flask backend on the host&quot;</span>
+<span class="d-add">+	@echo &quot;  client       Start frontend dev server on the host&quot;</span>
+<span class="d-ctx"> 	@echo &quot;&quot;</span>
+<span class="d-del">-	@echo &quot;Docker:&quot;</span>
+<span class="d-add">+	@echo &quot;Docker (full stack, alternative to the hybrid loop):&quot;</span>
+<span class="d-ctx"> 	@echo &quot;  docker       Run with Docker Compose&quot;</span>
+<span class="d-ctx"> 	@echo &quot;  docker-dev   Run with Docker Compose (dev mode)&quot;</span>
+<span class="d-ctx"> 	@echo &quot;&quot;</span>
+<span class="d-hunk">@@ -63,8 +64,13 @@ help:</span>
+<span class="d-ctx"> 	@echo &quot;  logs         Tail Cloud Run logs&quot;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Local Development</span>
+<span class="d-del">-redis:</span>
+<span class="d-del">-	redis-server</span>
+<span class="d-add">+# Backing services in Docker; the osrmport override publishes OSRM on host :5005</span>
+<span class="d-add">+# (not :5000 — macOS AirPlay squats it) for the host-run Flask.</span>
+<span class="d-add">+deps:</span>
+<span class="d-add">+	docker compose -f docker-compose.yml -f docker-compose.osrmport.yml up -d redis postgres osrm</span>
+<span class="d-add">+</span>
+<span class="d-add">+deps-down:</span>
+<span class="d-add">+	docker compose stop redis postgres osrm</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> flask:</span>
+<span class="d-ctx"> 	cd server &amp;&amp; source env/bin/activate &amp;&amp; python app.py</span>
+<span class="d-hunk">@@ -82,11 +88,10 @@ graphs:</span>
+<span class="d-ctx"> tiles: graphs</span>
+<span class="d-ctx"> 	cd server &amp;&amp; $(PY) build_pmtiles.py --all --profile dev</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# Fast non-Docker local stack: ensure graphs + tiles exist, then run redis (if not</span>
+<span class="d-del">-# already up), flask, and the Vite client. Ctrl-C stops flask too; redis is left</span>
+<span class="d-del">-# running (use `make clean` to stop it).</span>
+<span class="d-del">-dev: tiles</span>
+<span class="d-del">-	@redis-cli ping &gt;/dev/null 2&gt;&amp;1 || { echo &quot;Starting redis...&quot;; redis-server --daemonize yes; }</span>
+<span class="d-add">+# The hybrid dev loop: ensure graphs + tiles exist, start the Docker backing</span>
+<span class="d-add">+# services, then run flask + the Vite client on the host. Ctrl-C stops flask</span>
+<span class="d-add">+# too; the Docker services keep running (`make deps-down` to stop them).</span>
+<span class="d-add">+dev: tiles deps</span>
+<span class="d-ctx"> 	@echo &quot;Starting flask (background) + client (foreground)...&quot;</span>
+<span class="d-ctx"> 	@cd server &amp;&amp; $(PY) app.py &amp; echo $$! &gt; /tmp/cityedit-flask.pid</span>
+<span class="d-ctx"> 	@trap &#x27;kill `cat /tmp/cityedit-flask.pid` 2&gt;/dev/null; rm -f /tmp/cityedit-flask.pid&#x27; EXIT; \</span>
+<span class="d-hunk">@@ -119,6 +124,22 @@ deploy:</span>
+<span class="d-ctx"> test-cloud:</span>
+<span class="d-ctx"> 	./scripts/test-cloud.sh</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# Staging data refresh (docs/staging-parity-plan.md): restore the newest prod</span>
+<span class="d-add">+# backup into votes_staging, flush staging Redis, and let the app self-heal</span>
+<span class="d-add">+# (_hydrate_map_redis replays Postgres → Redis on each map&#x27;s first request).</span>
+<span class="d-add">+# Needs TWO bastion tunnels open first (see docs/gcp-deployment.md#staging):</span>
+<span class="d-add">+#   :5433 → Cloud SQL private IP   (same tunnel as prod DB access)</span>
+<span class="d-add">+#   :6380 → staging Redis host     (terraform output staging_redis_host)</span>
+<span class="d-add">+stage-refresh:</span>
+<span class="d-add">+	@lsof -ti :5433 &gt;/dev/null || { echo &quot;no tunnel on :5433 — open the bastion Cloud SQL tunnel first&quot;; exit 1; }</span>
+<span class="d-add">+	@lsof -ti :6380 &gt;/dev/null || { echo &quot;no tunnel on :6380 — open the bastion staging-Redis tunnel first&quot;; exit 1; }</span>
+<span class="d-add">+	@DUMP=$$(ls -t ~/city-edit-prod-backups/*/prod-full.dump | head -1); \</span>
+<span class="d-add">+	STG_URL=$$(gcloud secrets versions access latest --secret=database-url-staging --project=$(PROJECT_ID) | sed -E &#x27;s#@[^/]+/#@localhost:5433/#&#x27;); \</span>
+<span class="d-add">+	echo &quot;Restoring $$DUMP into votes_staging...&quot;; \</span>
+<span class="d-add">+	pg_restore --clean --if-exists --no-owner --no-privileges -d &quot;$$STG_URL&quot; &quot;$$DUMP&quot; &amp;&amp; \</span>
+<span class="d-add">+	redis-cli -p 6380 FLUSHALL &amp;&amp; \</span>
+<span class="d-add">+	echo &quot;Seeded. First request per map rehydrates its Redis hash from Postgres.&quot;</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> # Unit/integration tests (offline). Frontend: vitest. Backend: pytest (fakeredis,</span>
+<span class="d-ctx"> # no DB/Redis needed for the unit suite).</span>
+<span class="d-ctx"> test: test-frontend test-backend</span>
+<span class="d-hunk">@@ -178,8 +199,7 @@ screenshot-run:</span>
+<span class="d-ctx"> 	gcloud run jobs execute map-screenshot-prod --region=$(REGION) --project=$(PROJECT_ID)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Utilities</span>
+<span class="d-del">-clean:</span>
+<span class="d-del">-	-pkill -f &quot;redis-server&quot; 2&gt;/dev/null || true</span>
+<span class="d-add">+clean: deps-down</span>
+<span class="d-ctx"> 	-pkill -f &quot;python app.py&quot; 2&gt;/dev/null || true</span>
+<span class="d-del">-	-pkill -f &quot;bun run dev&quot; 2&gt;/dev/null || true</span>
+<span class="d-add">+	-pkill -f &quot;vite&quot; 2&gt;/dev/null || true</span>
+<span class="d-ctx"> 	@echo &quot;Stopped all services&quot;</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">docs/gcp-deployment.md</span>
+            <span class="stat"><span class="d-add">+69</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Ops docs</span>
+        <span class="ctx-sum">deploy guide, DB access, domains, troubleshooting</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">gcp-deployment.md</span>
+        <span class="ctx-sum">deploy guide</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Deploying Changes</span><span class="ol-sum">now points at staging-first</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">NEW Staging section</span><span class="ol-sum">URL secrecy, digest promotion, seeding, tunnels</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Environment &amp; Secrets / backups / domains</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>&quot;Staging (deploy here FIRST)&quot; — the promotion workflow + stage-refresh tunnels</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/gcp-deployment.md b/docs/gcp-deployment.md</span>
+<span class="d-meta">index d4dfcf0..007b0d5 100644</span>
+<span class="d-meta">--- a/docs/gcp-deployment.md</span>
+<span class="d-meta">+++ b/docs/gcp-deployment.md</span>
+<span class="d-hunk">@@ -45,6 +45,9 @@ gcloud config set project google-mpf-ywspom2sxeey</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ## Deploying Changes</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+&gt; **Deploy to [staging](#staging-deploy-here-first) first**, verify, then</span>
+<span class="d-add">+&gt; promote the *same image digest* to prod.</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> &gt; ## ⚠️ ALWAYS back up the prod DB locally before deploying.</span>
+<span class="d-ctx"> &gt;</span>
+<span class="d-ctx"> &gt; Every deploy — no exceptions. Take a fresh local snapshot of Cloud SQL</span>
+<span class="d-hunk">@@ -92,6 +95,72 @@ gcloud run services update desire-path-mapper \</span>
+<span class="d-ctx">   --image=us-central1-docker.pkg.dev/google-mpf-ywspom2sxeey/desire-path-mapper/app:latest</span>
+<span class="d-ctx"> ```</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+## Staging (deploy here FIRST)</span>
+<span class="d-add">+</span>
+<span class="d-add">+Full plan/rationale: [staging-parity-plan.md](staging-parity-plan.md). Staging</span>
+<span class="d-add">+is a parity copy of the app service — same image digests, same 8Gi/4CPU shape —</span>
+<span class="d-add">+with its own Redis (`desire-path-staging`), its own database (`votes_staging`,</span>
+<span class="d-add">+co-located on the prod Cloud SQL instance), and staging-scoped</span>
+<span class="d-add">+`admin-token-staging` / `secret-key-staging` secrets. OSRM, the previews</span>
+<span class="d-add">+bucket, and the image registry are shared. It runs with `APP_ENV=staging`,</span>
+<span class="d-add">+which gates the client&#x27;s canonical-subdomain redirect (otherwise testers</span>
+<span class="d-add">+bounce to prod), shows the STAGING ribbon, and noindexes every response.</span>
+<span class="d-add">+</span>
+<span class="d-add">+**The URL is the secret.** The service name carries a random token</span>
+<span class="d-add">+(`ce-stg-&lt;token&gt;`), so its `run.app` URL is unguessable and — because run.app</span>
+<span class="d-add">+uses Google&#x27;s shared wildcard cert — never published in Certificate</span>
+<span class="d-add">+Transparency logs. Never commit or publicly paste it. Look it up with:</span>
+<span class="d-add">+</span>
+<span class="d-add">+```bash</span>
+<span class="d-add">+cd terraform &amp;&amp; terraform output -raw staging_url    # or:</span>
+<span class="d-add">+gcloud run services list --project=google-mpf-ywspom2sxeey --format=&#x27;value(URL)&#x27; | grep ce-stg</span>
+<span class="d-add">+```</span>
+<span class="d-add">+</span>
+<span class="d-add">+To rotate a leaked URL: change `staging_token` in `terraform.tfvars`, targeted</span>
+<span class="d-add">+apply (creates the new service), delete the old one.</span>
+<span class="d-add">+</span>
+<span class="d-add">+### Digest promotion workflow</span>
+<span class="d-add">+</span>
+<span class="d-add">+```bash</span>
+<span class="d-add">+# 1. Build the overlay image (unchanged, ~2-3 min) → note the digest D</span>
+<span class="d-add">+gcloud builds submit --config=cloudbuild.overlay.yaml ...</span>
+<span class="d-add">+</span>
+<span class="d-add">+# 2. Deploy D to STAGING and verify there (load waterfall, smoke vote,</span>
+<span class="d-add">+#    [MAPLOAD] beacons filtered to the staging service name)</span>
+<span class="d-add">+gcloud run services update ce-stg-&lt;token&gt; --region=us-central1 \</span>
+<span class="d-add">+  --project=google-mpf-ywspom2sxeey --image=&lt;registry&gt;/app@sha256:D</span>
+<span class="d-add">+</span>
+<span class="d-add">+# 3. BACKUP PROD DB (mandatory, unchanged), then promote the SAME digest</span>
+<span class="d-add">+gcloud run services update desire-path-mapper --region=us-central1 \</span>
+<span class="d-add">+  --project=google-mpf-ywspom2sxeey --image=&lt;registry&gt;/app@sha256:D</span>
+<span class="d-add">+</span>
+<span class="d-add">+# 4. Served-asset-hash check on prod (unchanged)</span>
+<span class="d-add">+```</span>
+<span class="d-add">+</span>
+<span class="d-add">+Because staging runs the exact digest, graph/edge-id parity is automatic; a</span>
+<span class="d-add">+full-bake deploy (graph changes) rehearses its resnap on staging&#x27;s DB the same</span>
+<span class="d-add">+way.</span>
+<span class="d-add">+</span>
+<span class="d-add">+### Seeding / refreshing staging data</span>
+<span class="d-add">+</span>
+<span class="d-add">+`make stage-refresh` restores the newest `~/city-edit-prod-backups/*/prod-full.dump`</span>
+<span class="d-add">+into `votes_staging` and flushes staging Redis (the app then self-heals: each</span>
+<span class="d-add">+map&#x27;s first request replays Postgres → Redis via `_hydrate_map_redis`). It</span>
+<span class="d-add">+needs two bastion tunnels open:</span>
+<span class="d-add">+</span>
+<span class="d-add">+```bash</span>
+<span class="d-add">+# :5433 → Cloud SQL (same tunnel as prod DB access — see below)</span>
+<span class="d-add">+# :6380 → staging Redis (host: cd terraform &amp;&amp; terraform output -raw staging_redis_host)</span>
+<span class="d-add">+gcloud compute ssh bastion-prod --zone=us-central1-a \</span>
+<span class="d-add">+  --project=google-mpf-ywspom2sxeey --tunnel-through-iap \</span>
+<span class="d-add">+  --ssh-flag=&quot;-N&quot; --ssh-flag=&quot;-L 5433:10.39.0.3:5432&quot; \</span>
+<span class="d-add">+  --ssh-flag=&quot;-L 6380:&lt;staging-redis-host&gt;:6379&quot;</span>
+<span class="d-add">+```</span>
+<span class="d-add">+</span>
+<span class="d-add">+The staging terraform lives in `terraform/staging.tf` — apply it **only with</span>
+<span class="d-add">+`-target`** on staging resources, and only after the plan shows adds-only (the</span>
+<span class="d-add">+blanket-apply landmines below still stand).</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> ## Environment &amp; Secrets</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> App secrets are managed in Secret Manager and wired into the Cloud Run service by</span></pre>
+        </details>
+        
+        <details open>
+          <summary><span class="fname">CLAUDE.md</span>
+            <span class="stat"><span class="d-add">+10</span> / <span class="d-del">-4</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Project instructions</span>
+        <span class="ctx-sum">session-level rules for Claude</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">CLAUDE.md</span>
+        <span class="ctx-sum">project instructions</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">deploy rules</span><span class="ol-sum">backup-first unchanged; NEW staging-first bullet</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">everything else</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Deploy STAGING-FIRST bullet — promote the same digest; the URL is a secret, never committed</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/CLAUDE.md b/CLAUDE.md</span>
+<span class="d-meta">index dd86554..119c801 100644</span>
+<span class="d-meta">--- a/CLAUDE.md</span>
+<span class="d-meta">+++ b/CLAUDE.md</span>
+<span class="d-hunk">@@ -12,6 +12,7 @@ Active workstream (full report with diffs: `changelog/2026-06-14-caching-concurr</span>
+<span class="d-ctx"> - **Python dependencies**: ALWAYS install and manage Python packages with `uv pip` — never bare `pip`, `pip3`, `python -m pip`, `poetry`, `conda`, or `easy_install`. Add a package by editing `requirements.in`, recompile with `uv pip compile requirements.in -o requirements.txt`, then `uv pip install -r requirements.txt`. For one-off installs use `uv pip install &lt;pkg&gt;`. This applies everywhere: local venvs, scripts, and Dockerfiles.</span>
+<span class="d-ctx"> - **gcloud commands**: Run gcloud commands directly (e.g. `gcloud builds submit`, `gcloud run services logs read`, etc.) without asking the user.</span>
+<span class="d-ctx"> - **ALWAYS back up the prod DB locally before deploying** — every deploy, no exceptions. Take a fresh `pg_dump` snapshot of `desire-path-votes-prod` into `~/city-edit-prod-backups/&lt;UTC-timestamp&gt;/` *before* running any deploy command (Cloud Build, `terraform apply`, or `gcloud run services update`). Procedure: [docs/gcp-deployment.md#database-access--backups](docs/gcp-deployment.md#database-access--backups).</span>
+<span class="d-add">+- **Deploy STAGING-FIRST**: push each new image digest to the staging service (`ce-stg-&lt;token&gt;`, `APP_ENV=staging`, own Redis + `votes_staging` DB), verify there, then promote the *same digest* to `desire-path-mapper`. The staging URL is a secret — never commit or paste it into committed files; look it up via `terraform output -raw staging_url`. Data refresh: `make stage-refresh`. Full workflow: [docs/gcp-deployment.md#staging-deploy-here-first](docs/gcp-deployment.md#staging-deploy-here-first).</span>
+<span class="d-ctx"> - **docker commands**: Run docker commands directly (e.g. `docker compose up --build -d`, `docker compose logs`, etc.) without asking the user.</span>
+<span class="d-ctx"> - **Commit every completed request**: whenever one of my messages results in code changes, land those changes as a git commit once they&#x27;re done and verified — no need to ask. Git is my precise log of everything you changed and why. Rules:</span>
+<span class="d-ctx">   - One commit per completed request; if the work naturally splits into independent pieces (e.g. a server fix + an unrelated doc cleanup), several logical commits are better than one blob.</span>
+<span class="d-hunk">@@ -119,17 +120,22 @@ Services: `nginx` (port 8080), `flask` (internal, 3 replicas), `osrm` (internal,</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ## Local Development</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+Hybrid loop (canonical — see the README Quickstart): backing services in</span>
+<span class="d-add">+Docker, Flask + Vite on the host for fast edit cycles.</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> ```bash</span>
+<span class="d-del">-# Terminal 1: Redis</span>
+<span class="d-del">-redis-server</span>
+<span class="d-add">+# Backing services (Redis :6379, Postgres :5432, OSRM → host :5005)</span>
+<span class="d-add">+make deps   # = docker compose -f docker-compose.yml -f docker-compose.osrmport.yml up -d redis postgres osrm</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# Terminal 2: Flask</span>
+<span class="d-add">+# Flask on the host (restart after server/*.py edits; SKIP_PREWARM=1 for fast boots)</span>
+<span class="d-ctx"> cd server &amp;&amp; source env/bin/activate &amp;&amp; python app.py</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# Terminal 3: Client (auto-reloads on file changes)</span>
+<span class="d-add">+# Client on the host (hot-reloads on file changes)</span>
+<span class="d-ctx"> cd client-react &amp;&amp; npm run dev</span>
+<span class="d-ctx"> ```</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+Or all at once: `make dev` (builds missing graphs/tiles first).</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> ## Connecting to the Prod Database</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> Prod Postgres is Cloud SQL `desire-path-votes-prod` (private IP `10.39.0.3:5432`), reached via IAP through the `bastion-prod` VM. Creds are in Secret Manager (`database-url-prod`). Backup/restore of prod data — and where snapshots live (`~/city-edit-prod-backups/`) — is documented in [docs/gcp-deployment.md](docs/gcp-deployment.md#database-access--backups).</span></pre>
+        </details>
+        
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Targeted terraform plan re-run after the OSRM data-source fix: 14 to add, 0 to change, 0 to destroy; apply completed cleanly and the service went Ready on the first revision.</li>
+<li>Seeded votes_staging from the 2026-07-23 16:15Z prod dump: 869,139 edge_votes / 16 maps / 58 vote_types (the only restore error was the benign <code>SET transaction_timeout</code> — a newer-pg_dump directive Postgres 15 ignores).</li>
+<li>Staging serves real data end-to-end: /api/maps/nyc-walkways voteCount 28,979; sparse graph-votes with 8,244 edge pairs + 10 legend entries (lazy Redis hydration from the seeded DB, no restart needed).</li>
+<li>Headless staging run: cold loader-dismiss 3.9s / warm 1.0s (prod's post-00105 profile), host stays on staging (no prod bounce despite nyc-walkways having a canonical subdomain), STAGING ribbon renders, heatmap painted.</li>
+<li>X-Robots-Tag present on staging API responses AND nginx-served statics (SPA shell, hashed assets); absent everywhere on prod. <code>staging</code> key absent from prod configs.</li>
+<li>Digest promotion exercised for real: the overlay digest was deployed to staging, verified, then promoted to prod (rev 00107) after a fresh backup — both now serve identical asset hashes (<code>index-C4L56-9s.js</code>). Headless prod check: the subdomain redirect still fires.</li>
+<li><code>npx tsc --noEmit</code> clean; nginx config validated with <code>nginx -t</code> in docker; app.py parses.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open the staging URL (get it: <code>cd terraform &amp;&amp; terraform output -raw staging_url</code>) — the map should load with the yellow STAGING ribbon bottom-left and NOT redirect to prod.</li>
+<li>Cast a test vote on staging, reload — it should persist there; then check the same street on prod — it must NOT appear (separate Redis + separate database).</li>
+<li>Open cityedit.org/m/nyc-bikes in a fresh tab — confirm it still redirects to bikepaths.cityedit.org (prod behavior unchanged).</li>
+<li>Spot-check prod after rev 00107: heatmap loads, votes cast fine, no STAGING ribbon anywhere.</li>
+<li>Next deploy: follow the new staging-first flow in docs/gcp-deployment.md and see whether it catches anything before prod does.</li></ul>
+  </section>
+
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Other files in this diff</h2>
+    
+        <details>
+          <summary><span class="fname">docs/staging-parity-plan.md</span>
+            <span class="stat"><span class="d-add">+199</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Planning doc</span>
+        <span class="ctx-sum">the full plan this workstream executed</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">staging-parity-plan.md (NEW)</span>
+        <span class="ctx-sum">goal, topology, URL options, costs, rollout order</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">plan</span><span class="ol-sum">written first, then executed step-by-step this session</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The CT-log argument for a randomized run.app name over a vanity subdomain lives here</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/staging-parity-plan.md b/docs/staging-parity-plan.md</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..4974fde</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/docs/staging-parity-plan.md</span>
+<span class="d-hunk">@@ -0,0 +1,199 @@</span>
+<span class="d-add">+# Staging ↔ Prod Parity — Plan</span>
+<span class="d-add">+</span>
+<span class="d-add">+*Drafted 2026-07-23. Status: proposal, nothing provisioned yet.*</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Goal</span>
+<span class="d-add">+</span>
+<span class="d-add">+A always-on staging deployment of City Edit that:</span>
+<span class="d-add">+</span>
+<span class="d-add">+1. **Matches prod by construction** — same container image (same baked graphs,</span>
+<span class="d-add">+   PMTiles, venv), same service shape, its own copy of prod-like data — so</span>
+<span class="d-add">+   &quot;worked on staging&quot; actually predicts &quot;works on prod&quot;.</span>
+<span class="d-add">+2. Is reachable at an **unguessable URL** we can hand to testers, with no</span>
+<span class="d-add">+   Google-account ceremony.</span>
+<span class="d-add">+3. Becomes the **first stop for every deploy**: build → deploy to staging →</span>
+<span class="d-add">+   verify → promote the *same image digest* to prod. No more first-visitor</span>
+<span class="d-add">+   experiments on prod (today&#x27;s cold-load work was measured live on prod</span>
+<span class="d-add">+   because there was nowhere else to measure it).</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Current prod topology (what we&#x27;re mirroring)</span>
+<span class="d-add">+</span>
+<span class="d-add">+| Piece | Prod resource | Notes |</span>
+<span class="d-add">+|---|---|---|</span>
+<span class="d-add">+| App | Cloud Run `desire-path-mapper` (8Gi/4CPU, minScale 1, maxScale 8) | nginx + Flask in one container; graphs baked into image |</span>
+<span class="d-add">+| Routing | Cloud Run `desire-path-osrm` | Stateless; called with a Cloud Run ID token (audience = its URL) |</span>
+<span class="d-add">+| Votes (serving) | Memorystore Redis 1GB (`allkeys-lru`) | The heatmap serves ONLY from Redis |</span>
+<span class="d-add">+| Votes (durable) | Cloud SQL `desire-path-votes-prod` (private IP, via VPC connector) | `_populate_redis` hydrates Redis from Postgres at boot |</span>
+<span class="d-add">+| Secrets | Secret Manager: `database-url-prod`, `admin-token`, `secret-key` | secretRef&#x27;d into the service |</span>
+<span class="d-add">+| Previews | Private GCS bucket, Flask proxies `/previews/` | |</span>
+<span class="d-add">+| Domains | `cityedit.org` + per-map subdomains via Cloud Run domain mappings | |</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Proposed staging topology</span>
+<span class="d-add">+</span>
+<span class="d-add">+**Duplicate** (state-bearing or config-bearing — must not be shared):</span>
+<span class="d-add">+</span>
+<span class="d-add">+- **Cloud Run app service** — name carries the unguessable token (see below),</span>
+<span class="d-add">+  e.g. `ce-stg-&lt;token&gt;`. Same image reference, same env shape, same 8Gi/4CPU</span>
+<span class="d-add">+  (parity beats savings here — memory behavior is exactly what staging must</span>
+<span class="d-add">+  reproduce), but `minScale = 0` and `maxScale = 2` (cost: ~$0 idle; the</span>
+<span class="d-add">+  ~5-min prewarm window after cold start is acceptable for staging and is</span>
+<span class="d-add">+  itself a thing we want to observe).</span>
+<span class="d-add">+- **Redis** — second Memorystore Basic 1GB instance (`redis-staging`). The</span>
+<span class="d-add">+  codebase does not namespace keys per environment, so sharing prod Redis is</span>
+<span class="d-add">+  off the table. (~$35/mo — the main recurring cost.)</span>
+<span class="d-add">+- **Database** — a separate *database* `votes_staging` + user on the **same**</span>
+<span class="d-add">+  Cloud SQL instance, with its own secret `database-url-staging`. A second</span>
+<span class="d-add">+  db-f1-micro instance (~$10/mo) is the upgrade path if staging load ever</span>
+<span class="d-add">+  visibly disturbs prod queries — start cheap, the instance is idle most of</span>
+<span class="d-add">+  the day. Seeded from our existing `pg_dump` snapshots (see below).</span>
+<span class="d-add">+- **ADMIN_TOKEN / SECRET_KEY** — staging-specific secrets, so a leaked</span>
+<span class="d-add">+  staging token can&#x27;t administer prod.</span>
+<span class="d-add">+</span>
+<span class="d-add">+**Share** (stateless or read-only):</span>
+<span class="d-add">+</span>
+<span class="d-add">+- **OSRM service** — routing is stateless and read-only; grant the staging</span>
+<span class="d-add">+  service account `run.invoker` on `desire-path-osrm`. Fork it later only if</span>
+<span class="d-add">+  we start testing profile/dataset changes on staging.</span>
+<span class="d-add">+- **Previews bucket** — read-only from staging&#x27;s point of view.</span>
+<span class="d-add">+- **Artifact Registry image** — the whole point: staging runs the digest prod</span>
+<span class="d-add">+  will run next.</span>
+<span class="d-add">+</span>
+<span class="d-add">+**Explicitly out of scope for staging:** the screenshot job, OSM refresh</span>
+<span class="d-add">+scheduler, domain mappings for map subdomains, and alerting (see Monitoring).</span>
+<span class="d-add">+</span>
+<span class="d-add">+## The unguessable URL</span>
+<span class="d-add">+</span>
+<span class="d-add">+Options, with the honest trade-offs:</span>
+<span class="d-add">+</span>
+<span class="d-add">+1. **Randomized Cloud Run service name → default run.app URL** ⭐ recommended</span>
+<span class="d-add">+   first step. Name the service with a random token, e.g. `ce-stg-x7k2m9q4` →</span>
+<span class="d-add">+   `https://ce-stg-x7k2m9q4-katze52zaq-uc.a.run.app`. The TLS cert is Google&#x27;s</span>
+<span class="d-add">+   shared `*.a.run.app` wildcard, so **nothing about the hostname is ever</span>
+<span class="d-add">+   published**. Zero DNS/cert work. Caveat: the `katze52zaq` project hash is</span>
+<span class="d-add">+   shared with prod&#x27;s run.app URL, so treat the random token as the secret —</span>
+<span class="d-add">+   16+ chars of entropy in the service name.</span>
+<span class="d-add">+2. **`stg-&lt;token&gt;.cityedit.org` domain mapping** — prettier, but a Google-</span>
+<span class="d-add">+   managed certificate is issued per hostname and **Certificate Transparency</span>
+<span class="d-add">+   logs publish every issued hostname**. Anyone watching CT for</span>
+<span class="d-add">+   `%.cityedit.org` learns the &quot;unguessable&quot; name within hours. Only viable</span>
+<span class="d-add">+   with a wildcard cert (`*.cityedit.org`) on a load balancer — real money and</span>
+<span class="d-add">+   infra for a staging nicety. Skip unless/until we want it.</span>
+<span class="d-add">+3. **Belt-and-suspenders app gate** (optional layer on top of 1): a</span>
+<span class="d-add">+   `STAGING_ACCESS_TOKEN` env — nginx or Flask middleware 404s every request</span>
+<span class="d-add">+   unless a `?key=` param or cookie matches, and the param sets the cookie.</span>
+<span class="d-add">+   The shareable link becomes `https://…/?key=&lt;token&gt;`. Cheap to add if we</span>
+<span class="d-add">+   ever suspect the URL leaked; not needed day one.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Recommendation: **option 1 now**, option 3 in the back pocket. URL rotation =</span>
+<span class="d-add">+deploy under a new random name and delete the old service (10 minutes).</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Code changes needed (small but real)</span>
+<span class="d-add">+</span>
+<span class="d-add">+1. **Subdomain redirect must be gated.** `MapApp` redirects any map with a</span>
+<span class="d-add">+   canonical subdomain to `&lt;subdomain&gt;.cityedit.org` — on staging, opening</span>
+<span class="d-add">+   `/m/nyc-bikes` would bounce the tester to **prod**. Add an env-driven flag</span>
+<span class="d-add">+   (e.g. server injects `staging: true` into `/api/maps/&lt;slug&gt;` config or an</span>
+<span class="d-add">+   `APP_ENV=staging` reflected in a `/api/env` or the existing config</span>
+<span class="d-add">+   endpoint) and skip `subdomainRedirectUrl` when set. This is the one change</span>
+<span class="d-add">+   that touches app logic; everything else is infra.</span>
+<span class="d-add">+2. **`X-Robots-Tag: noindex, nofollow`** on every staging response (nginx</span>
+<span class="d-add">+   `add_header` behind the same env flag) — an unguessable URL stays</span>
+<span class="d-add">+   unguessable only if it never gets indexed after an accidental link.</span>
+<span class="d-add">+3. **Telemetry separation** — free by default: the `cityedit_map_load_ms`</span>
+<span class="d-add">+   metric and alert filters all pin `resource.labels.service_name=</span>
+<span class="d-add">+   &quot;desire-path-mapper&quot;`, so staging beacons/logs won&#x27;t pollute prod</span>
+<span class="d-add">+   dashboards. Optionally add a staging row to the dashboard later.</span>
+<span class="d-add">+4. **`FLASK_ENV`-style banner (optional):** a small &quot;STAGING&quot; ribbon in the</span>
+<span class="d-add">+   client when the env flag is set, so screenshots are never mistaken for</span>
+<span class="d-add">+   prod.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Terraform strategy (respecting the landmines)</span>
+<span class="d-add">+</span>
+<span class="d-add">+The known landmines stand: a blanket `terraform apply` wipes</span>
+<span class="d-add">+`ADMIN_TOKEN`/`SECRET_KEY` secret versions and tries to create the ebikes</span>
+<span class="d-add">+domain mapping — **app deploys go through gcloud, never `terraform apply`**</span>
+<span class="d-add">+(docs/gcp-deployment.md, memory: prod-deploy-landmines).</span>
+<span class="d-add">+</span>
+<span class="d-add">+- Add staging resources **additively** in a new `terraform/staging.tf`:</span>
+<span class="d-add">+  `google_redis_instance.cache_staging`, `google_sql_database.votes_staging`,</span>
+<span class="d-add">+  `google_sql_user.staging`, `google_secret_manager_secret.database_url_staging`</span>
+<span class="d-add">+  (+ version + IAM), `google_secret_manager_secret.admin_token_staging`,</span>
+<span class="d-add">+  `secret_key_staging`, `google_cloud_run_service.app_staging` (with</span>
+<span class="d-add">+  `lifecycle { ignore_changes = [template[0].spec[0].containers[0].image] }`</span>
+<span class="d-add">+  so gcloud-driven image updates don&#x27;t fight the plan), IAM: public invoker on</span>
+<span class="d-add">+  staging app, staging SA invoker on OSRM.</span>
+<span class="d-add">+- Apply **only with `-target`** on the new resources, exactly like the</span>
+<span class="d-add">+  monitoring workflow already documents. Verify the plan shows *only adds*</span>
+<span class="d-add">+  before applying — if it wants to touch any existing prod resource, stop.</span>
+<span class="d-add">+- The service name token: generate once (`openssl rand -hex 8`), store it in</span>
+<span class="d-add">+  `terraform.tfvars` (`staging_token = &quot;…&quot;`), never commit the tfvars value.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Data seeding &amp; refresh</span>
+<span class="d-add">+</span>
+<span class="d-add">+- **Seed:** `pg_restore` the newest `~/city-edit-prod-backups/&lt;ts&gt;/prod-full.dump`</span>
+<span class="d-add">+  into `votes_staging` through the existing bastion tunnel (localhost:5433 —</span>
+<span class="d-add">+  same instance, different database name, staging creds). On first boot,</span>
+<span class="d-add">+  staging&#x27;s `_populate_redis` hydrates its own Redis from it. No resnap needed</span>
+<span class="d-add">+  as long as staging runs the same image (same graphs → same edge ids) — the</span>
+<span class="d-add">+  invariant that already powers the overlay-deploy flow.</span>
+<span class="d-add">+- **Refresh cadence:** manual to start — a `make stage-refresh` target that</span>
+<span class="d-add">+  (1) takes the routine pre-deploy prod dump we already make, (2) restores it</span>
+<span class="d-add">+  to `votes_staging`, (3) `redis-cli -h &lt;staging-redis&gt; FLUSHALL` via the</span>
+<span class="d-add">+  bastion + restart the staging service (or PUBLISH `graph_reload`) so it</span>
+<span class="d-add">+  rehydrates. Automate on a weekly Cloud Scheduler job only if manual gets</span>
+<span class="d-add">+  tedious.</span>
+<span class="d-add">+- The dump contains no real PII (device ids are hashes, voter ids are UUIDs),</span>
+<span class="d-add">+  so no scrubbing pass is required.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## The new deploy workflow (the parity payoff)</span>
+<span class="d-add">+</span>
+<span class="d-add">+```</span>
+<span class="d-add">+1. cloudbuild.overlay.yaml → app:latest (digest D)          (~2-3 min, unchanged)</span>
+<span class="d-add">+2. gcloud run services update ce-stg-&lt;token&gt; --image=D       (staging first)</span>
+<span class="d-add">+3. Verify on staging: measure_load waterfall, cityedit.dumpState(),</span>
+<span class="d-add">+   smoke-vote on a staging map, [MAPLOAD] beacon in staging logs</span>
+<span class="d-add">+4. Fresh prod DB backup (unchanged, mandatory)</span>
+<span class="d-add">+5. gcloud run services update desire-path-mapper --image=D   (the SAME digest)</span>
+<span class="d-add">+6. Served-asset-hash check on prod (unchanged)</span>
+<span class="d-add">+```</span>
+<span class="d-add">+</span>
+<span class="d-add">+Step 2-3 replace &quot;measure it live on prod and hope&quot; — the exact digest gets a</span>
+<span class="d-add">+dress rehearsal including the post-deploy prewarm window. Full-bake deploys</span>
+<span class="d-add">+(graph changes) follow the same shape; because staging shares the image,</span>
+<span class="d-add">+graph/edge-id parity is automatic, and the resnap runbook applies to staging&#x27;s</span>
+<span class="d-add">+DB the same way it applies to prod&#x27;s.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Costs</span>
+<span class="d-add">+</span>
+<span class="d-add">+| Item | ~$/mo |</span>
+<span class="d-add">+|---|---|</span>
+<span class="d-add">+| Memorystore Basic 1GB (staging) | ~35 |</span>
+<span class="d-add">+| Cloud Run staging app (minScale 0, light use) | ~1-5 |</span>
+<span class="d-add">+| Extra database on existing Cloud SQL instance | 0 |</span>
+<span class="d-add">+| Shared OSRM / previews / registry | 0 |</span>
+<span class="d-add">+| **Total** | **~$40/mo** |</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Rollout order</span>
+<span class="d-add">+</span>
+<span class="d-add">+1. **Code:** staging env flag (redirect gate + noindex + optional ribbon) —</span>
+<span class="d-add">+   deployable to prod safely ahead of time (flag off = no behavior change).</span>
+<span class="d-add">+2. **Terraform:** `staging.tf`, targeted apply (Redis first — it takes the</span>
+<span class="d-add">+   longest to provision), then DB/user/secrets, then the Cloud Run service.</span>
+<span class="d-add">+3. **Seed:** restore latest dump → `votes_staging`; boot staging; confirm</span>
+<span class="d-add">+   hydration (`/api/graph-votes` non-empty, legend populated).</span>
+<span class="d-add">+4. **Verify parity:** run the load-measurement harness against staging; numbers</span>
+<span class="d-add">+   should match prod&#x27;s post-00105 profile (~2.5s cold / ~1s warm).</span>
+<span class="d-add">+5. **Adopt the workflow:** update docs/gcp-deployment.md + CLAUDE.md deploy</span>
+<span class="d-add">+   instructions to make staging-first promotion the documented path.</span>
+<span class="d-add">+6. Share `https://ce-stg-&lt;token&gt;-….run.app` with testers.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Open questions for Eric</span>
+<span class="d-add">+</span>
+<span class="d-add">+- OK to co-locate `votes_staging` on the prod Cloud SQL instance to start</span>
+<span class="d-add">+  (upgrade to a separate instance only if staging load shows up in prod)?</span>
+<span class="d-add">+- Is ~$40/mo acceptable for the always-available staging Redis? (The</span>
+<span class="d-add">+  alternative — provision/teardown staging on demand — saves the $35 but</span>
+<span class="d-add">+  makes &quot;always available at a stable URL&quot; false.)</span>
+<span class="d-add">+- Should map *subdomain* behavior on staging show the map at the staging URL</span>
+<span class="d-add">+  (recommended: flag simply disables redirects), or do we ever want</span>
+<span class="d-add">+  staging-scoped subdomains (needs the wildcard-cert LB — I&#x27;d say no)?</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes-staging-parity.diff</code> by <code>changelog/build_staging_parity_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

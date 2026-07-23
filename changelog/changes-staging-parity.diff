@@ -1,0 +1,1289 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index dd86554..119c801 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -12,6 +12,7 @@ Active workstream (full report with diffs: `changelog/2026-06-14-caching-concurr
+ - **Python dependencies**: ALWAYS install and manage Python packages with `uv pip` — never bare `pip`, `pip3`, `python -m pip`, `poetry`, `conda`, or `easy_install`. Add a package by editing `requirements.in`, recompile with `uv pip compile requirements.in -o requirements.txt`, then `uv pip install -r requirements.txt`. For one-off installs use `uv pip install <pkg>`. This applies everywhere: local venvs, scripts, and Dockerfiles.
+ - **gcloud commands**: Run gcloud commands directly (e.g. `gcloud builds submit`, `gcloud run services logs read`, etc.) without asking the user.
+ - **ALWAYS back up the prod DB locally before deploying** — every deploy, no exceptions. Take a fresh `pg_dump` snapshot of `desire-path-votes-prod` into `~/city-edit-prod-backups/<UTC-timestamp>/` *before* running any deploy command (Cloud Build, `terraform apply`, or `gcloud run services update`). Procedure: [docs/gcp-deployment.md#database-access--backups](docs/gcp-deployment.md#database-access--backups).
++- **Deploy STAGING-FIRST**: push each new image digest to the staging service (`ce-stg-<token>`, `APP_ENV=staging`, own Redis + `votes_staging` DB), verify there, then promote the *same digest* to `desire-path-mapper`. The staging URL is a secret — never commit or paste it into committed files; look it up via `terraform output -raw staging_url`. Data refresh: `make stage-refresh`. Full workflow: [docs/gcp-deployment.md#staging-deploy-here-first](docs/gcp-deployment.md#staging-deploy-here-first).
+ - **docker commands**: Run docker commands directly (e.g. `docker compose up --build -d`, `docker compose logs`, etc.) without asking the user.
+ - **Commit every completed request**: whenever one of my messages results in code changes, land those changes as a git commit once they're done and verified — no need to ask. Git is my precise log of everything you changed and why. Rules:
+   - One commit per completed request; if the work naturally splits into independent pieces (e.g. a server fix + an unrelated doc cleanup), several logical commits are better than one blob.
+@@ -119,17 +120,22 @@ Services: `nginx` (port 8080), `flask` (internal, 3 replicas), `osrm` (internal,
+ 
+ ## Local Development
+ 
++Hybrid loop (canonical — see the README Quickstart): backing services in
++Docker, Flask + Vite on the host for fast edit cycles.
++
+ ```bash
+-# Terminal 1: Redis
+-redis-server
++# Backing services (Redis :6379, Postgres :5432, OSRM → host :5005)
++make deps   # = docker compose -f docker-compose.yml -f docker-compose.osrmport.yml up -d redis postgres osrm
+ 
+-# Terminal 2: Flask
++# Flask on the host (restart after server/*.py edits; SKIP_PREWARM=1 for fast boots)
+ cd server && source env/bin/activate && python app.py
+ 
+-# Terminal 3: Client (auto-reloads on file changes)
++# Client on the host (hot-reloads on file changes)
+ cd client-react && npm run dev
+ ```
+ 
++Or all at once: `make dev` (builds missing graphs/tiles first).
++
+ ## Connecting to the Prod Database
+ 
+ Prod Postgres is Cloud SQL `desire-path-votes-prod` (private IP `10.39.0.3:5432`), reached via IAP through the `bastion-prod` VM. Creds are in Secret Manager (`database-url-prod`). Backup/restore of prod data — and where snapshots live (`~/city-edit-prod-backups/`) — is documented in [docs/gcp-deployment.md](docs/gcp-deployment.md#database-access--backups).
+diff --git a/Makefile b/Makefile
+index 02ee326..4ef78d0 100644
+--- a/Makefile
++++ b/Makefile
+@@ -7,7 +7,7 @@ SERVICE := desire-path-mapper
+ REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/desire-path-mapper/app
+ SCREENSHOT_REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/desire-path-mapper/screenshot
+ 
+-.PHONY: help dev redis flask client graphs tiles docker push deploy test test-frontend test-backend test-cloud tf-init tf-plan tf-apply logs clean monitoring monitoring-down loadtest-local loadtest-prod loadtest-verify
++.PHONY: help dev deps deps-down flask client graphs tiles docker push deploy test test-frontend test-backend test-cloud tf-init tf-plan tf-apply logs clean monitoring monitoring-down loadtest-local loadtest-prod loadtest-verify
+ 
+ # Python in the server venv (no activation needed inside make recipes)
+ PY := env/bin/python
+@@ -23,15 +23,16 @@ LOCUST_FLAGS := $(if $(USERS),--headless --users $(USERS) --spawn-rate $(or $(RA
+ help:
+ 	@echo "Usage: make <target>"
+ 	@echo ""
+-	@echo "Local Development:"
+-	@echo "  dev          Build graphs+tiles if needed, then run redis+flask+client (no Docker)"
++	@echo "Local Development (hybrid: Docker deps + host Flask/Vite):"
++	@echo "  dev          Build graphs+tiles if needed, start Docker deps, run flask+client on host"
++	@echo "  deps         Start backing services in Docker (redis, postgres, osrm on :5005)"
++	@echo "  deps-down    Stop the Docker backing services"
+ 	@echo "  graphs       Build any missing per-city walk graphs"
+ 	@echo "  tiles        Build per-city PMTiles (dev profile; matches prod content)"
+-	@echo "  redis        Start Redis server"
+-	@echo "  flask        Start Flask backend"
+-	@echo "  client       Start frontend dev server"
++	@echo "  flask        Start Flask backend on the host"
++	@echo "  client       Start frontend dev server on the host"
+ 	@echo ""
+-	@echo "Docker:"
++	@echo "Docker (full stack, alternative to the hybrid loop):"
+ 	@echo "  docker       Run with Docker Compose"
+ 	@echo "  docker-dev   Run with Docker Compose (dev mode)"
+ 	@echo ""
+@@ -63,8 +64,13 @@ help:
+ 	@echo "  logs         Tail Cloud Run logs"
+ 
+ # Local Development
+-redis:
+-	redis-server
++# Backing services in Docker; the osrmport override publishes OSRM on host :5005
++# (not :5000 — macOS AirPlay squats it) for the host-run Flask.
++deps:
++	docker compose -f docker-compose.yml -f docker-compose.osrmport.yml up -d redis postgres osrm
++
++deps-down:
++	docker compose stop redis postgres osrm
+ 
+ flask:
+ 	cd server && source env/bin/activate && python app.py
+@@ -82,11 +88,10 @@ graphs:
+ tiles: graphs
+ 	cd server && $(PY) build_pmtiles.py --all --profile dev
+ 
+-# Fast non-Docker local stack: ensure graphs + tiles exist, then run redis (if not
+-# already up), flask, and the Vite client. Ctrl-C stops flask too; redis is left
+-# running (use `make clean` to stop it).
+-dev: tiles
+-	@redis-cli ping >/dev/null 2>&1 || { echo "Starting redis..."; redis-server --daemonize yes; }
++# The hybrid dev loop: ensure graphs + tiles exist, start the Docker backing
++# services, then run flask + the Vite client on the host. Ctrl-C stops flask
++# too; the Docker services keep running (`make deps-down` to stop them).
++dev: tiles deps
+ 	@echo "Starting flask (background) + client (foreground)..."
+ 	@cd server && $(PY) app.py & echo $$! > /tmp/cityedit-flask.pid
+ 	@trap 'kill `cat /tmp/cityedit-flask.pid` 2>/dev/null; rm -f /tmp/cityedit-flask.pid' EXIT; \
+@@ -119,6 +124,22 @@ deploy:
+ test-cloud:
+ 	./scripts/test-cloud.sh
+ 
++# Staging data refresh (docs/staging-parity-plan.md): restore the newest prod
++# backup into votes_staging, flush staging Redis, and let the app self-heal
++# (_hydrate_map_redis replays Postgres → Redis on each map's first request).
++# Needs TWO bastion tunnels open first (see docs/gcp-deployment.md#staging):
++#   :5433 → Cloud SQL private IP   (same tunnel as prod DB access)
++#   :6380 → staging Redis host     (terraform output staging_redis_host)
++stage-refresh:
++	@lsof -ti :5433 >/dev/null || { echo "no tunnel on :5433 — open the bastion Cloud SQL tunnel first"; exit 1; }
++	@lsof -ti :6380 >/dev/null || { echo "no tunnel on :6380 — open the bastion staging-Redis tunnel first"; exit 1; }
++	@DUMP=$$(ls -t ~/city-edit-prod-backups/*/prod-full.dump | head -1); \
++	STG_URL=$$(gcloud secrets versions access latest --secret=database-url-staging --project=$(PROJECT_ID) | sed -E 's#@[^/]+/#@localhost:5433/#'); \
++	echo "Restoring $$DUMP into votes_staging..."; \
++	pg_restore --clean --if-exists --no-owner --no-privileges -d "$$STG_URL" "$$DUMP" && \
++	redis-cli -p 6380 FLUSHALL && \
++	echo "Seeded. First request per map rehydrates its Redis hash from Postgres."
++
+ # Unit/integration tests (offline). Frontend: vitest. Backend: pytest (fakeredis,
+ # no DB/Redis needed for the unit suite).
+ test: test-frontend test-backend
+@@ -178,8 +199,7 @@ screenshot-run:
+ 	gcloud run jobs execute map-screenshot-prod --region=$(REGION) --project=$(PROJECT_ID)
+ 
+ # Utilities
+-clean:
+-	-pkill -f "redis-server" 2>/dev/null || true
++clean: deps-down
+ 	-pkill -f "python app.py" 2>/dev/null || true
+-	-pkill -f "bun run dev" 2>/dev/null || true
++	-pkill -f "vite" 2>/dev/null || true
+ 	@echo "Stopped all services"
+diff --git a/client-react/src/App.tsx b/client-react/src/App.tsx
+index fb8724c..2f9f7f2 100644
+--- a/client-react/src/App.tsx
++++ b/client-react/src/App.tsx
+@@ -9,7 +9,7 @@ import { useRoute, useHeatmap } from "./context";
+ import { isLandingHost, subdomainRedirectUrl } from "./themes";
+ import {
+   resolveMapConfig, fetchMapConfig, applyMap, detectMapSlugFromUrl,
+-  takePasscodeParam, authWithPasscode,
++  takePasscodeParam, authWithPasscode, getCurrentMap,
+   type MapConfig,
+ } from "./map/runtime";
+ import { reportMapLoaded } from "./utils/loadTelemetry";
+@@ -55,6 +55,9 @@ function AppContent() {
+       </main>
+       <ErrorToast message={error} onDismiss={clearError} />
+       <PasscodeGate />
++      {getCurrentMap()?.staging && (
++        <div className="staging-ribbon" aria-hidden>STAGING</div>
++      )}
+       {isInitialLoading && <FullScreenLoader />}
+     </div>
+   );
+@@ -78,7 +81,9 @@ function MapApp() {
+       // A map with a canonical subdomain (presets + admin-assigned vanity hosts)
+       // settles on that host: send apex /m/<slug> and shared/typed visitors to
+       // e.g. bikepaths.cityedit.org, preserving any ?slat/?vt deep-link params.
+-      if (resolved?.subdomain) {
++      // Staging serves the same maps at its own (unguessable) host, so the
++      // redirect would eject testers to prod — the server flag disables it.
++      if (resolved?.subdomain && !resolved.staging) {
+         const target = subdomainRedirectUrl(resolved.subdomain);
+         if (target) {
+           window.location.replace(target);
+diff --git a/client-react/src/map/runtime.ts b/client-react/src/map/runtime.ts
+index be149de..08e46ad 100644
+--- a/client-react/src/map/runtime.ts
++++ b/client-react/src/map/runtime.ts
+@@ -40,6 +40,9 @@ export interface MapConfig {
+   subdomain?: string | null;
+   voteCount?: number;
+   city?: CityConfig;
++  /** Server runs with APP_ENV=staging: skip the canonical-subdomain redirect
++   *  (it would bounce testers to prod) and show the STAGING ribbon. */
++  staging?: boolean;
+ }
+ 
+ // The map shown when the URL names no slug and the host has no mapped subdomain.
+diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css
+index b51b2f4..5963dde 100644
+--- a/client-react/src/styles/globals.css
++++ b/client-react/src/styles/globals.css
+@@ -2194,6 +2194,35 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
+ }
+ 
+ 
++/* ==========================================================================
++   Staging ribbon — only rendered when the server runs with APP_ENV=staging,
++   so screenshots are never mistaken for prod. Non-interactive by design.
++   ========================================================================== */
++
++.staging-ribbon {
++  position: fixed;
++  left: 10px;
++  bottom: 10px;
++  z-index: 3000;
++  padding: 3px 10px;
++  border: 1px solid rgba(0, 0, 0, 0.25);
++  border-radius: 4px;
++  font-family: var(--font-ui, system-ui, sans-serif);
++  font-size: 11px;
++  font-weight: 700;
++  letter-spacing: 0.12em;
++  color: #5c3d00;
++  background: repeating-linear-gradient(
++    -45deg,
++    #ffd54a 0 10px,
++    #ffca1a 10px 20px
++  );
++  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
++  pointer-events: none;
++  user-select: none;
++}
++
++
+ /* ==========================================================================
+    Animations
+    ========================================================================== */
+diff --git a/deploy/nginx-cloudrun.conf b/deploy/nginx-cloudrun.conf
+index 54c9ada..3757d92 100644
+--- a/deploy/nginx-cloudrun.conf
++++ b/deploy/nginx-cloudrun.conf
+@@ -9,7 +9,7 @@ load_module modules/ngx_http_brotli_filter_module.so;
+ load_module modules/ngx_http_brotli_static_module.so;
+ 
+ events {
+-    worker_connections 1024;
++    worker_connections 4096;
+ }
+ 
+ http {
+@@ -31,10 +31,32 @@ http {
+     gzip_min_length 256;
+     gzip_proxied any;
+ 
++    # Staging (service name ce-stg-<token> → host ce-stg-….a.run.app) must never
++    # be indexed — the unguessable URL is the access control. nginx omits an
++    # add_header whose value is empty, so on prod hosts this is a no-op. Flask
++    # adds the same header to proxied responses when APP_ENV=staging; this map
++    # covers the statics nginx serves itself (SPA shell, /assets, pmtiles).
++    map $host $staging_robots {
++        default "";
++        "~^ce-stg-" "noindex, nofollow";
++    }
++
+     upstream flask {
+         server 127.0.0.1:5001;
++        keepalive 32;
++        # Retire pooled connections BEFORE gunicorn's --keep-alive 75 does: if
++        # gunicorn closes first, a request racing the FIN gets "upstream
++        # prematurely closed" — and POSTs (votes) are never retried.
++        keepalive_timeout 55s;
+     }
+ 
++    # Tile cache — /api/tile responses are immutable per archive bake (the URL
++    # carries a ?v= cache-buster and a strong ETag); caching them here keeps
++    # repeated viewports off gunicorn. On Cloud Run /tmp is tmpfs (counts
++    # against instance memory), so the cache is capped small.
++    proxy_cache_path /tmp/nginx-tiles levels=1:2 keys_zone=tiles:16m
++                     max_size=128m inactive=7d use_temp_path=off;
++
+     # donate.cityedit.org maps to this service like every other subdomain
+     # (terraform custom_domains); it exists only to redirect to the donation
+     # page, so answer it here before the catch-all app server.
+@@ -50,15 +72,22 @@ http {
+         root /var/www/html;
+         index index.html;
+ 
++        # Repeated inside every location that declares its own add_header —
++        # nginx's add_header inheritance is all-or-nothing, so a location-level
++        # add_header would otherwise drop this one.
++        add_header X-Robots-Tag $staging_robots always;
++
+         # Content-hashed build assets — safe to cache forever (immutable).
+         location /assets/ {
+             add_header Cache-Control "public, max-age=31536000, immutable";
++            add_header X-Robots-Tag $staging_robots always;
+         }
+ 
+         location / {
+             try_files $uri $uri/ /index.html;
+             # index.html / SPA shell must revalidate so new builds are picked up.
+             add_header Cache-Control "no-cache";
++            add_header X-Robots-Tag $staging_robots always;
+         }
+ 
+         # Map previews are captured daily into a private GCS bucket and streamed
+@@ -67,6 +96,8 @@ http {
+         # failure — fall back to the build-time baked PNG under /var/www/html.
+         location /previews/ {
+             proxy_pass http://flask;
++            proxy_http_version 1.1;
++            proxy_set_header Connection "";
+             proxy_set_header Host $host;
+             proxy_set_header X-Real-IP $remote_addr;
+             proxy_intercept_errors on;
+@@ -76,6 +107,7 @@ http {
+         location @baked_previews {
+             root /var/www/html;
+             add_header Cache-Control "public, max-age=3600";
++            add_header X-Robots-Tag $staging_robots always;
+         }
+ 
+         # Per-city PMTiles live at /api/tiles/<city>/graph.pmtiles (same URL Flask
+@@ -87,10 +119,33 @@ http {
+             alias /app/osm_data/$1;
+             add_header Cache-Control "public, max-age=604800";
+             add_header Access-Control-Allow-Origin *;
++            add_header X-Robots-Tag $staging_robots always;
++        }
++
++        location /api/tile/ {
++            proxy_pass http://flask;
++            proxy_http_version 1.1;
++            proxy_set_header Connection "";
++            proxy_set_header Host $host;
++            proxy_cache tiles;
++            # 204 = empty tile (outside blocks coverage) — cache those too.
++            proxy_cache_valid 200 204 7d;
++            proxy_cache_key $uri$is_args$args$http_accept_encoding;
++            # Collapse a cold-instance tile stampede to one upstream request
++            # per tile; timeouts match /api/ — a lazy city graph load freezes
++            # the single gevent worker (NYC ~50s+) and would 504 at the 60s
++            # default, leaving MapLibre with errored tiles until a zoom.
++            proxy_cache_lock on;
++            proxy_cache_lock_timeout 300s;
++            proxy_read_timeout 300;
++            proxy_send_timeout 300;
++            add_header X-Tile-Cache $upstream_cache_status;
+         }
+ 
+         location /api/ {
+             proxy_pass http://flask;
++            proxy_http_version 1.1;
++            proxy_set_header Connection "";
+             proxy_set_header Host $host;
+             proxy_set_header X-Real-IP $remote_addr;
+             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+diff --git a/docs/gcp-deployment.md b/docs/gcp-deployment.md
+index d4dfcf0..007b0d5 100644
+--- a/docs/gcp-deployment.md
++++ b/docs/gcp-deployment.md
+@@ -45,6 +45,9 @@ gcloud config set project google-mpf-ywspom2sxeey
+ 
+ ## Deploying Changes
+ 
++> **Deploy to [staging](#staging-deploy-here-first) first**, verify, then
++> promote the *same image digest* to prod.
++
+ > ## ⚠️ ALWAYS back up the prod DB locally before deploying.
+ >
+ > Every deploy — no exceptions. Take a fresh local snapshot of Cloud SQL
+@@ -92,6 +95,72 @@ gcloud run services update desire-path-mapper \
+   --image=us-central1-docker.pkg.dev/google-mpf-ywspom2sxeey/desire-path-mapper/app:latest
+ ```
+ 
++## Staging (deploy here FIRST)
++
++Full plan/rationale: [staging-parity-plan.md](staging-parity-plan.md). Staging
++is a parity copy of the app service — same image digests, same 8Gi/4CPU shape —
++with its own Redis (`desire-path-staging`), its own database (`votes_staging`,
++co-located on the prod Cloud SQL instance), and staging-scoped
++`admin-token-staging` / `secret-key-staging` secrets. OSRM, the previews
++bucket, and the image registry are shared. It runs with `APP_ENV=staging`,
++which gates the client's canonical-subdomain redirect (otherwise testers
++bounce to prod), shows the STAGING ribbon, and noindexes every response.
++
++**The URL is the secret.** The service name carries a random token
++(`ce-stg-<token>`), so its `run.app` URL is unguessable and — because run.app
++uses Google's shared wildcard cert — never published in Certificate
++Transparency logs. Never commit or publicly paste it. Look it up with:
++
++```bash
++cd terraform && terraform output -raw staging_url    # or:
++gcloud run services list --project=google-mpf-ywspom2sxeey --format='value(URL)' | grep ce-stg
++```
++
++To rotate a leaked URL: change `staging_token` in `terraform.tfvars`, targeted
++apply (creates the new service), delete the old one.
++
++### Digest promotion workflow
++
++```bash
++# 1. Build the overlay image (unchanged, ~2-3 min) → note the digest D
++gcloud builds submit --config=cloudbuild.overlay.yaml ...
++
++# 2. Deploy D to STAGING and verify there (load waterfall, smoke vote,
++#    [MAPLOAD] beacons filtered to the staging service name)
++gcloud run services update ce-stg-<token> --region=us-central1 \
++  --project=google-mpf-ywspom2sxeey --image=<registry>/app@sha256:D
++
++# 3. BACKUP PROD DB (mandatory, unchanged), then promote the SAME digest
++gcloud run services update desire-path-mapper --region=us-central1 \
++  --project=google-mpf-ywspom2sxeey --image=<registry>/app@sha256:D
++
++# 4. Served-asset-hash check on prod (unchanged)
++```
++
++Because staging runs the exact digest, graph/edge-id parity is automatic; a
++full-bake deploy (graph changes) rehearses its resnap on staging's DB the same
++way.
++
++### Seeding / refreshing staging data
++
++`make stage-refresh` restores the newest `~/city-edit-prod-backups/*/prod-full.dump`
++into `votes_staging` and flushes staging Redis (the app then self-heals: each
++map's first request replays Postgres → Redis via `_hydrate_map_redis`). It
++needs two bastion tunnels open:
++
++```bash
++# :5433 → Cloud SQL (same tunnel as prod DB access — see below)
++# :6380 → staging Redis (host: cd terraform && terraform output -raw staging_redis_host)
++gcloud compute ssh bastion-prod --zone=us-central1-a \
++  --project=google-mpf-ywspom2sxeey --tunnel-through-iap \
++  --ssh-flag="-N" --ssh-flag="-L 5433:10.39.0.3:5432" \
++  --ssh-flag="-L 6380:<staging-redis-host>:6379"
++```
++
++The staging terraform lives in `terraform/staging.tf` — apply it **only with
++`-target`** on staging resources, and only after the plan shows adds-only (the
++blanket-apply landmines below still stand).
++
+ ## Environment & Secrets
+ 
+ App secrets are managed in Secret Manager and wired into the Cloud Run service by
+diff --git a/docs/staging-parity-plan.md b/docs/staging-parity-plan.md
+new file mode 100644
+index 0000000..4974fde
+--- /dev/null
++++ b/docs/staging-parity-plan.md
+@@ -0,0 +1,199 @@
++# Staging ↔ Prod Parity — Plan
++
++*Drafted 2026-07-23. Status: proposal, nothing provisioned yet.*
++
++## Goal
++
++A always-on staging deployment of City Edit that:
++
++1. **Matches prod by construction** — same container image (same baked graphs,
++   PMTiles, venv), same service shape, its own copy of prod-like data — so
++   "worked on staging" actually predicts "works on prod".
++2. Is reachable at an **unguessable URL** we can hand to testers, with no
++   Google-account ceremony.
++3. Becomes the **first stop for every deploy**: build → deploy to staging →
++   verify → promote the *same image digest* to prod. No more first-visitor
++   experiments on prod (today's cold-load work was measured live on prod
++   because there was nowhere else to measure it).
++
++## Current prod topology (what we're mirroring)
++
++| Piece | Prod resource | Notes |
++|---|---|---|
++| App | Cloud Run `desire-path-mapper` (8Gi/4CPU, minScale 1, maxScale 8) | nginx + Flask in one container; graphs baked into image |
++| Routing | Cloud Run `desire-path-osrm` | Stateless; called with a Cloud Run ID token (audience = its URL) |
++| Votes (serving) | Memorystore Redis 1GB (`allkeys-lru`) | The heatmap serves ONLY from Redis |
++| Votes (durable) | Cloud SQL `desire-path-votes-prod` (private IP, via VPC connector) | `_populate_redis` hydrates Redis from Postgres at boot |
++| Secrets | Secret Manager: `database-url-prod`, `admin-token`, `secret-key` | secretRef'd into the service |
++| Previews | Private GCS bucket, Flask proxies `/previews/` | |
++| Domains | `cityedit.org` + per-map subdomains via Cloud Run domain mappings | |
++
++## Proposed staging topology
++
++**Duplicate** (state-bearing or config-bearing — must not be shared):
++
++- **Cloud Run app service** — name carries the unguessable token (see below),
++  e.g. `ce-stg-<token>`. Same image reference, same env shape, same 8Gi/4CPU
++  (parity beats savings here — memory behavior is exactly what staging must
++  reproduce), but `minScale = 0` and `maxScale = 2` (cost: ~$0 idle; the
++  ~5-min prewarm window after cold start is acceptable for staging and is
++  itself a thing we want to observe).
++- **Redis** — second Memorystore Basic 1GB instance (`redis-staging`). The
++  codebase does not namespace keys per environment, so sharing prod Redis is
++  off the table. (~$35/mo — the main recurring cost.)
++- **Database** — a separate *database* `votes_staging` + user on the **same**
++  Cloud SQL instance, with its own secret `database-url-staging`. A second
++  db-f1-micro instance (~$10/mo) is the upgrade path if staging load ever
++  visibly disturbs prod queries — start cheap, the instance is idle most of
++  the day. Seeded from our existing `pg_dump` snapshots (see below).
++- **ADMIN_TOKEN / SECRET_KEY** — staging-specific secrets, so a leaked
++  staging token can't administer prod.
++
++**Share** (stateless or read-only):
++
++- **OSRM service** — routing is stateless and read-only; grant the staging
++  service account `run.invoker` on `desire-path-osrm`. Fork it later only if
++  we start testing profile/dataset changes on staging.
++- **Previews bucket** — read-only from staging's point of view.
++- **Artifact Registry image** — the whole point: staging runs the digest prod
++  will run next.
++
++**Explicitly out of scope for staging:** the screenshot job, OSM refresh
++scheduler, domain mappings for map subdomains, and alerting (see Monitoring).
++
++## The unguessable URL
++
++Options, with the honest trade-offs:
++
++1. **Randomized Cloud Run service name → default run.app URL** ⭐ recommended
++   first step. Name the service with a random token, e.g. `ce-stg-x7k2m9q4` →
++   `https://ce-stg-x7k2m9q4-katze52zaq-uc.a.run.app`. The TLS cert is Google's
++   shared `*.a.run.app` wildcard, so **nothing about the hostname is ever
++   published**. Zero DNS/cert work. Caveat: the `katze52zaq` project hash is
++   shared with prod's run.app URL, so treat the random token as the secret —
++   16+ chars of entropy in the service name.
++2. **`stg-<token>.cityedit.org` domain mapping** — prettier, but a Google-
++   managed certificate is issued per hostname and **Certificate Transparency
++   logs publish every issued hostname**. Anyone watching CT for
++   `%.cityedit.org` learns the "unguessable" name within hours. Only viable
++   with a wildcard cert (`*.cityedit.org`) on a load balancer — real money and
++   infra for a staging nicety. Skip unless/until we want it.
++3. **Belt-and-suspenders app gate** (optional layer on top of 1): a
++   `STAGING_ACCESS_TOKEN` env — nginx or Flask middleware 404s every request
++   unless a `?key=` param or cookie matches, and the param sets the cookie.
++   The shareable link becomes `https://…/?key=<token>`. Cheap to add if we
++   ever suspect the URL leaked; not needed day one.
++
++Recommendation: **option 1 now**, option 3 in the back pocket. URL rotation =
++deploy under a new random name and delete the old service (10 minutes).
++
++## Code changes needed (small but real)
++
++1. **Subdomain redirect must be gated.** `MapApp` redirects any map with a
++   canonical subdomain to `<subdomain>.cityedit.org` — on staging, opening
++   `/m/nyc-bikes` would bounce the tester to **prod**. Add an env-driven flag
++   (e.g. server injects `staging: true` into `/api/maps/<slug>` config or an
++   `APP_ENV=staging` reflected in a `/api/env` or the existing config
++   endpoint) and skip `subdomainRedirectUrl` when set. This is the one change
++   that touches app logic; everything else is infra.
++2. **`X-Robots-Tag: noindex, nofollow`** on every staging response (nginx
++   `add_header` behind the same env flag) — an unguessable URL stays
++   unguessable only if it never gets indexed after an accidental link.
++3. **Telemetry separation** — free by default: the `cityedit_map_load_ms`
++   metric and alert filters all pin `resource.labels.service_name=
++   "desire-path-mapper"`, so staging beacons/logs won't pollute prod
++   dashboards. Optionally add a staging row to the dashboard later.
++4. **`FLASK_ENV`-style banner (optional):** a small "STAGING" ribbon in the
++   client when the env flag is set, so screenshots are never mistaken for
++   prod.
++
++## Terraform strategy (respecting the landmines)
++
++The known landmines stand: a blanket `terraform apply` wipes
++`ADMIN_TOKEN`/`SECRET_KEY` secret versions and tries to create the ebikes
++domain mapping — **app deploys go through gcloud, never `terraform apply`**
++(docs/gcp-deployment.md, memory: prod-deploy-landmines).
++
++- Add staging resources **additively** in a new `terraform/staging.tf`:
++  `google_redis_instance.cache_staging`, `google_sql_database.votes_staging`,
++  `google_sql_user.staging`, `google_secret_manager_secret.database_url_staging`
++  (+ version + IAM), `google_secret_manager_secret.admin_token_staging`,
++  `secret_key_staging`, `google_cloud_run_service.app_staging` (with
++  `lifecycle { ignore_changes = [template[0].spec[0].containers[0].image] }`
++  so gcloud-driven image updates don't fight the plan), IAM: public invoker on
++  staging app, staging SA invoker on OSRM.
++- Apply **only with `-target`** on the new resources, exactly like the
++  monitoring workflow already documents. Verify the plan shows *only adds*
++  before applying — if it wants to touch any existing prod resource, stop.
++- The service name token: generate once (`openssl rand -hex 8`), store it in
++  `terraform.tfvars` (`staging_token = "…"`), never commit the tfvars value.
++
++## Data seeding & refresh
++
++- **Seed:** `pg_restore` the newest `~/city-edit-prod-backups/<ts>/prod-full.dump`
++  into `votes_staging` through the existing bastion tunnel (localhost:5433 —
++  same instance, different database name, staging creds). On first boot,
++  staging's `_populate_redis` hydrates its own Redis from it. No resnap needed
++  as long as staging runs the same image (same graphs → same edge ids) — the
++  invariant that already powers the overlay-deploy flow.
++- **Refresh cadence:** manual to start — a `make stage-refresh` target that
++  (1) takes the routine pre-deploy prod dump we already make, (2) restores it
++  to `votes_staging`, (3) `redis-cli -h <staging-redis> FLUSHALL` via the
++  bastion + restart the staging service (or PUBLISH `graph_reload`) so it
++  rehydrates. Automate on a weekly Cloud Scheduler job only if manual gets
++  tedious.
++- The dump contains no real PII (device ids are hashes, voter ids are UUIDs),
++  so no scrubbing pass is required.
++
++## The new deploy workflow (the parity payoff)
++
++```
++1. cloudbuild.overlay.yaml → app:latest (digest D)          (~2-3 min, unchanged)
++2. gcloud run services update ce-stg-<token> --image=D       (staging first)
++3. Verify on staging: measure_load waterfall, cityedit.dumpState(),
++   smoke-vote on a staging map, [MAPLOAD] beacon in staging logs
++4. Fresh prod DB backup (unchanged, mandatory)
++5. gcloud run services update desire-path-mapper --image=D   (the SAME digest)
++6. Served-asset-hash check on prod (unchanged)
++```
++
++Step 2-3 replace "measure it live on prod and hope" — the exact digest gets a
++dress rehearsal including the post-deploy prewarm window. Full-bake deploys
++(graph changes) follow the same shape; because staging shares the image,
++graph/edge-id parity is automatic, and the resnap runbook applies to staging's
++DB the same way it applies to prod's.
++
++## Costs
++
++| Item | ~$/mo |
++|---|---|
++| Memorystore Basic 1GB (staging) | ~35 |
++| Cloud Run staging app (minScale 0, light use) | ~1-5 |
++| Extra database on existing Cloud SQL instance | 0 |
++| Shared OSRM / previews / registry | 0 |
++| **Total** | **~$40/mo** |
++
++## Rollout order
++
++1. **Code:** staging env flag (redirect gate + noindex + optional ribbon) —
++   deployable to prod safely ahead of time (flag off = no behavior change).
++2. **Terraform:** `staging.tf`, targeted apply (Redis first — it takes the
++   longest to provision), then DB/user/secrets, then the Cloud Run service.
++3. **Seed:** restore latest dump → `votes_staging`; boot staging; confirm
++   hydration (`/api/graph-votes` non-empty, legend populated).
++4. **Verify parity:** run the load-measurement harness against staging; numbers
++   should match prod's post-00105 profile (~2.5s cold / ~1s warm).
++5. **Adopt the workflow:** update docs/gcp-deployment.md + CLAUDE.md deploy
++   instructions to make staging-first promotion the documented path.
++6. Share `https://ce-stg-<token>-….run.app` with testers.
++
++## Open questions for Eric
++
++- OK to co-locate `votes_staging` on the prod Cloud SQL instance to start
++  (upgrade to a separate instance only if staging load shows up in prod)?
++- Is ~$40/mo acceptable for the always-available staging Redis? (The
++  alternative — provision/teardown staging on demand — saves the $35 but
++  makes "always available at a stable URL" false.)
++- Should map *subdomain* behavior on staging show the map at the staging URL
++  (recommended: flag simply disables redirects), or do we ever want
++  staging-scoped subdomains (needs the wildcard-cert LB — I'd say no)?
+diff --git a/server/app.py b/server/app.py
+index feb3e12..079bb2f 100644
+--- a/server/app.py
++++ b/server/app.py
+@@ -16,6 +16,8 @@ import orjson
+ import redis
+ import requests
+ from dotenv import load_dotenv
++from pmtiles.reader import Reader as PMTilesReader, MmapSource
++from pmtiles.tile import Compression
+ 
+ load_dotenv()
+ 
+@@ -599,6 +601,26 @@ def _build_graph_votes_body_locked(
+     return entry
+ 
+ 
++def _rebuild_votes_snapshot(rmap: ResolvedMap, mode: str | None, cache_key: str,
++                            lock: threading.Lock) -> None:
++    """Background revalidation for /api/graph-votes (runs on a real OS thread).
++
++    Acquire AND release the single-flight lock here in the worker so the lock
++    never crosses the request-greenlet/thread boundary mid-hold; losing the
++    non-blocking acquire just means a rebuild is already in flight."""
++    if not lock.acquire(blocking=False):
++        return
++    try:
++        rmap.graph.ensure_loaded()
++        fresh_rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
++        if _vote_cache_get(cache_key, fresh_rev) is None:
++            _build_graph_votes_body_locked(rmap, mode, fresh_rev, cache_key)
++    except Exception as e:
++        logger.warning(f"[VOTES] background rebuild '{cache_key}' failed: {e}")
++    finally:
++        lock.release()
++
++
+ def _sparse_votes_body(arrays: dict, evt: dict, nvt: dict, bvt: dict | None) -> dict:
+     """Assemble the format=sparse /api/graph-votes body from the dense arrays.
+ 
+@@ -732,7 +754,12 @@ def _prewarm():
+         for m in list_maps():
+             try:
+                 rmap = resolve_map(m["slug"])
+-                _build_graph_votes_body(rmap)
++                # Build the MODE-SCOPED snapshot — the client always requests
++                # mode=<map.mode>, so the cache key is "<slug>:<mode>". The old
++                # modeless build warmed a key no client ever asks for, and the
++                # first visitor per instance still paid the full ~6s build
++                # inline (the dominant cold-load term in the [MAPLOAD] P99).
++                _build_graph_votes_body(rmap, rmap.mode)
+                 # Pre-compress the topology blob too, so no tenant's first
+                 # visitor pays the one-time ~1-2s compression of the big
+                 # cities (brotli is what browsers actually receive).
+@@ -888,8 +915,29 @@ def maps_list():
+     return resp
+ 
+ 
+-def _map_response(m: dict):
+-    """Enrich a map dict with its city's public config and JSON-ify it."""
++# Staging deployments set APP_ENV=staging (terraform staging.tf). The flag rides
++# the map config to the client — which then skips the canonical-subdomain
++# redirect (it would bounce testers to prod) and shows a STAGING ribbon — and
++# marks every Flask response noindex so an accidentally-linked staging URL never
++# gets crawled. nginx applies the same header to its static responses via a
++# $host map (deploy/nginx-cloudrun.conf). Prod never sets APP_ENV.
++IS_STAGING = os.environ.get("APP_ENV", "").strip().lower() == "staging"
++
++if IS_STAGING:
++    @app.after_request
++    def _staging_noindex(resp):
++        resp.headers["X-Robots-Tag"] = "noindex, nofollow"
++        return resp
++
++
++def _enrich_map(m: dict) -> dict:
++    """Attach the city public config + searchable vote types to a map dict.
++
++    EVERY path that puts a map into _map_get_cache must cache the ENRICHED
++    dict — the SWR background refresh used to cache get_map() raw, so after
++    the first TTL expiry clients received an empty `city` (no bounds/center/
++    blockTiles; NYC only looked fine because the client bootstrap defaults
++    to it)."""
+     city = get_city(m["cityId"])
+     if city:
+         m["city"] = city.to_public()
+@@ -902,7 +950,14 @@ def _map_response(m: dict):
+         vt for vt in fetch_voted_vote_type_labels(m["slug"])
+         if vt["label"] not in default_labels
+     ]
+-    resp = jsonify(m)
++    if IS_STAGING:
++        m["staging"] = True
++    return m
++
++
++def _map_response(m: dict):
++    """Enrich a map dict with its city's public config and JSON-ify it."""
++    resp = jsonify(_enrich_map(m))
+     # This is the prod page-load entry point (resolved per load by slug/subdomain)
+     # and was uncached. A passcode map only reaches here once unlocked, so keep its
+     # config out of shared caches — per-browser only.
+@@ -931,6 +986,32 @@ _map_get_cache: dict[str, tuple[float, dict]] = {}
+ _map_get_locks: dict[str, threading.Lock] = {}
+ 
+ 
++def _refresh_map_get(slug: str, lock: threading.Lock) -> None:
++    """Background revalidation for /api/maps/<slug> (runs on a real OS thread).
++
++    get_map's Postgres round-trip (it includes a vote count) takes 1-2s on the
++    small prod instance; running it inline on TTL expiry put that stall on the
++    FIRST request of a page load, serializing everything behind it. Only public
++    maps are ever cached, so refreshing the cache here can't leak a passcode
++    map's config."""
++    if not lock.acquire(blocking=False):
++        return
++    try:
++        m = get_map(slug)
++        if m and not m.get("requiresPasscode"):
++            if len(_map_get_cache) > 256:  # bound: one entry per public map
++                _map_get_cache.clear()
++            _map_get_cache[slug] = (time.monotonic() + 30.0, _enrich_map(m))
++        else:
++            # Map deleted or newly passcode-protected: stop serving the stale
++            # public copy immediately.
++            _map_get_cache.pop(slug, None)
++    except Exception as e:
++        logger.warning(f"[MAPS] background refresh '{slug}' failed: {e}")
++    finally:
++        lock.release()
++
++
+ @app.route("/api/maps/<slug>", methods=["GET"])
+ def map_get(slug):
+     cached = _map_get_cache.get(slug)
+@@ -939,6 +1020,15 @@ def map_get(slug):
+         resp.headers["Cache-Control"] = "public, max-age=60"
+         return resp
+     lock = _map_get_locks.setdefault(slug, threading.Lock())
++    if cached is not None:
++        # Expired but present: serve the stale config NOW and refresh it in the
++        # background. Map config changes rarely; staleness is bounded by the
++        # refresh duration on top of the 30s TTL.
++        _PrewarmThread(target=_refresh_map_get, args=(slug, lock),
++                       name=f"map-swr-{slug}", daemon=True).start()
++        resp = jsonify(cached[1])
++        resp.headers["Cache-Control"] = "public, max-age=60"
++        return resp
+     with lock:  # gevent-patched: waiters yield the hub
+         cached = _map_get_cache.get(slug)
+         if cached and cached[0] > time.monotonic():
+@@ -1802,6 +1892,139 @@ def serve_tiles(filename):
+     return response
+ 
+ 
++# ── z/x/y block tiles ────────────────────────────────────────────────────────
++# Browsers never HTTP-cache the pmtiles:// protocol's range requests (206
++# responses), so warm visits re-download the whole viewport's block tiles
++# (~1MB). These discrete tile URLs are cacheable by the browser, nginx, and any
++# CDN; the client appends ?v=<blocksVersion> so a re-baked archive busts every
++# cache. tippecanoe stores tiles gzip-compressed, so the hot path is a
++# pass-through of stored bytes; the gzip LRU only fills for uncompressed
++# archives.
++
++_TILE_GZIP_LRU_MAX = 512
++
++_tile_readers: dict[str, tuple] = {}  # city_id → (reader, header, mtime_ns)
++_tile_gzip_lru: "OrderedDict[tuple, bytes]" = OrderedDict()
++_tile_lock = threading.Lock()
++
++
++def _blocks_tile_reader(city_id: str) -> tuple:
++    """(reader, header, mtime_ns) for a city's blocks.pmtiles archive.
++
++    blocks.pmtiles is re-baked IN PLACE (lazy re-bake), so the cache is keyed
++    on st_mtime_ns and the archive is reopened whenever it changes. Raises
++    OSError (incl. FileNotFoundError) when the city has no archive.
++    """
++    path = os.path.join(os.path.dirname(__file__), "osm_data", city_id, "blocks.pmtiles")
++    mtime_ns = os.stat(path).st_mtime_ns
++    entry = _tile_readers.get(city_id)
++    if entry and entry[2] == mtime_ns:
++        return entry
++    with _tile_lock:
++        entry = _tile_readers.get(city_id)
++        if entry and entry[2] == mtime_ns:
++            return entry
++        f = open(path, "rb")  # noqa: SIM115 — held open for the mmap's lifetime
++        reader = PMTilesReader(MmapSource(f))
++        header = reader.header()
++        # Drop gzip-LRU entries built from the previous bake. The old reader's
++        # file object is intentionally leaked: another greenlet may still be
++        # mid-read through its mmap, and re-bakes are rare.
++        for key in [k for k in _tile_gzip_lru if k[0] == city_id]:
++            del _tile_gzip_lru[key]
++        entry = (reader, header, mtime_ns)
++        _tile_readers[city_id] = entry
++        logger.info(
++            f"[TILES] opened {city_id}/blocks.pmtiles "
++            f"(z{header['min_zoom']}-{header['max_zoom']}, "
++            f"compression={header['tile_compression'].name})"
++        )
++        return entry
++
++
++@app.route("/api/tile/<city_id>/blocks/<int:z>/<int:x>/<int:y>.mvt")
++def blocks_tile(city_id, z, x, y):
++    # city_id feeds a filesystem path — only registered cities pass.
++    if get_city(city_id) is None:
++        return jsonify({"error": f"Unknown city '{city_id}'"}), 404
++    try:
++        reader, header, mtime_ns = _blocks_tile_reader(city_id)
++    except Exception:
++        # OSError when the city has no archive; anything else = a mid-re-bake
++        # read of the in-place-written file (header deserialization fails).
++        return jsonify({"error": f"No block tiles for city '{city_id}'"}), 404
++    if not (header["min_zoom"] <= z <= header["max_zoom"]):
++        return jsonify({"error": "Zoom out of range"}), 404
++    # zxy_to_tileid raises ValueError past (1<<z)-1 — scanners would 500.
++    if not (0 <= x < (1 << z) and 0 <= y < (1 << z)):
++        return jsonify({"error": "Tile out of range"}), 404
++
++    # Strong per-tile ETag; the ?v= cache-buster (blocksVersion) makes each URL
++    # unique per bake, so the body behind it is effectively immutable.
++    etag = f'"bt-{city_id}-{z}-{x}-{y}-{mtime_ns}"'
++    cache_control = "public, max-age=31536000, immutable"
++    if request.headers.get("If-None-Match") == etag:
++        resp = app.response_class(status=304)
++        resp.headers["ETag"] = etag
++        resp.headers["Cache-Control"] = cache_control
++        return resp
++
++    stored_gzip = header["tile_compression"] == Compression.GZIP
++    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "")
++    key = (city_id, z, x, y)
++    body = None
++    if accepts_gzip:
++        # Serves both roles: gzip-on-demand cache for uncompressed archives AND
++        # a hot-tile bytes cache for stored-gzip pass-through — Reader.get
++        # re-parses the root+leaf directories in pure Python (~5ms, no gevent
++        # yields) on EVERY call, so a cold-nginx-cache burst would otherwise
++        # head-of-line-block the worker. Purged on re-bake by mtime key change.
++        with _tile_lock:
++            body = _tile_gzip_lru.get(key)
++            if body is not None:
++                _tile_gzip_lru.move_to_end(key)
++
++    if body is None:
++        try:
++            data = reader.get(z, x, y)
++        except Exception:
++            # Mid-re-bake reads of the in-place-written archive can surface as
++            # deserialization errors — treat as absent rather than 500.
++            logger.warning(f"[TILES] unreadable tile {city_id}/{z}/{x}/{y}")
++            return jsonify({"error": "Tile unreadable"}), 404
++        if data is None or not data:
++            # 204: MapLibre treats an empty 2xx as an empty tile (no error, no
++            # parent-tile probing) and, unlike a 404, it is cacheable — blocks
++            # coverage stops at the street network, so water/edge tiles inside
++            # the pan bounds land here on every pan otherwise.
++            resp = app.response_class(status=204)
++            resp.headers["ETag"] = etag
++            resp.headers["Cache-Control"] = cache_control
++            return resp
++        if stored_gzip:
++            # tippecanoe already gzipped the stored tiles — pass them through
++            # (decompress only for the rare client that doesn't accept gzip).
++            body = data if accepts_gzip else gzip.decompress(data)
++        elif accepts_gzip:
++            body = gzip.compress(data, compresslevel=6)
++        else:
++            body = data
++        if accepts_gzip and len(body) <= 131072:
++            with _tile_lock:
++                _tile_gzip_lru[key] = body
++                while len(_tile_gzip_lru) > _TILE_GZIP_LRU_MAX:
++                    _tile_gzip_lru.popitem(last=False)
++
++    resp = app.response_class(response=body, mimetype="application/vnd.mapbox-vector-tile")
++    if accepts_gzip:
++        # In every accepts_gzip branch above, body holds gzip bytes.
++        resp.headers["Content-Encoding"] = "gzip"
++    resp.headers["Vary"] = "Accept-Encoding"
++    resp.headers["Cache-Control"] = cache_control
++    resp.headers["ETag"] = etag
++    return resp
++
++
+ # ── Map preview images ───────────────────────────────────────────────────────
+ # Previews are captured daily into a private GCS bucket (project enforces Public
+ # Access Prevention, so objects can't be made public). nginx proxies /previews/
+@@ -2025,23 +2248,33 @@ def graph_votes():
+     )
+ 
+     if not servable:
+-        # Stale-while-revalidate: one caller rebuilds; the rest keep serving
+-        # the previous snapshot instead of queueing on the build lock (they
+-        # only block when there is nothing to serve at all).
+         lock = _build_lock_for(cache_key)
+-        if lock.acquire(blocking=entry is None):
+-            try:
+-                rmap.graph.ensure_loaded()
+-                fresh_rev = int(
+-                    redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+-                entry = (_vote_cache_get(cache_key, fresh_rev)
+-                         or _build_graph_votes_body_locked(
+-                             rmap, mode, fresh_rev, cache_key))
+-            except Exception as e:
+-                return jsonify({"error": str(e)}), 500
+-            finally:
+-                lock.release()
+-        # else: a rebuild is in flight — serve the stale entry we hold.
++        if entry is not None:
++            # Stale-while-revalidate, for real: serve the snapshot we hold NOW
++            # and rebuild on a background OS thread (the GIL hands off every few
++            # ms, so the gevent hub keeps serving meanwhile). The rebuild used to
++            # run inline on whichever request drew the short straw — +~6s on a
++            # big map, the dominant cold-load term in the [MAPLOAD] P99, while
++            # every OTHER concurrent caller already served stale. Staleness stays
++            # bounded by the build duration either way; clients reconcile forward
++            # from WS deltas, which carry authoritative counts.
++            _PrewarmThread(target=_rebuild_votes_snapshot,
++                           args=(rmap, mode, cache_key, lock),
++                           name=f"votes-swr-{cache_key}", daemon=True).start()
++        else:
++            # Nothing cached at all (fresh instance past prewarm, LRU eviction,
++            # a blocks re-bake) — there is nothing to serve stale, so this one
++            # request builds inline behind the single-flight lock.
++            with lock:
++                try:
++                    rmap.graph.ensure_loaded()
++                    fresh_rev = int(
++                        redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
++                    entry = (_vote_cache_get(cache_key, fresh_rev)
++                             or _build_graph_votes_body_locked(
++                                 rmap, mode, fresh_rev, cache_key))
++                except Exception as e:
++                    return jsonify({"error": str(e)}), 500
+ 
+     # format=sparse: nonzero-only body decoded into typed arrays client-side
+     # (~50x smaller download + parse; the dense body OOM'd mobile Safari on
+diff --git a/terraform/staging.tf b/terraform/staging.tf
+new file mode 100644
+index 0000000..f1cde90
+--- /dev/null
++++ b/terraform/staging.tf
+@@ -0,0 +1,301 @@
++# =============================================================================
++# Staging environment (docs/staging-parity-plan.md)
++#
++# A parity copy of the app service at an UNGUESSABLE URL: the service name
++# carries a random token (var.staging_token), so the default run.app hostname
++# is the access control — Google's shared *.a.run.app wildcard cert means the
++# hostname is never published anywhere (unlike a domain mapping, whose
++# per-hostname managed cert would land in Certificate Transparency logs).
++#
++# Staging DUPLICATES the state-bearing pieces (Redis, database, admin/session
++# secrets) and SHARES the stateless ones (OSRM, previews bucket, the container
++# image — staging runs the exact digest prod runs next). It runs as the same
++# default compute service account as prod: identical runtime behavior, and the
++# existing OSRM-invoker + previews grants apply without new IAM.
++#
++# ⚠️ Apply ONLY with -target on these resources (same rule as monitoring.tf):
++#     terraform apply -target=google_redis_instance.cache_staging \
++#                     -target=google_sql_database.votes_staging ...
++# A blanket apply still carries the known prod landmines (secret wipe, ebikes
++# domain mapping). Verify the plan shows ONLY adds before applying.
++#
++# Image updates are pushed with gcloud (deploy staging first, then promote the
++# SAME digest to prod — see docs/gcp-deployment.md); lifecycle.ignore_changes
++# keeps terraform from fighting those digest flips.
++# =============================================================================
++
++variable "staging_token" {
++  description = "Random token embedded in the staging service name (the unguessable URL). Generate once: openssl rand -hex 8. Never commit the value."
++  type        = string
++  sensitive   = true
++}
++
++variable "staging_db_password" {
++  description = "Password for the app_staging PostgreSQL user"
++  type        = string
++  sensitive   = true
++}
++
++variable "staging_admin_token" {
++  description = "Staging admin gate token — distinct from prod so a leaked staging token can't administer prod"
++  type        = string
++  sensitive   = true
++}
++
++variable "staging_secret_key" {
++  description = "Staging session/passcode signing key — distinct from prod"
++  type        = string
++  sensitive   = true
++}
++
++# OSRM's URL read via a data source, NOT google_cloud_run_service.osrm: a
++# resource reference drags prod OSRM into every -target closure, and any
++# annotation drift there (e.g. gcloud's client-name stamps) would make the
++# "staging-only" apply roll a new prod OSRM revision. The data source keeps
++# staging plans strictly additive.
++data "google_cloud_run_service" "osrm_live" {
++  name     = "desire-path-osrm"
++  location = var.region
++}
++
++# Staging Redis. The codebase does not namespace Redis keys per environment,
++# so staging cannot share prod's instance — this Basic 1GB twin (~$35/mo) is
++# the main recurring cost of staging. No prevent_destroy: staging is meant to
++# be cheap to tear down / rotate.
++resource "google_redis_instance" "cache_staging" {
++  name           = "desire-path-staging"
++  tier           = "BASIC"
++  memory_size_gb = 1
++  region         = var.region
++
++  redis_version = "REDIS_7_0"
++  display_name  = "City Edit Redis (staging)"
++
++  redis_configs = {
++    maxmemory-policy = "allkeys-lru"
++  }
++}
++
++# Separate DATABASE on the shared prod Cloud SQL instance (not a second
++# instance): the instance idles most of the day, and a same-instance database
++# keeps seeding trivial (same bastion tunnel, different dbname). Upgrade path
++# if staging load ever shows up in prod queries: its own db-f1-micro.
++resource "google_sql_database" "votes_staging" {
++  name     = "votes_staging"
++  instance = google_sql_database_instance.votes.name
++}
++
++resource "google_sql_user" "app_staging" {
++  name     = "app_staging"
++  instance = google_sql_database_instance.votes.name
++  password = var.staging_db_password
++}
++
++resource "google_secret_manager_secret" "database_url_staging" {
++  secret_id = "database-url-staging"
++  replication {
++    auto {}
++  }
++  depends_on = [google_project_service.secretmanager]
++}
++
++resource "google_secret_manager_secret_version" "database_url_staging" {
++  secret      = google_secret_manager_secret.database_url_staging.id
++  secret_data = "postgresql://app_staging:${var.staging_db_password}@${google_sql_database_instance.votes.private_ip_address}:5432/votes_staging"
++}
++
++resource "google_secret_manager_secret" "admin_token_staging" {
++  secret_id = "admin-token-staging"
++  replication {
++    auto {}
++  }
++  depends_on = [google_project_service.secretmanager]
++}
++
++resource "google_secret_manager_secret_version" "admin_token_staging" {
++  secret      = google_secret_manager_secret.admin_token_staging.id
++  secret_data = var.staging_admin_token
++}
++
++resource "google_secret_manager_secret" "secret_key_staging" {
++  secret_id = "secret-key-staging"
++  replication {
++    auto {}
++  }
++  depends_on = [google_project_service.secretmanager]
++}
++
++resource "google_secret_manager_secret_version" "secret_key_staging" {
++  secret      = google_secret_manager_secret.secret_key_staging.id
++  secret_data = var.staging_secret_key
++}
++
++resource "google_secret_manager_secret_iam_member" "cloud_run_db_staging_access" {
++  secret_id = google_secret_manager_secret.database_url_staging.secret_id
++  role      = "roles/secretmanager.secretAccessor"
++  member    = "serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com"
++}
++
++resource "google_secret_manager_secret_iam_member" "cloud_run_admin_token_staging_access" {
++  secret_id = google_secret_manager_secret.admin_token_staging.secret_id
++  role      = "roles/secretmanager.secretAccessor"
++  member    = "serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com"
++}
++
++resource "google_secret_manager_secret_iam_member" "cloud_run_secret_key_staging_access" {
++  secret_id = google_secret_manager_secret.secret_key_staging.secret_id
++  role      = "roles/secretmanager.secretAccessor"
++  member    = "serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com"
++}
++
++# The staging app service. Same container shape as prod (8Gi/4CPU/concurrency
++# 200 — parity beats savings: memory behavior is exactly what staging must
++# reproduce) but minScale 0 (≈$0 idle; the cold-start + prewarm window is
++# itself something we want to observe on staging) and maxScale 2.
++resource "google_cloud_run_service" "app_staging" {
++  name     = "ce-stg-${var.staging_token}"
++  location = var.region
++
++  template {
++    spec {
++      container_concurrency = 200
++
++      containers {
++        # :latest only seeds the FIRST revision; day-to-day the digest is
++        # pushed with gcloud (staging first, then the same digest to prod)
++        # and ignore_changes below keeps terraform out of that loop.
++        image = "${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper/app:latest"
++
++        # Flags staging behavior in app + client: map configs carry
++        # staging:true (redirect gate + ribbon) and every response is
++        # X-Robots-Tag noindexed. See server/app.py IS_STAGING.
++        env {
++          name  = "APP_ENV"
++          value = "staging"
++        }
++
++        env {
++          name  = "REDIS_HOST"
++          value = google_redis_instance.cache_staging.host
++        }
++
++        env {
++          name  = "REDIS_PORT"
++          value = google_redis_instance.cache_staging.port
++        }
++
++        env {
++          name  = "SKIP_WARMUP"
++          value = "0"
++        }
++
++        # Shared with prod: OSRM is stateless/read-only, and the default
++        # compute SA already holds run.invoker on it.
++        env {
++          name  = "OSRM_URL"
++          value = data.google_cloud_run_service.osrm_live.status[0].url
++        }
++
++        env {
++          name = "DATABASE_URL"
++          value_from {
++            secret_key_ref {
++              name = google_secret_manager_secret.database_url_staging.secret_id
++              key  = "latest"
++            }
++          }
++        }
++
++        env {
++          name  = "PREVIEW_BUCKET"
++          value = google_storage_bucket.previews.name
++        }
++
++        env {
++          name = "ADMIN_TOKEN"
++          value_from {
++            secret_key_ref {
++              name = google_secret_manager_secret.admin_token_staging.secret_id
++              key  = "latest"
++            }
++          }
++        }
++
++        env {
++          name = "SECRET_KEY"
++          value_from {
++            secret_key_ref {
++              name = google_secret_manager_secret.secret_key_staging.secret_id
++              key  = "latest"
++            }
++          }
++        }
++
++        resources {
++          limits = {
++            cpu    = "4"
++            memory = "8Gi"
++          }
++        }
++
++        startup_probe {
++          http_get {
++            path = "/health"
++          }
++          initial_delay_seconds = 5
++          period_seconds        = 5
++          failure_threshold     = 120
++          timeout_seconds       = 3
++        }
++      }
++    }
++
++    metadata {
++      annotations = {
++        "autoscaling.knative.dev/minScale"        = "0"
++        "autoscaling.knative.dev/maxScale"        = "2"
++        "run.googleapis.com/startup-cpu-boost"    = "true"
++        "run.googleapis.com/vpc-access-connector" = google_vpc_access_connector.connector.id
++        "run.googleapis.com/vpc-access-egress"    = "private-ranges-only"
++      }
++    }
++  }
++
++  traffic {
++    percent         = 100
++    latest_revision = true
++  }
++
++  lifecycle {
++    ignore_changes = [template[0].spec[0].containers[0].image]
++  }
++
++  depends_on = [
++    google_project_service.cloud_run,
++    google_artifact_registry_repository.app,
++    google_vpc_access_connector.connector,
++    google_secret_manager_secret_version.database_url_staging,
++    google_secret_manager_secret_iam_member.cloud_run_db_staging_access,
++    google_secret_manager_secret_version.admin_token_staging,
++    google_secret_manager_secret_iam_member.cloud_run_admin_token_staging_access,
++    google_secret_manager_secret_version.secret_key_staging,
++    google_secret_manager_secret_iam_member.cloud_run_secret_key_staging_access,
++  ]
++}
++
++# Public like prod — the unguessable hostname is the gate.
++resource "google_cloud_run_service_iam_member" "public_staging" {
++  service  = google_cloud_run_service.app_staging.name
++  location = google_cloud_run_service.app_staging.location
++  role     = "roles/run.invoker"
++  member   = "allUsers"
++}
++
++output "staging_url" {
++  value     = google_cloud_run_service.app_staging.status[0].url
++  sensitive = true # the URL IS the secret
++}
++
++output "staging_redis_host" {
++  value = google_redis_instance.cache_staging.host
++}
