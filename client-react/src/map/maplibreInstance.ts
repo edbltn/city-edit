@@ -17,10 +17,9 @@ const listeners = new Set<(m: maplibregl.Map | null) => void>();
 export function setMapLibreMap(m: maplibregl.Map | null): void {
   if (m === instance) return;
   instance = m;
-  if (import.meta.env.DEV) {
-    // Debug/perf-harness handle to the live map.
-    (window as unknown as { __mlMap?: maplibregl.Map | null }).__mlMap = m;
-  }
+  // Debug/perf-harness handle to the live map (perf/instrument.js reads it,
+  // including against production `vite preview` builds).
+  (window as unknown as { __mlMap?: maplibregl.Map | null }).__mlMap = m;
   listeners.forEach((l) => l(m));
 }
 
