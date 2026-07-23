@@ -434,7 +434,8 @@ def _vote_cache_peek(cache_key: str) -> dict | None:
 
 
 def _entry_bytes(entry: dict) -> int:
-    return len(entry["body"]) + len(entry["gz"])
+    return (len(entry["body"]) + len(entry["gz"])
+            + len(entry.get("sp_body") or b"") + len(entry.get("sp_gz") or b""))
 
 
 def _vote_cache_put(cache_key: str, entry: dict) -> None:
@@ -563,21 +564,78 @@ def _build_graph_votes_body_locked(
             redis_client, rmap.slug, block_mode, rmap.graph.n_blocks))
         arrays["blocks_version"] = rmap.graph.blocks_version
 
+    # format=sparse twin. The dense arrays are >99.5% zeros/empties on a city
+    # graph (nyc-bikes: ~37K voted edges across 3.3M slots), and JSON.parse-ing
+    # the ~26MB dense body materializes ~9M boxed JS values on the client —
+    # hundreds of MB on mobile Safari, the "bikepaths" jetsam OOM. The sparse
+    # body carries only nonzero indices + values (the client rebuilds typed
+    # arrays), so it's ~50x smaller to download AND to parse. The private
+    # _*_sparse keys ride in from build_arrays/build_block_arrays (O(voted),
+    # never an O(graph) scan here) and must not leak into the dense body.
+    sparse = _sparse_votes_body(
+        arrays,
+        arrays.pop("_evt_sparse", {}),
+        arrays.pop("_nvt_sparse", {}),
+        arrays.pop("_bvt_sparse", None),
+    )
+
     # orjson + gzip level 3: the rebuild runs on the request path (debounced,
     # but each one used to stall the GIL ~2s serializing 37MB and compressing
     # at level 6 — the p95 spikes on unrelated endpoints). orjson is ~10x
     # faster than json here and zlib releases the GIL while compressing;
     # level 3 halves compression time for ~1.5% larger output.
     body = orjson.dumps(arrays, option=orjson.OPT_SERIALIZE_NUMPY)
+    sp_body = orjson.dumps(sparse, option=orjson.OPT_SERIALIZE_NUMPY)
     entry = {
         "rev": rev,
         "bstamp": rmap.graph.blocks_stamp(),
         "body": body,
         "gz": gzip.compress(body, 3),
+        "sp_body": sp_body,
+        "sp_gz": gzip.compress(sp_body, 3),
         "built": time.monotonic(),
     }
     _vote_cache_put(cache_key, entry)
     return entry
+
+
+def _sparse_votes_body(arrays: dict, evt: dict, nvt: dict, bvt: dict | None) -> dict:
+    """Assemble the format=sparse /api/graph-votes body from the dense arrays.
+
+    Vote totals become (idx, val) pairs of the nonzero entries (numpy
+    flatnonzero — C-speed, no Python loop over the graph); the per-index
+    vote-type breakdowns arrive pre-sparsified from build_arrays /
+    build_block_arrays because a breakdown can be non-empty where the net is 0
+    (counter-votes cancel), so nonzero totals alone can't recover its keys."""
+    import numpy as np
+
+    ev = np.asarray(arrays["edge_votes"])
+    nv = np.asarray(arrays["node_votes"])
+    ei = np.flatnonzero(ev)
+    ni = np.flatnonzero(nv)
+    sp = {
+        "sparse": 1,
+        "rev": arrays["rev"],
+        "vote_types": arrays["vote_types"],
+        "vote_type_legend": arrays["vote_type_legend"],
+        "n_edges": arrays["n_edges"],
+        "n_nodes": arrays["n_nodes"],
+        "topology_version": arrays["topology_version"],
+        "ev_idx": ei, "ev_val": ev[ei],
+        "nv_idx": ni, "nv_val": nv[ni],
+        "evt": evt, "nvt": nvt,
+    }
+    if "block_votes" in arrays:
+        bv = np.asarray(arrays["block_votes"])
+        bi = np.flatnonzero(bv)
+        sp.update({
+            "n_blocks": arrays["n_blocks"],
+            "blocks_version": arrays.get("blocks_version"),
+            "block_vote_type_legend": arrays["block_vote_type_legend"],
+            "bv_idx": bi, "bv_val": bv[bi],
+            "bvt": bvt or {},
+        })
+    return sp
 
 
 def _write_vote_fields(slug: str, fields: list[tuple[int, int]]) -> None:
@@ -675,9 +733,11 @@ def _prewarm():
             try:
                 rmap = resolve_map(m["slug"])
                 _build_graph_votes_body(rmap)
-                # Pre-gzip the topology blob too, so no tenant's first visitor
-                # pays the one-time ~1-2s compression of the big cities.
+                # Pre-compress the topology blob too, so no tenant's first
+                # visitor pays the one-time ~1-2s compression of the big
+                # cities (brotli is what browsers actually receive).
                 rmap.graph.topology_binary_gz()
+                rmap.graph.topology_binary_br()
                 warmed += 1
             except Exception as e:
                 logger.warning(f"[STARTUP] Pre-warm '{m['slug']}' failed: {e}")
@@ -1845,14 +1905,28 @@ def graph_topology():
             resp.headers["ETag"] = bin_etag
             resp.headers["Cache-Control"] = "public, max-age=86400"
             return resp
-        wants_gzip = "gzip" in (request.headers.get("Accept-Encoding") or "")
+        # Prefer brotli (~17% smaller than the gzip twin on the NYC blob —
+        # 15.6MB vs 18.8MB — every current browser advertises br); gzip is the
+        # fallback, identity last. Token-parse the header so "br" can't match
+        # inside another coding name.
+        codings = {t.strip().split(";")[0]
+                   for t in (request.headers.get("Accept-Encoding") or "").lower().split(",")}
+        body_enc = None
+        served_bin = None
+        if "br" in codings:
+            served_bin = rmap.graph.topology_binary_br()
+            if served_bin is not None:
+                body_enc = "br"
+        if served_bin is None and "gzip" in codings:
+            served_bin = rmap.graph.topology_binary_gz()
+            body_enc = "gzip"
+        if served_bin is None:
+            served_bin = rmap.graph.topology_binary()
         resp = app.response_class(
-            response=(rmap.graph.topology_binary_gz() if wants_gzip
-                      else rmap.graph.topology_binary()),
-            status=200, mimetype="application/octet-stream",
+            response=served_bin, status=200, mimetype="application/octet-stream",
         )
-        if wants_gzip:
-            resp.headers["Content-Encoding"] = "gzip"
+        if body_enc:
+            resp.headers["Content-Encoding"] = body_enc
         resp.headers["Vary"] = "Accept-Encoding"
         resp.headers["Cache-Control"] = "public, max-age=86400"
         resp.headers["ETag"] = bin_etag
@@ -1881,15 +1955,41 @@ def graph_topology():
     return resp
 
 
-def _graph_votes_etag(slug: str, mode: str | None, entry: dict, gzipped: bool) -> str:
+def _graph_votes_etag(
+    slug: str, mode: str | None, entry: dict, gzipped: bool, sparse: bool = False,
+) -> str:
     """ETag derived from the SERVED entry (its rev + blocks stamp), never from
     the live revision — the etag must always describe the body it rides with
     (a live-rev etag over a debounced body is the 304-pins-stale-body bug of
-    the blocks re-bake incident). The encoding rides in the tag because the
-    gzip and identity representations are different bytes."""
+    the blocks re-bake incident). The encoding AND the format ride in the tag
+    because gzip/identity and sparse/dense are different bytes."""
     bstamp = entry.get("bstamp")
     return (f'"v-{slug}-{mode or "all"}-{entry["rev"]}'
-            f'{f"-b{bstamp}" if bstamp else ""}{"-gz" if gzipped else ""}"')
+            f'{f"-b{bstamp}" if bstamp else ""}'
+            f'{"-sp" if sparse else ""}{"-gz" if gzipped else ""}"')
+
+
+@app.route("/api/client-timing", methods=["POST"])
+def client_timing():
+    """First-map-load beacon (navigator.sendBeacon from the client once the
+    loader dismisses). Emits one [MAPLOAD] log line per page load; the
+    log-based distribution metric `cityedit_map_load_ms`
+    (terraform/monitoring.tf) extracts `ms=` from it to chart P50/P95/P99
+    first-load latency on the System Health dashboard. Unauthenticated and
+    fire-and-forget by design: bad payloads are dropped silently (204 always)
+    so the endpoint can never become an error-noise or retry source."""
+    try:
+        payload = orjson.loads(request.get_data(cache=False) or b"{}")
+        ms = float(payload.get("ms"))
+    except (ValueError, TypeError, AttributeError, orjson.JSONDecodeError):
+        return "", 204
+    if not (0 < ms <= 600_000):  # >10min is a suspended tab, not a load
+        return "", 204
+    slug = re.sub(r"[^a-zA-Z0-9_-]", "", str(payload.get("map") or ""))[:64] or "unknown"
+    nav = re.sub(r"[^a-z_]", "", str(payload.get("nav") or ""))[:16] or "unknown"
+    cached = 1 if payload.get("cachedTopo") else 0
+    logger.info(f"[MAPLOAD] map={slug} ms={int(ms)} cached_topo={cached} nav={nav}")
+    return "", 204
 
 
 @app.route("/api/graph-votes", methods=["GET"])
@@ -1943,8 +2043,13 @@ def graph_votes():
                 lock.release()
         # else: a rebuild is in flight — serve the stale entry we hold.
 
+    # format=sparse: nonzero-only body decoded into typed arrays client-side
+    # (~50x smaller download + parse; the dense body OOM'd mobile Safari on
+    # vote-heavy maps). Dense stays the default for old clients still cached.
+    sparse_fmt = (request.args.get("format") == "sparse"
+                  and entry.get("sp_body") is not None)
     wants_gzip = "gzip" in (request.headers.get("Accept-Encoding") or "").lower()
-    etag = _graph_votes_etag(rmap.slug, mode, entry, wants_gzip)
+    etag = _graph_votes_etag(rmap.slug, mode, entry, wants_gzip, sparse_fmt)
     if request.headers.get("If-None-Match") == etag:
         resp = app.response_class(status=304)
         resp.headers["ETag"] = etag
@@ -1952,9 +2057,11 @@ def graph_votes():
         resp.headers["Vary"] = "Accept-Encoding"
         return resp
 
-    resp = app.response_class(
-        response=entry["gz"] if wants_gzip else entry["body"],
-        status=200, mimetype="application/json")
+    if sparse_fmt:
+        served = entry["sp_gz"] if wants_gzip else entry["sp_body"]
+    else:
+        served = entry["gz"] if wants_gzip else entry["body"]
+    resp = app.response_class(response=served, status=200, mimetype="application/json")
     if wants_gzip:
         resp.headers["Content-Encoding"] = "gzip"
     resp.headers["Vary"] = "Accept-Encoding"

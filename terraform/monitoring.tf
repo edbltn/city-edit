@@ -120,6 +120,68 @@ resource "google_logging_metric" "api_latency" {
 }
 
 # -----------------------------------------------------------------------------
+# First-map-load latency — CLIENT-perceived, not server-side. The client
+# beacons one measurement per page load (navigation start → full-screen loader
+# dismissed) to /api/client-timing, which logs a single line:
+#   [MAPLOAD] map=<slug> ms=<int> cached_topo=<0|1> nav=<navigate|reload|...>
+# cached_topo separates true cold first loads (topology from network) from
+# repeat visits (IndexedDB hit) — the "first time" P99 lives in cached_topo=0.
+# Values are MILLISECONDS.
+# -----------------------------------------------------------------------------
+
+resource "google_logging_metric" "map_load_ms" {
+  name        = "cityedit_map_load_ms"
+  description = "Client-perceived first-map-load latency (ms), from the [MAPLOAD] beacon log line"
+
+  filter = <<-EOT
+    resource.type="cloud_run_revision"
+    resource.labels.service_name="desire-path-mapper"
+    textPayload:"[MAPLOAD]"
+  EOT
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "DISTRIBUTION"
+    unit        = "ms"
+
+    labels {
+      key         = "map"
+      value_type  = "STRING"
+      description = "Map slug the load was for"
+    }
+
+    labels {
+      key         = "cached"
+      value_type  = "STRING"
+      description = "1 = topology served from the client cache (repeat visit), 0 = cold first load"
+    }
+
+    labels {
+      key         = "nav"
+      value_type  = "STRING"
+      description = "Navigation type (navigate / reload / back_forward)"
+    }
+  }
+
+  value_extractor = "REGEXP_EXTRACT(textPayload, \"ms=([0-9]+)\")"
+
+  label_extractors = {
+    map    = "REGEXP_EXTRACT(textPayload, \"map=([a-zA-Z0-9_-]+)\")"
+    cached = "REGEXP_EXTRACT(textPayload, \"cached_topo=([01])\")"
+    nav    = "REGEXP_EXTRACT(textPayload, \"nav=([a-z_]+)\")"
+  }
+
+  # 50ms … ~10min in 30% steps — first loads live in the 0.5s–60s range.
+  bucket_options {
+    exponential_buckets {
+      num_finite_buckets = 40
+      growth_factor      = 1.3
+      scale              = 50
+    }
+  }
+}
+
+# -----------------------------------------------------------------------------
 # Alert policies
 # -----------------------------------------------------------------------------
 
@@ -1078,6 +1140,60 @@ resource "google_monitoring_dashboard" "system_health" {
                 }
               }]
               thresholds = [{ value = 0.85 }]
+            }
+          }
+        },
+
+        # ---- Row: client-perceived first map load ([MAPLOAD] beacon) --------
+        {
+          yPos = 83, width = 16, height = 10
+          widget = {
+            title = "First map load — P99 (ms, worst segment)"
+            scorecard = {
+              timeSeriesQuery = {
+                timeSeriesFilter = {
+                  filter = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.map_load_ms.name}\" resource.type=\"cloud_run_revision\""
+                  aggregation = {
+                    alignmentPeriod    = "300s"
+                    perSeriesAligner   = "ALIGN_PERCENTILE_99"
+                    crossSeriesReducer = "REDUCE_MAX"
+                  }
+                }
+              }
+              sparkChartView = { sparkChartType = "SPARK_LINE" }
+              thresholds = [
+                { value = 10000, color = "YELLOW", direction = "ABOVE" },
+                { value = 30000, color = "RED", direction = "ABOVE" },
+              ]
+            }
+          }
+        },
+        {
+          xPos = 16, yPos = 83, width = 32, height = 10
+          widget = {
+            title = "First map load — P50 / P99, cold (network topology) vs warm (client cache)"
+            xyChart = {
+              dataSets = [
+                for ds in [
+                  { legend = "cold P99", cached = "0", aligner = "ALIGN_PERCENTILE_99" },
+                  { legend = "cold P50", cached = "0", aligner = "ALIGN_PERCENTILE_50" },
+                  { legend = "warm P99", cached = "1", aligner = "ALIGN_PERCENTILE_99" },
+                  { legend = "warm P50", cached = "1", aligner = "ALIGN_PERCENTILE_50" },
+                ] : {
+                  plotType       = "LINE"
+                  legendTemplate = ds.legend
+                  timeSeriesQuery = {
+                    timeSeriesFilter = {
+                      filter = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.map_load_ms.name}\" resource.type=\"cloud_run_revision\" metric.label.\"cached\"=\"${ds.cached}\""
+                      aggregation = {
+                        alignmentPeriod    = "300s"
+                        perSeriesAligner   = ds.aligner
+                        crossSeriesReducer = "REDUCE_MAX"
+                      }
+                    }
+                  }
+                }
+              ]
             }
           }
         },

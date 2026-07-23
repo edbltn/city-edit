@@ -413,6 +413,14 @@ def build_arrays(
         "vote_type_legend": legend,
         "edge_vote_types": edge_vote_types,
         "node_vote_types": node_vote_types,
+        # Sparse twins for the format=sparse body (keys are private — popped
+        # before the dense body serializes). Built here, from the voted-only
+        # dicts we already hold, so deriving them stays O(voted), never a
+        # 4.6M-slot scan of the dense lists on the request path. A dense list
+        # can hold a non-empty breakdown where the NET is 0 (counter-votes
+        # cancel), so the keys come from the vt dicts, not from nonzero totals.
+        "_evt_sparse": {str(e): edge_vote_types[e] for e in edge_vt},
+        "_nvt_sparse": {str(n): node_vote_types[n] for n in node_vt_merged},
     }
 
 

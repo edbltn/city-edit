@@ -1,0 +1,1640 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sparse vote bodies (the bikepaths OOM), brotli topology, and a first-load P99 dashboard — 2026-07-22</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Sparse vote bodies (the bikepaths OOM), brotli topology, and a first-load P99 dashboard</h1>
+    <div class="dateline">2026-07-22 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#sparse">1</a>
+<a href="#brotli">2</a>
+<a href="#p99">3</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">The bikepaths mobile crash traced to the one payload the typed-array migration missed: the dense 26MB /api/graph-votes JSON, whose parse materializes ~9M boxed JS values. Votes now travel sparse and decode into typed arrays, the 50MB topology blob ships as brotli (−17%), and a first-map-load beacon feeds a new P99 row on the System Health dashboard.</p>
+
+  
+    <section class="card" id="sparse">
+      <div class="tag">Backend + Frontend</div>
+      <h2>1 · The bikepaths mobile crash — the vote body was the last boxed giant</h2>
+      <h3>Symptom</h3>
+      <p>Opening bikepaths.cityedit.org (map <code>nyc-bikes</code>, the full NYC streets graph, 906K votes) on mobile Safari showed the loading indicator twice and died with “a problem repeatedly occurred” — WebKit's message after the tab OOM-crashes, auto-reloads once, and crashes again. The walkways map on the SAME graph survived.</p>
+      <h3>Root cause</h3>
+      <ul><li>The topology was migrated to typed arrays after the last mobile OOM — but <code>/api/graph-votes</code> never was. Its dense JSON body carries arrays sized to the graph: 3.3M <code>edge_votes</code> + 3.3M <code>edge_vote_types</code> + 1.35M×2 node arrays + 290K×2 block arrays ≈ <strong>9.3M JSON values</strong> (26MB decompressed). <code>JSON.parse</code> materializes every empty <code>[]</code> as a DISTINCT boxed JS array — ~3.3M of them for edges alone, roughly 250–400MB of transient+resident heap on a phone whose tab jetsams around 1–1.5GB.</li>
+<li>Why bikes and not walkways: nyc-bikes has 4.5–8× the vote density (37K voted edges, 48K voted nodes, 29K lit blocks vs 8K/8.6K/3.4K) — so everything DOWNSTREAM of the parse (per-type breakdown sub-arrays, the ~29K-block first <code>setFeatureState</code> sweep, route-proposal nets, pins) is also several times heavier, on top of the same fixed 9.3M-slot parse. The peak lands just past jetsam on bikes and just under it on walkways.</li>
+<li>The loading indicator showing twice is two stacked things: a benign two-phase loader (config-resolve splash → map+heatmap splash) on every cold load, and Safari's own crash-and-auto-reload. The React ErrorBoundary can't help — a jetsam kill terminates the process; there is no exception to catch.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>format=sparse wire format.</strong> The server now builds a sparse twin of every vote snapshot: nonzero <code>(idx, val)</code> pairs for edge/node/block totals (numpy <code>flatnonzero</code> — no O(graph) Python loop on the request path) and voted-only dicts for the per-type breakdowns, sourced from the sparse dicts <code>build_arrays</code>/<code>build_block_arrays</code> already hold. Breakdown keys come from the vote dicts, NOT from nonzero totals — counter-votes can cancel an edge's net to 0 while its breakdown must survive (the nyc-bikes Broadway case).</li>
+<li><strong>Typed + holey decode client-side.</strong> <code>decodeSparseVotes()</code> rebuilds <code>edge_votes</code>/<code>node_votes</code>/<code>block_votes</code> as <code>Int32Array</code> and the breakdowns as HOLEY arrays (entries only at voted indices). Every consumer already guards with <code>?? []</code> / <code>if (!pairs)</code>, and the mutation paths materialize a fresh array before writing — holes are safe where a shared <code>[]</code> sentinel would be catastrophic (voteApply pushes in place). ~600K materialized values instead of 9.3M boxed slots.</li>
+<li><strong>Both formats served side by side.</strong> The dense body stays the default for old cached clients; sparse rides the same snapshot cache entry with its own <code>-sp</code> ETag token. IndexedDB now caches the raw sparse payload (~50× smaller structured-clone) and re-decodes on read; old dense cache entries still decode as-is.</li>
+<li><strong>Compat fix en route:</strong> <code>broadcastBlockVotes</code> gated on <code>Array.isArray</code>, which an <code>Int32Array</code> fails — it now checks length, so block heat survives the typed migration.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/vote_store.py — build_arrays returns _evt_sparse/_nvt_sparse companions</li>
+<li>server/block_votes.py — build_block_arrays returns _bvt_sparse</li>
+<li>server/app.py — _sparse_votes_body(), sp_body/sp_gz cache twins, format=sparse serving, -sp ETag</li>
+<li>client-react/src/utils/sparseVotes.ts — NEW: decodeSparseVotes / isSparseVotes</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx — fetch + IDB cache + broadcast changes</li>
+<li>client-react/src/types/index.ts — GraphData vote fields widen to number[] | Int32Array</li></ul>
+    </section>
+    
+
+    <section class="card" id="brotli">
+      <div class="tag">Backend</div>
+      <h2>2 · First loads: brotli for the 50MB topology blob</h2>
+      <h3>Symptom</h3>
+      <p>A first-time visitor to any NYC map downloads the GTB2 binary topology: 50MB raw, 18.8MB gzipped — the dominant network cost of a cold load (5–15s on mobile LTE).</p>
+      <h3>Root cause</h3>
+      <ul><li>The blob was pre-gzipped once per graph load (level 6) and served with <code>Content-Encoding: gzip</code>; brotli was never wired in even though every current browser advertises <code>br</code>.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Pre-brotli'd twin (quality 5).</strong> Measured on the real NYC blob: <strong>15.5MB vs 18.8MB (−17%) and 0.6s vs 1.4s to build</strong> — strictly better than the gzip it shadows. Served when the client's Accept-Encoding tokens include <code>br</code>; gzip stays the fallback, identity last. Guarded import — no brotli package, no br variant, no error.</li>
+<li>Prewarm now pre-compresses both twins, and <code>unload()</code> drops the br blob with the rest.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/graph_registry.py — topology_binary_br(), unload() clears it</li>
+<li>server/app.py — token-parsed Accept-Encoding negotiation in graph_topology, prewarm</li>
+<li>server/requirements.in / requirements.txt — brotli (uv pip compile)</li></ul>
+    </section>
+    
+
+    <section class="card" id="p99">
+      <div class="tag">Frontend + Infra</div>
+      <h2>3 · First-map-load P99 on the System Health dashboard</h2>
+      <h3>Symptom</h3>
+      <p>No visibility into what users actually experience on first load — Cloud Run's request_latencies only see individual API calls, not the navigation-to-map-visible journey.</p>
+      <h3>Root cause</h3>
+      <ul><li>The client had no telemetry at all; the existing P99 tiles chart server-side per-request latency.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>One beacon per page load.</strong> When the full-screen loader first dismisses (base map ready AND heatmap painted), the client sendBeacons <code>{map, ms, cachedTopo, nav}</code> — <code>ms</code> measured from navigation start via <code>performance.now()</code>, <code>cachedTopo</code> separating true cold first loads from IndexedDB repeat visits. Sent as a plain string: a Blob typed application/json needs a CORS preflight sendBeacon can't perform, and Chrome silently drops it (found live in dev).</li>
+<li><strong>/api/client-timing → [MAPLOAD] log line.</strong> Validates and sanitizes, always 204s (never an error-noise source), logs one line for the log-based metric.</li>
+<li><strong>cityedit_map_load_ms distribution metric + dashboard row.</strong> Log-based DISTRIBUTION (ms, 50ms–10min buckets) labeled by map / cached / nav, plus two new System Health tiles: a First-map-load P99 scorecard and a cold-vs-warm P50/P99 chart. Terraform, targeted-apply safe per monitoring.tf's header.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/utils/loadTelemetry.ts — NEW: reportTopologySource / reportMapLoaded</li>
+<li>client-react/src/App.tsx — beacon on first loader dismissal</li>
+<li>server/app.py — /api/client-timing</li>
+<li>terraform/monitoring.tf — google_logging_metric.map_load_ms + dashboard row</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Server: sparse↔dense reconstruction checked cell-by-cell on <code>test-central-park</code> and the full <code>nyc-bikes</code> (3.3M edges): ALL CONSISTENT, including 4.8K net-zero edges that keep their counter-vote breakdowns.</li>
+<li>Topology: local Flask serves <code>Content-Encoding: br</code> at 15.5MB (was 18.8MB gzip) when br is accepted; gzip fallback intact.</li>
+<li>Client: <code>tsc --noEmit</code> clean; <code>vitest run</code> 253 passed / 1 skipped, including new sparse-decode and holey/typed mutation tests; production build passes.</li>
+<li>Live (dev, real Chrome): <code>/m/nyc-bikes</code> loads via format=sparse — topo ready, 20 route proposals recomputed from holey arrays, no console errors; beacon lands as <code>[MAPLOAD] map=nyc-bikes ms=17162 cached_topo=1 nav=navigate</code> (17s = the 15s occluded-window mapReady backstop, not real paint time).</li>
+<li>Terraform: <code>terraform validate</code> clean.</li>
+<li>Server unit suite: 7 pre-existing failures (numpy/list fixture drift) — identical with these changes stashed; nothing new fails.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-bikes</code> in a NORMAL window: heatmap + pins appear as before; DevTools Network shows <code>graph-votes?…&format=sparse</code> and a much smaller JSON body.</li>
+<li>Vote on an edge and watch the heat update live (WS delta onto the Int32Array path), then reload — the vote survives.</li>
+<li>On prod after deploy: from a phone, open bikepaths.cityedit.org fresh (Safari, private tab) — it should load without the crash-reload loop.</li>
+<li>In DevTools on prod: <code>graph-topology?format=bin</code> response header should read <code>content-encoding: br</code>.</li>
+<li>After ~a day of traffic: the System Health dashboard's new “First map load” row shows data, split cold vs warm.</li>
+<li><code>gcloud logging read 'textPayload:"[MAPLOAD]"' --limit 5</code> shows real beacons with sane ms values.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/App.tsx</span>
+            <span class="stat"><span class="d-add">+7</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · app shell</span>
+        <span class="ctx-sum">map resolution, provider tree, full-screen loaders</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">App.tsx</span>
+        <span class="ctx-sum">~200 LOC — MapApp (config splash) + AppContent (map splash)</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">FullScreenLoader</span><span class="ol-sum">the two-phase splash</span></li><li class="changed"><span class="ol-label">AppContent</span><span class="ol-sum">loader dismissal; NOW fires the load beacon</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">MapApp</span><span class="ol-sum">config resolve + redirect</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>AppContent effect — !isInitialLoading → reportMapLoaded() (idempotent)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/App.tsx b/client-react/src/App.tsx</span>
+<span class="d-meta">index 8e2bd62..fb8724c 100644</span>
+<span class="d-meta">--- a/client-react/src/App.tsx</span>
+<span class="d-meta">+++ b/client-react/src/App.tsx</span>
+<span class="d-hunk">@@ -12,6 +12,7 @@ import {</span>
+<span class="d-ctx">   takePasscodeParam, authWithPasscode,</span>
+<span class="d-ctx">   type MapConfig,</span>
+<span class="d-ctx"> } from &quot;./map/runtime&quot;;</span>
+<span class="d-add">+import { reportMapLoaded } from &quot;./utils/loadTelemetry&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** Full-screen &quot;Loading...&quot; splash with the ASCII (| / - \) spinner. */</span>
+<span class="d-ctx"> function FullScreenLoader() {</span>
+<span class="d-hunk">@@ -36,6 +37,12 @@ function AppContent() {</span>
+<span class="d-ctx">   // painted, so the map is never revealed half-loaded (slow on mobile).</span>
+<span class="d-ctx">   const { isInitialLoading } = useHeatmap();</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // The loader&#x27;s first dismissal IS the user-perceived &quot;map is up&quot; moment —</span>
+<span class="d-add">+  // beacon it once for the first-load P99 dashboard (utils/loadTelemetry.ts).</span>
+<span class="d-add">+  useEffect(() =&gt; {</span>
+<span class="d-add">+    if (!isInitialLoading) reportMapLoaded();</span>
+<span class="d-add">+  }, [isInitialLoading]);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   return (</span>
+<span class="d-ctx">     &lt;div id=&quot;app&quot;&gt;</span>
+<span class="d-ctx">       &lt;TopBar /&gt;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+30</span> / <span class="d-del">-9</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/GraphLayer</span>
+        <span class="ctx-sum">topology/vote loading, heatmap, proposals, deltas</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~5000 LOC — the load effect (topology → cached votes → live votes) is the heart</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">arrayMax / votesMatchTopology</span><span class="ol-sum">helpers; NOW ArrayLike</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">broadcastBlockVotes</span><span class="ol-sum">block heat event; NOW typed-array safe</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">fetchVotes (refresh)</span><span class="ol-sum">NOW format=sparse + decode</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">load effect</span><span class="ol-sum">topology (reports source) → cached votes (decode) → live votes (sparse fetch, raw cached)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">delta apply / redraw / tooltips</span><span class="ol-sum">unchanged — guarded index reads</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>imports — sparseVotes + loadTelemetry</li><li>arrayMax(ArrayLike&lt;number&gt;), votesMatchTopology(ArrayLike)</li><li>broadcastBlockVotes — length check replaces Array.isArray</li><li>fetchVotes — &amp;format=sparse + isSparseVotes decode</li><li>load effect — reportTopologySource, cached-votes decode, sparse fetch, cache voteRaw</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index dfedc10..4fc9ca6 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -65,6 +65,8 @@ import {</span>
+<span class="d-ctx">   setCachedVotes,</span>
+<span class="d-ctx">   clearGraphCache,</span>
+<span class="d-ctx"> } from &quot;../../utils/graphCache&quot;;</span>
+<span class="d-add">+import { decodeSparseVotes, isSparseVotes } from &quot;../../utils/sparseVotes&quot;;</span>
+<span class="d-add">+import { reportTopologySource } from &quot;../../utils/loadTelemetry&quot;;</span>
+<span class="d-ctx"> import {</span>
+<span class="d-ctx">   blockCoverage, getVotesVersion, reconcileEdge, resetMapVotes, setVoteTypeMap,</span>
+<span class="d-ctx">   type VoteDirection,</span>
+<span class="d-hunk">@@ -117,7 +119,7 @@ function haversineMeters(</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** Loop-based max to avoid stack overflow with large arrays. */</span>
+<span class="d-del">-function arrayMax(arr: number[]): number {</span>
+<span class="d-add">+function arrayMax(arr: ArrayLike&lt;number&gt;): number {</span>
+<span class="d-ctx">   let max = 0;</span>
+<span class="d-ctx">   for (let i = 0; i &lt; arr.length; i++) {</span>
+<span class="d-ctx">     if (arr[i] &gt; max) max = arr[i];</span>
+<span class="d-hunk">@@ -663,7 +665,7 @@ const spreadKeyRoute = (id: string) =&gt; `r${id}`;</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> function votesMatchTopology(</span>
+<span class="d-ctx">   voteData: { n_edges?: number; n_nodes?: number; n_blocks?: number;</span>
+<span class="d-del">-    edge_votes?: unknown[]; block_votes?: unknown[] },</span>
+<span class="d-add">+    edge_votes?: ArrayLike&lt;unknown&gt;; block_votes?: ArrayLike&lt;unknown&gt; },</span>
+<span class="d-ctx">   topology: GraphTopology | null,</span>
+<span class="d-ctx"> ): boolean {</span>
+<span class="d-ctx">   if (!topology) return false;</span>
+<span class="d-hunk">@@ -1963,7 +1965,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // per-edge canvas heatmap exactly as before.</span>
+<span class="d-ctx">   const broadcastBlockVotes = useCallback((voteData: Partial&lt;GraphData&gt;) =&gt; {</span>
+<span class="d-ctx">     const blockVotes = voteData.block_votes;</span>
+<span class="d-del">-    blocksActiveRef.current = Array.isArray(blockVotes) &amp;&amp; blockVotes.length &gt; 0;</span>
+<span class="d-add">+    // NOT Array.isArray — the sparse decoder hands us an Int32Array, which is</span>
+<span class="d-add">+    // not an Array but is exactly as broadcastable.</span>
+<span class="d-add">+    blocksActiveRef.current = blockVotes != null &amp;&amp; blockVotes.length &gt; 0;</span>
+<span class="d-ctx">     if (!blocksActiveRef.current) return;</span>
+<span class="d-ctx">     const detail: BlockVotesDetail = {</span>
+<span class="d-ctx">       blockVotes: blockVotes!,</span>
+<span class="d-hunk">@@ -2092,10 +2096,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   const fetchVotes = useCallback(async () =&gt; {</span>
+<span class="d-ctx">     if (!topologyRef.current) return;</span>
+<span class="d-ctx">     try {</span>
+<span class="d-del">-      const url = `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&amp;mode=${encodeURIComponent(themeMode)}`;</span>
+<span class="d-add">+      const url = `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&amp;mode=${encodeURIComponent(themeMode)}&amp;format=sparse`;</span>
+<span class="d-ctx">       const response = await fetch(url, { cache: &quot;no-store&quot;, headers: passcodeHeaders() });</span>
+<span class="d-ctx">       if (!response.ok) throw new Error(`Vote fetch failed: ${response.status}`);</span>
+<span class="d-del">-      const voteData = await response.json();</span>
+<span class="d-add">+      const voteRaw = await response.json();</span>
+<span class="d-add">+      const voteData = isSparseVotes(voteRaw) ? decodeSparseVotes(voteRaw) : voteRaw;</span>
+<span class="d-ctx">       // If the graph was rebuilt mid-session, these votes no longer line up with</span>
+<span class="d-ctx">       // our topology. Don&#x27;t paint the mismatch (it would crash); leave the current</span>
+<span class="d-ctx">       // heatmap and let the next full page load reconcile against fresh topology.</span>
+<span class="d-hunk">@@ -2292,6 +2297,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       hasBlocksRef.current = !!topology.edgeBlockId;</span>
+<span class="d-ctx">       dlog(&quot;topo&quot;, `ready: ${topology.nEdges} edges, ${topology.nNodes} nodes, `</span>
+<span class="d-ctx">         + `${topology.nBlocks ?? 0} blocks (${usedCachedTopology ? &quot;IndexedDB cache&quot; : &quot;network&quot;})`);</span>
+<span class="d-add">+      // Label this page load&#x27;s [MAPLOAD] beacon: cache = repeat visit,</span>
+<span class="d-add">+      // network = true cold first load (the P99 the dashboard tracks).</span>
+<span class="d-add">+      reportTopologySource(usedCachedTopology);</span>
+<span class="d-ctx">       debugState(&quot;topology&quot;, {</span>
+<span class="d-ctx">         nEdges: topology.nEdges, nBlocks: topology.nBlocks ?? 0, cached: usedCachedTopology,</span>
+<span class="d-ctx">       });</span>
+<span class="d-hunk">@@ -2305,7 +2313,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       //    pre-re-bake body paints the wrong polygons (node blocks dark, e.g.)</span>
+<span class="d-ctx">       //    which live deltas then layer onto instead of healing.</span>
+<span class="d-ctx">       if (usedCachedTopology &amp;&amp; version) {</span>
+<span class="d-del">-        const cachedVotes = await getCachedVotes&lt;Partial&lt;GraphData&gt;&gt;(getMapSlug() || themeMode, version);</span>
+<span class="d-add">+        // Cached entries written after the sparse-format rollout hold the raw</span>
+<span class="d-add">+        // (tiny) sparse payload; older entries hold the dense decoded shape.</span>
+<span class="d-add">+        // Decode either into the same in-memory form.</span>
+<span class="d-add">+        const cachedRaw = await getCachedVotes&lt;unknown&gt;(getMapSlug() || themeMode, version);</span>
+<span class="d-add">+        const cachedVotes = isSparseVotes(cachedRaw)</span>
+<span class="d-add">+          ? decodeSparseVotes(cachedRaw)</span>
+<span class="d-add">+          : cachedRaw as Partial&lt;GraphData&gt; | undefined;</span>
+<span class="d-ctx">         if (cancelled) return;</span>
+<span class="d-ctx">         const blocksMatch = cachedVotes</span>
+<span class="d-ctx">           &amp;&amp; (cachedVotes.blocks_version ?? null) === blocksVersion</span>
+<span class="d-hunk">@@ -2329,11 +2343,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       //    any deltas that arrived while the fetch was in flight.</span>
+<span class="d-ctx">       try {</span>
+<span class="d-ctx">         const r = await fetch(</span>
+<span class="d-del">-          `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&amp;mode=${encodeURIComponent(themeMode)}`,</span>
+<span class="d-add">+          `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&amp;mode=${encodeURIComponent(themeMode)}&amp;format=sparse`,</span>
+<span class="d-ctx">           { headers: passcodeHeaders() }</span>
+<span class="d-ctx">         );</span>
+<span class="d-ctx">         if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);</span>
+<span class="d-del">-        const voteData = await r.json();</span>
+<span class="d-add">+        // format=sparse: nonzero-only body decoded into typed/holey arrays —</span>
+<span class="d-add">+        // the dense body&#x27;s ~9M boxed slots were the mobile-Safari OOM (see</span>
+<span class="d-add">+        // utils/sparseVotes.ts). A dense body still decodes as-is (old server).</span>
+<span class="d-add">+        const voteRaw = await r.json();</span>
+<span class="d-add">+        const voteData = isSparseVotes(voteRaw) ? decodeSparseVotes(voteRaw) : voteRaw;</span>
+<span class="d-ctx">         if (cancelled) return;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         // Stale-topology guard. The vote arrays are indexed against the server&#x27;s</span>
+<span class="d-hunk">@@ -2373,7 +2391,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         graphDataRef.current = { ...topologyRef.current!, ...voteData };</span>
+<span class="d-ctx">         lastRevRef.current = voteData.rev ?? 0;</span>
+<span class="d-ctx">         setVoteTypeMap(voteData.vote_types);</span>
+<span class="d-del">-        if (version) setCachedVotes(getMapSlug() || themeMode, version, voteData);</span>
+<span class="d-add">+        // Persist the RAW wire payload: the sparse form is ~50x smaller to</span>
+<span class="d-add">+        // structured-clone into IndexedDB than the decoded dense arrays, and</span>
+<span class="d-add">+        // the read path re-decodes it.</span>
+<span class="d-add">+        if (version) setCachedVotes(getMapSlug() || themeMode, version, voteRaw);</span>
+<span class="d-ctx">         broadcastBlockVotes(voteData);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         // Replay any deltas that arrived while waiting for the fetch</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/voteApply.test.ts</span>
+            <span class="stat"><span class="d-add">+50</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · tests</span>
+        <span class="ctx-sum">vitest</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">voteApply.test.ts</span>
+        <span class="ctx-sum">mutation-path tests</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">existing suites</span><span class="ol-sum">dense-array mutations</span></li><li class="changed"><span class="ol-label">sparse-decoded suite</span><span class="ol-sum">NEW — Int32Array + holey mutations</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>new describe: applyEdgeVoteChange/applyMyVoteChange/applyAuthoritativeCounts/applyBlockCounts on typed+holey data</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/voteApply.test.ts b/client-react/src/components/GraphLayer/voteApply.test.ts</span>
+<span class="d-meta">index dc88af6..079c463 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/voteApply.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/voteApply.test.ts</span>
+<span class="d-hunk">@@ -175,3 +175,53 @@ describe(&quot;applyBlockCounts (SET, idempotent, block twin of vtCounts)&quot;, () =&gt; {</span>
+<span class="d-ctx">     expect(applyBlockCounts(bare, &quot;X&quot;, { &quot;0&quot;: [1, 0] })).toBe(false);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;mutation paths on sparse-decoded data (Int32Array votes, holey vote types)&quot;, () =&gt; {</span>
+<span class="d-add">+  // The sparse wire format (utils/sparseVotes.ts) hands the mutation paths</span>
+<span class="d-add">+  // Int32Array totals and HOLEY vote-type arrays (undefined at unvoted</span>
+<span class="d-add">+  // indices, no shared [] sentinel). Every entry point must handle both.</span>
+<span class="d-add">+  function makeSparseDecodedData(): GraphData {</span>
+<span class="d-add">+    const topo = topologyFromJson({</span>
+<span class="d-add">+      nodes: [[0, 0], [0, 1], [0, 2]],</span>
+<span class="d-add">+      edges: [[0, 1, &quot;&quot;], [1, 2, &quot;&quot;]],</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+    return {</span>
+<span class="d-add">+      ...topo,</span>
+<span class="d-add">+      edge_votes: new Int32Array(2),</span>
+<span class="d-add">+      node_votes: new Int32Array(3),</span>
+<span class="d-add">+      vote_type_legend: [],</span>
+<span class="d-add">+      edge_vote_types: new Array(2),   // holey — no entries yet</span>
+<span class="d-add">+      node_vote_types: new Array(3),</span>
+<span class="d-add">+      n_blocks: 2,</span>
+<span class="d-add">+      block_votes: new Int32Array(2),</span>
+<span class="d-add">+      block_vote_types: new Array(2),</span>
+<span class="d-add">+      block_vote_type_legend: [],</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;applyEdgeVoteChange materializes a fresh breakdown in a hole&quot;, () =&gt; {</span>
+<span class="d-add">+    const d = makeSparseDecodedData();</span>
+<span class="d-add">+    applyEdgeVoteChange(d, ADJ, [0], &quot;X&quot;, 1, false);</span>
+<span class="d-add">+    expect(row(d, 0, &quot;X&quot;)).toEqual({ up: 1, down: 0 });</span>
+<span class="d-add">+    expect(d.edge_votes![0]).toBe(1);</span>
+<span class="d-add">+    expect(d.edge_vote_types![1]).toBeUndefined(); // neighbor hole untouched</span>
+<span class="d-add">+    expect(d.node_votes![1]).toBe(1);              // derived through Int32Array</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;applyMyVoteChange and applyAuthoritativeCounts work through holes&quot;, () =&gt; {</span>
+<span class="d-add">+    const d = makeSparseDecodedData();</span>
+<span class="d-add">+    applyMyVoteChange(d, ADJ, [1], &quot;X&quot;, 0, -1);</span>
+<span class="d-add">+    expect(d.edge_votes![1]).toBe(-1);</span>
+<span class="d-add">+    applyAuthoritativeCounts(d, ADJ, &quot;X&quot;, { &quot;1&quot;: [4, 1] });</span>
+<span class="d-add">+    expect(row(d, 1, &quot;X&quot;)).toEqual({ up: 4, down: 1 });</span>
+<span class="d-add">+    expect(d.edge_votes![1]).toBe(3); // -1 + ((4-1) - oldNet(-1)) = 3</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;applyBlockCounts SETs into holey block arrays over Int32Array totals&quot;, () =&gt; {</span>
+<span class="d-add">+    const d = makeSparseDecodedData();</span>
+<span class="d-add">+    expect(applyBlockCounts(d, &quot;X&quot;, { &quot;1&quot;: [3, 1] })).toBe(true);</span>
+<span class="d-add">+    expect(d.block_vote_types![1]).toEqual([[0, 3, 1]]);</span>
+<span class="d-add">+    expect(d.block_votes![1]).toBe(4);</span>
+<span class="d-add">+    expect(d.block_vote_types![0]).toBeUndefined();</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+            <span class="stat"><span class="d-add">+4</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/MapLibreBackground</span>
+        <span class="ctx-sum">MapLibre base map + block feature-state heat</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapLibreBackground.tsx</span>
+        <span class="ctx-sum">~600 LOC — PMTiles sources, block heat diff-apply</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">BlockVotesDetail</span><span class="ol-sum">event payload type; NOW ArrayLike</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">heat apply</span><span class="ol-sum">diff-applied setFeatureState (unchanged — index loop)</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>BlockVotesDetail.blockVotes: ArrayLike&lt;number&gt;</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index 3ea36c1..70ed5ae 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -27,8 +27,10 @@ const LEAFLET_TO_MAPLIBRE_ZOOM = 1;</span>
+<span class="d-ctx"> // Block-vote payload broadcast by GraphLayer (which owns the /api/graph-votes</span>
+<span class="d-ctx"> // fetch). MapLibreBackground colors the block fills from it via feature-state.</span>
+<span class="d-ctx"> export interface BlockVotesDetail {</span>
+<span class="d-del">-  blockVotes: number[]; // total deduped votes (up + down) per block_id</span>
+<span class="d-del">-  max: number;          // normalization ceiling (floored so quiet maps don&#x27;t saturate)</span>
+<span class="d-add">+  // Total deduped votes (up + down) per block_id — Int32Array when decoded</span>
+<span class="d-add">+  // from the sparse wire format, number[] from legacy dense bodies.</span>
+<span class="d-add">+  blockVotes: ArrayLike&lt;number&gt;;</span>
+<span class="d-add">+  max: number; // normalization ceiling (floored so quiet maps don&#x27;t saturate)</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> export const BLOCK_VOTES_EVENT = &quot;city-edit:block-votes&quot;;</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/types/index.ts</span>
+            <span class="stat"><span class="d-add">+14</span> / <span class="d-del">-4</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · types</span>
+        <span class="ctx-sum">shared TS shapes</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">index.ts</span>
+        <span class="ctx-sum">~200 LOC — GraphData is the merged topology+votes shape</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">GraphData topology fields</span><span class="ol-sum">typed arrays (unchanged)</span></li><li class="changed"><span class="ol-label">GraphData vote fields</span><span class="ol-sum">widen to number[] | Int32Array; holey docs; n_edges/n_nodes stamps</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>vote totals — number[] | Int32Array; breakdowns documented holey; dimension-stamp fields added</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/types/index.ts b/client-react/src/types/index.ts</span>
+<span class="d-meta">index e799a8c..12c0ee6 100644</span>
+<span class="d-meta">--- a/client-react/src/types/index.ts</span>
+<span class="d-meta">+++ b/client-react/src/types/index.ts</span>
+<span class="d-hunk">@@ -115,19 +115,29 @@ export interface GraphData {</span>
+<span class="d-ctx">   edgeNames?: string[]; // station networks only; street graphs omit names</span>
+<span class="d-ctx">   edgeBlockId?: Int32Array; // per-edge block id (GTB2 topologies); -1 = unmapped</span>
+<span class="d-ctx">   nBlocks?: number;</span>
+<span class="d-del">-  node_votes?: number[];</span>
+<span class="d-del">-  edge_votes?: number[];</span>
+<span class="d-add">+  // Vote totals arrive as Int32Array when decoded from the sparse wire format</span>
+<span class="d-add">+  // (utils/sparseVotes.ts — mobile memory), or as boxed number[] from the</span>
+<span class="d-add">+  // legacy dense body / old IndexedDB entries. Both index and mutate the same.</span>
+<span class="d-add">+  node_votes?: number[] | Int32Array;</span>
+<span class="d-add">+  edge_votes?: number[] | Int32Array;</span>
+<span class="d-ctx">   vote_type_legend?: string[];</span>
+<span class="d-del">-  // Per-edge / per-node vote-type breakdown: [legendIdx, up, down][]</span>
+<span class="d-add">+  // Per-edge / per-node vote-type breakdown: [legendIdx, up, down][]. From the</span>
+<span class="d-add">+  // sparse decoder these are HOLEY arrays (entries only at voted indices) —</span>
+<span class="d-add">+  // always read via `x[i] ?? []` / a falsy guard, never assume an array.</span>
+<span class="d-ctx">   edge_vote_types?: [number, number, number][][];</span>
+<span class="d-ctx">   node_vote_types?: [number, number, number][][];</span>
+<span class="d-ctx">   // Block layer (docs/three-layer-model.md §2.4) — deduped per-block counts:</span>
+<span class="d-ctx">   // block_votes[b] = total activity (up + down); block_vote_types[b] = [legendIdx, up,</span>
+<span class="d-ctx">   // down][] indexing block_vote_type_legend (its own legend, not vote_type_legend).</span>
+<span class="d-del">-  block_votes?: number[];</span>
+<span class="d-add">+  block_votes?: number[] | Int32Array;</span>
+<span class="d-ctx">   block_vote_types?: [number, number, number][][];</span>
+<span class="d-ctx">   block_vote_type_legend?: string[];</span>
+<span class="d-ctx">   n_blocks?: number;</span>
+<span class="d-add">+  // Dimension stamps from /api/graph-votes (mismatch guard against a stale</span>
+<span class="d-add">+  // cached topology — votesMatchTopology).</span>
+<span class="d-add">+  n_edges?: number;</span>
+<span class="d-add">+  n_nodes?: number;</span>
+<span class="d-add">+  topology_version?: string;</span>
+<span class="d-ctx">   blocks_version?: string;</span>
+<span class="d-ctx">   rev?: number;</span>
+<span class="d-ctx">   vote_types?: Record&lt;string, string&gt;;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/loadTelemetry.ts</span>
+            <span class="stat"><span class="d-add">+51</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · utils/</span>
+        <span class="ctx-sum">first-load telemetry</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">loadTelemetry.ts</span>
+        <span class="ctx-sum">NEW ~48 LOC — one beacon per page load</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">reportTopologySource</span><span class="ol-sum">cold vs warm label from GraphLayer</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">reportMapLoaded</span><span class="ol-sum">sendBeacon as text/plain (CORS-safelisted)</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>entire file is new</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/loadTelemetry.ts b/client-react/src/utils/loadTelemetry.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..c6730a6</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/utils/loadTelemetry.ts</span>
+<span class="d-hunk">@@ -0,0 +1,51 @@</span>
+<span class="d-add">+// First-map-load beacon.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// One measurement per page load: elapsed time from navigation start</span>
+<span class="d-add">+// (performance.now()&#x27;s origin) to the moment the full-screen loader dismisses</span>
+<span class="d-add">+// (base map ready AND heatmap painted) — the user-perceived &quot;map is up&quot;</span>
+<span class="d-add">+// latency. Sent via sendBeacon to /api/client-timing, which logs a [MAPLOAD]</span>
+<span class="d-add">+// line that the log-based `cityedit_map_load_ms` distribution metric</span>
+<span class="d-add">+// (terraform/monitoring.tf) turns into the System Health dashboard&#x27;s</span>
+<span class="d-add">+// first-load P50/P95/P99. Fire-and-forget: telemetry must never break or slow</span>
+<span class="d-add">+// the app, so every failure path is swallowed.</span>
+<span class="d-add">+</span>
+<span class="d-add">+import { CONFIG } from &quot;../config&quot;;</span>
+<span class="d-add">+import { getMapSlug, detectMapSlugFromUrl } from &quot;../map/runtime&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+let topoSource: &quot;cache&quot; | &quot;network&quot; | null = null;</span>
+<span class="d-add">+let sent = false;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Called by GraphLayer once it knows whether the topology came from the</span>
+<span class="d-add">+ *  IndexedDB cache (repeat visit) or the network (true first load) — the</span>
+<span class="d-add">+ *  label that separates cold-load P99 from warm-load P99 on the dashboard. */</span>
+<span class="d-add">+export function reportTopologySource(cached: boolean) {</span>
+<span class="d-add">+  if (topoSource === null) topoSource = cached ? &quot;cache&quot; : &quot;network&quot;;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Called when the initial full-screen loader dismisses. Idempotent. */</span>
+<span class="d-add">+export function reportMapLoaded() {</span>
+<span class="d-add">+  if (sent) return;</span>
+<span class="d-add">+  sent = true;</span>
+<span class="d-add">+  try {</span>
+<span class="d-add">+    const ms = Math.round(performance.now());</span>
+<span class="d-add">+    const nav = (performance.getEntriesByType(&quot;navigation&quot;)[0] as</span>
+<span class="d-add">+      PerformanceNavigationTiming | undefined)?.type ?? &quot;unknown&quot;;</span>
+<span class="d-add">+    const body = JSON.stringify({</span>
+<span class="d-add">+      map: getMapSlug() || detectMapSlugFromUrl() || &quot;unknown&quot;,</span>
+<span class="d-add">+      ms,</span>
+<span class="d-add">+      cachedTopo: topoSource === &quot;cache&quot;,</span>
+<span class="d-add">+      nav,</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+    const url = `${CONFIG.apiUrl}/client-timing`;</span>
+<span class="d-add">+    // Send as a plain string (text/plain — CORS-safelisted). A Blob typed</span>
+<span class="d-add">+    // application/json would require a preflight sendBeacon can&#x27;t perform, so</span>
+<span class="d-add">+    // Chrome silently drops it when apiUrl is cross-origin (dev). The server</span>
+<span class="d-add">+    // parses the raw bytes and never looks at Content-Type.</span>
+<span class="d-add">+    const ok = navigator.sendBeacon?.(url, body);</span>
+<span class="d-add">+    if (!ok) {</span>
+<span class="d-add">+      fetch(url, { method: &quot;POST&quot;, body, keepalive: true }).catch(() =&gt; {});</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  } catch {</span>
+<span class="d-add">+    // Never let telemetry surface as an app error.</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/sparseVotes.test.ts</span>
+            <span class="stat"><span class="d-add">+83</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · tests</span>
+        <span class="ctx-sum">vitest</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">sparseVotes.test.ts</span>
+        <span class="ctx-sum">NEW — decode round-trip, holey independence, block omission</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">decode tests</span><span class="ol-sum">6 tests</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>entire file is new</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/sparseVotes.test.ts b/client-react/src/utils/sparseVotes.test.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..b53c734</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/utils/sparseVotes.test.ts</span>
+<span class="d-hunk">@@ -0,0 +1,83 @@</span>
+<span class="d-add">+import { describe, it, expect } from &quot;vitest&quot;;</span>
+<span class="d-add">+import { decodeSparseVotes, isSparseVotes, type SparseVotesPayload } from &quot;./sparseVotes&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const payload: SparseVotesPayload = {</span>
+<span class="d-add">+  sparse: 1,</span>
+<span class="d-add">+  rev: 42,</span>
+<span class="d-add">+  vote_types: { &quot;7&quot;: &quot;Add bike lane&quot; },</span>
+<span class="d-add">+  vote_type_legend: [&quot;Add bike lane&quot;, &quot;Add sharrow (shared lane markings)&quot;],</span>
+<span class="d-add">+  n_edges: 10,</span>
+<span class="d-add">+  n_nodes: 6,</span>
+<span class="d-add">+  topology_version: &#x27;&quot;abc&quot;&#x27;,</span>
+<span class="d-add">+  ev_idx: [2, 7],</span>
+<span class="d-add">+  ev_val: [5, -3],</span>
+<span class="d-add">+  nv_idx: [1],</span>
+<span class="d-add">+  nv_val: [5],</span>
+<span class="d-add">+  evt: { &quot;2&quot;: [[0, 6, 1]], &quot;7&quot;: [[1, 0, 3]] },</span>
+<span class="d-add">+  nvt: { &quot;1&quot;: [[0, 6, 1]] },</span>
+<span class="d-add">+  n_blocks: 4,</span>
+<span class="d-add">+  blocks_version: &quot;1699&quot;,</span>
+<span class="d-add">+  block_vote_type_legend: [&quot;Add bike lane&quot;],</span>
+<span class="d-add">+  bv_idx: [3],</span>
+<span class="d-add">+  bv_val: [7],</span>
+<span class="d-add">+  bvt: { &quot;3&quot;: [[0, 6, 1]] },</span>
+<span class="d-add">+};</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;isSparseVotes&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;accepts the sparse payload and rejects dense/nullish bodies&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(isSparseVotes(payload)).toBe(true);</span>
+<span class="d-add">+    expect(isSparseVotes({ edge_votes: [0, 1] })).toBe(false);</span>
+<span class="d-add">+    expect(isSparseVotes(undefined)).toBe(false);</span>
+<span class="d-add">+    expect(isSparseVotes(null)).toBe(false);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;decodeSparseVotes&quot;, () =&gt; {</span>
+<span class="d-add">+  const d = decodeSparseVotes(payload);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;rebuilds dense typed vote totals with zeros elsewhere&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(d.edge_votes).toBeInstanceOf(Int32Array);</span>
+<span class="d-add">+    expect(d.edge_votes!.length).toBe(10);</span>
+<span class="d-add">+    expect(d.edge_votes![2]).toBe(5);</span>
+<span class="d-add">+    expect(d.edge_votes![7]).toBe(-3);</span>
+<span class="d-add">+    expect(d.edge_votes![0]).toBe(0);</span>
+<span class="d-add">+    expect(d.node_votes![1]).toBe(5);</span>
+<span class="d-add">+    expect(d.block_votes![3]).toBe(7);</span>
+<span class="d-add">+    expect(d.block_votes!.length).toBe(4);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;rebuilds holey vote-type arrays sized to the graph&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(d.edge_vote_types!.length).toBe(10);</span>
+<span class="d-add">+    expect(d.edge_vote_types![2]).toEqual([[0, 6, 1]]);</span>
+<span class="d-add">+    expect(d.edge_vote_types![7]).toEqual([[1, 0, 3]]);</span>
+<span class="d-add">+    expect(d.edge_vote_types![0]).toBeUndefined();</span>
+<span class="d-add">+    expect(d.node_vote_types![1]).toEqual([[0, 6, 1]]);</span>
+<span class="d-add">+    expect(d.block_vote_types![3]).toEqual([[0, 6, 1]]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;holes are independent — writing one edge&#x27;s breakdown can&#x27;t leak into another&quot;, () =&gt; {</span>
+<span class="d-add">+    const fresh = decodeSparseVotes(payload);</span>
+<span class="d-add">+    const evt = fresh.edge_vote_types!;</span>
+<span class="d-add">+    // The voteApply mutation pattern: read-or-materialize, push, store back.</span>
+<span class="d-add">+    const pairs = evt[4] || [];</span>
+<span class="d-add">+    pairs.push([0, 1, 0]);</span>
+<span class="d-add">+    evt[4] = pairs as [number, number, number][];</span>
+<span class="d-add">+    expect(evt[5]).toBeUndefined();</span>
+<span class="d-add">+    expect(evt[4]).toEqual([[0, 1, 0]]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;carries the dimension stamps and metadata for the mismatch guard&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(d.n_edges).toBe(10);</span>
+<span class="d-add">+    expect(d.n_nodes).toBe(6);</span>
+<span class="d-add">+    expect(d.n_blocks).toBe(4);</span>
+<span class="d-add">+    expect(d.blocks_version).toBe(&quot;1699&quot;);</span>
+<span class="d-add">+    expect(d.rev).toBe(42);</span>
+<span class="d-add">+    expect(d.vote_type_legend).toEqual(payload.vote_type_legend);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;omits block fields when the map has no block layer&quot;, () =&gt; {</span>
+<span class="d-add">+    const noBlocks = decodeSparseVotes({ ...payload, n_blocks: undefined });</span>
+<span class="d-add">+    expect(noBlocks.block_votes).toBeUndefined();</span>
+<span class="d-add">+    expect(noBlocks.block_vote_types).toBeUndefined();</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/sparseVotes.ts</span>
+            <span class="stat"><span class="d-add">+91</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · utils/</span>
+        <span class="ctx-sum">wire-format decoding for the vote payload</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">sparseVotes.ts</span>
+        <span class="ctx-sum">NEW ~95 LOC — SparseVotesPayload type + decodeSparseVotes/isSparseVotes</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">SparseVotesPayload</span><span class="ol-sum">wire shape (idx/val pairs + voted dicts)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">denseInt32 / holeyVt</span><span class="ol-sum">typed + holey reconstruction</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">decodeSparseVotes</span><span class="ol-sum">sparse → GraphData vote fields</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>entire file is new</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/sparseVotes.ts b/client-react/src/utils/sparseVotes.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..83fa751</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/utils/sparseVotes.ts</span>
+<span class="d-hunk">@@ -0,0 +1,91 @@</span>
+<span class="d-add">+// Sparse /api/graph-votes decoding (format=sparse).</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// The dense vote body is &gt;99.5% zeros/empty entries on a city graph, and</span>
+<span class="d-add">+// JSON.parse-ing its ~26MB materialized ~9M boxed JS values — hundreds of MB</span>
+<span class="d-add">+// on mobile Safari, the &quot;bikepaths&quot; jetsam OOM (the topology got typed arrays</span>
+<span class="d-add">+// in graphTopology.ts; the vote arrays never did). The sparse body carries</span>
+<span class="d-add">+// only the nonzero indices + values; this decoder rebuilds the dense,</span>
+<span class="d-add">+// index-addressable shape consumers already expect:</span>
+<span class="d-add">+//</span>
+<span class="d-add">+//  - vote totals as Int32Array — indexable, mutable, `.length`-bearing, ~8x</span>
+<span class="d-add">+//    smaller than a boxed number[] of the same length</span>
+<span class="d-add">+//  - vote-type breakdowns as HOLEY arrays — entries exist only at voted</span>
+<span class="d-add">+//    indices. Every consumer guards with `?? []` / `if (!pairs) continue`,</span>
+<span class="d-add">+//    and the mutation paths (`edgeVoteTypes[eid] || []`) materialize a FRESH</span>
+<span class="d-add">+//    array before writing, so holes are safe where a shared empty-array</span>
+<span class="d-add">+//    sentinel would not be (a shared [] would be mutated in place by</span>
+<span class="d-add">+//    voteApply&#x27;s push).</span>
+<span class="d-add">+</span>
+<span class="d-add">+import type { GraphData } from &quot;../types&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+type VtPairs = [number, number, number][];</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Wire shape of the format=sparse /api/graph-votes body. */</span>
+<span class="d-add">+export interface SparseVotesPayload {</span>
+<span class="d-add">+  sparse: 1;</span>
+<span class="d-add">+  rev?: number;</span>
+<span class="d-add">+  vote_types?: Record&lt;string, string&gt;;</span>
+<span class="d-add">+  vote_type_legend?: string[];</span>
+<span class="d-add">+  n_edges: number;</span>
+<span class="d-add">+  n_nodes: number;</span>
+<span class="d-add">+  topology_version?: string;</span>
+<span class="d-add">+  ev_idx?: number[];</span>
+<span class="d-add">+  ev_val?: number[];</span>
+<span class="d-add">+  nv_idx?: number[];</span>
+<span class="d-add">+  nv_val?: number[];</span>
+<span class="d-add">+  evt?: Record&lt;string, VtPairs&gt;;</span>
+<span class="d-add">+  nvt?: Record&lt;string, VtPairs&gt;;</span>
+<span class="d-add">+  // Present only when the map has a block layer.</span>
+<span class="d-add">+  n_blocks?: number;</span>
+<span class="d-add">+  blocks_version?: string | null;</span>
+<span class="d-add">+  block_vote_type_legend?: string[];</span>
+<span class="d-add">+  bv_idx?: number[];</span>
+<span class="d-add">+  bv_val?: number[];</span>
+<span class="d-add">+  bvt?: Record&lt;string, VtPairs&gt;;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+export function isSparseVotes(x: unknown): x is SparseVotesPayload {</span>
+<span class="d-add">+  return !!x &amp;&amp; typeof x === &quot;object&quot; &amp;&amp; (x as { sparse?: unknown }).sparse === 1;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+function denseInt32(n: number, idx?: number[], val?: number[]): Int32Array {</span>
+<span class="d-add">+  const a = new Int32Array(n);</span>
+<span class="d-add">+  if (idx &amp;&amp; val) {</span>
+<span class="d-add">+    for (let i = 0; i &lt; idx.length; i++) a[idx[i]] = val[i];</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return a;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+function holeyVt(n: number, m?: Record&lt;string, VtPairs&gt;): VtPairs[] {</span>
+<span class="d-add">+  const a: VtPairs[] = new Array(n);</span>
+<span class="d-add">+  if (m) {</span>
+<span class="d-add">+    for (const k in m) a[+k] = m[k];</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return a;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Rebuild the dense vote fields (`edge_votes`, `edge_vote_types`, …) that the</span>
+<span class="d-add">+ *  rest of the app indexes into. Pure; scales with VOTED entries, not graph</span>
+<span class="d-add">+ *  size (aside from the two zero-filled typed allocations). */</span>
+<span class="d-add">+export function decodeSparseVotes(sp: SparseVotesPayload): Partial&lt;GraphData&gt; {</span>
+<span class="d-add">+  const out: Partial&lt;GraphData&gt; = {</span>
+<span class="d-add">+    rev: sp.rev,</span>
+<span class="d-add">+    vote_types: sp.vote_types,</span>
+<span class="d-add">+    vote_type_legend: sp.vote_type_legend ?? [],</span>
+<span class="d-add">+    n_edges: sp.n_edges,</span>
+<span class="d-add">+    n_nodes: sp.n_nodes,</span>
+<span class="d-add">+    topology_version: sp.topology_version,</span>
+<span class="d-add">+    edge_votes: denseInt32(sp.n_edges, sp.ev_idx, sp.ev_val),</span>
+<span class="d-add">+    node_votes: denseInt32(sp.n_nodes, sp.nv_idx, sp.nv_val),</span>
+<span class="d-add">+    edge_vote_types: holeyVt(sp.n_edges, sp.evt),</span>
+<span class="d-add">+    node_vote_types: holeyVt(sp.n_nodes, sp.nvt),</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+  if (sp.n_blocks != null) {</span>
+<span class="d-add">+    out.n_blocks = sp.n_blocks;</span>
+<span class="d-add">+    out.blocks_version = sp.blocks_version ?? undefined;</span>
+<span class="d-add">+    out.block_vote_type_legend = sp.block_vote_type_legend ?? [];</span>
+<span class="d-add">+    out.block_votes = denseInt32(sp.n_blocks, sp.bv_idx, sp.bv_val);</span>
+<span class="d-add">+    out.block_vote_types = holeyVt(sp.n_blocks, sp.bvt);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return out;</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+124</span> / <span class="d-del">-17</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask · API surface</span>
+        <span class="ctx-sum">all HTTP endpoints, vote-snapshot cache, prewarm, WS hub</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~2200 LOC — the graph-votes snapshot LRU + graph-topology + admin/stats live here</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">vote cache (LRU + single-flight)</span><span class="ol-sum">_vote_cache, _entry_bytes, debounce</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_build_graph_votes_body_locked</span><span class="ol-sum">snapshot build; NOW builds the sparse twin too</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_sparse_votes_body</span><span class="ol-sum">NEW — nonzero idx/val + voted-only breakdown dicts</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">prewarm</span><span class="ol-sum">graph + vote-body + topology-blob warm; NOW also br</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">/api/client-timing</span><span class="ol-sum">NEW — [MAPLOAD] beacon sink</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">/api/graph-topology</span><span class="ol-sum">GTB2 bin serving; NOW br/gzip/identity negotiation</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">/api/graph-votes</span><span class="ol-sum">snapshot serving; NOW format=sparse + -sp ETag</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">vote cast path / WS / admin</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>_entry_bytes — counts sp_body/sp_gz toward the cache budget</li><li>_build_graph_votes_body_locked — pops _*_sparse keys, dumps sp_body/sp_gz twins</li><li>_sparse_votes_body() — flatnonzero idx/val pairs + metadata + block section</li><li>_prewarm — topology_binary_br() alongside gz</li><li>_graph_votes_etag — sparse flag → -sp token</li><li>graph_topology — token-parsed Accept-Encoding, br → gzip → identity</li><li>client_timing() — validate, sanitize, log [MAPLOAD], always 204</li><li>graph_votes — format=sparse serves the sp twins</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index 01c4333..feb3e12 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -434,7 +434,8 @@ def _vote_cache_peek(cache_key: str) -&gt; dict | None:</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def _entry_bytes(entry: dict) -&gt; int:</span>
+<span class="d-del">-    return len(entry[&quot;body&quot;]) + len(entry[&quot;gz&quot;])</span>
+<span class="d-add">+    return (len(entry[&quot;body&quot;]) + len(entry[&quot;gz&quot;])</span>
+<span class="d-add">+            + len(entry.get(&quot;sp_body&quot;) or b&quot;&quot;) + len(entry.get(&quot;sp_gz&quot;) or b&quot;&quot;))</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def _vote_cache_put(cache_key: str, entry: dict) -&gt; None:</span>
+<span class="d-hunk">@@ -563,23 +564,80 @@ def _build_graph_votes_body_locked(</span>
+<span class="d-ctx">             redis_client, rmap.slug, block_mode, rmap.graph.n_blocks))</span>
+<span class="d-ctx">         arrays[&quot;blocks_version&quot;] = rmap.graph.blocks_version</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    # format=sparse twin. The dense arrays are &gt;99.5% zeros/empties on a city</span>
+<span class="d-add">+    # graph (nyc-bikes: ~37K voted edges across 3.3M slots), and JSON.parse-ing</span>
+<span class="d-add">+    # the ~26MB dense body materializes ~9M boxed JS values on the client —</span>
+<span class="d-add">+    # hundreds of MB on mobile Safari, the &quot;bikepaths&quot; jetsam OOM. The sparse</span>
+<span class="d-add">+    # body carries only nonzero indices + values (the client rebuilds typed</span>
+<span class="d-add">+    # arrays), so it&#x27;s ~50x smaller to download AND to parse. The private</span>
+<span class="d-add">+    # _*_sparse keys ride in from build_arrays/build_block_arrays (O(voted),</span>
+<span class="d-add">+    # never an O(graph) scan here) and must not leak into the dense body.</span>
+<span class="d-add">+    sparse = _sparse_votes_body(</span>
+<span class="d-add">+        arrays,</span>
+<span class="d-add">+        arrays.pop(&quot;_evt_sparse&quot;, {}),</span>
+<span class="d-add">+        arrays.pop(&quot;_nvt_sparse&quot;, {}),</span>
+<span class="d-add">+        arrays.pop(&quot;_bvt_sparse&quot;, None),</span>
+<span class="d-add">+    )</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     # orjson + gzip level 3: the rebuild runs on the request path (debounced,</span>
+<span class="d-ctx">     # but each one used to stall the GIL ~2s serializing 37MB and compressing</span>
+<span class="d-ctx">     # at level 6 — the p95 spikes on unrelated endpoints). orjson is ~10x</span>
+<span class="d-ctx">     # faster than json here and zlib releases the GIL while compressing;</span>
+<span class="d-ctx">     # level 3 halves compression time for ~1.5% larger output.</span>
+<span class="d-ctx">     body = orjson.dumps(arrays, option=orjson.OPT_SERIALIZE_NUMPY)</span>
+<span class="d-add">+    sp_body = orjson.dumps(sparse, option=orjson.OPT_SERIALIZE_NUMPY)</span>
+<span class="d-ctx">     entry = {</span>
+<span class="d-ctx">         &quot;rev&quot;: rev,</span>
+<span class="d-ctx">         &quot;bstamp&quot;: rmap.graph.blocks_stamp(),</span>
+<span class="d-ctx">         &quot;body&quot;: body,</span>
+<span class="d-ctx">         &quot;gz&quot;: gzip.compress(body, 3),</span>
+<span class="d-add">+        &quot;sp_body&quot;: sp_body,</span>
+<span class="d-add">+        &quot;sp_gz&quot;: gzip.compress(sp_body, 3),</span>
+<span class="d-ctx">         &quot;built&quot;: time.monotonic(),</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     _vote_cache_put(cache_key, entry)</span>
+<span class="d-ctx">     return entry</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+def _sparse_votes_body(arrays: dict, evt: dict, nvt: dict, bvt: dict | None) -&gt; dict:</span>
+<span class="d-add">+    &quot;&quot;&quot;Assemble the format=sparse /api/graph-votes body from the dense arrays.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Vote totals become (idx, val) pairs of the nonzero entries (numpy</span>
+<span class="d-add">+    flatnonzero — C-speed, no Python loop over the graph); the per-index</span>
+<span class="d-add">+    vote-type breakdowns arrive pre-sparsified from build_arrays /</span>
+<span class="d-add">+    build_block_arrays because a breakdown can be non-empty where the net is 0</span>
+<span class="d-add">+    (counter-votes cancel), so nonzero totals alone can&#x27;t recover its keys.&quot;&quot;&quot;</span>
+<span class="d-add">+    import numpy as np</span>
+<span class="d-add">+</span>
+<span class="d-add">+    ev = np.asarray(arrays[&quot;edge_votes&quot;])</span>
+<span class="d-add">+    nv = np.asarray(arrays[&quot;node_votes&quot;])</span>
+<span class="d-add">+    ei = np.flatnonzero(ev)</span>
+<span class="d-add">+    ni = np.flatnonzero(nv)</span>
+<span class="d-add">+    sp = {</span>
+<span class="d-add">+        &quot;sparse&quot;: 1,</span>
+<span class="d-add">+        &quot;rev&quot;: arrays[&quot;rev&quot;],</span>
+<span class="d-add">+        &quot;vote_types&quot;: arrays[&quot;vote_types&quot;],</span>
+<span class="d-add">+        &quot;vote_type_legend&quot;: arrays[&quot;vote_type_legend&quot;],</span>
+<span class="d-add">+        &quot;n_edges&quot;: arrays[&quot;n_edges&quot;],</span>
+<span class="d-add">+        &quot;n_nodes&quot;: arrays[&quot;n_nodes&quot;],</span>
+<span class="d-add">+        &quot;topology_version&quot;: arrays[&quot;topology_version&quot;],</span>
+<span class="d-add">+        &quot;ev_idx&quot;: ei, &quot;ev_val&quot;: ev[ei],</span>
+<span class="d-add">+        &quot;nv_idx&quot;: ni, &quot;nv_val&quot;: nv[ni],</span>
+<span class="d-add">+        &quot;evt&quot;: evt, &quot;nvt&quot;: nvt,</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    if &quot;block_votes&quot; in arrays:</span>
+<span class="d-add">+        bv = np.asarray(arrays[&quot;block_votes&quot;])</span>
+<span class="d-add">+        bi = np.flatnonzero(bv)</span>
+<span class="d-add">+        sp.update({</span>
+<span class="d-add">+            &quot;n_blocks&quot;: arrays[&quot;n_blocks&quot;],</span>
+<span class="d-add">+            &quot;blocks_version&quot;: arrays.get(&quot;blocks_version&quot;),</span>
+<span class="d-add">+            &quot;block_vote_type_legend&quot;: arrays[&quot;block_vote_type_legend&quot;],</span>
+<span class="d-add">+            &quot;bv_idx&quot;: bi, &quot;bv_val&quot;: bv[bi],</span>
+<span class="d-add">+            &quot;bvt&quot;: bvt or {},</span>
+<span class="d-add">+        })</span>
+<span class="d-add">+    return sp</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> def _write_vote_fields(slug: str, fields: list[tuple[int, int]]) -&gt; None:</span>
+<span class="d-ctx">     &quot;&quot;&quot;HSET a batch of (redis_field, count) into a map&#x27;s Redis hash, pipelined.</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -675,9 +733,11 @@ def _prewarm():</span>
+<span class="d-ctx">             try:</span>
+<span class="d-ctx">                 rmap = resolve_map(m[&quot;slug&quot;])</span>
+<span class="d-ctx">                 _build_graph_votes_body(rmap)</span>
+<span class="d-del">-                # Pre-gzip the topology blob too, so no tenant&#x27;s first visitor</span>
+<span class="d-del">-                # pays the one-time ~1-2s compression of the big cities.</span>
+<span class="d-add">+                # Pre-compress the topology blob too, so no tenant&#x27;s first</span>
+<span class="d-add">+                # visitor pays the one-time ~1-2s compression of the big</span>
+<span class="d-add">+                # cities (brotli is what browsers actually receive).</span>
+<span class="d-ctx">                 rmap.graph.topology_binary_gz()</span>
+<span class="d-add">+                rmap.graph.topology_binary_br()</span>
+<span class="d-ctx">                 warmed += 1</span>
+<span class="d-ctx">             except Exception as e:</span>
+<span class="d-ctx">                 logger.warning(f&quot;[STARTUP] Pre-warm &#x27;{m[&#x27;slug&#x27;]}&#x27; failed: {e}&quot;)</span>
+<span class="d-hunk">@@ -1845,14 +1905,28 @@ def graph_topology():</span>
+<span class="d-ctx">             resp.headers[&quot;ETag&quot;] = bin_etag</span>
+<span class="d-ctx">             resp.headers[&quot;Cache-Control&quot;] = &quot;public, max-age=86400&quot;</span>
+<span class="d-ctx">             return resp</span>
+<span class="d-del">-        wants_gzip = &quot;gzip&quot; in (request.headers.get(&quot;Accept-Encoding&quot;) or &quot;&quot;)</span>
+<span class="d-add">+        # Prefer brotli (~17% smaller than the gzip twin on the NYC blob —</span>
+<span class="d-add">+        # 15.6MB vs 18.8MB — every current browser advertises br); gzip is the</span>
+<span class="d-add">+        # fallback, identity last. Token-parse the header so &quot;br&quot; can&#x27;t match</span>
+<span class="d-add">+        # inside another coding name.</span>
+<span class="d-add">+        codings = {t.strip().split(&quot;;&quot;)[0]</span>
+<span class="d-add">+                   for t in (request.headers.get(&quot;Accept-Encoding&quot;) or &quot;&quot;).lower().split(&quot;,&quot;)}</span>
+<span class="d-add">+        body_enc = None</span>
+<span class="d-add">+        served_bin = None</span>
+<span class="d-add">+        if &quot;br&quot; in codings:</span>
+<span class="d-add">+            served_bin = rmap.graph.topology_binary_br()</span>
+<span class="d-add">+            if served_bin is not None:</span>
+<span class="d-add">+                body_enc = &quot;br&quot;</span>
+<span class="d-add">+        if served_bin is None and &quot;gzip&quot; in codings:</span>
+<span class="d-add">+            served_bin = rmap.graph.topology_binary_gz()</span>
+<span class="d-add">+            body_enc = &quot;gzip&quot;</span>
+<span class="d-add">+        if served_bin is None:</span>
+<span class="d-add">+            served_bin = rmap.graph.topology_binary()</span>
+<span class="d-ctx">         resp = app.response_class(</span>
+<span class="d-del">-            response=(rmap.graph.topology_binary_gz() if wants_gzip</span>
+<span class="d-del">-                      else rmap.graph.topology_binary()),</span>
+<span class="d-del">-            status=200, mimetype=&quot;application/octet-stream&quot;,</span>
+<span class="d-add">+            response=served_bin, status=200, mimetype=&quot;application/octet-stream&quot;,</span>
+<span class="d-ctx">         )</span>
+<span class="d-del">-        if wants_gzip:</span>
+<span class="d-del">-            resp.headers[&quot;Content-Encoding&quot;] = &quot;gzip&quot;</span>
+<span class="d-add">+        if body_enc:</span>
+<span class="d-add">+            resp.headers[&quot;Content-Encoding&quot;] = body_enc</span>
+<span class="d-ctx">         resp.headers[&quot;Vary&quot;] = &quot;Accept-Encoding&quot;</span>
+<span class="d-ctx">         resp.headers[&quot;Cache-Control&quot;] = &quot;public, max-age=86400&quot;</span>
+<span class="d-ctx">         resp.headers[&quot;ETag&quot;] = bin_etag</span>
+<span class="d-hunk">@@ -1881,15 +1955,41 @@ def graph_topology():</span>
+<span class="d-ctx">     return resp</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-def _graph_votes_etag(slug: str, mode: str | None, entry: dict, gzipped: bool) -&gt; str:</span>
+<span class="d-add">+def _graph_votes_etag(</span>
+<span class="d-add">+    slug: str, mode: str | None, entry: dict, gzipped: bool, sparse: bool = False,</span>
+<span class="d-add">+) -&gt; str:</span>
+<span class="d-ctx">     &quot;&quot;&quot;ETag derived from the SERVED entry (its rev + blocks stamp), never from</span>
+<span class="d-ctx">     the live revision — the etag must always describe the body it rides with</span>
+<span class="d-ctx">     (a live-rev etag over a debounced body is the 304-pins-stale-body bug of</span>
+<span class="d-del">-    the blocks re-bake incident). The encoding rides in the tag because the</span>
+<span class="d-del">-    gzip and identity representations are different bytes.&quot;&quot;&quot;</span>
+<span class="d-add">+    the blocks re-bake incident). The encoding AND the format ride in the tag</span>
+<span class="d-add">+    because gzip/identity and sparse/dense are different bytes.&quot;&quot;&quot;</span>
+<span class="d-ctx">     bstamp = entry.get(&quot;bstamp&quot;)</span>
+<span class="d-ctx">     return (f&#x27;&quot;v-{slug}-{mode or &quot;all&quot;}-{entry[&quot;rev&quot;]}&#x27;</span>
+<span class="d-del">-            f&#x27;{f&quot;-b{bstamp}&quot; if bstamp else &quot;&quot;}{&quot;-gz&quot; if gzipped else &quot;&quot;}&quot;&#x27;)</span>
+<span class="d-add">+            f&#x27;{f&quot;-b{bstamp}&quot; if bstamp else &quot;&quot;}&#x27;</span>
+<span class="d-add">+            f&#x27;{&quot;-sp&quot; if sparse else &quot;&quot;}{&quot;-gz&quot; if gzipped else &quot;&quot;}&quot;&#x27;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+@app.route(&quot;/api/client-timing&quot;, methods=[&quot;POST&quot;])</span>
+<span class="d-add">+def client_timing():</span>
+<span class="d-add">+    &quot;&quot;&quot;First-map-load beacon (navigator.sendBeacon from the client once the</span>
+<span class="d-add">+    loader dismisses). Emits one [MAPLOAD] log line per page load; the</span>
+<span class="d-add">+    log-based distribution metric `cityedit_map_load_ms`</span>
+<span class="d-add">+    (terraform/monitoring.tf) extracts `ms=` from it to chart P50/P95/P99</span>
+<span class="d-add">+    first-load latency on the System Health dashboard. Unauthenticated and</span>
+<span class="d-add">+    fire-and-forget by design: bad payloads are dropped silently (204 always)</span>
+<span class="d-add">+    so the endpoint can never become an error-noise or retry source.&quot;&quot;&quot;</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        payload = orjson.loads(request.get_data(cache=False) or b&quot;{}&quot;)</span>
+<span class="d-add">+        ms = float(payload.get(&quot;ms&quot;))</span>
+<span class="d-add">+    except (ValueError, TypeError, AttributeError, orjson.JSONDecodeError):</span>
+<span class="d-add">+        return &quot;&quot;, 204</span>
+<span class="d-add">+    if not (0 &lt; ms &lt;= 600_000):  # &gt;10min is a suspended tab, not a load</span>
+<span class="d-add">+        return &quot;&quot;, 204</span>
+<span class="d-add">+    slug = re.sub(r&quot;[^a-zA-Z0-9_-]&quot;, &quot;&quot;, str(payload.get(&quot;map&quot;) or &quot;&quot;))[:64] or &quot;unknown&quot;</span>
+<span class="d-add">+    nav = re.sub(r&quot;[^a-z_]&quot;, &quot;&quot;, str(payload.get(&quot;nav&quot;) or &quot;&quot;))[:16] or &quot;unknown&quot;</span>
+<span class="d-add">+    cached = 1 if payload.get(&quot;cachedTopo&quot;) else 0</span>
+<span class="d-add">+    logger.info(f&quot;[MAPLOAD] map={slug} ms={int(ms)} cached_topo={cached} nav={nav}&quot;)</span>
+<span class="d-add">+    return &quot;&quot;, 204</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> @app.route(&quot;/api/graph-votes&quot;, methods=[&quot;GET&quot;])</span>
+<span class="d-hunk">@@ -1943,8 +2043,13 @@ def graph_votes():</span>
+<span class="d-ctx">                 lock.release()</span>
+<span class="d-ctx">         # else: a rebuild is in flight — serve the stale entry we hold.</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    # format=sparse: nonzero-only body decoded into typed arrays client-side</span>
+<span class="d-add">+    # (~50x smaller download + parse; the dense body OOM&#x27;d mobile Safari on</span>
+<span class="d-add">+    # vote-heavy maps). Dense stays the default for old clients still cached.</span>
+<span class="d-add">+    sparse_fmt = (request.args.get(&quot;format&quot;) == &quot;sparse&quot;</span>
+<span class="d-add">+                  and entry.get(&quot;sp_body&quot;) is not None)</span>
+<span class="d-ctx">     wants_gzip = &quot;gzip&quot; in (request.headers.get(&quot;Accept-Encoding&quot;) or &quot;&quot;).lower()</span>
+<span class="d-del">-    etag = _graph_votes_etag(rmap.slug, mode, entry, wants_gzip)</span>
+<span class="d-add">+    etag = _graph_votes_etag(rmap.slug, mode, entry, wants_gzip, sparse_fmt)</span>
+<span class="d-ctx">     if request.headers.get(&quot;If-None-Match&quot;) == etag:</span>
+<span class="d-ctx">         resp = app.response_class(status=304)</span>
+<span class="d-ctx">         resp.headers[&quot;ETag&quot;] = etag</span>
+<span class="d-hunk">@@ -1952,9 +2057,11 @@ def graph_votes():</span>
+<span class="d-ctx">         resp.headers[&quot;Vary&quot;] = &quot;Accept-Encoding&quot;</span>
+<span class="d-ctx">         return resp</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    resp = app.response_class(</span>
+<span class="d-del">-        response=entry[&quot;gz&quot;] if wants_gzip else entry[&quot;body&quot;],</span>
+<span class="d-del">-        status=200, mimetype=&quot;application/json&quot;)</span>
+<span class="d-add">+    if sparse_fmt:</span>
+<span class="d-add">+        served = entry[&quot;sp_gz&quot;] if wants_gzip else entry[&quot;sp_body&quot;]</span>
+<span class="d-add">+    else:</span>
+<span class="d-add">+        served = entry[&quot;gz&quot;] if wants_gzip else entry[&quot;body&quot;]</span>
+<span class="d-add">+    resp = app.response_class(response=served, status=200, mimetype=&quot;application/json&quot;)</span>
+<span class="d-ctx">     if wants_gzip:</span>
+<span class="d-ctx">         resp.headers[&quot;Content-Encoding&quot;] = &quot;gzip&quot;</span>
+<span class="d-ctx">     resp.headers[&quot;Vary&quot;] = &quot;Accept-Encoding&quot;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/block_votes.py</span>
+            <span class="stat"><span class="d-add">+3</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask · block aggregation</span>
+        <span class="ctx-sum">deduped per-block vote aggregates (bagg:) → block arrays</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">block_votes.py</span>
+        <span class="ctx-sum">~250 LOC — block field codec + aggregate rebuild + array projection</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">block field codec</span><span class="ol-sum">pack/unpack block·vt·dir</span></li><li class="dim"><span class="ol-label">rebuild_from_db</span><span class="ol-sum">bagg: reconstruction</span></li><li class="changed"><span class="ol-label">build_block_arrays</span><span class="ol-sum">aggregate hash → arrays; NOW also sparse companion</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>build_block_arrays return — adds _bvt_sparse dict keyed from bvt (voted blocks only)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/block_votes.py b/server/block_votes.py</span>
+<span class="d-meta">index 50df906..1c9dbfe 100644</span>
+<span class="d-meta">--- a/server/block_votes.py</span>
+<span class="d-meta">+++ b/server/block_votes.py</span>
+<span class="d-hunk">@@ -234,6 +234,9 @@ def build_block_arrays(redis_client, slug: str, mode: int, n_blocks: int) -&gt; dic</span>
+<span class="d-ctx">         &quot;block_vote_types&quot;: block_vote_types,</span>
+<span class="d-ctx">         &quot;block_vote_type_legend&quot;: legend,</span>
+<span class="d-ctx">         &quot;n_blocks&quot;: n_blocks,</span>
+<span class="d-add">+        # Sparse twin for the format=sparse body (private key, popped before</span>
+<span class="d-add">+        # the dense body serializes) — voted blocks only, O(voted).</span>
+<span class="d-add">+        &quot;_bvt_sparse&quot;: {str(b): block_vote_types[b] for b in bvt},</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/graph_registry.py</span>
+            <span class="stat"><span class="d-add">+17</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask · graph registry</span>
+        <span class="ctx-sum">LRU of loaded CityGraphs; GTB2 topology encoding + blob cache</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">graph_registry.py</span>
+        <span class="ctx-sum">~520 LOC — CityGraph lifecycle, topology_binary/_gz, blocks metadata</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">encode_topology_bin</span><span class="ol-sum">GTB2 layout</span></li><li class="changed"><span class="ol-label">CityGraph load/unload</span><span class="ol-sum">npz load, residents, unload frees; NOW clears br blob</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">topology_binary / _gz</span><span class="ol-sum">blob + pre-gzip cache</span></li><li class="changed"><span class="ol-label">topology_binary_br</span><span class="ol-sum">NEW — pre-brotli&#x27;d twin (q5, guarded import)</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>topology_bin_br resident + topology_binary_br() (15.5MB vs 18.8MB gzip on NYC, 0.6s to build)</li><li>unload() — drops the br blob with the rest</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/graph_registry.py b/server/graph_registry.py</span>
+<span class="d-meta">index 4269efa..126aee4 100644</span>
+<span class="d-meta">--- a/server/graph_registry.py</span>
+<span class="d-meta">+++ b/server/graph_registry.py</span>
+<span class="d-hunk">@@ -204,6 +204,7 @@ class CityGraph:</span>
+<span class="d-ctx">         self.topology_etag: str | None = None</span>
+<span class="d-ctx">         self.topology_bin: bytes | None = None</span>
+<span class="d-ctx">         self.topology_bin_gz: bytes | None = None</span>
+<span class="d-add">+        self.topology_bin_br: bytes | None = None</span>
+<span class="d-ctx">         # Lazily-built kdtrees: node tree for point-vote snapping, edge-midpoint</span>
+<span class="d-ctx">         # tree for the vote migration (kept off the hot load path).</span>
+<span class="d-ctx">         self._node_tree: cKDTree | None = None</span>
+<span class="d-hunk">@@ -372,6 +373,21 @@ class CityGraph:</span>
+<span class="d-ctx">             self.topology_bin_gz = _gzip.compress(self.topology_binary(), 6)</span>
+<span class="d-ctx">         return self.topology_bin_gz</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    def topology_binary_br(self) -&gt; bytes | None:</span>
+<span class="d-add">+        &quot;&quot;&quot;Pre-brotli&#x27;d GTB2 blob — ~17% smaller than the gzip twin AND faster</span>
+<span class="d-add">+        to build (NYC: 15.6MB br q5 in 0.6s vs 18.8MB gzip-6 in 1.4s, measured</span>
+<span class="d-add">+        on the 50MB blob). Every current browser sends Accept-Encoding: br, so</span>
+<span class="d-add">+        this is what first-time visitors actually download; gzip stays as the</span>
+<span class="d-add">+        fallback. Returns None when the brotli package is unavailable so the</span>
+<span class="d-add">+        caller degrades to gzip instead of erroring.&quot;&quot;&quot;</span>
+<span class="d-add">+        if self.topology_bin_br is None:</span>
+<span class="d-add">+            try:</span>
+<span class="d-add">+                import brotli</span>
+<span class="d-add">+            except ImportError:</span>
+<span class="d-add">+                return None</span>
+<span class="d-add">+            self.topology_bin_br = brotli.compress(self.topology_binary(), quality=5)</span>
+<span class="d-add">+        return self.topology_bin_br</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     def _ensure_node_tree(self) -&gt; cKDTree | None:</span>
+<span class="d-ctx">         self.ensure_loaded()</span>
+<span class="d-ctx">         if self._node_tree is None and self.n_nodes:</span>
+<span class="d-hunk">@@ -460,6 +476,7 @@ class CityGraph:</span>
+<span class="d-ctx">         self.topology_etag = None</span>
+<span class="d-ctx">         self.topology_bin = None</span>
+<span class="d-ctx">         self.topology_bin_gz = None</span>
+<span class="d-add">+        self.topology_bin_br = None</span>
+<span class="d-ctx">         self._node_tree = None</span>
+<span class="d-ctx">         self._edge_mid_tree = None</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/requirements.in</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask · dependencies</span>
+        <span class="ctx-sum">hand-written top-level deps (uv pip compile source)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">requirements.in</span>
+        <span class="ctx-sum">~25 lines</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">deps list</span><span class="ol-sum">adds brotli</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>+ brotli</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/requirements.in b/server/requirements.in</span>
+<span class="d-meta">index b3e2884..4fad2dd 100644</span>
+<span class="d-meta">--- a/server/requirements.in</span>
+<span class="d-meta">+++ b/server/requirements.in</span>
+<span class="d-hunk">@@ -18,3 +18,4 @@ mercantile</span>
+<span class="d-ctx"> mapbox-vector-tile</span>
+<span class="d-ctx"> psycogreen</span>
+<span class="d-ctx"> orjson</span>
+<span class="d-add">+brotli</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/requirements.txt</span>
+            <span class="stat"><span class="d-add">+3</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask · dependencies</span>
+        <span class="ctx-sum">uv-pip-compiled lockfile (installed by Dockerfile.overlay too)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">requirements.txt</span>
+        <span class="ctx-sum">locked pins</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">locked pins</span><span class="ol-sum">brotli==1.2.0</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>+ brotli==1.2.0</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/requirements.txt b/server/requirements.txt</span>
+<span class="d-meta">index 29bc933..255451b 100644</span>
+<span class="d-meta">--- a/server/requirements.txt</span>
+<span class="d-meta">+++ b/server/requirements.txt</span>
+<span class="d-hunk">@@ -1,7 +1,9 @@</span>
+<span class="d-ctx"> # This file was autogenerated by uv via the following command:</span>
+<span class="d-del">-#    uv pip compile requirements.in -o requirements.txt --python env/bin/python</span>
+<span class="d-add">+#    uv pip compile requirements.in -o requirements.txt</span>
+<span class="d-ctx"> blinker==1.9.0</span>
+<span class="d-ctx">     # via flask</span>
+<span class="d-add">+brotli==1.2.0</span>
+<span class="d-add">+    # via -r requirements.in</span>
+<span class="d-ctx"> certifi==2025.11.12</span>
+<span class="d-ctx">     # via requests</span>
+<span class="d-ctx"> charset-normalizer==3.4.4</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/vote_store.py</span>
+            <span class="stat"><span class="d-add">+8</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask · vote storage</span>
+        <span class="ctx-sum">packed-field Redis votes → per-edge/node arrays for the heatmap</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">vote_store.py</span>
+        <span class="ctx-sum">~460 LOC — codec, build_arrays (snapshot builder), OSM→edge mapping</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">53-bit vote codec</span><span class="ol-sum">pack/unpack edge·mode·vt·dir</span></li><li class="dim"><span class="ol-label">read_all / revision keys</span><span class="ol-sum">Redis hash access</span></li><li class="changed"><span class="ol-label">build_arrays</span><span class="ol-sum">votes → dense arrays; NOW also sparse companions</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">osm_nodes_to_edge_ids</span><span class="ol-sum">OSRM annotation mapping</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>build_arrays return — adds _evt_sparse/_nvt_sparse dicts keyed from edge_vt/node_vt_merged (O(voted))</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/vote_store.py b/server/vote_store.py</span>
+<span class="d-meta">index 760000f..c580240 100644</span>
+<span class="d-meta">--- a/server/vote_store.py</span>
+<span class="d-meta">+++ b/server/vote_store.py</span>
+<span class="d-hunk">@@ -413,6 +413,14 @@ def build_arrays(</span>
+<span class="d-ctx">         &quot;vote_type_legend&quot;: legend,</span>
+<span class="d-ctx">         &quot;edge_vote_types&quot;: edge_vote_types,</span>
+<span class="d-ctx">         &quot;node_vote_types&quot;: node_vote_types,</span>
+<span class="d-add">+        # Sparse twins for the format=sparse body (keys are private — popped</span>
+<span class="d-add">+        # before the dense body serializes). Built here, from the voted-only</span>
+<span class="d-add">+        # dicts we already hold, so deriving them stays O(voted), never a</span>
+<span class="d-add">+        # 4.6M-slot scan of the dense lists on the request path. A dense list</span>
+<span class="d-add">+        # can hold a non-empty breakdown where the NET is 0 (counter-votes</span>
+<span class="d-add">+        # cancel), so the keys come from the vt dicts, not from nonzero totals.</span>
+<span class="d-add">+        &quot;_evt_sparse&quot;: {str(e): edge_vote_types[e] for e in edge_vt},</span>
+<span class="d-add">+        &quot;_nvt_sparse&quot;: {str(n): node_vote_types[n] for n in node_vt_merged},</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">terraform/monitoring.tf</span>
+            <span class="stat"><span class="d-add">+116</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill on">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Terraform · monitoring</span>
+        <span class="ctx-sum">pure Cloud Monitoring config — targeted-apply safe by design</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">monitoring.tf</span>
+        <span class="ctx-sum">~1200 LOC — log metrics, alerts, the System Health mosaic dashboard</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">api_latency log metric</span><span class="ol-sum">server-side per-endpoint distribution</span></li><li class="changed"><span class="ol-label">map_load_ms log metric</span><span class="ol-sum">NEW — client [MAPLOAD] distribution (ms, map/cached/nav labels)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">alert policies</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">system_health dashboard</span><span class="ol-sum">NEW row: first-load P99 scorecard + cold/warm chart</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>google_logging_metric.map_load_ms — textPayload [MAPLOAD], ms= extractor, 50ms–10min buckets</li><li>dashboard tiles yPos=83 — P99 scorecard + cold-vs-warm P50/P99 xyChart</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/terraform/monitoring.tf b/terraform/monitoring.tf</span>
+<span class="d-meta">index c0d6f95..09cca3f 100644</span>
+<span class="d-meta">--- a/terraform/monitoring.tf</span>
+<span class="d-meta">+++ b/terraform/monitoring.tf</span>
+<span class="d-hunk">@@ -119,6 +119,68 @@ resource &quot;google_logging_metric&quot; &quot;api_latency&quot; {</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# -----------------------------------------------------------------------------</span>
+<span class="d-add">+# First-map-load latency — CLIENT-perceived, not server-side. The client</span>
+<span class="d-add">+# beacons one measurement per page load (navigation start → full-screen loader</span>
+<span class="d-add">+# dismissed) to /api/client-timing, which logs a single line:</span>
+<span class="d-add">+#   [MAPLOAD] map=&lt;slug&gt; ms=&lt;int&gt; cached_topo=&lt;0|1&gt; nav=&lt;navigate|reload|...&gt;</span>
+<span class="d-add">+# cached_topo separates true cold first loads (topology from network) from</span>
+<span class="d-add">+# repeat visits (IndexedDB hit) — the &quot;first time&quot; P99 lives in cached_topo=0.</span>
+<span class="d-add">+# Values are MILLISECONDS.</span>
+<span class="d-add">+# -----------------------------------------------------------------------------</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_logging_metric&quot; &quot;map_load_ms&quot; {</span>
+<span class="d-add">+  name        = &quot;cityedit_map_load_ms&quot;</span>
+<span class="d-add">+  description = &quot;Client-perceived first-map-load latency (ms), from the [MAPLOAD] beacon log line&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  filter = &lt;&lt;-EOT</span>
+<span class="d-add">+    resource.type=&quot;cloud_run_revision&quot;</span>
+<span class="d-add">+    resource.labels.service_name=&quot;desire-path-mapper&quot;</span>
+<span class="d-add">+    textPayload:&quot;[MAPLOAD]&quot;</span>
+<span class="d-add">+  EOT</span>
+<span class="d-add">+</span>
+<span class="d-add">+  metric_descriptor {</span>
+<span class="d-add">+    metric_kind = &quot;DELTA&quot;</span>
+<span class="d-add">+    value_type  = &quot;DISTRIBUTION&quot;</span>
+<span class="d-add">+    unit        = &quot;ms&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    labels {</span>
+<span class="d-add">+      key         = &quot;map&quot;</span>
+<span class="d-add">+      value_type  = &quot;STRING&quot;</span>
+<span class="d-add">+      description = &quot;Map slug the load was for&quot;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+</span>
+<span class="d-add">+    labels {</span>
+<span class="d-add">+      key         = &quot;cached&quot;</span>
+<span class="d-add">+      value_type  = &quot;STRING&quot;</span>
+<span class="d-add">+      description = &quot;1 = topology served from the client cache (repeat visit), 0 = cold first load&quot;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+</span>
+<span class="d-add">+    labels {</span>
+<span class="d-add">+      key         = &quot;nav&quot;</span>
+<span class="d-add">+      value_type  = &quot;STRING&quot;</span>
+<span class="d-add">+      description = &quot;Navigation type (navigate / reload / back_forward)&quot;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  value_extractor = &quot;REGEXP_EXTRACT(textPayload, \&quot;ms=([0-9]+)\&quot;)&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  label_extractors = {</span>
+<span class="d-add">+    map    = &quot;REGEXP_EXTRACT(textPayload, \&quot;map=([a-zA-Z0-9_-]+)\&quot;)&quot;</span>
+<span class="d-add">+    cached = &quot;REGEXP_EXTRACT(textPayload, \&quot;cached_topo=([01])\&quot;)&quot;</span>
+<span class="d-add">+    nav    = &quot;REGEXP_EXTRACT(textPayload, \&quot;nav=([a-z_]+)\&quot;)&quot;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  # 50ms … ~10min in 30% steps — first loads live in the 0.5s–60s range.</span>
+<span class="d-add">+  bucket_options {</span>
+<span class="d-add">+    exponential_buckets {</span>
+<span class="d-add">+      num_finite_buckets = 40</span>
+<span class="d-add">+      growth_factor      = 1.3</span>
+<span class="d-add">+      scale              = 50</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> # -----------------------------------------------------------------------------</span>
+<span class="d-ctx"> # Alert policies</span>
+<span class="d-ctx"> # -----------------------------------------------------------------------------</span>
+<span class="d-hunk">@@ -1081,6 +1143,60 @@ resource &quot;google_monitoring_dashboard&quot; &quot;system_health&quot; {</span>
+<span class="d-ctx">             }</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">         },</span>
+<span class="d-add">+</span>
+<span class="d-add">+        # ---- Row: client-perceived first map load ([MAPLOAD] beacon) --------</span>
+<span class="d-add">+        {</span>
+<span class="d-add">+          yPos = 83, width = 16, height = 10</span>
+<span class="d-add">+          widget = {</span>
+<span class="d-add">+            title = &quot;First map load — P99 (ms, worst segment)&quot;</span>
+<span class="d-add">+            scorecard = {</span>
+<span class="d-add">+              timeSeriesQuery = {</span>
+<span class="d-add">+                timeSeriesFilter = {</span>
+<span class="d-add">+                  filter = &quot;metric.type=\&quot;logging.googleapis.com/user/${google_logging_metric.map_load_ms.name}\&quot; resource.type=\&quot;cloud_run_revision\&quot;&quot;</span>
+<span class="d-add">+                  aggregation = {</span>
+<span class="d-add">+                    alignmentPeriod    = &quot;300s&quot;</span>
+<span class="d-add">+                    perSeriesAligner   = &quot;ALIGN_PERCENTILE_99&quot;</span>
+<span class="d-add">+                    crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
+<span class="d-add">+                  }</span>
+<span class="d-add">+                }</span>
+<span class="d-add">+              }</span>
+<span class="d-add">+              sparkChartView = { sparkChartType = &quot;SPARK_LINE&quot; }</span>
+<span class="d-add">+              thresholds = [</span>
+<span class="d-add">+                { value = 10000, color = &quot;YELLOW&quot;, direction = &quot;ABOVE&quot; },</span>
+<span class="d-add">+                { value = 30000, color = &quot;RED&quot;, direction = &quot;ABOVE&quot; },</span>
+<span class="d-add">+              ]</span>
+<span class="d-add">+            }</span>
+<span class="d-add">+          }</span>
+<span class="d-add">+        },</span>
+<span class="d-add">+        {</span>
+<span class="d-add">+          xPos = 16, yPos = 83, width = 32, height = 10</span>
+<span class="d-add">+          widget = {</span>
+<span class="d-add">+            title = &quot;First map load — P50 / P99, cold (network topology) vs warm (client cache)&quot;</span>
+<span class="d-add">+            xyChart = {</span>
+<span class="d-add">+              dataSets = [</span>
+<span class="d-add">+                for ds in [</span>
+<span class="d-add">+                  { legend = &quot;cold P99&quot;, cached = &quot;0&quot;, aligner = &quot;ALIGN_PERCENTILE_99&quot; },</span>
+<span class="d-add">+                  { legend = &quot;cold P50&quot;, cached = &quot;0&quot;, aligner = &quot;ALIGN_PERCENTILE_50&quot; },</span>
+<span class="d-add">+                  { legend = &quot;warm P99&quot;, cached = &quot;1&quot;, aligner = &quot;ALIGN_PERCENTILE_99&quot; },</span>
+<span class="d-add">+                  { legend = &quot;warm P50&quot;, cached = &quot;1&quot;, aligner = &quot;ALIGN_PERCENTILE_50&quot; },</span>
+<span class="d-add">+                ] : {</span>
+<span class="d-add">+                  plotType       = &quot;LINE&quot;</span>
+<span class="d-add">+                  legendTemplate = ds.legend</span>
+<span class="d-add">+                  timeSeriesQuery = {</span>
+<span class="d-add">+                    timeSeriesFilter = {</span>
+<span class="d-add">+                      filter = &quot;metric.type=\&quot;logging.googleapis.com/user/${google_logging_metric.map_load_ms.name}\&quot; resource.type=\&quot;cloud_run_revision\&quot; metric.label.\&quot;cached\&quot;=\&quot;${ds.cached}\&quot;&quot;</span>
+<span class="d-add">+                      aggregation = {</span>
+<span class="d-add">+                        alignmentPeriod    = &quot;300s&quot;</span>
+<span class="d-add">+                        perSeriesAligner   = ds.aligner</span>
+<span class="d-add">+                        crossSeriesReducer = &quot;REDUCE_MAX&quot;</span>
+<span class="d-add">+                      }</span>
+<span class="d-add">+                    }</span>
+<span class="d-add">+                  }</span>
+<span class="d-add">+                }</span>
+<span class="d-add">+              ]</span>
+<span class="d-add">+            }</span>
+<span class="d-add">+          }</span>
+<span class="d-add">+        },</span>
+<span class="d-ctx">       ]</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">   })</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_sparse_votes_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

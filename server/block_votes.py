@@ -234,6 +234,9 @@ def build_block_arrays(redis_client, slug: str, mode: int, n_blocks: int) -> dic
         "block_vote_types": block_vote_types,
         "block_vote_type_legend": legend,
         "n_blocks": n_blocks,
+        # Sparse twin for the format=sparse body (private key, popped before
+        # the dense body serializes) — voted blocks only, O(voted).
+        "_bvt_sparse": {str(b): block_vote_types[b] for b in bvt},
     }
 
 

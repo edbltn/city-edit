@@ -12,6 +12,7 @@ import {
   takePasscodeParam, authWithPasscode,
   type MapConfig,
 } from "./map/runtime";
+import { reportMapLoaded } from "./utils/loadTelemetry";
 
 /** Full-screen "Loading..." splash with the ASCII (| / - \) spinner. */
 function FullScreenLoader() {
@@ -35,6 +36,12 @@ function AppContent() {
   // Keep the splash up until BOTH the base map and the vote heatmap have first
   // painted, so the map is never revealed half-loaded (slow on mobile).
   const { isInitialLoading } = useHeatmap();
+
+  // The loader's first dismissal IS the user-perceived "map is up" moment —
+  // beacon it once for the first-load P99 dashboard (utils/loadTelemetry.ts).
+  useEffect(() => {
+    if (!isInitialLoading) reportMapLoaded();
+  }, [isInitialLoading]);
 
   return (
     <div id="app">

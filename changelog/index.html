@@ -29,6 +29,23 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-22-sparse-votes-mapload-p99.html">
+    <div class="date">2026-07-22</div>
+    <h2>Sparse vote bodies (the bikepaths OOM), brotli topology, and a first-load P99 dashboard</h2>
+    <p>The "a problem repeatedly occurred" crash on bikepaths.cityedit.org traced to the one payload
+    the typed-array migration missed: /api/graph-votes still shipped dense JSON — 3.3M edge slots,
+    1.35M node slots, 290K block slots (~9.3M values, 26MB), and JSON.parse boxes every empty []
+    distinctly, ~250–400MB of heap on a phone. nyc-bikes' 4.5–8× vote density (37K voted edges, 29K
+    lit blocks) pushed the peak past mobile Safari's jetsam limit where walkways squeaked under.
+    New format=sparse body carries only nonzero indices+values and decodes into Int32Array totals +
+    holey breakdown arrays (~600K values); verified cell-identical to the dense body on the full
+    NYC graph, counter-vote net-zero breakdowns included. The 50MB GTB2 topology blob now also
+    ships as brotli q5 (15.5MB vs 18.8MB gzip, and faster to build). And first-load latency is now
+    measured for real: a sendBeacon on loader dismissal → /api/client-timing → [MAPLOAD] log →
+    log-based cityedit_map_load_ms distribution → a new System Health row with a first-load P99
+    scorecard and a cold-vs-warm P50/P99 chart.</p>
+  </a>
+
   <a class="entry" href="./2026-07-22-light-pin-theme-colors.html">
     <div class="date">2026-07-22</div>
     <h2>Light-mode pins wear the theme — accent-anchored glow + themed selection</h2>

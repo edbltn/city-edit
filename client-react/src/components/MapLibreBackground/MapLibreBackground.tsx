@@ -27,8 +27,10 @@ const LEAFLET_TO_MAPLIBRE_ZOOM = 1;
 // Block-vote payload broadcast by GraphLayer (which owns the /api/graph-votes
 // fetch). MapLibreBackground colors the block fills from it via feature-state.
 export interface BlockVotesDetail {
-  blockVotes: number[]; // total deduped votes (up + down) per block_id
-  max: number;          // normalization ceiling (floored so quiet maps don't saturate)
+  // Total deduped votes (up + down) per block_id — Int32Array when decoded
+  // from the sparse wire format, number[] from legacy dense bodies.
+  blockVotes: ArrayLike<number>;
+  max: number; // normalization ceiling (floored so quiet maps don't saturate)
 }
 export const BLOCK_VOTES_EVENT = "city-edit:block-votes";
 

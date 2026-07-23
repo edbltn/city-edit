@@ -115,19 +115,29 @@ export interface GraphData {
   edgeNames?: string[]; // station networks only; street graphs omit names
   edgeBlockId?: Int32Array; // per-edge block id (GTB2 topologies); -1 = unmapped
   nBlocks?: number;
-  node_votes?: number[];
-  edge_votes?: number[];
+  // Vote totals arrive as Int32Array when decoded from the sparse wire format
+  // (utils/sparseVotes.ts — mobile memory), or as boxed number[] from the
+  // legacy dense body / old IndexedDB entries. Both index and mutate the same.
+  node_votes?: number[] | Int32Array;
+  edge_votes?: number[] | Int32Array;
   vote_type_legend?: string[];
-  // Per-edge / per-node vote-type breakdown: [legendIdx, up, down][]
+  // Per-edge / per-node vote-type breakdown: [legendIdx, up, down][]. From the
+  // sparse decoder these are HOLEY arrays (entries only at voted indices) —
+  // always read via `x[i] ?? []` / a falsy guard, never assume an array.
   edge_vote_types?: [number, number, number][][];
   node_vote_types?: [number, number, number][][];
   // Block layer (docs/three-layer-model.md §2.4) — deduped per-block counts:
   // block_votes[b] = total activity (up + down); block_vote_types[b] = [legendIdx, up,
   // down][] indexing block_vote_type_legend (its own legend, not vote_type_legend).
-  block_votes?: number[];
+  block_votes?: number[] | Int32Array;
   block_vote_types?: [number, number, number][][];
   block_vote_type_legend?: string[];
   n_blocks?: number;
+  // Dimension stamps from /api/graph-votes (mismatch guard against a stale
+  // cached topology — votesMatchTopology).
+  n_edges?: number;
+  n_nodes?: number;
+  topology_version?: string;
   blocks_version?: string;
   rev?: number;
   vote_types?: Record<string, string>;

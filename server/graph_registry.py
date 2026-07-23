@@ -204,6 +204,7 @@ class CityGraph:
         self.topology_etag: str | None = None
         self.topology_bin: bytes | None = None
         self.topology_bin_gz: bytes | None = None
+        self.topology_bin_br: bytes | None = None
         # Lazily-built kdtrees: node tree for point-vote snapping, edge-midpoint
         # tree for the vote migration (kept off the hot load path).
         self._node_tree: cKDTree | None = None
@@ -372,6 +373,21 @@ class CityGraph:
             self.topology_bin_gz = _gzip.compress(self.topology_binary(), 6)
         return self.topology_bin_gz
 
+    def topology_binary_br(self) -> bytes | None:
+        """Pre-brotli'd GTB2 blob — ~17% smaller than the gzip twin AND faster
+        to build (NYC: 15.6MB br q5 in 0.6s vs 18.8MB gzip-6 in 1.4s, measured
+        on the 50MB blob). Every current browser sends Accept-Encoding: br, so
+        this is what first-time visitors actually download; gzip stays as the
+        fallback. Returns None when the brotli package is unavailable so the
+        caller degrades to gzip instead of erroring."""
+        if self.topology_bin_br is None:
+            try:
+                import brotli
+            except ImportError:
+                return None
+            self.topology_bin_br = brotli.compress(self.topology_binary(), quality=5)
+        return self.topology_bin_br
+
     def _ensure_node_tree(self) -> cKDTree | None:
         self.ensure_loaded()
         if self._node_tree is None and self.n_nodes:
@@ -460,6 +476,7 @@ class CityGraph:
         self.topology_etag = None
         self.topology_bin = None
         self.topology_bin_gz = None
+        self.topology_bin_br = None
         self._node_tree = None
         self._edge_mid_tree = None
 

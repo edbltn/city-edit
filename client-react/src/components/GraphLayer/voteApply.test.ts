@@ -175,3 +175,53 @@ describe("applyBlockCounts (SET, idempotent, block twin of vtCounts)", () => {
     expect(applyBlockCounts(bare, "X", { "0": [1, 0] })).toBe(false);
   });
 });
+
+describe("mutation paths on sparse-decoded data (Int32Array votes, holey vote types)", () => {
+  // The sparse wire format (utils/sparseVotes.ts) hands the mutation paths
+  // Int32Array totals and HOLEY vote-type arrays (undefined at unvoted
+  // indices, no shared [] sentinel). Every entry point must handle both.
+  function makeSparseDecodedData(): GraphData {
+    const topo = topologyFromJson({
+      nodes: [[0, 0], [0, 1], [0, 2]],
+      edges: [[0, 1, ""], [1, 2, ""]],
+    });
+    return {
+      ...topo,
+      edge_votes: new Int32Array(2),
+      node_votes: new Int32Array(3),
+      vote_type_legend: [],
+      edge_vote_types: new Array(2),   // holey — no entries yet
+      node_vote_types: new Array(3),
+      n_blocks: 2,
+      block_votes: new Int32Array(2),
+      block_vote_types: new Array(2),
+      block_vote_type_legend: [],
+    };
+  }
+
+  it("applyEdgeVoteChange materializes a fresh breakdown in a hole", () => {
+    const d = makeSparseDecodedData();
+    applyEdgeVoteChange(d, ADJ, [0], "X", 1, false);
+    expect(row(d, 0, "X")).toEqual({ up: 1, down: 0 });
+    expect(d.edge_votes![0]).toBe(1);
+    expect(d.edge_vote_types![1]).toBeUndefined(); // neighbor hole untouched
+    expect(d.node_votes![1]).toBe(1);              // derived through Int32Array
+  });
+
+  it("applyMyVoteChange and applyAuthoritativeCounts work through holes", () => {
+    const d = makeSparseDecodedData();
+    applyMyVoteChange(d, ADJ, [1], "X", 0, -1);
+    expect(d.edge_votes![1]).toBe(-1);
+    applyAuthoritativeCounts(d, ADJ, "X", { "1": [4, 1] });
+    expect(row(d, 1, "X")).toEqual({ up: 4, down: 1 });
+    expect(d.edge_votes![1]).toBe(3); // -1 + ((4-1) - oldNet(-1)) = 3
+  });
+
+  it("applyBlockCounts SETs into holey block arrays over Int32Array totals", () => {
+    const d = makeSparseDecodedData();
+    expect(applyBlockCounts(d, "X", { "1": [3, 1] })).toBe(true);
+    expect(d.block_vote_types![1]).toEqual([[0, 3, 1]]);
+    expect(d.block_votes![1]).toBe(4);
+    expect(d.block_vote_types![0]).toBeUndefined();
+  });
+});

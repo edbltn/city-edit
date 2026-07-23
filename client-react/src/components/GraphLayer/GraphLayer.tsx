@@ -65,6 +65,8 @@ import {
   setCachedVotes,
   clearGraphCache,
 } from "../../utils/graphCache";
+import { decodeSparseVotes, isSparseVotes } from "../../utils/sparseVotes";
+import { reportTopologySource } from "../../utils/loadTelemetry";
 import {
   blockCoverage, getVotesVersion, reconcileEdge, resetMapVotes, setVoteTypeMap,
   type VoteDirection,
@@ -117,7 +119,7 @@ function haversineMeters(
 }
 
 /** Loop-based max to avoid stack overflow with large arrays. */
-function arrayMax(arr: number[]): number {
+function arrayMax(arr: ArrayLike<number>): number {
   let max = 0;
   for (let i = 0; i < arr.length; i++) {
     if (arr[i] > max) max = arr[i];
@@ -663,7 +665,7 @@ const spreadKeyRoute = (id: string) => `r${id}`;
  */
 function votesMatchTopology(
   voteData: { n_edges?: number; n_nodes?: number; n_blocks?: number;
-    edge_votes?: unknown[]; block_votes?: unknown[] },
+    edge_votes?: ArrayLike<unknown>; block_votes?: ArrayLike<unknown> },
   topology: GraphTopology | null,
 ): boolean {
   if (!topology) return false;
@@ -1963,7 +1965,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // per-edge canvas heatmap exactly as before.
   const broadcastBlockVotes = useCallback((voteData: Partial<GraphData>) => {
     const blockVotes = voteData.block_votes;
-    blocksActiveRef.current = Array.isArray(blockVotes) && blockVotes.length > 0;
+    // NOT Array.isArray — the sparse decoder hands us an Int32Array, which is
+    // not an Array but is exactly as broadcastable.
+    blocksActiveRef.current = blockVotes != null && blockVotes.length > 0;
     if (!blocksActiveRef.current) return;
     const detail: BlockVotesDetail = {
       blockVotes: blockVotes!,
@@ -2092,10 +2096,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const fetchVotes = useCallback(async () => {
     if (!topologyRef.current) return;
     try {
-      const url = `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`;
+      const url = `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}&format=sparse`;
       const response = await fetch(url, { cache: "no-store", headers: passcodeHeaders() });
       if (!response.ok) throw new Error(`Vote fetch failed: ${response.status}`);
-      const voteData = await response.json();
+      const voteRaw = await response.json();
+      const voteData = isSparseVotes(voteRaw) ? decodeSparseVotes(voteRaw) : voteRaw;
       // If the graph was rebuilt mid-session, these votes no longer line up with
       // our topology. Don't paint the mismatch (it would crash); leave the current
       // heatmap and let the next full page load reconcile against fresh topology.
@@ -2292,6 +2297,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       hasBlocksRef.current = !!topology.edgeBlockId;
       dlog("topo", `ready: ${topology.nEdges} edges, ${topology.nNodes} nodes, `
         + `${topology.nBlocks ?? 0} blocks (${usedCachedTopology ? "IndexedDB cache" : "network"})`);
+      // Label this page load's [MAPLOAD] beacon: cache = repeat visit,
+      // network = true cold first load (the P99 the dashboard tracks).
+      reportTopologySource(usedCachedTopology);
       debugState("topology", {
         nEdges: topology.nEdges, nBlocks: topology.nBlocks ?? 0, cached: usedCachedTopology,
       });
@@ -2305,7 +2313,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       //    pre-re-bake body paints the wrong polygons (node blocks dark, e.g.)
       //    which live deltas then layer onto instead of healing.
       if (usedCachedTopology && version) {
-        const cachedVotes = await getCachedVotes<Partial<GraphData>>(getMapSlug() || themeMode, version);
+        // Cached entries written after the sparse-format rollout hold the raw
+        // (tiny) sparse payload; older entries hold the dense decoded shape.
+        // Decode either into the same in-memory form.
+        const cachedRaw = await getCachedVotes<unknown>(getMapSlug() || themeMode, version);
+        const cachedVotes = isSparseVotes(cachedRaw)
+          ? decodeSparseVotes(cachedRaw)
+          : cachedRaw as Partial<GraphData> | undefined;
         if (cancelled) return;
         const blocksMatch = cachedVotes
           && (cachedVotes.blocks_version ?? null) === blocksVersion
@@ -2329,11 +2343,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       //    any deltas that arrived while the fetch was in flight.
       try {
         const r = await fetch(
-          `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`,
+          `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}&format=sparse`,
           { headers: passcodeHeaders() }
         );
         if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);
-        const voteData = await r.json();
+        // format=sparse: nonzero-only body decoded into typed/holey arrays —
+        // the dense body's ~9M boxed slots were the mobile-Safari OOM (see
+        // utils/sparseVotes.ts). A dense body still decodes as-is (old server).
+        const voteRaw = await r.json();
+        const voteData = isSparseVotes(voteRaw) ? decodeSparseVotes(voteRaw) : voteRaw;
         if (cancelled) return;
 
         // Stale-topology guard. The vote arrays are indexed against the server's
@@ -2373,7 +2391,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         graphDataRef.current = { ...topologyRef.current!, ...voteData };
         lastRevRef.current = voteData.rev ?? 0;
         setVoteTypeMap(voteData.vote_types);
-        if (version) setCachedVotes(getMapSlug() || themeMode, version, voteData);
+        // Persist the RAW wire payload: the sparse form is ~50x smaller to
+        // structured-clone into IndexedDB than the decoded dense arrays, and
+        // the read path re-decodes it.
+        if (version) setCachedVotes(getMapSlug() || themeMode, version, voteRaw);
         broadcastBlockVotes(voteData);
 
         // Replay any deltas that arrived while waiting for the fetch
