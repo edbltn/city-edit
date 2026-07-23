@@ -32,8 +32,20 @@ function pushToMap(map: maplibregl.Map | null): void {
     const src = map.getSource(HEAT_SOURCE_ID) as GeoJSONSource | undefined;
     src?.setData(lastFC);
   };
-  if (map.isStyleLoaded()) apply();
-  else map.once("load", apply);
+  if (map.getSource(HEAT_SOURCE_ID)) {
+    apply();
+    return;
+  }
+  // The source exists as soon as the style JSON is parsed — don't wait for
+  // the map "load" event, which also waits for every initial TILE fetch and
+  // would hold early data (e.g. the /api/heat fast path) hostage to the
+  // slowest tile.
+  const onStyleData = () => {
+    if (!map.getSource(HEAT_SOURCE_ID)) return;
+    map.off("styledata", onStyleData);
+    apply();
+  };
+  map.on("styledata", onStyleData);
 }
 
 // Re-prime whenever MapCanvas swaps in a new map instance.

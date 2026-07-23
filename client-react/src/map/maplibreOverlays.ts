@@ -38,8 +38,18 @@ function pushSource(map: maplibregl.Map | null, sourceId: string): void {
       features: [...registry(sourceId).values()],
     });
   };
-  if (map.isStyleLoaded()) apply();
-  else map.once("load", apply);
+  if (map.getSource(sourceId)) {
+    apply();
+    return;
+  }
+  // The source exists once the style JSON parses — don't wait for "load",
+  // which also waits for every initial tile fetch.
+  const onStyleData = () => {
+    if (!map.getSource(sourceId)) return;
+    map.off("styledata", onStyleData);
+    apply();
+  };
+  map.on("styledata", onStyleData);
 }
 
 // Re-prime all registered sources whenever a new map instance appears.

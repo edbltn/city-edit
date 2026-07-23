@@ -1,5 +1,27 @@
 # Rekey + scale plan: stable edge IDs, <1.5s first load, ~300 concurrent on one server
 
+> **STATUS 2026-07-22: steps 1–5 + 7 EXECUTED** (commits after `f6e6d5c`).
+> Measured on local prod-shaped setup (gunicorn+gevent, prod client build):
+>
+> - **300 WebSocket clients**: connect+init 813ms, vote delta fan-out p95 **80ms**
+>   (300/300), 20 sustained votes → 300/300 clients, **zero rev gaps**.
+> - **100 simultaneous cold visitors** (worst-case stampede, no nginx cache):
+>   heat p95 4.0s, topology p95 3.3s, tiles p95 2.7s — graceful, no errors.
+> - **Cold first load** (prod build): heatmap **3.3s**, streets ~4.5s — the
+>   heat gate is inflated by main-thread contention from the *background*
+>   topology parse; **warm repeat visit: heatmap 1.4s**. The 1.5s target is
+>   met warm; cold is ~2-3.5s visual on local infra (was ~7s at session start).
+> - **eid registry seeded for nyc** — topology etag unchanged
+>   (3801edb62737e4e3), proving existing votes unaffected. OSM refreshes are
+>   unfrozen: refresh_osm.py updates the registry; rebuild tiles via
+>   `python build_pmtiles.py --city <id>` afterwards.
+> - Found during rollout: heat/route GL source pushes were deferred to the map
+>   "load" event, which waits for every initial tile — early data now applies
+>   as soon as the style parses (styledata), worth ~5s on cold loads.
+> - Load test: `perf/loadtest.mjs` (results in perf/results/loadtest-*.json).
+> - Step 6 (binary topology) intentionally deferred — biggest remaining lever
+>   for the cold-load tail alongside viewport-lazy topology via eid'd tiles.
+
 **Goals**
 1. First load ≤1.5s to *streets visible + heatmap painted* on ordinary broadband (≥20Mbps).
 2. Hundreds (~300) of concurrent connections — WebSockets + page loads + votes — on a

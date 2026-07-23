@@ -504,7 +504,18 @@ WS_KEEPALIVE_S = 30
 # client is dropped (it reconnects and recovers via the rev-gap refetch).
 WS_QUEUE_MAX = 256
 
-_ws_subscribers: dict[str, set["queue.Queue[str]"]] = {}
+class _WsSub:
+    """One connected client's delta queue. A separate wrapper object because
+    gevent's monkeypatched Queue is a C type that rejects new attributes."""
+
+    __slots__ = ("q", "dead")
+
+    def __init__(self):
+        self.q: "queue.Queue[str]" = queue.Queue(maxsize=WS_QUEUE_MAX)
+        self.dead = False
+
+
+_ws_subscribers: dict[str, set[_WsSub]] = {}
 _ws_listeners: set[str] = set()
 _ws_lock = threading.Lock()
 
@@ -521,31 +532,30 @@ def _ws_listen(channel: str) -> None:
                     continue
                 with _ws_lock:
                     subs = list(_ws_subscribers.get(channel, ()))
-                for q in subs:
+                for sub in subs:
                     try:
-                        q.put_nowait(msg["data"])
+                        sub.q.put_nowait(msg["data"])
                     except queue.Full:
                         # Slow client — mark it dead; its handler will drop it.
-                        q.dead = True  # type: ignore[attr-defined]
+                        sub.dead = True
         except Exception as e:
             logger.warning(f"[WS] listener for {channel} died: {e}; retrying in 1s")
             time.sleep(1)
 
 
-def _ws_subscribe(channel: str) -> "queue.Queue[str]":
-    q: "queue.Queue[str]" = queue.Queue(maxsize=WS_QUEUE_MAX)
-    q.dead = False  # type: ignore[attr-defined]
+def _ws_subscribe(channel: str) -> _WsSub:
+    sub = _WsSub()
     with _ws_lock:
-        _ws_subscribers.setdefault(channel, set()).add(q)
+        _ws_subscribers.setdefault(channel, set()).add(sub)
         if channel not in _ws_listeners:
             _ws_listeners.add(channel)
             threading.Thread(target=_ws_listen, args=(channel,), daemon=True).start()
-    return q
+    return sub
 
 
-def _ws_unsubscribe(channel: str, q: "queue.Queue[str]") -> None:
+def _ws_unsubscribe(channel: str, sub: _WsSub) -> None:
     with _ws_lock:
-        _ws_subscribers.get(channel, set()).discard(q)
+        _ws_subscribers.get(channel, set()).discard(sub)
 
 
 @sock.route("/ws")
@@ -554,22 +564,22 @@ def ws(ws):
     slug = (request.args.get("map") or DEFAULT_MAP_SLUG).strip()
     channel = vote_store.channel_key(slug)
 
-    q = _ws_subscribe(channel)
+    sub = _ws_subscribe(channel)
     try:
         rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)
         ws.send(json.dumps({"type": "init", "rev": rev, "map": slug}))
 
         while True:
-            if getattr(q, "dead", False):
+            if sub.dead:
                 break  # overflowed — force a reconnect so the client refetches
             try:
-                data = q.get(timeout=WS_KEEPALIVE_S)
+                data = sub.q.get(timeout=WS_KEEPALIVE_S)
                 ws.send(data)
             except queue.Empty:
                 # Idle: keepalive doubles as dead-peer detection (send raises).
                 ws.send('{"type":"keepalive"}')
     finally:
-        _ws_unsubscribe(channel, q)
+        _ws_unsubscribe(channel, sub)
 
 
 # ── Routes API ─────────────────────────────────────────────────────────────
