@@ -464,6 +464,9 @@ export function MapCanvas({ mapStyle, onFacade }: MapCanvasProps) {
         pitchWithRotate: false,
         touchPitch: false,
         attributionControl: false,
+        // Default is 3px — real fingers wobble more than that, so taps were
+        // sometimes read as micro-pans and fired no click at all.
+        clickTolerance: 10,
       });
       map.touchZoomRotate.disableRotation();
       map.keyboard.disableRotation();

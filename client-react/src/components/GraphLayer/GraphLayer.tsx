@@ -1520,6 +1520,21 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   return (
     <>
       {indicatorMarkers}
+      {/* A pin placed before the graph/indexes are ready can't resolve to a
+          street yet — show immediate feedback so the tap visibly landed; the
+          pinned effect re-resolves (and swaps in the real card) once data
+          arrives. Without this, early taps looked like they did nothing. */}
+      {(pinnedPoint || localPinned) && pinnedScreenPos && !pinnedTarget && createPortal(
+        <div
+          className="graph-indicator-modal graph-proposal-card is-hover"
+          style={{ left: pinnedScreenPos.x, top: pinnedScreenPos.y }}
+        >
+          <div className="graph-indicator-modal-body">
+            <div className="graph-tooltip-meta">Locating street…</div>
+          </div>
+        </div>,
+        mapContainer
+      )}
       {showPinned && pinnedScreenPos && createPortal(
         <ProposalCard
           winner={pinnedWinner}
