@@ -16,6 +16,8 @@ import orjson
 import redis
 import requests
 from dotenv import load_dotenv
+from pmtiles.reader import Reader as PMTilesReader, MmapSource
+from pmtiles.tile import Compression
 
 load_dotenv()
 
@@ -1860,6 +1862,115 @@ def serve_tiles(filename):
         "Content-Range, Accept-Ranges, Content-Length, ETag"
     )
     return response
+
+
+# ── z/x/y block tiles ────────────────────────────────────────────────────────
+# Browsers never HTTP-cache the pmtiles:// protocol's range requests (206
+# responses), so warm visits re-download the whole viewport's block tiles
+# (~1MB). These discrete tile URLs are cacheable by the browser, nginx, and any
+# CDN; the client appends ?v=<blocksVersion> so a re-baked archive busts every
+# cache. tippecanoe stores tiles gzip-compressed, so the hot path is a
+# pass-through of stored bytes; the gzip LRU only fills for uncompressed
+# archives.
+
+_TILE_GZIP_LRU_MAX = 512
+
+_tile_readers: dict[str, tuple] = {}  # city_id → (reader, header, mtime_ns)
+_tile_gzip_lru: "OrderedDict[tuple, bytes]" = OrderedDict()
+_tile_lock = threading.Lock()
+
+
+def _blocks_tile_reader(city_id: str) -> tuple:
+    """(reader, header, mtime_ns) for a city's blocks.pmtiles archive.
+
+    blocks.pmtiles is re-baked IN PLACE (lazy re-bake), so the cache is keyed
+    on st_mtime_ns and the archive is reopened whenever it changes. Raises
+    OSError (incl. FileNotFoundError) when the city has no archive.
+    """
+    path = os.path.join(os.path.dirname(__file__), "osm_data", city_id, "blocks.pmtiles")
+    mtime_ns = os.stat(path).st_mtime_ns
+    entry = _tile_readers.get(city_id)
+    if entry and entry[2] == mtime_ns:
+        return entry
+    with _tile_lock:
+        entry = _tile_readers.get(city_id)
+        if entry and entry[2] == mtime_ns:
+            return entry
+        f = open(path, "rb")  # noqa: SIM115 — held open for the mmap's lifetime
+        reader = PMTilesReader(MmapSource(f))
+        header = reader.header()
+        # Drop gzip-LRU entries built from the previous bake. The old reader's
+        # file object is intentionally leaked: another greenlet may still be
+        # mid-read through its mmap, and re-bakes are rare.
+        for key in [k for k in _tile_gzip_lru if k[0] == city_id]:
+            del _tile_gzip_lru[key]
+        entry = (reader, header, mtime_ns)
+        _tile_readers[city_id] = entry
+        logger.info(
+            f"[TILES] opened {city_id}/blocks.pmtiles "
+            f"(z{header['min_zoom']}-{header['max_zoom']}, "
+            f"compression={header['tile_compression'].name})"
+        )
+        return entry
+
+
+@app.route("/api/tile/<city_id>/blocks/<int:z>/<int:x>/<int:y>.mvt")
+def blocks_tile(city_id, z, x, y):
+    # city_id feeds a filesystem path — only registered cities pass.
+    if get_city(city_id) is None:
+        return jsonify({"error": f"Unknown city '{city_id}'"}), 404
+    try:
+        reader, header, mtime_ns = _blocks_tile_reader(city_id)
+    except OSError:
+        return jsonify({"error": f"No block tiles for city '{city_id}'"}), 404
+    if not (header["min_zoom"] <= z <= header["max_zoom"]):
+        return jsonify({"error": "Zoom out of range"}), 404
+
+    # Strong per-tile ETag; the ?v= cache-buster (blocksVersion) makes each URL
+    # unique per bake, so the body behind it is effectively immutable.
+    etag = f'"bt-{city_id}-{z}-{x}-{y}-{mtime_ns}"'
+    cache_control = "public, max-age=31536000, immutable"
+    if request.headers.get("If-None-Match") == etag:
+        resp = app.response_class(status=304)
+        resp.headers["ETag"] = etag
+        resp.headers["Cache-Control"] = cache_control
+        return resp
+
+    stored_gzip = header["tile_compression"] == Compression.GZIP
+    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "")
+    key = (city_id, z, x, y)
+    body = None
+    if accepts_gzip and not stored_gzip:
+        with _tile_lock:
+            body = _tile_gzip_lru.get(key)
+            if body is not None:
+                _tile_gzip_lru.move_to_end(key)
+
+    if body is None:
+        data = reader.get(z, x, y)
+        if data is None:
+            return jsonify({"error": "No such tile"}), 404
+        if stored_gzip:
+            # tippecanoe already gzipped the stored tiles — pass them through
+            # (decompress only for the rare client that doesn't accept gzip).
+            body = data if accepts_gzip else gzip.decompress(data)
+        elif accepts_gzip:
+            body = gzip.compress(data, compresslevel=6)
+            with _tile_lock:
+                _tile_gzip_lru[key] = body
+                while len(_tile_gzip_lru) > _TILE_GZIP_LRU_MAX:
+                    _tile_gzip_lru.popitem(last=False)
+        else:
+            body = data
+
+    resp = app.response_class(response=body, mimetype="application/vnd.mapbox-vector-tile")
+    if accepts_gzip:
+        # In every accepts_gzip branch above, body holds gzip bytes.
+        resp.headers["Content-Encoding"] = "gzip"
+    resp.headers["Vary"] = "Accept-Encoding"
+    resp.headers["Cache-Control"] = cache_control
+    resp.headers["ETag"] = etag
+    return resp
 
 
 # ── Map preview images ───────────────────────────────────────────────────────

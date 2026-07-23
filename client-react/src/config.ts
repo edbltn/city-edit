@@ -81,6 +81,11 @@ export const CONFIG = {
     ? `${devApiBase}/api/tiles/nyc/blocks.pmtiles`
     : "/api/tiles/nyc/blocks.pmtiles",
 
+  // z/x/y block-tile source (browser/CDN-cacheable — the pmtiles:// protocol's
+  // range requests never are). Populated from the city payload by
+  // applyCityConfig(); while null, MapLibre falls back to blockTilesUrl.
+  blockTiles: null as BlockTilesConfig | null,
+
   // Leaflet behaviors
   preferCanvas: true,
 
@@ -97,6 +102,15 @@ export const CONFIG = {
       : `${wsProtocol}//${typeof window !== "undefined" ? window.location.host : ""}/ws`),
 };
 
+// z/x/y block-tile source descriptor (server: cities.City._block_tiles()).
+export interface BlockTilesConfig {
+  /** URL template with {z}/{x}/{y} placeholders; carries a ?v= cache-buster
+   *  (blocksVersion) so a re-baked archive busts every HTTP cache. */
+  template: string;
+  minzoom: number;
+  maxzoom: number;
+}
+
 // Public city shape returned by the API (matches server cities.City.to_public()).
 export interface CityConfig {
   id: string;
@@ -110,6 +124,9 @@ export interface CityConfig {
   /** Cache-buster for blocks.pmtiles (server: file mtime); null/absent when
    *  the city ships no block artifacts. */
   blocksVersion?: number | null;
+  /** z/x/y block-tile source; null/absent when the city ships no block
+   *  artifacts (or the server predates the endpoint). */
+  blockTiles?: BlockTilesConfig | null;
 }
 
 /**
@@ -118,7 +135,8 @@ export interface CityConfig {
  * read the active city's values. Pan limits get generous padding around the bbox.
  */
 export function applyCityConfig(city: CityConfig): void {
-  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath, blocksVersion } = city;
+  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath, blocksVersion, blockTiles } =
+    city;
   CONFIG.initialView = { lat: center.lat, lon: center.lon, zoom: defaultZoom };
   CONFIG.mappedBounds = { sw: { ...bounds.sw }, ne: { ...bounds.ne } };
   CONFIG.nycBounds = {
@@ -135,4 +153,12 @@ export function applyCityConfig(city: CityConfig): void {
       + (blocksVersion ? `?v=${blocksVersion}` : "");
     CONFIG.blockTilesUrl = isLocalDev ? `${devApiBase}${blocksPath}` : blocksPath;
   }
+  // z/x/y tile template — same devHost rule as the other API URLs (absolute to
+  // Flask :5001 in dev, relative behind nginx in prod).
+  CONFIG.blockTiles = blockTiles
+    ? {
+      ...blockTiles,
+      template: isLocalDev ? `${devApiBase}${blockTiles.template}` : blockTiles.template,
+    }
+    : null;
 }

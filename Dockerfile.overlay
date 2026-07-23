@@ -34,3 +34,8 @@ COPY server/data/ ./data/
 # Rebuilt client + updated nginx config.
 COPY --from=client-builder /app/dist /var/www/html/
 COPY deploy/nginx-cloudrun.conf /etc/nginx/nginx.conf
+
+# Process supervisor config too — without this an overlay deploy silently keeps
+# the base image's gunicorn command line (e.g. new --worker-connections knobs
+# would never ship).
+COPY deploy/supervisord.conf /etc/supervisor/conf.d/supervisord.conf

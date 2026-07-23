@@ -9,7 +9,7 @@
 import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
-import { CONFIG } from "../../config";
+import { CONFIG, type BlockTilesConfig } from "../../config";
 import { dlog, dwarn, debugState } from "../../utils/debugLog";
 import { maplibreRasterTiles, heatTip, type MapStyle } from "../../mapStyles";
 
@@ -120,9 +120,29 @@ function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification["pai
 function buildStyle(
   _graphTilesUrl: string,
   blockTilesUrl: string,
+  blockTiles: BlockTilesConfig | null,
   tiles: string[],
   mapStyle: MapStyle,
 ): maplibregl.StyleSpecification {
+  // z/x/y endpoint when the city advertises one: discrete tile URLs are
+  // browser/nginx/CDN-cacheable, while the pmtiles:// protocol's range
+  // requests (206s) never are — warm visits re-downloaded ~1MB. Tile bytes
+  // are identical either way, so feature ids and all feature-state heat/
+  // selection logic are untouched. MapLibre wants absolute tile URLs; build
+  // them by string concat — new URL() percent-encodes the {z} braces.
+  const blocksSource: maplibregl.VectorSourceSpecification = blockTiles
+    ? {
+      type: "vector",
+      tiles: [
+        blockTiles.template.startsWith("http")
+          ? blockTiles.template
+          : `${window.location.origin}${blockTiles.template}`,
+      ],
+      minzoom: blockTiles.minzoom,
+      maxzoom: blockTiles.maxzoom,
+    }
+    : { type: "vector", url: `pmtiles://${blockTilesUrl}` };
+
   return {
     version: 8,
     name: "desire-path",
@@ -146,10 +166,7 @@ function buildStyle(
       // promoteId: it would look up the now-absent property and override every
       // id with undefined, silently detaching all feature-state (heat,
       // selection).
-      blocks: {
-        type: "vector",
-        url: `pmtiles://${blockTilesUrl}`,
-      },
+      blocks: blocksSource,
     },
     layers: [
       // Background fill (shows through before tiles load) — matches the map style.
@@ -241,6 +258,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         style: buildStyle(
           CONFIG.graphTilesUrl,
           CONFIG.blockTilesUrl,
+          CONFIG.blockTiles,
           maplibreRasterTiles(mapStyle),
           mapStyle,
         ),

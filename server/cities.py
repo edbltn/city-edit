@@ -14,6 +14,24 @@ bbox convention throughout the app: (south, west, north, east).
 import os
 from dataclasses import dataclass
 
+from pmtiles.reader import Reader as PMTilesReader, MmapSource
+
+
+# blocks.pmtiles zoom range per archive path, keyed on the mtime cache-buster so
+# a lazy re-bake is picked up without re-reading the header on every request.
+_blocks_zoom_cache: dict[str, tuple[int, int, int]] = {}
+
+
+def _blocks_zoom_range(path: str, version: int) -> tuple[int, int]:
+    cached = _blocks_zoom_cache.get(path)
+    if cached and cached[0] == version:
+        return cached[1], cached[2]
+    with open(path, "rb") as f:
+        header = PMTilesReader(MmapSource(f)).header()
+    entry = (version, header["min_zoom"], header["max_zoom"])
+    _blocks_zoom_cache[path] = entry
+    return entry[1], entry[2]
+
 
 def _env_osrm_host(city_id: str, default: str) -> str:
     """Per-city OSRM host override, e.g. OSRM_HOST_NYC=localhost for local dev."""
@@ -55,6 +73,7 @@ class City:
     def to_public(self) -> dict:
         """Client-facing shape (matches the bounds/center used in config.ts)."""
         s, w, n, e = self.bbox
+        blocks_version = self._blocks_version()
         return {
             "id": self.id,
             "name": self.name,
@@ -68,7 +87,25 @@ class City:
             # fixed URL): the client appends ?v=<this>, so a re-baked block set
             # is never mixed with week-old cached ranges. A cheap stat — no
             # graph load — and None when the city has no block artifacts.
-            "blocksVersion": self._blocks_version(),
+            "blocksVersion": blocks_version,
+            # z/x/y block-tile source (browser/CDN-cacheable, unlike the
+            # pmtiles range requests). ?v= busts every cache on re-bake.
+            "blockTiles": self._block_tiles(blocks_version),
+        }
+
+    def _block_tiles(self, blocks_version: int | None) -> dict | None:
+        """MapLibre z/x/y tile-source descriptor, or None when no archive."""
+        if blocks_version is None:
+            return None
+        path = os.path.join(os.path.dirname(__file__), self.data_dir, "blocks.pmtiles")
+        try:
+            minzoom, maxzoom = _blocks_zoom_range(path, blocks_version)
+        except (OSError, KeyError, ValueError):
+            return None
+        return {
+            "template": f"/api/tile/{self.id}/blocks/{{z}}/{{x}}/{{y}}.mvt?v={blocks_version}",
+            "minzoom": minzoom,
+            "maxzoom": maxzoom,
         }
 
     def _blocks_version(self) -> int | None:
