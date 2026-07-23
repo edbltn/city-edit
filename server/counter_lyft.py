@@ -8,9 +8,9 @@ a legal bike route would have used anyway — especially corridors that already
 have bike lanes near stations. This script subtracts that signal: for every
 ingested ride it routes the SAME trip through a bike-legality OSRM
 (scripts/build_bike_osrm.sh, profile osrm/bicycle-flat.lua — shortest LEGAL
-path, no pushing-the-bike onto foot-only ways) and casts direction=-1, with
-the ride's own voter_id and vote type, on the upvoted edges the bike route
-covers. Only the divergent stretches — pedestrian-only paths and
+path, no pushing-the-bike onto foot-only ways) and CANCELS the ride's own
+votes (direction=0, same voter_id and vote type) on the upvoted edges the
+bike route covers. Only the divergent stretches — pedestrian-only paths and
 counter-one-way riding a bike can't legally use — keep their upvotes.
 
 Two structural choices make "covers" mean "this stretch was legally ridable":
@@ -43,14 +43,16 @@ sha256(ride_id)[:16], so hashing the ride_ids in the cached monthly zips
 (server/lyft_data/) recovers exactly the imported devices and their trip
 endpoints. Human voters never match.
 
-Idempotent: re-running plans no-ops (the voter's prior direction is already
--1), so a second pass changes nothing.
+Idempotent: re-running plans no-ops (the voter has no remaining votes on the
+covered blocks), so a second pass changes nothing.
 
-A running tally gate (NetGate) keeps every (vote_type, edge) tally at ≥ 0:
-a flip is a −2 swing so it's only cast while the tally stays positive; when
-exactly one upvote remains the device's vote is REMOVED (direction 0) instead;
-edges already at zero are left alone. The correction cancels imported signal —
-it never manufactures net-negative streets.
+Cancellation only ever removes the device's OWN votes, so a (vote_type, edge)
+tally can never go negative and no device is counted "against" at block level
+(block counts dedupe per device — block_votes.py). The legacy --flip mode
+casts direction=-1 instead, guarded by a running tally gate (NetGate) that
+keeps every tally ≥ 0: a flip is a −2 swing so it's only cast while the tally
+stays positive; the last upvote is downgraded to a removal; zeroed edges are
+left alone. Flips still surface as block-level downvotes — prefer the default.
 
 Usage:
     # Build + serve the bike graph first:
@@ -515,10 +517,18 @@ async def counter_one(session, args, device, ride, vt_edges, vt_labels, graph,
         overlap = sorted(edges & bike_set)
         if not overlap:
             continue
-        # Tally gate: never push a (vote_type, edge) tally below zero — flip
-        # only edges that keep a positive tally, downgrade the last upvote to
-        # a removal, and leave already-zeroed edges alone entirely.
-        flips, zeros = gate.take(vt_id, overlap)
+        if args.flip:
+            # Tally gate: never push a (vote_type, edge) tally below zero —
+            # flip only edges that keep a positive tally, downgrade the last
+            # upvote to a removal, and leave already-zeroed edges alone.
+            flips, zeros = gate.take(vt_id, overlap)
+        else:
+            # Cancel mode (default): remove the device's OWN votes on the
+            # covered blocks (direction 0). A removal only ever subtracts what
+            # this device cast, so tallies can't go negative and no device is
+            # ever counted "against" at block level — the correction erases
+            # imported credit instead of manufacturing downvotes.
+            flips, zeros = [], overlap
         if not flips and not zeros:
             continue
         any_overlap = True
@@ -608,6 +618,13 @@ def main():
                              "already countered by a prior matched pass).")
     parser.add_argument("--admin-token", default=os.environ.get("ADMIN_TOKEN"),
                         help="Backend ADMIN_TOKEN for --reconstruct-unmatched")
+    parser.add_argument("--flip", action="store_true",
+                        help="Legacy behavior: cast direction=-1 flips (gated "
+                             "by the running tally so no (vote_type, edge) "
+                             "goes negative) instead of the default "
+                             "direction=0 cancellation. Flips still mark "
+                             "devices 'against' at block level; prefer the "
+                             "default.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Compute overlaps and report; cast nothing")
     args = parser.parse_args()
@@ -630,8 +647,11 @@ def main():
     log(f"Loading upvotes for map '{args.map_slug}' ...")
     votes, marked = load_upvotes(args.map_slug)
     log(f"  {len(votes)} devices with upvotes ({len(marked)} import-marked)")
-    gate = NetGate(load_net_counts(args.map_slug))
-    log(f"  tally gate over {len(gate.net)} (vote_type, edge) pairs")
+    if args.flip:
+        gate = NetGate(load_net_counts(args.map_slug))
+        log(f"  tally gate over {len(gate.net)} (vote_type, edge) pairs")
+    else:
+        gate = NetGate({})  # cancel mode removes own votes only; no gate needed
 
     log("Matching devices against cached ride zips ...")
     matched = match_rides(args.city, set(votes))
