@@ -219,11 +219,19 @@ function buildStyle(
         attribution:
           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
       },
-      // Graph overlay from PMTiles
-      graph: {
-        type: "vector",
-        url: `pmtiles://${graphTilesUrl}`,
-      },
+      // Graph overlay — z/x/y tile URLs when the server provides them
+      // (browser/CDN cacheable); pmtiles range requests as fallback.
+      graph: CONFIG.graphTiles
+        ? {
+            type: "vector",
+            tiles: [CONFIG.graphTiles.template],
+            minzoom: CONFIG.graphTiles.minzoom,
+            maxzoom: CONFIG.graphTiles.maxzoom,
+          }
+        : {
+            type: "vector",
+            url: `pmtiles://${graphTilesUrl}`,
+          },
       // Voted edges — small GeoJSON pushed by GraphLayer on vote changes.
       [HEAT_SOURCE_ID]: {
         type: "geojson",

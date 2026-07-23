@@ -9,7 +9,11 @@ import sys
 import time
 import hashlib
 import threading
+from collections import OrderedDict
 from functools import lru_cache
+
+from pmtiles.reader import Reader as PMTilesReader, MmapSource
+from pmtiles.tile import Compression
 
 import redis
 import requests
@@ -394,6 +398,9 @@ def map_get(slug):
     city = get_city(m["cityId"])
     if city:
         m["city"] = city.to_public()
+        # z/x/y tile source for the client's GL map (browser/CDN cacheable,
+        # unlike pmtiles range requests).
+        m["city"]["tiles"] = city_tiles_meta(city.id)
     return jsonify(m)
 
 
@@ -587,11 +594,17 @@ def calculate_route():
         )
 
         if "error" in route:
-            logger.info("[ROUTE] OSRM failed, falling back to Python router")
-            route = rmap.graph.provider.calculate_route(
-                start=(start[0], start[1]), end=(end[0], end[1]),
-                mode="walk", waypoints=waypoints_tuples,
-            )
+            # The Python router is CPU-bound (can take seconds) and blocks the
+            # whole gevent event loop — every WebSocket and request on this
+            # worker stalls while it runs. Fine in dev (no OSRM container);
+            # set PYTHON_ROUTING_FALLBACK=0 in production so an OSRM outage
+            # degrades to a routing error instead of freezing the server.
+            if os.environ.get("PYTHON_ROUTING_FALLBACK", "1") != "0":
+                logger.info("[ROUTE] OSRM failed, falling back to Python router")
+                route = rmap.graph.provider.calculate_route(
+                    start=(start[0], start[1]), end=(end[0], end[1]),
+                    mode="walk", waypoints=waypoints_tuples,
+                )
 
         if "error" in route:
             return jsonify(route), 404
@@ -982,6 +995,106 @@ def serve_tiles(filename):
     response.headers["Cache-Control"] = "public, max-age=604800"
     response.headers["Access-Control-Allow-Origin"] = "*"
     return response
+
+
+# ── z/x/y vector tiles ──────────────────────────────────────────────────────
+# Browsers never HTTP-cache range requests, so the pmtiles:// protocol
+# re-downloads the whole viewport's tiles on every visit. These discrete tile
+# URLs are cacheable by the browser, nginx, and any CDN. Tiles in the archive
+# are uncompressed MVT; gzipped copies are kept in a small LRU since the
+# viewport hot set is tiny and pbf compresses ~4x.
+
+_TILE_CACHE_MAX = 512
+
+_tile_readers: dict[str, tuple] = {}
+_tile_gzip_lru: "OrderedDict[tuple, bytes]" = OrderedDict()
+_tile_lock = threading.Lock()
+
+
+def _tile_reader(city_id: str) -> tuple:
+    """(reader, header, etag) for a city's pmtiles archive, cached."""
+    entry = _tile_readers.get(city_id)
+    if entry:
+        return entry
+    with _tile_lock:
+        entry = _tile_readers.get(city_id)
+        if entry:
+            return entry
+        path = os.path.join(os.path.dirname(__file__), "osm_data", city_id, "graph.pmtiles")
+        f = open(path, "rb")  # noqa: SIM115 — held open for the mmap's lifetime
+        reader = PMTilesReader(MmapSource(f))
+        header = reader.header()
+        st = os.stat(path)
+        etag = f'"t-{int(st.st_mtime)}-{st.st_size}"'
+        entry = (reader, header, etag)
+        _tile_readers[city_id] = entry
+        return entry
+
+
+def city_tiles_meta(city_id: str) -> dict | None:
+    """Client-facing z/x/y tile source description (None when no archive)."""
+    try:
+        _, header, _ = _tile_reader(city_id)
+    except (FileNotFoundError, OSError):
+        return None
+    return {
+        "template": f"/api/tile/{city_id}/{{z}}/{{x}}/{{y}}.mvt",
+        "minzoom": header["min_zoom"],
+        "maxzoom": header["max_zoom"],
+    }
+
+
+@app.route("/api/tile/<city_id>/<int:z>/<int:x>/<int:y>.mvt")
+def vector_tile(city_id, z, x, y):
+    try:
+        reader, header, etag = _tile_reader(city_id)
+    except (FileNotFoundError, OSError):
+        return jsonify({"error": f"No tiles for city '{city_id}'"}), 404
+
+    if request.headers.get("If-None-Match") == etag:
+        resp = app.response_class(status=304)
+        resp.headers["ETag"] = etag
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
+
+    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "")
+    key = (city_id, z, x, y)
+    body = None
+    if accepts_gzip:
+        with _tile_lock:
+            body = _tile_gzip_lru.get(key)
+            if body is not None:
+                _tile_gzip_lru.move_to_end(key)
+
+    if body is None:
+        data = reader.get(z, x, y)
+        if data is None:
+            # Empty tile — 204 renders as "no features" in MapLibre.
+            resp = app.response_class(status=204)
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            resp.headers["ETag"] = etag
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            return resp
+        if header["tile_compression"] == Compression.GZIP:
+            # Archive already gzipped its tiles — pass through.
+            body = data
+        elif accepts_gzip:
+            body = gzip.compress(data, compresslevel=6)
+            with _tile_lock:
+                _tile_gzip_lru[key] = body
+                while len(_tile_gzip_lru) > _TILE_CACHE_MAX:
+                    _tile_gzip_lru.popitem(last=False)
+        else:
+            body = data
+
+    resp = app.response_class(response=body, mimetype="application/vnd.mapbox-vector-tile")
+    if accepts_gzip or header["tile_compression"] == Compression.GZIP:
+        resp.headers["Content-Encoding"] = "gzip"
+    resp.headers["Vary"] = "Accept-Encoding"
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    resp.headers["ETag"] = etag
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
 
 
 @app.route("/api/graph-version", methods=["GET"])

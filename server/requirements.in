@@ -9,6 +9,7 @@ mercantile
 networkx
 osmnx
 pmtiles
+pmtiles
 psycogreen
 psycopg2-binary
 python-dotenv

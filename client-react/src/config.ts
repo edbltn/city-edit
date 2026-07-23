@@ -52,10 +52,16 @@ export const CONFIG = {
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
   tileSubdomains: "abcd",
 
-  // PMTiles — graph overlay tiles (built from OSM walk graph)
+  // PMTiles — graph overlay tiles (built from OSM walk graph). Used only as
+  // the fallback when the server doesn't provide a z/x/y tile template.
   graphTilesUrl: isLocalDev
     ? "http://localhost:5001/api/tiles/graph.pmtiles"
     : "/tiles/graph.pmtiles",
+
+  // z/x/y vector-tile source for the graph (browser/CDN cacheable, unlike
+  // pmtiles range requests). Set at bootstrap from the map config; when null
+  // the pmtiles:// protocol above is used instead.
+  graphTiles: null as { template: string; minzoom: number; maxzoom: number } | null,
 
   // API & Socket URLs - auto-detect based on environment
   apiUrl: isLocalDev ? "http://localhost:5001/api" : "/api",
@@ -74,6 +80,7 @@ export interface CityConfig {
   minZoom: number;
   maxZoom: number;
   tilesPath: string;
+  tiles?: { template: string; minzoom: number; maxzoom: number } | null;
 }
 
 /**
@@ -93,5 +100,12 @@ export function applyCityConfig(city: CityConfig): void {
   CONFIG.maxZoom = maxZoom;
   if (tilesPath) {
     CONFIG.graphTilesUrl = isLocalDev ? `http://localhost:5001${tilesPath}` : tilesPath;
+  }
+  const tiles = city.tiles;
+  if (tiles?.template) {
+    CONFIG.graphTiles = {
+      ...tiles,
+      template: isLocalDev ? `http://localhost:5001${tiles.template}` : tiles.template,
+    };
   }
 }
