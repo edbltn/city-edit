@@ -15,6 +15,7 @@ import { getDefaultVoteTypeForTheme } from "../constants/voteTypes";
 import { blockCoverage, type VoteDirection } from "../utils/voteStore";
 import { useVotesVersion } from "../utils/useVotesVersion";
 import { castVotes, voteButtonState } from "../utils/castVote";
+import { reverseGeocode } from "../utils/geocode";
 import { derror } from "../utils/debugLog";
 import { useTheme } from "./ThemeContext";
 import { useGraphSnap } from "./GraphSnapContext";
@@ -503,13 +504,9 @@ export function RouteProvider({ children }: { children: ReactNode }) {
 
   const geocodeInto = useCallback(
     (coords: LatLng) => {
-      fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${coords.lat}&lng=${coords.lng}`)
-        .then((r) => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.json();
-        })
-        .then((data) => patchWaypointAddress(coords, data.address))
-        .catch(() => {});
+      reverseGeocode(coords.lat, coords.lng).then((address) => {
+        if (address) patchWaypointAddress(coords, address);
+      });
     },
     [patchWaypointAddress]
   );

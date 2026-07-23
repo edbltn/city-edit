@@ -72,6 +72,7 @@ import {
   type VoteDirection,
 } from "../../utils/voteStore";
 import { castVotes, voteButtonState } from "../../utils/castVote";
+import { reverseGeocode } from "../../utils/geocode";
 import { dlog, dwarn, derror, debugState, debugProbe } from "../../utils/debugLog";
 import { useVotesVersion } from "../../utils/useVotesVersion";
 import { getVoterId } from "../../utils/voterIdentity";
@@ -180,20 +181,17 @@ function resolveAddress(
   const cached = geocodeCache.get(key);
   if (cached !== undefined) return cached || formatLatLng(lat, lng);
 
-  // Not cached — show placeholder and fire async fetch
+  // Not cached — show placeholder and fire async fetch (reverseGeocode retries
+  // with backoff internally, so a transient failure resolves without a re-hover)
   if (!geocodeInFlight.has(key)) {
     geocodeInFlight.add(key);
-    fetch(withMap(`${CONFIG.apiUrl}/reverse-geocode?lat=${lat}&lng=${lng}`))
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data) => {
-        geocodeCache.set(key, data.address || null);
-        onResolved();
-      })
-      .catch(() => {
-        // Don't cache failures — allow retry on next hover
+    reverseGeocode(lat, lng)
+      .then((address) => {
+        // Don't cache null (failure after retries) — allow retry on next hover
+        if (address !== null) {
+          geocodeCache.set(key, address);
+          onResolved();
+        }
       })
       .finally(() => {
         geocodeInFlight.delete(key);

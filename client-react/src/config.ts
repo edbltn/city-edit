@@ -16,6 +16,13 @@ const wsProtocol =
     ? "wss:"
     : "ws:";
 
+// Dev API host follows the page's hostname (not a hardcoded localhost) so the
+// dev server is testable from a phone on the same network: open the Network
+// URL vite prints and API/WS/tiles resolve to this machine automatically.
+// VITE_API_BASE still wins, so a worktree stack can point elsewhere entirely.
+const devHost = typeof window !== "undefined" ? window.location.hostname : "localhost";
+const devApiBase = import.meta.env.VITE_API_BASE || `http://${devHost}:5001`;
+
 export const CONFIG = {
   // Active map slug (set at bootstrap from the URL; empty = legacy single-map mode)
   mapSlug: "",
@@ -64,14 +71,14 @@ export const CONFIG = {
   // default for the bootstrap (nyc); applyCityConfig() rebinds it to the active
   // city's tilesPath once the map config loads.
   graphTilesUrl: isLocalDev
-    ? `${import.meta.env.VITE_API_BASE || "http://localhost:5001"}/api/tiles/nyc/graph.pmtiles`
+    ? `${devApiBase}/api/tiles/nyc/graph.pmtiles`
     : "/api/tiles/nyc/graph.pmtiles",
 
   // Block polygons (one per street segment) — the primary heat display when a
   // city has them. Same per-city tiles dir as the graph; availability is
   // detected from the /api/graph-votes response carrying block_votes.
   blockTilesUrl: isLocalDev
-    ? `${import.meta.env.VITE_API_BASE || "http://localhost:5001"}/api/tiles/nyc/blocks.pmtiles`
+    ? `${devApiBase}/api/tiles/nyc/blocks.pmtiles`
     : "/api/tiles/nyc/blocks.pmtiles",
 
   // Leaflet behaviors
@@ -82,11 +89,11 @@ export const CONFIG = {
   // own Flask on a non-default port without colliding with the main dev server.
   apiUrl: import.meta.env.VITE_API_BASE
     ? `${import.meta.env.VITE_API_BASE}/api`
-    : (isLocalDev ? "http://localhost:5001/api" : "/api"),
+    : (isLocalDev ? `http://${devHost}:5001/api` : "/api"),
   wsUrl: import.meta.env.VITE_WS_BASE
     ? `${import.meta.env.VITE_WS_BASE}/ws`
     : (isLocalDev
-      ? "ws://localhost:5001/ws"
+      ? `ws://${devHost}:5001/ws`
       : `${wsProtocol}//${typeof window !== "undefined" ? window.location.host : ""}/ws`),
 };
 
@@ -121,11 +128,11 @@ export function applyCityConfig(city: CityConfig): void {
   CONFIG.minZoom = minZoom;
   CONFIG.maxZoom = maxZoom;
   if (tilesPath) {
-    CONFIG.graphTilesUrl = isLocalDev ? `http://localhost:5001${tilesPath}` : tilesPath;
+    CONFIG.graphTilesUrl = isLocalDev ? `${devApiBase}${tilesPath}` : tilesPath;
     // ?v= busts the week-long HTTP cache when the block set is re-baked —
     // stale cached ranges of the OLD archive must never mix with the new one.
     const blocksPath = tilesPath.replace("graph.pmtiles", "blocks.pmtiles")
       + (blocksVersion ? `?v=${blocksVersion}` : "");
-    CONFIG.blockTilesUrl = isLocalDev ? `http://localhost:5001${blocksPath}` : blocksPath;
+    CONFIG.blockTilesUrl = isLocalDev ? `${devApiBase}${blocksPath}` : blocksPath;
   }
 }

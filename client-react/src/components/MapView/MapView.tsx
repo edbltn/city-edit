@@ -180,6 +180,9 @@ function SnapMarker({
     [showAsEnd]
   );
 
+  // Touch devices have no persistent cursor: the "follow the cursor" ghost
+  // would freeze at the last tap position and read as a phantom pin.
+  if (!window.matchMedia("(hover: hover)").matches) return null;
   if (suppress || !cursorLatLng) return null;
   if (!pointOnly && activeTool === "end" && !hasStart) return null;
 
