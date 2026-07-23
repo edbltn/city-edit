@@ -2,6 +2,7 @@ import gzip
 import json
 import logging
 import math
+import queue
 import os
 import re
 import sys
@@ -481,42 +482,85 @@ def map_auth(slug):
 
 # ── WebSocket (delta-based, per-map) ─────────────────────────────────────────
 
+# ── WebSocket fanout ────────────────────────────────────────────────────────
+# One Redis pubsub listener per channel per process, fanning messages out to
+# per-client stdlib queues. The old design gave every client its own Redis
+# connection and a 10Hz get_message() poll — at hundreds of clients that's
+# thousands of wakeups/sec and hundreds of Redis connections on one event
+# loop. stdlib Queue/Thread are gevent-cooperative under gunicorn's
+# monkeypatch and plain threads under the dev server, so this works in both.
+
+WS_KEEPALIVE_S = 30
+# Bounded so one stalled client can't buffer unbounded deltas; on overflow the
+# client is dropped (it reconnects and recovers via the rev-gap refetch).
+WS_QUEUE_MAX = 256
+
+_ws_subscribers: dict[str, set["queue.Queue[str]"]] = {}
+_ws_listeners: set[str] = set()
+_ws_lock = threading.Lock()
+
+
+def _ws_listen(channel: str) -> None:
+    """Long-lived listener: one Redis pubsub → all subscribed client queues."""
+    while True:
+        try:
+            client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
+            pubsub = client.pubsub()
+            pubsub.subscribe(channel)
+            for msg in pubsub.listen():
+                if msg.get("type") != "message":
+                    continue
+                with _ws_lock:
+                    subs = list(_ws_subscribers.get(channel, ()))
+                for q in subs:
+                    try:
+                        q.put_nowait(msg["data"])
+                    except queue.Full:
+                        # Slow client — mark it dead; its handler will drop it.
+                        q.dead = True  # type: ignore[attr-defined]
+        except Exception as e:
+            logger.warning(f"[WS] listener for {channel} died: {e}; retrying in 1s")
+            time.sleep(1)
+
+
+def _ws_subscribe(channel: str) -> "queue.Queue[str]":
+    q: "queue.Queue[str]" = queue.Queue(maxsize=WS_QUEUE_MAX)
+    q.dead = False  # type: ignore[attr-defined]
+    with _ws_lock:
+        _ws_subscribers.setdefault(channel, set()).add(q)
+        if channel not in _ws_listeners:
+            _ws_listeners.add(channel)
+            threading.Thread(target=_ws_listen, args=(channel,), daemon=True).start()
+    return q
+
+
+def _ws_unsubscribe(channel: str, q: "queue.Queue[str]") -> None:
+    with _ws_lock:
+        _ws_subscribers.get(channel, set()).discard(q)
+
+
 @sock.route("/ws")
 def ws(ws):
     """Push a single map's vote deltas to a client in real time."""
     slug = (request.args.get("map") or DEFAULT_MAP_SLUG).strip()
     channel = vote_store.channel_key(slug)
 
-    ws_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
-    pubsub = ws_client.pubsub()
-    pubsub.subscribe(channel)
-
-    rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)
-    ws.send(json.dumps({"type": "init", "rev": rev, "map": slug}))
-
-    last_push = time.time()
-    KEEPALIVE = 30
+    q = _ws_subscribe(channel)
     try:
+        rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)
+        ws.send(json.dumps({"type": "init", "rev": rev, "map": slug}))
+
         while True:
+            if getattr(q, "dead", False):
+                break  # overflowed — force a reconnect so the client refetches
             try:
-                ws.receive(timeout=0)
-            except Exception as e:
-                s = str(e).lower()
-                if "timed out" not in s and "no data" not in s and "connection closed" not in s:
-                    logger.warning(f"[WS] receive exception: {e}")
-
-            msg = pubsub.get_message(timeout=0.1)
-            if msg and msg["type"] == "message":
-                ws.send(msg["data"])
-                last_push = time.time()
-
-            if time.time() - last_push > KEEPALIVE:
+                data = q.get(timeout=WS_KEEPALIVE_S)
+                ws.send(data)
+            except queue.Empty:
+                # Idle: keepalive doubles as dead-peer detection (send raises).
                 ws.send('{"type":"keepalive"}')
-                last_push = time.time()
     finally:
-        pubsub.unsubscribe(channel)
-        pubsub.close()
-        ws_client.close()
+        _ws_unsubscribe(channel, q)
 
 
 # ── Routes API ─────────────────────────────────────────────────────────────
