@@ -46,6 +46,21 @@ function arrayMax(arr: number[]): number {
   return max;
 }
 
+// True once the client has built the collection from its own topology+votes —
+// after that the (older) server-built snapshot must not clobber it.
+let locallySynced = false;
+
+/**
+ * First-paint fast path: push the server-built voted-edges collection
+ * (/api/heat) so heat shows before the topology download finishes. No-op if
+ * the local data already synced (it's fresher — it includes optimistic votes).
+ */
+export function primeHeatFromServer(fc: GeoJSON.FeatureCollection): void {
+  if (locallySynced) return;
+  lastFC = fc;
+  pushToMap(getMapLibreMap());
+}
+
 /**
  * Rebuild the voted-edge collection from graph data and push it to the live
  * MapLibre map. Call on any vote mutation (full fetch, delta, optimistic).
@@ -53,6 +68,7 @@ function arrayMax(arr: number[]): number {
 export function syncHeatToMapLibre(data: Pick<GraphData, "nodes" | "edges" | "edge_votes">): void {
   const votes = data.edge_votes;
   if (!votes || !data.edges || !data.nodes) return;
+  locallySynced = true;
 
   const maxVotes = Math.max(1, arrayMax(votes));
   const logMax = Math.log(maxVotes + 1);

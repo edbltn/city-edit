@@ -1,6 +1,7 @@
 import gzip
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -178,8 +179,72 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> dict:
     arrays["vote_types"] = {str(k): v for k, v in vote_store.all_vote_types().items()}
     body = json.dumps(arrays)
 
-    entry = {"rev": rev, "body": body, "gz": gzip.compress(body.encode(), compresslevel=6)}
+    entry = {
+        "rev": rev,
+        "body": body,
+        "gz": gzip.compress(body.encode(), compresslevel=6),
+        # Kept for /api/heat so it can build its GeoJSON without re-reading Redis.
+        "edge_votes": arrays["edge_votes"],
+    }
     _vote_cache[cache_key] = entry
+    return entry
+
+
+# ── Heatmap fast path ───────────────────────────────────────────────────────
+# Server-built GeoJSON of voted edges (norm/tHot/tPeak baked in, mirroring the
+# client's maplibreHeat.ts math) so the first heat paint doesn't wait for the
+# multi-MB topology download. Cached per (map, mode, revision), gzipped.
+
+_heat_cache: dict[str, dict] = {}
+
+
+def _build_heat_entry(rmap: ResolvedMap, mode: str | None = None) -> dict:
+    rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+    cache_key = f"{rmap.slug}:{mode}" if mode else rmap.slug
+    cached = _heat_cache.get(cache_key)
+    if cached and cached["rev"] == rev:
+        return cached
+
+    votes_entry = _build_graph_votes_body(rmap, mode)
+    edge_votes = votes_entry["edge_votes"]
+    nodes = rmap.graph.nodes
+    edges = rmap.graph.edges
+
+    max_votes = 1
+    for v in edge_votes:
+        if v > max_votes:
+            max_votes = v
+    log_max = math.log(max_votes + 1)
+
+    features = []
+    for i, v in enumerate(edge_votes):
+        if v <= 0 or i >= len(edges):
+            continue
+        a = nodes[edges[i][0]]
+        b = nodes[edges[i][1]]
+        norm = math.log(v + 1) / log_max
+        features.append({
+            "type": "Feature",
+            "id": i,
+            "properties": {
+                "norm": norm,
+                "tHot": (norm - 0.2) / 0.8 if norm > 0.2 else 0,
+                "tPeak": (norm - 0.7) / 0.3 if norm > 0.7 else 0,
+            },
+            "geometry": {
+                "type": "LineString",
+                # GeoJSON is [lng, lat]; graph nodes are [lat, lng].
+                "coordinates": [[a[1], a[0]], [b[1], b[0]]],
+            },
+        })
+
+    body = json.dumps({"type": "FeatureCollection", "features": features})
+    entry = {
+        "rev": rev,
+        "body": body,
+        "gz": gzip.compress(body.encode(), compresslevel=6),
+    }
+    _heat_cache[cache_key] = entry
     return entry
 
 
@@ -954,6 +1019,46 @@ def graph_votes():
     else:
         resp = app.response_class(
             response=entry["body"], status=200, mimetype="application/json",
+        )
+    resp.headers["Vary"] = "Accept-Encoding"
+    resp.headers["Cache-Control"] = "public, max-age=5"
+    resp.headers["ETag"] = etag
+    return resp
+
+
+@app.route("/api/heat", methods=["GET"])
+def heat():
+    """Voted-edges GeoJSON for the heatmap's first paint (no topology needed).
+
+    Same feature shape the client builds locally (maplibreHeat.ts); the client
+    switches to its locally-built collection once topology + votes arrive.
+    """
+    rmap = resolve_map(request.args.get("map"))
+    rmap.graph.ensure_loaded()
+
+    mode = request.args.get("mode") or None
+    rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+    etag = f'"h-{rmap.slug}-{mode or "all"}-{rev}"'
+    if request.headers.get("If-None-Match") == etag:
+        resp = app.response_class(status=304)
+        resp.headers["ETag"] = etag
+        resp.headers["Cache-Control"] = "public, max-age=5"
+        return resp
+
+    try:
+        entry = _build_heat_entry(rmap, mode)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "")
+    if accepts_gzip and entry.get("gz") is not None:
+        resp = app.response_class(
+            response=entry["gz"], status=200, mimetype="application/geo+json",
+        )
+        resp.headers["Content-Encoding"] = "gzip"
+    else:
+        resp = app.response_class(
+            response=entry["body"], status=200, mimetype="application/geo+json",
         )
     resp.headers["Vary"] = "Accept-Encoding"
     resp.headers["Cache-Control"] = "public, max-age=5"

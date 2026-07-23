@@ -18,7 +18,7 @@ import { CONFIG } from "../../config";
 import { withMap, getMapSlug } from "../../map/runtime";
 import { useMapFacade } from "../../map/MapFacadeContext";
 import type { MapFacade, MapMouseEvent } from "../../map/facade";
-import { syncHeatToMapLibre } from "./maplibreHeat";
+import { syncHeatToMapLibre, primeHeatFromServer } from "./maplibreHeat";
 import { syncHighlightsToMapLibre } from "./maplibreHighlight";
 import { useWebSocketContext } from "../../context/WebSocketContext";
 import { useGraphSnap, useTheme, useHeatmap } from "../../context";
@@ -700,7 +700,18 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     let cancelled = false;
 
     (async () => {
-      // 0. Kick off the authoritative vote fetch immediately — it doesn't
+      // 0a. Heatmap fast path: the server-built voted-edges GeoJSON paints the
+      //     heat as soon as the GL map is up, long before the topology
+      //     download completes. Superseded by the locally-built collection
+      //     once topology + votes land (see maplibreHeat.primeHeatFromServer).
+      fetch(`${CONFIG.apiUrl}/heat?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((fc) => {
+          if (!cancelled && fc) primeHeatFromServer(fc as GeoJSON.FeatureCollection);
+        })
+        .catch(() => {});
+
+      // 0b. Kick off the authoritative vote fetch immediately — it doesn't
       //    depend on topology, so it downloads in parallel with the (much
       //    larger) topology fetch instead of after it.
       const votesPromise = fetch(
