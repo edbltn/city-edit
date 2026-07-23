@@ -78,6 +78,7 @@ export function syncHeatToMapLibre(data: Pick<GraphData, "nodes" | "edges" | "ed
     const v = votes[i] ?? 0;
     if (v <= 0) continue;
     const [fromIdx, toIdx] = data.edges[i];
+    if (fromIdx === toIdx) continue; // tombstone (retired eid) / self-loop
     const a = data.nodes[fromIdx];
     const b = data.nodes[toIdx];
     if (!a || !b) continue;

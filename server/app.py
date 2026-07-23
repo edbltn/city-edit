@@ -225,6 +225,8 @@ def _build_heat_entry(rmap: ResolvedMap, mode: str | None = None) -> dict:
     for i, v in enumerate(edge_votes):
         if v <= 0 or i >= len(edges):
             continue
+        if edges[i][0] == edges[i][1]:
+            continue  # tombstone (retired eid) or self-loop — no geometry to draw
         a = nodes[edges[i][0]]
         b = nodes[edges[i][1]]
         norm = math.log(v + 1) / log_max

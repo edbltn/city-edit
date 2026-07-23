@@ -16,6 +16,7 @@ import threading
 from collections import OrderedDict
 
 from cities import City
+from edge_registry import apply_edge_registry
 from python_router import PythonRouter
 from osrm_router import OsrmRouter
 
@@ -59,13 +60,19 @@ class CityGraph:
         logger.info(f"[GRAPH] Loading graph for city '{self.city.id}'...")
         south, west, north, east = self.city.bbox
         data = self.provider.get_graph_for_bbox(south, west, north, east)
+        # Reorder edges so index == stable eid (durable across OSM rebuilds).
+        # No-op with a warning when the city has no registry yet.
+        apply_edge_registry(self.city.data_dir, data, persist=False)
         nodes = data.get("nodes", [])
         edges = data.get("edges", [])
 
-        # coord → edge index reverse map (both directions for undirected lookup)
+        # coord → edge index reverse map (both directions for undirected lookup).
+        # Degenerate entries (retired-eid tombstones, OSM self-loops) are skipped.
         coord_to_edge_idx: dict[tuple[str, str], list[int]] = {}
         for i, edge in enumerate(edges):
             from_idx, to_idx = edge[0], edge[1]
+            if from_idx == to_idx:
+                continue
             from_lat, from_lon = nodes[from_idx]
             to_lat, to_lon = nodes[to_idx]
             c1 = f"{round(from_lon, 5)},{round(from_lat, 5)}"
@@ -79,9 +86,12 @@ class CityGraph:
             lat, lon = node[0], node[1]
             coord_to_node_idx[f"{round(lon, 5)},{round(lat, 5)}"] = i
 
-        # Node adjacency: node_id → [edge_ids]
+        # Node adjacency: node_id → [edge_ids]; degenerates skipped so node 0
+        # doesn't accumulate every tombstone as an "adjacent" edge.
         adj: list[list[int]] = [[] for _ in range(len(nodes))]
         for i, edge in enumerate(edges):
+            if edge[0] == edge[1]:
+                continue
             adj[edge[0]].append(i)
             adj[edge[1]].append(i)
 

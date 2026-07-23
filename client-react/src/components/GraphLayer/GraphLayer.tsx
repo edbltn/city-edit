@@ -240,6 +240,8 @@ function findNearestEdgeIndex(
 
   const checkEdge = (i: number, currentBestDist: number, currentBestIdx: number): [number, number] => {
     const [fromIdx, toIdx] = data.edges[i];
+    // Tombstones (retired eids) and self-loops aren't selectable geometry.
+    if (fromIdx === toIdx) return [currentBestDist, currentBestIdx];
     const fromPt = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);
     const toPt = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);
     const dist = pointToSegmentDist(px, py, fromPt.x, fromPt.y, toPt.x, toPt.y);
@@ -313,6 +315,8 @@ function hitTest(
 
   const checkEdge = (i: number) => {
     const [fromIdx, toIdx] = data.edges[i];
+    // Tombstones (retired eids) and self-loops aren't selectable geometry.
+    if (fromIdx === toIdx) return;
     const fromPt = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);
     const toPt = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);
     const dist = pointToSegmentDist(px, py, fromPt.x, fromPt.y, toPt.x, toPt.y);
@@ -368,6 +372,9 @@ function buildNodeAdj(topology: Pick<GraphData, "nodes" | "edges">): number[][] 
   const adj: number[][] = new Array(topology.nodes.length);
   for (let i = 0; i < adj.length; i++) adj[i] = [];
   for (let i = 0; i < topology.edges.length; i++) {
+    // Skip degenerates (retired-eid tombstones point 0→0) so node 0 doesn't
+    // accumulate them as "adjacent" edges.
+    if (topology.edges[i][0] === topology.edges[i][1]) continue;
     adj[topology.edges[i][0]].push(i);
     adj[topology.edges[i][1]].push(i);
   }
@@ -1232,7 +1239,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     const placed = winners
       .map((w) => {
         const edge = topology.edges[w.edgeIdx];
-        if (!edge) return null;
+        if (!edge || edge[0] === edge[1]) return null;
         const [fromIdx, toIdx] = edge;
         const fromNode = topology.nodes[fromIdx];
         const toNode = topology.nodes[toIdx];

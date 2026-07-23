@@ -4,8 +4,12 @@ Build PMTiles file from the OSM routing graph.
 Generates MVT (Mapbox Vector Tile) encoded tiles for client-side rendering
 with MapLibre GL JS. Two layers per tile: "edges" (LineString) and "nodes" (Point).
 
+Edge feature ids are the STABLE eids from edge_registry.py (the registry is
+applied/updated before tiling), so tiles, topology, and votes all agree on
+edge identity. Rebuild these tiles whenever the walk graph is rebuilt.
+
 Usage:
-    python build_pmtiles.py [--output graph.pmtiles]
+    python build_pmtiles.py --city nyc [--output osm_data/nyc/graph.pmtiles]
 """
 
 import json
@@ -18,30 +22,35 @@ import mercantile
 from pmtiles.tile import zxy_to_tileid, TileType, Compression
 from pmtiles.writer import Writer
 
+from cities import get_city
+from edge_registry import apply_edge_registry
 from python_router import PythonRouter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Mapped region bounds (matches client config.ts mappedBounds)
-DEFAULT_BBOX = (-74.03069, 40.70121, -73.90752, 40.87043)  # west, south, east, north
 MIN_ZOOM = 12
 MAX_ZOOM = 16
 
 
-def get_all_nodes_edges():
-    """Get all nodes and edges from the graph."""
-    router = PythonRouter("osm_data/nyc")
-    west, south, east, north = DEFAULT_BBOX
+def get_all_nodes_edges(city_id: str):
+    """City graph with the stable-eid registry applied (index == eid)."""
+    city = get_city(city_id)
+    if not city:
+        raise SystemExit(f"Unknown city: {city_id}")
+    router = PythonRouter(city.data_dir)
+    south, west, north, east = city.bbox
     data = router.get_graph_for_bbox(south, west, north, east)
-    return data.get("nodes", []), data.get("edges", [])
+    apply_edge_registry(city.data_dir, data, persist=True)
+    bbox = (west, south, east, north)
+    return data.get("nodes", []), data.get("edges", []), bbox
 
 
-def build_pmtiles(output_path: str = "graph.pmtiles"):
+def build_pmtiles(city_id: str, output_path: str):
     """Build PMTiles file with MVT-encoded tiles from graph data."""
-    logger.info(f"Building PMTiles: {output_path}")
+    logger.info(f"Building PMTiles for {city_id}: {output_path}")
 
-    nodes, edges = get_all_nodes_edges()
+    nodes, edges, bbox = get_all_nodes_edges(city_id)
     logger.info(f"Got {len(nodes)} nodes and {len(edges)} edges")
 
     node_coords = {i: (lat, lon) for i, (lat, lon) in enumerate(nodes)}
@@ -63,9 +72,12 @@ def build_pmtiles(output_path: str = "graph.pmtiles"):
                 "id": node_idx,
             })
 
-    # Process edges
+    # Process edges — feature id == eid. Tombstones (retired eids) and
+    # self-loops have no drawable geometry and are skipped.
     for edge_idx, edge in enumerate(edges):
         from_idx, to_idx = edge[0], edge[1]
+        if from_idx == to_idx:
+            continue
         name = edge[2] if len(edge) > 2 else ""
         highway = edge[3] if len(edge) > 3 else ""
 
@@ -131,10 +143,10 @@ def build_pmtiles(output_path: str = "graph.pmtiles"):
                 "tile_compression": Compression.NONE,
                 "min_zoom": MIN_ZOOM,
                 "max_zoom": MAX_ZOOM,
-                "min_lon_e7": int(DEFAULT_BBOX[0] * 1e7),
-                "min_lat_e7": int(DEFAULT_BBOX[1] * 1e7),
-                "max_lon_e7": int(DEFAULT_BBOX[2] * 1e7),
-                "max_lat_e7": int(DEFAULT_BBOX[3] * 1e7),
+                "min_lon_e7": int(bbox[0] * 1e7),
+                "min_lat_e7": int(bbox[1] * 1e7),
+                "max_lon_e7": int(bbox[2] * 1e7),
+                "max_lat_e7": int(bbox[3] * 1e7),
             },
             metadata={
                 "name": "desire-path-graph",
@@ -143,7 +155,7 @@ def build_pmtiles(output_path: str = "graph.pmtiles"):
                 "type": "overlay",
                 "minzoom": str(MIN_ZOOM),
                 "maxzoom": str(MAX_ZOOM),
-                "bounds": ",".join(str(b) for b in DEFAULT_BBOX),
+                "bounds": ",".join(str(b) for b in bbox),
                 "vector_layers": json.dumps([
                     {
                         "id": "edges",
@@ -169,6 +181,9 @@ def build_pmtiles(output_path: str = "graph.pmtiles"):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Build PMTiles from OSM graph")
-    parser.add_argument("--output", "-o", default="graph.pmtiles", help="Output path")
+    parser.add_argument("--city", default="nyc", help="City id (see cities.py)")
+    parser.add_argument("--output", "-o", default=None,
+                        help="Output path (default: osm_data/<city>/graph.pmtiles)")
     args = parser.parse_args()
-    build_pmtiles(args.output)
+    out = args.output or os.path.join("osm_data", args.city, "graph.pmtiles")
+    build_pmtiles(args.city, out)

@@ -151,6 +151,18 @@ def build_city(target: str, force: bool = False, check_only: bool = False) -> di
     stats = build_graph(bbox, str(out_dir))   # osmnx downloads the network directly
     duration = (datetime.utcnow() - start).total_seconds()
 
+    # Update the stable-eid registry against the fresh graph: surviving edges
+    # keep their eids (and therefore their votes), new edges allocate fresh
+    # ones, vanished edges retire theirs. Rebuild PMTiles afterwards so tile
+    # feature ids stay in sync (build_pmtiles.py).
+    from edge_registry import apply_edge_registry
+    from python_router import PythonRouter
+
+    south, west, north, east = bbox
+    fresh = PythonRouter(data_dir=str(out_dir)).get_graph_for_bbox(south, west, north, east)
+    eid_stats = apply_edge_registry(str(out_dir), fresh, persist=True)
+    logger.info(f"[{target}] eid registry: {eid_stats}")
+
     version = f"{target}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
     metadata = {
         "city": target,
