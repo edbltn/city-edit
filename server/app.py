@@ -915,6 +915,21 @@ def maps_list():
     return resp
 
 
+# Staging deployments set APP_ENV=staging (terraform staging.tf). The flag rides
+# the map config to the client — which then skips the canonical-subdomain
+# redirect (it would bounce testers to prod) and shows a STAGING ribbon — and
+# marks every Flask response noindex so an accidentally-linked staging URL never
+# gets crawled. nginx applies the same header to its static responses via a
+# $host map (deploy/nginx-cloudrun.conf). Prod never sets APP_ENV.
+IS_STAGING = os.environ.get("APP_ENV", "").strip().lower() == "staging"
+
+if IS_STAGING:
+    @app.after_request
+    def _staging_noindex(resp):
+        resp.headers["X-Robots-Tag"] = "noindex, nofollow"
+        return resp
+
+
 def _enrich_map(m: dict) -> dict:
     """Attach the city public config + searchable vote types to a map dict.
 
@@ -935,6 +950,8 @@ def _enrich_map(m: dict) -> dict:
         vt for vt in fetch_voted_vote_type_labels(m["slug"])
         if vt["label"] not in default_labels
     ]
+    if IS_STAGING:
+        m["staging"] = True
     return m
 
 

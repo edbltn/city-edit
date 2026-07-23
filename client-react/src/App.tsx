@@ -9,7 +9,7 @@ import { useRoute, useHeatmap } from "./context";
 import { isLandingHost, subdomainRedirectUrl } from "./themes";
 import {
   resolveMapConfig, fetchMapConfig, applyMap, detectMapSlugFromUrl,
-  takePasscodeParam, authWithPasscode,
+  takePasscodeParam, authWithPasscode, getCurrentMap,
   type MapConfig,
 } from "./map/runtime";
 import { reportMapLoaded } from "./utils/loadTelemetry";
@@ -55,6 +55,9 @@ function AppContent() {
       </main>
       <ErrorToast message={error} onDismiss={clearError} />
       <PasscodeGate />
+      {getCurrentMap()?.staging && (
+        <div className="staging-ribbon" aria-hidden>STAGING</div>
+      )}
       {isInitialLoading && <FullScreenLoader />}
     </div>
   );
@@ -78,7 +81,9 @@ function MapApp() {
       // A map with a canonical subdomain (presets + admin-assigned vanity hosts)
       // settles on that host: send apex /m/<slug> and shared/typed visitors to
       // e.g. bikepaths.cityedit.org, preserving any ?slat/?vt deep-link params.
-      if (resolved?.subdomain) {
+      // Staging serves the same maps at its own (unguessable) host, so the
+      // redirect would eject testers to prod — the server flag disables it.
+      if (resolved?.subdomain && !resolved.staging) {
         const target = subdomainRedirectUrl(resolved.subdomain);
         if (target) {
           window.location.replace(target);

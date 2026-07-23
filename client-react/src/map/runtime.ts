@@ -40,6 +40,9 @@ export interface MapConfig {
   subdomain?: string | null;
   voteCount?: number;
   city?: CityConfig;
+  /** Server runs with APP_ENV=staging: skip the canonical-subdomain redirect
+   *  (it would bounce testers to prod) and show the STAGING ribbon. */
+  staging?: boolean;
 }
 
 // The map shown when the URL names no slug and the host has no mapped subdomain.
