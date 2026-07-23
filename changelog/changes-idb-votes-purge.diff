@@ -1,0 +1,52 @@
+diff --git a/client-react/src/utils/graphCache.ts b/client-react/src/utils/graphCache.ts
+index f3c5c06..4abb4b9 100644
+--- a/client-react/src/utils/graphCache.ts
++++ b/client-react/src/utils/graphCache.ts
+@@ -22,7 +22,14 @@ const STORE = "graph";
+ // memory budget. A pre-v3 cached JSON topology (station networks) would lack
+ // coords/ends and crash the accessors — bump to drop those entries. Binary
+ // topology blobs are unaffected (decoded fresh each load), but clearing is cheap.
+-const DB_VERSION = 3;
++// v4: pre-sparse clients persisted the DECODED dense vote arrays (~9M boxed
++// values on NYC maps). Merely READING such an entry back structured-clones the
++// whole thing onto the JS heap — over mobile Safari's jetsam budget before the
++// format check can reject it, and the crash kills the page before the sparse
++// refetch ever overwrites the entry, so the device crash-loops forever. Purge
++// every votes:* key on upgrade (a key-range delete never materializes the
++// values); cached topology is format-compatible and survives.
++const DB_VERSION = 4;
+ 
+ const TOPOLOGY_KEY = "topology";
+ const TOPOLOGY_BIN_KEY = "topology-bin";
+@@ -38,13 +45,25 @@ function openDb(): Promise<IDBDatabase> {
+       return;
+     }
+     const req = indexedDB.open(DB_NAME, DB_VERSION);
+-    req.onupgradeneeded = () => {
++    req.onupgradeneeded = (event) => {
+       const db = req.result;
+-      // Drop any prior store on upgrade: a pre-v2 client may have persisted
+-      // topology bytes from a stale HTTP-cache response under the current
+-      // version key. Clearing forces a fresh, version-busted re-fetch.
+-      if (db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE);
+-      db.createObjectStore(STORE);
++      // Pre-v3 stores may hold topology bytes from a stale HTTP-cache response
++      // keyed by the current version, or boxed-tuple topology the typed-array
++      // accessors can't read — drop the whole store and re-fetch fresh.
++      if (event.oldVersion < 3) {
++        if (db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE);
++      }
++      if (!db.objectStoreNames.contains(STORE)) {
++        db.createObjectStore(STORE);
++        return;
++      }
++      // v3 → v4: delete every votes:* entry by KEY RANGE. Reading a pre-sparse
++      // dense entry (even to inspect it) materializes ~9M boxed values and
++      // jetsam-kills mobile Safari; a range delete touches only the keys. The
++      // cached binary topology is unchanged in format and stays warm.
++      req.transaction!
++        .objectStore(STORE)
++        .delete(IDBKeyRange.bound("votes:", "votes:\uffff"));
+     };
+     req.onsuccess = () => resolve(req.result);
+     req.onerror = () => reject(req.error);

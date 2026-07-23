@@ -29,6 +29,20 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-23-idb-dense-votes-purge.html">
+    <div class="date">2026-07-23</div>
+    <h2>The crash loop the sparse fix couldn't reach — purging pre-sparse dense vote entries (IndexedDB v4)</h2>
+    <p>format=sparse fixed the bikepaths mobile crash for every device except the ones already
+    poisoned: a phone that visited before the rollout still held the DECODED dense vote arrays
+    (~9M boxed values) in IndexedDB, and merely reading that entry back on load — before any format
+    check can reject it — re-created the old memory peak and jetsam-killed the tab before the sparse
+    refetch could overwrite it. A permanent crash loop no error boundary can catch (a jetsam kill
+    raises no JS error). Cache bumped to v4: the upgrade deletes every votes:* key with a key-range
+    delete that never materializes the values, while the warm topology cache survives. Verified in a
+    real Chrome against the dev bundle: seeded v3 dense entries purged, topology sentinel intact,
+    fresh sparse entry written after.</p>
+  </a>
+
   <a class="entry" href="./2026-07-22-sparse-votes-mapload-p99.html">
     <div class="date">2026-07-22</div>
     <h2>Sparse vote bodies (the bikepaths OOM), brotli topology, and a first-load P99 dashboard</h2>
