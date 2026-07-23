@@ -69,6 +69,11 @@ server/osm_data/
 /debug
 /af2641f3-*.png
 
+# Perf harness output (results are per-run; the committed reference baselines
+# are force-added)
+perf/results/
+perf/shots/
+
 # Locust run output and venv
 loadtest/env/
 loadtest/sf_run*

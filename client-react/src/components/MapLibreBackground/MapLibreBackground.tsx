@@ -480,6 +480,13 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
           }
         }
       }
+      // Perf harness hook (perf/instrument.js): stamp the first heat apply —
+      // feature-state isn't introspectable from outside, so this is the one
+      // signal for "heat is now visible". Guarded: zero-cost in normal runs.
+      if (!prev) {
+        (window as unknown as { __perf?: { mark: (l: string) => void } }).__perf
+          ?.mark("first-heat-apply");
+      }
       applied.current = { heat: next, denom };
       dlog("blocks", `heat apply (${full ? "full" : "diff"}): ${writes} writes, ${next.size} lit`);
       debugState("blockHeatNonzero", next.size);
