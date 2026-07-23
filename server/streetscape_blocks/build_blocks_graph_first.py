@@ -38,11 +38,18 @@ edge∩polygon overlap hold by construction:
      geometrically one intersection with that neighbour and is ABSORBED into
      it. A corridor is the union of its member-edge tubes (per-class
      half-width) minus the junction cells, so corridor-vs-junction stays
-     disjoint (junctions win). Membership follows the final geometry: a
-     corridor edge left entirely inside junction cells is REASSIGNED to the
-     cell containing its midpoint, and a captured edge a cut stranded outside
-     its own cell is RE-HOMED to the cell or corridor that holds it now — so
-     edge∩polygon overlap is total.
+     disjoint (junctions win). CORRIDOR-VS-CORRIDOR overlaps (parallel
+     streets within buffer reach, grade-separated crossings) are resolved by
+     the same geometry-wins rule: each overlap region is claimed by the
+     corridor whose member edges carry more length inside it and cut from the
+     other; a corridor cut to < 1 m² merges into the winner. The final
+     polygon set is audited PAIRWISE ACROSS ALL CLASSES — nothing ships with
+     an overlap ≥ 1 m². Membership follows the final geometry: a corridor
+     edge left entirely inside junction cells is REASSIGNED to the cell
+     containing its midpoint, an edge cut away from its corridor moves to the
+     polygon holding its midpoint (clipped tube graft as last resort), and a
+     captured edge a cut stranded outside its own cell is RE-HOMED to the
+     cell or corridor that holds it now — so edge∩polygon overlap is total.
 
 Outputs (same contract the server + tippecanoe already consume):
   output/blocks_final_<city>.geojson       display polygons, dense block_id
@@ -151,6 +158,51 @@ def split_oversized(xy: np.ndarray, labels: np.ndarray) -> np.ndarray:
         queue.append(next_label)
         next_label += 1
     return labels
+
+
+def _polyparts(geom) -> list:
+    """Polygonal parts of any geometry (lines/points dropped)."""
+    if geom.geom_type in ("Polygon", "MultiPolygon"):
+        return [geom]
+    if geom.geom_type == "GeometryCollection":
+        out = []
+        for g in geom.geoms:
+            out.extend(_polyparts(g))
+        return out
+    return []
+
+
+def _clean(geom):
+    """Valid, purely-polygonal geometry. Difference/intersection chains emit
+    self-touching rings and mixed-dimension collections — make_valid itself
+    throws on the latter ("Overlay input is mixed-dimension"), so strip to
+    polygonal parts FIRST, validate each part (buffer(0) as fallback), then
+    union."""
+    if geom is None or geom.is_empty:
+        return geom
+    parts = _polyparts(geom)
+    if not parts:
+        return Polygon()
+    fixed = []
+    for p in parts:
+        if not p.is_valid:
+            try:
+                p = shapely.make_valid(p)
+            except shapely.errors.GEOSException:
+                p = p.buffer(0)
+            fixed.extend(_polyparts(p))
+        else:
+            fixed.append(p)
+    if not fixed:
+        return Polygon()
+    try:
+        out = union_all(fixed)
+    except shapely.errors.GEOSException:
+        out = union_all([p.buffer(0) for p in fixed])
+    parts = _polyparts(out)
+    if not parts:
+        return Polygon()
+    return parts[0] if len(parts) == 1 else union_all(parts)
 
 
 def majority(values):
@@ -529,34 +581,144 @@ def main():
         if cell_tree is not None and not tube.is_empty:
             hit = cell_tree.query(tube, predicate="intersects")
             if len(hit):
-                tube = shapely.difference(tube, union_all([cells[i] for i in hit]))
+                tube = _clean(shapely.difference(tube, union_all([cells[i] for i in hit])))
         if not tube.is_empty and tube.area > 1.0:
             corr_polys[c] = tube
 
+    # ── Corridor-vs-corridor disjointness ──────────────────────────────────
+    # Two corridors' tubes overlap wherever DISTINCT streets run closer than
+    # the sum of their half-widths: parallel service roads and paths,
+    # grade-separated crossings (no shared node → no junction cell between
+    # them), wide-class buffers spilling over a neighbouring footway. This was
+    # the last unhandled overlap class (thousands of pairs per city) — an
+    # overlapped block under another is impossible to click.
+    # Resolution mirrors the junction trim's "geometry wins" rule: each
+    # overlap region is CLAIMED by the corridor whose own member edges carry
+    # more length inside it (its street actually runs there; tie → longer
+    # member length overall, then lower id) and CUT from the other. A loser
+    # left with < 1 m² is geometrically a duplicate of the winner and MERGES
+    # into it (members + geometry) — cuts only shrink and merges only union,
+    # so the sweep converges; ≤ 4 mutating sweeps + a measure-only one.
+    corr_cuts = 0
+    corr_merges = 0
+    cc_residual = 0
+    lines_cache: dict[int, object] = {}
+
+    def member_lines(c):
+        if c not in lines_cache:
+            lines_cache[c] = shapely.multilinestrings(
+                [list(ln.coords) for ln in edge_lines(corridors[c])])
+        return lines_cache[c]
+
+    def merge_corridor(i: int, j: int):
+        """Fold corridor i (members + geometry) into corridor j."""
+        nonlocal corr_merges
+        corridors[j].extend(corridors[i])
+        corridors[i] = []
+        corr_polys[j] = _clean(union_all([corr_polys[j], corr_polys[i]]))
+        del corr_polys[i]
+        lines_cache.pop(i, None)
+        lines_cache.pop(j, None)
+        corr_merges += 1
+
+    for sweep in range(5):
+        ids = [c for c in corr_polys if not corr_polys[c].is_empty]
+        if len(ids) < 2:
+            break
+        geoms = np.array([corr_polys[c] for c in ids], dtype=object)
+        tree = STRtree(list(geoms))
+        qi, qj = tree.query(geoms, predicate="intersects")
+        pairs = [(ids[int(a)], ids[int(b)]) for a, b in zip(qi, qj) if a < b]
+        if sweep == 4:
+            cc_residual = sum(
+                1 for a, b in pairs
+                if a in corr_polys and b in corr_polys
+                and corr_polys[a].intersection(corr_polys[b]).area >= 1.0)
+            break
+        n_cut_before = corr_cuts + corr_merges
+        for a, b in pairs:
+            if a not in corr_polys or b not in corr_polys:
+                continue
+            pa, pb = corr_polys[a], corr_polys[b]
+            region = _clean(pa.intersection(pb))
+            if region.is_empty or region.area < 1.0:
+                continue
+            la = member_lines(a).intersection(region).length
+            lb = member_lines(b).intersection(region).length
+            if la > lb:
+                keep, lose = a, b
+            elif lb > la:
+                keep, lose = b, a
+            else:
+                # Pure buffer spill on both sides — the longer street keeps.
+                ta, tb = member_lines(a).length, member_lines(b).length
+                keep, lose = (a, b) if (ta, -a) >= (tb, -b) else (b, a)
+            cut = _clean(shapely.difference(corr_polys[lose], corr_polys[keep]))
+            if cut.is_empty or cut.area < 1.0:
+                merge_corridor(lose, keep)
+            else:
+                corr_polys[lose] = cut
+                corr_cuts += 1
+        if corr_cuts + corr_merges == n_cut_before:
+            # Nothing mutated: remaining intersects are boundary touches.
+            cc_residual = 0
+            break
+    print(f"[gf] corridor disjointness: {corr_cuts} cuts, {corr_merges} "
+          f"duplicate corridors merged, {cc_residual} overlapping corridor "
+          f"pairs left ({time.time()-t0:.0f}s)", flush=True)
+
     # Membership follows the final geometry: a corridor edge whose tube was
     # entirely eaten by junction cells (short link threading an intersection)
-    # moves to the cell containing its midpoint, so every edge intersects its
-    # own block polygon. Corridors left with no geometry disappear entirely.
+    # OR cut away by the corridor-disjointness pass moves to the polygon that
+    # holds its midpoint now — a cell first, else the corridor whose (final)
+    # geometry contains it; last resort, its clipped tube is grafted back onto
+    # its own corridor, so every edge intersects its own block polygon.
+    # Corridors left with no geometry disappear entirely.
     reassigned = 0
-    for c in live_corrs:
+    corr_grafts = 0
+    reamap_ids = [c for c in corr_polys if not corr_polys[c].is_empty]
+    reamap_tree = STRtree([corr_polys[c] for c in reamap_ids]) if reamap_ids else None
+    moved_in: dict[int, list[int]] = {}
+    for c in list(live_corrs):
         poly = corr_polys.get(c)
         stay = []
         for eid in corridors[c]:
-            if poly is not None:
-                line = LineString([node_xy[ends[eid, 0]], node_xy[ends[eid, 1]]])
-                if line.distance(poly) <= 1e-6:
-                    stay.append(eid)
-                    continue
+            line = LineString([node_xy[ends[eid, 0]], node_xy[ends[eid, 1]]])
+            if poly is not None and line.distance(poly) <= 1e-6:
+                stay.append(eid)
+                continue
             mid = shapely.points((node_xy[ends[eid, 0]] + node_xy[ends[eid, 1]]) / 2.0)
             hit = cell_tree.query(mid, predicate="intersects") if cell_tree is not None else []
             if len(hit):
                 edge_cluster[eid] = live_cl[int(hit[0])]
                 reassigned += 1
-            else:
-                stay.append(eid)     # nothing better — keep the corridor mapping
+                continue
+            hit = reamap_tree.query(mid, predicate="intersects") if reamap_tree is not None else []
+            hit = [h for h in hit if reamap_ids[int(h)] != c]
+            if len(hit):
+                moved_in.setdefault(reamap_ids[int(hit[0])], []).append(int(eid))
+                reassigned += 1
+                continue
+            if poly is not None:
+                # Graft the edge's own tube back, clipped against every other
+                # polygon so the graft cannot re-create an overlap.
+                patch = tube_of([eid])
+                near = cell_tree.query(patch, predicate="intersects") if cell_tree is not None else []
+                if len(near):
+                    patch = shapely.difference(patch, union_all([cells[int(i)] for i in near]))
+                nearc = reamap_tree.query(patch, predicate="intersects") if reamap_tree is not None else []
+                others = [corr_polys[reamap_ids[int(i)]] for i in nearc if reamap_ids[int(i)] != c]
+                if others:
+                    patch = shapely.difference(patch, union_all(others))
+                corr_polys[c] = _clean(union_all([corr_polys[c], patch]))
+                poly = corr_polys[c]
+                corr_grafts += 1
+            stay.append(eid)
         corridors[c] = stay
-        if not stay and c in corr_polys:
+        if not stay and c in corr_polys and c not in moved_in:
             del corr_polys[c]
+    for c, eids in moved_in.items():
+        corridors[c].extend(eids)
 
     # Junction membership follows the final geometry too: an unconditional
     # bisector cut can strand a captured edge outside its own (now smaller)
@@ -598,7 +760,13 @@ def main():
             if near:
                 patch = shapely.difference(
                     patch, union_all([cells[n] for n in near]))
-            cells[idx] = union_all([cells[idx], patch])
+            nearc = corr_tree.query(patch, predicate="intersects") if corr_tree is not None else []
+            if len(nearc):
+                # Clip against corridors too — un-clipped grafts were the one
+                # remaining source of junction-vs-corridor overlap.
+                patch = shapely.difference(
+                    patch, union_all([corr_polys[corr_ids[int(n)]] for n in nearc]))
+            cells[idx] = _clean(union_all([cells[idx], patch]))
             grafts += 1
     if grafts:
         # Grafts changed geometry after the trim's residual measurement —
@@ -618,19 +786,180 @@ def main():
           f"edges re-homed, {grafts} tube grafts ({time.time()-t0:.0f}s)",
           flush=True)
 
-    # ── 5. Emit: dense block ids, geojson + npy + meta ─────────────────────
+    # ── Finalize in the SHIPPED (lon/lat) frame: snap → validate → audit →
+    # repair. Valid-in-metres polygons flip invalid after the lon/lat
+    # transform (708 on test-mid): cut seams carry near-coincident collinear
+    # vertices whose relative float error grows under the frame scaling, so
+    # rings self-cross — and a consumer's make_valid can FILL a self-crossed
+    # ring into a large false lobe. So the disjointness contract is enforced
+    # in the frame that actually ships: transform FIRST, snap every
+    # coordinate to a 1e-7° grid (≈1 cm; shared cut seams land on identical
+    # grid points), make_valid, then measure ALL-CLASS pairwise overlap and
+    # cut any residual pair (junction beats corridor, else larger area) —
+    # nothing ships overlapping ≥ 1 m² or invalid.
+    GRID_LL = 1e-7
+    ll_area_m2 = mlon * mlat                      # deg² → m² at this latitude
+
     def to_ll(geom):
         return shapely.transform(
             geom, lambda a: np.column_stack((a[:, 0] / mlon + w, a[:, 1] / mlat + s)))
 
+    invalid_fixed = 0
+
+    def _finalize(geom):
+        nonlocal invalid_fixed
+        g = to_ll(geom)
+        if not g.is_valid:
+            invalid_fixed += 1
+            g = _clean(g)
+        try:
+            g = shapely.set_precision(g, GRID_LL)
+        except shapely.errors.GEOSException:
+            # set_precision chokes on some repaired hole/shell arrangements —
+            # re-validate and retry; give up on snapping only as a last resort
+            # (the pairwise repair sweep below still enforces disjointness).
+            g = _clean(g)
+            try:
+                g = shapely.set_precision(g, GRID_LL)
+            except shapely.errors.GEOSException:
+                pass
+        return _clean(g)
+
+    for c in list(corr_polys):
+        corr_polys[c] = _finalize(corr_polys[c])
+        if corr_polys[c].is_empty:
+            del corr_polys[c]
+    cells = [_finalize(cl) for cl in cells]
+
+    audit_ids = list(corr_polys.keys())           # corridor ids, then cells
+    repaired_geo: set[int] = set()
+    repair_cuts = 0
+    overlap_detail = {"CC": 0, "CJ": 0, "JJ": 0}
+    residual_all = 0
+    # Repair at ≥ 0.5 m² but promise ≥ 1 m² clean: the half-metre hysteresis
+    # absorbs measuring-frame differences (an external scan's projection can
+    # rate a threshold-grazing pair a little differently).
+    for rnd in range(4):
+        geoms = [corr_polys[c] for c in audit_ids] + list(cells)
+        kinds = ["C"] * len(audit_ids) + ["J"] * len(cells)
+        overlap_detail = {"CC": 0, "CJ": 0, "JJ": 0}
+        hits = []
+        nonempty = [i for i, g in enumerate(geoms) if not g.is_empty]
+        if len(nonempty) >= 2:
+            atree = STRtree([geoms[i] for i in nonempty])
+            aq, at = atree.query(np.array([geoms[i] for i in nonempty],
+                                          dtype=object),
+                                 predicate="intersects")
+            for a, b in zip(aq, at):
+                a, b = nonempty[int(a)], nonempty[int(b)]
+                if a >= b:
+                    continue
+                try:
+                    inter = geoms[a].intersection(geoms[b]).area
+                except shapely.errors.GEOSException:
+                    inter = math.inf          # unmeasurable pair → force repair
+                if inter * ll_area_m2 >= 0.5:
+                    cls = "".join(sorted(kinds[a] + kinds[b]))
+                    overlap_detail[cls] += 1
+                    hits.append((a, b))
+        residual_all = len(hits)
+        if not hits or rnd == 3:
+            break
+        for a, b in hits:
+            # Junction beats corridor; same kind → larger area keeps.
+            if kinds[a] == kinds[b]:
+                keep, lose = (a, b) if geoms[a].area >= geoms[b].area else (b, a)
+            else:
+                keep, lose = (a, b) if kinds[a] == "J" else (b, a)
+            try:
+                cut = shapely.difference(geoms[lose], geoms[keep])
+            except shapely.errors.GEOSException:
+                try:
+                    cut = shapely.difference(_clean(geoms[lose]), _clean(geoms[keep]))
+                except shapely.errors.GEOSException:
+                    cut = Polygon()          # unrecoverable: drop, re-home members
+            try:
+                cut = _clean(shapely.set_precision(cut, GRID_LL))
+            except shapely.errors.GEOSException:
+                cut = _clean(cut)
+            if lose < len(audit_ids):
+                corr_polys[audit_ids[lose]] = cut
+            else:
+                cells[lose - len(audit_ids)] = cut
+            repaired_geo.add(lose)
+            repair_cuts += 1
+    print(f"[gf] final ship-frame audit: {residual_all} overlapping pairs "
+          f"≥1m² ({overlap_detail}); {invalid_fixed} transform-invalid "
+          f"geometries fixed, {repair_cuts} residual repair cuts "
+          f"({time.time()-t0:.0f}s)", flush=True)
+
+    # GLOBAL ship-frame membership re-home: the metric-frame passes re-home
+    # by exact touch, but corridor cuts + the frame snap leave a tail of
+    # members metres from their polygon (244 on test-mid, up to 23 m). Final
+    # rule, applied to EVERY member edge against the FINAL shipped geometry:
+    # an edge whose line doesn't touch its polygon (within one snap step)
+    # moves to the polygon holding its midpoint, else any polygon its line
+    # crosses; a member nothing holds stays put and surfaces in §6.
+    ll_nodes = np.column_stack((nodes[:, 1], nodes[:, 0]))    # (lon, lat)
+    repair_rehomed = 0
+    fin_corr_ids = [c for c in corr_polys if not corr_polys[c].is_empty]
+    fin_geoms = [corr_polys[c] for c in fin_corr_ids] + \
+        [cl for cl in cells if not cl.is_empty]
+    fin_kind: list[tuple[str, int]] = [("C", c) for c in fin_corr_ids] + \
+        [("J", i) for i, cl in enumerate(cells) if not cl.is_empty]
+    fin_tree = STRtree(fin_geoms) if fin_geoms else None
+    moved_edges: dict[int, tuple[str, int]] = {}
+
+    def rehome_members(eids, own_poly):
+        nonlocal repair_rehomed
+        for eid in list(eids):
+            line = LineString([ll_nodes[ends[eid, 0]], ll_nodes[ends[eid, 1]]])
+            if own_poly is not None and not own_poly.is_empty \
+                    and line.distance(own_poly) <= 2 * GRID_LL:
+                continue
+            if fin_tree is None:
+                continue
+            mid = shapely.points((ll_nodes[ends[eid, 0]] + ll_nodes[ends[eid, 1]]) / 2.0)
+            hit = fin_tree.query(mid, predicate="intersects")
+            if not len(hit):
+                hit = fin_tree.query(line, predicate="intersects")
+            if not len(hit):
+                continue
+            moved_edges[int(eid)] = fin_kind[int(hit[0])]
+            repair_rehomed += 1
+
+    for c in list(corr_polys):
+        rehome_members(corridors[c], corr_polys.get(c))
+    for ci, k in enumerate(live_cl):
+        rehome_members(np.where(edge_cluster == k)[0], cells[ci])
+    if moved_edges:
+        for c in list(corr_polys):
+            corridors[c] = [e for e in corridors[c] if e not in moved_edges]
+        for eid, (kind, tgt) in moved_edges.items():
+            if kind == "C":
+                edge_cluster[eid] = -1
+                if eid not in corridors[tgt]:
+                    corridors[tgt].append(int(eid))
+            else:
+                edge_cluster[eid] = live_cl[tgt]
+        print(f"[gf] ship-frame re-home: {repair_rehomed} members moved to "
+              f"the polygon that holds them ({time.time()-t0:.0f}s)", flush=True)
+
+    # ── 5. Emit: dense block ids, geojson + npy + meta ─────────────────────
+
     # block_id starts at 1: tippecanoe/MVT cannot represent a native feature
     # id of 0 (it drops it), which would detach feature-state (heat/selection)
     # from block 0. Server arrays are sized n_blocks = len(feats)+1, slot 0 unused.
+    # Geometry is ALREADY in the shipped lon/lat frame (finalized above);
+    # area_m2 converts via the equirectangular scale. Emptied polygons
+    # (ship-frame repairs) emit no feature; their members were re-homed above.
     feats = []
     edge_block = np.full(n_edges, -1, dtype=np.int32)
     poly_of_block: dict[int, object] = {}
     for c, poly in corr_polys.items():
         members = corridors[c]
+        if poly.is_empty or not members:
+            continue
         bid = len(feats) + 1
         edge_block[members] = bid
         poly_of_block[bid] = poly
@@ -640,27 +969,31 @@ def main():
                 "block_id": bid, "seg_id": -1,
                 "road_class": majority(rclass[members]) or "path",
                 "road_name": majority([names[i] for i in members]),
-                "area_m2": round(poly.area, 1), "n_edges": len(members),
+                "area_m2": round(poly.area * ll_area_m2, 1), "n_edges": len(members),
             },
-            "geometry": mapping(to_ll(poly)),
+            "geometry": mapping(poly),
         })
     for i, k in enumerate(live_cl):
-        bid = len(feats) + 1
         captured = np.where(edge_cluster == k)[0]
+        if cells[i].is_empty or not len(captured):
+            continue
+        bid = len(feats) + 1
         edge_block[captured] = bid
         poly_of_block[bid] = cells[i]
         feats.append({
             "type": "Feature",
             "properties": {
                 "block_id": bid, "seg_id": -1, "road_class": "node",
-                "road_name": None, "area_m2": round(cells[i].area, 1),
+                "road_name": None, "area_m2": round(cells[i].area * ll_area_m2, 1),
                 "node_id": int(cl_members[k].min()), "n_nodes": len(cl_members[k]),
                 "n_edges": int(len(captured)),
             },
-            "geometry": mapping(to_ll(cells[i])),
+            "geometry": mapping(cells[i]),
         })
 
     # ── 6. Audit: coverage + overlap by construction, verified anyway ──────
+    # Touch is measured in the SHIPPED frame (2·GRID_LL ≈ 2 cm tolerance —
+    # the snap can move a boundary by at most one grid step).
     mapped = int((edge_block >= 0).sum())
     checked = 0
     overlapping = 0
@@ -672,7 +1005,8 @@ def main():
         if poly is None:
             continue
         checked += 1
-        if poly.distance(LineString([node_xy[ends[i, 0]], node_xy[ends[i, 1]]])) <= 1e-6:
+        if poly.distance(LineString([ll_nodes[ends[i, 0]],
+                                     ll_nodes[ends[i, 1]]])) <= 2 * GRID_LL:
             overlapping += 1
     print(f"[gf] audit: {mapped}/{n_edges} mapped "
           f"({100*mapped/max(1, int(not_self.sum())):.2f}% of non-self); "
@@ -707,7 +1041,16 @@ def main():
         "equivalent_clusters_merged": clusters_merged,
         "cells_bisector_trimmed": cells_trimmed,
         "cells_absorbed": cells_absorbed,
-        "residual_overlap_pairs": residual_pairs,
+        # ALL-CLASS residual (corridor-corridor + corridor-junction +
+        # junction-junction), measured on the final shipped polygons. The
+        # pre-2026-07-22 stamp counted junction pairs only.
+        "residual_overlap_pairs": residual_all,
+        "residual_overlap_detail": overlap_detail,
+        "residual_junction_pairs_presweep": residual_pairs,
+        "corridor_cuts": corr_cuts,
+        "corridor_duplicates_merged": corr_merges,
+        "corridor_tube_grafts": corr_grafts,
+        "invalid_geoms_fixed": invalid_fixed,
         "edges_reassigned_to_cells": reassigned,
         "junction_edges_rehomed": rehomed,
         "junction_tube_grafts": grafts,
