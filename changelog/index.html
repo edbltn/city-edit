@@ -46,6 +46,25 @@
     scorecard and a cold-vs-warm P50/P99 chart.</p>
   </a>
 
+  <a class="entry" href="./2026-07-22-block-disjoint-all-classes.html">
+    <div class="date">2026-07-22</div>
+    <h2>Blocks never overlap, for real this time — corridor cuts, ship-frame audit, all-class guarantee</h2>
+    <p>Prod still showed stacked, unclickable block polygons (7th Ave / W 53rd on nyc-bikes): the
+    July-13 fix only made junction-vs-junction cells disjoint — corridor-vs-corridor overlap was never
+    handled (thousands of pairs per city: parallel street/footway tubes, grade-separated crossings,
+    wide-class buffers), junction grafts leaked into corridors, and ~200–700 polygons per city shipped
+    invalid. The builder now extends geometry-wins to every pair class: each corridor overlap region is
+    claimed by the corridor whose member edges carry more length inside it and cut from the other, a
+    loser cut below 1&nbsp;m² merges into the winner, and the whole contract is enforced in the frame
+    that ships — transform to lon/lat FIRST (the frame scaling was flipping seam-heavy polygons
+    invalid in transit), snap to a 1&nbsp;cm grid, make_valid, audit every polygon pair of every class,
+    repair stragglers, then re-home any member edge the cuts stranded. All 7 cities re-baked: 0
+    overlapping pairs ≥&nbsp;1&nbsp;m², 0 invalid geometries, 100% coverage — confirmed by a new
+    independent scanner (scan_overlaps.py). Shipped via the artifacts-only overlay with
+    nyc/sf/dc/chicago baked against the serving image's own graphs (etag-gated), prod DB backed up
+    first. The reported URLs now select two distinct single blocks ([blocks] select: 200072 / 494).</p>
+  </a>
+
   <a class="entry" href="./2026-07-22-light-pin-theme-colors.html">
     <div class="date">2026-07-22</div>
     <h2>Light-mode pins wear the theme — accent-anchored glow + themed selection</h2>
