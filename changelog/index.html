@@ -110,6 +110,24 @@
     byte-identical.</p>
   </a>
 
+  <a class="entry" href="./2026-07-23-counter-cancel-negative-blocks.html">
+    <div class="date">2026-07-23</div>
+    <h2>Counter-votes go cancel-only — negative blocks eliminated</h2>
+    <p>The 2026-07-21 tally floor held at edge level but prod block pins still showed net-negative
+    breakdowns (nyc-bikes: 1,171 (block, vote_type) entries with downs &gt; ups, vs a single
+    net-negative edge) — block counts dedupe per <em>device</em>, so any flipped import device
+    with a surviving −1 row read as one "against", and each such row also silently ate one spared
+    upvote on shared corridors (flips are −2 swings). Fix in three parts: prod sweep deleting all
+    308,597 remaining counter-cast −1 rows (safe: clear-then-cast had already removed those
+    devices' own +1s — verified zero devices hold both directions), negative block entries
+    1171→0 / 61→1 / 22→0 with the survivors organic human downvotes; counter_lyft.py now
+    defaults to <strong>direction-0 cancellation</strong> (removes only the device's own votes —
+    tallies structurally can't go negative, flips demoted to <code>--flip</code>); and fresh
+    Citibike data — 10,000 June 1–7 rides imported into prod nyc-bikes and countered in cancel
+    mode (14,831 of 20,616 matched rides cancelled 1.12M covered upvotes, 0 downvotes cast).
+    nyc-bikes now serves 106,769 net-positive edges, 0 negative blocks.</p>
+  </a>
+
   <a class="entry" href="./2026-07-15-layer-anchor-failsafe.html">
     <div class="date">2026-07-15</div>
     <h2>Layer-anchor failsafes — the map can no longer stay misaligned</h2>
