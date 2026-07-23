@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useRouteCalculation } from "../hooks/useRouteCalculation";
 import { CONFIG } from "../config";
+import { reverseGeocode } from "../utils/geocode";
 import { getMapSlug, getPasscodeToken } from "../map/runtime";
 import { getVoterId } from "../utils/voterIdentity";
 import { getDefaultVoteTypeForTheme } from "../constants/voteTypes";
@@ -225,30 +226,24 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     if (initial.start) {
       const s = initial.start;
       setStart({ coords: { lat: s.lat, lng: s.lng }, timestamp: Date.now(), address: null });
-      fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${s.lat}&lng=${s.lng}`)
-        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-        .then(data => {
-          setStart(prev =>
-            prev.coords?.lat === s.lat && prev.coords?.lng === s.lng
-              ? { ...prev, address: data.address }
-              : prev
-          );
-        })
-        .catch(() => {});
+      reverseGeocode(s.lat, s.lng).then((address) => {
+        setStart(prev =>
+          prev.coords?.lat === s.lat && prev.coords?.lng === s.lng
+            ? { ...prev, address }
+            : prev
+        );
+      });
     }
     if (initial.end) {
       const e = initial.end;
       setEnd({ coords: { lat: e.lat, lng: e.lng }, timestamp: Date.now(), address: null });
-      fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${e.lat}&lng=${e.lng}`)
-        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-        .then(data => {
-          setEnd(prev =>
-            prev.coords?.lat === e.lat && prev.coords?.lng === e.lng
-              ? { ...prev, address: data.address }
-              : prev
-          );
-        })
-        .catch(() => {});
+      reverseGeocode(e.lat, e.lng).then((address) => {
+        setEnd(prev =>
+          prev.coords?.lat === e.lat && prev.coords?.lng === e.lng
+            ? { ...prev, address }
+            : prev
+        );
+      });
     }
     if (initial.vt) {
       restoredVtRef.current = initial.vt;
@@ -322,38 +317,26 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const setStartPoint = useCallback((coords: LatLng, address?: string) => {
     setStart({ coords, timestamp: Date.now(), address: address ?? null });
     if (!address) {
-      fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${coords.lat}&lng=${coords.lng}`)
-        .then(r => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.json();
-        })
-        .then(data => {
-          setStart(prev =>
-            prev.coords?.lat === coords.lat && prev.coords?.lng === coords.lng
-              ? { ...prev, address: data.address }
-              : prev
-          );
-        })
-        .catch(() => {});
+      reverseGeocode(coords.lat, coords.lng).then((address) => {
+        setStart(prev =>
+          prev.coords?.lat === coords.lat && prev.coords?.lng === coords.lng
+            ? { ...prev, address }
+            : prev
+        );
+      });
     }
   }, []);
 
   const setEndPoint = useCallback((coords: LatLng, address?: string) => {
     setEnd({ coords, timestamp: Date.now(), address: address ?? null });
     if (!address) {
-      fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${coords.lat}&lng=${coords.lng}`)
-        .then(r => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.json();
-        })
-        .then(data => {
-          setEnd(prev =>
-            prev.coords?.lat === coords.lat && prev.coords?.lng === coords.lng
-              ? { ...prev, address: data.address }
-              : prev
-          );
-        })
-        .catch(() => {});
+      reverseGeocode(coords.lat, coords.lng).then((address) => {
+        setEnd(prev =>
+          prev.coords?.lat === coords.lat && prev.coords?.lng === coords.lng
+            ? { ...prev, address }
+            : prev
+        );
+      });
     }
   }, []);
 
@@ -614,16 +597,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       setActiveToolState("start");
       if (!addr) {
         const pt = remaining[0];
-        fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${pt.lat}&lng=${pt.lng}`)
-          .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-          .then(data => {
-            setStart(prev =>
-              prev.coords?.lat === pt.lat && prev.coords?.lng === pt.lng
-                ? { ...prev, address: data.address }
-                : prev
-            );
-          })
-          .catch(() => {});
+        reverseGeocode(pt.lat, pt.lng).then((address) => {
+        setStart(prev =>
+          prev.coords?.lat === pt.lat && prev.coords?.lng === pt.lng
+            ? { ...prev, address }
+            : prev
+        );
+      });
       }
     } else {
       // Two or more: first=start, last=end, middle=ghostWaypoints
@@ -656,32 +636,26 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         setStart({ coords: newStart, timestamp: Date.now(), address: startAddr });
         // Fetch reverse geocode if promoted point lacks an address
         if (!startAddr) {
-          fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${newStart.lat}&lng=${newStart.lng}`)
-            .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-            .then(data => {
-              setStart(prev =>
-                prev.coords?.lat === newStart.lat && prev.coords?.lng === newStart.lng
-                  ? { ...prev, address: data.address }
-                  : prev
-              );
-            })
-            .catch(() => {});
+          reverseGeocode(newStart.lat, newStart.lng).then((address) => {
+        setStart(prev =>
+          prev.coords?.lat === newStart.lat && prev.coords?.lng === newStart.lng
+            ? { ...prev, address }
+            : prev
+        );
+      });
         }
       }
       if (endChanged) {
         const endAddr = remainingAddresses[remainingAddresses.length - 1] ?? null;
         setEnd({ coords: newEnd, timestamp: Date.now(), address: endAddr });
         if (!endAddr) {
-          fetch(`${CONFIG.apiUrl}/reverse-geocode?map=${getMapSlug()}&lat=${newEnd.lat}&lng=${newEnd.lng}`)
-            .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-            .then(data => {
-              setEnd(prev =>
-                prev.coords?.lat === newEnd.lat && prev.coords?.lng === newEnd.lng
-                  ? { ...prev, address: data.address }
-                  : prev
-              );
-            })
-            .catch(() => {});
+          reverseGeocode(newEnd.lat, newEnd.lng).then((address) => {
+        setEnd(prev =>
+          prev.coords?.lat === newEnd.lat && prev.coords?.lng === newEnd.lng
+            ? { ...prev, address }
+            : prev
+        );
+      });
         }
       }
       setGhostWaypoints(newGhostWaypoints);

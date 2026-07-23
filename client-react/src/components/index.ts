@@ -7,5 +7,4 @@ export { ErrorToast } from "./ErrorToast";
 export { GhostPin } from "./GhostPin";
 export { VoteTypeSelector } from "./VoteTypeSelector";
 export { Landing } from "./Landing";
-export { BoundaryLayer } from "./BoundaryLayer";
 export { ModeSwitcher } from "./ModeSwitcher";

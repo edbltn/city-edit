@@ -1,29 +1,33 @@
 /**
  * Graph Layer - OSM Network Vote Visualization
  *
- * Canvas-based renderer for edges/nodes with vote counts from /api/graph.
- * Edges glow blue based on vote intensity (log-scaled).
- * Hovering an edge or node highlights it and shows a tooltip with:
- *   - Street name (or reverse-geocoded address)
- *   - Vote count
- *   - Top 3 vote types
- * Clears on zoom, redraws on zoom end and pan.
+ * The network baseline renders from PMTiles (graph-edges layer) and voted
+ * edges render as GL heat layers (maplibreHeat.ts); this component owns the
+ * data + interaction side:
+ *   - topology/vote loading, WebSocket deltas, optimistic vote application
+ *   - Flatbush hit-testing (nearest-edge-anywhere fallback + node-over-edge
+ *     priority that queryRenderedFeatures can't provide)
+ *   - hover/pinned selection rings (pushed to the graph-highlight GL source)
+ *   - proposal cards (hover + pinned) and top-proposal indicator markers
  */
 
 import { useEffect, useLayoutEffect, useRef, useCallback, useState, useMemo } from "react";
-import { useMap, Marker } from "react-leaflet";
 import { createPortal } from "react-dom";
-import L from "leaflet";
 import Flatbush from "flatbush";
 import { CONFIG } from "../../config";
 import { withMap, getMapSlug } from "../../map/runtime";
+import { useMapFacade } from "../../map/MapFacadeContext";
+import { getMapLibreMap } from "../../map/maplibreInstance";
+import type { MapFacade, MapMouseEvent } from "../../map/facade";
+import { syncHeatToMapLibre, primeHeatFromServer } from "./maplibreHeat";
+import { syncHighlightsToMapLibre } from "./maplibreHighlight";
 import { useWebSocketContext } from "../../context/WebSocketContext";
 import { useGraphSnap, useTheme, useHeatmap } from "../../context";
 import type { GraphData } from "../../types";
-import { hashLabelToColor, makeVoteTypeIcon } from "./voteTypeIcon";
+import { hashLabelToColor, voteTypeIconHtml, VOTE_TYPE_ICON_SIZE } from "./voteTypeIcon";
 import { selectTopProposals, type VoteTypeWinner } from "./topProposals";
 import { applyEdgeVoteChange, applyAuthoritativeCounts } from "./voteApply";
-import { iconForLabel, iconSrc, mapStyleForTheme } from "../../themes";
+import { iconForLabel, iconSrc } from "../../themes";
 import {
   getCachedTopology,
   setCachedTopology,
@@ -33,7 +37,9 @@ import {
 import { getMyVote, setMyVote, reconcileEdge, type VoteDirection } from "../../utils/myVotes";
 import { getVoterId } from "../../utils/voterIdentity";
 import { buildSelectionUrl, copyToClipboard } from "../../utils/shareLink";
+import { reverseGeocode } from "../../utils/geocode";
 import { CheckIcon } from "../CheckIcon";
+import { MapMarker } from "../MapMarker";
 
 // ---------------------------------------------------------------------------
 // Geometry helpers
@@ -59,24 +65,6 @@ function pointToSegmentDist(
   const cy = ay + t * dy - py;
   return Math.sqrt(cx * cx + cy * cy);
 }
-
-/** Loop-based max to avoid stack overflow with large arrays. */
-function arrayMax(arr: number[]): number {
-  let max = 0;
-  for (let i = 0; i < arr.length; i++) {
-    if (arr[i] > max) max = arr[i];
-  }
-  return max;
-}
-
-// ---------------------------------------------------------------------------
-// Heatmap color stops — flame cross-section
-// ---------------------------------------------------------------------------
-// Each pass uses a different color and width so the gradient runs ACROSS the
-// stroke (halo on the outside, hot core on the inside) rather than ALONG it.
-// The ramp + blend mode come from the active map style (mapStyles.ts): dark
-// styles blend additively (`lighter`/`screen`) for Strava-style intersection
-// brightening; the light style blends via `multiply` so heat darkens the map.
 
 // ---------------------------------------------------------------------------
 // Reverse-geocode cache (module-level, survives re-renders)
@@ -107,20 +95,16 @@ function resolveAddress(
   const cached = geocodeCache.get(key);
   if (cached !== undefined) return cached || formatLatLng(lat, lng);
 
-  // Not cached — show placeholder and fire async fetch
+  // Not cached — show placeholder and fire async (retrying) fetch
   if (!geocodeInFlight.has(key)) {
     geocodeInFlight.add(key);
-    fetch(withMap(`${CONFIG.apiUrl}/reverse-geocode?lat=${lat}&lng=${lng}`))
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data) => {
-        geocodeCache.set(key, data.address || null);
-        onResolved();
-      })
-      .catch(() => {
-        // Don't cache failures — allow retry on next hover
+    reverseGeocode(lat, lng)
+      .then((address) => {
+        // null after retries = give up for now; next hover tries again
+        if (address !== null) {
+          geocodeCache.set(key, address || null);
+          onResolved();
+        }
       })
       .finally(() => {
         geocodeInFlight.delete(key);
@@ -137,17 +121,6 @@ function resolveAddress(
 // Unified radii — used for hover, snap, pinned highlight, and tooltip lookup
 const SNAP_EDGE_PX = 4;   // hit-test radius for edges
 const SNAP_NODE_PX = 3;   // node priority radius (wins over edges when very close)
-
-// Highlight ring dimensions — matched to the desire path SVG filter so hover
-// and pinned highlights look identical to the selected path:
-//   - Edge ring: 7px wide stroke with a 4px hole = 1.5px white border each side
-//   - Node ring: 5px outer radius with 3.5px hole = 1.5px white border
-//   - Interior alpha: 0.12 (matches feColorMatrix in RouteLayer)
-const HIGHLIGHT_RING_WIDTH = 7;
-const HIGHLIGHT_INNER_WIDTH = 4;
-const HIGHLIGHT_NODE_OUTER_R = 5;
-const HIGHLIGHT_NODE_INNER_R = 3.5;
-const HIGHLIGHT_INTERIOR_ALPHA = 0.12;
 
 // Hover target type
 interface HoverEdge { kind: "edge"; index: number }
@@ -190,7 +163,7 @@ function decodeVoteTypes(
 }
 
 // Min zoom level at which to show vote-type indicator icons (avoids clutter
-// when many edges crowd a small viewport).
+// when many edges crowd a small viewport). Leaflet-style zoom (see facade).
 const INDICATOR_MIN_ZOOM = 13;
 
 // Cap on how many top-proposal indicators show on the map. Each surviving
@@ -213,11 +186,38 @@ const SPREAD_ANIM_MS = 280;   // keep in sync with the CSS transition
 // segment is always among the top few bbox-nearest in practice.
 const INDEX_NEIGHBOR_K = 20;
 
+/** Resolves when the GL map's initial tiles settle, or after maxWaitMs. */
+function tilesSettled(maxWaitMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const ml = getMapLibreMap();
+    if (!ml || (ml.isStyleLoaded() && ml.areTilesLoaded())) {
+      resolve();
+      return;
+    }
+    const done = () => {
+      window.clearTimeout(timer);
+      ml.off("idle", done);
+      resolve();
+    };
+    const timer = window.setTimeout(done, maxWaitMs);
+    ml.on("idle", done);
+  });
+}
+
+// Index builds yield to the main thread between batches so they don't jank
+// the tile/heat animations happening at exactly this moment of the load.
+// Until an index exists, hit-testing simply returns no result (hover lights
+// up ~a second later) — no brute-force fallback, which would scan the full
+// 650k-edge array per mousemove.
+const INDEX_YIELD_BATCH = 120_000;
+const yieldToMain = () => new Promise<void>((r) => setTimeout(r, 0));
+
 /** Build a flatbush spatial index of node points. Done once per graph. */
-function buildNodeIndex(data: Pick<GraphData, "nodes">): Flatbush | null {
+async function buildNodeIndex(data: Pick<GraphData, "nodes">): Promise<Flatbush | null> {
   if (data.nodes.length === 0) return null;
   const idx = new Flatbush(data.nodes.length);
   for (let i = 0; i < data.nodes.length; i++) {
+    if (i > 0 && i % INDEX_YIELD_BATCH === 0) await yieldToMain();
     const node = data.nodes[i];
     // Point bbox: min == max (lng,lat ordering matches the edge index)
     idx.add(node[1], node[0], node[1], node[0]);
@@ -227,10 +227,11 @@ function buildNodeIndex(data: Pick<GraphData, "nodes">): Flatbush | null {
 }
 
 /** Build a flatbush spatial index of edge bounding boxes. Done once per graph. */
-function buildEdgeIndex(data: Pick<GraphData, "nodes" | "edges">): Flatbush | null {
+async function buildEdgeIndex(data: Pick<GraphData, "nodes" | "edges">): Promise<Flatbush | null> {
   if (data.edges.length === 0) return null;
   const idx = new Flatbush(data.edges.length);
   for (let i = 0; i < data.edges.length; i++) {
+    if (i > 0 && i % INDEX_YIELD_BATCH === 0) await yieldToMain();
     const [fromIdx, toIdx] = data.edges[i];
     const fromNode = data.nodes[fromIdx];
     const toNode = data.nodes[toIdx];
@@ -255,7 +256,7 @@ function buildEdgeIndex(data: Pick<GraphData, "nodes" | "edges">): Flatbush | nu
  */
 function findNearestEdgeIndex(
   data: GraphData,
-  map: L.Map,
+  map: MapFacade,
   px: number, py: number,
   index: Flatbush | null,
   queryLng: number,
@@ -265,6 +266,8 @@ function findNearestEdgeIndex(
 
   const checkEdge = (i: number, currentBestDist: number, currentBestIdx: number): [number, number] => {
     const [fromIdx, toIdx] = data.edges[i];
+    // Tombstones (retired eids) and self-loops aren't selectable geometry.
+    if (fromIdx === toIdx) return [currentBestDist, currentBestIdx];
     const fromPt = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);
     const toPt = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);
     const dist = pointToSegmentDist(px, py, fromPt.x, fromPt.y, toPt.x, toPt.y);
@@ -274,16 +277,10 @@ function findNearestEdgeIndex(
   let bestDist = Infinity;
   let bestIdx = -1;
 
-  if (index) {
-    const candidates = index.neighbors(queryLng, queryLat, INDEX_NEIGHBOR_K);
-    for (const i of candidates) {
-      [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);
-    }
-  } else {
-    // Brief fallback while the index is being built
-    for (let i = 0; i < data.edges.length; i++) {
-      [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);
-    }
+  if (!index) return null; // index still building — no selection yet
+  const candidates = index.neighbors(queryLng, queryLat, INDEX_NEIGHBOR_K);
+  for (const i of candidates) {
+    [bestDist, bestIdx] = checkEdge(i, bestDist, bestIdx);
   }
 
   return bestIdx >= 0 ? bestIdx : null;
@@ -300,7 +297,7 @@ function findNearestEdgeIndex(
  */
 function hitTest(
   data: GraphData,
-  map: L.Map,
+  map: MapFacade,
   px: number, py: number,
   lat: number, lng: number,
   edgeIndex: Flatbush | null,
@@ -323,8 +320,6 @@ function hitTest(
   if (nodeIndex) {
     const candidates = nodeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K);
     for (const i of candidates) checkNode(i);
-  } else {
-    for (let i = 0; i < data.nodes.length; i++) checkNode(i);
   }
 
   if (bestNode !== null) {
@@ -338,6 +333,8 @@ function hitTest(
 
   const checkEdge = (i: number) => {
     const [fromIdx, toIdx] = data.edges[i];
+    // Tombstones (retired eids) and self-loops aren't selectable geometry.
+    if (fromIdx === toIdx) return;
     const fromPt = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);
     const toPt = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);
     const dist = pointToSegmentDist(px, py, fromPt.x, fromPt.y, toPt.x, toPt.y);
@@ -350,8 +347,6 @@ function hitTest(
   if (edgeIndex) {
     const candidates = edgeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K);
     for (const i of candidates) checkEdge(i);
-  } else {
-    for (let i = 0; i < data.edges.length; i++) checkEdge(i);
   }
 
   if (bestEdge !== null) {
@@ -386,10 +381,6 @@ function projectOntoEdge(
 }
 
 // ---------------------------------------------------------------------------
-// Tooltip content helper (shared by hover and pinned tooltips)
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Node adjacency builder — used to derive node votes from edges
 // ---------------------------------------------------------------------------
 
@@ -397,6 +388,9 @@ function buildNodeAdj(topology: Pick<GraphData, "nodes" | "edges">): number[][] 
   const adj: number[][] = new Array(topology.nodes.length);
   for (let i = 0; i < adj.length; i++) adj[i] = [];
   for (let i = 0; i < topology.edges.length; i++) {
+    // Skip degenerates (retired-eid tombstones point 0→0) so node 0 doesn't
+    // accumulate them as "adjacent" edges.
+    if (topology.edges[i][0] === topology.edges[i][1]) continue;
     adj[topology.edges[i][0]].push(i);
     adj[topology.edges[i][1]].push(i);
   }
@@ -425,47 +419,19 @@ interface GraphLayerProps {
 }
 
 export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSelected, suppressHover = false }: GraphLayerProps) {
-  const map = useMap();
+  const map = useMapFacade();
   const { subscribeToDelta } = useWebSocketContext();
   const { setSnapFn, setCurrentSnap, isDraggingRef: graphDraggingRef } = useGraphSnap();
   const { setHeatmapLoaded, isHeatmapLoading } = useHeatmap();
   const theme = useTheme();
   const themeMode = theme.mode;
-  const mapStyle = mapStyleForTheme(theme);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
-  const hoverCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const hoverCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const graphDataRef = useRef<GraphData | null>(null);
   const topologyRef = useRef<Pick<GraphData, "nodes" | "edges"> | null>(null);
   const edgeIndexRef = useRef<Flatbush | null>(null);
   const nodeIndexRef = useRef<Flatbush | null>(null);
-  const redrawTimeoutRef = useRef<number | null>(null);
-  const isZoomingRef = useRef(false);
-
-  // Per-zoom projection cache for node layer-points. Leaflet layer-points are
-  // stable across pans at a fixed zoom (panning only translates the map pane),
-  // so we project each node at most once per zoom and reuse it across all pan
-  // frames — turning every redraw into cheap "layerPoint + paneOffset" adds.
-  // Keyed by zoom + pixelOrigin (origin only changes on zoom / view reset).
-  // `done` marks which nodes have been projected so we project lazily, paying
-  // only for nodes that actually enter the viewport.
-  const projCacheRef = useRef<{
-    zoom: number;
-    ox: number;
-    oy: number;
-    xs: Float64Array;
-    ys: Float64Array;
-    done: Uint8Array;
-  } | null>(null);
-
-  // Memoized max edge-vote count, recomputed only when the vote revision
-  // changes (i.e. on a vote/delta) rather than on every zoom/pan frame.
-  const maxVotesRef = useRef(1);
-  const maxVotesRevRef = useRef(-1);
 
   // Node adjacency list — node index → [edge indices]. Built once from topology,
-  // used to derive node votes from edge totals (max of adjacent edges).
+  // used to derive node votes from edges (max of adjacent edges).
   const nodeAdjRef = useRef<number[][] | null>(null);
 
   // Last-seen revision for gap detection
@@ -543,22 +509,22 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   const resolveSelectionRef = useRef(resolveSelection);
   useEffect(() => { resolveSelectionRef.current = resolveSelection; }, [resolveSelection]);
 
-  // Register graph snap function for use by path drag. Uses hitTest directly
-  // (in-radius only, null when out of range) so dragging stays free when far
-  // from the graph — unlike resolveSelection, which always resolves to an edge.
+  // Register graph snap function for use by path/marker drag. Uses hitTest
+  // directly (in-radius only, null when out of range) so dragging stays free
+  // when far from the graph — unlike resolveSelection, which always resolves.
   useEffect(() => {
-    setSnapFn((m: L.Map, lat: number, lng: number) => {
+    setSnapFn((lat: number, lng: number) => {
       const data = graphDataRef.current;
       if (!data) return null;
-      const pt = m.latLngToContainerPoint([lat, lng]);
+      const pt = map.latLngToContainerPoint([lat, lng]);
       const result = hitTest(
-        data, m, pt.x, pt.y, lat, lng,
+        data, map, pt.x, pt.y, lat, lng,
         edgeIndexRef.current, nodeIndexRef.current
       );
       if (!result) return null;
       return { lat: result.snapLat, lng: result.snapLng };
     });
-  }, [setSnapFn]);
+  }, [setSnapFn, map]);
 
   // Hover state
   const [hoverTarget, setHoverTarget] = useState<HoverTarget | null>(null);
@@ -576,7 +542,13 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   const suppressHoverRef = useRef(suppressHover);
   useEffect(() => { suppressHoverRef.current = suppressHover; }, [suppressHover]);
 
-  // Pinned tooltip screen position (follows start pin on map pan/zoom)
+  // Selection made by clicking a top-proposal indicator. Independent of the
+  // route start point — selecting a proposal no longer drops a pin; it only
+  // pins the card + highlight. Cleared by the card's X, a plain map click,
+  // or a real pinned point (route start) taking precedence.
+  const [localPinned, setLocalPinned] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Pinned tooltip screen position (follows the selection on map pan/zoom)
   const [pinnedScreenPos, setPinnedScreenPos] = useState<{ x: number; y: number } | null>(null);
   const pinnedRafRef = useRef<number | null>(null);
   // Pinned target (node or edge) for highlight and tooltip
@@ -585,6 +557,58 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   // pinnedPoint effect uses it directly instead of re-running hitTest
   // (which can snap to a neighboring edge).
   const pinnedEdgeOverrideRef = useRef<number | null>(null);
+
+  // When the pinned selection is a top proposal, trace the connected corridor
+  // of edges carrying the same vote type (net > 0) — the whole voted stretch
+  // lights up in GIS-selection yellow, not just the clicked segment. BFS over
+  // the node adjacency, capped to keep pathological blobs bounded.
+  const CORRIDOR_MAX_EDGES = 400;
+  const computeCorridor = useCallback((): number[] | null => {
+    const pinned = pinnedTargetRef.current;
+    const data = graphDataRef.current;
+    const adj = nodeAdjRef.current;
+    if (!pinned || pinned.kind !== "edge" || !data?.edge_vote_types || !adj) return null;
+    const winner = winnersRef.current.find((w) => w.edgeIdx === pinned.index);
+    if (!winner) return null;
+
+    const carriesType = (i: number): boolean => {
+      const e = data.edges[i];
+      if (!e || e[0] === e[1]) return false;
+      return ((data.edge_vote_types ?? [])[i] ?? []).some(
+        ([li, up, down]) => li === winner.legendIdx && (up ?? 0) - (down ?? 0) > 0
+      );
+    };
+
+    const visited = new Set<number>([pinned.index]);
+    const queue: number[] = [pinned.index];
+    while (queue.length > 0 && visited.size < CORRIDOR_MAX_EDGES) {
+      const e = data.edges[queue.shift()!];
+      if (!e) continue;
+      for (const n of [e[0], e[1]]) {
+        for (const ne of adj[n] ?? []) {
+          if (!visited.has(ne) && carriesType(ne)) {
+            visited.add(ne);
+            queue.push(ne);
+          }
+        }
+      }
+    }
+    // A lone segment is already shown by the white ring — no corridor needed.
+    return visited.size > 1 ? [...visited] : null;
+  }, []);
+
+  // Push the current pinned/hover rings (+ corridor) to the GL highlight
+  // source. The hover-suppressed-when-pinned rule is applied here so the sync
+  // module stays dumb. Stable (reads refs only).
+  const syncHighlights = useCallback(() => {
+    const pinned = pinnedTargetRef.current;
+    const hover = hoverTargetRef.current;
+    const hoverIsPinned = pinned && hover
+      && hover.kind === pinned.kind && hover.index === pinned.index;
+    syncHighlightsToMapLibre(
+      graphDataRef.current, pinned, hoverIsPinned ? null : hover, computeCorridor(),
+    );
+  }, [computeCorridor]);
 
   // Increments when a geocode resolves, forcing tooltip re-render
   const [geocodeVersion, setGeocodeVersion] = useState(0);
@@ -604,7 +628,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   // Vote-type indicator markers — top-voted segment per vote type
   const [winners, setWinners] = useState<VoteTypeWinner[]>([]);
   const [currentZoom, setCurrentZoom] = useState<number>(() => map.getZoom());
-  const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
+  const iconHtmlCacheRef = useRef<Map<string, string>>(new Map());
 
   // Temporary "fan out crowded icons into a grid" state. Maps a winner's
   // legendIdx -> overridden [lat, lng] while the spread is active; null when
@@ -646,8 +670,11 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       data, tiebreakSaltRef.current, TOP_PROPOSAL_LIMIT,
     ), legendChanged);
     setGraphVoteVersion((v) => v + 1);
-    scheduleRedrawRef.current();
-  }, [setStableWinners]);
+    // Voted edges render as MapLibre heat layers; ring highlights re-sync in
+    // case the underlying data object was replaced.
+    syncHeatToMapLibre(data);
+    syncHighlights();
+  }, [setStableWinners, syncHighlights]);
 
   const refreshGraphDisplayRef = useRef(refreshGraphDisplay);
   useEffect(() => { refreshGraphDisplayRef.current = refreshGraphDisplay; }, [refreshGraphDisplay]);
@@ -662,50 +689,10 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
 
   // Reset icon cache + winners when theme switches (different vote namespace)
   useEffect(() => {
-    iconCacheRef.current.clear();
+    iconHtmlCacheRef.current.clear();
     pendingOptimisticRef.current.clear();
     setWinners([]);
   }, [themeMode]);
-
-  // Initialize canvases once
-  useEffect(() => {
-    const canvas = document.createElement("canvas");
-    canvas.className = "graph-layer";
-    canvas.style.position = "absolute";
-    canvas.style.top = "0";
-    canvas.style.left = "0";
-    canvas.style.pointerEvents = "none";
-    // CSS-level softness: a hint of blur smooths the geometric snap. The blend
-    // mode comes from the map style — `screen` lightens a dark basemap where
-    // heat accumulates; `multiply` darkens a light basemap.
-    canvas.style.filter = "blur(0.6px)";
-    canvas.style.mixBlendMode = mapStyle.heatBlend;
-
-    const hoverCanvas = document.createElement("canvas");
-    hoverCanvas.className = "graph-layer-hover";
-    hoverCanvas.style.position = "absolute";
-    hoverCanvas.style.top = "0";
-    hoverCanvas.style.left = "0";
-    hoverCanvas.style.pointerEvents = "none";
-
-    const ctx = canvas.getContext("2d");
-    const hoverCtx = hoverCanvas.getContext("2d");
-    canvasRef.current = canvas;
-    ctxRef.current = ctx;
-    hoverCanvasRef.current = hoverCanvas;
-    hoverCtxRef.current = hoverCtx;
-
-    const pane = map.getPane("graphPane");
-    if (pane) {
-      pane.appendChild(canvas);
-      pane.appendChild(hoverCanvas);
-    }
-
-    return () => {
-      if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
-      if (hoverCanvas.parentNode) hoverCanvas.parentNode.removeChild(hoverCanvas);
-    };
-  }, [map, mapStyle.heatBlend]);
 
   // Full vote fetch — used on initial load and revision-gap recovery.
   const fetchVotes = useCallback(async () => {
@@ -740,12 +727,6 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   const fetchVotesRef = useRef(fetchVotes);
   useEffect(() => { fetchVotesRef.current = fetchVotes; }, [fetchVotes]);
 
-  // Shared helper: increment edge votes, update vote-type breakdowns, re-derive
-  // affected node votes. Used by both WebSocket deltas and optimistic updates.
-  // Apply a vote change to the in-memory graph data. `dir` is +1 (up) / -1
-  // (down); `reversed` means a prior opposite vote is being flipped, so one vote
-  // moves across directions (net delta ±2). Updates the per-type [li, up, down]
-  // triples, the net edge_votes total, and re-derives affected node values.
   // Apply a WebSocket delta to graphDataRef.
   //
   // Directional (modal +/−) deltas carry `vtCounts` — the server's authoritative
@@ -789,6 +770,46 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     let cancelled = false;
 
     (async () => {
+      // 0a. Heatmap fast path: the server-built voted-edges GeoJSON paints the
+      //     heat as soon as the GL map is up, long before the topology
+      //     download completes. Superseded by the locally-built collection
+      //     once topology + votes land (see maplibreHeat.primeHeatFromServer).
+      fetch(`${CONFIG.apiUrl}/heat?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((fc) => {
+          if (cancelled || !fc) return;
+          primeHeatFromServer(fc as GeoJSON.FeatureCollection);
+          // Server-computed top proposals (with midpoints) let the indicator
+          // icons appear alongside the heat, seconds before the topology
+          // download finishes. The locally-computed winners replace them once
+          // votes+topology land (identical unless votes changed in between).
+          const winners = (fc as { winners?: VoteTypeWinner[] }).winners;
+          if (winners?.length && winnersRef.current.length === 0) {
+            setStableWinners(winners);
+          }
+        })
+        .catch(() => {});
+
+      // 0b. Kick off the authoritative vote fetch immediately — it doesn't
+      //    depend on topology, so it downloads in parallel with the (much
+      //    larger) topology fetch instead of after it.
+      const votesPromise = fetch(
+        `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`
+      ).then((r) => {
+        if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);
+        return r.json();
+      });
+      votesPromise.catch(() => {}); // handled below; avoid unhandled rejection
+
+      // 0c. Yield bandwidth to the visual layers: hold the multi-MB topology
+      //     download until the initial tiles settle (or 2.5s), so streets and
+      //     heat aren't competing with it. Deep links skip the wait — they
+      //     need hit-testing to resolve the pinned selection ASAP.
+      const params = new URLSearchParams(window.location.search);
+      const hasDeepLink = params.has("slat") || params.has("elat");
+      if (!hasDeepLink) await tilesSettled(2500);
+      if (cancelled) return;
+
       // 1. Resolve the graph version, then load topology from IndexedDB when it
       //    matches — skipping the multi-MB download and JSON parse entirely.
       let topology: GraphData | null = null;
@@ -823,10 +844,11 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
 
       topologyRef.current = topology;
       graphDataRef.current = topology;
-      edgeIndexRef.current = buildEdgeIndex(topology);
-      nodeIndexRef.current = buildNodeIndex(topology);
       nodeAdjRef.current = buildNodeAdj(topology);
-      scheduleRedrawRef.current();
+      edgeIndexRef.current = await buildEdgeIndex(topology);
+      if (cancelled) return;
+      nodeIndexRef.current = await buildNodeIndex(topology);
+      if (cancelled) return;
 
       // 2. Paint immediately from cached votes (same graph version only) so the
       //    heatmap appears without waiting on the network. Skipped when the
@@ -842,14 +864,10 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         }
       }
 
-      // 3. Authoritative vote fetch — replaces the cached snapshot and replays
-      //    any deltas that arrived while the fetch was in flight.
+      // 3. Authoritative vote fetch (started in step 0) — replaces the cached
+      //    snapshot and replays any deltas that arrived while it was in flight.
       try {
-        const r = await fetch(
-          `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}`
-        );
-        if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);
-        const voteData = await r.json();
+        const voteData = await votesPromise;
         if (cancelled) return;
         graphDataRef.current = { ...topologyRef.current!, ...voteData };
         lastRevRef.current = voteData.rev ?? 0;
@@ -873,7 +891,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       }
     })();
     return () => { cancelled = true; };
-  }, [applyDeltaToGraphData, setHeatmapLoaded]);
+  }, [applyDeltaToGraphData, setHeatmapLoaded, themeMode]);
 
   // Subscribe to WebSocket deltas — apply each directly to the vote arrays.
   // If a revision gap is detected, do a full refetch to recover.
@@ -960,337 +978,35 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     return () => window.removeEventListener("optimistic-vote", handler);
   }, [themeMode]);
 
-  // Draw hover and pinned highlights on separate canvas
-  const redrawHoverHighlight = useCallback(() => {
-    const hoverCanvas = hoverCanvasRef.current;
-    const hoverCtx = hoverCtxRef.current;
-    const data = graphDataRef.current;
-    if (!hoverCanvas || !hoverCtx) return;
-
-    const size = map.getSize();
-    hoverCanvas.width = size.x;
-    hoverCanvas.height = size.y;
-
-    const topLeft = map.containerPointToLayerPoint([0, 0]);
-    L.DomUtil.setPosition(hoverCanvas, topLeft);
-    hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
-
-    if (!data) return;
-
-    hoverCtx.lineCap = "round";
-    hoverCtx.lineJoin = "round";
-
-    // Renders a hollow white ring with faint interior — same look as the
-    // desire path. `alpha` scales overall opacity (e.g. hover dimmer than pinned).
-    // Three passes:
-    //   1. Stroke wide white (covers full path footprint)
-    //   2. destination-out narrower stroke (carves the hole)
-    //   3. Stroke narrower at low alpha (faint white interior)
-    const drawNode = (nodeIndex: number, alpha: number) => {
-      const node = data.nodes[nodeIndex];
-      if (!node) return;
-      const pt = map.latLngToContainerPoint([node[0], node[1]]);
-
-      hoverCtx.globalCompositeOperation = "source-over";
-      hoverCtx.globalAlpha = alpha;
-      hoverCtx.fillStyle = "#ffffff";
-      hoverCtx.beginPath();
-      hoverCtx.arc(pt.x, pt.y, HIGHLIGHT_NODE_OUTER_R, 0, Math.PI * 2);
-      hoverCtx.fill();
-
-      hoverCtx.globalCompositeOperation = "destination-out";
-      hoverCtx.globalAlpha = 1.0;
-      hoverCtx.beginPath();
-      hoverCtx.arc(pt.x, pt.y, HIGHLIGHT_NODE_INNER_R, 0, Math.PI * 2);
-      hoverCtx.fill();
-
-      hoverCtx.globalCompositeOperation = "source-over";
-      hoverCtx.globalAlpha = HIGHLIGHT_INTERIOR_ALPHA * alpha;
-      hoverCtx.beginPath();
-      hoverCtx.arc(pt.x, pt.y, HIGHLIGHT_NODE_INNER_R, 0, Math.PI * 2);
-      hoverCtx.fill();
-    };
-
-    const drawEdge = (edgeIndex: number, alpha: number) => {
-      const edge = data.edges[edgeIndex];
-      if (!edge) return;
-      const [fromIdx, toIdx] = edge;
-      const fromScreen = map.latLngToContainerPoint([data.nodes[fromIdx][0], data.nodes[fromIdx][1]]);
-      const toScreen = map.latLngToContainerPoint([data.nodes[toIdx][0], data.nodes[toIdx][1]]);
-
-      const strokeLine = () => {
-        hoverCtx.beginPath();
-        hoverCtx.moveTo(fromScreen.x, fromScreen.y);
-        hoverCtx.lineTo(toScreen.x, toScreen.y);
-        hoverCtx.stroke();
-      };
-
-      hoverCtx.globalCompositeOperation = "source-over";
-      hoverCtx.globalAlpha = alpha;
-      hoverCtx.strokeStyle = "#ffffff";
-      hoverCtx.lineWidth = HIGHLIGHT_RING_WIDTH;
-      strokeLine();
-
-      hoverCtx.globalCompositeOperation = "destination-out";
-      hoverCtx.globalAlpha = 1.0;
-      hoverCtx.lineWidth = HIGHLIGHT_INNER_WIDTH;
-      strokeLine();
-
-      hoverCtx.globalCompositeOperation = "source-over";
-      hoverCtx.globalAlpha = HIGHLIGHT_INTERIOR_ALPHA * alpha;
-      hoverCtx.lineWidth = HIGHLIGHT_INNER_WIDTH;
-      strokeLine();
-    };
-
-    const drawTarget = (t: HoverTarget, alpha: number) => {
-      if (t.kind === "edge") drawEdge(t.index, alpha);
-      else drawNode(t.index, alpha);
-    };
-
-    // Pinned highlight (selected start point) — full opacity, exact path match
-    const pinned = pinnedTargetRef.current;
-    if (pinned) drawTarget(pinned, 1.0);
-
-    // Hover highlight — slightly dimmer to read as "preview". Suppress it when
-    // it resolves to the already-pinned target so the selection's hover version
-    // doesn't double-draw; only show hover for a *different* proposal.
-    const hover = hoverTargetRef.current;
-    const hoverIsPinned = pinned && hover && hover.kind === pinned.kind && hover.index === pinned.index;
-    if (hover && !hoverIsPinned) drawTarget(hover, 0.6);
-
-    // Reset state for any subsequent canvas operations
-    hoverCtx.globalCompositeOperation = "source-over";
-    hoverCtx.globalAlpha = 1.0;
-  }, [map]);
-
-  const redrawHoverHighlightRef = useRef(redrawHoverHighlight);
-  useEffect(() => { redrawHoverHighlightRef.current = redrawHoverHighlight; }, [redrawHoverHighlight]);
-
-  // Redraw function - renders edges with vote-scaled styling
-  const redraw = useCallback(() => {
-    const canvas = canvasRef.current;
-    const ctx = ctxRef.current;
-    const data = graphDataRef.current;
-
-    if (!canvas || !ctx || !data) return;
-
-    const size = map.getSize();
-    canvas.width = size.x;
-    canvas.height = size.y;
-
-    const topLeft = map.containerPointToLayerPoint([0, 0]);
-    L.DomUtil.setPosition(canvas, topLeft);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (!data.edges || !data.nodes) return;
-
-    const nodes = data.nodes;
-    const edges = data.edges;
-    const edgeVotes = data.edge_votes ?? [];
-
-    // maxVotes is global (so colors stay consistent across the viewport) but
-    // only changes when votes change — recompute on revision change, not every
-    // frame. lastRevRef advances on every full fetch and applied delta.
-    if (maxVotesRevRef.current !== lastRevRef.current) {
-      maxVotesRef.current = Math.max(1, arrayMax(edgeVotes));
-      maxVotesRevRef.current = lastRevRef.current;
-    }
-    const maxVotes = maxVotesRef.current;
-
-    const bounds = map.getBounds();
-    const zoom = map.getZoom();
-    const zoomScale = Math.pow(2, (zoom - 14) / 2);
-
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
-    // ----------------------------------------------------------------
-    // Projection cache — node layer-points, valid for the current zoom.
-    // Rebuilt when zoom or pixelOrigin changes; nodes projected lazily as
-    // they're first drawn and reused across pans. Per-frame we only add the
-    // pane offset to convert cached layer-points → container pixels.
-    // ----------------------------------------------------------------
-    const origin = map.getPixelOrigin();
-    let proj = projCacheRef.current;
-    if (!proj || proj.zoom !== zoom || proj.ox !== origin.x || proj.oy !== origin.y) {
-      const n = nodes.length;
-      proj = {
-        zoom,
-        ox: origin.x,
-        oy: origin.y,
-        xs: new Float64Array(n),
-        ys: new Float64Array(n),
-        done: new Uint8Array(n),
-      };
-      projCacheRef.current = proj;
-    }
-    const { xs, ys, done } = proj;
-    const offset = map.layerPointToContainerPoint(L.point(0, 0));
-    const offX = offset.x;
-    const offY = offset.y;
-
-    const projectNode = (i: number) => {
-      if (done[i]) return;
-      const p = map.latLngToLayerPoint([nodes[i][0], nodes[i][1]]);
-      xs[i] = p.x;
-      ys[i] = p.y;
-      done[i] = 1;
-    };
-
-    const drawSeg = (i: number) => {
-      const a = edges[i][0];
-      const b = edges[i][1];
-      projectNode(a);
-      projectNode(b);
-      ctx.beginPath();
-      ctx.moveTo(xs[a] + offX, ys[a] + offY);
-      ctx.lineTo(xs[b] + offX, ys[b] + offY);
-      ctx.stroke();
-    };
-
-    // ----------------------------------------------------------------
-    // Viewport culling — query the edge spatial index for edges whose bbox
-    // intersects the visible bounds (+ small margin for wide strokes). Falls
-    // back to all edges only in the brief window before the index is built.
-    // ----------------------------------------------------------------
-    const mLat = (bounds.getNorth() - bounds.getSouth()) * 0.05;
-    const mLng = (bounds.getEast() - bounds.getWest()) * 0.05;
-    const edgeIndex = edgeIndexRef.current;
-    const visible = edgeIndex
-      ? edgeIndex.search(
-          bounds.getWest() - mLng,
-          bounds.getSouth() - mLat,
-          bounds.getEast() + mLng,
-          bounds.getNorth() + mLat,
-        )
-      : null;
-    const count = visible ? visible.length : edges.length;
-    const edgeAt = (k: number): number => (visible ? visible[k] : k);
-
-    // ----------------------------------------------------------------
-    // Phase 1 — zero-vote baseline (source-over, faint white)
-    // Drawn before lighter mode so the network outline doesn't itself
-    // accumulate at intersections (which would highlight random nodes).
-    // ----------------------------------------------------------------
-    ctx.globalCompositeOperation = "source-over";
-    ctx.lineWidth = 0.5 * zoomScale;
-    ctx.globalAlpha = 0.05;
-    ctx.strokeStyle = "#ffffff";
-    for (let k = 0; k < count; k++) {
-      const i = edgeAt(k);
-      if ((edgeVotes[i] ?? 0) > 0) continue;
-      drawSeg(i);
-    }
-
-    // ----------------------------------------------------------------
-    // Phase 2 — voted edges, additive blending (Strava-style)
-    // Sort ascending so the hottest edges paint last and dominate at
-    // overlaps; "lighter" composite means RGB channels sum, naturally
-    // shifting toward yellow/white as intensity stacks. Only the visible
-    // subset is collected/sorted, so this is cheap regardless of graph size.
-    // ----------------------------------------------------------------
-    const voted: number[] = [];
-    for (let k = 0; k < count; k++) {
-      const i = edgeAt(k);
-      if ((edgeVotes[i] ?? 0) > 0) voted.push(i);
-    }
-    voted.sort((a, b) => (edgeVotes[a] ?? 0) - (edgeVotes[b] ?? 0));
-
-    ctx.globalCompositeOperation = mapStyle.heatComposite;
-    const heat = mapStyle.heat;
-
-    for (const i of voted) {
-      const norm = Math.log((edgeVotes[i] ?? 0) + 1) / Math.log(maxVotes + 1);
-
-      // Pass 1 — wide outer halo (low alpha, broad falloff).
-      // Approximates Gaussian halo via stroke width + low opacity.
-      ctx.lineWidth = (2 + norm * 8) * zoomScale;
-      ctx.globalAlpha = 0.025 + norm * 0.06;
-      ctx.strokeStyle = heat.halo;
-      drawSeg(i);
-
-      // Pass 2 — "heat" mid stroke (the dominant color).
-      ctx.lineWidth = (1 + norm * 2) * zoomScale;
-      ctx.globalAlpha = 0.08 + norm * 0.20;
-      ctx.strokeStyle = heat.warm;
-      drawSeg(i);
-
-      // Pass 3 — hot core (kicks in past ~mid intensity).
-      if (norm > 0.2) {
-        const t = (norm - 0.2) / 0.8;
-        ctx.lineWidth = (0.6 + t * 1.0) * zoomScale;
-        ctx.globalAlpha = 0.10 + t * 0.30;
-        ctx.strokeStyle = heat.hot;
-        drawSeg(i);
-      }
-
-      // Pass 4 — bright peak (only the hottest edges).
-      if (norm > 0.7) {
-        const t = (norm - 0.7) / 0.3;
-        ctx.lineWidth = Math.max(0.3, 0.4 * zoomScale);
-        ctx.globalAlpha = 0.30 * t;
-        ctx.strokeStyle = heat.peak;
-        drawSeg(i);
-      }
-    }
-
-    ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = 1.0;
-
-    redrawHoverHighlightRef.current();
-  }, [map, mapStyle.heat, mapStyle.heatComposite]);
-
-  // Schedule redraw
-  const scheduleRedraw = useCallback(() => {
-    if (redrawTimeoutRef.current) cancelAnimationFrame(redrawTimeoutRef.current);
-    redrawTimeoutRef.current = requestAnimationFrame(redraw);
-  }, [redraw]);
-
-  const scheduleRedrawRef = useRef(scheduleRedraw);
-  useEffect(() => { scheduleRedrawRef.current = scheduleRedraw; }, [scheduleRedraw]);
-
-  // Map event listeners — topology is pre-loaded, just redraw on pan/zoom
+  // Map event listeners — drop the hover ring when a zoom starts (its target
+  // is stale the moment the zoom starts); the pinned ring stays, as a GL layer
+  // it tracks the camera for free. Track zoom for the indicator threshold.
   useEffect(() => {
     const handleZoomStart = () => {
-      isZoomingRef.current = true;
-      const ctx = ctxRef.current;
-      const canvas = canvasRef.current;
-      if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const hoverCtx = hoverCtxRef.current;
-      const hoverCanvas = hoverCanvasRef.current;
-      if (hoverCanvas && hoverCtx) hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
-      hoverTargetRef.current = null;
-      setHoverTarget(null);
+      if (hoverTargetRef.current) {
+        hoverTargetRef.current = null;
+        setHoverTarget(null);
+        syncHighlights();
+      }
     };
     const handleZoomEnd = () => {
-      isZoomingRef.current = false;
       setCurrentZoom(map.getZoom());
-      scheduleRedrawRef.current();
     };
-    const handleMoveEnd = () => {
-      // Always redraw on moveend — isZoomingRef is cleared synchronously in zoomend
-      scheduleRedrawRef.current();
-    };
-    const handleResize = () => scheduleRedrawRef.current();
 
     map.on("zoomstart", handleZoomStart);
     map.on("zoomend", handleZoomEnd);
-    map.on("moveend", handleMoveEnd);
-    map.on("resize", handleResize);
     return () => {
       map.off("zoomstart", handleZoomStart);
       map.off("zoomend", handleZoomEnd);
-      map.off("moveend", handleMoveEnd);
-      map.off("resize", handleResize);
     };
-  }, [map]);
+  }, [map, syncHighlights]);
 
   // Hover detection and snap — uses hitTest for unified logic.
   useEffect(() => {
     const canHover = window.matchMedia("(hover: hover)").matches;
     if (!canHover) return;
 
-    const handleMouseMove = (e: L.LeafletMouseEvent) => {
+    const handleMouseMove = (e: MapMouseEvent) => {
       if (hoverRafRef.current) return;
       hoverRafRef.current = requestAnimationFrame(() => {
         hoverRafRef.current = null;
@@ -1299,7 +1015,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
           if (hoverTargetRef.current) {
             hoverTargetRef.current = null;
             setHoverTarget(null);
-            redrawHoverHighlightRef.current();
+            syncHighlights();
           }
           onSnapRef.current?.(null);
           setCurrentSnap(null);
@@ -1316,7 +1032,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
           if (hoverTargetRef.current) {
             hoverTargetRef.current = null;
             setHoverTarget(null);
-            redrawHoverHighlightRef.current();
+            syncHighlights();
           }
           return;
         }
@@ -1348,7 +1064,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         if (changed) {
           hoverTargetRef.current = newTarget;
           setHoverTarget(newTarget);
-          redrawHoverHighlightRef.current();
+          syncHighlights();
         }
 
         if (newTarget) {
@@ -1356,7 +1072,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         }
 
         // Snap position: only compute when actually dragging (path-drag system
-        // is the only consumer). Skipping when idle saves ~100k iterations
+        // is the only consumer). Skipping when idle saves the hit-test work
         // on every mousemove. Uses hitTest directly (in-radius only) so the drag
         // stays free when far from the graph — not resolveSelection's edge fallback.
         if (!dragging) return;
@@ -1370,20 +1086,13 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
           onSnapRef.current?.(snapPos);
           setCurrentSnap(snapPos);
         } else {
-          // Fallback: nearest node out of range. Use the node index when
-          // available (top-1 by bbox distance — for points that's exact).
+          // Fallback: nearest node out of range (top-1 by bbox distance —
+          // for points that's exact). Index-only; no result while building.
           const nodeIdx = nodeIndexRef.current;
           let nearestIdx = -1;
           if (nodeIdx) {
             const candidates = nodeIdx.neighbors(e.latlng.lng, e.latlng.lat, 1);
             if (candidates.length > 0) nearestIdx = candidates[0];
-          } else {
-            let nearestDist = Infinity;
-            for (let i = 0; i < data.nodes.length; i++) {
-              const n = data.nodes[i];
-              const d = (n[0] - e.latlng.lat) ** 2 + (n[1] - e.latlng.lng) ** 2;
-              if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
-            }
           }
           if (nearestIdx >= 0) {
             const n = data.nodes[nearestIdx];
@@ -1402,7 +1111,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       if (hoverTargetRef.current) {
         hoverTargetRef.current = null;
         setHoverTarget(null);
-        redrawHoverHighlightRef.current();
+        syncHighlights();
       }
       onSnapRef.current?.(null);
       setCurrentSnap(null);
@@ -1415,17 +1124,38 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       map.off("mouseout", handleMouseOut);
       if (hoverRafRef.current) cancelAnimationFrame(hoverRafRef.current);
     };
-  }, [map]);
+  }, [map, setCurrentSnap, graphDraggingRef, syncHighlights]);
 
-  // Track pinned tooltip screen position on map pan/zoom
-  const pinnedLat = pinnedPoint?.lat ?? null;
-  const pinnedLng = pinnedPoint?.lng ?? null;
+  // Track pinned tooltip screen position on map pan/zoom. A host-provided
+  // pinned point (route start) takes precedence over the local indicator
+  // selection.
+  const pinnedLat = pinnedPoint?.lat ?? localPinned?.lat ?? null;
+  const pinnedLng = pinnedPoint?.lng ?? localPinned?.lng ?? null;
+
+  // A real pinned point supersedes (and clears) the indicator selection so a
+  // stale proposal doesn't resurface when the start point is later removed.
+  useEffect(() => {
+    if (pinnedPoint) setLocalPinned(null);
+  }, [pinnedPoint]);
+
+  // A plain map click (not on a marker) clears the indicator selection —
+  // matching how clicking away dismisses a selection in GIS tools. Marker
+  // clicks are excluded: the indicator's own click handler manages state.
+  useEffect(() => {
+    const onMapClick = (e: MapMouseEvent) => {
+      const target = e.originalEvent.target as HTMLElement | null;
+      if (target?.closest(".maplibregl-marker")) return;
+      setLocalPinned(null);
+    };
+    map.on("click", onMapClick);
+    return () => map.off("click", onMapClick);
+  }, [map]);
 
   useEffect(() => {
     if (pinnedLat === null || pinnedLng === null) {
       setPinnedScreenPos(null);
       pinnedTargetRef.current = null;
-      redrawHoverHighlightRef.current();
+      syncHighlights();
       return;
     }
 
@@ -1435,7 +1165,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     const sel = resolveSelection(pinnedLat, pinnedLng, pinnedEdgeOverrideRef.current);
     pinnedEdgeOverrideRef.current = null;
     pinnedTargetRef.current = sel?.target ?? null;
-    redrawHoverHighlightRef.current();
+    syncHighlights();
 
     const update = () => {
       const pt = map.latLngToContainerPoint([pinnedLat, pinnedLng]);
@@ -1464,7 +1194,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     };
     // isHeatmapLoading re-triggers resolution once the graph finishes loading,
     // so a cold deep-link (point set before the graph arrives) still resolves.
-  }, [map, pinnedLat, pinnedLng, resolveSelection, isHeatmapLoading]);
+  }, [map, pinnedLat, pinnedLng, resolveSelection, isHeatmapLoading, syncHighlights]);
 
   // -------------------------------------------------------------------------
   // Tooltip content — hover
@@ -1508,7 +1238,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   let pinnedVoteEdgeId: number | null = null;
   let pinnedPointLatLng: { lat: number; lng: number } | null = null;
   const pinnedTarget = pinnedTargetRef.current;
-  const showPinned = pinnedPoint && pinnedScreenPos && pinnedTarget && data;
+  const showPinned = (pinnedPoint || localPinned) && pinnedScreenPos && pinnedTarget && data;
 
   if (showPinned) {
     if (pinnedTarget.kind === "edge") {
@@ -1596,24 +1326,39 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   const selectedEdgeIdx =
     pinnedTarget?.kind === "edge" ? pinnedTarget.index : null;
 
+  // Timestamp of the last indicator touch, so the browser's synthetic click
+  // (fired after touchend) doesn't double-run the handler. Without direct
+  // touchend handling, iOS treats the first tap as hover (the mouseover
+  // handler mutates content) and users had to tap twice to select.
+  const lastIndicatorTouchRef = useRef(0);
+
   const indicatorMarkers = useMemo(() => {
     if (currentZoom < INDICATOR_MIN_ZOOM) return null;
+    if (winners.length === 0) return null;
     const topology = topologyRef.current;
-    if (!topology || winners.length === 0) return null;
 
     // Resolve every winner to its edge-midpoint once up front so click handlers
     // can measure on-screen distance between icons for cluster detection.
+    // Topology is authoritative; server-provided midpoints (heat fast path)
+    // place icons before the topology download completes.
     const placed = winners
       .map((w) => {
-        const edge = topology.edges[w.edgeIdx];
-        if (!edge) return null;
-        const [fromIdx, toIdx] = edge;
-        const fromNode = topology.nodes[fromIdx];
-        const toNode = topology.nodes[toIdx];
-        if (!fromNode || !toNode) return null;
-        const midLat = (fromNode[0] + toNode[0]) / 2;
-        const midLng = (fromNode[1] + toNode[1]) / 2;
-        return { w, midLat, midLng };
+        const edge = topology?.edges[w.edgeIdx];
+        if (edge && edge[0] !== edge[1]) {
+          const fromNode = topology!.nodes[edge[0]];
+          const toNode = topology!.nodes[edge[1]];
+          if (fromNode && toNode) {
+            return {
+              w,
+              midLat: (fromNode[0] + toNode[0]) / 2,
+              midLng: (fromNode[1] + toNode[1]) / 2,
+            };
+          }
+        }
+        if (w.midLat != null && w.midLng != null) {
+          return { w, midLat: w.midLat, midLng: w.midLng };
+        }
+        return null;
       })
       .filter(Boolean) as Array<{
       w: VoteTypeWinner;
@@ -1626,7 +1371,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
     // position is stored by legendIdx for the render below to pick up.
     const spreadCluster = (
       members: typeof placed,
-      anchor: L.Point,
+      anchor: { x: number; y: number },
     ) => {
       const cols = Math.ceil(Math.sqrt(members.length));
       const rows = Math.ceil(members.length / cols);
@@ -1658,10 +1403,10 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
       const posLat = override ? override[0] : midLat;
       const posLng = override ? override[1] : midLng;
 
-      let icon = iconCacheRef.current.get(w.label);
-      if (!icon) {
-        icon = makeVoteTypeIcon(w.label);
-        iconCacheRef.current.set(w.label, icon);
+      let iconHtml = iconHtmlCacheRef.current.get(w.label);
+      if (!iconHtml) {
+        iconHtml = voteTypeIconHtml(w.label);
+        iconHtmlCacheRef.current.set(w.label, iconHtml);
       }
 
       const activateIndicator = () => {
@@ -1676,14 +1421,14 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         setTooltipPos({ x: rect.left + iconPt.x, y: rect.top + iconPt.y });
         hoverTargetRef.current = target;
         setHoverTarget(target);
-        redrawHoverHighlightRef.current();
+        syncHighlights();
       };
 
       const deactivateIndicator = () => {
         overIndicatorRef.current = false;
         hoverTargetRef.current = null;
         setHoverTarget(null);
-        redrawHoverHighlightRef.current();
+        syncHighlights();
       };
 
       const handleClick = () => {
@@ -1706,26 +1451,36 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
         clearSpread();
         activateIndicator();
         pinnedEdgeOverrideRef.current = w.edgeIdx;
-        // Lock the start point to the icon's true edge midpoint, not its
-        // temporary fanned-out grid cell — the spread offset is display-only.
+        // Select at the icon's true edge midpoint, not its temporary
+        // fanned-out grid cell — the spread offset is display-only. This
+        // pins the card + yellow corridor WITHOUT dropping a route pin.
+        setLocalPinned({ lat: midLat, lng: midLng });
         onIndicatorClickRef.current?.({ lat: midLat, lng: midLng });
       };
 
       return (
-        <Marker
+        <MapMarker
           key={w.legendIdx}
-          position={[posLat, posLng]}
-          icon={icon}
-          zIndexOffset={w.edgeIdx === selectedEdgeIdx ? 2000 : 1000}
-          eventHandlers={{
-            mouseover: activateIndicator,
-            mouseout: deactivateIndicator,
-            click: handleClick,
+          position={{ lat: posLat, lng: posLng }}
+          html={iconHtml}
+          className="vote-type-indicator-wrapper"
+          size={VOTE_TYPE_ICON_SIZE}
+          anchor="center"
+          zIndex={w.edgeIdx === selectedEdgeIdx ? 2000 : 1000}
+          onMouseOver={activateIndicator}
+          onMouseOut={deactivateIndicator}
+          onTouchEnd={() => {
+            lastIndicatorTouchRef.current = Date.now();
+            handleClick();
+          }}
+          onClick={() => {
+            if (Date.now() - lastIndicatorTouchRef.current < 700) return;
+            handleClick();
           }}
         />
       );
     });
-  }, [winners, currentZoom, map, spreadPositions, clearSpread, selectedEdgeIdx]);
+  }, [winners, currentZoom, map, spreadPositions, clearSpread, selectedEdgeIdx, syncHighlights]);
 
   // Cast a directional vote on a single proposal (edge, vote type). Optimistic:
   // applies immediately via the same event the route cast uses, records the
@@ -1783,6 +1538,21 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
   return (
     <>
       {indicatorMarkers}
+      {/* A pin placed before the graph/indexes are ready can't resolve to a
+          street yet — show immediate feedback so the tap visibly landed; the
+          pinned effect re-resolves (and swaps in the real card) once data
+          arrives. Without this, early taps looked like they did nothing. */}
+      {(pinnedPoint || localPinned) && pinnedScreenPos && !pinnedTarget && createPortal(
+        <div
+          className="graph-indicator-modal graph-proposal-card is-hover"
+          style={{ left: pinnedScreenPos.x, top: pinnedScreenPos.y }}
+        >
+          <div className="graph-indicator-modal-body">
+            <div className="graph-tooltip-meta">Locating street…</div>
+          </div>
+        </div>,
+        mapContainer
+      )}
       {showPinned && pinnedScreenPos && createPortal(
         <ProposalCard
           winner={pinnedWinner}
@@ -1798,7 +1568,11 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
             ? buildSelectionUrl(pinnedPointLatLng, pinnedWinner?.label ?? pinnedVoteTypes[0]?.label)
             : null}
           onVote={castProposalVote}
-          onRemove={onRemoveSelectedRef.current}
+          onRemove={() => {
+            setLocalPinned(null);
+            // Also clears the start point when the selection came from one.
+            if (pinnedPoint) onRemoveSelectedRef.current?.();
+          }}
           onHoverChange={(over) => {
             overModalRef.current = over;
             // Clear any transient hover card when entering the pinned modal so
@@ -1806,7 +1580,7 @@ export function GraphLayer({ onSnap, pinnedPoint, onIndicatorClick, onRemoveSele
             if (over && hoverTargetRef.current) {
               hoverTargetRef.current = null;
               setHoverTarget(null);
-              redrawHoverHighlightRef.current();
+              syncHighlights();
             }
           }}
         />,
@@ -1872,6 +1646,13 @@ function ProposalCard({
   const icon = winner ? iconForLabel(winner.label) : null;
   void myVotesVersion; // read so the card re-renders when my votes change
 
+  // If the card unmounts with the cursor still inside it (e.g. clicking its
+  // own X), no mouseleave ever fires — release the hover claim explicitly so
+  // the map hover doesn't stay suppressed.
+  const onHoverChangeRef = useRef(onHoverChange);
+  useEffect(() => { onHoverChangeRef.current = onHoverChange; }, [onHoverChange]);
+  useEffect(() => () => { onHoverChangeRef.current?.(false); }, []);
+
   // Keep the card fully on-screen: from its untransformed size (offsetWidth/Height
   // ignore the CSS scale-in animation) + the known anchor transform, compute where
   // each edge lands and nudge it back in from any viewport edge it overflows.
@@ -1890,16 +1671,6 @@ function ProposalCard({
     else if (baseTop + h > window.innerHeight - M) y = window.innerHeight - M - (baseTop + h);
     setCorr((prev) => (Math.abs(prev.x - x) > 0.5 || Math.abs(prev.y - y) > 0.5 ? { x, y } : prev));
   }, [screenX, screenY, flipped, rows]);
-
-  // Stop Leaflet from treating clicks/drags on the card as map interactions:
-  // this keeps the modal from being cleared (a map click) and lets the user
-  // select text and press buttons. Native-level handling (React's
-  // stopPropagation doesn't reach Leaflet's own DOM listeners).
-  useEffect(() => {
-    if (!interactive || !cardRef.current) return;
-    L.DomEvent.disableClickPropagation(cardRef.current);
-    L.DomEvent.disableScrollPropagation(cardRef.current);
-  }, [interactive]);
 
   const handleCopy = () => {
     if (!shareUrl) return;

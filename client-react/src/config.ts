@@ -8,13 +8,21 @@ export * from "./colors";
 // Detect environment: when running the Vite dev server (any port — including
 // incremented ports for parallel worktrees) talk to Flask directly on :5001.
 // In Docker/production (built bundle served by nginx) use relative paths.
+// VITE_LOCAL_API=1 forces the local-dev URLs in a production build, so
+// `vite build && vite preview` can run against local Flask for perf testing.
 const isLocalDev =
-  typeof window !== "undefined" && import.meta.env.DEV;
+  typeof window !== "undefined" &&
+  (import.meta.env.DEV || import.meta.env.VITE_LOCAL_API === "1");
 
 const wsProtocol =
   typeof window !== "undefined" && window.location.protocol === "https:"
     ? "wss:"
     : "ws:";
+
+// Dev API host follows the page's hostname (not a hardcoded localhost) so the
+// dev server is testable from a phone on the same network: open the Network
+// URL vite prints and API/WS/tiles resolve to this machine automatically.
+const devHost = typeof window !== "undefined" ? window.location.hostname : "localhost";
 
 export const CONFIG = {
   // Active map slug (set at bootstrap from the URL; empty = legacy single-map mode)
@@ -49,18 +57,21 @@ export const CONFIG = {
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
   tileSubdomains: "abcd",
 
-  // PMTiles — graph overlay tiles (built from OSM walk graph)
+  // PMTiles — graph overlay tiles (built from OSM walk graph). Used only as
+  // the fallback when the server doesn't provide a z/x/y tile template.
   graphTilesUrl: isLocalDev
-    ? "http://localhost:5001/api/tiles/graph.pmtiles"
+    ? `http://${devHost}:5001/api/tiles/graph.pmtiles`
     : "/tiles/graph.pmtiles",
 
-  // Leaflet behaviors
-  preferCanvas: true,
+  // z/x/y vector-tile source for the graph (browser/CDN cacheable, unlike
+  // pmtiles range requests). Set at bootstrap from the map config; when null
+  // the pmtiles:// protocol above is used instead.
+  graphTiles: null as { template: string; minzoom: number; maxzoom: number } | null,
 
   // API & Socket URLs - auto-detect based on environment
-  apiUrl: isLocalDev ? "http://localhost:5001/api" : "/api",
+  apiUrl: isLocalDev ? `http://${devHost}:5001/api` : "/api",
   wsUrl: isLocalDev
-    ? "ws://localhost:5001/ws"
+    ? `ws://${devHost}:5001/ws`
     : `${wsProtocol}//${typeof window !== "undefined" ? window.location.host : ""}/ws`,
 };
 
@@ -74,6 +85,7 @@ export interface CityConfig {
   minZoom: number;
   maxZoom: number;
   tilesPath: string;
+  tiles?: { template: string; minzoom: number; maxzoom: number } | null;
 }
 
 /**
@@ -92,6 +104,13 @@ export function applyCityConfig(city: CityConfig): void {
   CONFIG.minZoom = minZoom;
   CONFIG.maxZoom = maxZoom;
   if (tilesPath) {
-    CONFIG.graphTilesUrl = isLocalDev ? `http://localhost:5001${tilesPath}` : tilesPath;
+    CONFIG.graphTilesUrl = isLocalDev ? `http://${devHost}:5001${tilesPath}` : tilesPath;
+  }
+  const tiles = city.tiles;
+  if (tiles?.template) {
+    CONFIG.graphTiles = {
+      ...tiles,
+      template: isLocalDev ? `http://${devHost}:5001${tiles.template}` : tiles.template,
+    };
   }
 }

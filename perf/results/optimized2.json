@@ -1,0 +1,304 @@
+{
+  "label": "optimized2",
+  "url": "http://localhost:4174/m/nyc-bikes?lat=40.722&lng=-74&z=15",
+  "timestamp": "2026-07-13T01:56:49.930Z",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "deviceScaleFactor": 2,
+  "cpuThrottle": 1,
+  "reps": 3,
+  "metrics": {
+    "loadToHeatmapMs": 2137,
+    "pan": {
+      "avgFps": 60,
+      "p95FrameMs": 17.7,
+      "maxFrameMs": 17.7,
+      "jankFramesPerDrag": 0,
+      "redrawDelayMs": 7,
+      "postPanMaxFrameMs": 17.7
+    },
+    "zoom": {
+      "avgFps": 60,
+      "p95FrameMs": 17.6,
+      "maxFrameMs": 17.7,
+      "blackoutMs": null
+    }
+  },
+  "raw": {
+    "panStats": [
+      {
+        "frames": 64,
+        "avgFps": 59.1,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 32.8,
+        "jankFrames": 0
+      },
+      {
+        "frames": 77,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 61,
+        "avgFps": 60.1,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 61,
+        "avgFps": 60,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 61,
+        "avgFps": 60,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 61,
+        "avgFps": 60.1,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 67,
+        "avgFps": 60,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 61,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 61,
+        "avgFps": 60.1,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 20.4,
+        "jankFrames": 0
+      },
+      {
+        "frames": 61,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 61,
+        "avgFps": 60,
+        "p95FrameMs": 17.5,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 61,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      }
+    ],
+    "postPanStats": [
+      {
+        "frames": 42,
+        "avgFps": 60,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.8,
+        "jankFrames": 0
+      },
+      {
+        "frames": 42,
+        "avgFps": 60,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 42,
+        "avgFps": 59.9,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 42,
+        "avgFps": 60,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.8,
+        "jankFrames": 0
+      },
+      {
+        "frames": 42,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 42,
+        "avgFps": 59.9,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.8,
+        "jankFrames": 0
+      },
+      {
+        "frames": 42,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 42,
+        "avgFps": 59.9,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 42,
+        "avgFps": 59.9,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 42,
+        "avgFps": 60,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 42,
+        "avgFps": 60,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 42,
+        "avgFps": 59.9,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      }
+    ],
+    "panRedrawDelays": [
+      6.600000001490116,
+      7,
+      6.800000004470348,
+      8.900000005960464,
+      7,
+      6.5,
+      7.100000001490116,
+      7.299999997019768,
+      7.799999997019768,
+      8.299999997019768,
+      6.399999998509884,
+      9.100000001490116
+    ],
+    "zoomStats": [
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.7,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.8,
+        "jankFrames": 0
+      },
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 18.2,
+        "jankFrames": 0
+      },
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      },
+      {
+        "frames": 87,
+        "avgFps": 60,
+        "p95FrameMs": 17.6,
+        "maxFrameMs": 17.7,
+        "jankFrames": 0
+      }
+    ],
+    "zoomBlackouts": []
+  }
+}

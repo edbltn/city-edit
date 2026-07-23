@@ -1,12 +1,19 @@
+import gzip
 import json
 import logging
+import math
+import queue
 import os
 import re
 import sys
 import time
 import hashlib
 import threading
+from collections import OrderedDict
 from functools import lru_cache
+
+from pmtiles.reader import Reader as PMTilesReader, MmapSource
+from pmtiles.tile import Compression
 
 import redis
 import requests
@@ -148,8 +155,13 @@ _vote_cache: dict[str, dict] = {}
 _proposal_vote_lock = threading.Lock()
 
 
-def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
-    """Build the /api/graph-votes JSON for one map+mode, cached by its revision.
+def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> dict:
+    """Build the /api/graph-votes payload for one map+mode, cached by its revision.
+
+    Returns the cache entry: {"rev", "body" (JSON str), "gz" (gzipped bytes)}.
+    The gzipped variant exists because the vote arrays are mostly zeros and
+    compress ~100x — worth caching once per revision rather than re-encoding
+    per request.
 
     `mode` scopes the legend and heatmap to a single vote namespace (e.g.
     "walkways") so proposals cast under other modes on the same map don't leak
@@ -159,7 +171,7 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
     cache_key = f"{rmap.slug}:{mode}" if mode else rmap.slug
     cached = _vote_cache.get(cache_key)
     if cached and cached["rev"] == rev:
-        return cached["body"]
+        return cached
 
     rmap.graph.ensure_loaded()
     votes = vote_store.read_all(redis_client, rmap.slug)
@@ -172,8 +184,136 @@ def _build_graph_votes_body(rmap: ResolvedMap, mode: str | None = None) -> str:
     arrays["vote_types"] = {str(k): v for k, v in vote_store.all_vote_types().items()}
     body = json.dumps(arrays)
 
-    _vote_cache[cache_key] = {"rev": rev, "body": body}
-    return body
+    entry = {
+        "rev": rev,
+        "body": body,
+        "gz": gzip.compress(body.encode(), compresslevel=6),
+        # Kept for /api/heat so it can build its GeoJSON + top-proposal winners
+        # without re-reading Redis.
+        "edge_votes": arrays["edge_votes"],
+        "edge_vote_types": arrays.get("edge_vote_types") or [],
+        "vote_type_legend": arrays.get("vote_type_legend") or [],
+    }
+    _vote_cache[cache_key] = entry
+    return entry
+
+
+# ── Heatmap fast path ───────────────────────────────────────────────────────
+# Server-built GeoJSON of voted edges (norm/tHot/tPeak baked in, mirroring the
+# client's maplibreHeat.ts math) so the first heat paint doesn't wait for the
+# multi-MB topology download. Cached per (map, mode, revision), gzipped.
+
+_heat_cache: dict[str, dict] = {}
+
+TOP_PROPOSAL_LIMIT = 10
+
+
+def _select_top_proposals(legend, edge_vote_types, salt: int, limit: int = TOP_PROPOSAL_LIMIT):
+    """Server mirror of client topProposals.ts: per-type best edge by net
+    support -> one winner per edge -> top `limit` by net (deterministic
+    label-shuffle tiebreak). Shipped with /api/heat so top-proposal indicators
+    appear with the heatmap instead of waiting for the topology download."""
+    best_by_type: dict[int, tuple[int, int]] = {}
+    for edge_idx, pairs in enumerate(edge_vote_types):
+        if not pairs:
+            continue
+        for li, up, down in pairs:
+            count = (up or 0) - (down or 0)
+            cur = best_by_type.get(li)
+            if cur is None or count > cur[1]:
+                best_by_type[li] = (edge_idx, count)
+
+    winners = []
+    for li, (edge_idx, count) in best_by_type.items():
+        label = legend[li] if 0 <= li < len(legend) else None
+        if not label or count <= 0:
+            continue
+        winners.append({"legendIdx": li, "label": label, "edgeIdx": edge_idx, "count": count})
+
+    def shuffle_key(label: str) -> int:
+        h = salt & 0xFFFFFFFF
+        for ch in label:
+            h = ((h * 31) + ord(ch)) & 0xFFFFFFFF
+        return h - (1 << 32) if h >= (1 << 31) else h
+
+    def sort_key(w):
+        return (-w["count"], shuffle_key(w["label"]))
+
+    best_by_edge: dict[int, dict] = {}
+    for w in winners:
+        cur = best_by_edge.get(w["edgeIdx"])
+        if cur is None or sort_key(w) < sort_key(cur):
+            best_by_edge[w["edgeIdx"]] = w
+    return sorted(best_by_edge.values(), key=sort_key)[:limit]
+
+
+def _build_heat_entry(rmap: ResolvedMap, mode: str | None = None) -> dict:
+    rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+    cache_key = f"{rmap.slug}:{mode}" if mode else rmap.slug
+    cached = _heat_cache.get(cache_key)
+    if cached and cached["rev"] == rev:
+        return cached
+
+    votes_entry = _build_graph_votes_body(rmap, mode)
+    edge_votes = votes_entry["edge_votes"]
+    nodes = rmap.graph.nodes
+    edges = rmap.graph.edges
+
+    max_votes = 1
+    for v in edge_votes:
+        if v > max_votes:
+            max_votes = v
+    log_max = math.log(max_votes + 1)
+
+    features = []
+    for i, v in enumerate(edge_votes):
+        if v <= 0 or i >= len(edges):
+            continue
+        if edges[i][0] == edges[i][1]:
+            continue  # tombstone (retired eid) or self-loop — no geometry to draw
+        a = nodes[edges[i][0]]
+        b = nodes[edges[i][1]]
+        norm = math.log(v + 1) / log_max
+        features.append({
+            "type": "Feature",
+            "id": i,
+            "properties": {
+                "norm": norm,
+                "tHot": (norm - 0.2) / 0.8 if norm > 0.2 else 0,
+                "tPeak": (norm - 0.7) / 0.3 if norm > 0.7 else 0,
+            },
+            "geometry": {
+                "type": "LineString",
+                # GeoJSON is [lng, lat]; graph nodes are [lat, lng].
+                "coordinates": [[a[1], a[0]], [b[1], b[0]]],
+            },
+        })
+
+    winners = _select_top_proposals(
+        votes_entry.get("vote_type_legend") or [],
+        votes_entry.get("edge_vote_types") or [],
+        salt=rev,
+    )
+    for w in winners:
+        e = edges[w["edgeIdx"]] if w["edgeIdx"] < len(edges) else None
+        if not e or e[0] == e[1]:
+            w["midLat"] = None
+            w["midLng"] = None
+            continue
+        a, b = nodes[e[0]], nodes[e[1]]
+        w["midLat"] = (a[0] + b[0]) / 2
+        w["midLng"] = (a[1] + b[1]) / 2
+    winners = [w for w in winners if w.get("midLat") is not None]
+
+    # "winners" rides along as a GeoJSON foreign member.
+    body = json.dumps({"type": "FeatureCollection", "features": features, "winners": winners})
+    entry = {
+        "rev": rev,
+        "body": body,
+        "gz": gzip.compress(body.encode(), compresslevel=6),
+    }
+    _heat_cache[cache_key] = entry
+    return entry
 
 
 def _populate_redis():
@@ -321,6 +461,9 @@ def map_get(slug):
     city = get_city(m["cityId"])
     if city:
         m["city"] = city.to_public()
+        # z/x/y tile source for the client's GL map (browser/CDN cacheable,
+        # unlike pmtiles range requests).
+        m["city"]["tiles"] = city_tiles_meta(city.id)
     return jsonify(m)
 
 
@@ -409,42 +552,95 @@ def map_auth(slug):
 
 # ── WebSocket (delta-based, per-map) ─────────────────────────────────────────
 
+# ── WebSocket fanout ────────────────────────────────────────────────────────
+# One Redis pubsub listener per channel per process, fanning messages out to
+# per-client stdlib queues. The old design gave every client its own Redis
+# connection and a 10Hz get_message() poll — at hundreds of clients that's
+# thousands of wakeups/sec and hundreds of Redis connections on one event
+# loop. stdlib Queue/Thread are gevent-cooperative under gunicorn's
+# monkeypatch and plain threads under the dev server, so this works in both.
+
+WS_KEEPALIVE_S = 30
+# Bounded so one stalled client can't buffer unbounded deltas; on overflow the
+# client is dropped (it reconnects and recovers via the rev-gap refetch).
+WS_QUEUE_MAX = 256
+
+class _WsSub:
+    """One connected client's delta queue. A separate wrapper object because
+    gevent's monkeypatched Queue is a C type that rejects new attributes."""
+
+    __slots__ = ("q", "dead")
+
+    def __init__(self):
+        self.q: "queue.Queue[str]" = queue.Queue(maxsize=WS_QUEUE_MAX)
+        self.dead = False
+
+
+_ws_subscribers: dict[str, set[_WsSub]] = {}
+_ws_listeners: set[str] = set()
+_ws_lock = threading.Lock()
+
+
+def _ws_listen(channel: str) -> None:
+    """Long-lived listener: one Redis pubsub → all subscribed client queues."""
+    while True:
+        try:
+            client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
+            pubsub = client.pubsub()
+            pubsub.subscribe(channel)
+            for msg in pubsub.listen():
+                if msg.get("type") != "message":
+                    continue
+                with _ws_lock:
+                    subs = list(_ws_subscribers.get(channel, ()))
+                for sub in subs:
+                    try:
+                        sub.q.put_nowait(msg["data"])
+                    except queue.Full:
+                        # Slow client — mark it dead; its handler will drop it.
+                        sub.dead = True
+        except Exception as e:
+            logger.warning(f"[WS] listener for {channel} died: {e}; retrying in 1s")
+            time.sleep(1)
+
+
+def _ws_subscribe(channel: str) -> _WsSub:
+    sub = _WsSub()
+    with _ws_lock:
+        _ws_subscribers.setdefault(channel, set()).add(sub)
+        if channel not in _ws_listeners:
+            _ws_listeners.add(channel)
+            threading.Thread(target=_ws_listen, args=(channel,), daemon=True).start()
+    return sub
+
+
+def _ws_unsubscribe(channel: str, sub: _WsSub) -> None:
+    with _ws_lock:
+        _ws_subscribers.get(channel, set()).discard(sub)
+
+
 @sock.route("/ws")
 def ws(ws):
     """Push a single map's vote deltas to a client in real time."""
     slug = (request.args.get("map") or DEFAULT_MAP_SLUG).strip()
     channel = vote_store.channel_key(slug)
 
-    ws_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
-    pubsub = ws_client.pubsub()
-    pubsub.subscribe(channel)
-
-    rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)
-    ws.send(json.dumps({"type": "init", "rev": rev, "map": slug}))
-
-    last_push = time.time()
-    KEEPALIVE = 30
+    sub = _ws_subscribe(channel)
     try:
+        rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)
+        ws.send(json.dumps({"type": "init", "rev": rev, "map": slug}))
+
         while True:
+            if sub.dead:
+                break  # overflowed — force a reconnect so the client refetches
             try:
-                ws.receive(timeout=0)
-            except Exception as e:
-                s = str(e).lower()
-                if "timed out" not in s and "no data" not in s and "connection closed" not in s:
-                    logger.warning(f"[WS] receive exception: {e}")
-
-            msg = pubsub.get_message(timeout=0.1)
-            if msg and msg["type"] == "message":
-                ws.send(msg["data"])
-                last_push = time.time()
-
-            if time.time() - last_push > KEEPALIVE:
+                data = sub.q.get(timeout=WS_KEEPALIVE_S)
+                ws.send(data)
+            except queue.Empty:
+                # Idle: keepalive doubles as dead-peer detection (send raises).
                 ws.send('{"type":"keepalive"}')
-                last_push = time.time()
     finally:
-        pubsub.unsubscribe(channel)
-        pubsub.close()
-        ws_client.close()
+        _ws_unsubscribe(channel, sub)
 
 
 # ── Routes API ─────────────────────────────────────────────────────────────
@@ -471,11 +667,17 @@ def calculate_route():
         )
 
         if "error" in route:
-            logger.info("[ROUTE] OSRM failed, falling back to Python router")
-            route = rmap.graph.provider.calculate_route(
-                start=(start[0], start[1]), end=(end[0], end[1]),
-                mode="walk", waypoints=waypoints_tuples,
-            )
+            # The Python router is CPU-bound (can take seconds) and blocks the
+            # whole gevent event loop — every WebSocket and request on this
+            # worker stalls while it runs. Fine in dev (no OSRM container);
+            # set PYTHON_ROUTING_FALLBACK=0 in production so an OSRM outage
+            # degrades to a routing error instead of freezing the server.
+            if os.environ.get("PYTHON_ROUTING_FALLBACK", "1") != "0":
+                logger.info("[ROUTE] OSRM failed, falling back to Python router")
+                route = rmap.graph.provider.calculate_route(
+                    start=(start[0], start[1]), end=(end[0], end[1]),
+                    mode="walk", waypoints=waypoints_tuples,
+                )
 
         if "error" in route:
             return jsonify(route), 404
@@ -868,6 +1070,106 @@ def serve_tiles(filename):
     return response
 
 
+# ── z/x/y vector tiles ──────────────────────────────────────────────────────
+# Browsers never HTTP-cache range requests, so the pmtiles:// protocol
+# re-downloads the whole viewport's tiles on every visit. These discrete tile
+# URLs are cacheable by the browser, nginx, and any CDN. Tiles in the archive
+# are uncompressed MVT; gzipped copies are kept in a small LRU since the
+# viewport hot set is tiny and pbf compresses ~4x.
+
+_TILE_CACHE_MAX = 512
+
+_tile_readers: dict[str, tuple] = {}
+_tile_gzip_lru: "OrderedDict[tuple, bytes]" = OrderedDict()
+_tile_lock = threading.Lock()
+
+
+def _tile_reader(city_id: str) -> tuple:
+    """(reader, header, etag) for a city's pmtiles archive, cached."""
+    entry = _tile_readers.get(city_id)
+    if entry:
+        return entry
+    with _tile_lock:
+        entry = _tile_readers.get(city_id)
+        if entry:
+            return entry
+        path = os.path.join(os.path.dirname(__file__), "osm_data", city_id, "graph.pmtiles")
+        f = open(path, "rb")  # noqa: SIM115 — held open for the mmap's lifetime
+        reader = PMTilesReader(MmapSource(f))
+        header = reader.header()
+        st = os.stat(path)
+        etag = f'"t-{int(st.st_mtime)}-{st.st_size}"'
+        entry = (reader, header, etag)
+        _tile_readers[city_id] = entry
+        return entry
+
+
+def city_tiles_meta(city_id: str) -> dict | None:
+    """Client-facing z/x/y tile source description (None when no archive)."""
+    try:
+        _, header, _ = _tile_reader(city_id)
+    except (FileNotFoundError, OSError):
+        return None
+    return {
+        "template": f"/api/tile/{city_id}/{{z}}/{{x}}/{{y}}.mvt",
+        "minzoom": header["min_zoom"],
+        "maxzoom": header["max_zoom"],
+    }
+
+
+@app.route("/api/tile/<city_id>/<int:z>/<int:x>/<int:y>.mvt")
+def vector_tile(city_id, z, x, y):
+    try:
+        reader, header, etag = _tile_reader(city_id)
+    except (FileNotFoundError, OSError):
+        return jsonify({"error": f"No tiles for city '{city_id}'"}), 404
+
+    if request.headers.get("If-None-Match") == etag:
+        resp = app.response_class(status=304)
+        resp.headers["ETag"] = etag
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
+
+    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "")
+    key = (city_id, z, x, y)
+    body = None
+    if accepts_gzip:
+        with _tile_lock:
+            body = _tile_gzip_lru.get(key)
+            if body is not None:
+                _tile_gzip_lru.move_to_end(key)
+
+    if body is None:
+        data = reader.get(z, x, y)
+        if data is None:
+            # Empty tile — 204 renders as "no features" in MapLibre.
+            resp = app.response_class(status=204)
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            resp.headers["ETag"] = etag
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            return resp
+        if header["tile_compression"] == Compression.GZIP:
+            # Archive already gzipped its tiles — pass through.
+            body = data
+        elif accepts_gzip:
+            body = gzip.compress(data, compresslevel=6)
+            with _tile_lock:
+                _tile_gzip_lru[key] = body
+                while len(_tile_gzip_lru) > _TILE_CACHE_MAX:
+                    _tile_gzip_lru.popitem(last=False)
+        else:
+            body = data
+
+    resp = app.response_class(response=body, mimetype="application/vnd.mapbox-vector-tile")
+    if accepts_gzip or header["tile_compression"] == Compression.GZIP:
+        resp.headers["Content-Encoding"] = "gzip"
+    resp.headers["Vary"] = "Accept-Encoding"
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    resp.headers["ETag"] = etag
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
 @app.route("/api/graph-version", methods=["GET"])
 def graph_version():
     """Cheap content hash of a city's topology, used as a client cache key."""
@@ -892,11 +1194,22 @@ def graph_topology():
         resp = app.response_class(status=304)
         resp.headers["ETag"] = etag
         resp.headers["Cache-Control"] = "public, max-age=86400"
+        resp.headers["Vary"] = "Accept-Encoding"
         return resp
 
-    resp = app.response_class(
-        response=rmap.graph.topology_json, status=200, mimetype="application/json",
-    )
+    # Serve the pre-compressed variant to gzip-accepting clients (~5MB instead
+    # of ~24MB for NYC). Compressed once at graph load; see graph_registry.
+    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "")
+    if accepts_gzip and rmap.graph.topology_gzip is not None:
+        resp = app.response_class(
+            response=rmap.graph.topology_gzip, status=200, mimetype="application/json",
+        )
+        resp.headers["Content-Encoding"] = "gzip"
+    else:
+        resp = app.response_class(
+            response=rmap.graph.topology_json, status=200, mimetype="application/json",
+        )
+    resp.headers["Vary"] = "Accept-Encoding"
     resp.headers["Cache-Control"] = "public, max-age=86400"
     if etag:
         resp.headers["ETag"] = etag
@@ -922,11 +1235,62 @@ def graph_votes():
         return resp
 
     try:
-        body = _build_graph_votes_body(rmap, mode)
+        entry = _build_graph_votes_body(rmap, mode)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    resp = app.response_class(response=body, status=200, mimetype="application/json")
+    # Vote arrays are mostly zeros — the cached gzip variant is ~100x smaller.
+    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "")
+    if accepts_gzip and entry.get("gz") is not None:
+        resp = app.response_class(
+            response=entry["gz"], status=200, mimetype="application/json",
+        )
+        resp.headers["Content-Encoding"] = "gzip"
+    else:
+        resp = app.response_class(
+            response=entry["body"], status=200, mimetype="application/json",
+        )
+    resp.headers["Vary"] = "Accept-Encoding"
+    resp.headers["Cache-Control"] = "public, max-age=5"
+    resp.headers["ETag"] = etag
+    return resp
+
+
+@app.route("/api/heat", methods=["GET"])
+def heat():
+    """Voted-edges GeoJSON for the heatmap's first paint (no topology needed).
+
+    Same feature shape the client builds locally (maplibreHeat.ts); the client
+    switches to its locally-built collection once topology + votes arrive.
+    """
+    rmap = resolve_map(request.args.get("map"))
+    rmap.graph.ensure_loaded()
+
+    mode = request.args.get("mode") or None
+    rev = int(redis_client.get(vote_store.revision_key(rmap.slug)) or 0)
+    etag = f'"h-{rmap.slug}-{mode or "all"}-{rev}"'
+    if request.headers.get("If-None-Match") == etag:
+        resp = app.response_class(status=304)
+        resp.headers["ETag"] = etag
+        resp.headers["Cache-Control"] = "public, max-age=5"
+        return resp
+
+    try:
+        entry = _build_heat_entry(rmap, mode)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "")
+    if accepts_gzip and entry.get("gz") is not None:
+        resp = app.response_class(
+            response=entry["gz"], status=200, mimetype="application/geo+json",
+        )
+        resp.headers["Content-Encoding"] = "gzip"
+    else:
+        resp = app.response_class(
+            response=entry["body"], status=200, mimetype="application/geo+json",
+        )
+    resp.headers["Vary"] = "Accept-Encoding"
     resp.headers["Cache-Control"] = "public, max-age=5"
     resp.headers["ETag"] = etag
     return resp

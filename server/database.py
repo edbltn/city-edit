@@ -6,10 +6,12 @@ Redis handles fast reads/writes and pub/sub; Postgres stores permanent history.
 """
 import logging
 import os
+import threading
 from contextlib import contextmanager
 from typing import Optional
 
 import psycopg2
+import psycopg2.pool
 from psycopg2.extras import execute_values
 
 logger = logging.getLogger(__name__)
@@ -17,33 +19,73 @@ logger = logging.getLogger(__name__)
 # Database connection string from environment
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# Connection pool (simple approach - one connection per request)
-_connection: Optional[psycopg2.extensions.connection] = None
+# Make psycopg2 cooperative under gevent (gunicorn --worker-class gevent):
+# without this every query blocks the whole event loop in C, and a single
+# shared connection would interleave cursors across greenlets. Harmless no-op
+# when gevent isn't active (local dev runs the threaded Flask server).
+try:
+    from gevent import monkey as _gevent_monkey
+
+    if _gevent_monkey.is_module_patched("socket"):
+        from psycogreen.gevent import patch_psycopg
+
+        patch_psycopg()
+        logger.info("[DB] psycopg2 patched for gevent")
+except ImportError:
+    pass
+
+# Small connection pool — greenlet/thread-safe (ThreadedConnectionPool's lock
+# is gevent-patched when running under gevent). Sized for one worker process.
+# The semaphore makes acquisition BLOCK when all connections are checked out;
+# the bare pool raises "pool exhausted" instead, which would surface as 500s
+# under concurrent load.
+_pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
+_pool_sem: Optional[threading.BoundedSemaphore] = None
+_pool_lock = threading.Lock()
 
 
-def get_connection() -> psycopg2.extensions.connection:
-    """Get or create database connection."""
-    global _connection
-
+def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    global _pool, _pool_sem
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL environment variable not set")
-
-    if _connection is None or _connection.closed:
-        _connection = psycopg2.connect(DATABASE_URL)
-        _connection.autocommit = True
-
-    return _connection
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                maxconn = int(os.environ.get("PG_POOL_MAX", "10"))
+                _pool_sem = threading.BoundedSemaphore(maxconn)
+                _pool = psycopg2.pool.ThreadedConnectionPool(
+                    minconn=1, maxconn=maxconn, dsn=DATABASE_URL,
+                )
+    return _pool
 
 
 @contextmanager
 def get_cursor():
-    """Context manager for database cursor."""
-    conn = get_connection()
-    cursor = conn.cursor()
+    """Context manager for a pooled connection's cursor. Blocks (gevent- and
+    thread-cooperatively) when the pool is fully checked out."""
+    pool = _get_pool()
+    _pool_sem.acquire()
     try:
-        yield cursor
+        conn = pool.getconn()
+        try:
+            if conn.closed:
+                # Stale connection from the pool (server restart etc.) — replace it.
+                pool.putconn(conn, close=True)
+                conn = psycopg2.connect(DATABASE_URL)
+            conn.autocommit = True
+            cursor = conn.cursor()
+            try:
+                yield cursor
+            finally:
+                cursor.close()
+        finally:
+            try:
+                pool.putconn(conn)
+            except psycopg2.pool.PoolError:
+                # Connection replaced outside the pool — close it directly.
+                conn.close()
     finally:
-        cursor.close()
+        _pool_sem.release()
 
 
 def _migrate_edge_votes(cursor):

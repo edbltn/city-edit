@@ -1,8 +1,23 @@
 import { useCallback, useRef, useEffect, useState } from "react";
-import L from "leaflet";
 import { useGhostPin, useGraphSnap } from "../context";
+import {
+  UTIL_SOURCE_ID,
+  setOverlayFeature,
+  removeOverlayFeature,
+  setDesirePathDimmed,
+} from "../map/maplibreOverlays";
+import type { MapFacade, MapMouseEvent } from "../map/facade";
 import type { RouteGeometry, LatLng } from "../types";
 
+// Pixel radius around the path centerline that counts as "on the path" for
+// hover + drag-start — half the old 20px-wide invisible Leaflet hit-line.
+const PATH_HIT_PX = 10;
+
+// Only one path layer may own the hover ghost / an active drag at a time.
+// With split paths, two layers share an endpoint; without this claim both
+// would show ghosts (the fat Leaflet hit-lines used to arbitrate by stacking).
+let hoverClaim: symbol | null = null;
+let dragActive = false;
 
 /**
  * Closest point on the path *polyline* (not just a vertex) to a given lat/lng,
@@ -11,80 +26,112 @@ import type { RouteGeometry, LatLng } from "../types";
  * discrete vertices. Display-only — the committed drop still snaps via the graph.
  */
 function closestPointOnPath(
-  map: L.Map,
+  map: MapFacade,
   coordinates: [number, number][],
-  latlng: L.LatLng,
-  thresholdPx: number = 40
+  latlng: LatLng,
+  thresholdPx: number = PATH_HIT_PX
 ): LatLng | null {
   if (coordinates.length === 0) return null;
+  const p = map.latLngToContainerPoint(latlng);
+
   if (coordinates.length === 1) {
-    const only = map.latLngToContainerPoint(L.latLng(coordinates[0][1], coordinates[0][0]));
-    const p0 = map.latLngToContainerPoint(latlng);
-    return p0.distanceTo(only) <= thresholdPx
+    const only = map.latLngToContainerPoint({ lat: coordinates[0][1], lng: coordinates[0][0] });
+    const d = Math.hypot(p.x - only.x, p.y - only.y);
+    return d <= thresholdPx
       ? { lat: coordinates[0][1], lng: coordinates[0][0] }
       : null;
   }
 
-  const p = map.latLngToContainerPoint(latlng);
   let bestDist = Infinity;
-  let bestPoint: L.Point | null = null;
+  let bestPoint: { x: number; y: number } | null = null;
 
   for (let i = 0; i < coordinates.length - 1; i++) {
-    const a = map.latLngToContainerPoint(L.latLng(coordinates[i][1], coordinates[i][0]));
-    const b = map.latLngToContainerPoint(L.latLng(coordinates[i + 1][1], coordinates[i + 1][0]));
+    const a = map.latLngToContainerPoint({ lat: coordinates[i][1], lng: coordinates[i][0] });
+    const b = map.latLngToContainerPoint({ lat: coordinates[i + 1][1], lng: coordinates[i + 1][0] });
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const lenSq = dx * dx + dy * dy;
     // Project p onto segment a→b, clamped to the segment.
     const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
-    const proj = L.point(a.x + t * dx, a.y + t * dy);
-    const dist = p.distanceTo(proj);
+    const projX = a.x + t * dx;
+    const projY = a.y + t * dy;
+    const dist = Math.hypot(p.x - projX, p.y - projY);
     if (dist < bestDist) {
       bestDist = dist;
-      bestPoint = proj;
+      bestPoint = { x: projX, y: projY };
     }
   }
 
   if (bestDist > thresholdPx || !bestPoint) return null;
-  const ll = map.containerPointToLatLng(bestPoint);
-  return { lat: ll.lat, lng: ll.lng };
+  return map.containerPointToLatLng(bestPoint);
 }
 
 interface UsePathDragOptions {
-  map: L.Map;
+  map: MapFacade;
   geometry: RouteGeometry;
   segmentIndex: number;
   onSegmentDrag?: (segmentIndex: number, position: LatLng) => void;
+  /** Fires true/false as the cursor enters/leaves the path's hit radius. */
+  onHoverChange?: (isHovering: boolean) => void;
 }
 
 interface UsePathDragResult {
   isDraggingRef: React.MutableRefObject<boolean>;
-  hoverLatLng: L.LatLng | null;
-  handleStart: (e: L.LeafletMouseEvent) => void;
-  handleHoverMove: (e: L.LeafletMouseEvent) => void;
-  handleHoverOut: () => void;
+  hoverLatLng: LatLng | null;
 }
 
-const DRAG_TRAIL_STYLE: L.PolylineOptions = {
-  color: "#999999",
-  weight: 2,
-  opacity: 0.6,
-  dashArray: "1, 4",
-  lineCap: "round",
-};
+let trailCounter = 0;
 
+/**
+ * Drag-to-insert-waypoint interaction on a desire path. Hit-testing is pure
+ * math against the geometry (the Flatbush pattern — camera-independent), not
+ * a fat invisible hit-line: a map mousedown/touchstart within PATH_HIT_PX of
+ * the polyline starts a drag; while idle, mousemoves within the radius show
+ * the hover ghost pin.
+ */
 export function usePathDrag({
   map,
   geometry,
   segmentIndex,
   onSegmentDrag,
+  onHoverChange,
 }: UsePathDragOptions): UsePathDragResult {
   const { startDrag, updateDrag, endDrag } = useGhostPin();
   const { snapToGraph, setDragging } = useGraphSnap();
   const isDraggingRef = useRef(false);
-  const dragOriginRef = useRef<L.LatLng | null>(null);
-  const dragTrailRef = useRef<L.Polyline | null>(null);
-  const [hoverLatLng, setHoverLatLng] = useState<L.LatLng | null>(null);
+  const dragOriginRef = useRef<LatLng | null>(null);
+  const dragStartClientRef = useRef<{ x: number; y: number } | null>(null);
+  const [hoverLatLng, setHoverLatLng] = useState<LatLng | null>(null);
+
+  // This instance's identity for the module-level hover/drag claims, and its
+  // keyed trail feature in the util-lines source.
+  const tokenRef = useRef<symbol | null>(null);
+  if (!tokenRef.current) tokenRef.current = Symbol("path-drag");
+  const trailKeyRef = useRef(`trail-path-${++trailCounter}`);
+
+  const onHoverChangeRef = useRef(onHoverChange);
+  useEffect(() => { onHoverChangeRef.current = onHoverChange; }, [onHoverChange]);
+
+  const geometryRef = useRef(geometry);
+  useEffect(() => { geometryRef.current = geometry; }, [geometry]);
+
+  const setHovering = useCallback((pos: LatLng | null) => {
+    const token = tokenRef.current!;
+    if (pos) {
+      if (hoverClaim && hoverClaim !== token) return; // another path owns it
+      hoverClaim = token;
+      map.getCanvas().style.cursor = "grab";
+      setHoverLatLng(pos);
+      onHoverChangeRef.current?.(true);
+    } else if (hoverClaim === token) {
+      hoverClaim = null;
+      map.getCanvas().style.cursor = "";
+      setHoverLatLng(null);
+      onHoverChangeRef.current?.(false);
+    } else {
+      setHoverLatLng(null);
+    }
+  }, [map]);
 
   // Get position from mouse or touch event
   const getEventPosition = useCallback((e: MouseEvent | TouchEvent) => {
@@ -97,30 +144,32 @@ export function usePathDrag({
     return { x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY };
   }, []);
 
+  const updateTrail = useCallback((end: LatLng) => {
+    const origin = dragOriginRef.current;
+    if (!origin) return;
+    setOverlayFeature(UTIL_SOURCE_ID, trailKeyRef.current, {
+      type: "LineString",
+      coordinates: [[origin.lng, origin.lat], [end.lng, end.lat]],
+    });
+  }, []);
+
   // Global move handler for drag (mouse + touch)
   const handleGlobalMove = useCallback(
     (e: MouseEvent | TouchEvent) => {
       if (isDraggingRef.current) {
         const pos = getEventPosition(e);
-        const container = map.getContainer();
-        const rect = container.getBoundingClientRect();
-        const containerPoint = L.point(pos.x - rect.left, pos.y - rect.top);
-        const latLng = map.containerPointToLatLng(containerPoint);
+        const rect = map.getContainer().getBoundingClientRect();
+        const latLng = map.containerPointToLatLng({ x: pos.x - rect.left, y: pos.y - rect.top });
         // Underlying snap (edge/node via hitTest — never a top proposal). The
         // ghost itself follows the raw cursor, like the start/end markers; the
         // snap only drives the trail end and the committed drop position.
-        const snapped = snapToGraph(map, latLng.lat, latLng.lng);
+        const snapped = snapToGraph(latLng.lat, latLng.lng);
 
         updateDrag(pos, snapped);
-
-        // Update drag trail line
-        const trailEnd = snapped ? L.latLng(snapped.lat, snapped.lng) : latLng;
-        if (dragOriginRef.current && dragTrailRef.current) {
-          dragTrailRef.current.setLatLngs([dragOriginRef.current, trailEnd]);
-        }
+        updateTrail(snapped ?? latLng);
       }
     },
-    [updateDrag, getEventPosition, map, snapToGraph]
+    [updateDrag, getEventPosition, map, snapToGraph, updateTrail]
   );
 
   // Global end handler - convert screen position to lat/lng and call callback
@@ -128,26 +177,34 @@ export function usePathDrag({
     (e: MouseEvent | TouchEvent) => {
       if (isDraggingRef.current && onSegmentDrag) {
         const pos = getEventPosition(e);
-        const container = map.getContainer();
-        const rect = container.getBoundingClientRect();
-        const containerPoint = L.point(pos.x - rect.left, pos.y - rect.top);
-        const latLng = map.containerPointToLatLng(containerPoint);
+        // A press-and-release without real movement is a tap, not a drag —
+        // inserting a waypoint at the grab point would be a no-op for the
+        // route but adds a stray marker + recalc (easy to trigger on touch,
+        // e.g. a double-tap landing on the fresh path).
+        const startPos = dragStartClientRef.current;
+        const movedPx = startPos ? Math.hypot(pos.x - startPos.x, pos.y - startPos.y) : Infinity;
+        if (movedPx >= 8) {
+          const rect = map.getContainer().getBoundingClientRect();
+          const latLng = map.containerPointToLatLng({ x: pos.x - rect.left, y: pos.y - rect.top });
 
-        // Snap to nearest graph node/edge
-        const snapped = snapToGraph(map, latLng.lat, latLng.lng);
-        const finalPos = snapped ?? { lat: latLng.lat, lng: latLng.lng };
-        onSegmentDrag(segmentIndex, finalPos);
+          // Snap to nearest graph node/edge
+          const snapped = snapToGraph(latLng.lat, latLng.lng);
+          const finalPos = snapped ?? latLng;
+          onSegmentDrag(segmentIndex, finalPos);
+        }
       }
 
       // Cleanup
       isDraggingRef.current = false;
+      dragActive = false;
       setDragging(false);
       endDrag();
-      dragTrailRef.current?.remove();
-      dragTrailRef.current = null;
+      removeOverlayFeature(UTIL_SOURCE_ID, trailKeyRef.current);
       dragOriginRef.current = null;
-      map.dragging.enable();
+      dragStartClientRef.current = null;
+      setDesirePathDimmed(false);
       document.body.classList.remove("dragging-from-path");
+      map.getCanvas().style.cursor = "";
 
       document.removeEventListener("mousemove", handleGlobalMove);
       document.removeEventListener("mouseup", handleGlobalEnd);
@@ -155,34 +212,29 @@ export function usePathDrag({
       document.removeEventListener("touchend", handleGlobalEnd);
       document.removeEventListener("touchcancel", handleGlobalEnd);
     },
-    [map, segmentIndex, onSegmentDrag, endDrag, handleGlobalMove, getEventPosition, snapToGraph]
+    [map, segmentIndex, onSegmentDrag, endDrag, handleGlobalMove, getEventPosition, snapToGraph, setDragging]
   );
 
-  // Start drag on mousedown/touchstart
-  const handleStart = useCallback(
-    (e: L.LeafletMouseEvent) => {
-      if (!onSegmentDrag) return;
-
-      L.DomEvent.stopPropagation(e);
-      L.DomEvent.preventDefault(e.originalEvent);
-
+  // Shared drag-start: grab point in client coords + the lat/lng under it.
+  const beginDrag = useCallback(
+    (clientPos: { x: number; y: number }, latlng: LatLng) => {
       isDraggingRef.current = true;
+      dragActive = true;
+      dragStartClientRef.current = clientPos;
       setDragging(true);
-      map.dragging.disable();
+      setDesirePathDimmed(true);
       document.body.classList.add("dragging-from-path");
-      setHoverLatLng(null);
+      map.getCanvas().style.cursor = "grabbing";
+      setHovering(null);
 
       // Ghost starts at the raw grab point (unsnapped); snapped is the
       // underlying edge/node used for the trail + drop.
-      const pos = getEventPosition(e.originalEvent);
-      const snapped = snapToGraph(map, e.latlng.lat, e.latlng.lng);
+      const snapped = snapToGraph(latlng.lat, latlng.lng);
+      startDrag(clientPos, snapped);
 
-      startDrag(pos, snapped);
-
-      // Create drag trail from grab point
-      const origin = snapped ? L.latLng(snapped.lat, snapped.lng) : e.latlng;
+      const origin = snapped ?? latlng;
       dragOriginRef.current = origin;
-      dragTrailRef.current = L.polyline([origin, origin], DRAG_TRAIL_STYLE).addTo(map);
+      updateTrail(origin);
 
       // Attach global listeners for both mouse and touch
       document.addEventListener("mousemove", handleGlobalMove);
@@ -191,122 +243,114 @@ export function usePathDrag({
       document.addEventListener("touchend", handleGlobalEnd);
       document.addEventListener("touchcancel", handleGlobalEnd);
     },
-    [map, onSegmentDrag, startDrag, handleGlobalMove, handleGlobalEnd, getEventPosition, snapToGraph]
+    [map, setDragging, setHovering, snapToGraph, startDrag, updateTrail, handleGlobalMove, handleGlobalEnd]
   );
 
-  // Check if a point is near the path geometry (within threshold pixels)
-  const isPointNearPath = useCallback(
-    (latlng: L.LatLng, thresholdPx: number = 25): boolean => {
-      const coords = geometry.coordinates;
-      if (coords.length < 2) return false;
+  // Map mouse handlers: hover ghost while idle, drag start on press.
+  useEffect(() => {
+    if (!onSegmentDrag) return;
 
-      const point = map.latLngToContainerPoint(latlng);
+    const handleMapMouseMove = (e: MapMouseEvent) => {
+      if (isDraggingRef.current || dragActive) return;
+      const snapped = closestPointOnPath(map, geometryRef.current.coordinates, e.latlng);
+      setHovering(snapped);
+    };
 
-      for (let i = 0; i < coords.length - 1; i++) {
-        const a = map.latLngToContainerPoint(L.latLng(coords[i][1], coords[i][0]));
-        const b = map.latLngToContainerPoint(L.latLng(coords[i + 1][1], coords[i + 1][0]));
-        const dist = L.LineUtil.pointToSegmentDistance(point, a, b);
-        if (dist <= thresholdPx) return true;
-      }
-      return false;
-    },
-    [map, geometry]
-  );
-
-  // Hover ghost pin handlers
-  const handleHoverMove = useCallback(
-    (e: L.LeafletMouseEvent) => {
+    const handleMapMouseOut = () => {
       if (isDraggingRef.current) return;
-      const snapped = closestPointOnPath(map, geometry.coordinates, e.latlng);
-      setHoverLatLng(snapped ? L.latLng(snapped.lat, snapped.lng) : null);
-    },
-    [map, geometry.coordinates]
-  );
+      setHovering(null);
+    };
 
-  const handleHoverOut = useCallback(() => {
-    setHoverLatLng(null);
-  }, []);
+    const handleMapMouseDown = (e: MapMouseEvent) => {
+      if (isDraggingRef.current || dragActive) return;
+      const near = closestPointOnPath(map, geometryRef.current.coordinates, e.latlng);
+      if (!near) return;
+      // Ours — stop the map's drag-pan for this gesture.
+      e.preventDefault();
+      e.originalEvent.preventDefault();
+      beginDrag({ x: e.originalEvent.clientX, y: e.originalEvent.clientY }, e.latlng);
+    };
 
-  // Listen for touchstart on map container and check if near path
+    map.on("mousemove", handleMapMouseMove);
+    map.on("mouseout", handleMapMouseOut);
+    map.on("mousedown", handleMapMouseDown);
+    return () => {
+      map.off("mousemove", handleMapMouseMove);
+      map.off("mouseout", handleMapMouseOut);
+      map.off("mousedown", handleMapMouseDown);
+    };
+  }, [map, onSegmentDrag, setHovering, beginDrag]);
+
+  // Touch: listen on the map container in the capture phase (MapLibre's own
+  // touch handlers sit on the canvas container below), grab the gesture when
+  // it lands near the path.
   useEffect(() => {
     if (!onSegmentDrag) return;
 
     const container = map.getContainer();
 
     const handleContainerTouchStart = (e: TouchEvent) => {
-      if (isDraggingRef.current) return;
+      if (isDraggingRef.current || dragActive) return;
       if (e.touches.length !== 1) return;
 
       // Don't capture touches on markers - let them handle tap-to-delete
       const target = e.target as HTMLElement;
-      if (target.closest(".custom-marker, .leaflet-marker-icon, .pin-container")) {
+      if (target.closest(".maplibregl-marker, .custom-marker, .pin-container")) {
         return;
       }
 
       const touch = e.touches[0];
       const rect = container.getBoundingClientRect();
-      const containerPoint = L.point(touch.clientX - rect.left, touch.clientY - rect.top);
-      const latlng = map.containerPointToLatLng(containerPoint);
+      const latlng = map.containerPointToLatLng({
+        x: touch.clientX - rect.left,
+        y: touch.clientY - rect.top,
+      });
 
-      if (isPointNearPath(latlng)) {
+      // Slightly wider radius than mouse — fingers are imprecise.
+      if (closestPointOnPath(map, geometryRef.current.coordinates, latlng, 25)) {
         e.stopPropagation();
         e.preventDefault();
-
-        isDraggingRef.current = true;
-        setDragging(true);
-        map.dragging.disable();
-
-        const snapped = snapToGraph(map, latlng.lat, latlng.lng);
-        const pos = { x: touch.clientX, y: touch.clientY };
-
-        // Ghost follows the finger (unsnapped); snapped is the underlying drop.
-        startDrag(pos, snapped);
-
-        // Create drag trail from grab point
-        const origin = snapped ? L.latLng(snapped.lat, snapped.lng) : latlng;
-        dragOriginRef.current = origin;
-        dragTrailRef.current = L.polyline([origin, origin], DRAG_TRAIL_STYLE).addTo(map);
-
-        document.addEventListener("mousemove", handleGlobalMove);
-        document.addEventListener("mouseup", handleGlobalEnd);
-        document.addEventListener("touchmove", handleGlobalMove, { passive: false });
-        document.addEventListener("touchend", handleGlobalEnd);
-        document.addEventListener("touchcancel", handleGlobalEnd);
+        beginDrag({ x: touch.clientX, y: touch.clientY }, latlng);
       }
     };
 
-    container.addEventListener("touchstart", handleContainerTouchStart, { passive: false });
+    container.addEventListener("touchstart", handleContainerTouchStart, { passive: false, capture: true });
 
     return () => {
-      container.removeEventListener("touchstart", handleContainerTouchStart);
+      container.removeEventListener("touchstart", handleContainerTouchStart, { capture: true });
     };
-  }, [map, onSegmentDrag, isPointNearPath, startDrag, handleGlobalMove, handleGlobalEnd, snapToGraph]);
+  }, [map, onSegmentDrag, beginDrag]);
 
   // Cleanup listeners on unmount
   useEffect(() => {
+    const trailKey = trailKeyRef.current;
     return () => {
       document.removeEventListener("mousemove", handleGlobalMove);
       document.removeEventListener("mouseup", handleGlobalEnd);
       document.removeEventListener("touchmove", handleGlobalMove);
       document.removeEventListener("touchend", handleGlobalEnd);
       document.removeEventListener("touchcancel", handleGlobalEnd);
+      if (hoverClaim === tokenRef.current) {
+        hoverClaim = null;
+        map.getCanvas().style.cursor = "";
+        onHoverChangeRef.current?.(false);
+      }
       if (isDraggingRef.current) {
-        map.dragging.enable();
+        isDraggingRef.current = false;
+        dragActive = false;
         document.body.classList.remove("dragging-from-path");
+        map.getCanvas().style.cursor = "";
         setDragging(false);
         endDrag();
-        dragTrailRef.current?.remove();
-        dragTrailRef.current = null;
+        setDesirePathDimmed(false);
+        removeOverlayFeature(UTIL_SOURCE_ID, trailKey);
         dragOriginRef.current = null;
       }
     };
-  }, [map, endDrag, handleGlobalMove, handleGlobalEnd]);
+  }, [map, endDrag, handleGlobalMove, handleGlobalEnd, setDragging]);
 
   return {
     isDraggingRef,
     hoverLatLng,
-    handleStart,
-    handleHoverMove,
-    handleHoverOut,
   };
 }

@@ -1,0 +1,12 @@
+.git
+**/node_modules
+server/env
+# Heavy local data artifacts stay out of the build context — graphs and tiles
+# are built inside the image. Only the stable edge-id registries ride along
+# (they must persist across image rebuilds; see server/edge_registry.py).
+server/osm_data/**
+!server/osm_data/*/edge_registry.json.gz
+perf/results
+perf/shots
+screenshots
+docs

@@ -10,6 +10,10 @@
 export const COLOR_START = "#00C4D4"; // Bright cyan-teal — pops against orange heatmap
 export const COLOR_END = "#DC343B"; // Poppy Red - vibrant 2025 red
 
+// GIS-style selection highlight (the QGIS/ArcGIS "selected features" yellow).
+// Used for the corridor of edges sharing a selected top proposal's vote type.
+export const SELECTION_YELLOW = "#FFE816";
+
 // Desire path overlay - green like bike paths
 export const DESIRE_PATH = {
   fill: "#3CB371",

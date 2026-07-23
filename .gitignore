@@ -54,7 +54,11 @@ Screenshot*.png
 client-react/public/previews/*.png
 
 # Generated/downloaded OSM graph data (rebuilt in the image via refresh_osm.py)
-server/osm_data/
+# OSM data artifacts are not tracked — EXCEPT the stable edge-id registries,
+# which must persist across graph rebuilds/deploys (see server/edge_registry.py).
+server/osm_data/**
+!server/osm_data/*/
+!server/osm_data/*/edge_registry.json.gz
 
 # Database dumps
 *.dump

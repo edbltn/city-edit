@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef } from "react";
-import { Marker, useMap } from "react-leaflet";
-import L from "leaflet";
 import { COLOR_START, COLOR_END, ROUTE_COLORS } from "../../colors";
 import { isWithinMappedBounds } from "../../utils/bounds";
-import { kiteIcon } from "../../utils/kiteIcon";
+import { kiteHtml, KITE_SIZE } from "../../utils/kiteIcon";
 import { useGraphSnap } from "../../context";
+import {
+  UTIL_SOURCE_ID,
+  setOverlayFeature,
+  removeOverlayFeature,
+} from "../../map/maplibreOverlays";
+import { MapMarker, type MapMarkerHandle } from "../MapMarker";
 import type { LatLng } from "../../types";
 
 // Minimum distance (in degrees) to consider a drag as intentional movement
@@ -34,23 +38,15 @@ function getMarkerColor(which: "start" | "end" | "waypoint"): string {
   return ROUTE_COLORS.desire.middle;
 }
 
-const DRAG_TRAIL_STYLE: L.PolylineOptions = {
-  color: "#999999",
-  weight: 2,
-  opacity: 0.6,
-  dashArray: "1, 4",
-  lineCap: "round",
-};
+let trailCounter = 0;
 
 export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, hidden, onHoverChange }: RouteMarkerProps) {
-  const map = useMap();
   const { snapToGraph, currentSnapRef, setDragging } = useGraphSnap();
-  const markerRef = useRef<L.Marker>(null);
+  const markerRef = useRef<MapMarkerHandle>(null);
   const dragStartPosition = useRef<LatLng | null>(null);
-  const dragTrailRef = useRef<L.Polyline | null>(null);
+  const trailKeyRef = useRef(`trail-marker-${++trailCounter}`);
   const touchStartTime = useRef<number>(0);
   const wasDragged = useRef<boolean>(false);
-  const originalSetLatLngRef = useRef<Function | null>(null);
   const hoveredRef = useRef(false);
 
   // If the marker unmounts while hovered (e.g. click-to-delete), release the
@@ -64,94 +60,71 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
     }
   }, []);
 
-  const icon = useMemo(() => kiteIcon(getMarkerColor(which)), [which]);
-
-  // Hide/show via Leaflet DOM directly — no unmount/remount flicker
+  // Remove a stray drag trail if the marker unmounts mid-drag.
   useEffect(() => {
-    const el = markerRef.current?.getElement();
-    if (el) {
-      el.style.opacity = hidden ? "0" : "";
-      el.style.pointerEvents = hidden ? "none" : "";
-    }
-  }, [hidden]);
-
-  // Restore setLatLng if component unmounts during an active drag
-  useEffect(() => {
-    return () => {
-      const marker = markerRef.current;
-      if (marker && originalSetLatLngRef.current) {
-        (marker as any).setLatLng = originalSetLatLngRef.current;
-        originalSetLatLngRef.current = null;
-      }
-    };
+    const trailKey = trailKeyRef.current;
+    return () => removeOverlayFeature(UTIL_SOURCE_ID, trailKey);
   }, []);
 
-  const eventHandlers = useMemo(
+  const html = useMemo(() => kiteHtml(getMarkerColor(which)), [which]);
+
+  const updateTrail = (end: LatLng) => {
+    const origin = dragStartPosition.current;
+    if (!origin) return;
+    setOverlayFeature(UTIL_SOURCE_ID, trailKeyRef.current, {
+      type: "LineString",
+      coordinates: [[origin.lng, origin.lat], [end.lng, end.lat]],
+    });
+  };
+
+  const handlers = useMemo(
     () => ({
-      mouseover: () => { hoveredRef.current = true; onHoverChange?.(true); },
-      mouseout: () => { hoveredRef.current = false; onHoverChange?.(false); },
+      onMouseOver: () => { hoveredRef.current = true; onHoverChange?.(true); },
+      onMouseOut: () => { hoveredRef.current = false; onHoverChange?.(false); },
       // Desktop: click fires if there was no drag
-      click: () => {
+      onClick: () => {
         if (!wasDragged.current) {
           onDelete?.();
         }
         wasDragged.current = false;
       },
       // Mobile: track touch timing for tap detection
-      touchstart: () => {
+      onTouchStart: () => {
         touchStartTime.current = Date.now();
         wasDragged.current = false;
       },
-      touchend: () => {
+      onTouchEnd: () => {
         // If touch was quick and no drag occurred, treat as tap
         const elapsed = Date.now() - touchStartTime.current;
         if (elapsed < TAP_TIMEOUT && !wasDragged.current) {
           onDelete?.();
         }
       },
-      dragstart: () => {
+      onDragStart: () => {
         wasDragged.current = true;
         const marker = markerRef.current;
         if (marker) {
           const latlng = marker.getLatLng();
-          dragStartPosition.current = { lat: latlng.lat, lng: latlng.lng };
-          originalSetLatLngRef.current = marker.setLatLng.bind(marker);
-          (marker as any).setLatLng = function() { return this; };
-
-          // Create dotted trail from original position
-          dragTrailRef.current = L.polyline(
-            [latlng, latlng],
-            DRAG_TRAIL_STYLE
-          ).addTo(map);
+          dragStartPosition.current = latlng;
+          // Dotted trail from the original position
+          updateTrail(latlng);
         }
         setDragging(true);
         onDragStart?.();
       },
-      drag: () => {
+      onDrag: () => {
         const marker = markerRef.current;
-        if (marker && dragStartPosition.current && dragTrailRef.current) {
+        if (marker && dragStartPosition.current) {
           const snapped = currentSnapRef.current;
-          const latlng = marker.getLatLng();
-          const trailEnd = snapped ?? latlng;
-          dragTrailRef.current.setLatLngs([
-            [dragStartPosition.current.lat, dragStartPosition.current.lng],
-            trailEnd,
-          ]);
+          updateTrail(snapped ?? marker.getLatLng());
         }
       },
-      dragend: () => {
+      onDragEnd: () => {
         const marker = markerRef.current;
 
         // Remove drag trail and clear drag state
-        dragTrailRef.current?.remove();
-        dragTrailRef.current = null;
+        removeOverlayFeature(UTIL_SOURCE_ID, trailKeyRef.current);
         setDragging(false);
-
-        // Restore original setLatLng before state updates trigger re-renders
-        if (marker && originalSetLatLngRef.current) {
-          (marker as any).setLatLng = originalSetLatLngRef.current;
-          originalSetLatLngRef.current = null;
-        }
 
         if (!marker || !onDragEnd) {
           onDragFinish?.();
@@ -160,14 +133,14 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
 
         // Snap final position to graph node/edge
         const latlng = marker.getLatLng();
-        const snapped = snapToGraph(map, latlng.lat, latlng.lng);
-        const newPos = snapped ?? { lat: latlng.lat, lng: latlng.lng };
+        const snapped = snapToGraph(latlng.lat, latlng.lng);
+        const newPos = snapped ?? latlng;
 
         // Check if new position is within mapped bounds
         if (!isWithinMappedBounds(newPos)) {
           // Reset marker to original position
           if (dragStartPosition.current) {
-            marker.setLatLng([dragStartPosition.current.lat, dragStartPosition.current.lng]);
+            marker.setLatLng(dragStartPosition.current);
           }
           dragStartPosition.current = null;
           onOutOfBounds?.();
@@ -184,7 +157,7 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
 
           if (distance < MIN_DRAG_DISTANCE) {
             // Reset marker to original position and do nothing
-            marker.setLatLng([dragStartPosition.current.lat, dragStartPosition.current.lng]);
+            marker.setLatLng(dragStartPosition.current);
             dragStartPosition.current = null;
             onDragFinish?.();
             return;
@@ -196,17 +169,21 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
         onDragFinish?.();
       },
     }),
-    [map, onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, snapToGraph, currentSnapRef, setDragging, onHoverChange]
+    [onDragEnd, onDragStart, onDragFinish, onDelete, onOutOfBounds, snapToGraph, currentSnapRef, setDragging, onHoverChange]
   );
 
   return (
-    <Marker
+    <MapMarker
       ref={markerRef}
-      position={[position.lat, position.lng]}
-      icon={icon}
+      position={position}
+      html={html}
+      className="custom-marker"
+      size={KITE_SIZE}
+      anchor="bottom"
       draggable={!!onDragEnd}
-      eventHandlers={eventHandlers}
-      zIndexOffset={1000}
+      hidden={hidden}
+      zIndex={1000}
+      {...handlers}
     />
   );
 }

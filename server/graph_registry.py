@@ -8,6 +8,7 @@ blob (with ETag) for /api/graph-topology. An LRU bound keeps memory in check whe
 several cities are active. OSRM routers are likewise created per city, each
 pointing at that city's OSRM container.
 """
+import gzip
 import hashlib
 import json
 import logging
@@ -15,6 +16,7 @@ import threading
 from collections import OrderedDict
 
 from cities import City
+from edge_registry import apply_edge_registry
 from python_router import PythonRouter
 from osrm_router import OsrmRouter
 
@@ -42,6 +44,7 @@ class CityGraph:
         self.osm_to_graph_idx: dict = {}
         self.node_pair_to_edge: dict = {}
         self.topology_json: str | None = None
+        self.topology_gzip: bytes | None = None
         self.topology_etag: str | None = None
 
     def ensure_loaded(self):
@@ -57,13 +60,19 @@ class CityGraph:
         logger.info(f"[GRAPH] Loading graph for city '{self.city.id}'...")
         south, west, north, east = self.city.bbox
         data = self.provider.get_graph_for_bbox(south, west, north, east)
+        # Reorder edges so index == stable eid (durable across OSM rebuilds).
+        # No-op with a warning when the city has no registry yet.
+        apply_edge_registry(self.city.data_dir, data, persist=False)
         nodes = data.get("nodes", [])
         edges = data.get("edges", [])
 
-        # coord → edge index reverse map (both directions for undirected lookup)
+        # coord → edge index reverse map (both directions for undirected lookup).
+        # Degenerate entries (retired-eid tombstones, OSM self-loops) are skipped.
         coord_to_edge_idx: dict[tuple[str, str], list[int]] = {}
         for i, edge in enumerate(edges):
             from_idx, to_idx = edge[0], edge[1]
+            if from_idx == to_idx:
+                continue
             from_lat, from_lon = nodes[from_idx]
             to_lat, to_lon = nodes[to_idx]
             c1 = f"{round(from_lon, 5)},{round(from_lat, 5)}"
@@ -77,15 +86,22 @@ class CityGraph:
             lat, lon = node[0], node[1]
             coord_to_node_idx[f"{round(lon, 5)},{round(lat, 5)}"] = i
 
-        # Node adjacency: node_id → [edge_ids]
+        # Node adjacency: node_id → [edge_ids]; degenerates skipped so node 0
+        # doesn't accumulate every tombstone as an "adjacent" edge.
         adj: list[list[int]] = [[] for _ in range(len(nodes))]
         for i, edge in enumerate(edges):
+            if edge[0] == edge[1]:
+                continue
             adj[edge[0]].append(i)
             adj[edge[1]].append(i)
 
         edges_slim = [[e[0], e[1], e[2]] for e in edges]
         topology_json = json.dumps({"nodes": nodes, "edges": edges_slim})
         topology_etag = '"' + hashlib.sha256(topology_json.encode()).hexdigest()[:16] + '"'
+        # Pre-compressed variant served to gzip-accepting clients (~4-5x
+        # smaller; coordinate JSON compresses well). Built once per load so
+        # neither Flask nor nginx re-compresses ~24MB per cold visitor.
+        topology_gzip = gzip.compress(topology_json.encode(), compresslevel=6)
 
         self.nodes = nodes
         self.edges = edges
@@ -95,6 +111,7 @@ class CityGraph:
         self.osm_to_graph_idx = data.get("osm_to_graph_idx", {})
         self.node_pair_to_edge = data.get("node_pair_to_edge", {})
         self.topology_json = topology_json
+        self.topology_gzip = topology_gzip
         self.topology_etag = topology_etag
         self._loaded = True
 
@@ -132,6 +149,7 @@ class CityGraph:
         self.osm_to_graph_idx = {}
         self.node_pair_to_edge = {}
         self.topology_json = None
+        self.topology_gzip = None
         self.topology_etag = None
 
 
