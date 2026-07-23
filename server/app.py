@@ -1932,10 +1932,15 @@ def blocks_tile(city_id, z, x, y):
         return jsonify({"error": f"Unknown city '{city_id}'"}), 404
     try:
         reader, header, mtime_ns = _blocks_tile_reader(city_id)
-    except OSError:
+    except Exception:
+        # OSError when the city has no archive; anything else = a mid-re-bake
+        # read of the in-place-written file (header deserialization fails).
         return jsonify({"error": f"No block tiles for city '{city_id}'"}), 404
     if not (header["min_zoom"] <= z <= header["max_zoom"]):
         return jsonify({"error": "Zoom out of range"}), 404
+    # zxy_to_tileid raises ValueError past (1<<z)-1 — scanners would 500.
+    if not (0 <= x < (1 << z) and 0 <= y < (1 << z)):
+        return jsonify({"error": "Tile out of range"}), 404
 
     # Strong per-tile ETag; the ?v= cache-buster (blocksVersion) makes each URL
     # unique per bake, so the body behind it is effectively immutable.
@@ -1951,28 +1956,47 @@ def blocks_tile(city_id, z, x, y):
     accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "")
     key = (city_id, z, x, y)
     body = None
-    if accepts_gzip and not stored_gzip:
+    if accepts_gzip:
+        # Serves both roles: gzip-on-demand cache for uncompressed archives AND
+        # a hot-tile bytes cache for stored-gzip pass-through — Reader.get
+        # re-parses the root+leaf directories in pure Python (~5ms, no gevent
+        # yields) on EVERY call, so a cold-nginx-cache burst would otherwise
+        # head-of-line-block the worker. Purged on re-bake by mtime key change.
         with _tile_lock:
             body = _tile_gzip_lru.get(key)
             if body is not None:
                 _tile_gzip_lru.move_to_end(key)
 
     if body is None:
-        data = reader.get(z, x, y)
-        if data is None:
-            return jsonify({"error": "No such tile"}), 404
+        try:
+            data = reader.get(z, x, y)
+        except Exception:
+            # Mid-re-bake reads of the in-place-written archive can surface as
+            # deserialization errors — treat as absent rather than 500.
+            logger.warning(f"[TILES] unreadable tile {city_id}/{z}/{x}/{y}")
+            return jsonify({"error": "Tile unreadable"}), 404
+        if data is None or not data:
+            # 204: MapLibre treats an empty 2xx as an empty tile (no error, no
+            # parent-tile probing) and, unlike a 404, it is cacheable — blocks
+            # coverage stops at the street network, so water/edge tiles inside
+            # the pan bounds land here on every pan otherwise.
+            resp = app.response_class(status=204)
+            resp.headers["ETag"] = etag
+            resp.headers["Cache-Control"] = cache_control
+            return resp
         if stored_gzip:
             # tippecanoe already gzipped the stored tiles — pass them through
             # (decompress only for the rare client that doesn't accept gzip).
             body = data if accepts_gzip else gzip.decompress(data)
         elif accepts_gzip:
             body = gzip.compress(data, compresslevel=6)
+        else:
+            body = data
+        if accepts_gzip and len(body) <= 131072:
             with _tile_lock:
                 _tile_gzip_lru[key] = body
                 while len(_tile_gzip_lru) > _TILE_GZIP_LRU_MAX:
                     _tile_gzip_lru.popitem(last=False)
-        else:
-            body = data
 
     resp = app.response_class(response=body, mimetype="application/vnd.mapbox-vector-tile")
     if accepts_gzip:

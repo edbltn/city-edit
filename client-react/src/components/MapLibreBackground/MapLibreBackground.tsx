@@ -161,6 +161,7 @@ function buildStyle(
       ],
       minzoom: blockTiles.minzoom,
       maxzoom: blockTiles.maxzoom,
+      ...(blockTiles.bounds ? { bounds: blockTiles.bounds } : {}),
     }
     : { type: "vector", url: `pmtiles://${blockTilesUrl}` };
 

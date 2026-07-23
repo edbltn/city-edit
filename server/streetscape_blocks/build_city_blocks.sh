@@ -43,10 +43,15 @@ if command -v tippecanoe >/dev/null 2>&1; then
   # --use-attribute-for-id: block_id becomes the NATIVE feature id (required by
   # the client's setFeatureState heat/selection; MapLibre reads native ids, no
   # promoteId). Matches how the existing nyc blocks.pmtiles was built.
-  tippecanoe -o "$DATA_DIR/blocks.pmtiles" -zg --drop-densest-as-needed \
+  # Bake to a temp file + atomic rename: the archive is read IN PLACE by the
+  # running server (mmap'd pmtiles reader + /api/tile/), and tippecanoe -o
+  # writes a SQLite journal at the target path mid-bake — readers must never
+  # observe a half-written archive.
+  tippecanoe -o "$DATA_DIR/blocks.pmtiles.tmp" -zg --drop-densest-as-needed \
     --extend-zooms-if-still-dropping --coalesce-densest-as-needed \
     --use-attribute-for-id=block_id \
     -l blocks --force "$FINAL_FILE"
+  mv -f "$DATA_DIR/blocks.pmtiles.tmp" "$DATA_DIR/blocks.pmtiles"
 else
   echo "tippecanoe not found — skipping PMTiles (install: brew install tippecanoe)"
 fi

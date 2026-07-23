@@ -17,19 +17,25 @@ from dataclasses import dataclass
 from pmtiles.reader import Reader as PMTilesReader, MmapSource
 
 
-# blocks.pmtiles zoom range per archive path, keyed on the mtime cache-buster so
-# a lazy re-bake is picked up without re-reading the header on every request.
-_blocks_zoom_cache: dict[str, tuple[int, int, int]] = {}
+# blocks.pmtiles zoom range + coverage bounds per archive path, keyed on the
+# mtime cache-buster so a lazy re-bake is picked up without re-reading the
+# header on every request.
+_blocks_header_cache: dict[str, tuple[int, tuple[int, int], list[float]]] = {}
 
 
-def _blocks_zoom_range(path: str, version: int) -> tuple[int, int]:
-    cached = _blocks_zoom_cache.get(path)
+def _blocks_header_info(path: str, version: int) -> tuple[tuple[int, int], list[float]]:
+    """((minzoom, maxzoom), [minLon, minLat, maxLon, maxLat]) from the header."""
+    cached = _blocks_header_cache.get(path)
     if cached and cached[0] == version:
         return cached[1], cached[2]
     with open(path, "rb") as f:
         header = PMTilesReader(MmapSource(f)).header()
-    entry = (version, header["min_zoom"], header["max_zoom"])
-    _blocks_zoom_cache[path] = entry
+    bounds = [
+        header["min_lon_e7"] / 1e7, header["min_lat_e7"] / 1e7,
+        header["max_lon_e7"] / 1e7, header["max_lat_e7"] / 1e7,
+    ]
+    entry = (version, (header["min_zoom"], header["max_zoom"]), bounds)
+    _blocks_header_cache[path] = entry
     return entry[1], entry[2]
 
 
@@ -99,13 +105,23 @@ class City:
             return None
         path = os.path.join(os.path.dirname(__file__), self.data_dir, "blocks.pmtiles")
         try:
-            minzoom, maxzoom = _blocks_zoom_range(path, blocks_version)
-        except (OSError, KeyError, ValueError):
+            # ?v= must be unique per BAKE: st_mtime_ns, not the second-
+            # resolution blocksVersion — two bakes in the same second would
+            # otherwise share a URL and durably poison the immutable caches.
+            mtime_ns = os.stat(path).st_mtime_ns
+            (minzoom, maxzoom), bounds = _blocks_header_info(path, blocks_version)
+        except Exception:
+            # OSError when absent; anything else = header unreadable (e.g. a
+            # mid-re-bake read of the in-place-written archive) — advertise no
+            # z/x/y source and let the client fall back to pmtiles://.
             return None
         return {
-            "template": f"/api/tile/{self.id}/blocks/{{z}}/{{x}}/{{y}}.mvt?v={blocks_version}",
+            "template": f"/api/tile/{self.id}/blocks/{{z}}/{{x}}/{{y}}.mvt?v={mtime_ns}",
             "minzoom": minzoom,
             "maxzoom": maxzoom,
+            # Coverage bbox: MapLibre skips requesting tiles wholly outside it,
+            # killing the per-pan stream of water/edge empty-tile requests.
+            "bounds": bounds,
         }
 
     def _blocks_version(self) -> int | None:

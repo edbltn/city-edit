@@ -105,10 +105,13 @@ export const CONFIG = {
 // z/x/y block-tile source descriptor (server: cities.City._block_tiles()).
 export interface BlockTilesConfig {
   /** URL template with {z}/{x}/{y} placeholders; carries a ?v= cache-buster
-   *  (blocksVersion) so a re-baked archive busts every HTTP cache. */
+   *  (archive mtime_ns) so a re-baked archive busts every HTTP cache. */
   template: string;
   minzoom: number;
   maxzoom: number;
+  /** Coverage bbox [minLon, minLat, maxLon, maxLat] — MapLibre skips tiles
+   *  wholly outside it (water/edge tiles would otherwise 204 on every pan). */
+  bounds?: [number, number, number, number];
 }
 
 // Public city shape returned by the API (matches server cities.City.to_public()).
