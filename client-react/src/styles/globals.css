@@ -1727,7 +1727,11 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 
 .vote-type-indicator.is-selected .vote-type-indicator-outer,
 .vote-type-indicator.is-selected .vote-type-indicator-inner { stroke: var(--selected-ring, #fff); }
-[data-basemap="light"] .vote-type-indicator.is-selected { --selected-ring: #000; }
+/* Warm mid-grey, not black: on light paper a pure-black double ring overpowers
+   the pin (the accent glow + tinted fill + 1.1 scale already carry "selected").
+   Solid — a translucent grey over the accent glow band would go muddy. Kept
+   clearly heavier than the idle hairline so selection still reads at a glance. */
+[data-basemap="light"] .vote-type-indicator.is-selected { --selected-ring: #8a857a; }
 /* On light paper a selected pin's fill was indistinguishable from plain white
    (the heat tint alone is too faint, and a zero-vote selection has none), so
    the ink double-ring read as a bare white box. Guarantee a baseline accent

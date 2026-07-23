@@ -112,7 +112,8 @@
 <li>Selected pins on light paper pair an ink-black double ring with the paper fill; the heat tint (26% of an already-pale ramp color) was imperceptible, and a zero-vote selection has no tint at all — hence “just white bg”.</li></ul>
       <h3>What changed</h3>
       <ul><li><strong>Accent-anchored pin ramp on light basemaps.</strong> New <code>buildPinRampStops(style)</code>: dark basemaps keep the heat ramp verbatim; light basemaps interpolate pale-accent-tint (lowest rank) → <em>pure accent</em> (hottest pin, at HEAT_PEAK_POS) → ink-deepened accent (unused tip). Rank still reads as color depth, and every pin wears the theme. Both pin sites (PBTP squares + RBTP diamonds) switched; the canvas heatmap keeps the true multiply ramp.</li>
-<li><strong>Guaranteed accent tint on selected fills (light only).</strong> <code>.is-selected</code> fills now mix a baseline 12% of the glow color — falling back to <code>var(--accent)</code> for zero-vote selections — plus the existing heat-scaled share, so a selected pin is never a bare white box under its ink ring.</li></ul>
+<li><strong>Guaranteed accent tint on selected fills (light only).</strong> <code>.is-selected</code> fills now mix a baseline 12% of the glow color — falling back to <code>var(--accent)</code> for zero-vote selections — plus the existing heat-scaled share, so a selected pin is never a bare white box under its ink ring.</li>
+<li><strong>Round 2 — softer selection ring on light paper.</strong> The selected double ring was pure <code>#000</code>, which overpowered the pin. Now a solid warm mid-grey (<code>#8a857a</code>) — solid because a translucent grey over the accent glow band would go muddy; still clearly heavier than the idle hairline, with the glow + tinted fill + 1.1× scale carrying the “selected” weight.</li></ul>
       <h3>Files touched</h3>
       <ul class="files"><li>client-react/src/mapStyles.ts — buildPinRampStops(), parseColor()/mixRgb() helpers</li>
 <li>client-react/src/components/GraphLayer/GraphLayer.tsx — both pin ramp sites → buildPinRampStops</li>
@@ -133,7 +134,7 @@
     <div class="tag">For you</div>
     <h2>Manual checklist</h2>
     <ul><li>Open <code>http://localhost:3000/m/new-york-buses</code>: every top-proposal pin should glow terracotta (palest on the lowest-ranked, full accent on the hottest) — no grey/tan rings.</li>
-<li>Click a route diamond to select it: the ink double ring should sit over a clearly terracotta-tinted fill and keep its accent glow — not a white box.</li>
+<li>Click a route diamond to select it: a soft warm-grey double ring over a clearly terracotta-tinted fill, accent glow intact — not a white box, and not a harsh black ring.</li>
 <li>Check a plum-style map (<code>/m/new-plum</code>) and a trees-style one for the same: glow in that map's purple / leaf-green accent.</li>
 <li>Open a dark map (<code>/m/nyc-bikes</code>, <code>/m/nyc-walkways</code>): pins must look exactly as before (heat-ramp colors).</li></ul>
   </section>
@@ -310,7 +311,7 @@
         
         <details>
           <summary><span class="fname">client-react/src/styles/globals.css</span>
-            <span class="stat"><span class="d-add">+12</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+17</span> / <span class="d-del">-1</span></span>
           </summary>
           
     <div class="ctx">
@@ -340,13 +341,19 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
-<span class="d-meta">index 167c757..a6c8958 100644</span>
+<span class="d-meta">index 167c757..b51b2f4 100644</span>
 <span class="d-meta">--- a/client-react/src/styles/globals.css</span>
 <span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
-<span class="d-hunk">@@ -1728,6 +1728,18 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-hunk">@@ -1727,7 +1727,23 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx"> </span>
 <span class="d-ctx"> .vote-type-indicator.is-selected .vote-type-indicator-outer,</span>
 <span class="d-ctx"> .vote-type-indicator.is-selected .vote-type-indicator-inner { stroke: var(--selected-ring, #fff); }</span>
-<span class="d-ctx"> [data-basemap=&quot;light&quot;] .vote-type-indicator.is-selected { --selected-ring: #000; }</span>
+<span class="d-del">-[data-basemap=&quot;light&quot;] .vote-type-indicator.is-selected { --selected-ring: #000; }</span>
+<span class="d-add">+/* Warm mid-grey, not black: on light paper a pure-black double ring overpowers</span>
+<span class="d-add">+   the pin (the accent glow + tinted fill + 1.1 scale already carry &quot;selected&quot;).</span>
+<span class="d-add">+   Solid — a translucent grey over the accent glow band would go muddy. Kept</span>
+<span class="d-add">+   clearly heavier than the idle hairline so selection still reads at a glance. */</span>
+<span class="d-add">+[data-basemap=&quot;light&quot;] .vote-type-indicator.is-selected { --selected-ring: #8a857a; }</span>
 <span class="d-add">+/* On light paper a selected pin&#x27;s fill was indistinguishable from plain white</span>
 <span class="d-add">+   (the heat tint alone is too faint, and a zero-vote selection has none), so</span>
 <span class="d-add">+   the ink double-ring read as a bare white box. Guarantee a baseline accent</span>

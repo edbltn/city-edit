@@ -92,6 +92,11 @@ SECTIONS = [
             "<code>.is-selected</code> fills now mix a baseline 12% of the glow color — falling "
             "back to <code>var(--accent)</code> for zero-vote selections — plus the existing "
             "heat-scaled share, so a selected pin is never a bare white box under its ink ring.",
+            "<strong>Round 2 — softer selection ring on light paper.</strong> The selected double "
+            "ring was pure <code>#000</code>, which overpowered the pin. Now a solid warm mid-grey "
+            "(<code>#8a857a</code>) — solid because a translucent grey over the accent glow band "
+            "would go muddy; still clearly heavier than the idle hairline, with the glow + tinted "
+            "fill + 1.1× scale carrying the “selected” weight.",
         ],
         "files": [
             "client-react/src/mapStyles.ts — buildPinRampStops(), parseColor()/mixRgb() helpers",
@@ -110,7 +115,7 @@ VERIFY = [
 
 CHECKLIST = [
     "Open <code>http://localhost:3000/m/new-york-buses</code>: every top-proposal pin should glow terracotta (palest on the lowest-ranked, full accent on the hottest) — no grey/tan rings.",
-    "Click a route diamond to select it: the ink double ring should sit over a clearly terracotta-tinted fill and keep its accent glow — not a white box.",
+    "Click a route diamond to select it: a soft warm-grey double ring over a clearly terracotta-tinted fill, accent glow intact — not a white box, and not a harsh black ring.",
     "Check a plum-style map (<code>/m/new-plum</code>) and a trees-style one for the same: glow in that map's purple / leaf-green accent.",
     "Open a dark map (<code>/m/nyc-bikes</code>, <code>/m/nyc-walkways</code>): pins must look exactly as before (heat-ramp colors).",
 ]
