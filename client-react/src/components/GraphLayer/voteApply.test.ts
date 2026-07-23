@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, applyMyVoteChange } from "./voteApply";
+import { applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, applyMyVoteChange, topProposalDiffs } from "./voteApply";
 import { topologyFromJson, buildNodeAdj } from "./graphTopology";
 import type { GraphData } from "../../types";
 
@@ -223,5 +223,51 @@ describe("mutation paths on sparse-decoded data (Int32Array votes, holey vote ty
     expect(d.block_vote_types![1]).toEqual([[0, 3, 1]]);
     expect(d.block_votes![1]).toBe(4);
     expect(d.block_vote_types![0]).toBeUndefined();
+  });
+});
+
+describe("topProposalDiffs (signed block heat)", () => {
+  it("takes the MAX differential across a block's vote types", () => {
+    // block 0: type A 5-1=+4, type B 9-2=+7 -> +7 (top by differential,
+    // even though A would win a total-activity ranking if counts differed)
+    const { diff, maxPos, maxNeg } = topProposalDiffs(
+      [13, 0], [[[0, 5, 1], [1, 9, 2]], undefined]);
+    expect(diff[0]).toBe(7);
+    expect(diff[1]).toBe(0);
+    expect(maxPos).toBe(7);
+    expect(maxNeg).toBe(0);
+  });
+
+  it("goes negative when even the best proposal is net-against", () => {
+    // block 0: A 1-4=-3, B 0-2=-2 -> -2 (the LEAST negative is still the top)
+    const { diff, maxPos, maxNeg } = topProposalDiffs(
+      [7, 0], [[[0, 1, 4], [1, 0, 2]], undefined]);
+    expect(diff[0]).toBe(-2);
+    expect(maxPos).toBe(0);
+    expect(maxNeg).toBe(2);
+  });
+
+  it("cancelled signal reads zero, not hot", () => {
+    const { diff } = topProposalDiffs([6], [[[0, 3, 3]]]);
+    expect(diff[0]).toBe(0);
+  });
+
+  it("falls back to the deduped total for blocks without a breakdown", () => {
+    const { diff, maxPos } = topProposalDiffs([5, 2], [undefined, []]);
+    expect(diff[0]).toBe(5);
+    expect(diff[1]).toBe(2);
+    expect(maxPos).toBe(5);
+  });
+
+  it("works over Int32Array totals and holey breakdowns (sparse decode)", () => {
+    const totals = new Int32Array([0, 4, 9]);
+    const bvt: ([number, number, number][] | undefined)[] = new Array(3);
+    bvt[2] = [[0, 2, 7]];
+    const { diff, maxPos, maxNeg } = topProposalDiffs(totals, bvt);
+    expect(diff[0]).toBe(0);
+    expect(diff[1]).toBe(4);   // hole -> total fallback
+    expect(diff[2]).toBe(-5);
+    expect(maxPos).toBe(4);
+    expect(maxNeg).toBe(5);
   });
 });

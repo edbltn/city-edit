@@ -22,6 +22,10 @@ export interface HeatRamp {
   warm: string; // dominant mid color
   hot: string;  // core, kicks in past mid intensity
   peak: string; // brightest, only the hottest edges
+  // The NEGATIVE arm: block heat is the top proposal's vote differential
+  // (up − down), so a net-against block ramps the other way — into cold.
+  cold: string;     // mildly negative (any net-against differential)
+  coldDeep: string; // overwhelmingly negative — the "almost blue" floor
 }
 
 export interface MapStyle {
@@ -64,11 +68,14 @@ const DARK_WARM: Omit<MapStyle, "id"> = {
   tileMaxZoom: 21,
   // Hue runs purple → red-orange → amber → gold so intensity reads as a color
   // shift, not just brightness. Peak is gold (not near-white) to keep glow tame.
+  // Negative arm dives through indigo to icy blue — the opposite temperature.
   heat: {
     halo: "rgb(96, 56, 120)",
     warm: "rgb(196, 96, 56)",
     hot: "rgb(232, 154, 54)",
     peak: "rgb(250, 214, 120)",
+    cold: "rgb(74, 84, 190)",
+    coldDeep: "rgb(92, 118, 250)",
   },
   heatBlend: "screen",
   heatComposite: "lighter",
@@ -116,11 +123,15 @@ export const MAP_STYLES: Record<string, MapStyle> = {
   // green stack toward a hot lime/white core at busy intersections.
   // Hue runs blue-teal → green → yellow-green → gold so hotspots glow warm
   // against a cool low-traffic field.
+  // Negative arm: the green field freezes — steel blue down to a vivid
+  // near-pure blue, so an overwhelmingly net-against block reads almost blue.
   bikepaths: darkStyle("bikepaths", "#2BE06B", {
     halo: "rgb(20, 88, 124)",
     warm: "rgb(36, 168, 96)",
     hot: "rgb(146, 210, 70)",
     peak: "rgb(244, 206, 96)",
+    cold: "rgb(38, 108, 205)",
+    coldDeep: "rgb(70, 105, 255)",
   }),
 
   // Walkways — dark basemap, warm yellow-brown orange.
@@ -128,30 +139,42 @@ export const MAP_STYLES: Record<string, MapStyle> = {
 
   // Transit & mobility — dark basemap, signal blue that glows like a transit map.
   // Hue runs indigo → blue → cyan → mint so intensity climbs the cool spectrum.
+  // Positive heat already climbs the cool blues, so the negative arm swings to
+  // violet/magenta — unmistakably "against", never confusable with busy-cool.
   transit: darkStyle("transit", "#3B8EE0", {
     halo: "rgb(60, 44, 132)",
     warm: "rgb(50, 118, 206)",
     hot: "rgb(58, 192, 196)",
     peak: "rgb(176, 240, 206)",
+    cold: "rgb(122, 58, 196)",
+    coldDeep: "rgb(178, 74, 235)",
   }),
 
   // Waterfront & blue infrastructure — dark basemap, harbor teal/cyan.
   // Hue runs deep blue → teal → green → pale yellow so hotspots warm up.
+  // Teal positives; the negative arm goes indigo → violet (blue alone would
+  // read as more water).
   waterfront: darkStyle("waterfront", "#22C9C9", {
     halo: "rgb(28, 72, 142)",
     warm: "rgb(34, 168, 174)",
     hot: "rgb(118, 214, 128)",
     peak: "rgb(228, 232, 140)",
+    cold: "rgb(104, 64, 200)",
+    coldDeep: "rgb(158, 80, 240)",
   }),
 
   // Trees / parks & greening — light basemap, leaf green.
   // Light basemap (multiply): pale chartreuse → green → emerald → deep blue, so
   // intensity both darkens and shifts hue toward blue.
+  // Multiply basemap: the negative arm tints toward slate → strong blue (a
+  // multiply blue darkens the paper coolly, the inverse of the leafy warmth).
   trees: lightStyle("trees", "#5FA052", {
     halo: "rgb(206, 222, 152)",
     warm: "rgb(122, 182, 84)",
     hot: "rgb(44, 138, 98)",
     peak: "rgb(22, 74, 112)",
+    cold: "rgb(132, 150, 214)",
+    coldDeep: "rgb(62, 82, 190)",
   }),
 
   // Streets & public space — light basemap, terracotta (brick / paving).
@@ -161,15 +184,21 @@ export const MAP_STYLES: Record<string, MapStyle> = {
     warm: "rgb(208, 138, 90)",
     hot: "rgb(176, 72, 70)",
     peak: "rgb(92, 32, 82)",
+    cold: "rgb(138, 152, 208)",
+    coldDeep: "rgb(56, 84, 186)",
   }),
 
   // Culture & community — light basemap, plum/violet.
   // Light basemap (multiply): pale rose → orchid → violet → indigo.
+  // Violet positives; the negative arm cools to steel/teal-blue so it can't be
+  // mistaken for a deeper violet.
   plum: lightStyle("plum", "#8E5AA8", {
     halo: "rgb(234, 202, 204)",
     warm: "rgb(182, 122, 184)",
     hot: "rgb(120, 72, 162)",
     peak: "rgb(52, 40, 112)",
+    cold: "rgb(118, 158, 202)",
+    coldDeep: "rgb(42, 104, 176)",
   }),
 
   // Neutral default for user-created maps without a preset style.
@@ -228,10 +257,11 @@ export function heatTip(heat: HeatRamp, basemap: Basemap): string {
 
 /**
  * Build the CSS `linear-gradient(...)` for the heatmap legend swatch from a
- * style's ramp, so the legend always matches the map.
+ * style's ramp, so the legend always matches the map. The left quarter is the
+ * negative arm (net-against differentials); zero sits at 25%.
  */
 export function heatGradientCss(heat: HeatRamp, basemap: Basemap): string {
-  return `linear-gradient(to right, ${heat.halo}, ${heat.warm} 35%, ${heat.hot} 65%, ${heat.peak} 85%, ${heatTip(heat, basemap)})`;
+  return `linear-gradient(to right, ${heat.coldDeep}, ${heat.cold} 18%, ${heat.halo} 25%, ${heat.warm} 51%, ${heat.hot} 74%, ${heat.peak} 89%, ${heatTip(heat, basemap)})`;
 }
 
 // A heat ramp expanded to positioned RGB stops, ready for interpolation. The

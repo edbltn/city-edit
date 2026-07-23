@@ -34,7 +34,7 @@ import {
   expandSelectionToUndirected,
   type RouteProposal,
 } from "./routeProposals";
-import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts } from "./voteApply";
+import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, topProposalDiffs } from "./voteApply";
 import {
   COORD_SCALE,
   type GraphTopology,
@@ -136,6 +136,14 @@ function arrayMax(arr: ArrayLike<number>): number {
 // measured against a fixed scale and renders proportionally cooler, while a
 // busy map past the floor still uses its own (larger) max for full dynamic range.
 const HEAT_FULL_SCALE = 50;
+
+// The negative arm's own denominator floor. Net-against differentials are far
+// rarer and smaller than net-for ones (organic downvotes, not bulk imports), so
+// normalizing them against the positive ceiling would render every net-against
+// block a barely-visible tint. A tighter floor gives the negative range its own
+// dynamic range: ~10 net-against is already "overwhelmingly negative" and earns
+// the full cold color.
+const NEG_HEAT_FULL_SCALE = 10;
 
 // ---------------------------------------------------------------------------
 // Heatmap color stops — flame cross-section
@@ -1974,9 +1982,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // not an Array but is exactly as broadcastable.
     blocksActiveRef.current = blockVotes != null && blockVotes.length > 0;
     if (!blocksActiveRef.current) return;
+    // Block heat is the SIGNED vote differential (up − down) of the block's
+    // top-ranked proposal — top-ranked BY differential (topProposalDiffs). A
+    // block whose best proposal is still net-against gets a negative value
+    // and renders on the cold arm of the ramp.
+    const { diff, maxPos, maxNeg } = topProposalDiffs(
+      blockVotes!, voteData.block_vote_types);
     const detail: BlockVotesDetail = {
-      blockVotes: blockVotes!,
-      max: Math.max(HEAT_FULL_SCALE, arrayMax(blockVotes!)),
+      blockDiff: diff,
+      max: Math.max(HEAT_FULL_SCALE, maxPos),
+      maxNeg: Math.max(NEG_HEAT_FULL_SCALE, maxNeg),
     };
     window.dispatchEvent(new CustomEvent(BLOCK_VOTES_EVENT, { detail }));
   }, []);

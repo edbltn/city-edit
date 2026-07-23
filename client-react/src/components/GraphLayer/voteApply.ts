@@ -176,6 +176,42 @@ export function applyEdgeVoteChange(
  * docs/three-layer-model.md §2.4). Idempotent like the edge SET. Returns true
  * when anything changed so the caller can re-broadcast the block heat.
  */
+/**
+ * Per-block SIGNED heat value: the vote differential (up − down) of the
+ * block's top-ranked proposal, ranked BY differential — i.e. the max
+ * differential across the block's vote types. Negative when even the block's
+ * best proposal is net-against; zero (invisible) when signal cancels out.
+ * Blocks with activity but no per-type breakdown (legacy untyped votes) fall
+ * back to their deduped total. Returns the array plus both arm ceilings for
+ * the renderer's two-sided log normalization.
+ */
+export function topProposalDiffs(
+  blockVotes: ArrayLike<number>,
+  blockVoteTypes?: ([number, number, number][] | undefined)[] | null,
+): { diff: Int32Array; maxPos: number; maxNeg: number } {
+  const n = blockVotes.length;
+  const diff = new Int32Array(n);
+  let maxPos = 0;
+  let maxNeg = 0;
+  for (let b = 0; b < n; b++) {
+    const entries = blockVoteTypes?.[b];
+    let d: number;
+    if (entries && entries.length > 0) {
+      d = entries[0][1] - entries[0][2];
+      for (let i = 1; i < entries.length; i++) {
+        const v = entries[i][1] - entries[i][2];
+        if (v > d) d = v;
+      }
+    } else {
+      d = blockVotes[b] || 0;
+    }
+    diff[b] = d;
+    if (d > maxPos) maxPos = d;
+    else if (-d > maxNeg) maxNeg = -d;
+  }
+  return { diff, maxPos, maxNeg };
+}
+
 export function applyBlockCounts(
   data: VoteData,
   vtLabel: string,
@@ -200,8 +236,10 @@ export function applyBlockCounts(
 
     const pairs = blockVoteTypes[bid] || [];
     const existing = pairs.find(([l]) => l === li);
-    // Heat is TOTAL deduped activity (up + down): downvotes are engagement,
-    // so they read hot too — mirrors server block_votes.build_block_arrays.
+    // block_votes stays TOTAL deduped activity (up + down), mirroring server
+    // block_votes.build_block_arrays — it's the legacy-fallback heat for blocks
+    // without a per-type breakdown. Display heat itself is the top-proposal
+    // DIFFERENTIAL, derived from blockVoteTypes in broadcastBlockVotes.
     const oldTotal = existing ? existing[1] + existing[2] : 0;
     if (existing && existing[1] === up && existing[2] === down) continue;
 

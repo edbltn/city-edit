@@ -27,10 +27,13 @@ const LEAFLET_TO_MAPLIBRE_ZOOM = 1;
 // Block-vote payload broadcast by GraphLayer (which owns the /api/graph-votes
 // fetch). MapLibreBackground colors the block fills from it via feature-state.
 export interface BlockVotesDetail {
-  // Total deduped votes (up + down) per block_id — Int32Array when decoded
-  // from the sparse wire format, number[] from legacy dense bodies.
-  blockVotes: ArrayLike<number>;
-  max: number; // normalization ceiling (floored so quiet maps don't saturate)
+  // SIGNED vote differential (up − down) of each block's top-ranked proposal
+  // (ranked by differential — the max across the block's vote types). Positive
+  // reads on the warm arm of the ramp, negative on the cold arm, zero is
+  // invisible (cancelled/contested signal carries no heat).
+  blockDiff: ArrayLike<number>;
+  max: number;    // positive-arm ceiling (floored so quiet maps don't saturate)
+  maxNeg: number; // negative-arm ceiling (own, tighter floor — see GraphLayer)
 }
 export const BLOCK_VOTES_EVENT = "city-edit:block-votes";
 
@@ -57,30 +60,43 @@ export function blockIdAtLatLng(lat: number, lng: number): number | null {
   return blockAtResolver ? blockAtResolver(lat, lng) : null;
 }
 
-/** fill-color / fill-opacity expressions driven by feature-state "heat" ∈ [0,1].
- *  At heat 0 the block is fully transparent (no votes → invisible); it ramps up
- *  through the active style's heat colors. Blocks ARE the heat display, so there
- *  is no baseline edge layer (edges show only on Leaflet hover/selection). */
+/** fill-color / fill-opacity expressions driven by feature-state "heat" ∈ [−1,1].
+ *  Heat is the SIGNED top-proposal differential: 0 is fully transparent (no net
+ *  signal → invisible), the positive arm ramps warm → incandescent tip, the
+ *  negative arm ramps into the style's cold colors (net-against blocks read
+ *  almost blue at the floor). Blocks ARE the heat display, so there is no
+ *  baseline edge layer (edges show only on Leaflet hover/selection). */
 function blockFillPaint(style: MapStyle): maplibregl.FillLayerSpecification["paint"] {
   const heat = style.heat;
   const h: maplibregl.ExpressionSpecification = ["coalesce", ["feature-state", "heat"], 0];
   return {
-    // Start the ramp at `warm` (not halo) so even a single vote reads clearly,
-    // and keep the fill translucent — the outline layer below carries the
-    // brightness, so a voted block doesn't render as a solid slab.
+    // Positive arm starts at `warm` (not halo) so even a single vote reads
+    // clearly, and the fill stays translucent — the outline layer below
+    // carries the brightness, so a voted block doesn't render as a solid slab.
     // Stops span the FULL heat domain, ending in the incandescent tip: votes
     // are heavy-tailed, so the log-normalized top of a busy map piles up near
     // 1.0 — a ramp that plateaus early (the old 0.6 → peak flat top) painted
     // every hot corridor the same color. Now peak→tip keeps resolving there.
+    // The negative arm mirrors it in cold: any net-against block wears `cold`,
+    // deepening to `coldDeep` at the negative ceiling. The tiny stop at −0.001
+    // pins the whole mild-negative range to `cold` — without it a −0.1 block
+    // would interpolate mostly toward `warm` and read as faint support.
     "fill-color": [
       "interpolate", ["linear"], h,
+      -1.0, heat.coldDeep,
+      -0.001, heat.cold,
       0.0, heat.warm,
       0.35, heat.hot,
       0.7, heat.peak,
       1.0, heatTip(heat, style.basemap),
     ],
+    // Opacity rises with |heat|, symmetric about the invisible zero. The
+    // negative arm peaks slightly higher: cold fills fight the basemap harder
+    // than additive/multiply warm tones do.
     "fill-opacity": [
       "interpolate", ["linear"], h,
+      -1.0, 0.72,
+      -0.001, 0.38,
       0.0, 0.0,
       0.001, 0.38,
       1.0, 0.66,
@@ -97,6 +113,8 @@ function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification["pai
   return {
     "line-color": [
       "interpolate", ["linear"], h,
+      -1.0, heat.coldDeep,
+      -0.001, heat.cold,
       0.0, heat.warm,
       0.35, heat.hot,
       0.7, heat.peak,
@@ -104,12 +122,16 @@ function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification["pai
     ],
     "line-width": [
       "interpolate", ["linear"], h,
+      -1.0, 2.0,
+      -0.7, 1.4,
       0.0, 1.1,
       0.7, 1.4,
       1.0, 2.0,
     ],
     "line-opacity": [
       "interpolate", ["linear"], h,
+      -1.0, 1.0,
+      -0.001, 0.72,
       0.0, 0.0,
       0.001, 0.72,
       1.0, 1.0,
@@ -437,7 +459,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
     // the normalization it was computed with. Feature-state lives on the SOURCE
     // (tiles pick it up as they load), so once applied it survives every tile
     // (re)load — this is what lets apply() diff instead of rewriting the world.
-    const applied = { current: null as { heat: Map<number, number>; denom: number } | null };
+    const applied = { current: null as { heat: Map<number, number>; denomKey: string } | null };
 
     const featureOf = (id: number) => ({ source: "blocks", sourceLayer: "blocks", id });
 
@@ -457,26 +479,34 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         applySelected();
         return;
       }
-      const { blockVotes, max } = detail;
-      const denom = Math.log(Math.max(1, max) + 1);
+      const { blockDiff, max, maxNeg } = detail;
+      // Two log denominators, one per arm: positives normalize against the
+      // busy-map ceiling, negatives against their own (much smaller) floor so
+      // net-against blocks actually reach the deep-cold end of the ramp.
+      const denomPos = Math.log(Math.max(1, max) + 1);
+      const denomNeg = Math.log(Math.max(1, maxNeg) + 1);
+      const denomKey = `${denomPos}|${denomNeg}`;
+      const signedHeat = (v: number) =>
+        v > 0 ? Math.log(v + 1) / denomPos : -Math.log(1 - v) / denomNeg;
       const prev = applied.current;
-      // Full rewrite only on the first apply and when the normalization
+      // Full rewrite only on the first apply and when a normalization
       // ceiling moved (every lit block's heat changes then — rare). Otherwise
       // write just the blocks whose heat actually changed: a vote touches a
       // handful, and the old always-full rewrite (~47k setFeatureState on the
       // NYC bike map, on EVERY vote and EVERY sourcedata event) was the main
       // "zooming reloads the whole map" cost.
-      const full = !prev || prev.denom !== denom;
+      const full = !prev || prev.denomKey !== denomKey;
       const next = new Map<number, number>();
       let writes = 0;
       if (full) {
-        // Clear prior states, then set only the blocks that have votes
-        // (sparse). The wholesale clear drops `selected` too — re-apply after.
+        // Clear prior states, then set only the blocks with a nonzero
+        // differential (sparse). The wholesale clear drops `selected` too —
+        // re-apply after.
         ml.removeFeatureState({ source: "blocks", sourceLayer: "blocks" });
-        for (let id = 0; id < blockVotes.length; id++) {
-          const v = blockVotes[id];
-          if (v > 0) {
-            const h = Math.log(v + 1) / denom;
+        for (let id = 0; id < blockDiff.length; id++) {
+          const v = blockDiff[id];
+          if (v !== 0) {
+            const h = signedHeat(v);
             next.set(id, h);
             ml.setFeatureState(featureOf(id), { heat: h });
             writes++;
@@ -484,10 +514,10 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         }
         applySelected();
       } else {
-        for (let id = 0; id < blockVotes.length; id++) {
-          const v = blockVotes[id];
-          if (v > 0) {
-            const h = Math.log(v + 1) / denom;
+        for (let id = 0; id < blockDiff.length; id++) {
+          const v = blockDiff[id];
+          if (v !== 0) {
+            const h = signedHeat(v);
             next.set(id, h);
             if (prev.heat.get(id) !== h) {
               ml.setFeatureState(featureOf(id), { heat: h });
@@ -495,7 +525,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
             }
           }
         }
-        // Blocks whose last vote was just undone: cool back to 0.
+        // Blocks whose differential just returned to zero: cool back to invisible.
         for (const id of prev.heat.keys()) {
           if (!next.has(id)) {
             ml.setFeatureState(featureOf(id), { heat: 0 });
@@ -510,7 +540,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         (window as unknown as { __perf?: { mark: (l: string) => void } }).__perf
           ?.mark("first-heat-apply");
       }
-      applied.current = { heat: next, denom };
+      applied.current = { heat: next, denomKey };
       dlog("blocks", `heat apply (${full ? "full" : "diff"}): ${writes} writes, ${next.size} lit`);
       debugState("blockHeatNonzero", next.size);
     };
