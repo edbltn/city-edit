@@ -337,13 +337,22 @@ const MY_VOTES_EDGE_CAP = 500;
 const ROUTE_VOTES_EDGE_CAP = 4000;
 const ROUTE_VOTES_DEBOUNCE_MS = 350;
 
+// Index builds yield to the main thread between batches so the multi-second
+// NYC build doesn't jank the tile/heat animations happening at exactly this
+// moment of the load. Until an index exists, hitTest simply returns no result
+// (hover lights up ~a second later) — no brute-force fallback, which would
+// scan the full 650k-edge array per mousemove.
+const INDEX_YIELD_BATCH = 120_000;
+const yieldToMain = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 /** Build a flatbush spatial index of node points. Done once per graph. */
-function buildNodeIndex(data: GraphTopology): Flatbush | null {
+async function buildNodeIndex(data: GraphTopology): Promise<Flatbush | null> {
   const n = data.nNodes;
   if (n === 0) return null;
   const c = data.coords;
   const idx = new Flatbush(n);
   for (let i = 0; i < n; i++) {
+    if (i > 0 && i % INDEX_YIELD_BATCH === 0) await yieldToMain();
     const lat = c[2 * i] / COORD_SCALE;
     const lng = c[2 * i + 1] / COORD_SCALE;
     // Point bbox: min == max (lng,lat ordering matches the edge index)
@@ -354,7 +363,7 @@ function buildNodeIndex(data: GraphTopology): Flatbush | null {
 }
 
 /** Build a flatbush spatial index of edge bounding boxes. Done once per graph. */
-function buildEdgeIndex(data: GraphTopology): Flatbush | null {
+async function buildEdgeIndex(data: GraphTopology): Promise<Flatbush | null> {
   const n = data.nEdges;
   if (n === 0) return null;
   const c = data.coords;
@@ -362,6 +371,7 @@ function buildEdgeIndex(data: GraphTopology): Flatbush | null {
   const nNodes = data.nNodes;
   const idx = new Flatbush(n);
   for (let i = 0; i < n; i++) {
+    if (i > 0 && i % INDEX_YIELD_BATCH === 0) await yieldToMain();
     const fromIdx = e[2 * i];
     const toIdx = e[2 * i + 1];
     // A malformed/stale topology can reference a node index that doesn't exist.
@@ -440,12 +450,9 @@ function hitTest(
     // query still returns up to K matching candidates however sparse they are.
     const candidates = edgeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K, Infinity, allowEdge);
     for (const i of candidates) checkEdge(i);
-  } else {
-    for (let i = 0; i < data.nEdges; i++) {
-      if (allowEdge && !allowEdge(i)) continue;
-      checkEdge(i);
-    }
   }
+  // No else: while the index is still building (async, yielding) edges simply
+  // don't hit — brute-forcing all edges per mousemove froze the NYC map.
 
   if (bestEdge !== null) {
     // Parity split: t in the outer NODE_END_SHARE hands the hit to that
@@ -486,12 +493,8 @@ function hitTest(
     if (nodeIndex) {
       const candidates = nodeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K, Infinity, allowNode);
       for (const i of candidates) checkNode(i);
-    } else {
-      for (let i = 0; i < data.nNodes; i++) {
-        if (allowNode && !allowNode(i)) continue;
-        checkNode(i);
-      }
     }
+    // No else — same index-only rule as edges above.
     if (bestNode !== null) return nodeResult(bestNode);
   }
 
@@ -2189,8 +2192,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       //    the version probe and the topology load/decode: the request depends
       //    only on slug+mode. On a cold load it used to start only AFTER the
       //    multi-MB topology finished downloading, serializing the two biggest
-      //    fetches. Step 3 awaits it; the noop catch here only silences the
-      //    unhandled-rejection warning when topology fails first.
+      //    fetches. The early block-heat paint (in step 1) and step 3 both
+      //    consume it; the noop catches only silence the unhandled-rejection
+      //    warning when topology fails first.
       const votesFetchPromise = fetch(
         `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}&format=sparse`,
         { headers: passcodeHeaders() },
@@ -2199,6 +2203,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         return r.json();
       });
       votesFetchPromise.catch(() => {});
+      // Decode ONCE, shared by the early block-heat paint below and step 3 —
+      // whichever awaits it second reuses the same decoded arrays.
+      const votesDecodedPromise = votesFetchPromise.then((voteRaw) => ({
+        voteRaw,
+        voteData: isSparseVotes(voteRaw) ? decodeSparseVotes(voteRaw) : voteRaw,
+      }));
+      votesDecodedPromise.catch(() => {});
+      // Set once the authoritative body's block heat is on screen — step 2
+      // must not repaint the (older-rev) cached snapshot over it.
+      let earlyHeatPainted = false;
 
       // 1. Resolve the graph version, then load topology from IndexedDB when it
       //    matches — skipping the multi-MB download and JSON parse entirely.
@@ -2219,6 +2233,33 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         } catch {
           // Version probe failed — fall back to a direct topology fetch.
         }
+
+        // EARLY BLOCK-HEAT PAINT — the sparse vote body (~57KB) carries the
+        // complete block heat, and MapLibre applies it as feature-state keyed
+        // purely by block id on the blocks PMTiles source (the payload is
+        // retained + re-applied until the source exists), so it needs NO
+        // topology or edge arrays. Painting the moment the votes land —
+        // instead of after the multi-MB topology download + decode below —
+        // puts first heat on screen seconds earlier on a cold load. Gate:
+        // blocks_version must equal the probe's (block ids renumber on every
+        // re-bake; a mid-deploy mismatch would light the wrong polygons) — on
+        // mismatch skip and let the topology-gated flow below reconcile
+        // exactly as before. Edge-array reconciliation (votesMatchTopology,
+        // graphDataRef) still happens only in step 3.
+        votesDecodedPromise.then(({ voteData }) => {
+          if (cancelled) return;
+          if (!voteData.block_votes?.length) return;
+          if ((voteData.blocks_version ?? null) !== blocksVersion) {
+            dlog("blocks", "skipping early heat paint: blocks_version mismatch", {
+              votes: voteData.blocks_version, probe: blocksVersion,
+            });
+            return;
+          }
+          earlyHeatPainted = true;
+          broadcastBlockVotes(voteData);
+          dlog("blocks", `first-heat-paint: ${voteData.block_votes.length} block slots `
+            + `at rev ${voteData.rev} (pre-topology)`);
+        }).catch(() => {});
 
         // Cache-bust the topology URL by graph version. /graph-topology is served
         // with max-age=86400, so after a deploy that renumbers edge ids the browser
@@ -2305,8 +2346,6 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
       topologyRef.current = topology;
       graphDataRef.current = topology;
-      edgeIndexRef.current = buildEdgeIndex(topology);
-      nodeIndexRef.current = buildNodeIndex(topology);
       nodeAdjRef.current = buildNodeAdj(topology);
       blockIndexRef.current = buildBlockIndex(topology);
       hasBlocksRef.current = !!topology.edgeBlockId;
@@ -2319,6 +2358,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         nEdges: topology.nEdges, nBlocks: topology.nBlocks ?? 0, cached: usedCachedTopology,
       });
       scheduleRedrawRef.current();
+      // Spatial indexes build in yielding batches (see INDEX_YIELD_BATCH) so
+      // the tile/heat paint happening right now isn't janked; hitTest returns
+      // no hit until each ref is set with a COMPLETE index. Clear any stale
+      // indexes from a previous effect run first — a mousemove landing in a
+      // yield gap must never pair an old index with the new topology.
+      edgeIndexRef.current = null;
+      nodeIndexRef.current = null;
+      edgeIndexRef.current = await buildEdgeIndex(topology);
+      if (cancelled) return;
+      nodeIndexRef.current = await buildNodeIndex(topology);
+      if (cancelled) return;
 
       // 2. Paint immediately from cached votes (same graph version only) so the
       //    heatmap appears without waiting on the network. Skipped when the
@@ -2343,7 +2393,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           graphDataRef.current = { ...topology, ...cachedVotes };
           lastRevRef.current = cachedVotes.rev ?? 0;
           setVoteTypeMap(cachedVotes.vote_types);
-          broadcastBlockVotes(cachedVotes);
+          // The edge-array install above still proceeds, but don't repaint
+          // the cached (older-rev) block heat over the authoritative body if
+          // the early paint already landed.
+          if (!earlyHeatPainted) broadcastBlockVotes(cachedVotes);
           refreshHeatmapDisplayRef.current();
           requestProposalsRecomputeRef.current();
           setHeatmapLoaded();
@@ -2362,8 +2415,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         // format=sparse: nonzero-only body decoded into typed/holey arrays —
         // the dense body's ~9M boxed slots were the mobile-Safari OOM (see
         // utils/sparseVotes.ts). A dense body still decodes as-is (old server).
-        const voteRaw = await votesFetchPromise;
-        const voteData = isSparseVotes(voteRaw) ? decodeSparseVotes(voteRaw) : voteRaw;
+        const { voteRaw, voteData } = await votesDecodedPromise;
         if (cancelled) return;
 
         // Stale-topology guard. The vote arrays are indexed against the server's
@@ -2388,11 +2440,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           if (fresh && votesMatchTopology(voteData, fresh)) {
             topology = fresh;
             topologyRef.current = fresh;
-            edgeIndexRef.current = buildEdgeIndex(fresh);
-            nodeIndexRef.current = buildNodeIndex(fresh);
             nodeAdjRef.current = buildNodeAdj(fresh);
             blockIndexRef.current = buildBlockIndex(fresh);
             hasBlocksRef.current = !!fresh.edgeBlockId;
+            // Same stale-index guard as the mount path: null out, then set
+            // each ref only once its yielding rebuild completes.
+            edgeIndexRef.current = null;
+            nodeIndexRef.current = null;
+            edgeIndexRef.current = await buildEdgeIndex(fresh);
+            if (cancelled) return;
+            nodeIndexRef.current = await buildNodeIndex(fresh);
+            if (cancelled) return;
           } else {
             await clearGraphCache();
             setHeatmapLoaded();
@@ -3089,19 +3147,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           onSnapRef.current?.(snapPos);
           setCurrentSnap(snapPos);
         } else {
-          // Fallback: nearest node out of range. Use the node index when
-          // available (top-1 by bbox distance — for points that's exact).
+          // Fallback: nearest node out of range (top-1 by bbox distance —
+          // for points that's exact). Index-only; no result while the index
+          // is still building — this fires per mousemove during a drag, so a
+          // brute-force node scan here would jank exactly like hitTest's.
           const nodeIdx = nodeIndexRef.current;
           let nearestIdx = -1;
           if (nodeIdx) {
             const candidates = nodeIdx.neighbors(e.latlng.lng, e.latlng.lat, 1);
             if (candidates.length > 0) nearestIdx = candidates[0];
-          } else {
-            let nearestDist = Infinity;
-            for (let i = 0; i < data.nNodes; i++) {
-              const d = (nodeLat(data, i) - e.latlng.lat) ** 2 + (nodeLon(data, i) - e.latlng.lng) ** 2;
-              if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
-            }
           }
           if (nearestIdx >= 0) {
             const snapPos = { lat: nodeLat(data, nearestIdx), lng: nodeLon(data, nearestIdx) };
