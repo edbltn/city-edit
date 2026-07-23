@@ -1,0 +1,479 @@
+diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
+index 0f36ac2..8f53178 100644
+--- a/client-react/src/components/GraphLayer/GraphLayer.tsx
++++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -34,7 +34,7 @@ import {
+   expandSelectionToUndirected,
+   type RouteProposal,
+ } from "./routeProposals";
+-import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts } from "./voteApply";
++import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, topProposalDiffs } from "./voteApply";
+ import {
+   COORD_SCALE,
+   type GraphTopology,
+@@ -137,6 +137,14 @@ function arrayMax(arr: ArrayLike<number>): number {
+ // busy map past the floor still uses its own (larger) max for full dynamic range.
+ const HEAT_FULL_SCALE = 50;
+ 
++// The negative arm's own denominator floor. Net-against differentials are far
++// rarer and smaller than net-for ones (organic downvotes, not bulk imports), so
++// normalizing them against the positive ceiling would render every net-against
++// block a barely-visible tint. A tighter floor gives the negative range its own
++// dynamic range: ~10 net-against is already "overwhelmingly negative" and earns
++// the full cold color.
++const NEG_HEAT_FULL_SCALE = 10;
++
+ // ---------------------------------------------------------------------------
+ // Heatmap color stops — flame cross-section
+ // ---------------------------------------------------------------------------
+@@ -1974,9 +1982,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     // not an Array but is exactly as broadcastable.
+     blocksActiveRef.current = blockVotes != null && blockVotes.length > 0;
+     if (!blocksActiveRef.current) return;
++    // Block heat is the SIGNED vote differential (up − down) of the block's
++    // top-ranked proposal — top-ranked BY differential (topProposalDiffs). A
++    // block whose best proposal is still net-against gets a negative value
++    // and renders on the cold arm of the ramp.
++    const { diff, maxPos, maxNeg } = topProposalDiffs(
++      blockVotes!, voteData.block_vote_types);
+     const detail: BlockVotesDetail = {
+-      blockVotes: blockVotes!,
+-      max: Math.max(HEAT_FULL_SCALE, arrayMax(blockVotes!)),
++      blockDiff: diff,
++      max: Math.max(HEAT_FULL_SCALE, maxPos),
++      maxNeg: Math.max(NEG_HEAT_FULL_SCALE, maxNeg),
+     };
+     window.dispatchEvent(new CustomEvent(BLOCK_VOTES_EVENT, { detail }));
+   }, []);
+diff --git a/client-react/src/components/GraphLayer/voteApply.test.ts b/client-react/src/components/GraphLayer/voteApply.test.ts
+index 079c463..2f33702 100644
+--- a/client-react/src/components/GraphLayer/voteApply.test.ts
++++ b/client-react/src/components/GraphLayer/voteApply.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, it, expect } from "vitest";
+-import { applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, applyMyVoteChange } from "./voteApply";
++import { applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, applyMyVoteChange, topProposalDiffs } from "./voteApply";
+ import { topologyFromJson, buildNodeAdj } from "./graphTopology";
+ import type { GraphData } from "../../types";
+ 
+@@ -225,3 +225,49 @@ describe("mutation paths on sparse-decoded data (Int32Array votes, holey vote ty
+     expect(d.block_vote_types![0]).toBeUndefined();
+   });
+ });
++
++describe("topProposalDiffs (signed block heat)", () => {
++  it("takes the MAX differential across a block's vote types", () => {
++    // block 0: type A 5-1=+4, type B 9-2=+7 -> +7 (top by differential,
++    // even though A would win a total-activity ranking if counts differed)
++    const { diff, maxPos, maxNeg } = topProposalDiffs(
++      [13, 0], [[[0, 5, 1], [1, 9, 2]], undefined]);
++    expect(diff[0]).toBe(7);
++    expect(diff[1]).toBe(0);
++    expect(maxPos).toBe(7);
++    expect(maxNeg).toBe(0);
++  });
++
++  it("goes negative when even the best proposal is net-against", () => {
++    // block 0: A 1-4=-3, B 0-2=-2 -> -2 (the LEAST negative is still the top)
++    const { diff, maxPos, maxNeg } = topProposalDiffs(
++      [7, 0], [[[0, 1, 4], [1, 0, 2]], undefined]);
++    expect(diff[0]).toBe(-2);
++    expect(maxPos).toBe(0);
++    expect(maxNeg).toBe(2);
++  });
++
++  it("cancelled signal reads zero, not hot", () => {
++    const { diff } = topProposalDiffs([6], [[[0, 3, 3]]]);
++    expect(diff[0]).toBe(0);
++  });
++
++  it("falls back to the deduped total for blocks without a breakdown", () => {
++    const { diff, maxPos } = topProposalDiffs([5, 2], [undefined, []]);
++    expect(diff[0]).toBe(5);
++    expect(diff[1]).toBe(2);
++    expect(maxPos).toBe(5);
++  });
++
++  it("works over Int32Array totals and holey breakdowns (sparse decode)", () => {
++    const totals = new Int32Array([0, 4, 9]);
++    const bvt: ([number, number, number][] | undefined)[] = new Array(3);
++    bvt[2] = [[0, 2, 7]];
++    const { diff, maxPos, maxNeg } = topProposalDiffs(totals, bvt);
++    expect(diff[0]).toBe(0);
++    expect(diff[1]).toBe(4);   // hole -> total fallback
++    expect(diff[2]).toBe(-5);
++    expect(maxPos).toBe(4);
++    expect(maxNeg).toBe(5);
++  });
++});
+diff --git a/client-react/src/components/GraphLayer/voteApply.ts b/client-react/src/components/GraphLayer/voteApply.ts
+index 76e5e68..b67c4a3 100644
+--- a/client-react/src/components/GraphLayer/voteApply.ts
++++ b/client-react/src/components/GraphLayer/voteApply.ts
+@@ -176,6 +176,42 @@ export function applyEdgeVoteChange(
+  * docs/three-layer-model.md §2.4). Idempotent like the edge SET. Returns true
+  * when anything changed so the caller can re-broadcast the block heat.
+  */
++/**
++ * Per-block SIGNED heat value: the vote differential (up − down) of the
++ * block's top-ranked proposal, ranked BY differential — i.e. the max
++ * differential across the block's vote types. Negative when even the block's
++ * best proposal is net-against; zero (invisible) when signal cancels out.
++ * Blocks with activity but no per-type breakdown (legacy untyped votes) fall
++ * back to their deduped total. Returns the array plus both arm ceilings for
++ * the renderer's two-sided log normalization.
++ */
++export function topProposalDiffs(
++  blockVotes: ArrayLike<number>,
++  blockVoteTypes?: ([number, number, number][] | undefined)[] | null,
++): { diff: Int32Array; maxPos: number; maxNeg: number } {
++  const n = blockVotes.length;
++  const diff = new Int32Array(n);
++  let maxPos = 0;
++  let maxNeg = 0;
++  for (let b = 0; b < n; b++) {
++    const entries = blockVoteTypes?.[b];
++    let d: number;
++    if (entries && entries.length > 0) {
++      d = entries[0][1] - entries[0][2];
++      for (let i = 1; i < entries.length; i++) {
++        const v = entries[i][1] - entries[i][2];
++        if (v > d) d = v;
++      }
++    } else {
++      d = blockVotes[b] || 0;
++    }
++    diff[b] = d;
++    if (d > maxPos) maxPos = d;
++    else if (-d > maxNeg) maxNeg = -d;
++  }
++  return { diff, maxPos, maxNeg };
++}
++
+ export function applyBlockCounts(
+   data: VoteData,
+   vtLabel: string,
+@@ -200,8 +236,10 @@ export function applyBlockCounts(
+ 
+     const pairs = blockVoteTypes[bid] || [];
+     const existing = pairs.find(([l]) => l === li);
+-    // Heat is TOTAL deduped activity (up + down): downvotes are engagement,
+-    // so they read hot too — mirrors server block_votes.build_block_arrays.
++    // block_votes stays TOTAL deduped activity (up + down), mirroring server
++    // block_votes.build_block_arrays — it's the legacy-fallback heat for blocks
++    // without a per-type breakdown. Display heat itself is the top-proposal
++    // DIFFERENTIAL, derived from blockVoteTypes in broadcastBlockVotes.
+     const oldTotal = existing ? existing[1] + existing[2] : 0;
+     if (existing && existing[1] === up && existing[2] === down) continue;
+ 
+diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+index aacc52d..070a5e5 100644
+--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
++++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+@@ -27,10 +27,13 @@ const LEAFLET_TO_MAPLIBRE_ZOOM = 1;
+ // Block-vote payload broadcast by GraphLayer (which owns the /api/graph-votes
+ // fetch). MapLibreBackground colors the block fills from it via feature-state.
+ export interface BlockVotesDetail {
+-  // Total deduped votes (up + down) per block_id — Int32Array when decoded
+-  // from the sparse wire format, number[] from legacy dense bodies.
+-  blockVotes: ArrayLike<number>;
+-  max: number; // normalization ceiling (floored so quiet maps don't saturate)
++  // SIGNED vote differential (up − down) of each block's top-ranked proposal
++  // (ranked by differential — the max across the block's vote types). Positive
++  // reads on the warm arm of the ramp, negative on the cold arm, zero is
++  // invisible (cancelled/contested signal carries no heat).
++  blockDiff: ArrayLike<number>;
++  max: number;    // positive-arm ceiling (floored so quiet maps don't saturate)
++  maxNeg: number; // negative-arm ceiling (own, tighter floor — see GraphLayer)
+ }
+ export const BLOCK_VOTES_EVENT = "city-edit:block-votes";
+ 
+@@ -57,30 +60,43 @@ export function blockIdAtLatLng(lat: number, lng: number): number | null {
+   return blockAtResolver ? blockAtResolver(lat, lng) : null;
+ }
+ 
+-/** fill-color / fill-opacity expressions driven by feature-state "heat" ∈ [0,1].
+- *  At heat 0 the block is fully transparent (no votes → invisible); it ramps up
+- *  through the active style's heat colors. Blocks ARE the heat display, so there
+- *  is no baseline edge layer (edges show only on Leaflet hover/selection). */
++/** fill-color / fill-opacity expressions driven by feature-state "heat" ∈ [−1,1].
++ *  Heat is the SIGNED top-proposal differential: 0 is fully transparent (no net
++ *  signal → invisible), the positive arm ramps warm → incandescent tip, the
++ *  negative arm ramps into the style's cold colors (net-against blocks read
++ *  almost blue at the floor). Blocks ARE the heat display, so there is no
++ *  baseline edge layer (edges show only on Leaflet hover/selection). */
+ function blockFillPaint(style: MapStyle): maplibregl.FillLayerSpecification["paint"] {
+   const heat = style.heat;
+   const h: maplibregl.ExpressionSpecification = ["coalesce", ["feature-state", "heat"], 0];
+   return {
+-    // Start the ramp at `warm` (not halo) so even a single vote reads clearly,
+-    // and keep the fill translucent — the outline layer below carries the
+-    // brightness, so a voted block doesn't render as a solid slab.
++    // Positive arm starts at `warm` (not halo) so even a single vote reads
++    // clearly, and the fill stays translucent — the outline layer below
++    // carries the brightness, so a voted block doesn't render as a solid slab.
+     // Stops span the FULL heat domain, ending in the incandescent tip: votes
+     // are heavy-tailed, so the log-normalized top of a busy map piles up near
+     // 1.0 — a ramp that plateaus early (the old 0.6 → peak flat top) painted
+     // every hot corridor the same color. Now peak→tip keeps resolving there.
++    // The negative arm mirrors it in cold: any net-against block wears `cold`,
++    // deepening to `coldDeep` at the negative ceiling. The tiny stop at −0.001
++    // pins the whole mild-negative range to `cold` — without it a −0.1 block
++    // would interpolate mostly toward `warm` and read as faint support.
+     "fill-color": [
+       "interpolate", ["linear"], h,
++      -1.0, heat.coldDeep,
++      -0.001, heat.cold,
+       0.0, heat.warm,
+       0.35, heat.hot,
+       0.7, heat.peak,
+       1.0, heatTip(heat, style.basemap),
+     ],
++    // Opacity rises with |heat|, symmetric about the invisible zero. The
++    // negative arm peaks slightly higher: cold fills fight the basemap harder
++    // than additive/multiply warm tones do.
+     "fill-opacity": [
+       "interpolate", ["linear"], h,
++      -1.0, 0.72,
++      -0.001, 0.38,
+       0.0, 0.0,
+       0.001, 0.38,
+       1.0, 0.66,
+@@ -97,6 +113,8 @@ function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification["pai
+   return {
+     "line-color": [
+       "interpolate", ["linear"], h,
++      -1.0, heat.coldDeep,
++      -0.001, heat.cold,
+       0.0, heat.warm,
+       0.35, heat.hot,
+       0.7, heat.peak,
+@@ -104,12 +122,16 @@ function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification["pai
+     ],
+     "line-width": [
+       "interpolate", ["linear"], h,
++      -1.0, 2.0,
++      -0.7, 1.4,
+       0.0, 1.1,
+       0.7, 1.4,
+       1.0, 2.0,
+     ],
+     "line-opacity": [
+       "interpolate", ["linear"], h,
++      -1.0, 1.0,
++      -0.001, 0.72,
+       0.0, 0.0,
+       0.001, 0.72,
+       1.0, 1.0,
+@@ -437,7 +459,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+     // the normalization it was computed with. Feature-state lives on the SOURCE
+     // (tiles pick it up as they load), so once applied it survives every tile
+     // (re)load — this is what lets apply() diff instead of rewriting the world.
+-    const applied = { current: null as { heat: Map<number, number>; denom: number } | null };
++    const applied = { current: null as { heat: Map<number, number>; denomKey: string } | null };
+ 
+     const featureOf = (id: number) => ({ source: "blocks", sourceLayer: "blocks", id });
+ 
+@@ -457,26 +479,34 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+         applySelected();
+         return;
+       }
+-      const { blockVotes, max } = detail;
+-      const denom = Math.log(Math.max(1, max) + 1);
++      const { blockDiff, max, maxNeg } = detail;
++      // Two log denominators, one per arm: positives normalize against the
++      // busy-map ceiling, negatives against their own (much smaller) floor so
++      // net-against blocks actually reach the deep-cold end of the ramp.
++      const denomPos = Math.log(Math.max(1, max) + 1);
++      const denomNeg = Math.log(Math.max(1, maxNeg) + 1);
++      const denomKey = `${denomPos}|${denomNeg}`;
++      const signedHeat = (v: number) =>
++        v > 0 ? Math.log(v + 1) / denomPos : -Math.log(1 - v) / denomNeg;
+       const prev = applied.current;
+-      // Full rewrite only on the first apply and when the normalization
++      // Full rewrite only on the first apply and when a normalization
+       // ceiling moved (every lit block's heat changes then — rare). Otherwise
+       // write just the blocks whose heat actually changed: a vote touches a
+       // handful, and the old always-full rewrite (~47k setFeatureState on the
+       // NYC bike map, on EVERY vote and EVERY sourcedata event) was the main
+       // "zooming reloads the whole map" cost.
+-      const full = !prev || prev.denom !== denom;
++      const full = !prev || prev.denomKey !== denomKey;
+       const next = new Map<number, number>();
+       let writes = 0;
+       if (full) {
+-        // Clear prior states, then set only the blocks that have votes
+-        // (sparse). The wholesale clear drops `selected` too — re-apply after.
++        // Clear prior states, then set only the blocks with a nonzero
++        // differential (sparse). The wholesale clear drops `selected` too —
++        // re-apply after.
+         ml.removeFeatureState({ source: "blocks", sourceLayer: "blocks" });
+-        for (let id = 0; id < blockVotes.length; id++) {
+-          const v = blockVotes[id];
+-          if (v > 0) {
+-            const h = Math.log(v + 1) / denom;
++        for (let id = 0; id < blockDiff.length; id++) {
++          const v = blockDiff[id];
++          if (v !== 0) {
++            const h = signedHeat(v);
+             next.set(id, h);
+             ml.setFeatureState(featureOf(id), { heat: h });
+             writes++;
+@@ -484,10 +514,10 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+         }
+         applySelected();
+       } else {
+-        for (let id = 0; id < blockVotes.length; id++) {
+-          const v = blockVotes[id];
+-          if (v > 0) {
+-            const h = Math.log(v + 1) / denom;
++        for (let id = 0; id < blockDiff.length; id++) {
++          const v = blockDiff[id];
++          if (v !== 0) {
++            const h = signedHeat(v);
+             next.set(id, h);
+             if (prev.heat.get(id) !== h) {
+               ml.setFeatureState(featureOf(id), { heat: h });
+@@ -495,7 +525,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+             }
+           }
+         }
+-        // Blocks whose last vote was just undone: cool back to 0.
++        // Blocks whose differential just returned to zero: cool back to invisible.
+         for (const id of prev.heat.keys()) {
+           if (!next.has(id)) {
+             ml.setFeatureState(featureOf(id), { heat: 0 });
+@@ -510,7 +540,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+         (window as unknown as { __perf?: { mark: (l: string) => void } }).__perf
+           ?.mark("first-heat-apply");
+       }
+-      applied.current = { heat: next, denom };
++      applied.current = { heat: next, denomKey };
+       dlog("blocks", `heat apply (${full ? "full" : "diff"}): ${writes} writes, ${next.size} lit`);
+       debugState("blockHeatNonzero", next.size);
+     };
+diff --git a/client-react/src/mapStyles.ts b/client-react/src/mapStyles.ts
+index d350e4d..966c0ad 100644
+--- a/client-react/src/mapStyles.ts
++++ b/client-react/src/mapStyles.ts
+@@ -22,6 +22,10 @@ export interface HeatRamp {
+   warm: string; // dominant mid color
+   hot: string;  // core, kicks in past mid intensity
+   peak: string; // brightest, only the hottest edges
++  // The NEGATIVE arm: block heat is the top proposal's vote differential
++  // (up − down), so a net-against block ramps the other way — into cold.
++  cold: string;     // mildly negative (any net-against differential)
++  coldDeep: string; // overwhelmingly negative — the "almost blue" floor
+ }
+ 
+ export interface MapStyle {
+@@ -64,11 +68,14 @@ const DARK_WARM: Omit<MapStyle, "id"> = {
+   tileMaxZoom: 21,
+   // Hue runs purple → red-orange → amber → gold so intensity reads as a color
+   // shift, not just brightness. Peak is gold (not near-white) to keep glow tame.
++  // Negative arm dives through indigo to icy blue — the opposite temperature.
+   heat: {
+     halo: "rgb(96, 56, 120)",
+     warm: "rgb(196, 96, 56)",
+     hot: "rgb(232, 154, 54)",
+     peak: "rgb(250, 214, 120)",
++    cold: "rgb(74, 84, 190)",
++    coldDeep: "rgb(92, 118, 250)",
+   },
+   heatBlend: "screen",
+   heatComposite: "lighter",
+@@ -116,11 +123,15 @@ export const MAP_STYLES: Record<string, MapStyle> = {
+   // green stack toward a hot lime/white core at busy intersections.
+   // Hue runs blue-teal → green → yellow-green → gold so hotspots glow warm
+   // against a cool low-traffic field.
++  // Negative arm: the green field freezes — steel blue down to a vivid
++  // near-pure blue, so an overwhelmingly net-against block reads almost blue.
+   bikepaths: darkStyle("bikepaths", "#2BE06B", {
+     halo: "rgb(20, 88, 124)",
+     warm: "rgb(36, 168, 96)",
+     hot: "rgb(146, 210, 70)",
+     peak: "rgb(244, 206, 96)",
++    cold: "rgb(38, 108, 205)",
++    coldDeep: "rgb(70, 105, 255)",
+   }),
+ 
+   // Walkways — dark basemap, warm yellow-brown orange.
+@@ -128,30 +139,42 @@ export const MAP_STYLES: Record<string, MapStyle> = {
+ 
+   // Transit & mobility — dark basemap, signal blue that glows like a transit map.
+   // Hue runs indigo → blue → cyan → mint so intensity climbs the cool spectrum.
++  // Positive heat already climbs the cool blues, so the negative arm swings to
++  // violet/magenta — unmistakably "against", never confusable with busy-cool.
+   transit: darkStyle("transit", "#3B8EE0", {
+     halo: "rgb(60, 44, 132)",
+     warm: "rgb(50, 118, 206)",
+     hot: "rgb(58, 192, 196)",
+     peak: "rgb(176, 240, 206)",
++    cold: "rgb(122, 58, 196)",
++    coldDeep: "rgb(178, 74, 235)",
+   }),
+ 
+   // Waterfront & blue infrastructure — dark basemap, harbor teal/cyan.
+   // Hue runs deep blue → teal → green → pale yellow so hotspots warm up.
++  // Teal positives; the negative arm goes indigo → violet (blue alone would
++  // read as more water).
+   waterfront: darkStyle("waterfront", "#22C9C9", {
+     halo: "rgb(28, 72, 142)",
+     warm: "rgb(34, 168, 174)",
+     hot: "rgb(118, 214, 128)",
+     peak: "rgb(228, 232, 140)",
++    cold: "rgb(104, 64, 200)",
++    coldDeep: "rgb(158, 80, 240)",
+   }),
+ 
+   // Trees / parks & greening — light basemap, leaf green.
+   // Light basemap (multiply): pale chartreuse → green → emerald → deep blue, so
+   // intensity both darkens and shifts hue toward blue.
++  // Multiply basemap: the negative arm tints toward slate → strong blue (a
++  // multiply blue darkens the paper coolly, the inverse of the leafy warmth).
+   trees: lightStyle("trees", "#5FA052", {
+     halo: "rgb(206, 222, 152)",
+     warm: "rgb(122, 182, 84)",
+     hot: "rgb(44, 138, 98)",
+     peak: "rgb(22, 74, 112)",
++    cold: "rgb(132, 150, 214)",
++    coldDeep: "rgb(62, 82, 190)",
+   }),
+ 
+   // Streets & public space — light basemap, terracotta (brick / paving).
+@@ -161,15 +184,21 @@ export const MAP_STYLES: Record<string, MapStyle> = {
+     warm: "rgb(208, 138, 90)",
+     hot: "rgb(176, 72, 70)",
+     peak: "rgb(92, 32, 82)",
++    cold: "rgb(138, 152, 208)",
++    coldDeep: "rgb(56, 84, 186)",
+   }),
+ 
+   // Culture & community — light basemap, plum/violet.
+   // Light basemap (multiply): pale rose → orchid → violet → indigo.
++  // Violet positives; the negative arm cools to steel/teal-blue so it can't be
++  // mistaken for a deeper violet.
+   plum: lightStyle("plum", "#8E5AA8", {
+     halo: "rgb(234, 202, 204)",
+     warm: "rgb(182, 122, 184)",
+     hot: "rgb(120, 72, 162)",
+     peak: "rgb(52, 40, 112)",
++    cold: "rgb(118, 158, 202)",
++    coldDeep: "rgb(42, 104, 176)",
+   }),
+ 
+   // Neutral default for user-created maps without a preset style.
+@@ -228,10 +257,11 @@ export function heatTip(heat: HeatRamp, basemap: Basemap): string {
+ 
+ /**
+  * Build the CSS `linear-gradient(...)` for the heatmap legend swatch from a
+- * style's ramp, so the legend always matches the map.
++ * style's ramp, so the legend always matches the map. The left quarter is the
++ * negative arm (net-against differentials); zero sits at 25%.
+  */
+ export function heatGradientCss(heat: HeatRamp, basemap: Basemap): string {
+-  return `linear-gradient(to right, ${heat.halo}, ${heat.warm} 35%, ${heat.hot} 65%, ${heat.peak} 85%, ${heatTip(heat, basemap)})`;
++  return `linear-gradient(to right, ${heat.coldDeep}, ${heat.cold} 18%, ${heat.halo} 25%, ${heat.warm} 51%, ${heat.hot} 74%, ${heat.peak} 89%, ${heatTip(heat, basemap)})`;
+ }
+ 
+ // A heat ramp expanded to positioned RGB stops, ready for interpolation. The

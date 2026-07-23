@@ -29,6 +29,24 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-23-differential-block-heat.html">
+    <div class="date">2026-07-23</div>
+    <h2>Differential block heat — net-against blocks go cold</h2>
+    <p>Block heat was total deduped activity (up + down), so a net-against block glowed as hot as a
+    net-for one — opposition read as popularity. Heat is now the <strong>signed differential
+    (up − down) of each block's top-ranked proposal</strong>, ranked by differential
+    (topProposalDiffs = max across the block's vote types): positive rides the warm ramp, zero
+    (cancelled signal) is invisible, negative descends a new per-theme cold arm ending almost blue
+    (bikes: steel → vivid blue; transit/waterfront swing violet; light themes tint slate).
+    Feature-state heat is ∈ [−1, 1] with a log denominator per arm — negatives normalize against
+    their own tight floor (NEG_HEAT_FULL_SCALE 10) so organic opposition reaches deep cold beside
+    bulk-import positives — and a −0.001 stop pins mild negatives to cold so they can never
+    interpolate toward warm. Legend gradient spans the full spectrum, zero at 25%. Client-only
+    change (derived from breakdowns already in every payload). Verified live on nyc-bikes:
+    24,363 negative / 17,881 positive blocks, countered avenues blue against warm greenways;
+    258 tests pass.</p>
+  </a>
+
   <a class="entry" href="./2026-07-23-perf-interim-borrows.html">
     <div class="date">2026-07-23</div>
     <h2>Borrowing perf from Brook's perf-interim PR #7 — early heat, cacheable tiles, and the races the review caught</h2>

@@ -1,0 +1,844 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Differential block heat — net-against blocks go cold — 2026-07-23</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.25; }
+  pre.diff span { display: block; white-space: pre; }
+  pre.diff span span { display: inline; }
+
+  .s-kw { color: #a52a5a; }
+  .s-str { color: #0a3069; }
+  .s-com { color: #77716a; font-style: italic; }
+  .s-num { color: #0550ae; }
+  .s-lit { color: #0550ae; }
+  .s-fn { color: #6639ba; }
+  .s-type { color: #953800; }
+  .s-prop { color: #116329; }
+  .s-tag { color: #116329; }
+  .s-attr { color: #0550ae; }
+  .s-dec { color: #6639ba; }
+
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Differential block heat — net-against blocks go cold</h1>
+    <div class="dateline">2026-07-23 · branch <code>fix/unify-voting</code></div>
+  </header>
+
+  <nav class="toc"><a href="#why">1</a>
+<a href="#render">2</a>
+<a href="#themes">3</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a>
+  </nav>
+
+  <p class="lede">Imported Citibike trips are routed through the foot profile on purpose — the divergence
+  between how a pedestrian moves and where a bike is allowed to go IS the vote. But the ingest upvoted the
+  whole pedestrianized path, so corridors that already carry bikes (and especially streets that already
+  have bike lanes, densest near Citibike stations) got the same +1 as the genuinely un-bikeable stretches.
+  The correction: a second, bike-legality OSRM dataset (stock v5.25.0 bicycle profile flattened to
+  shortest-legal-path, pushing-the-bike disabled) re-routes every ingested ride pinned to its own voted
+  corridor via via-points; every upvoted edge lying bodily inside the resulting route's 20 m corridor gets
+  a <code>direction=-1</code> cast from the ride's own voter identity. What survives upvoted is exactly
+  what can't be ridden: park and plaza paths, stairs, and one-way streets taken against the flow.</p>
+
+  
+    <section class="card" id="why">
+      <div class="tag">Diagnosis · heat semantics</div>
+      <h2>1 · Activity heat can't tell support from opposition</h2>
+      <h3>Symptom</h3>
+      <p>Block heat was TOTAL deduped activity (up + down): a block with 6 devices against and 5 for glowed exactly as hot as one with 11 for. After the counter-vote work made net-against and cancelled blocks a real, meaningful state, the heatmap had no way to show them — opposition read as popularity.</p>
+      <h3>Root cause</h3>
+      <ul><li>The heat value was <code>block_votes[b] = up + down</code> end to end: server aggregate, sparse wire format, and the MapLibre feature-state apply all spoke unsigned totals, and every theme ramp only had a warm arm.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Heat is now the <strong>signed differential (up − down) of the block's top-ranked proposal</strong>, ranked BY differential — <code>topProposalDiffs()</code> takes the max differential across the block's vote types. Positive rides the existing warm ramp; zero (cancelled/contested signal) is invisible; negative descends a new cold arm. Client-only: derived from the per-type breakdowns already in every payload, so no server or wire change.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/voteApply.ts</span>
+            <span class="stat"><span class="d-add">+40</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · GraphLayer</span>
+        <span class="ctx-sum">pure vote-application: mutates in-memory vote arrays, derives node/block projections</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">voteApply.ts</span>
+        <span class="ctx-sum">~290 LOC — optimistic/authoritative edge SETs, block SETs, and now the signed block-heat derivation</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">applyMyVoteChange / applyEdgeVoteChange</span><span class="ol-sum">optimistic per-edge transitions</span></li><li class="changed"><span class="ol-label">topProposalDiffs</span><span class="ol-sum">NEW: per-block signed heat — max (up − down) across the block&#x27;s vote types, total fallback, both arm ceilings</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">applyBlockCounts</span><span class="ol-sum">authoritative per-block SET from WS deltas (comment updated: totals are the legacy fallback now)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">applyAuthoritativeCounts</span><span class="ol-sum">authoritative per-edge SET</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>topProposalDiffs — Int32Array over blocks; per block max differential across [legendIdx, up, down] entries; maxPos/maxNeg for the renderer</li><li>applyBlockCounts comment — block_votes stays total activity, display heat is the differential derived downstream</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/voteApply.ts b/client-react/src/components/GraphLayer/voteApply.ts</span>
+<span class="d-meta">index 76e5e68..b67c4a3 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/voteApply.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/voteApply.ts</span>
+<span class="d-hunk">@@ -176,6 +176,42 @@ export function applyEdgeVoteChange(</span>
+<span class="d-ctx"> <span class="s-com"> * docs/three-layer-model.md §2.4). Idempotent like the edge SET. Returns true</span></span>
+<span class="d-ctx"> <span class="s-com"> * when anything changed so the caller can re-broadcast the block heat.</span></span>
+<span class="d-ctx"> <span class="s-com"> */</span></span>
+<span class="d-add">+<span class="s-com">/**</span></span>
+<span class="d-add">+<span class="s-com"> * Per-block SIGNED heat value: the vote differential (up − down) of the</span></span>
+<span class="d-add">+<span class="s-com"> * block&#x27;s top-ranked proposal, ranked BY differential — i.e. the max</span></span>
+<span class="d-add">+<span class="s-com"> * differential across the block&#x27;s vote types. Negative when even the block&#x27;s</span></span>
+<span class="d-add">+<span class="s-com"> * best proposal is net-against; zero (invisible) when signal cancels out.</span></span>
+<span class="d-add">+<span class="s-com"> * Blocks with activity but no per-type breakdown (legacy untyped votes) fall</span></span>
+<span class="d-add">+<span class="s-com"> * back to their deduped total. Returns the array plus both arm ceilings for</span></span>
+<span class="d-add">+<span class="s-com"> * the renderer&#x27;s two-sided log normalization.</span></span>
+<span class="d-add">+<span class="s-com"> */</span></span>
+<span class="d-add">+<span class="s-kw">export</span> <span class="s-kw">function</span> <span class="s-fn">topProposalDiffs</span>(</span>
+<span class="d-add">+  blockVotes: <span class="s-type">ArrayLike</span>&lt;number&gt;,</span>
+<span class="d-add">+  blockVoteTypes?: ([number, number, number][] | <span class="s-lit">undefined</span>)[] | <span class="s-lit">null</span>,</span>
+<span class="d-add">+): { diff: <span class="s-type">Int32Array</span>; maxPos: number; maxNeg: number } {</span>
+<span class="d-add">+  <span class="s-kw">const</span> n = blockVotes.length;</span>
+<span class="d-add">+  <span class="s-kw">const</span> diff = <span class="s-kw">new</span> <span class="s-fn">Int32Array</span>(n);</span>
+<span class="d-add">+  <span class="s-kw">let</span> maxPos = <span class="s-num">0</span>;</span>
+<span class="d-add">+  <span class="s-kw">let</span> maxNeg = <span class="s-num">0</span>;</span>
+<span class="d-add">+  <span class="s-kw">for</span> (<span class="s-kw">let</span> b = <span class="s-num">0</span>; b &lt; n; b++) {</span>
+<span class="d-add">+    <span class="s-kw">const</span> entries = blockVoteTypes?.[b];</span>
+<span class="d-add">+    <span class="s-kw">let</span> d: number;</span>
+<span class="d-add">+    <span class="s-kw">if</span> (entries &amp;&amp; entries.length &gt; <span class="s-num">0</span>) {</span>
+<span class="d-add">+      d = entries[<span class="s-num">0</span>][<span class="s-num">1</span>] - entries[<span class="s-num">0</span>][<span class="s-num">2</span>];</span>
+<span class="d-add">+      <span class="s-kw">for</span> (<span class="s-kw">let</span> i = <span class="s-num">1</span>; i &lt; entries.length; i++) {</span>
+<span class="d-add">+        <span class="s-kw">const</span> v = entries[i][<span class="s-num">1</span>] - entries[i][<span class="s-num">2</span>];</span>
+<span class="d-add">+        <span class="s-kw">if</span> (v &gt; d) d = v;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    } <span class="s-kw">else</span> {</span>
+<span class="d-add">+      d = blockVotes[b] || <span class="s-num">0</span>;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    diff[b] = d;</span>
+<span class="d-add">+    <span class="s-kw">if</span> (d &gt; maxPos) maxPos = d;</span>
+<span class="d-add">+    <span class="s-kw">else</span> <span class="s-kw">if</span> (-d &gt; maxNeg) maxNeg = -d;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  <span class="s-kw">return</span> { diff, maxPos, maxNeg };</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">function</span> <span class="s-fn">applyBlockCounts</span>(</span>
+<span class="d-ctx">   data: <span class="s-type">VoteData</span>,</span>
+<span class="d-ctx">   vtLabel: string,</span>
+<span class="d-hunk">@@ -200,8 +236,10 @@ export function applyBlockCounts(</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-kw">const</span> pairs = blockVoteTypes[bid] || [];</span>
+<span class="d-ctx">     <span class="s-kw">const</span> existing = pairs.<span class="s-fn">find</span>(([l]) =&gt; l === li);</span>
+<span class="d-del">-    <span class="s-com">// Heat is TOTAL deduped activity (up + down): downvotes are engagement,</span></span>
+<span class="d-del">-    <span class="s-com">// so they read hot too — mirrors server block_votes.build_block_arrays.</span></span>
+<span class="d-add">+    <span class="s-com">// block_votes stays TOTAL deduped activity (up + down), mirroring server</span></span>
+<span class="d-add">+    <span class="s-com">// block_votes.build_block_arrays — it&#x27;s the legacy-fallback heat for blocks</span></span>
+<span class="d-add">+    <span class="s-com">// without a per-type breakdown. Display heat itself is the top-proposal</span></span>
+<span class="d-add">+    <span class="s-com">// DIFFERENTIAL, derived from blockVoteTypes in broadcastBlockVotes.</span></span>
+<span class="d-ctx">     <span class="s-kw">const</span> oldTotal = existing ? existing[<span class="s-num">1</span>] + existing[<span class="s-num">2</span>] : <span class="s-num">0</span>;</span>
+<span class="d-ctx">     <span class="s-kw">if</span> (existing &amp;&amp; existing[<span class="s-num">1</span>] === up &amp;&amp; existing[<span class="s-num">2</span>] === down) <span class="s-kw">continue</span>;</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/voteApply.test.ts</span>
+            <span class="stat"><span class="d-add">+47</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · GraphLayer</span>
+        <span class="ctx-sum">unit tests for the pure vote-application core</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">voteApply.test.ts</span>
+        <span class="ctx-sum">24 tests — 5 new for topProposalDiffs</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">edge/node/block apply suites</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">topProposalDiffs suite</span><span class="ol-sum">NEW: max-differential ranking, negative top, cancelled→0, fallback, sparse shapes</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>five topProposalDiffs cases incl. Int32Array totals + holey breakdown arrays (the sparse-decode shapes)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/voteApply.test.ts b/client-react/src/components/GraphLayer/voteApply.test.ts</span>
+<span class="d-meta">index 079c463..2f33702 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/voteApply.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/voteApply.test.ts</span>
+<span class="d-hunk">@@ -1,5 +1,5 @@</span>
+<span class="d-ctx"> <span class="s-kw">import</span> { describe, it, expect } <span class="s-kw">from</span> <span class="s-str">&quot;vitest&quot;</span>;</span>
+<span class="d-del">-<span class="s-kw">import</span> { applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, applyMyVoteChange } <span class="s-kw">from</span> <span class="s-str">&quot;./voteApply&quot;</span>;</span>
+<span class="d-add">+<span class="s-kw">import</span> { applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, applyMyVoteChange, topProposalDiffs } <span class="s-kw">from</span> <span class="s-str">&quot;./voteApply&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> { topologyFromJson, buildNodeAdj } <span class="s-kw">from</span> <span class="s-str">&quot;./graphTopology&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> <span class="s-kw">type</span> { <span class="s-type">GraphData</span> } <span class="s-kw">from</span> <span class="s-str">&quot;../../types&quot;</span>;</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -225,3 +225,49 @@ describe(&quot;mutation paths on sparse-decoded data (Int32Array votes, holey vote ty</span>
+<span class="d-ctx">     <span class="s-fn">expect</span>(d.block_vote_types![<span class="s-num">0</span>]).<span class="s-fn">toBeUndefined</span>();</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-add">+</span>
+<span class="d-add">+<span class="s-fn">describe</span>(<span class="s-str">&quot;topProposalDiffs (signed block heat)&quot;</span>, () =&gt; {</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;takes the MAX differential across a block&#x27;s vote types&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-com">// block 0: type A 5-1=+4, type B 9-2=+7 -&gt; +7 (top by differential,</span></span>
+<span class="d-add">+    <span class="s-com">// even though A would win a total-activity ranking if counts differed)</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> { diff, maxPos, maxNeg } = <span class="s-fn">topProposalDiffs</span>(</span>
+<span class="d-add">+      [<span class="s-num">13</span>, <span class="s-num">0</span>], [[[<span class="s-num">0</span>, <span class="s-num">5</span>, <span class="s-num">1</span>], [<span class="s-num">1</span>, <span class="s-num">9</span>, <span class="s-num">2</span>]], <span class="s-lit">undefined</span>]);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(diff[<span class="s-num">0</span>]).<span class="s-fn">toBe</span>(<span class="s-num">7</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(diff[<span class="s-num">1</span>]).<span class="s-fn">toBe</span>(<span class="s-num">0</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(maxPos).<span class="s-fn">toBe</span>(<span class="s-num">7</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(maxNeg).<span class="s-fn">toBe</span>(<span class="s-num">0</span>);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;goes negative when even the best proposal is net-against&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-com">// block 0: A 1-4=-3, B 0-2=-2 -&gt; -2 (the LEAST negative is still the top)</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> { diff, maxPos, maxNeg } = <span class="s-fn">topProposalDiffs</span>(</span>
+<span class="d-add">+      [<span class="s-num">7</span>, <span class="s-num">0</span>], [[[<span class="s-num">0</span>, <span class="s-num">1</span>, <span class="s-num">4</span>], [<span class="s-num">1</span>, <span class="s-num">0</span>, <span class="s-num">2</span>]], <span class="s-lit">undefined</span>]);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(diff[<span class="s-num">0</span>]).<span class="s-fn">toBe</span>(-<span class="s-num">2</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(maxPos).<span class="s-fn">toBe</span>(<span class="s-num">0</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(maxNeg).<span class="s-fn">toBe</span>(<span class="s-num">2</span>);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;cancelled signal reads zero, not hot&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> { diff } = <span class="s-fn">topProposalDiffs</span>([<span class="s-num">6</span>], [[[<span class="s-num">0</span>, <span class="s-num">3</span>, <span class="s-num">3</span>]]]);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(diff[<span class="s-num">0</span>]).<span class="s-fn">toBe</span>(<span class="s-num">0</span>);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;falls back to the deduped total for blocks without a breakdown&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> { diff, maxPos } = <span class="s-fn">topProposalDiffs</span>([<span class="s-num">5</span>, <span class="s-num">2</span>], [<span class="s-lit">undefined</span>, []]);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(diff[<span class="s-num">0</span>]).<span class="s-fn">toBe</span>(<span class="s-num">5</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(diff[<span class="s-num">1</span>]).<span class="s-fn">toBe</span>(<span class="s-num">2</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(maxPos).<span class="s-fn">toBe</span>(<span class="s-num">5</span>);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  <span class="s-fn">it</span>(<span class="s-str">&quot;works over Int32Array totals and holey breakdowns (sparse decode)&quot;</span>, () =&gt; {</span>
+<span class="d-add">+    <span class="s-kw">const</span> totals = <span class="s-kw">new</span> <span class="s-fn">Int32Array</span>([<span class="s-num">0</span>, <span class="s-num">4</span>, <span class="s-num">9</span>]);</span>
+<span class="d-add">+    <span class="s-kw">const</span> bvt: ([number, number, number][] | <span class="s-lit">undefined</span>)[] = <span class="s-kw">new</span> <span class="s-fn">Array</span>(<span class="s-num">3</span>);</span>
+<span class="d-add">+    bvt[<span class="s-num">2</span>] = [[<span class="s-num">0</span>, <span class="s-num">2</span>, <span class="s-num">7</span>]];</span>
+<span class="d-add">+    <span class="s-kw">const</span> { diff, maxPos, maxNeg } = <span class="s-fn">topProposalDiffs</span>(totals, bvt);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(diff[<span class="s-num">0</span>]).<span class="s-fn">toBe</span>(<span class="s-num">0</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(diff[<span class="s-num">1</span>]).<span class="s-fn">toBe</span>(<span class="s-num">4</span>);   <span class="s-com">// hole -&gt; total fallback</span></span>
+<span class="d-add">+    <span class="s-fn">expect</span>(diff[<span class="s-num">2</span>]).<span class="s-fn">toBe</span>(-<span class="s-num">5</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(maxPos).<span class="s-fn">toBe</span>(<span class="s-num">4</span>);</span>
+<span class="d-add">+    <span class="s-fn">expect</span>(maxNeg).<span class="s-fn">toBe</span>(<span class="s-num">5</span>);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+    </section>
+    
+
+    <section class="card" id="render">
+      <div class="tag">client · MapLibre blocks</div>
+      <h2>2 · Two-armed normalization and paint</h2>
+      <h3>Symptom</h3>
+      <p>Negative differentials are structurally tiny next to bulk-import positives (organic downvotes vs thousands of imported rides): normalized against the shared ceiling they'd all wash out at a barely-visible tint.</p>
+      <h3>Root cause</h3>
+      <ul><li>One log denominator can't serve both arms — the positive ceiling on a busy map is hundreds of votes, while ~10 net-against is already overwhelming opposition.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Feature-state heat is now ∈ [−1, 1] with a log denominator per arm: positives normalize against the busy-map ceiling (<code>HEAT_FULL_SCALE</code> 50), negatives against their own much tighter floor (<code>NEG_HEAT_FULL_SCALE</code> 10), so net-against blocks actually reach deep cold.</li>
+<li>The fill/line interpolations pin the whole mild-negative range to <code>cold</code> with a stop at −0.001 — without it a −0.1 block would interpolate mostly toward <code>warm</code> and read as faint support. Opacity is symmetric about the invisible zero (the cold arm peaks slightly higher — cold fills fight the basemap harder).</li>
+<li>The diff-apply architecture survives intact: lit = nonzero differential, the full-rewrite trigger is now the (denomPos, denomNeg) pair, and blocks whose differential returns to zero cool back to invisible.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+            <span class="stat"><span class="d-add">+58</span> / <span class="d-del">-28</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · MapLibreBackground</span>
+        <span class="ctx-sum">owns the GL map: block tiles, feature-state heat, selection states</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapLibreBackground.tsx</span>
+        <span class="ctx-sum">~600 LOC — paint expressions + the heat apply loop change</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">BlockVotesDetail</span><span class="ol-sum">signed contract: blockDiff + max + maxNeg</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">blockFillPaint / blockLinePaint</span><span class="ol-sum">interpolations extended into the negative domain; −0.001 cold pin; symmetric opacity</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">apply()</span><span class="ol-sum">two log denominators; lit = nonzero; denomKey full-rewrite trigger</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">selection / tile rebind / camera sync</span><span class="ol-sum">untouched</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>fill-color: −1 coldDeep → −0.001 cold → 0 warm → 0.35 hot → 0.7 peak → 1 tip</li><li>fill/line-opacity symmetric about invisible zero (cold arm peaks slightly higher)</li><li>signedHeat(v) = ±log(|v|+1)/denom per arm; denomKey change forces the rare full rewrite</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index aacc52d..070a5e5 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -27,10 +27,13 @@ const LEAFLET_TO_MAPLIBRE_ZOOM = 1;</span>
+<span class="d-ctx"> <span class="s-com">// Block-vote payload broadcast by GraphLayer (which owns the /api/graph-votes</span></span>
+<span class="d-ctx"> <span class="s-com">// fetch). MapLibreBackground colors the block fills from it via feature-state.</span></span>
+<span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">interface</span> <span class="s-type">BlockVotesDetail</span> {</span>
+<span class="d-del">-  <span class="s-com">// Total deduped votes (up + down) per block_id — Int32Array when decoded</span></span>
+<span class="d-del">-  <span class="s-com">// from the sparse wire format, number[] from legacy dense bodies.</span></span>
+<span class="d-del">-  blockVotes: <span class="s-type">ArrayLike</span>&lt;number&gt;;</span>
+<span class="d-del">-  max: number; <span class="s-com">// normalization ceiling (floored so quiet maps don&#x27;t saturate)</span></span>
+<span class="d-add">+  <span class="s-com">// SIGNED vote differential (up − down) of each block&#x27;s top-ranked proposal</span></span>
+<span class="d-add">+  <span class="s-com">// (ranked by differential — the max across the block&#x27;s vote types). Positive</span></span>
+<span class="d-add">+  <span class="s-com">// reads on the warm arm of the ramp, negative on the cold arm, zero is</span></span>
+<span class="d-add">+  <span class="s-com">// invisible (cancelled/contested signal carries no heat).</span></span>
+<span class="d-add">+  blockDiff: <span class="s-type">ArrayLike</span>&lt;number&gt;;</span>
+<span class="d-add">+  max: number;    <span class="s-com">// positive-arm ceiling (floored so quiet maps don&#x27;t saturate)</span></span>
+<span class="d-add">+  maxNeg: number; <span class="s-com">// negative-arm ceiling (own, tighter floor — see GraphLayer)</span></span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">const</span> <span class="s-type">BLOCK_VOTES_EVENT</span> = <span class="s-str">&quot;city-edit:block-votes&quot;</span>;</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -57,30 +60,43 @@ export function blockIdAtLatLng(lat: number, lng: number): number | null {</span>
+<span class="d-ctx">   <span class="s-kw">return</span> blockAtResolver ? <span class="s-fn">blockAtResolver</span>(lat, lng) : <span class="s-lit">null</span>;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-<span class="s-com">/** fill-color / fill-opacity expressions driven by feature-state &quot;heat&quot; ∈ [0,1].</span></span>
+<span class="d-del">-<span class="s-com"> *  At heat 0 the block is fully transparent (no votes → invisible); it ramps up</span></span>
+<span class="d-del">-<span class="s-com"> *  through the active style&#x27;s heat colors. Blocks ARE the heat display, so there</span></span>
+<span class="d-del">-<span class="s-com"> *  is no baseline edge layer (edges show only on Leaflet hover/selection). */</span></span>
+<span class="d-add">+<span class="s-com">/** fill-color / fill-opacity expressions driven by feature-state &quot;heat&quot; ∈ [−1,1].</span></span>
+<span class="d-add">+<span class="s-com"> *  Heat is the SIGNED top-proposal differential: 0 is fully transparent (no net</span></span>
+<span class="d-add">+<span class="s-com"> *  signal → invisible), the positive arm ramps warm → incandescent tip, the</span></span>
+<span class="d-add">+<span class="s-com"> *  negative arm ramps into the style&#x27;s cold colors (net-against blocks read</span></span>
+<span class="d-add">+<span class="s-com"> *  almost blue at the floor). Blocks ARE the heat display, so there is no</span></span>
+<span class="d-add">+<span class="s-com"> *  baseline edge layer (edges show only on Leaflet hover/selection). */</span></span>
+<span class="d-ctx"> <span class="s-kw">function</span> <span class="s-fn">blockFillPaint</span>(style: <span class="s-type">MapStyle</span>): maplibregl.<span class="s-type">FillLayerSpecification</span>[<span class="s-str">&quot;paint&quot;</span>] {</span>
+<span class="d-ctx">   <span class="s-kw">const</span> heat = style.heat;</span>
+<span class="d-ctx">   <span class="s-kw">const</span> h: maplibregl.<span class="s-type">ExpressionSpecification</span> = [<span class="s-str">&quot;coalesce&quot;</span>, [<span class="s-str">&quot;feature-state&quot;</span>, <span class="s-str">&quot;heat&quot;</span>], <span class="s-num">0</span>];</span>
+<span class="d-ctx">   <span class="s-kw">return</span> {</span>
+<span class="d-del">-    <span class="s-com">// Start the ramp at `warm` (not halo) so even a single vote reads clearly,</span></span>
+<span class="d-del">-    <span class="s-com">// and keep the fill translucent — the outline layer below carries the</span></span>
+<span class="d-del">-    <span class="s-com">// brightness, so a voted block doesn&#x27;t render as a solid slab.</span></span>
+<span class="d-add">+    <span class="s-com">// Positive arm starts at `warm` (not halo) so even a single vote reads</span></span>
+<span class="d-add">+    <span class="s-com">// clearly, and the fill stays translucent — the outline layer below</span></span>
+<span class="d-add">+    <span class="s-com">// carries the brightness, so a voted block doesn&#x27;t render as a solid slab.</span></span>
+<span class="d-ctx">     <span class="s-com">// Stops span the FULL heat domain, ending in the incandescent tip: votes</span></span>
+<span class="d-ctx">     <span class="s-com">// are heavy-tailed, so the log-normalized top of a busy map piles up near</span></span>
+<span class="d-ctx">     <span class="s-com">// 1.0 — a ramp that plateaus early (the old 0.6 → peak flat top) painted</span></span>
+<span class="d-ctx">     <span class="s-com">// every hot corridor the same color. Now peak→tip keeps resolving there.</span></span>
+<span class="d-add">+    <span class="s-com">// The negative arm mirrors it in cold: any net-against block wears `cold`,</span></span>
+<span class="d-add">+    <span class="s-com">// deepening to `coldDeep` at the negative ceiling. The tiny stop at −0.001</span></span>
+<span class="d-add">+    <span class="s-com">// pins the whole mild-negative range to `cold` — without it a −0.1 block</span></span>
+<span class="d-add">+    <span class="s-com">// would interpolate mostly toward `warm` and read as faint support.</span></span>
+<span class="d-ctx">     <span class="s-str">&quot;fill-color&quot;</span>: [</span>
+<span class="d-ctx">       <span class="s-str">&quot;interpolate&quot;</span>, [<span class="s-str">&quot;linear&quot;</span>], h,</span>
+<span class="d-add">+      -<span class="s-num">1.0</span>, heat.coldDeep,</span>
+<span class="d-add">+      -<span class="s-num">0.001</span>, heat.cold,</span>
+<span class="d-ctx">       <span class="s-num">0.0</span>, heat.warm,</span>
+<span class="d-ctx">       <span class="s-num">0.35</span>, heat.hot,</span>
+<span class="d-ctx">       <span class="s-num">0.7</span>, heat.peak,</span>
+<span class="d-ctx">       <span class="s-num">1.0</span>, <span class="s-fn">heatTip</span>(heat, style.basemap),</span>
+<span class="d-ctx">     ],</span>
+<span class="d-add">+    <span class="s-com">// Opacity rises with |heat|, symmetric about the invisible zero. The</span></span>
+<span class="d-add">+    <span class="s-com">// negative arm peaks slightly higher: cold fills fight the basemap harder</span></span>
+<span class="d-add">+    <span class="s-com">// than additive/multiply warm tones do.</span></span>
+<span class="d-ctx">     <span class="s-str">&quot;fill-opacity&quot;</span>: [</span>
+<span class="d-ctx">       <span class="s-str">&quot;interpolate&quot;</span>, [<span class="s-str">&quot;linear&quot;</span>], h,</span>
+<span class="d-add">+      -<span class="s-num">1.0</span>, <span class="s-num">0.72</span>,</span>
+<span class="d-add">+      -<span class="s-num">0.001</span>, <span class="s-num">0.38</span>,</span>
+<span class="d-ctx">       <span class="s-num">0.0</span>, <span class="s-num">0.0</span>,</span>
+<span class="d-ctx">       <span class="s-num">0.001</span>, <span class="s-num">0.38</span>,</span>
+<span class="d-ctx">       <span class="s-num">1.0</span>, <span class="s-num">0.66</span>,</span>
+<span class="d-hunk">@@ -97,6 +113,8 @@ function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification[&quot;pai</span>
+<span class="d-ctx">   <span class="s-kw">return</span> {</span>
+<span class="d-ctx">     <span class="s-str">&quot;line-color&quot;</span>: [</span>
+<span class="d-ctx">       <span class="s-str">&quot;interpolate&quot;</span>, [<span class="s-str">&quot;linear&quot;</span>], h,</span>
+<span class="d-add">+      -<span class="s-num">1.0</span>, heat.coldDeep,</span>
+<span class="d-add">+      -<span class="s-num">0.001</span>, heat.cold,</span>
+<span class="d-ctx">       <span class="s-num">0.0</span>, heat.warm,</span>
+<span class="d-ctx">       <span class="s-num">0.35</span>, heat.hot,</span>
+<span class="d-ctx">       <span class="s-num">0.7</span>, heat.peak,</span>
+<span class="d-hunk">@@ -104,12 +122,16 @@ function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification[&quot;pai</span>
+<span class="d-ctx">     ],</span>
+<span class="d-ctx">     <span class="s-str">&quot;line-width&quot;</span>: [</span>
+<span class="d-ctx">       <span class="s-str">&quot;interpolate&quot;</span>, [<span class="s-str">&quot;linear&quot;</span>], h,</span>
+<span class="d-add">+      -<span class="s-num">1.0</span>, <span class="s-num">2.0</span>,</span>
+<span class="d-add">+      -<span class="s-num">0.7</span>, <span class="s-num">1.4</span>,</span>
+<span class="d-ctx">       <span class="s-num">0.0</span>, <span class="s-num">1.1</span>,</span>
+<span class="d-ctx">       <span class="s-num">0.7</span>, <span class="s-num">1.4</span>,</span>
+<span class="d-ctx">       <span class="s-num">1.0</span>, <span class="s-num">2.0</span>,</span>
+<span class="d-ctx">     ],</span>
+<span class="d-ctx">     <span class="s-str">&quot;line-opacity&quot;</span>: [</span>
+<span class="d-ctx">       <span class="s-str">&quot;interpolate&quot;</span>, [<span class="s-str">&quot;linear&quot;</span>], h,</span>
+<span class="d-add">+      -<span class="s-num">1.0</span>, <span class="s-num">1.0</span>,</span>
+<span class="d-add">+      -<span class="s-num">0.001</span>, <span class="s-num">0.72</span>,</span>
+<span class="d-ctx">       <span class="s-num">0.0</span>, <span class="s-num">0.0</span>,</span>
+<span class="d-ctx">       <span class="s-num">0.001</span>, <span class="s-num">0.72</span>,</span>
+<span class="d-ctx">       <span class="s-num">1.0</span>, <span class="s-num">1.0</span>,</span>
+<span class="d-hunk">@@ -437,7 +459,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">     <span class="s-com">// the normalization it was computed with. Feature-state lives on the SOURCE</span></span>
+<span class="d-ctx">     <span class="s-com">// (tiles pick it up as they load), so once applied it survives every tile</span></span>
+<span class="d-ctx">     <span class="s-com">// (re)load — this is what lets apply() diff instead of rewriting the world.</span></span>
+<span class="d-del">-    <span class="s-kw">const</span> applied = { current: <span class="s-lit">null</span> <span class="s-kw">as</span> { heat: <span class="s-type">Map</span>&lt;number, number&gt;; denom: number } | <span class="s-lit">null</span> };</span>
+<span class="d-add">+    <span class="s-kw">const</span> applied = { current: <span class="s-lit">null</span> <span class="s-kw">as</span> { heat: <span class="s-type">Map</span>&lt;number, number&gt;; denomKey: string } | <span class="s-lit">null</span> };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     <span class="s-kw">const</span> featureOf = (id: number) =&gt; ({ source: <span class="s-str">&quot;blocks&quot;</span>, sourceLayer: <span class="s-str">&quot;blocks&quot;</span>, id });</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -457,26 +479,34 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">         <span class="s-fn">applySelected</span>();</span>
+<span class="d-ctx">         <span class="s-kw">return</span>;</span>
+<span class="d-ctx">       }</span>
+<span class="d-del">-      <span class="s-kw">const</span> { blockVotes, max } = detail;</span>
+<span class="d-del">-      <span class="s-kw">const</span> denom = <span class="s-type">Math</span>.<span class="s-fn">log</span>(<span class="s-type">Math</span>.<span class="s-fn">max</span>(<span class="s-num">1</span>, max) + <span class="s-num">1</span>);</span>
+<span class="d-add">+      <span class="s-kw">const</span> { blockDiff, max, maxNeg } = detail;</span>
+<span class="d-add">+      <span class="s-com">// Two log denominators, one per arm: positives normalize against the</span></span>
+<span class="d-add">+      <span class="s-com">// busy-map ceiling, negatives against their own (much smaller) floor so</span></span>
+<span class="d-add">+      <span class="s-com">// net-against blocks actually reach the deep-cold end of the ramp.</span></span>
+<span class="d-add">+      <span class="s-kw">const</span> denomPos = <span class="s-type">Math</span>.<span class="s-fn">log</span>(<span class="s-type">Math</span>.<span class="s-fn">max</span>(<span class="s-num">1</span>, max) + <span class="s-num">1</span>);</span>
+<span class="d-add">+      <span class="s-kw">const</span> denomNeg = <span class="s-type">Math</span>.<span class="s-fn">log</span>(<span class="s-type">Math</span>.<span class="s-fn">max</span>(<span class="s-num">1</span>, maxNeg) + <span class="s-num">1</span>);</span>
+<span class="d-add">+      <span class="s-kw">const</span> denomKey = <span class="s-str">`${denomPos}|${denomNeg}`</span>;</span>
+<span class="d-add">+      <span class="s-kw">const</span> signedHeat = (v: number) =&gt;</span>
+<span class="d-add">+        v &gt; <span class="s-num">0</span> ? <span class="s-type">Math</span>.<span class="s-fn">log</span>(v + <span class="s-num">1</span>) / denomPos : -<span class="s-type">Math</span>.<span class="s-fn">log</span>(<span class="s-num">1</span> - v) / denomNeg;</span>
+<span class="d-ctx">       <span class="s-kw">const</span> prev = applied.current;</span>
+<span class="d-del">-      <span class="s-com">// Full rewrite only on the first apply and when the normalization</span></span>
+<span class="d-add">+      <span class="s-com">// Full rewrite only on the first apply and when a normalization</span></span>
+<span class="d-ctx">       <span class="s-com">// ceiling moved (every lit block&#x27;s heat changes then — rare). Otherwise</span></span>
+<span class="d-ctx">       <span class="s-com">// write just the blocks whose heat actually changed: a vote touches a</span></span>
+<span class="d-ctx">       <span class="s-com">// handful, and the old always-full rewrite (~47k setFeatureState on the</span></span>
+<span class="d-ctx">       <span class="s-com">// NYC bike map, on EVERY vote and EVERY sourcedata event) was the main</span></span>
+<span class="d-ctx">       <span class="s-com">// &quot;zooming reloads the whole map&quot; cost.</span></span>
+<span class="d-del">-      <span class="s-kw">const</span> full = !prev || prev.denom !== denom;</span>
+<span class="d-add">+      <span class="s-kw">const</span> full = !prev || prev.denomKey !== denomKey;</span>
+<span class="d-ctx">       <span class="s-kw">const</span> next = <span class="s-kw">new</span> <span class="s-type">Map</span>&lt;number, number&gt;();</span>
+<span class="d-ctx">       <span class="s-kw">let</span> writes = <span class="s-num">0</span>;</span>
+<span class="d-ctx">       <span class="s-kw">if</span> (full) {</span>
+<span class="d-del">-        <span class="s-com">// Clear prior states, then set only the blocks that have votes</span></span>
+<span class="d-del">-        <span class="s-com">// (sparse). The wholesale clear drops `selected` too — re-apply after.</span></span>
+<span class="d-add">+        <span class="s-com">// Clear prior states, then set only the blocks with a nonzero</span></span>
+<span class="d-add">+        <span class="s-com">// differential (sparse). The wholesale clear drops `selected` too —</span></span>
+<span class="d-add">+        <span class="s-com">// re-apply after.</span></span>
+<span class="d-ctx">         ml.<span class="s-fn">removeFeatureState</span>({ source: <span class="s-str">&quot;blocks&quot;</span>, sourceLayer: <span class="s-str">&quot;blocks&quot;</span> });</span>
+<span class="d-del">-        <span class="s-kw">for</span> (<span class="s-kw">let</span> id = <span class="s-num">0</span>; id &lt; blockVotes.length; id++) {</span>
+<span class="d-del">-          <span class="s-kw">const</span> v = blockVotes[id];</span>
+<span class="d-del">-          <span class="s-kw">if</span> (v &gt; <span class="s-num">0</span>) {</span>
+<span class="d-del">-            <span class="s-kw">const</span> h = <span class="s-type">Math</span>.<span class="s-fn">log</span>(v + <span class="s-num">1</span>) / denom;</span>
+<span class="d-add">+        <span class="s-kw">for</span> (<span class="s-kw">let</span> id = <span class="s-num">0</span>; id &lt; blockDiff.length; id++) {</span>
+<span class="d-add">+          <span class="s-kw">const</span> v = blockDiff[id];</span>
+<span class="d-add">+          <span class="s-kw">if</span> (v !== <span class="s-num">0</span>) {</span>
+<span class="d-add">+            <span class="s-kw">const</span> h = <span class="s-fn">signedHeat</span>(v);</span>
+<span class="d-ctx">             next.<span class="s-kw">set</span>(id, h);</span>
+<span class="d-ctx">             ml.<span class="s-fn">setFeatureState</span>(<span class="s-fn">featureOf</span>(id), { heat: h });</span>
+<span class="d-ctx">             writes++;</span>
+<span class="d-hunk">@@ -484,10 +514,10 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx">         <span class="s-fn">applySelected</span>();</span>
+<span class="d-ctx">       } <span class="s-kw">else</span> {</span>
+<span class="d-del">-        <span class="s-kw">for</span> (<span class="s-kw">let</span> id = <span class="s-num">0</span>; id &lt; blockVotes.length; id++) {</span>
+<span class="d-del">-          <span class="s-kw">const</span> v = blockVotes[id];</span>
+<span class="d-del">-          <span class="s-kw">if</span> (v &gt; <span class="s-num">0</span>) {</span>
+<span class="d-del">-            <span class="s-kw">const</span> h = <span class="s-type">Math</span>.<span class="s-fn">log</span>(v + <span class="s-num">1</span>) / denom;</span>
+<span class="d-add">+        <span class="s-kw">for</span> (<span class="s-kw">let</span> id = <span class="s-num">0</span>; id &lt; blockDiff.length; id++) {</span>
+<span class="d-add">+          <span class="s-kw">const</span> v = blockDiff[id];</span>
+<span class="d-add">+          <span class="s-kw">if</span> (v !== <span class="s-num">0</span>) {</span>
+<span class="d-add">+            <span class="s-kw">const</span> h = <span class="s-fn">signedHeat</span>(v);</span>
+<span class="d-ctx">             next.<span class="s-kw">set</span>(id, h);</span>
+<span class="d-ctx">             <span class="s-kw">if</span> (prev.heat.<span class="s-kw">get</span>(id) !== h) {</span>
+<span class="d-ctx">               ml.<span class="s-fn">setFeatureState</span>(<span class="s-fn">featureOf</span>(id), { heat: h });</span>
+<span class="d-hunk">@@ -495,7 +525,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">             }</span>
+<span class="d-ctx">           }</span>
+<span class="d-ctx">         }</span>
+<span class="d-del">-        <span class="s-com">// Blocks whose last vote was just undone: cool back to 0.</span></span>
+<span class="d-add">+        <span class="s-com">// Blocks whose differential just returned to zero: cool back to invisible.</span></span>
+<span class="d-ctx">         <span class="s-kw">for</span> (<span class="s-kw">const</span> id <span class="s-kw">of</span> prev.heat.<span class="s-fn">keys</span>()) {</span>
+<span class="d-ctx">           <span class="s-kw">if</span> (!next.<span class="s-fn">has</span>(id)) {</span>
+<span class="d-ctx">             ml.<span class="s-fn">setFeatureState</span>(<span class="s-fn">featureOf</span>(id), { heat: <span class="s-num">0</span> });</span>
+<span class="d-hunk">@@ -510,7 +540,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">         (window <span class="s-kw">as</span> unknown <span class="s-kw">as</span> { __perf?: { mark: (l: string) =&gt; <span class="s-kw">void</span> } }).__perf</span>
+<span class="d-ctx">           ?.<span class="s-fn">mark</span>(<span class="s-str">&quot;first-heat-apply&quot;</span>);</span>
+<span class="d-ctx">       }</span>
+<span class="d-del">-      applied.current = { heat: next, denom };</span>
+<span class="d-add">+      applied.current = { heat: next, denomKey };</span>
+<span class="d-ctx">       <span class="s-fn">dlog</span>(<span class="s-str">&quot;blocks&quot;</span>, <span class="s-str">`heat apply (${full ? &quot;full&quot; : &quot;diff&quot;}): ${writes} writes, ${next.size} lit`</span>);</span>
+<span class="d-ctx">       <span class="s-fn">debugState</span>(<span class="s-str">&quot;blockHeatNonzero&quot;</span>, next.size);</span>
+<span class="d-ctx">     };</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+18</span> / <span class="d-del">-3</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · GraphLayer</span>
+        <span class="ctx-sum">the map brain: topology, votes, selection, proposals, heat broadcast</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~5100 LOC — only the block-heat broadcast changes</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">constants</span><span class="ol-sum">NEG_HEAT_FULL_SCALE = 10 beside HEAT_FULL_SCALE = 50, with the why</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">broadcastBlockVotes</span><span class="ol-sum">now derives signed diffs via topProposalDiffs and ships both arm ceilings</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">everything else</span><span class="ol-sum">topology load, selection, proposals, canvas — untouched</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>NEG_HEAT_FULL_SCALE — negatives get their own dynamic range (organic downs vs bulk-import ups)</li><li>broadcastBlockVotes — {blockDiff, max, maxNeg} event detail replaces {blockVotes, max}</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 0f36ac2..8f53178 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -34,7 +34,7 @@ import {</span>
+<span class="d-ctx">   expandSelectionToUndirected,</span>
+<span class="d-ctx">   <span class="s-kw">type</span> <span class="s-type">RouteProposal</span>,</span>
+<span class="d-ctx"> } <span class="s-kw">from</span> <span class="s-str">&quot;./routeProposals&quot;</span>;</span>
+<span class="d-del">-<span class="s-kw">import</span> { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts } <span class="s-kw">from</span> <span class="s-str">&quot;./voteApply&quot;</span>;</span>
+<span class="d-add">+<span class="s-kw">import</span> { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, topProposalDiffs } <span class="s-kw">from</span> <span class="s-str">&quot;./voteApply&quot;</span>;</span>
+<span class="d-ctx"> <span class="s-kw">import</span> {</span>
+<span class="d-ctx">   <span class="s-type">COORD_SCALE</span>,</span>
+<span class="d-ctx">   <span class="s-kw">type</span> <span class="s-type">GraphTopology</span>,</span>
+<span class="d-hunk">@@ -137,6 +137,14 @@ function arrayMax(arr: ArrayLike&lt;number&gt;): number {</span>
+<span class="d-ctx"> <span class="s-com">// busy map past the floor still uses its own (larger) max for full dynamic range.</span></span>
+<span class="d-ctx"> <span class="s-kw">const</span> <span class="s-type">HEAT_FULL_SCALE</span> = <span class="s-num">50</span>;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+<span class="s-com">// The negative arm&#x27;s own denominator floor. Net-against differentials are far</span></span>
+<span class="d-add">+<span class="s-com">// rarer and smaller than net-for ones (organic downvotes, not bulk imports), so</span></span>
+<span class="d-add">+<span class="s-com">// normalizing them against the positive ceiling would render every net-against</span></span>
+<span class="d-add">+<span class="s-com">// block a barely-visible tint. A tighter floor gives the negative range its own</span></span>
+<span class="d-add">+<span class="s-com">// dynamic range: ~10 net-against is already &quot;overwhelmingly negative&quot; and earns</span></span>
+<span class="d-add">+<span class="s-com">// the full cold color.</span></span>
+<span class="d-add">+<span class="s-kw">const</span> <span class="s-type">NEG_HEAT_FULL_SCALE</span> = <span class="s-num">10</span>;</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> <span class="s-com">// ---------------------------------------------------------------------------</span></span>
+<span class="d-ctx"> <span class="s-com">// Heatmap color stops — flame cross-section</span></span>
+<span class="d-ctx"> <span class="s-com">// ---------------------------------------------------------------------------</span></span>
+<span class="d-hunk">@@ -1974,9 +1982,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     <span class="s-com">// not an Array but is exactly as broadcastable.</span></span>
+<span class="d-ctx">     blocksActiveRef.current = blockVotes != <span class="s-lit">null</span> &amp;&amp; blockVotes.length &gt; <span class="s-num">0</span>;</span>
+<span class="d-ctx">     <span class="s-kw">if</span> (!blocksActiveRef.current) <span class="s-kw">return</span>;</span>
+<span class="d-add">+    <span class="s-com">// Block heat is the SIGNED vote differential (up − down) of the block&#x27;s</span></span>
+<span class="d-add">+    <span class="s-com">// top-ranked proposal — top-ranked BY differential (topProposalDiffs). A</span></span>
+<span class="d-add">+    <span class="s-com">// block whose best proposal is still net-against gets a negative value</span></span>
+<span class="d-add">+    <span class="s-com">// and renders on the cold arm of the ramp.</span></span>
+<span class="d-add">+    <span class="s-kw">const</span> { diff, maxPos, maxNeg } = <span class="s-fn">topProposalDiffs</span>(</span>
+<span class="d-add">+      blockVotes!, voteData.block_vote_types);</span>
+<span class="d-ctx">     <span class="s-kw">const</span> detail: <span class="s-type">BlockVotesDetail</span> = {</span>
+<span class="d-del">-      blockVotes: blockVotes!,</span>
+<span class="d-del">-      max: <span class="s-type">Math</span>.<span class="s-fn">max</span>(<span class="s-type">HEAT_FULL_SCALE</span>, <span class="s-fn">arrayMax</span>(blockVotes!)),</span>
+<span class="d-add">+      blockDiff: diff,</span>
+<span class="d-add">+      max: <span class="s-type">Math</span>.<span class="s-fn">max</span>(<span class="s-type">HEAT_FULL_SCALE</span>, maxPos),</span>
+<span class="d-add">+      maxNeg: <span class="s-type">Math</span>.<span class="s-fn">max</span>(<span class="s-type">NEG_HEAT_FULL_SCALE</span>, maxNeg),</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx">     window.<span class="s-fn">dispatchEvent</span>(<span class="s-kw">new</span> <span class="s-fn">CustomEvent</span>(<span class="s-type">BLOCK_VOTES_EVENT</span>, { detail }));</span>
+<span class="d-ctx">   }, []);</span></pre>
+        </details>
+        
+    </section>
+    
+
+    <section class="card" id="themes">
+      <div class="tag">client · theme ramps</div>
+      <h2>3 · A cold arm for every theme</h2>
+      <h3>Symptom</h3>
+      <p>No theme had negative-arm colors, and the cold end must read as opposition without being confusable with the theme's positive spectrum.</p>
+      <h3>Root cause</h3>
+      <ul><li>Each ramp was authored warm-only (halo/warm/hot/peak + computed incandescent tip).</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>HeatRamp</code> gains <code>cold</code> / <code>coldDeep</code>: bikes freezes steel blue → vivid near-pure blue (an overwhelmingly net-against block reads almost blue); transit and waterfront swing violet/indigo since their positives already climb the cool blues; the light multiply themes (trees, terracotta, plum) tint toward slate/steel blues that darken the paper coolly.</li>
+<li>The legend gradient (<code>heatGradientCss</code> → <code>--heat-gradient</code>) now spans the full spectrum, cold-deep on the left with zero sitting at 25%.</li></ul>
+      <h3>Diffs — files touched (click to expand)</h3>
+        <details>
+          <summary><span class="fname">client-react/src/mapStyles.ts</span>
+            <span class="stat"><span class="d-add">+32</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · theming</span>
+        <span class="ctx-sum">per-style basemap + heat ramp definitions shared by canvas, blocks, pins, legend</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">mapStyles.ts</span>
+        <span class="ctx-sum">~360 LOC — HeatRamp interface + all seven palettes + legend gradient</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">HeatRamp</span><span class="ol-sum">gains cold / coldDeep (the negative arm)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">seven palettes</span><span class="ol-sum">per-theme cold colors chosen against each positive spectrum</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">heatGradientCss</span><span class="ol-sum">legend spans cold-deep → tip, zero at 25%</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">buildHeatRampStops / pin ramps</span><span class="ol-sum">positive-arm samplers — untouched</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>bikes: cold rgb(38,108,205) → coldDeep rgb(70,105,255) — the almost-blue floor</li><li>transit/waterfront swing violet (positives already cool); light themes tint slate/steel blue</li><li>legend gradient with the negative arm on the left quarter</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/mapStyles.ts b/client-react/src/mapStyles.ts</span>
+<span class="d-meta">index d350e4d..966c0ad 100644</span>
+<span class="d-meta">--- a/client-react/src/mapStyles.ts</span>
+<span class="d-meta">+++ b/client-react/src/mapStyles.ts</span>
+<span class="d-hunk">@@ -22,6 +22,10 @@ export interface HeatRamp {</span>
+<span class="d-ctx">   warm: string; <span class="s-com">// dominant mid color</span></span>
+<span class="d-ctx">   hot: string;  <span class="s-com">// core, kicks in past mid intensity</span></span>
+<span class="d-ctx">   peak: string; <span class="s-com">// brightest, only the hottest edges</span></span>
+<span class="d-add">+  <span class="s-com">// The NEGATIVE arm: block heat is the top proposal&#x27;s vote differential</span></span>
+<span class="d-add">+  <span class="s-com">// (up − down), so a net-against block ramps the other way — into cold.</span></span>
+<span class="d-add">+  cold: string;     <span class="s-com">// mildly negative (any net-against differential)</span></span>
+<span class="d-add">+  coldDeep: string; <span class="s-com">// overwhelmingly negative — the &quot;almost blue&quot; floor</span></span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">interface</span> <span class="s-type">MapStyle</span> {</span>
+<span class="d-hunk">@@ -64,11 +68,14 @@ const DARK_WARM: Omit&lt;MapStyle, &quot;id&quot;&gt; = {</span>
+<span class="d-ctx">   tileMaxZoom: <span class="s-num">21</span>,</span>
+<span class="d-ctx">   <span class="s-com">// Hue runs purple → red-orange → amber → gold so intensity reads as a color</span></span>
+<span class="d-ctx">   <span class="s-com">// shift, not just brightness. Peak is gold (not near-white) to keep glow tame.</span></span>
+<span class="d-add">+  <span class="s-com">// Negative arm dives through indigo to icy blue — the opposite temperature.</span></span>
+<span class="d-ctx">   heat: {</span>
+<span class="d-ctx">     halo: <span class="s-str">&quot;rgb(96, 56, 120)&quot;</span>,</span>
+<span class="d-ctx">     warm: <span class="s-str">&quot;rgb(196, 96, 56)&quot;</span>,</span>
+<span class="d-ctx">     hot: <span class="s-str">&quot;rgb(232, 154, 54)&quot;</span>,</span>
+<span class="d-ctx">     peak: <span class="s-str">&quot;rgb(250, 214, 120)&quot;</span>,</span>
+<span class="d-add">+    cold: <span class="s-str">&quot;rgb(74, 84, 190)&quot;</span>,</span>
+<span class="d-add">+    coldDeep: <span class="s-str">&quot;rgb(92, 118, 250)&quot;</span>,</span>
+<span class="d-ctx">   },</span>
+<span class="d-ctx">   heatBlend: <span class="s-str">&quot;screen&quot;</span>,</span>
+<span class="d-ctx">   heatComposite: <span class="s-str">&quot;lighter&quot;</span>,</span>
+<span class="d-hunk">@@ -116,11 +123,15 @@ export const MAP_STYLES: Record&lt;string, MapStyle&gt; = {</span>
+<span class="d-ctx">   <span class="s-com">// green stack toward a hot lime/white core at busy intersections.</span></span>
+<span class="d-ctx">   <span class="s-com">// Hue runs blue-teal → green → yellow-green → gold so hotspots glow warm</span></span>
+<span class="d-ctx">   <span class="s-com">// against a cool low-traffic field.</span></span>
+<span class="d-add">+  <span class="s-com">// Negative arm: the green field freezes — steel blue down to a vivid</span></span>
+<span class="d-add">+  <span class="s-com">// near-pure blue, so an overwhelmingly net-against block reads almost blue.</span></span>
+<span class="d-ctx">   bikepaths: <span class="s-fn">darkStyle</span>(<span class="s-str">&quot;bikepaths&quot;</span>, <span class="s-str">&quot;#2BE06B&quot;</span>, {</span>
+<span class="d-ctx">     halo: <span class="s-str">&quot;rgb(20, 88, 124)&quot;</span>,</span>
+<span class="d-ctx">     warm: <span class="s-str">&quot;rgb(36, 168, 96)&quot;</span>,</span>
+<span class="d-ctx">     hot: <span class="s-str">&quot;rgb(146, 210, 70)&quot;</span>,</span>
+<span class="d-ctx">     peak: <span class="s-str">&quot;rgb(244, 206, 96)&quot;</span>,</span>
+<span class="d-add">+    cold: <span class="s-str">&quot;rgb(38, 108, 205)&quot;</span>,</span>
+<span class="d-add">+    coldDeep: <span class="s-str">&quot;rgb(70, 105, 255)&quot;</span>,</span>
+<span class="d-ctx">   }),</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-com">// Walkways — dark basemap, warm yellow-brown orange.</span></span>
+<span class="d-hunk">@@ -128,30 +139,42 @@ export const MAP_STYLES: Record&lt;string, MapStyle&gt; = {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-com">// Transit &amp; mobility — dark basemap, signal blue that glows like a transit map.</span></span>
+<span class="d-ctx">   <span class="s-com">// Hue runs indigo → blue → cyan → mint so intensity climbs the cool spectrum.</span></span>
+<span class="d-add">+  <span class="s-com">// Positive heat already climbs the cool blues, so the negative arm swings to</span></span>
+<span class="d-add">+  <span class="s-com">// violet/magenta — unmistakably &quot;against&quot;, never confusable with busy-cool.</span></span>
+<span class="d-ctx">   transit: <span class="s-fn">darkStyle</span>(<span class="s-str">&quot;transit&quot;</span>, <span class="s-str">&quot;#3B8EE0&quot;</span>, {</span>
+<span class="d-ctx">     halo: <span class="s-str">&quot;rgb(60, 44, 132)&quot;</span>,</span>
+<span class="d-ctx">     warm: <span class="s-str">&quot;rgb(50, 118, 206)&quot;</span>,</span>
+<span class="d-ctx">     hot: <span class="s-str">&quot;rgb(58, 192, 196)&quot;</span>,</span>
+<span class="d-ctx">     peak: <span class="s-str">&quot;rgb(176, 240, 206)&quot;</span>,</span>
+<span class="d-add">+    cold: <span class="s-str">&quot;rgb(122, 58, 196)&quot;</span>,</span>
+<span class="d-add">+    coldDeep: <span class="s-str">&quot;rgb(178, 74, 235)&quot;</span>,</span>
+<span class="d-ctx">   }),</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-com">// Waterfront &amp; blue infrastructure — dark basemap, harbor teal/cyan.</span></span>
+<span class="d-ctx">   <span class="s-com">// Hue runs deep blue → teal → green → pale yellow so hotspots warm up.</span></span>
+<span class="d-add">+  <span class="s-com">// Teal positives; the negative arm goes indigo → violet (blue alone would</span></span>
+<span class="d-add">+  <span class="s-com">// read as more water).</span></span>
+<span class="d-ctx">   waterfront: <span class="s-fn">darkStyle</span>(<span class="s-str">&quot;waterfront&quot;</span>, <span class="s-str">&quot;#22C9C9&quot;</span>, {</span>
+<span class="d-ctx">     halo: <span class="s-str">&quot;rgb(28, 72, 142)&quot;</span>,</span>
+<span class="d-ctx">     warm: <span class="s-str">&quot;rgb(34, 168, 174)&quot;</span>,</span>
+<span class="d-ctx">     hot: <span class="s-str">&quot;rgb(118, 214, 128)&quot;</span>,</span>
+<span class="d-ctx">     peak: <span class="s-str">&quot;rgb(228, 232, 140)&quot;</span>,</span>
+<span class="d-add">+    cold: <span class="s-str">&quot;rgb(104, 64, 200)&quot;</span>,</span>
+<span class="d-add">+    coldDeep: <span class="s-str">&quot;rgb(158, 80, 240)&quot;</span>,</span>
+<span class="d-ctx">   }),</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-com">// Trees / parks &amp; greening — light basemap, leaf green.</span></span>
+<span class="d-ctx">   <span class="s-com">// Light basemap (multiply): pale chartreuse → green → emerald → deep blue, so</span></span>
+<span class="d-ctx">   <span class="s-com">// intensity both darkens and shifts hue toward blue.</span></span>
+<span class="d-add">+  <span class="s-com">// Multiply basemap: the negative arm tints toward slate → strong blue (a</span></span>
+<span class="d-add">+  <span class="s-com">// multiply blue darkens the paper coolly, the inverse of the leafy warmth).</span></span>
+<span class="d-ctx">   trees: <span class="s-fn">lightStyle</span>(<span class="s-str">&quot;trees&quot;</span>, <span class="s-str">&quot;#5FA052&quot;</span>, {</span>
+<span class="d-ctx">     halo: <span class="s-str">&quot;rgb(206, 222, 152)&quot;</span>,</span>
+<span class="d-ctx">     warm: <span class="s-str">&quot;rgb(122, 182, 84)&quot;</span>,</span>
+<span class="d-ctx">     hot: <span class="s-str">&quot;rgb(44, 138, 98)&quot;</span>,</span>
+<span class="d-ctx">     peak: <span class="s-str">&quot;rgb(22, 74, 112)&quot;</span>,</span>
+<span class="d-add">+    cold: <span class="s-str">&quot;rgb(132, 150, 214)&quot;</span>,</span>
+<span class="d-add">+    coldDeep: <span class="s-str">&quot;rgb(62, 82, 190)&quot;</span>,</span>
+<span class="d-ctx">   }),</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-com">// Streets &amp; public space — light basemap, terracotta (brick / paving).</span></span>
+<span class="d-hunk">@@ -161,15 +184,21 @@ export const MAP_STYLES: Record&lt;string, MapStyle&gt; = {</span>
+<span class="d-ctx">     warm: <span class="s-str">&quot;rgb(208, 138, 90)&quot;</span>,</span>
+<span class="d-ctx">     hot: <span class="s-str">&quot;rgb(176, 72, 70)&quot;</span>,</span>
+<span class="d-ctx">     peak: <span class="s-str">&quot;rgb(92, 32, 82)&quot;</span>,</span>
+<span class="d-add">+    cold: <span class="s-str">&quot;rgb(138, 152, 208)&quot;</span>,</span>
+<span class="d-add">+    coldDeep: <span class="s-str">&quot;rgb(56, 84, 186)&quot;</span>,</span>
+<span class="d-ctx">   }),</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-com">// Culture &amp; community — light basemap, plum/violet.</span></span>
+<span class="d-ctx">   <span class="s-com">// Light basemap (multiply): pale rose → orchid → violet → indigo.</span></span>
+<span class="d-add">+  <span class="s-com">// Violet positives; the negative arm cools to steel/teal-blue so it can&#x27;t be</span></span>
+<span class="d-add">+  <span class="s-com">// mistaken for a deeper violet.</span></span>
+<span class="d-ctx">   plum: <span class="s-fn">lightStyle</span>(<span class="s-str">&quot;plum&quot;</span>, <span class="s-str">&quot;#8E5AA8&quot;</span>, {</span>
+<span class="d-ctx">     halo: <span class="s-str">&quot;rgb(234, 202, 204)&quot;</span>,</span>
+<span class="d-ctx">     warm: <span class="s-str">&quot;rgb(182, 122, 184)&quot;</span>,</span>
+<span class="d-ctx">     hot: <span class="s-str">&quot;rgb(120, 72, 162)&quot;</span>,</span>
+<span class="d-ctx">     peak: <span class="s-str">&quot;rgb(52, 40, 112)&quot;</span>,</span>
+<span class="d-add">+    cold: <span class="s-str">&quot;rgb(118, 158, 202)&quot;</span>,</span>
+<span class="d-add">+    coldDeep: <span class="s-str">&quot;rgb(42, 104, 176)&quot;</span>,</span>
+<span class="d-ctx">   }),</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   <span class="s-com">// Neutral default for user-created maps without a preset style.</span></span>
+<span class="d-hunk">@@ -228,10 +257,11 @@ export function heatTip(heat: HeatRamp, basemap: Basemap): string {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-com">/**</span></span>
+<span class="d-ctx"> <span class="s-com"> * Build the CSS `linear-gradient(...)` for the heatmap legend swatch from a</span></span>
+<span class="d-del">-<span class="s-com"> * style&#x27;s ramp, so the legend always matches the map.</span></span>
+<span class="d-add">+<span class="s-com"> * style&#x27;s ramp, so the legend always matches the map. The left quarter is the</span></span>
+<span class="d-add">+<span class="s-com"> * negative arm (net-against differentials); zero sits at 25%.</span></span>
+<span class="d-ctx"> <span class="s-com"> */</span></span>
+<span class="d-ctx"> <span class="s-kw">export</span> <span class="s-kw">function</span> <span class="s-fn">heatGradientCss</span>(heat: <span class="s-type">HeatRamp</span>, basemap: <span class="s-type">Basemap</span>): string {</span>
+<span class="d-del">-  <span class="s-kw">return</span> <span class="s-str">`linear-gradient(to right, ${heat.halo}, ${heat.warm} 35%, ${heat.hot} 65%, ${heat.peak} 85%, ${heatTip(heat, basemap)})`</span>;</span>
+<span class="d-add">+  <span class="s-kw">return</span> <span class="s-str">`linear-gradient(to right, ${heat.coldDeep}, ${heat.cold} 18%, ${heat.halo} 25%, ${heat.warm} 51%, ${heat.hot} 74%, ${heat.peak} 89%, ${heatTip(heat, basemap)})`</span>;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> <span class="s-com">// A heat ramp expanded to positioned RGB stops, ready for interpolation. The</span></span></pre>
+        </details>
+        
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Live on local nyc-bikes (rich pre-sweep negative state): feature-state holds 24,363 negative-heat + 17,881 positive-heat blocks, range exactly [−1, 1]; flip-countered avenues render blue against warm park/greenway desire-lines (screenshot-verified at two zooms).</li>
+<li>block-heat paint expression confirmed in the live style: −1 → rgb(70,105,255) (coldDeep), −0.001 → rgb(38,108,205) (cold), 0 → warm green, 1 → incandescent tip.</li>
+<li>Early heat paint (pre-topology, from the sparse body) still works: first-heat-paint at 284,281 block slots, then a full apply of 42,244 lit blocks.</li>
+<li>258 client tests pass (5 new for topProposalDiffs: max-differential ranking, negative top, cancelled-to-zero, no-breakdown fallback, Int32Array/holey sparse shapes).</li>
+<li>tsc --noEmit clean.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-bikes</code> — avenues that were counter-flipped locally should read blue; Central Park loops and greenways stay warm green/gold.</li>
+<li>Click a blue block: the modal's top row should be net-against (downs &gt; ups), matching the cold rendering.</li>
+<li>Switch themes on a few maps (transit, trees, terracotta): negative blocks should read violet (transit) or steel blue (light themes) — never confusable with each theme's positive colors.</li>
+<li>Check the legend swatch: the gradient should now start in the cold colors before warming through the theme ramp.</li>
+<li>Cast an up-then-down vote on one block and watch it move warm → invisible → cold live (WS delta path recomputes the differential per apply).</li></ul>
+  </section>
+
+
+
+  <footer>
+    Generated from <code>changelog/changes-counter-lyft.diff</code> by <code>changelog/build_counter_lyft_report.py</code>.
+    Regenerate after further edits with
+    <code>git diff dc81a6c -- osrm/bicycle-flat.lua scripts/build_bike_osrm.sh server/counter_lyft.py server/tests/unit/test_counter_lyft.py server/app.py server/database.py .gcloudignore &gt; changelog/changes-counter-lyft.diff &amp;&amp; python changelog/build_counter_lyft_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
