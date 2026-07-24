@@ -10,8 +10,8 @@ import numpy as np
 
 from graph_registry import encode_topology_bin
 
-NODES = [[40.0, -74.0], [40.1, -74.1], [40.25, -73.9]]
-EDGES = [[0, 1, "a"], [1, 2, "b"]]
+NODES = np.array([[40.0, -74.0], [40.1, -74.1], [40.25, -73.9]], dtype=np.float64)
+EDGES = np.array([[0, 1], [1, 2]], dtype=np.int32)
 
 HEADER = struct.calcsize("<4sIII")  # 16 bytes
 COORDS = len(NODES) * 2 * 4

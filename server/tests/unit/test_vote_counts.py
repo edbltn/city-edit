@@ -56,9 +56,9 @@ def test_build_arrays_reflects_net_and_breakdown(redis_client, tiny_graph):
     votes = v.read_all(redis_client, SLUG)
     arrays = v.build_arrays(
         votes, tiny_graph["edge_count"], tiny_graph["node_count"],
-        tiny_graph["node_adj"], mode_filter=MODE,
+        tiny_graph["edge_ends"], mode_filter=MODE,
     )
-    assert arrays["edge_votes"] == [2, -1]
+    assert (arrays["edge_votes"] == [2, -1]).all()
     # node 1 borders both edges; node total is the max adjacent net (2).
     assert arrays["node_votes"][1] == 2
 

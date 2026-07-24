@@ -30,9 +30,9 @@ def test_replayed_votes_surface_under_the_maps_mode(redis_client):
     _hydrate(redis_client, [(0, 7, v.UP, 3), (2, 7, v.UP, 5), (2, 7, v.DOWN, 1)], mode)
 
     votes = v.read_all(redis_client, SLUG)
-    arrays = v.build_arrays(votes, EDGES, NODES, NODE_ADJ, mode_filter=mode)
+    arrays = v.build_arrays(votes, EDGES, NODES, None, mode_filter=mode)
 
-    assert arrays["edge_votes"] == [3, 0, 4, 0]  # net (up − down)
+    assert (arrays["edge_votes"] == [3, 0, 4, 0]).all()  # net (up − down)
 
 
 def test_reading_under_the_wrong_mode_drops_everything(redis_client):
@@ -43,10 +43,10 @@ def test_reading_under_the_wrong_mode_drops_everything(redis_client):
     _hydrate(redis_client, [(0, 7, v.UP, 3), (2, 7, v.UP, 5)], stored)
 
     votes = v.read_all(redis_client, SLUG)
-    wrong = v.build_arrays(votes, EDGES, NODES, NODE_ADJ,
+    wrong = v.build_arrays(votes, EDGES, NODES, None,
                            mode_filter=v.mode_to_int("walk"))
 
-    assert wrong["edge_votes"] == [0, 0, 0, 0]
+    assert (wrong["edge_votes"] == [0, 0, 0, 0]).all()
 
 
 def test_hydrate_is_idempotent(redis_client):
@@ -58,6 +58,6 @@ def test_hydrate_is_idempotent(redis_client):
     _hydrate(redis_client, rows, mode)  # replay again
 
     votes = v.read_all(redis_client, SLUG)
-    arrays = v.build_arrays(votes, EDGES, NODES, NODE_ADJ, mode_filter=mode)
+    arrays = v.build_arrays(votes, EDGES, NODES, None, mode_filter=mode)
 
-    assert arrays["edge_votes"] == [0, 4, 0, 2]
+    assert (arrays["edge_votes"] == [0, 4, 0, 2]).all()

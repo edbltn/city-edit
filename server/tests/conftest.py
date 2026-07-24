@@ -6,6 +6,7 @@ tests (marked @pytest.mark.integration) need live services and are opt-in.
 import pytest
 
 import fakeredis
+import numpy as np
 
 
 @pytest.fixture
@@ -15,11 +16,11 @@ def redis_client():
 
 
 # A tiny graph fixture: 3 nodes, 2 edges sharing node 1 (mirrors the frontend
-# voteApply test graph). node_adj[n] = edge ids touching node n.
+# voteApply test graph). edge_ends[e] = [node_u, node_v] for edge e.
 @pytest.fixture
 def tiny_graph():
     return {
         "edge_count": 2,
         "node_count": 3,
-        "node_adj": [[0], [0, 1], [1]],
+        "edge_ends": np.array([[0, 1], [1, 2]], dtype=np.int32),
     }
