@@ -169,10 +169,19 @@ so each user counts once:
 - Served from the Redis structures in `server/block_votes.py`
   (`bd:<slug>:<mode>:<block>:<vt>:<dir>` device-multiplicity hashes +
   `bagg:<slug>:<mode>` aggregate; rebuilt from Postgres on cold start / resnap)
-  as `block_votes[]` (total activity = up + down — downvotes read hot too) and `block_vote_types[]`
+  as `block_votes[]` (total deduped activity per block) and `block_vote_types[]`
   (`[legendIdx, up, down]` per block) on `/api/graph-votes`.
-- The **heat display is the block fill** (MapLibre feature-state on the blocks
-  PMTiles); the per-edge canvas heat is the fallback for maps without blocks.
+- **Heat display** is the **signed top-proposal differential** per block: the
+  vote differential (up − down) of the block's best-ranked proposal, ranked by
+  differential across the block's vote types (`client-react/src/components/GraphLayer/voteApply.ts`
+  `topProposalDiffs`). Positive differentials ride the warm ramp (existing hues),
+  negative descend into the theme's cold arm (almost blue at floor), zero is
+  invisible (cancelled signal carries no heat). Per-block differentials are
+  normalized via two-armed log scaling: positives against HEAT_FULL_SCALE (50),
+  negatives against their own tighter floor NEG_HEAT_FULL_SCALE (10), so
+  organic net-against blocks reach genuine cold instead of washing out next to
+  bulk-import positives. Feature-state heat ∈ [−1, 1]. The per-edge canvas heat
+  is the fallback for maps without blocks.
 - The **modal** for any selection sums the *deduped block counts* over the
   selection's blocks (a device present in two blocks of a corridor counts once
   per block).
