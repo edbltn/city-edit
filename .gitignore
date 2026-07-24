@@ -90,3 +90,7 @@ server/streetscape_blocks/eval/*.npz
 exports/
 .blocks-staging/
 .arrays-staging/
+
+# Local scratch artifacts (generated / one-off, never commit)
+terraform/tfplan-donate
+changelog/changes.diff

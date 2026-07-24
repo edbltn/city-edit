@@ -3,7 +3,7 @@
 Build server/data/ebike_stations.json — the fixed set of NYC e-bike charging
 stations used by the "E-bike stations" network (see graph_registry.py).
 
-The 50 stations come from ebikes.png (a Lyft e-bike charging map), transcribed as
+The 50 stations come from screenshots/ebikes.png (a Lyft e-bike charging map), transcribed as
 "<Street A> & <Street B>" intersections. We resolve each to a coordinate by
 finding the graph node where an edge named A meets an edge named B in the NYC walk
 graph — exact, offline, and already on the network we render. Anything the graph
@@ -28,7 +28,7 @@ import requests
 from cities import get_city
 from python_router import PythonRouter
 
-# Intersections transcribed from ebikes.png (Manhattan, the Bronx, Queens, and
+# Intersections transcribed from screenshots/ebikes.png (Manhattan, the Bronx, Queens, and
 # Brooklyn). Order matches the map legend.
 STATIONS = [
     "Wadsworth Ave & W 175th St",
