@@ -29,6 +29,22 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-23-nightly-swarm.html">
+    <div class="date">2026-07-23</div>
+    <h2>Overnight Haiku swarm — 13 nightly tasks, 5 landed, 8 caught by review</h2>
+    <p>First unattended maintenance run: 13 tasks (tests, dead code, docs, one refactor) dispatched to
+    Haiku workers in isolated worktrees, each branch adversarially reviewed by a Sonnet agent, only
+    approved work cherry-picked onto <code>nightly/2026-07-23</code> behind test gates. Landed: the
+    backend unit suite green for the first time on this branch (75/75, was 68 passing / 7 failing —
+    the tests had drifted from the vectorized edge_ends build_arrays signature), +39 client tests for
+    mapStyles/themes (258 → 297), 615 lines of pure helpers extracted from the 5,133-line
+    GraphLayer.tsx into spatialLookup/geometry/topology/geocoding modules, three-layer-model.md
+    updated for differential block heat, and ~600&nbsp;KB of stray root screenshots removed. The
+    other 8 branches were rejected — 9 of 13 worktrees had silently snapshotted a seven-week-old
+    commit, and reviewers caught fabricated test evidence by demanding it reproduce from the
+    committed branch alone (merge-base first, always).</p>
+  </a>
+
   <a class="entry" href="./2026-07-23-differential-block-heat.html">
     <div class="date">2026-07-23</div>
     <h2>Differential block heat — net-against blocks go cold</h2>

@@ -1,0 +1,1811 @@
+diff --git a/.gitignore b/.gitignore
+index 073406b..8a5c4a4 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -90,3 +90,7 @@ server/streetscape_blocks/eval/*.npz
+ exports/
+ .blocks-staging/
+ .arrays-staging/
++
++# Local scratch artifacts (generated / one-off, never commit)
++terraform/tfplan-donate
++changelog/changes.diff
+diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
+index 8f53178..e8fed71 100644
+--- a/client-react/src/components/GraphLayer/GraphLayer.tsx
++++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -72,627 +72,26 @@ import {
+   type VoteDirection,
+ } from "../../utils/voteStore";
+ import { castVotes, voteButtonState } from "../../utils/castVote";
+-import { reverseGeocode } from "../../utils/geocode";
+ import { dlog, dwarn, derror, debugState, debugProbe } from "../../utils/debugLog";
+ import { useVotesVersion } from "../../utils/useVotesVersion";
+ import { getVoterId } from "../../utils/voterIdentity";
+ import { isHoverSuppressed } from "../../utils/touchHover";
+ import { buildSelectionUrl, copyToClipboard } from "../../utils/shareLink";
+ import { CheckIcon } from "../CheckIcon";
+-
+-// ---------------------------------------------------------------------------
+-// Geometry helpers
+-// ---------------------------------------------------------------------------
+-
+-/** Distance from point (px,py) to line segment (ax,ay)-(bx,by), in pixels. */
+-function pointToSegmentDist(
+-  px: number, py: number,
+-  ax: number, ay: number,
+-  bx: number, by: number
+-): number {
+-  const dx = bx - ax;
+-  const dy = by - ay;
+-  const lenSq = dx * dx + dy * dy;
+-  if (lenSq === 0) {
+-    const ex = px - ax;
+-    const ey = py - ay;
+-    return Math.sqrt(ex * ex + ey * ey);
+-  }
+-  let t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+-  t = Math.max(0, Math.min(1, t));
+-  const cx = ax + t * dx - px;
+-  const cy = ay + t * dy - py;
+-  return Math.sqrt(cx * cx + cy * cy);
+-}
+-
+-/** Great-circle distance between two lat/lng points, in meters. */
+-function haversineMeters(
+-  lat1: number, lng1: number, lat2: number, lng2: number
+-): number {
+-  const R = 6371000;
+-  const toRad = Math.PI / 180;
+-  const dLat = (lat2 - lat1) * toRad;
+-  const dLng = (lng2 - lng1) * toRad;
+-  const a =
+-    Math.sin(dLat / 2) ** 2 +
+-    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLng / 2) ** 2;
+-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+-}
+-
+-/** Loop-based max to avoid stack overflow with large arrays. */
+-function arrayMax(arr: ArrayLike<number>): number {
+-  let max = 0;
+-  for (let i = 0; i < arr.length; i++) {
+-    if (arr[i] > max) max = arr[i];
+-  }
+-  return max;
+-}
+-
+-// Floor for the heat normalization denominator. Brightness is
+-// log(votes+1)/log(scale+1); using a map's own max as `scale` makes a quiet map
+-// (small max) blow out — log() pushes its 1–2-vote edges to near-full heat, so
+-// e.g. SF (max ~18) lit up almost every edge while NYC (max ~400) stayed mostly
+-// cool. Flooring the denominator at this many votes means a low-traffic map is
+-// measured against a fixed scale and renders proportionally cooler, while a
+-// busy map past the floor still uses its own (larger) max for full dynamic range.
+-const HEAT_FULL_SCALE = 50;
+-
+-// The negative arm's own denominator floor. Net-against differentials are far
+-// rarer and smaller than net-for ones (organic downvotes, not bulk imports), so
+-// normalizing them against the positive ceiling would render every net-against
+-// block a barely-visible tint. A tighter floor gives the negative range its own
+-// dynamic range: ~10 net-against is already "overwhelmingly negative" and earns
+-// the full cold color.
+-const NEG_HEAT_FULL_SCALE = 10;
+-
+-// ---------------------------------------------------------------------------
+-// Heatmap color stops — flame cross-section
+-// ---------------------------------------------------------------------------
+-// Each pass uses a different color and width so the gradient runs ACROSS the
+-// stroke (halo on the outside, hot core on the inside) rather than ALONG it.
+-// The ramp + blend mode come from the active map style (mapStyles.ts): dark
+-// styles blend additively (`lighter`/`screen`) for Strava-style intersection
+-// brightening; the light style blends via `multiply` so heat darkens the map.
+-
+-// Slightly hold the heatmap back so the top-proposal pins read as the brightest
+-// thing on the map. Applied as canvas element opacity (atop the blend mode), so
+-// it dims the whole heat field — and its faint zero-vote network skeleton —
+-// uniformly without touching per-edge intensity math.
+-const HEATMAP_OPACITY = "0.55";
+-
+-// ---------------------------------------------------------------------------
+-// Reverse-geocode cache (module-level, survives re-renders)
+-// ---------------------------------------------------------------------------
+-
+-const geocodeCache = new Map<string, string | null>();
+-const geocodeInFlight = new Set<string>();
+-
+-function cacheKey(lat: number, lng: number): string {
+-  return `${lat.toFixed(5)},${lng.toFixed(5)}`;
+-}
+-
+-function formatLatLng(lat: number, lng: number): string {
+-  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+-}
+-
+-/**
+- * Return cached address, or a lat-lon placeholder while fetching.
+- * Calls onResolved() when a fetch completes so the caller can re-render.
+- * Does NOT cache failures so they can be retried.
+- */
+-function resolveAddress(
+-  lat: number,
+-  lng: number,
+-  onResolved: () => void,
+-): string {
+-  const key = cacheKey(lat, lng);
+-  const cached = geocodeCache.get(key);
+-  if (cached !== undefined) return cached || formatLatLng(lat, lng);
+-
+-  // Not cached — show placeholder and fire async fetch (reverseGeocode retries
+-  // with backoff internally, so a transient failure resolves without a re-hover)
+-  if (!geocodeInFlight.has(key)) {
+-    geocodeInFlight.add(key);
+-    reverseGeocode(lat, lng)
+-      .then(({ ok, address }) => {
+-        // Cache any SERVER answer — including a null address (no named street,
+-        // every station-network point), which renders as the lat/lng fallback.
+-        // Only failure-after-retries stays uncached so the next hover retries;
+-        // caching by ok-ness (not null-ness) is what stops no-address targets
+-        // from refetching on every render forever.
+-        if (ok) {
+-          geocodeCache.set(key, address ?? "");
+-          onResolved();
+-        }
+-      })
+-      .finally(() => {
+-        geocodeInFlight.delete(key);
+-      });
+-  }
+-  return formatLatLng(lat, lng);
+-}
+-
+-
+-// ---------------------------------------------------------------------------
+-// Constants & hit-testing
+-// ---------------------------------------------------------------------------
+-
+-// Node/edge PARITY: the ends of every segment belong to its endpoint NODES.
+-// The nearest edge decides the hit, then the projection parameter t decides
+-// the final target — t in the outer NODE_END_SHARE of the segment resolves
+-// to that end's node instead. At 0.25 per end, nodes own half of every
+-// edge's catchment area (plus the clamped region beyond the endpoints), so
+-// random clicks split ~50/50 node/edge. This is deliberately the ONLY node
+-// rule — it's scale-invariant, so the split holds at every zoom:
+-//   - A pixel-radius node disc can never achieve parity: distance-to-nearest-
+-//     node is always >= distance-to-nearest-edge (nodes ARE edge endpoints),
+-//     so any "pick the closer" rule degenerates to all-edges.
+-//   - An absolute-priority disc overshoots the moment edges get short on
+-//     screen (park paths at z15 have geometry nodes every 4-16px, so an 8px
+-//     disc paves the whole line with node hits).
+-// Hovering exactly on a junction still yields the node: the nearest edge is
+-// an incident one and t clamps to its node end.
+-const NODE_END_SHARE = 0.25;
+-// While a feature is pinned, a re-click within this screen distance of it keeps
+-// the SAME selection rather than re-resolving to a neighbour/endpoint. Stops the
+-// open card — which occludes its own icon — from drifting as you click near it.
+-const STICKY_RESELECT_PX = 44;
+-
+-// Highlight ring dimensions — matched to the desire path SVG filter so hover
+-// and pinned highlights look identical to the selected path:
+-//   - Edge ring: 7px wide stroke with a 4px hole = 1.5px white border each side
+-//   - Node ring: 5px outer radius with 3.5px hole = 1.5px white border
+-//   - Interior alpha: 0.12 (matches feColorMatrix in RouteLayer)
+-const HIGHLIGHT_RING_WIDTH = 7;
+-const HIGHLIGHT_INNER_WIDTH = 4;
+-const HIGHLIGHT_NODE_OUTER_R = 5;
+-const HIGHLIGHT_NODE_INNER_R = 3.5;
+-const HIGHLIGHT_INTERIOR_ALPHA = 0.12;
+-
+-// Hover target type
+-interface HoverEdge { kind: "edge"; index: number }
+-interface HoverNode { kind: "node"; index: number }
+-type HoverTarget = HoverEdge | HoverNode;
+-
+-// The single resolved selection shared by hover, click/pin, the point-vote
+-// handler, and top-proposal indicators. `voteEdgeId` is the edge a vote lands
+-// on (an edge target votes on itself; a node votes on its first adjacent edge),
+-// so the highlighted component always matches the vote target.
+-interface ResolvedSelection {
+-  target: HoverTarget;
+-  snapLat: number;
+-  snapLng: number;
+-  voteEdgeId: number | null;
+-}
+-
+-interface HitResult {
+-  target: HoverTarget;
+-  snapLat: number;
+-  snapLng: number;
+-}
+-
+-// A vote-type breakdown row shown in tooltips/modals.
+-interface VoteTypeRow {
+-  label: string;
+-  up: number;
+-  down: number;
+-}
+-
+-/** Decode a [legendIdx, up, down][] breakdown into labelled rows. */
+-function decodeVoteTypes(
+-  pairs: [number, number, number][] | undefined,
+-  legend: string[]
+-): VoteTypeRow[] {
+-  if (!pairs) return [];
+-  return pairs
+-    .map(([idx, up, down]) => ({ label: legend[idx], up: up ?? 0, down: down ?? 0 }))
+-    .filter((v) => v.label);
+-}
+-
+-// Cap on how many top-proposal indicators show on the map. Each surviving
+-// EDGE consumes one slot (winners are deduped per edge first), so the 20 most
+-// net-voted segments survive — drawn from the top few edges per vote type.
+-const TOP_PROPOSAL_LIMIT = 20;
+-
+-// "Spread to grid" interaction for crowded indicators. When a top-proposal
+-// icon is clicked and other icons sit within CLUSTER_RADIUS_PX of it on screen,
+-// the first click is swallowed: instead of selecting, the cluster fans out into
+-// a grid so each icon becomes individually clickable, then snaps back after
+-// SPREAD_DURATION_MS.
+-const CLUSTER_RADIUS_PX = 26; // screen distance that counts as "clustered"
+-const SPREAD_CELL_PX = 38;    // grid cell pitch when fanned out
+-const SPREAD_DURATION_MS = 2200;
+-const SPREAD_ANIM_MS = 280;   // keep in sync with the CSS transition
+-
+-// Top-proposal recomputation is BATCHED off the vote path: a cast/delta only
+-// marks the lists dirty and repaints the heatmap; this sweep recomputes both
+-// proposal families (PBTP scan + RBTP clustering) in idle time on a minute
+-// cadence. On the 3.3M-edge NYC bike graph the recompute is far too heavy to
+-// run per vote — it froze the app for seconds on every cast.
+-const PROPOSALS_REFRESH_INTERVAL_MS = 60_000;
+-
+-// requestIdleCallback with a setTimeout fallback (Safari) — schedules the next
+-// slice of the route-proposal job so heavy vote types never monopolize a frame.
+-function scheduleIdleSlice(cb: (deadline?: IdleDeadline) => void): void {
+-  if (typeof requestIdleCallback === "function") requestIdleCallback(cb, { timeout: 1000 });
+-  else window.setTimeout(() => cb(), 50);
+-}
+-
+-// Movement (px²) before a press on an exploded proposal becomes a mid-drag rather
+-// than a tap (which selects). Mirrors the path-drag's tap-vs-drag intent.
+-const MID_DRAG_THRESHOLD_SQ = 16; // (4px)²
+-// Dotted rubber-band for the mid being dragged out of a proposal — matches the
+-// path-drag and waypoint-drag trails (usePathDrag / RouteMarker).
+-const MID_DRAG_TRAIL_STYLE: L.PolylineOptions = {
+-  color: "#999999",
+-  weight: 2,
+-  opacity: 0.6,
+-  dashArray: "1, 4",
+-  lineCap: "round",
+-};
+-
+-// Number of bbox-nearest candidates to retrieve from the spatial index.
+-// 20 is enough for Manhattan-scale edges (~200m max length); the closest
+-// segment is always among the top few bbox-nearest in practice.
+-const INDEX_NEIGHBOR_K = 20;
+-
+-// Cap on how many block edges the modal-open /my-votes reconcile requests. A
+-// merged foot-component block can hold thousands of edges — the URL (and the
+-// server scan) must stay bounded; coverage of a huge block degrades gracefully.
+-const MY_VOTES_EDGE_CAP = 500;
+-
+-// Cap + debounce for the route card's /api/route-votes fetch (distinct-voter
+-// rows). POSTed as JSON so it can carry far more edge ids than a URL, but still
+-// bounded; the debounce coalesces vote bursts into one refetch.
+-const ROUTE_VOTES_EDGE_CAP = 4000;
+-const ROUTE_VOTES_DEBOUNCE_MS = 350;
+-
+-// Index builds yield to the main thread between batches so the multi-second
+-// NYC build doesn't jank the tile/heat animations happening at exactly this
+-// moment of the load. Until an index exists, hitTest simply returns no result
+-// (hover lights up ~a second later) — no brute-force fallback, which would
+-// scan the full 650k-edge array per mousemove.
+-const INDEX_YIELD_BATCH = 120_000;
+-const yieldToMain = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+-
+-/** Build a flatbush spatial index of node points. Done once per graph. */
+-async function buildNodeIndex(data: GraphTopology): Promise<Flatbush | null> {
+-  const n = data.nNodes;
+-  if (n === 0) return null;
+-  const c = data.coords;
+-  const idx = new Flatbush(n);
+-  for (let i = 0; i < n; i++) {
+-    if (i > 0 && i % INDEX_YIELD_BATCH === 0) await yieldToMain();
+-    const lat = c[2 * i] / COORD_SCALE;
+-    const lng = c[2 * i + 1] / COORD_SCALE;
+-    // Point bbox: min == max (lng,lat ordering matches the edge index)
+-    idx.add(lng, lat, lng, lat);
+-  }
+-  idx.finish();
+-  return idx;
+-}
+-
+-/** Build a flatbush spatial index of edge bounding boxes. Done once per graph. */
+-async function buildEdgeIndex(data: GraphTopology): Promise<Flatbush | null> {
+-  const n = data.nEdges;
+-  if (n === 0) return null;
+-  const c = data.coords;
+-  const e = data.ends;
+-  const nNodes = data.nNodes;
+-  const idx = new Flatbush(n);
+-  for (let i = 0; i < n; i++) {
+-    if (i > 0 && i % INDEX_YIELD_BATCH === 0) await yieldToMain();
+-    const fromIdx = e[2 * i];
+-    const toIdx = e[2 * i + 1];
+-    // A malformed/stale topology can reference a node index that doesn't exist.
+-    // Index a degenerate (0,0) box for it instead of reading out of bounds —
+-    // Flatbush requires exactly nEdges adds, so we can't skip the entry.
+-    if (fromIdx >= nNodes || toIdx >= nNodes) {
+-      idx.add(0, 0, 0, 0);
+-      continue;
+-    }
+-    const fLat = c[2 * fromIdx] / COORD_SCALE, fLng = c[2 * fromIdx + 1] / COORD_SCALE;
+-    const tLat = c[2 * toIdx] / COORD_SCALE, tLng = c[2 * toIdx + 1] / COORD_SCALE;
+-    idx.add(
+-      Math.min(fLng, tLng), Math.min(fLat, tLat),
+-      Math.max(fLng, tLng), Math.max(fLat, tLat),
+-    );
+-  }
+-  idx.finish();
+-  return idx;
+-}
+-
+-/**
+- * Unified hit-test: resolve (px,py) to a node or edge with node/edge PARITY.
+- *
+- * Hierarchy:
+- *   1. The nearest edge within `maxEdgeDistPx` decides — but its ends belong
+- *      to its endpoint nodes: a projection parameter t in the outer
+- *      NODE_END_SHARE of the segment resolves to that end's node instead of
+- *      the edge (see the constant's comment for why this is the ONLY node
+- *      rule). Degenerate self-edges (e-bike stations) are never split —
+- *      they stay edge targets.
+- *   2. maxEdgeDistPx === Infinity (always-resolve callers) with no eligible
+- *      edge: the nearest eligible node, uncapped — a block whose only
+- *      member is a node is still selectable from anywhere in its polygon.
+- *
+- * Every live caller resolves through resolveSelection, which passes Infinity
+- * so a selection ALWAYS resolves; maxEdgeDistPx remains a parameter for
+- * radius-bounded callers.
+- *
+- * With spatial indices each scan touches only the top-k bbox-nearest
+- * candidates (typically <30 per call) instead of all nodes/edges. Path-drag
+- * fires this on every mousemove via the snap closure, so this is the hot path.
+- */
+-function hitTest(
+-  data: GraphData,
+-  map: L.Map,
+-  px: number, py: number,
+-  lat: number, lng: number,
+-  edgeIndex: Flatbush | null,
+-  nodeIndex: Flatbush | null,
+-  allowEdge?: (i: number) => boolean,
+-  allowNode?: (i: number) => boolean,
+-  maxEdgeDistPx: number = Infinity
+-): HitResult | null {
+-  const nodeResult = (i: number): HitResult => ({
+-    target: { kind: "node", index: i },
+-    snapLat: nodeLat(data, i), snapLng: nodeLon(data, i),
+-  });
+-
+-  // 1. Nearest edge within maxEdgeDistPx.
+-  let bestEdge: number | null = null;
+-  let bestEdgeDist = maxEdgeDistPx;
+-
+-  const checkEdge = (i: number) => {
+-    const fromIdx = edgeFrom(data, i), toIdx = edgeTo(data, i);
+-    const fromPt = map.latLngToContainerPoint([nodeLat(data, fromIdx), nodeLon(data, fromIdx)]);
+-    const toPt = map.latLngToContainerPoint([nodeLat(data, toIdx), nodeLon(data, toIdx)]);
+-    const dist = pointToSegmentDist(px, py, fromPt.x, fromPt.y, toPt.x, toPt.y);
+-    if (dist < bestEdgeDist) {
+-      bestEdgeDist = dist;
+-      bestEdge = i;
+-    }
+-  };
+-
+-  if (edgeIndex) {
+-    // flatbush applies the filter BEFORE counting results, so a constrained
+-    // query still returns up to K matching candidates however sparse they are.
+-    const candidates = edgeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K, Infinity, allowEdge);
+-    for (const i of candidates) checkEdge(i);
+-  }
+-  // No else: while the index is still building (async, yielding) edges simply
+-  // don't hit — brute-forcing all edges per mousemove froze the NYC map.
+-
+-  if (bestEdge !== null) {
+-    // Parity split: t in the outer NODE_END_SHARE hands the hit to that
+-    // end's node. t is computed in PIXEL space (the same space the distance
+-    // ranking uses) — lat/lng space is anisotropic at NYC latitudes.
+-    const fromIdx = edgeFrom(data, bestEdge), toIdx = edgeTo(data, bestEdge);
+-    const fromPt = map.latLngToContainerPoint([nodeLat(data, fromIdx), nodeLon(data, fromIdx)]);
+-    const toPt = map.latLngToContainerPoint([nodeLat(data, toIdx), nodeLon(data, toIdx)]);
+-    const dx = toPt.x - fromPt.x, dy = toPt.y - fromPt.y;
+-    const lenSq = dx * dx + dy * dy;
+-    if (lenSq > 0) {
+-      const t = Math.max(0, Math.min(1,
+-        ((px - fromPt.x) * dx + (py - fromPt.y) * dy) / lenSq
+-      ));
+-      if (t < NODE_END_SHARE || t > 1 - NODE_END_SHARE) {
+-        const nid = t < 0.5 ? fromIdx : toIdx;
+-        if (!allowNode || allowNode(nid)) return nodeResult(nid);
+-      }
+-    }
+-    const { lat: snapLat, lng: snapLng } = projectOntoEdge(data, bestEdge, lat, lng);
+-    return { target: { kind: "edge", index: bestEdge }, snapLat, snapLng };
+-  }
+-
+-  // 2. Always-resolve mode with no eligible edge (a capture-only node cell):
+-  // the nearest eligible node, uncapped. Node scan only runs on this cold
+-  // path — the hot path above never touches the node index.
+-  if (maxEdgeDistPx === Infinity) {
+-    let bestNode: number | null = null;
+-    let bestNodeDist = Infinity;
+-    const checkNode = (i: number) => {
+-      const pt = map.latLngToContainerPoint([nodeLat(data, i), nodeLon(data, i)]);
+-      const dist = (px - pt.x) ** 2 + (py - pt.y) ** 2;
+-      if (dist < bestNodeDist) {
+-        bestNodeDist = dist;
+-        bestNode = i;
+-      }
+-    };
+-    if (nodeIndex) {
+-      const candidates = nodeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K, Infinity, allowNode);
+-      for (const i of candidates) checkNode(i);
+-    }
+-    // No else — same index-only rule as edges above.
+-    if (bestNode !== null) return nodeResult(bestNode);
+-  }
+-
+-  return null;
+-}
+-
+-/**
+- * The block-constraint filters for a point: which block polygon is under it,
+- * and the edge/node eligibility predicates for that block. ONE construction
+- * shared by hover/selection (resolveSelection) AND the waypoint snap — the
+- * two must agree or a click selects something different from what hover
+- * showed. Null when no block is under the point (or MapLibre isn't ready).
+- */
+-function blockFiltersAt(
+-  data: GraphData,
+-  adj: NodeAdj | null,
+-  lat: number,
+-  lng: number,
+-): { blockId: number; edgeInBlock: (i: number) => boolean; nodeInBlock: (n: number) => boolean } | null {
+-  const ebi = data.edgeBlockId;
+-  if (!ebi) return null;
+-  const blockId = blockIdAtLatLng(lat, lng);
+-  if (blockId == null) return null;
+-  return {
+-    blockId,
+-    edgeInBlock: (i: number) => ebi[i] === blockId,
+-    // A node belongs to the hovered block if an adjacent edge is a member OR
+-    // the node physically sits inside the block's polygon. The geometric arm
+-    // is what makes the junction node at the CENTER of a circular cell
+-    // hoverable — its incident roadway edges can all belong to neighbouring
+-    // street blocks, so adjacency alone rejected the very node under the
+-    // cursor. (Short-circuited: the MapLibre point query only runs for nodes
+-    // that fail adjacency, i.e. near junction cells.)
+-    nodeInBlock: (n: number) => {
+-      if (adj) {
+-        for (let k = adj.start[n]; k < adj.start[n + 1]; k++) {
+-          if (ebi[adj.edges[k]] === blockId) return true;
+-        }
+-      }
+-      return blockIdAtLatLng(nodeLat(data, n), nodeLon(data, n)) === blockId;
+-    },
+-  };
+-}
+-
+-/**
+- * The shortest edge adjacent to `nid` that belongs to `blockId` — the
+- * block-constrained twin of graphTopology.adjShortest, so a node picked under
+- * a hovered block votes/highlights within THAT block, not a neighbour the
+- * unconstrained shortest-edge rule might prefer. Falls back to the
+- * unconstrained pick when no adjacent edge is in the block.
+- */
+-function adjShortestInBlock(
+-  data: GraphData,
+-  adj: NodeAdj | null,
+-  nid: number,
+-  blockId: number,
+-): number | null {
+-  if (!adj || !data.edgeBlockId) return adjShortest(data, adj, nid);
+-  const cosLat = Math.cos(nodeLat(data, nid) * (Math.PI / 180));
+-  let best = -1;
+-  let bestD2 = Infinity;
+-  for (let k = adj.start[nid]; k < adj.start[nid + 1]; k++) {
+-    const eid = adj.edges[k];
+-    if (data.edgeBlockId[eid] !== blockId) continue;
+-    const a = edgeFrom(data, eid), b = edgeTo(data, eid);
+-    const dLat = nodeLat(data, a) - nodeLat(data, b);
+-    const dLon = (nodeLon(data, a) - nodeLon(data, b)) * cosLat;
+-    const d2 = dLat * dLat + dLon * dLon;
+-    if (d2 < bestD2) {
+-      bestD2 = d2;
+-      best = eid;
+-    }
+-  }
+-  return best >= 0 ? best : adjShortest(data, adj, nid);
+-}
+-
+-/**
+- * Project (lat,lng) onto edge `edgeIdx`, returning the closest point on the
+- * segment (clamped to the endpoints). Shared by hitTest and the nearest-edge
+- * fallback so both produce a real snap position.
+- */
+-function projectOntoEdge(
+-  data: GraphTopology,
+-  edgeIdx: number,
+-  lat: number, lng: number
+-): { lat: number; lng: number } {
+-  const fromIdx = edgeFrom(data, edgeIdx), toIdx = edgeTo(data, edgeIdx);
+-  const fLat = nodeLat(data, fromIdx), fLng = nodeLon(data, fromIdx);
+-  const tLat = nodeLat(data, toIdx), tLng = nodeLon(data, toIdx);
+-  const dx = tLng - fLng;
+-  const dy = tLat - fLat;
+-  const lenSq = dx * dx + dy * dy;
+-  if (lenSq === 0) return { lat: fLat, lng: fLng };
+-  const t = Math.max(0, Math.min(1,
+-    ((lng - fLng) * dx + (lat - fLat) * dy) / lenSq
+-  ));
+-  return { lat: fLat + t * dy, lng: fLng + t * dx };
+-}
+-
+-/**
+- * The representative on-graph coordinate for a resolved target: an edge's
+- * midpoint (where its indicator icon sits) or a node's position. This is the
+- * ONE place that maps a target to a point — the pinned modal uses it as both
+- * its anchor AND its React key, so the card tracks the selected FEATURE and is
+- * never positioned by the raw click coordinates.
+- */
+-function targetLatLng(
+-  target: HoverTarget | null,
+-  data: GraphTopology | null
+-): { lat: number; lng: number } | null {
+-  if (!target || !data) return null;
+-  if (target.kind === "edge") {
+-    if (target.index >= data.nEdges) return null;
+-    const from = edgeFrom(data, target.index), to = edgeTo(data, target.index);
+-    if (from >= data.nNodes || to >= data.nNodes) return null;
+-    return {
+-      lat: (nodeLat(data, from) + nodeLat(data, to)) / 2,
+-      lng: (nodeLon(data, from) + nodeLon(data, to)) / 2,
+-    };
+-  }
+-  if (target.index >= data.nNodes) return null;
+-  return { lat: nodeLat(data, target.index), lng: nodeLon(data, target.index) };
+-}
+-
+-/**
+- * Display anchor for an RBTP diamond: its middle path edge's midpoint, else the
+- * mean of its two anchors. ONE definition shared by the marker render, the
+- * cluster fan-out, and the drop hit-test so they can never disagree on where a
+- * diamond "is".
+- */
+-function rbtpDisplayPos(topo: GraphTopology, p: RouteProposal): [number, number] {
+-  const midEdge = p.edgeIds[Math.floor(p.edgeIds.length / 2)];
+-  if (midEdge != null && midEdge < topo.nEdges) {
+-    const from = edgeFrom(topo, midEdge), to = edgeTo(topo, midEdge);
+-    if (from < topo.nNodes && to < topo.nNodes) {
+-      return [
+-        (nodeLat(topo, from) + nodeLat(topo, to)) / 2,
+-        (nodeLon(topo, from) + nodeLon(topo, to)) / 2,
+-      ];
+-    }
+-  }
+-  return [
+-    (p.anchorCoords[0].lat + p.anchorCoords[1].lat) / 2,
+-    (p.anchorCoords[0].lng + p.anchorCoords[1].lng) / 2,
+-  ];
+-}
+-
+-// Spread-map keys — the fanned-out grid mixes POINT proposals (edge-keyed
+-// squares) and ROUTE proposals (id-keyed diamonds), so keys carry the kind.
+-const spreadKeyEdge = (edgeIdx: number) => `e${edgeIdx}`;
+-const spreadKeyRoute = (id: string) => `r${id}`;
+-
+-// ---------------------------------------------------------------------------
+-// Tooltip content helper (shared by hover and pinned tooltips)
+-// ---------------------------------------------------------------------------
+-
+-// ---------------------------------------------------------------------------
+-// Node adjacency builder — used to derive node votes from edges
+-// ---------------------------------------------------------------------------
+-
+-// The binary topology decoder (GTB1 + GTB2) lives in graphTopology.ts
+-// (decodeTopologyBin) — shared with the pure route-proposal/block logic.
+-
+-/**
+- * True when a vote payload is indexed against the SAME topology we hold. Vote
+- * arrays are sized to the server's current graph; the server stamps n_edges /
+- * n_nodes onto the payload so the client can reject votes that don't line up
+- * with its (possibly day-old cached) topology — painting a mismatch is what
+- * indexed past the array ends and crashed mobile Safari. Falls back to the
+- * edge_votes length when the dimensions aren't present (older server).
+- */
+-function votesMatchTopology(
+-  voteData: { n_edges?: number; n_nodes?: number; n_blocks?: number;
+-    edge_votes?: ArrayLike<unknown>; block_votes?: ArrayLike<unknown> },
+-  topology: GraphTopology | null,
+-): boolean {
+-  if (!topology) return false;
+-  const nEdges = voteData.n_edges ?? voteData.edge_votes?.length;
+-  if (nEdges != null && nEdges !== topology.nEdges) return false;
+-  if (voteData.n_nodes != null && voteData.n_nodes !== topology.nNodes) return false;
+-  // Block ids renumber on every blocks re-bake (SAME topology etag), so a body
+-  // built against a different block set colors the wrong polygons.
+-  const nBlocks = voteData.n_blocks ?? voteData.block_votes?.length;
+-  if (nBlocks != null && topology.nBlocks != null && nBlocks !== topology.nBlocks) {
+-    return false;
+-  }
+-  return true;
+-}
++import { arrayMax, haversineMeters, HEAT_FULL_SCALE, NEG_HEAT_FULL_SCALE, HEATMAP_OPACITY } from "./geometryHelpers";
++import { resolveAddress } from "./geocodingHelpers";
++import {
++  STICKY_RESELECT_PX, HIGHLIGHT_RING_WIDTH, HIGHLIGHT_INNER_WIDTH,
++  HIGHLIGHT_NODE_OUTER_R, HIGHLIGHT_NODE_INNER_R, HIGHLIGHT_INTERIOR_ALPHA,
++  type HoverTarget, type ResolvedSelection, type VoteTypeRow,
++  decodeVoteTypes, TOP_PROPOSAL_LIMIT, CLUSTER_RADIUS_PX, SPREAD_CELL_PX,
++  SPREAD_DURATION_MS, SPREAD_ANIM_MS, PROPOSALS_REFRESH_INTERVAL_MS,
++  scheduleIdleSlice, MID_DRAG_THRESHOLD_SQ, MID_DRAG_TRAIL_STYLE,
++  MY_VOTES_EDGE_CAP, ROUTE_VOTES_EDGE_CAP, ROUTE_VOTES_DEBOUNCE_MS,
++  buildNodeIndex, buildEdgeIndex,
++  hitTest, blockFiltersAt, adjShortestInBlock, projectOntoEdge,
++} from "./spatialLookup";
++import { targetLatLng, rbtpDisplayPos, spreadKeyEdge, spreadKeyRoute, votesMatchTopology } from "./topologyHelpers";
+ 
+ // ---------------------------------------------------------------------------
+ // Top-proposal indicator marker
+diff --git a/client-react/src/components/GraphLayer/geocodingHelpers.ts b/client-react/src/components/GraphLayer/geocodingHelpers.ts
+new file mode 100644
+index 0000000..64b0519
+--- /dev/null
++++ b/client-react/src/components/GraphLayer/geocodingHelpers.ts
+@@ -0,0 +1,53 @@
++import { reverseGeocode } from "../../utils/geocode";
++
++// ---------------------------------------------------------------------------
++// Reverse-geocode cache (module-level, survives re-renders)
++// ---------------------------------------------------------------------------
++
++export const geocodeCache = new Map<string, string | null>();
++export const geocodeInFlight = new Set<string>();
++
++function cacheKey(lat: number, lng: number): string {
++  return `${lat.toFixed(5)},${lng.toFixed(5)}`;
++}
++
++function formatLatLng(lat: number, lng: number): string {
++  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
++}
++
++/**
++ * Return cached address, or a lat-lon placeholder while fetching.
++ * Calls onResolved() when a fetch completes so the caller can re-render.
++ * Does NOT cache failures so they can be retried.
++ */
++export function resolveAddress(
++  lat: number,
++  lng: number,
++  onResolved: () => void,
++): string {
++  const key = cacheKey(lat, lng);
++  const cached = geocodeCache.get(key);
++  if (cached !== undefined) return cached || formatLatLng(lat, lng);
++
++  // Not cached — show placeholder and fire async fetch (reverseGeocode retries
++  // with backoff internally, so a transient failure resolves without a re-hover)
++  if (!geocodeInFlight.has(key)) {
++    geocodeInFlight.add(key);
++    reverseGeocode(lat, lng)
++      .then(({ ok, address }) => {
++        // Cache any SERVER answer — including a null address (no named street,
++        // every station-network point), which renders as the lat/lng fallback.
++        // Only failure-after-retries stays uncached so the next hover retries;
++        // caching by ok-ness (not null-ness) is what stops no-address targets
++        // from refetching on every render forever.
++        if (ok) {
++          geocodeCache.set(key, address ?? "");
++          onResolved();
++        }
++      })
++      .finally(() => {
++        geocodeInFlight.delete(key);
++      });
++  }
++  return formatLatLng(lat, lng);
++}
+diff --git a/client-react/src/components/GraphLayer/geometryHelpers.ts b/client-react/src/components/GraphLayer/geometryHelpers.ts
+new file mode 100644
+index 0000000..c3a315b
+--- /dev/null
++++ b/client-react/src/components/GraphLayer/geometryHelpers.ts
+@@ -0,0 +1,79 @@
++// ---------------------------------------------------------------------------
++// Geometry helpers
++// ---------------------------------------------------------------------------
++
++/** Distance from point (px,py) to line segment (ax,ay)-(bx,by), in pixels. */
++export function pointToSegmentDist(
++  px: number, py: number,
++  ax: number, ay: number,
++  bx: number, by: number
++): number {
++  const dx = bx - ax;
++  const dy = by - ay;
++  const lenSq = dx * dx + dy * dy;
++  if (lenSq === 0) {
++    const ex = px - ax;
++    const ey = py - ay;
++    return Math.sqrt(ex * ex + ey * ey);
++  }
++  let t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
++  t = Math.max(0, Math.min(1, t));
++  const cx = ax + t * dx - px;
++  const cy = ay + t * dy - py;
++  return Math.sqrt(cx * cx + cy * cy);
++}
++
++/** Great-circle distance between two lat/lng points, in meters. */
++export function haversineMeters(
++  lat1: number, lng1: number, lat2: number, lng2: number
++): number {
++  const R = 6371000;
++  const toRad = Math.PI / 180;
++  const dLat = (lat2 - lat1) * toRad;
++  const dLng = (lng2 - lng1) * toRad;
++  const a =
++    Math.sin(dLat / 2) ** 2 +
++    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLng / 2) ** 2;
++  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
++}
++
++/** Loop-based max to avoid stack overflow with large arrays. */
++export function arrayMax(arr: ArrayLike<number>): number {
++  let max = 0;
++  for (let i = 0; i < arr.length; i++) {
++    if (arr[i] > max) max = arr[i];
++  }
++  return max;
++}
++
++// Floor for the heat normalization denominator. Brightness is
++// log(votes+1)/log(scale+1); using a map's own max as `scale` makes a quiet map
++// (small max) blow out — log() pushes its 1–2-vote edges to near-full heat, so
++// e.g. SF (max ~18) lit up almost every edge while NYC (max ~400) stayed mostly
++// cool. Flooring the denominator at this many votes means a low-traffic map is
++// measured against a fixed scale and renders proportionally cooler, while a
++// busy map past the floor still uses its own (larger) max for full dynamic range.
++export const HEAT_FULL_SCALE = 50;
++
++// The negative arm's own denominator floor. Net-against differentials are far
++// rarer and smaller than net-for ones (organic downvotes, not bulk imports), so
++// normalizing them against the positive ceiling would render every net-against
++// block a barely-visible tint. A tighter floor gives the negative range its own
++// dynamic range: ~10 net-against is already "overwhelmingly negative" and earns
++// the full cold color.
++export const NEG_HEAT_FULL_SCALE = 10;
++
++// ---------------------------------------------------------------------------
++// Heatmap color stops — flame cross-section
++// ---------------------------------------------------------------------------
++// Each pass uses a different color and width so the gradient runs ACROSS the
++// stroke (halo on the outside, hot core on the inside) rather than ALONG it.
++// The ramp + blend mode come from the active map style (mapStyles.ts): dark
++// styles blend additively (`lighter`/`screen`) for Strava-style intersection
++// brightening; the light style blends via `multiply` so heat darkens the map.
++
++// Slightly hold the heatmap back so the top-proposal pins read as the brightest
++// thing on the map. Applied as canvas element opacity (atop the blend mode), so
++// it dims the whole heat field — and its faint zero-vote network skeleton —
++// uniformly without touching per-edge intensity math.
++export const HEATMAP_OPACITY = "0.55";
+diff --git a/client-react/src/components/GraphLayer/spatialLookup.ts b/client-react/src/components/GraphLayer/spatialLookup.ts
+new file mode 100644
+index 0000000..111667c
+--- /dev/null
++++ b/client-react/src/components/GraphLayer/spatialLookup.ts
+@@ -0,0 +1,406 @@
++import L from "leaflet";
++import Flatbush from "flatbush";
++import { pointToSegmentDist } from "./geometryHelpers";
++import type { GraphData } from "../../types";
++import type { GraphTopology } from "./graphTopology";
++import {
++  COORD_SCALE,
++  type NodeAdj,
++  nodeLat,
++  nodeLon,
++  edgeFrom,
++  edgeTo,
++  adjShortest,
++} from "./graphTopology";
++import { blockIdAtLatLng } from "../MapLibreBackground/MapLibreBackground";
++
++// ---------------------------------------------------------------------------
++// Constants & hit-testing
++// ---------------------------------------------------------------------------
++
++// Node/edge PARITY: the ends of every segment belong to its endpoint NODES.
++// The nearest edge decides the hit, then the projection parameter t decides
++// the final target — t in the outer NODE_END_SHARE of the segment resolves
++// to that end's node instead. At 0.25 per end, nodes own half of every
++// edge's catchment area (plus the clamped region beyond the endpoints), so
++// random clicks split ~50/50 node/edge. This is deliberately the ONLY node
++// rule — it's scale-invariant, so the split holds at every zoom:
++//   - A pixel-radius node disc can never achieve parity: distance-to-nearest-
++//     node is always >= distance-to-nearest-edge (nodes ARE edge endpoints),
++//     so any "pick the closer" rule degenerates to all-edges.
++//   - An absolute-priority disc overshoots the moment edges get short on
++//     screen (park paths at z15 have geometry nodes every 4-16px, so an 8px
++//     disc paves the whole line with node hits).
++// Hovering exactly on a junction still yields the node: the nearest edge is
++// an incident one and t clamps to its node end.
++export const NODE_END_SHARE = 0.25;
++// While a feature is pinned, a re-click within this screen distance of it keeps
++// the SAME selection rather than re-resolving to a neighbour/endpoint. Stops the
++// open card — which occludes its own icon — from drifting as you click near it.
++export const STICKY_RESELECT_PX = 44;
++
++// Highlight ring dimensions — matched to the desire path SVG filter so hover
++// and pinned highlights look identical to the selected path:
++//   - Edge ring: 7px wide stroke with a 4px hole = 1.5px white border each side
++//   - Node ring: 5px outer radius with 3.5px hole = 1.5px white border
++//   - Interior alpha: 0.12 (matches feColorMatrix in RouteLayer)
++export const HIGHLIGHT_RING_WIDTH = 7;
++export const HIGHLIGHT_INNER_WIDTH = 4;
++export const HIGHLIGHT_NODE_OUTER_R = 5;
++export const HIGHLIGHT_NODE_INNER_R = 3.5;
++export const HIGHLIGHT_INTERIOR_ALPHA = 0.12;
++
++// Hover target type
++export interface HoverEdge { kind: "edge"; index: number }
++export interface HoverNode { kind: "node"; index: number }
++export type HoverTarget = HoverEdge | HoverNode;
++
++// The single resolved selection shared by hover, click/pin, the point-vote
++// handler, and top-proposal indicators. `voteEdgeId` is the edge a vote lands
++// on (an edge target votes on itself; a node votes on its first adjacent edge),
++// so the highlighted component always matches the vote target.
++export interface ResolvedSelection {
++  target: HoverTarget;
++  snapLat: number;
++  snapLng: number;
++  voteEdgeId: number | null;
++}
++
++export interface HitResult {
++  target: HoverTarget;
++  snapLat: number;
++  snapLng: number;
++}
++
++// A vote-type breakdown row shown in tooltips/modals.
++export interface VoteTypeRow {
++  label: string;
++  up: number;
++  down: number;
++}
++
++/** Decode a [legendIdx, up, down][] breakdown into labelled rows. */
++export function decodeVoteTypes(
++  pairs: [number, number, number][] | undefined,
++  legend: string[]
++): VoteTypeRow[] {
++  if (!pairs) return [];
++  return pairs
++    .map(([idx, up, down]) => ({ label: legend[idx], up: up ?? 0, down: down ?? 0 }))
++    .filter((v) => v.label);
++}
++
++// Cap on how many top-proposal indicators show on the map. Each surviving
++// EDGE consumes one slot (winners are deduped per edge first), so the 20 most
++// net-voted segments survive — drawn from the top few edges per vote type.
++export const TOP_PROPOSAL_LIMIT = 20;
++
++// "Spread to grid" interaction for crowded indicators. When a top-proposal
++// icon is clicked and other icons sit within CLUSTER_RADIUS_PX of it on screen,
++// the first click is swallowed: instead of selecting, the cluster fans out into
++// a grid so each icon becomes individually clickable, then snaps back after
++// SPREAD_DURATION_MS.
++export const CLUSTER_RADIUS_PX = 26; // screen distance that counts as "clustered"
++export const SPREAD_CELL_PX = 38;    // grid cell pitch when fanned out
++export const SPREAD_DURATION_MS = 2200;
++export const SPREAD_ANIM_MS = 280;   // keep in sync with the CSS transition
++
++// Top-proposal recomputation is BATCHED off the vote path: a cast/delta only
++// marks the lists dirty and repaints the heatmap; this sweep recomputes both
++// proposal families (PBTP scan + RBTP clustering) in idle time on a minute
++// cadence. On the 3.3M-edge NYC bike graph the recompute is far too heavy to
++// run per vote — it froze the app for seconds on every cast.
++export const PROPOSALS_REFRESH_INTERVAL_MS = 60_000;
++
++// requestIdleCallback with a setTimeout fallback (Safari) — schedules the next
++// slice of the route-proposal job so heavy vote types never monopolize a frame.
++export function scheduleIdleSlice(cb: (deadline?: IdleDeadline) => void): void {
++  if (typeof requestIdleCallback === "function") requestIdleCallback(cb, { timeout: 1000 });
++  else window.setTimeout(() => cb(), 50);
++}
++
++// Movement (px²) before a press on an exploded proposal becomes a mid-drag rather
++// than a tap (which selects). Mirrors the path-drag's tap-vs-drag intent.
++export const MID_DRAG_THRESHOLD_SQ = 16; // (4px)²
++// Dotted rubber-band for the mid being dragged out of a proposal — matches the
++// path-drag and waypoint-drag trails (usePathDrag / RouteMarker).
++export const MID_DRAG_TRAIL_STYLE: L.PolylineOptions = {
++  color: "#999999",
++  weight: 2,
++  opacity: 0.6,
++  dashArray: "1, 4",
++  lineCap: "round",
++};
++
++// Number of bbox-nearest candidates to retrieve from the spatial index.
++// 20 is enough for Manhattan-scale edges (~200m max length); the closest
++// segment is always among the top few bbox-nearest in practice.
++export const INDEX_NEIGHBOR_K = 20;
++
++// Cap on how many block edges the modal-open /my-votes reconcile requests. A
++// merged foot-component block can hold thousands of edges — the URL (and the
++// server scan) must stay bounded; coverage of a huge block degrades gracefully.
++export const MY_VOTES_EDGE_CAP = 500;
++
++// Cap + debounce for the route card's /api/route-votes fetch (distinct-voter
++// rows). POSTed as JSON so it can carry far more edge ids than a URL, but still
++// bounded; the debounce coalesces vote bursts into one refetch.
++export const ROUTE_VOTES_EDGE_CAP = 4000;
++export const ROUTE_VOTES_DEBOUNCE_MS = 350;
++
++// Index builds yield to the main thread between batches so the multi-second
++// NYC build doesn't jank the tile/heat animations happening at exactly this
++// moment of the load. Until an index exists, hitTest simply returns no result
++// (hover lights up ~a second later) — no brute-force fallback, which would
++// scan the full 650k-edge array per mousemove.
++export const INDEX_YIELD_BATCH = 120_000;
++export const yieldToMain = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
++
++/** Build a flatbush spatial index of node points. Done once per graph. */
++export async function buildNodeIndex(data: GraphTopology): Promise<Flatbush | null> {
++  const n = data.nNodes;
++  if (n === 0) return null;
++  const c = data.coords;
++  const idx = new Flatbush(n);
++  for (let i = 0; i < n; i++) {
++    if (i > 0 && i % INDEX_YIELD_BATCH === 0) await yieldToMain();
++    const lat = c[2 * i] / COORD_SCALE;
++    const lng = c[2 * i + 1] / COORD_SCALE;
++    // Point bbox: min == max (lng,lat ordering matches the edge index)
++    idx.add(lng, lat, lng, lat);
++  }
++  idx.finish();
++  return idx;
++}
++
++/** Build a flatbush spatial index of edge bounding boxes. Done once per graph. */
++export async function buildEdgeIndex(data: GraphTopology): Promise<Flatbush | null> {
++  const n = data.nEdges;
++  if (n === 0) return null;
++  const c = data.coords;
++  const e = data.ends;
++  const nNodes = data.nNodes;
++  const idx = new Flatbush(n);
++  for (let i = 0; i < n; i++) {
++    if (i > 0 && i % INDEX_YIELD_BATCH === 0) await yieldToMain();
++    const fromIdx = e[2 * i];
++    const toIdx = e[2 * i + 1];
++    // A malformed/stale topology can reference a node index that doesn't exist.
++    // Index a degenerate (0,0) box for it instead of reading out of bounds —
++    // Flatbush requires exactly nEdges adds, so we can't skip the entry.
++    if (fromIdx >= nNodes || toIdx >= nNodes) {
++      idx.add(0, 0, 0, 0);
++      continue;
++    }
++    const fLat = c[2 * fromIdx] / COORD_SCALE, fLng = c[2 * fromIdx + 1] / COORD_SCALE;
++    const tLat = c[2 * toIdx] / COORD_SCALE, tLng = c[2 * toIdx + 1] / COORD_SCALE;
++    idx.add(
++      Math.min(fLng, tLng), Math.min(fLat, tLat),
++      Math.max(fLng, tLng), Math.max(fLat, tLat),
++    );
++  }
++  idx.finish();
++  return idx;
++}
++
++/**
++ * Unified hit-test: resolve (px,py) to a node or edge with node/edge PARITY.
++ *
++ * Hierarchy:
++ *   1. The nearest edge within `maxEdgeDistPx` decides — but its ends belong
++ *      to its endpoint nodes: a projection parameter t in the outer
++ *      NODE_END_SHARE of the segment resolves to that end's node instead of
++ *      the edge (see the constant's comment for why this is the ONLY node
++ *      rule). Degenerate self-edges (e-bike stations) are never split —
++ *      they stay edge targets.
++ *   2. maxEdgeDistPx === Infinity (always-resolve callers) with no eligible
++ *      edge: the nearest eligible node, uncapped — a block whose only
++ *      member is a node is still selectable from anywhere in its polygon.
++ *
++ * Every live caller resolves through resolveSelection, which passes Infinity
++ * so a selection ALWAYS resolves; maxEdgeDistPx remains a parameter for
++ * radius-bounded callers.
++ *
++ * With spatial indices each scan touches only the top-k bbox-nearest
++ * candidates (typically <30 per call) instead of all nodes/edges. Path-drag
++ * fires this on every mousemove via the snap closure, so this is the hot path.
++ */
++export function hitTest(
++  data: GraphData,
++  map: L.Map,
++  px: number, py: number,
++  lat: number, lng: number,
++  edgeIndex: Flatbush | null,
++  nodeIndex: Flatbush | null,
++  allowEdge?: (i: number) => boolean,
++  allowNode?: (i: number) => boolean,
++  maxEdgeDistPx: number = Infinity
++): HitResult | null {
++  const nodeResult = (i: number): HitResult => ({
++    target: { kind: "node", index: i },
++    snapLat: nodeLat(data, i), snapLng: nodeLon(data, i),
++  });
++
++  // 1. Nearest edge within maxEdgeDistPx.
++  let bestEdge: number | null = null;
++  let bestEdgeDist = maxEdgeDistPx;
++
++  const checkEdge = (i: number) => {
++    const fromIdx = edgeFrom(data, i), toIdx = edgeTo(data, i);
++    const fromPt = map.latLngToContainerPoint([nodeLat(data, fromIdx), nodeLon(data, fromIdx)]);
++    const toPt = map.latLngToContainerPoint([nodeLat(data, toIdx), nodeLon(data, toIdx)]);
++    const dist = pointToSegmentDist(px, py, fromPt.x, fromPt.y, toPt.x, toPt.y);
++    if (dist < bestEdgeDist) {
++      bestEdgeDist = dist;
++      bestEdge = i;
++    }
++  };
++
++  if (edgeIndex) {
++    // flatbush applies the filter BEFORE counting results, so a constrained
++    // query still returns up to K matching candidates however sparse they are.
++    const candidates = edgeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K, Infinity, allowEdge);
++    for (const i of candidates) checkEdge(i);
++  }
++  // No else: while the index is still building (async, yielding) edges simply
++  // don't hit — brute-forcing all edges per mousemove froze the NYC map.
++
++  if (bestEdge !== null) {
++    // Parity split: t in the outer NODE_END_SHARE hands the hit to that
++    // end's node. t is computed in PIXEL space (the same space the distance
++    // ranking uses) — lat/lng space is anisotropic at NYC latitudes.
++    const fromIdx = edgeFrom(data, bestEdge), toIdx = edgeTo(data, bestEdge);
++    const fromPt = map.latLngToContainerPoint([nodeLat(data, fromIdx), nodeLon(data, fromIdx)]);
++    const toPt = map.latLngToContainerPoint([nodeLat(data, toIdx), nodeLon(data, toIdx)]);
++    const dx = toPt.x - fromPt.x, dy = toPt.y - fromPt.y;
++    const lenSq = dx * dx + dy * dy;
++    if (lenSq > 0) {
++      const t = Math.max(0, Math.min(1,
++        ((px - fromPt.x) * dx + (py - fromPt.y) * dy) / lenSq
++      ));
++      if (t < NODE_END_SHARE || t > 1 - NODE_END_SHARE) {
++        const nid = t < 0.5 ? fromIdx : toIdx;
++        if (!allowNode || allowNode(nid)) return nodeResult(nid);
++      }
++    }
++    const { lat: snapLat, lng: snapLng } = projectOntoEdge(data, bestEdge, lat, lng);
++    return { target: { kind: "edge", index: bestEdge }, snapLat, snapLng };
++  }
++
++  // 2. Always-resolve mode with no eligible edge (a capture-only node cell):
++  // the nearest eligible node, uncapped. Node scan only runs on this cold
++  // path — the hot path above never touches the node index.
++  if (maxEdgeDistPx === Infinity) {
++    let bestNode: number | null = null;
++    let bestNodeDist = Infinity;
++    const checkNode = (i: number) => {
++      const pt = map.latLngToContainerPoint([nodeLat(data, i), nodeLon(data, i)]);
++      const dist = (px - pt.x) ** 2 + (py - pt.y) ** 2;
++      if (dist < bestNodeDist) {
++        bestNodeDist = dist;
++        bestNode = i;
++      }
++    };
++    if (nodeIndex) {
++      const candidates = nodeIndex.neighbors(lng, lat, INDEX_NEIGHBOR_K, Infinity, allowNode);
++      for (const i of candidates) checkNode(i);
++    }
++    // No else — same index-only rule as edges above.
++    if (bestNode !== null) return nodeResult(bestNode);
++  }
++
++  return null;
++}
++
++/**
++ * The block-constraint filters for a point: which block polygon is under it,
++ * and the edge/node eligibility predicates for that block. ONE construction
++ * shared by hover/selection (resolveSelection) AND the waypoint snap — the
++ * two must agree or a click selects something different from what hover
++ * showed. Null when no block is under the point (or MapLibre isn't ready).
++ */
++export function blockFiltersAt(
++  data: GraphData,
++  adj: NodeAdj | null,
++  lat: number,
++  lng: number,
++): { blockId: number; edgeInBlock: (i: number) => boolean; nodeInBlock: (n: number) => boolean } | null {
++  const ebi = data.edgeBlockId;
++  if (!ebi) return null;
++  const blockId = blockIdAtLatLng(lat, lng);
++  if (blockId == null) return null;
++  return {
++    blockId,
++    edgeInBlock: (i: number) => ebi[i] === blockId,
++    // A node belongs to the hovered block if an adjacent edge is a member OR
++    // the node physically sits inside the block's polygon. The geometric arm
++    // is what makes the junction node at the CENTER of a circular cell
++    // hoverable — its incident roadway edges can all belong to neighbouring
++    // street blocks, so adjacency alone rejected the very node under the
++    // cursor. (Short-circuited: the MapLibre point query only runs for nodes
++    // that fail adjacency, i.e. near junction cells.)
++    nodeInBlock: (n: number) => {
++      if (adj) {
++        for (let k = adj.start[n]; k < adj.start[n + 1]; k++) {
++          if (ebi[adj.edges[k]] === blockId) return true;
++        }
++      }
++      return blockIdAtLatLng(nodeLat(data, n), nodeLon(data, n)) === blockId;
++    },
++  };
++}
++
++/**
++ * The shortest edge adjacent to `nid` that belongs to `blockId` — the
++ * block-constrained twin of graphTopology.adjShortest, so a node picked under
++ * a hovered block votes/highlights within THAT block, not a neighbour the
++ * unconstrained shortest-edge rule might prefer. Falls back to the
++ * unconstrained pick when no adjacent edge is in the block.
++ */
++export function adjShortestInBlock(
++  data: GraphData,
++  adj: NodeAdj | null,
++  nid: number,
++  blockId: number,
++): number | null {
++  if (!adj || !data.edgeBlockId) return adjShortest(data, adj, nid);
++  const cosLat = Math.cos(nodeLat(data, nid) * (Math.PI / 180));
++  let best = -1;
++  let bestD2 = Infinity;
++  for (let k = adj.start[nid]; k < adj.start[nid + 1]; k++) {
++    const eid = adj.edges[k];
++    if (data.edgeBlockId[eid] !== blockId) continue;
++    const a = edgeFrom(data, eid), b = edgeTo(data, eid);
++    const dLat = nodeLat(data, a) - nodeLat(data, b);
++    const dLon = (nodeLon(data, a) - nodeLon(data, b)) * cosLat;
++    const d2 = dLat * dLat + dLon * dLon;
++    if (d2 < bestD2) {
++      bestD2 = d2;
++      best = eid;
++    }
++  }
++  return best >= 0 ? best : adjShortest(data, adj, nid);
++}
++
++/**
++ * Project (lat,lng) onto edge `edgeIdx`, returning the closest point on the
++ * segment (clamped to the endpoints). Shared by hitTest and the nearest-edge
++ * fallback so both produce a real snap position.
++ */
++export function projectOntoEdge(
++  data: GraphTopology,
++  edgeIdx: number,
++  lat: number, lng: number
++): { lat: number; lng: number } {
++  const fromIdx = edgeFrom(data, edgeIdx), toIdx = edgeTo(data, edgeIdx);
++  const fLat = nodeLat(data, fromIdx), fLng = nodeLon(data, fromIdx);
++  const tLat = nodeLat(data, toIdx), tLng = nodeLon(data, toIdx);
++  const dx = tLng - fLng;
++  const dy = tLat - fLat;
++  const lenSq = dx * dx + dy * dy;
++  if (lenSq === 0) return { lat: fLat, lng: fLng };
++  const t = Math.max(0, Math.min(1,
++    ((lng - fLng) * dx + (lat - fLat) * dy) / lenSq
++  ));
++  return { lat: fLat + t * dy, lng: fLng + t * dx };
++}
+diff --git a/client-react/src/components/GraphLayer/topologyHelpers.ts b/client-react/src/components/GraphLayer/topologyHelpers.ts
+new file mode 100644
+index 0000000..d69a332
+--- /dev/null
++++ b/client-react/src/components/GraphLayer/topologyHelpers.ts
+@@ -0,0 +1,83 @@
++import type { GraphTopology } from "./graphTopology";
++import type { RouteProposal } from "./routeProposals";
++import type { HoverTarget } from "./spatialLookup";
++import { nodeLat, nodeLon, edgeFrom, edgeTo } from "./graphTopology";
++
++/**
++ * The representative on-graph coordinate for a resolved target: an edge's
++ * midpoint (where its indicator icon sits) or a node's position. This is the
++ * ONE place that maps a target to a point — the pinned modal uses it as both
++ * its anchor AND its React key, so the card tracks the selected FEATURE and is
++ * never positioned by the raw click coordinates.
++ */
++export function targetLatLng(
++  target: HoverTarget | null,
++  data: GraphTopology | null
++): { lat: number; lng: number } | null {
++  if (!target || !data) return null;
++  if (target.kind === "edge") {
++    if (target.index >= data.nEdges) return null;
++    const from = edgeFrom(data, target.index), to = edgeTo(data, target.index);
++    if (from >= data.nNodes || to >= data.nNodes) return null;
++    return {
++      lat: (nodeLat(data, from) + nodeLat(data, to)) / 2,
++      lng: (nodeLon(data, from) + nodeLon(data, to)) / 2,
++    };
++  }
++  if (target.index >= data.nNodes) return null;
++  return { lat: nodeLat(data, target.index), lng: nodeLon(data, target.index) };
++}
++
++/**
++ * Display anchor for an RBTP diamond: its middle path edge's midpoint, else the
++ * mean of its two anchors. ONE definition shared by the marker render, the
++ * cluster fan-out, and the drop hit-test so they can never disagree on where a
++ * diamond "is".
++ */
++export function rbtpDisplayPos(topo: GraphTopology, p: RouteProposal): [number, number] {
++  const midEdge = p.edgeIds[Math.floor(p.edgeIds.length / 2)];
++  if (midEdge != null && midEdge < topo.nEdges) {
++    const from = edgeFrom(topo, midEdge), to = edgeTo(topo, midEdge);
++    if (from < topo.nNodes && to < topo.nNodes) {
++      return [
++        (nodeLat(topo, from) + nodeLat(topo, to)) / 2,
++        (nodeLon(topo, from) + nodeLon(topo, to)) / 2,
++      ];
++    }
++  }
++  return [
++    (p.anchorCoords[0].lat + p.anchorCoords[1].lat) / 2,
++    (p.anchorCoords[0].lng + p.anchorCoords[1].lng) / 2,
++  ];
++}
++
++// Spread-map keys — the fanned-out grid mixes POINT proposals (edge-keyed
++// squares) and ROUTE proposals (id-keyed diamonds), so keys carry the kind.
++export const spreadKeyEdge = (edgeIdx: number) => `e${edgeIdx}`;
++export const spreadKeyRoute = (id: string) => `r${id}`;
++
++/**
++ * True when a vote payload is indexed against the SAME topology we hold. Vote
++ * arrays are sized to the server's current graph; the server stamps n_edges /
++ * n_nodes onto the payload so the client can reject votes that don't line up
++ * with its (possibly day-old cached) topology — painting a mismatch is what
++ * indexed past the array ends and crashed mobile Safari. Falls back to the
++ * edge_votes length when the dimensions aren't present (older server).
++ */
++export function votesMatchTopology(
++  voteData: { n_edges?: number; n_nodes?: number; n_blocks?: number;
++    edge_votes?: ArrayLike<unknown>; block_votes?: ArrayLike<unknown> },
++  topology: GraphTopology | null,
++): boolean {
++  if (!topology) return false;
++  const nEdges = voteData.n_edges ?? voteData.edge_votes?.length;
++  if (nEdges != null && nEdges !== topology.nEdges) return false;
++  if (voteData.n_nodes != null && voteData.n_nodes !== topology.nNodes) return false;
++  // Block ids renumber on every blocks re-bake (SAME topology etag), so a body
++  // built against a different block set colors the wrong polygons.
++  const nBlocks = voteData.n_blocks ?? voteData.block_votes?.length;
++  if (nBlocks != null && topology.nBlocks != null && nBlocks !== topology.nBlocks) {
++    return false;
++  }
++  return true;
++}
+diff --git a/client-react/src/mapStyles.test.ts b/client-react/src/mapStyles.test.ts
+new file mode 100644
+index 0000000..72f965c
+--- /dev/null
++++ b/client-react/src/mapStyles.test.ts
+@@ -0,0 +1,127 @@
++import { describe, it, expect } from "vitest";
++import {
++  getMapStyle,
++  maplibreRasterTiles,
++  heatGradientCss,
++  MAP_STYLES,
++  DEFAULT_MAP_STYLE,
++} from "./mapStyles";
++
++describe("getMapStyle", () => {
++  it("returns the named style for a known id", () => {
++    const style = getMapStyle("bikepaths");
++    expect(style.id).toBe("bikepaths");
++    expect(style.basemap).toBe("dark");
++    expect(style.accent).toBe("#2BE06B");
++  });
++
++  it("returns the named style for walkways", () => {
++    const style = getMapStyle("walkways");
++    expect(style.id).toBe("walkways");
++    expect(style.basemap).toBe("dark");
++    expect(style.accent).toBe("#E0A23A");
++  });
++
++  it("returns the named style for trees", () => {
++    const style = getMapStyle("trees");
++    expect(style.id).toBe("trees");
++    expect(style.basemap).toBe("light");
++    expect(style.accent).toBe("#5FA052");
++  });
++
++  it("falls back to default for unknown style id", () => {
++    const style = getMapStyle("nonexistent");
++    expect(style.id).toBe("default");
++    expect(style).toEqual(DEFAULT_MAP_STYLE);
++  });
++
++  it("falls back to default for empty string", () => {
++    const style = getMapStyle("");
++    expect(style).toEqual(DEFAULT_MAP_STYLE);
++  });
++});
++
++describe("maplibreRasterTiles", () => {
++  it("expands tile URL template with all 4 subdomains", () => {
++    const style = MAP_STYLES.bikepaths;
++    const tiles = maplibreRasterTiles(style);
++    expect(tiles).toHaveLength(4);
++    expect(tiles[0]).toContain("a.basemaps.cartocdn.com");
++    expect(tiles[1]).toContain("b.basemaps.cartocdn.com");
++    expect(tiles[2]).toContain("c.basemaps.cartocdn.com");
++    expect(tiles[3]).toContain("d.basemaps.cartocdn.com");
++  });
++
++  it("replaces {s} subdomain and {r} retina placeholders", () => {
++    const style = MAP_STYLES.walkways;
++    const tiles = maplibreRasterTiles(style);
++    tiles.forEach((url) => {
++      expect(url).not.toContain("{s}");
++      expect(url).not.toContain("{r}");
++      expect(url).toContain("@2x");
++    });
++  });
++
++  it("produces valid URLs for the dark basemap", () => {
++    const style = MAP_STYLES.bikepaths;
++    const tiles = maplibreRasterTiles(style);
++    tiles.forEach((url) => {
++      expect(url).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/dark_nolabels\/\{z\}\/\{x\}\/\{y\}@2x\.png$/);
++    });
++  });
++
++  it("produces valid URLs for the light basemap", () => {
++    const style = MAP_STYLES.trees;
++    const tiles = maplibreRasterTiles(style);
++    tiles.forEach((url) => {
++      expect(url).toMatch(/^https:\/\/[a-d]\.basemaps\.cartocdn\.com\/light_nolabels\/\{z\}\/\{x\}\/\{y\}@2x\.png$/);
++    });
++  });
++});
++
++describe("heatGradientCss", () => {
++  it("generates a valid linear-gradient CSS function", () => {
++    const style = MAP_STYLES.bikepaths;
++    const css = heatGradientCss(style.heat, style.basemap);
++    expect(css).toMatch(/^linear-gradient\(to right,/);
++    expect(css).toContain("rgb(");
++  });
++
++  it("includes cold/cold-deep arm for negative differentials", () => {
++    const style = MAP_STYLES.bikepaths;
++    const css = heatGradientCss(style.heat, style.basemap);
++    expect(css).toContain(style.heat.coldDeep);
++    expect(css).toContain(style.heat.cold);
++  });
++
++  it("includes all heat stops in the gradient", () => {
++    const style = MAP_STYLES.bikepaths;
++    const css = heatGradientCss(style.heat, style.basemap);
++    // Should include cold, warm, hot, peak in the gradient
++    expect(css).toContain(style.heat.coldDeep);
++    expect(css).toContain(style.heat.halo);
++    expect(css).toContain(style.heat.warm);
++    expect(css).toContain(style.heat.hot);
++    expect(css).toContain(style.heat.peak);
++  });
++
++  it("works with dark basemap (bikepaths)", () => {
++    const style = MAP_STYLES.bikepaths;
++    const css = heatGradientCss(style.heat, style.basemap);
++    // Verify the gradient includes all the colors
++    expect(css).toContain(style.heat.halo);
++    expect(css).toContain(style.heat.warm);
++    expect(css).toContain(style.heat.hot);
++    expect(css).toContain(style.heat.peak);
++  });
++
++  it("works with light basemap (trees)", () => {
++    const style = MAP_STYLES.trees;
++    const css = heatGradientCss(style.heat, style.basemap);
++    // Verify the gradient includes all the colors
++    expect(css).toContain(style.heat.halo);
++    expect(css).toContain(style.heat.warm);
++    expect(css).toContain(style.heat.hot);
++    expect(css).toContain(style.heat.peak);
++  });
++});
+diff --git a/client-react/src/themes.test.ts b/client-react/src/themes.test.ts
+new file mode 100644
+index 0000000..519e1cc
+--- /dev/null
++++ b/client-react/src/themes.test.ts
+@@ -0,0 +1,213 @@
++import { describe, it, expect } from "vitest";
++import {
++  iconSrc,
++  iconForLabel,
++  mapHref,
++  themeFromMap,
++  type ThemeNavState,
++} from "./themes";
++
++describe("iconSrc", () => {
++  it("returns the icon SVG path for a given icon name", () => {
++    const path = iconSrc("bikes");
++    expect(path).toBe("/icons/bikes.svg");
++  });
++
++  it("works with different icon names", () => {
++    expect(iconSrc("trees")).toBe("/icons/trees.svg");
++    expect(iconSrc("walkways")).toBe("/icons/walkways.svg");
++    expect(iconSrc("safety")).toBe("/icons/safety.svg");
++    expect(iconSrc("parks")).toBe("/icons/parks.svg");
++  });
++
++  it("handles icon names with hyphens", () => {
++    expect(iconSrc("traffic-reduction")).toBe("/icons/traffic-reduction.svg");
++    expect(iconSrc("public-space")).toBe("/icons/public-space.svg");
++  });
++
++  it("produces consistent paths", () => {
++    const icon = "custom-icon";
++    expect(iconSrc(icon)).toBe(iconSrc(icon));
++  });
++});
++
++describe("iconForLabel", () => {
++  it("returns the icon for a preset suggestion label", () => {
++    const icon = iconForLabel("Improve bike lane");
++    expect(icon).toBe("bikes");
++  });
++
++  it("finds icons from the bikepaths theme", () => {
++    expect(iconForLabel("Add bike parking")).toBe("bikes");
++    expect(iconForLabel("Add protected bike lane")).toBe("safety");
++  });
++
++  it("finds icons from the trees theme", () => {
++    expect(iconForLabel("Add tree")).toBe("trees");
++    expect(iconForLabel("Create a tree pit")).toBe("trees");
++  });
++
++  it("finds icons from the walkways theme", () => {
++    expect(iconForLabel("Improve sidewalk")).toBe("walkways");
++    expect(iconForLabel("Add crosswalk")).toBe("pedestrian-streets");
++  });
++
++  it("returns null for unknown labels", () => {
++    expect(iconForLabel("Unknown custom label")).toBeNull();
++    expect(iconForLabel("")).toBeNull();
++  });
++
++  it("is case-sensitive (exact label match required)", () => {
++    expect(iconForLabel("improve bike lane")).toBeNull();
++    expect(iconForLabel("Improve Bike Lane")).toBeNull();
++  });
++});
++
++describe("mapHref", () => {
++  it("returns a path for a map slug", () => {
++    const href = mapHref("nyc-bikepaths");
++    expect(href).toBe("/m/nyc-bikepaths");
++  });
++
++  it("includes zoom in query string when provided", () => {
++    const href = mapHref("nyc-bikepaths", { zoom: 15 });
++    expect(href).toContain("z=15");
++    expect(href).toContain("/m/nyc-bikepaths?");
++  });
++
++  it("includes center coordinates when provided", () => {
++    const state: ThemeNavState = { center: { lat: 40.7128, lng: -74.0060 } };
++    const href = mapHref("nyc-bikepaths", state);
++    expect(href).toContain("lat=40.71280");
++    expect(href).toContain("lng=-74.00600");
++  });
++
++  it("includes start point when provided", () => {
++    const state: ThemeNavState = { start: { lat: 40.7000, lng: -74.0100 } };
++    const href = mapHref("nyc-bikepaths", state);
++    expect(href).toContain("slat=40.70000");
++    expect(href).toContain("slng=-74.01000");
++  });
++
++  it("includes end point when provided", () => {
++    const state: ThemeNavState = { end: { lat: 40.7300, lng: -73.9900 } };
++    const href = mapHref("nyc-bikepaths", state);
++    expect(href).toContain("elat=40.73000");
++    expect(href).toContain("elng=-73.99000");
++  });
++
++  it("includes vote type when provided", () => {
++    const state: ThemeNavState = { vt: "tree-planting" };
++    const href = mapHref("nyc-bikepaths", state);
++    expect(href).toContain("vt=tree-planting");
++  });
++
++  it("combines multiple state properties in the query string", () => {
++    const state: ThemeNavState = {
++      zoom: 14,
++      center: { lat: 40.7000, lng: -74.0000 },
++      start: { lat: 40.6900, lng: -74.0100 },
++      end: { lat: 40.7100, lng: -73.9900 },
++      vt: "bike-lane",
++    };
++    const href = mapHref("nyc-bikepaths", state);
++    expect(href).toContain("z=14");
++    expect(href).toContain("lat=40.70000");
++    expect(href).toContain("lng=-74.00000");
++    expect(href).toContain("slat=40.69000");
++    expect(href).toContain("slng=-74.01000");
++    expect(href).toContain("elat=40.71000");
++    expect(href).toContain("elng=-73.99000");
++    expect(href).toContain("vt=bike-lane");
++  });
++
++  it("handles null state gracefully (no query string)", () => {
++    const href = mapHref("nyc-bikepaths", undefined);
++    expect(href).toBe("/m/nyc-bikepaths");
++  });
++
++  it("truncates coordinates to 5 decimal places", () => {
++    const state: ThemeNavState = { center: { lat: 40.712891234567, lng: -74.006012345 } };
++    const href = mapHref("nyc-bikepaths", state);
++    expect(href).toContain("lat=40.71289");
++    expect(href).not.toContain("lat=40.712891");
++  });
++});
++
++describe("themeFromMap", () => {
++  it("builds a theme from a preset map (bikepaths)", () => {
++    const map = {
++      slug: "nyc-bikepaths",
++      name: "NYC Bikepaths",
++      subtitle: "Vote for better cycling",
++      mode: "bikepaths",
++      style: "bikepaths",
++    };
++    const theme = themeFromMap(map);
++    expect(theme.id).toBe("bikepaths");
++    expect(theme.name).toBe("NYC Bikepaths");
++    expect(theme.tagline).toBe("Vote for better cycling"); // subtitle takes precedence
++    expect(theme.mode).toBe("bikepaths");
++    expect(theme.inputMode).toBe("both");
++  });
++
++  it("falls back to walkways theme defaults for unknown style", () => {
++    const map = {
++      slug: "my-custom-map",
++      name: "Custom Map",
++      mode: "custom-mode",
++    };
++    const theme = themeFromMap(map);
++    expect(theme.id).toBe("my-custom-map");
++    expect(theme.name).toBe("Custom Map");
++    expect(theme.mode).toBe("custom-mode");
++    expect(theme.locationLabel).toBe("Start"); // default
++    expect(theme.symbol).toBe("mapping"); // default
++  });
++
++  it("uses custom vote types when provided", () => {
++    const map = {
++      slug: "test-map",
++      name: "Test",
++      voteTypes: [
++        { label: "Custom Vote", icon: "custom-icon", pointType: "route" as const },
++      ],
++    };
++    const theme = themeFromMap(map);
++    expect(theme.suggestions).toHaveLength(1);
++    expect(theme.suggestions[0].label).toBe("Custom Vote");
++  });
++
++  it("uses the first vote type's icon as symbol when no style symbol exists", () => {
++    const map = {
++      slug: "test",
++      name: "Test",
++      voteTypes: [
++        { label: "Custom", icon: "star", pointType: "point" as const },
++      ],
++    };
++    const theme = themeFromMap(map);
++    expect(theme.symbol).toBe("star");
++  });
++
++  it("prefers subtitle over style tagline when both exist", () => {
++    const map = {
++      slug: "test",
++      name: "Test",
++      subtitle: "Custom subtitle",
++      style: "bikepaths",
++    };
++    const theme = themeFromMap(map);
++    expect(theme.tagline).toBe("Custom subtitle");
++  });
++
++  it("sets subdomain from the map", () => {
++    const map = {
++      slug: "test",
++      name: "Test",
++      subdomain: "bikepaths",
++    };
++    const theme = themeFromMap(map);
++    expect(theme.subdomain).toBe("bikepaths");
++  });
++});
+diff --git a/docs/three-layer-model.md b/docs/three-layer-model.md
+index cb7f908..b2e0987 100644
+--- a/docs/three-layer-model.md
++++ b/docs/three-layer-model.md
+@@ -169,10 +169,19 @@ so each user counts once:
+ - Served from the Redis structures in `server/block_votes.py`
+   (`bd:<slug>:<mode>:<block>:<vt>:<dir>` device-multiplicity hashes +
+   `bagg:<slug>:<mode>` aggregate; rebuilt from Postgres on cold start / resnap)
+-  as `block_votes[]` (total activity = up + down — downvotes read hot too) and `block_vote_types[]`
++  as `block_votes[]` (total deduped activity per block) and `block_vote_types[]`
+   (`[legendIdx, up, down]` per block) on `/api/graph-votes`.
+-- The **heat display is the block fill** (MapLibre feature-state on the blocks
+-  PMTiles); the per-edge canvas heat is the fallback for maps without blocks.
++- **Heat display** is the **signed top-proposal differential** per block: the
++  vote differential (up − down) of the block's best-ranked proposal, ranked by
++  differential across the block's vote types (`client-react/src/components/GraphLayer/voteApply.ts`
++  `topProposalDiffs`). Positive differentials ride the warm ramp (existing hues),
++  negative descend into the theme's cold arm (almost blue at floor), zero is
++  invisible (cancelled signal carries no heat). Per-block differentials are
++  normalized via two-armed log scaling: positives against HEAT_FULL_SCALE (50),
++  negatives against their own tighter floor NEG_HEAT_FULL_SCALE (10), so
++  organic net-against blocks reach genuine cold instead of washing out next to
++  bulk-import positives. Feature-state heat ∈ [−1, 1]. The per-edge canvas heat
++  is the fallback for maps without blocks.
+ - The **modal** for any selection sums the *deduped block counts* over the
+   selection's blocks (a device present in two blocks of a corridor counts once
+   per block).
+diff --git a/drag problem.png b/drag problem.png
+deleted file mode 100644
+index 257cb6a..0000000
+Binary files a/drag problem.png and /dev/null differ
+diff --git a/logo problem.png b/logo problem.png
+deleted file mode 100644
+index 8a607b4..0000000
+Binary files a/logo problem.png and /dev/null differ
+diff --git a/ebikes.png b/screenshots/ebikes.png
+similarity index 100%
+rename from ebikes.png
+rename to screenshots/ebikes.png
+diff --git a/server/build_ebike_stations.py b/server/build_ebike_stations.py
+index 69a2613..7ff789a 100644
+--- a/server/build_ebike_stations.py
++++ b/server/build_ebike_stations.py
+@@ -3,7 +3,7 @@
+ Build server/data/ebike_stations.json — the fixed set of NYC e-bike charging
+ stations used by the "E-bike stations" network (see graph_registry.py).
+ 
+-The 50 stations come from ebikes.png (a Lyft e-bike charging map), transcribed as
++The 50 stations come from screenshots/ebikes.png (a Lyft e-bike charging map), transcribed as
+ "<Street A> & <Street B>" intersections. We resolve each to a coordinate by
+ finding the graph node where an edge named A meets an edge named B in the NYC walk
+ graph — exact, offline, and already on the network we render. Anything the graph
+@@ -28,7 +28,7 @@ import requests
+ from cities import get_city
+ from python_router import PythonRouter
+ 
+-# Intersections transcribed from ebikes.png (Manhattan, the Bronx, Queens, and
++# Intersections transcribed from screenshots/ebikes.png (Manhattan, the Bronx, Queens, and
+ # Brooklyn). Order matches the map legend.
+ STATIONS = [
+     "Wadsworth Ave & W 175th St",
+diff --git a/server/tests/conftest.py b/server/tests/conftest.py
+index d8c6e8c..925fcc9 100644
+--- a/server/tests/conftest.py
++++ b/server/tests/conftest.py
+@@ -6,6 +6,7 @@ tests (marked @pytest.mark.integration) need live services and are opt-in.
+ import pytest
+ 
+ import fakeredis
++import numpy as np
+ 
+ 
+ @pytest.fixture
+@@ -15,11 +16,11 @@ def redis_client():
+ 
+ 
+ # A tiny graph fixture: 3 nodes, 2 edges sharing node 1 (mirrors the frontend
+-# voteApply test graph). node_adj[n] = edge ids touching node n.
++# voteApply test graph). edge_ends[e] = [node_u, node_v] for edge e.
+ @pytest.fixture
+ def tiny_graph():
+     return {
+         "edge_count": 2,
+         "node_count": 3,
+-        "node_adj": [[0], [0, 1], [1]],
++        "edge_ends": np.array([[0, 1], [1, 2]], dtype=np.int32),
+     }
+diff --git a/server/tests/unit/test_hydration.py b/server/tests/unit/test_hydration.py
+index e2bf6c0..5b6e168 100644
+--- a/server/tests/unit/test_hydration.py
++++ b/server/tests/unit/test_hydration.py
+@@ -30,9 +30,9 @@ def test_replayed_votes_surface_under_the_maps_mode(redis_client):
+     _hydrate(redis_client, [(0, 7, v.UP, 3), (2, 7, v.UP, 5), (2, 7, v.DOWN, 1)], mode)
+ 
+     votes = v.read_all(redis_client, SLUG)
+-    arrays = v.build_arrays(votes, EDGES, NODES, NODE_ADJ, mode_filter=mode)
++    arrays = v.build_arrays(votes, EDGES, NODES, None, mode_filter=mode)
+ 
+-    assert arrays["edge_votes"] == [3, 0, 4, 0]  # net (up − down)
++    assert (arrays["edge_votes"] == [3, 0, 4, 0]).all()  # net (up − down)
+ 
+ 
+ def test_reading_under_the_wrong_mode_drops_everything(redis_client):
+@@ -43,10 +43,10 @@ def test_reading_under_the_wrong_mode_drops_everything(redis_client):
+     _hydrate(redis_client, [(0, 7, v.UP, 3), (2, 7, v.UP, 5)], stored)
+ 
+     votes = v.read_all(redis_client, SLUG)
+-    wrong = v.build_arrays(votes, EDGES, NODES, NODE_ADJ,
++    wrong = v.build_arrays(votes, EDGES, NODES, None,
+                            mode_filter=v.mode_to_int("walk"))
+ 
+-    assert wrong["edge_votes"] == [0, 0, 0, 0]
++    assert (wrong["edge_votes"] == [0, 0, 0, 0]).all()
+ 
+ 
+ def test_hydrate_is_idempotent(redis_client):
+@@ -58,6 +58,6 @@ def test_hydrate_is_idempotent(redis_client):
+     _hydrate(redis_client, rows, mode)  # replay again
+ 
+     votes = v.read_all(redis_client, SLUG)
+-    arrays = v.build_arrays(votes, EDGES, NODES, NODE_ADJ, mode_filter=mode)
++    arrays = v.build_arrays(votes, EDGES, NODES, None, mode_filter=mode)
+ 
+-    assert arrays["edge_votes"] == [0, 4, 0, 2]
++    assert (arrays["edge_votes"] == [0, 4, 0, 2]).all()
+diff --git a/server/tests/unit/test_topology_bin.py b/server/tests/unit/test_topology_bin.py
+index 6f54c1a..2ec83a5 100644
+--- a/server/tests/unit/test_topology_bin.py
++++ b/server/tests/unit/test_topology_bin.py
+@@ -10,8 +10,8 @@ import numpy as np
+ 
+ from graph_registry import encode_topology_bin
+ 
+-NODES = [[40.0, -74.0], [40.1, -74.1], [40.25, -73.9]]
+-EDGES = [[0, 1, "a"], [1, 2, "b"]]
++NODES = np.array([[40.0, -74.0], [40.1, -74.1], [40.25, -73.9]], dtype=np.float64)
++EDGES = np.array([[0, 1], [1, 2]], dtype=np.int32)
+ 
+ HEADER = struct.calcsize("<4sIII")  # 16 bytes
+ COORDS = len(NODES) * 2 * 4
+diff --git a/server/tests/unit/test_vote_counts.py b/server/tests/unit/test_vote_counts.py
+index a4f4bc4..7f83cb7 100644
+--- a/server/tests/unit/test_vote_counts.py
++++ b/server/tests/unit/test_vote_counts.py
+@@ -56,9 +56,9 @@ def test_build_arrays_reflects_net_and_breakdown(redis_client, tiny_graph):
+     votes = v.read_all(redis_client, SLUG)
+     arrays = v.build_arrays(
+         votes, tiny_graph["edge_count"], tiny_graph["node_count"],
+-        tiny_graph["node_adj"], mode_filter=MODE,
++        tiny_graph["edge_ends"], mode_filter=MODE,
+     )
+-    assert arrays["edge_votes"] == [2, -1]
++    assert (arrays["edge_votes"] == [2, -1]).all()
+     # node 1 borders both edges; node total is the max adjacent net (2).
+     assert arrays["node_votes"][1] == 2
+ 
