@@ -4,8 +4,6 @@ import {
   iconForLabel,
   mapHref,
   themeFromMap,
-  THEMES,
-  type Theme,
   type ThemeNavState,
 } from "./themes";
 

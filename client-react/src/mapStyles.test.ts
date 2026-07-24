@@ -5,7 +5,6 @@ import {
   heatGradientCss,
   MAP_STYLES,
   DEFAULT_MAP_STYLE,
-  type MapStyle,
 } from "./mapStyles";
 
 describe("getMapStyle", () => {
@@ -82,47 +81,47 @@ describe("maplibreRasterTiles", () => {
 
 describe("heatGradientCss", () => {
   it("generates a valid linear-gradient CSS function", () => {
-    const css = heatGradientCss(MAP_STYLES.bikepaths.heat);
+    const style = MAP_STYLES.bikepaths;
+    const css = heatGradientCss(style.heat, style.basemap);
     expect(css).toMatch(/^linear-gradient\(to right,/);
     expect(css).toContain("rgb(");
   });
 
-  it("includes all four heat stops: halo, warm, hot, peak", () => {
-    const heat = MAP_STYLES.bikepaths.heat;
-    const css = heatGradientCss(heat);
-    expect(css).toContain(heat.halo);
-    expect(css).toContain(heat.warm);
-    expect(css).toContain(heat.hot);
-    expect(css).toContain(heat.peak);
+  it("includes cold/cold-deep arm for negative differentials", () => {
+    const style = MAP_STYLES.bikepaths;
+    const css = heatGradientCss(style.heat, style.basemap);
+    expect(css).toContain(style.heat.coldDeep);
+    expect(css).toContain(style.heat.cold);
   });
 
   it("includes all heat stops in the gradient", () => {
-    const heat = MAP_STYLES.bikepaths.heat;
-    const css = heatGradientCss(heat);
-    // Should include halo, warm, hot, peak in the gradient
-    expect(css).toContain(heat.halo);
-    expect(css).toContain(heat.warm);
-    expect(css).toContain(heat.hot);
-    expect(css).toContain(heat.peak);
+    const style = MAP_STYLES.bikepaths;
+    const css = heatGradientCss(style.heat, style.basemap);
+    // Should include cold, warm, hot, peak in the gradient
+    expect(css).toContain(style.heat.coldDeep);
+    expect(css).toContain(style.heat.halo);
+    expect(css).toContain(style.heat.warm);
+    expect(css).toContain(style.heat.hot);
+    expect(css).toContain(style.heat.peak);
   });
 
-  it("works with different heat ramps (bikepaths)", () => {
-    const heat = MAP_STYLES.bikepaths.heat;
-    const css = heatGradientCss(heat);
-    // Verify the gradient includes all the right colors
-    expect(css).toContain(heat.halo);
-    expect(css).toContain(heat.warm);
-    expect(css).toContain(heat.hot);
-    expect(css).toContain(heat.peak);
+  it("works with dark basemap (bikepaths)", () => {
+    const style = MAP_STYLES.bikepaths;
+    const css = heatGradientCss(style.heat, style.basemap);
+    // Verify the gradient includes all the colors
+    expect(css).toContain(style.heat.halo);
+    expect(css).toContain(style.heat.warm);
+    expect(css).toContain(style.heat.hot);
+    expect(css).toContain(style.heat.peak);
   });
 
-  it("works with different heat ramps (trees)", () => {
-    const heat = MAP_STYLES.trees.heat;
-    const css = heatGradientCss(heat);
-    // Verify the gradient includes all the right colors
-    expect(css).toContain(heat.halo);
-    expect(css).toContain(heat.warm);
-    expect(css).toContain(heat.hot);
-    expect(css).toContain(heat.peak);
+  it("works with light basemap (trees)", () => {
+    const style = MAP_STYLES.trees;
+    const css = heatGradientCss(style.heat, style.basemap);
+    // Verify the gradient includes all the colors
+    expect(css).toContain(style.heat.halo);
+    expect(css).toContain(style.heat.warm);
+    expect(css).toContain(style.heat.hot);
+    expect(css).toContain(style.heat.peak);
   });
 });
