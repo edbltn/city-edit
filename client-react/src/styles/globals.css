@@ -293,7 +293,7 @@ body {
 
 
 /* ==========================================================================
-   Topbar Actions (2×2 grid: Mode/HowItWorks over VoteType/Actions)
+   Topbar Actions (2×2 grid: Mode/Feedback·About·Donate over VoteType/Actions)
    ========================================================================== */
 
 .topbar-actions {
@@ -1414,17 +1414,12 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 
   /* The Cast/Clear group stays in the DOM (just .hidden-reserve'd) with no
-     selection, so it always sizes the right column — Mode and How-it-Works keep
+     selection, so it always sizes the right column and the header links keep
      a fixed *horizontal* width instead of shrinking when Cast/Clear later
-     appear. The second row itself collapses to 0 height (no row-gap) until a
-     selection, so it pops down from the banner only when the controls show. */
+     appear. The second row used to collapse to 0 until a selection, but it
+     now hosts the always-visible How-it-Works button, so it stays open. */
   .topbar-actions {
     column-gap: var(--space-2);
-    row-gap: 0;
-    grid-template-rows: var(--control-height) 0;
-  }
-
-  .topbar-actions.has-selection {
     row-gap: var(--space-2);
     grid-template-rows: var(--control-height) var(--control-height);
   }

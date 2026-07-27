@@ -216,7 +216,10 @@ export function Landing() {
       <footer className="landing-footer">
         <span>© {year} City Edit. All rights reserved.</span>
         <a href="https://sphericalharmonics.org/" className="landing-footer-link">
-          sphericalharmonics.org
+          About
+        </a>
+        <a href="https://feedback.cityedit.org" className="landing-footer-link">
+          Feedback
         </a>
         <a href="https://donate.cityedit.org" className="landing-footer-link">
           Donate

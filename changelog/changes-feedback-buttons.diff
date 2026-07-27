@@ -1,0 +1,396 @@
+diff --git a/client-react/public/feedback.html b/client-react/public/feedback.html
+new file mode 100644
+index 0000000..0e6b15c
+--- /dev/null
++++ b/client-react/public/feedback.html
+@@ -0,0 +1,218 @@
++<!DOCTYPE html>
++<html lang="en">
++  <head>
++    <meta charset="UTF-8" />
++    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <title>Feedback — City Edit</title>
++    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
++    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
++    <link rel="preconnect" href="https://fonts.googleapis.com" />
++    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
++    <link
++      href="https://fonts.googleapis.com/css2?family=Red+Hat+Mono:ital,wght@0,300..700;1,300..700&display=swap"
++      rel="stylesheet"
++    />
++    <style>
++      :root {
++        --font-main: "Red Hat Mono", "Courier New", Courier, monospace;
++        --paper: #0d0d0d;
++        --ink: #d4d4d4;
++        --hairline: rgba(212, 212, 212, 0.2);
++        --hover-bg: rgba(212, 212, 212, 0.06);
++        --accent: #e0a23a;
++        --space-2: 8px;
++        --space-3: 12px;
++        --space-4: 16px;
++        --space-6: 24px;
++      }
++
++      * {
++        box-sizing: border-box;
++      }
++
++      html,
++      body {
++        margin: 0;
++        padding: 0;
++        background: var(--paper);
++        color: var(--ink);
++        font-family: var(--font-main);
++        min-height: 100%;
++      }
++
++      .wrap {
++        max-width: 560px;
++        margin: 0 auto;
++        padding: 48px var(--space-4) 64px;
++      }
++
++      .brand {
++        display: inline-block;
++        color: var(--ink);
++        text-decoration: none;
++        font-size: 13px;
++        letter-spacing: 0.08em;
++        border: 1px solid var(--hairline);
++        padding: 6px 10px;
++      }
++
++      .brand:hover {
++        background: var(--hover-bg);
++      }
++
++      h1 {
++        font-size: 22px;
++        font-weight: 600;
++        margin: var(--space-6) 0 var(--space-2);
++      }
++
++      p.lede {
++        font-size: 14px;
++        line-height: 1.6;
++        margin: 0 0 var(--space-6);
++        opacity: 0.8;
++      }
++
++      form {
++        display: flex;
++        flex-direction: column;
++        gap: var(--space-4);
++      }
++
++      label {
++        display: flex;
++        flex-direction: column;
++        gap: var(--space-2);
++        font-size: 13px;
++        letter-spacing: 0.04em;
++      }
++
++      label .optional {
++        opacity: 0.5;
++      }
++
++      input,
++      textarea {
++        font-family: var(--font-main);
++        font-size: 15px;
++        color: var(--ink);
++        background: transparent;
++        border: 1px solid var(--hairline);
++        border-radius: 0;
++        padding: 10px var(--space-3);
++      }
++
++      textarea {
++        min-height: 160px;
++        resize: vertical;
++      }
++
++      input:focus,
++      textarea:focus {
++        outline: none;
++        border-color: var(--accent);
++      }
++
++      button[type="submit"] {
++        font-family: var(--font-main);
++        font-size: 15px;
++        font-weight: 600;
++        color: #111;
++        background: var(--accent);
++        border: 1px solid var(--accent);
++        border-radius: 0;
++        padding: 12px var(--space-4);
++        cursor: pointer;
++        align-self: flex-start;
++      }
++
++      button[type="submit"]:hover {
++        filter: brightness(1.1);
++      }
++
++      .sent {
++        display: none;
++        border: 1px solid var(--accent);
++        color: var(--ink);
++        padding: var(--space-3) var(--space-4);
++        font-size: 14px;
++        line-height: 1.5;
++        margin-bottom: var(--space-6);
++      }
++
++      .sent.visible {
++        display: block;
++      }
++
++      footer {
++        margin-top: 48px;
++        font-size: 12px;
++        opacity: 0.5;
++      }
++
++      footer a {
++        color: var(--ink);
++      }
++    </style>
++  </head>
++  <body>
++    <div class="wrap">
++      <a class="brand" href="https://cityedit.org">← CITY EDIT</a>
++
++      <h1>Feedback</h1>
++      <p class="lede">
++        Found a bug, have an idea, or want a map for your city? Tell us — your
++        message goes straight to the people who build City Edit.
++      </p>
++
++      <div id="sent" class="sent">
++        Thanks — your feedback is on its way. We read everything.
++      </div>
++
++      <form
++        id="feedback-form"
++        action="https://formsubmit.co/eric@sphericalharmonics.org"
++        method="POST"
++      >
++        <input type="hidden" name="_cc" value="brook@sphericalharmonics.org" />
++        <input type="hidden" name="_subject" value="City Edit feedback" />
++        <input type="hidden" name="_template" value="box" />
++        <input type="hidden" name="_captcha" value="false" />
++        <input type="hidden" name="_next" value="https://feedback.cityedit.org/?sent=1" />
++        <!-- Honeypot: bots fill it, humans never see it -->
++        <input type="text" name="_honey" style="display: none" tabindex="-1" autocomplete="off" />
++
++        <label>
++          <span>Name <span class="optional">(optional)</span></span>
++          <input type="text" name="name" autocomplete="name" />
++        </label>
++
++        <label>
++          <span>Email <span class="optional">(optional — if you'd like a reply)</span></span>
++          <input type="email" name="_replyto" autocomplete="email" />
++        </label>
++
++        <label>
++          <span>Message</span>
++          <textarea name="message" required placeholder="What's on your mind?"></textarea>
++        </label>
++
++        <button type="submit">Send feedback</button>
++      </form>
++
++      <footer>
++        A project by
++        <a href="https://sphericalharmonics.org/">Spherical Harmonics</a> ·
++        <a href="https://donate.cityedit.org">Donate</a>
++      </footer>
++    </div>
++
++    <script>
++      // FormSubmit redirects back here with ?sent=1 after a successful send.
++      if (new URLSearchParams(location.search).has("sent")) {
++        document.getElementById("sent").classList.add("visible");
++        document.getElementById("feedback-form").reset();
++      }
++    </script>
++  </body>
++</html>
+diff --git a/client-react/src/components/Landing/Landing.tsx b/client-react/src/components/Landing/Landing.tsx
+index 7418f00..3847b1c 100644
+--- a/client-react/src/components/Landing/Landing.tsx
++++ b/client-react/src/components/Landing/Landing.tsx
+@@ -216,7 +216,10 @@ export function Landing() {
+       <footer className="landing-footer">
+         <span>© {year} City Edit. All rights reserved.</span>
+         <a href="https://sphericalharmonics.org/" className="landing-footer-link">
+-          sphericalharmonics.org
++          About
++        </a>
++        <a href="https://feedback.cityedit.org" className="landing-footer-link">
++          Feedback
+         </a>
+         <a href="https://donate.cityedit.org" className="landing-footer-link">
+           Donate
+diff --git a/client-react/src/components/TopBar/TopBar.css b/client-react/src/components/TopBar/TopBar.css
+index 66d3dbd..a51dd9e 100644
+--- a/client-react/src/components/TopBar/TopBar.css
++++ b/client-react/src/components/TopBar/TopBar.css
+@@ -58,7 +58,7 @@
+   }
+ }
+ 
+-/* How-it-Works + Donate share one .topbar-actions grid cell */
++/* Feedback + About + Donate share one .topbar-actions grid cell */
+ .header-btn-group {
+   display: flex;
+   align-items: stretch;
+@@ -68,11 +68,21 @@
+ 
+ .header-btn-group .btn-header {
+   flex: 1;
++  text-decoration: none;
+ }
+ 
+-/* Donate is an external link styled as a header button */
++/* Donate carries the active map's accent so it pops against its neighbours.
++   Every theme accent is bright enough that near-black text keeps contrast. */
+ .btn-donate {
+-  text-decoration: none;
++  background: var(--accent);
++  border-color: var(--accent);
++  color: #111;
++  font-weight: 600;
++}
++
++.btn-donate:hover:not(:disabled) {
++  background: var(--accent);
++  filter: brightness(1.12);
+ }
+ 
+ /* Loading state pulse animation for route fields */
+diff --git a/client-react/src/components/TopBar/TopBar.tsx b/client-react/src/components/TopBar/TopBar.tsx
+index 073a108..743a6f5 100644
+--- a/client-react/src/components/TopBar/TopBar.tsx
++++ b/client-react/src/components/TopBar/TopBar.tsx
+@@ -219,14 +219,25 @@ export const TopBar = memo(function TopBar() {
+           </div>
+ 
+           {/* One grid cell: .topbar-actions is a strict 2×2 grid (4-across in
+-              landscape), so both buttons share a wrapper to keep 4 children. */}
++              landscape), so the three links share a wrapper to keep 4 children. */}
+           <div className="header-btn-group">
+-            <button
++            <a
+               className="btn-header"
+-              onClick={() => setShowHowItWorks(true)}
++              href="https://feedback.cityedit.org"
++              target="_blank"
++              rel="noopener noreferrer"
+             >
+-              How it Works
+-            </button>
++              Feedback
++            </a>
++
++            <a
++              className="btn-header"
++              href="https://sphericalharmonics.org"
++              target="_blank"
++              rel="noopener noreferrer"
++            >
++              About
++            </a>
+ 
+             <a
+               className="btn-header btn-donate"
+@@ -244,6 +255,13 @@ export const TopBar = memo(function TopBar() {
+           </div>
+ 
+           <div className="actions-group">
++            <button
++              className="btn-header"
++              onClick={() => setShowHowItWorks(true)}
++            >
++              How it Works
++            </button>
++
+             <div className={`calculating-indicator ${isLoading && start.coords && end.coords ? "active" : ""}`}>
+               <div className="spinner"></div>
+               <span>Calculating...</span>
+diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css
+index 5963dde..78685e3 100644
+--- a/client-react/src/styles/globals.css
++++ b/client-react/src/styles/globals.css
+@@ -293,7 +293,7 @@ body {
+ 
+ 
+ /* ==========================================================================
+-   Topbar Actions (2×2 grid: Mode/HowItWorks over VoteType/Actions)
++   Topbar Actions (2×2 grid: Mode/Feedback·About·Donate over VoteType/Actions)
+    ========================================================================== */
+ 
+ .topbar-actions {
+@@ -1414,17 +1414,12 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
+   }
+ 
+   /* The Cast/Clear group stays in the DOM (just .hidden-reserve'd) with no
+-     selection, so it always sizes the right column — Mode and How-it-Works keep
++     selection, so it always sizes the right column and the header links keep
+      a fixed *horizontal* width instead of shrinking when Cast/Clear later
+-     appear. The second row itself collapses to 0 height (no row-gap) until a
+-     selection, so it pops down from the banner only when the controls show. */
++     appear. The second row used to collapse to 0 until a selection, but it
++     now hosts the always-visible How-it-Works button, so it stays open. */
+   .topbar-actions {
+     column-gap: var(--space-2);
+-    row-gap: 0;
+-    grid-template-rows: var(--control-height) 0;
+-  }
+-
+-  .topbar-actions.has-selection {
+     row-gap: var(--space-2);
+     grid-template-rows: var(--control-height) var(--control-height);
+   }
+diff --git a/deploy/nginx-cloudrun.conf b/deploy/nginx-cloudrun.conf
+index 3757d92..9debb1a 100644
+--- a/deploy/nginx-cloudrun.conf
++++ b/deploy/nginx-cloudrun.conf
+@@ -66,6 +66,19 @@ http {
+         return 301 https://donorbox.org/support-spherical-harmonics;
+     }
+ 
++    # feedback.cityedit.org serves only the static feedback form (baked into
++    # the client build as /feedback.html); every path lands on the form.
++    server {
++        listen 8080;
++        server_name feedback.cityedit.org;
++        root /var/www/html;
++
++        location / {
++            try_files /feedback.html =404;
++            add_header Cache-Control "no-cache";
++        }
++    }
++
+     server {
+         listen 8080 default_server;
+ 
+diff --git a/terraform/main.tf b/terraform/main.tf
+index 39e5335..e31763b 100644
+--- a/terraform/main.tf
++++ b/terraform/main.tf
+@@ -485,6 +485,7 @@ variable "custom_domains" {
+     "ebikes.cityedit.org",
+     "demo.cityedit.org",
+     "donate.cityedit.org",
++    "feedback.cityedit.org",
+   ]
+ }
+ 

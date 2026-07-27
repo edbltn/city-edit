@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Feedback — City Edit</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Red+Hat+Mono:ital,wght@0,300..700;1,300..700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --font-main: "Red Hat Mono", "Courier New", Courier, monospace;
+        --paper: #0d0d0d;
+        --ink: #d4d4d4;
+        --hairline: rgba(212, 212, 212, 0.2);
+        --hover-bg: rgba(212, 212, 212, 0.06);
+        --accent: #e0a23a;
+        --space-2: 8px;
+        --space-3: 12px;
+        --space-4: 16px;
+        --space-6: 24px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--font-main);
+        min-height: 100%;
+      }
+
+      .wrap {
+        max-width: 560px;
+        margin: 0 auto;
+        padding: 48px var(--space-4) 64px;
+      }
+
+      .brand {
+        display: inline-block;
+        color: var(--ink);
+        text-decoration: none;
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        border: 1px solid var(--hairline);
+        padding: 6px 10px;
+      }
+
+      .brand:hover {
+        background: var(--hover-bg);
+      }
+
+      h1 {
+        font-size: 22px;
+        font-weight: 600;
+        margin: var(--space-6) 0 var(--space-2);
+      }
+
+      p.lede {
+        font-size: 14px;
+        line-height: 1.6;
+        margin: 0 0 var(--space-6);
+        opacity: 0.8;
+      }
+
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
+
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+      }
+
+      label .optional {
+        opacity: 0.5;
+      }
+
+      input,
+      textarea {
+        font-family: var(--font-main);
+        font-size: 15px;
+        color: var(--ink);
+        background: transparent;
+        border: 1px solid var(--hairline);
+        border-radius: 0;
+        padding: 10px var(--space-3);
+      }
+
+      textarea {
+        min-height: 160px;
+        resize: vertical;
+      }
+
+      input:focus,
+      textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+
+      button[type="submit"] {
+        font-family: var(--font-main);
+        font-size: 15px;
+        font-weight: 600;
+        color: #111;
+        background: var(--accent);
+        border: 1px solid var(--accent);
+        border-radius: 0;
+        padding: 12px var(--space-4);
+        cursor: pointer;
+        align-self: flex-start;
+      }
+
+      button[type="submit"]:hover {
+        filter: brightness(1.1);
+      }
+
+      .sent {
+        display: none;
+        border: 1px solid var(--accent);
+        color: var(--ink);
+        padding: var(--space-3) var(--space-4);
+        font-size: 14px;
+        line-height: 1.5;
+        margin-bottom: var(--space-6);
+      }
+
+      .sent.visible {
+        display: block;
+      }
+
+      footer {
+        margin-top: 48px;
+        font-size: 12px;
+        opacity: 0.5;
+      }
+
+      footer a {
+        color: var(--ink);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <a class="brand" href="https://cityedit.org">← CITY EDIT</a>
+
+      <h1>Feedback</h1>
+      <p class="lede">
+        Found a bug, have an idea, or want a map for your city? Tell us — your
+        message goes straight to the people who build City Edit.
+      </p>
+
+      <div id="sent" class="sent">
+        Thanks — your feedback is on its way. We read everything.
+      </div>
+
+      <form
+        id="feedback-form"
+        action="https://formsubmit.co/eric@sphericalharmonics.org"
+        method="POST"
+      >
+        <input type="hidden" name="_cc" value="brook@sphericalharmonics.org" />
+        <input type="hidden" name="_subject" value="City Edit feedback" />
+        <input type="hidden" name="_template" value="box" />
+        <input type="hidden" name="_captcha" value="false" />
+        <input type="hidden" name="_next" value="https://feedback.cityedit.org/?sent=1" />
+        <!-- Honeypot: bots fill it, humans never see it -->
+        <input type="text" name="_honey" style="display: none" tabindex="-1" autocomplete="off" />
+
+        <label>
+          <span>Name <span class="optional">(optional)</span></span>
+          <input type="text" name="name" autocomplete="name" />
+        </label>
+
+        <label>
+          <span>Email <span class="optional">(optional — if you'd like a reply)</span></span>
+          <input type="email" name="_replyto" autocomplete="email" />
+        </label>
+
+        <label>
+          <span>Message</span>
+          <textarea name="message" required placeholder="What's on your mind?"></textarea>
+        </label>
+
+        <button type="submit">Send feedback</button>
+      </form>
+
+      <footer>
+        A project by
+        <a href="https://sphericalharmonics.org/">Spherical Harmonics</a> ·
+        <a href="https://donate.cityedit.org">Donate</a>
+      </footer>
+    </div>
+
+    <script>
+      // FormSubmit redirects back here with ?sent=1 after a successful send.
+      if (new URLSearchParams(location.search).has("sent")) {
+        document.getElementById("sent").classList.add("visible");
+        document.getElementById("feedback-form").reset();
+      }
+    </script>
+  </body>
+</html>

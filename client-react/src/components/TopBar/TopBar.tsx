@@ -219,14 +219,25 @@ export const TopBar = memo(function TopBar() {
           </div>
 
           {/* One grid cell: .topbar-actions is a strict 2×2 grid (4-across in
-              landscape), so both buttons share a wrapper to keep 4 children. */}
+              landscape), so the three links share a wrapper to keep 4 children. */}
           <div className="header-btn-group">
-            <button
+            <a
               className="btn-header"
-              onClick={() => setShowHowItWorks(true)}
+              href="https://feedback.cityedit.org"
+              target="_blank"
+              rel="noopener noreferrer"
             >
-              How it Works
-            </button>
+              Feedback
+            </a>
+
+            <a
+              className="btn-header"
+              href="https://sphericalharmonics.org"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              About
+            </a>
 
             <a
               className="btn-header btn-donate"
@@ -244,6 +255,13 @@ export const TopBar = memo(function TopBar() {
           </div>
 
           <div className="actions-group">
+            <button
+              className="btn-header"
+              onClick={() => setShowHowItWorks(true)}
+            >
+              How it Works
+            </button>
+
             <div className={`calculating-indicator ${isLoading && start.coords && end.coords ? "active" : ""}`}>
               <div className="spinner"></div>
               <span>Calculating...</span>

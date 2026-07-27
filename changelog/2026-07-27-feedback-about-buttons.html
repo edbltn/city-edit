@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>feedback.cityedit.org + the header link row (Feedback · About · Donate) — 2026-07-27</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; position: relative; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>feedback.cityedit.org + the header link row (Feedback · About · Donate)</h1>
+    <div class="dateline">2026-07-27 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#feedback-subdomain">1</a>
+<a href="#header-row">2</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">A way for users to reach the team: feedback.cityedit.org serves a form whose
+  submissions email eric@ and brook@sphericalharmonics.org, and the map-page header grew a
+  Feedback · About · Donate link row (Donate in the map theme's accent) with How-it-Works moved
+  down beside Cast/Clear.</p>
+
+  
+    <section class="card" id="feedback-subdomain">
+      <div class="tag">nginx + terraform + static page</div>
+      <h2>1 · feedback.cityedit.org — a form that emails the team</h2>
+      <h3>Goal</h3>
+      <p>There was no way for users to reach us. Donate already had the pattern: a <code>*.cityedit.org</code> subdomain mapped to the same Cloud Run service and answered at the nginx layer (donate 301-redirects to Donorbox). Feedback follows it, but serves a real page: a form whose submissions land in <code>eric@sphericalharmonics.org</code> + <code>brook@sphericalharmonics.org</code>.</p>
+      <h3>Design</h3>
+      <ul><li>The server has no SMTP/email stack, and adding one (plus a queue, spam handling, secrets) for a feedback form is overkill. <strong>FormSubmit.co</strong> is a no-backend form-to-email relay: the static page POSTs to <code>formsubmit.co/eric@sphericalharmonics.org</code> with a hidden <code>_cc</code> to Brook, a honeypot field for bots, and a <code>_next</code> redirect back to the page (<code>?sent=1</code> shows the thank-you banner).</li>
+<li>The page itself is <code>client-react/public/feedback.html</code> — Vite copies <code>public/</code> into <code>dist/</code> verbatim, so it ships inside the existing client build with zero new build steps. It reuses the app's terminal aesthetic (Red Hat Mono, #0d0d0d paper, hairline borders, amber accent).</li>
+<li>nginx answers the subdomain before the catch-all SPA server: every path on <code>feedback.cityedit.org</code> lands on <code>/feedback.html</code>.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>New static form page</strong> <code>client-react/public/feedback.html</code> — name (optional), reply-to email (optional), message; posts to FormSubmit with <code>_cc</code>, <code>_subject</code>, honeypot, and a success banner on return.</li>
+<li><strong>nginx server block</strong> for <code>feedback.cityedit.org</code> in <code>deploy/nginx-cloudrun.conf</code>, mirroring the donate block's placement.</li>
+<li><strong>Terraform</strong>: <code>feedback.cityedit.org</code> added to <code>custom_domains</code>, so a targeted apply creates the Cloud Run domain mapping (the app service itself is never applied via terraform — see the deploy-landmines runbook).</li>
+<li><strong>One manual step</strong>: a Namecheap DNS CNAME <code>feedback → ghs.googlehosted.com</code> (DNS for cityedit.org is registrar-hosted, not in terraform).</li>
+<li><strong>One activation step</strong>: FormSubmit sends a one-time activation email to eric@sphericalharmonics.org on the first submission; until it's clicked, submissions aren't relayed.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/public/feedback.html — NEW: the form page</li>
+<li>deploy/nginx-cloudrun.conf — feedback.cityedit.org server block</li>
+<li>terraform/main.tf — custom_domains += feedback.cityedit.org</li></ul>
+    </section>
+    
+
+    <section class="card" id="header-row">
+      <div class="tag">React client</div>
+      <h2>2 · Header rework — Feedback · About · Donate on one line</h2>
+      <h3>Goal</h3>
+      <p>The map-page header had How-it-Works + Donate sharing a grid cell. Wanted: Feedback, About (→ sphericalharmonics.org), and Donate together on one line, Donate colored by the active map theme, and How-it-Works moved down to the Cast/Clear row. Same trio on the landing footer.</p>
+      <h3>Design</h3>
+      <ul><li><code>.topbar-actions</code> is a strict 2×2 grid (Mode / header links over Vote / actions), so the three links stay wrapped in <code>.header-btn-group</code> to keep 4 grid children, and How-it-Works simply moves into <code>.actions-group</code> (the Cast/Clear cell).</li>
+<li>On mobile (≤1080px) the second grid row used to collapse to 0 height until a selection existed — it held only the then-hidden Cast/Clear controls. With the always-visible How-it-Works button living there, the collapse would hide it, so the row now stays open.</li>
+<li>Theme coloring: <code>ThemeContext</code> already injects the active map style's accent as <code>--accent</code> on the document root (with an amber fallback pre-JS). Every theme accent is a bright mid-tone, so near-black text keeps ≥4.4:1 contrast on all of them — the Donate button just paints <code>background: var(--accent)</code>.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>TopBar.tsx</strong>: header cell now renders Feedback (→ feedback.cityedit.org), About (→ sphericalharmonics.org), Donate — all external links; the How-it-Works <code>&lt;button&gt;</code> moved to the front of <code>.actions-group</code> on the Cast/Clear row (its modal state stays in TopBar).</li>
+<li><strong>TopBar.css</strong>: <code>.btn-donate</code> gets the accent background, accent border, near-black bold label, and a brightness hover; links in the group share <code>text-decoration: none</code>.</li>
+<li><strong>globals.css</strong>: the ≤1080px second-row collapse (<code>grid-template-rows … 0</code> + <code>.has-selection</code> override) replaced by an always-open second row, since How-it-Works now lives there.</li>
+<li><strong>Landing.tsx</strong>: footer now reads About · Feedback · Donate (the old <code>sphericalharmonics.org</code> label became About).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/TopBar/TopBar.tsx — link trio + How-it-Works move</li>
+<li>client-react/src/components/TopBar/TopBar.css — themed .btn-donate</li>
+<li>client-react/src/styles/globals.css — mobile row-2 always open</li>
+<li>client-react/src/components/Landing/Landing.tsx — footer About/Feedback/Donate</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Frontend: <code>tsc --noEmit</code> — clean; <code>vite build</code> — clean, and <code>dist/feedback.html</code> present in the bundle.</li>
+<li>nginx: config syntax-checked in a Debian container (<code>nginx -t</code>, brotli module lines stripped for the check) — OK.</li>
+<li>Live dev (localhost:3000): walkways map shows Feedback / About / Donate on one line with an amber Donate; How-it-Works renders on the Cast/Clear row; landing footer shows About · Feedback · Donate; /feedback.html renders the styled form.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li><strong>Click the FormSubmit activation link</strong> — submit the form once on feedback.cityedit.org, then open eric@sphericalharmonics.org's inbox and confirm the FormSubmit activation email; until it's clicked no feedback is relayed. Then submit again and confirm both eric@ and brook@ receive it.</li>
+<li><strong>Add the DNS record at Namecheap</strong>: CNAME <code>feedback</code> → <code>ghs.googlehosted.com</code> (same as donate). Until then feedback.cityedit.org won't resolve; the buttons will 404 at the DNS level.</li>
+<li>On a map page, confirm the Donate button picks up each theme's accent (amber on walkways, green on bikes) and the label stays readable.</li>
+<li>On a phone-width window, confirm How-it-Works is visible below the mode row <em>before</em> any selection is made, and that Cast/Clear appear next to it after selecting a route.</li>
+<li>Open the How-it-Works modal from its new spot; confirm it still opens/closes.</li>
+<li>On the landing page footer, click About / Feedback / Donate and confirm the three targets.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/public/feedback.html</span>
+            <span class="stat"><span class="d-add">+218</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill on">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client static assets · client-react/public/</span>
+        <span class="ctx-sum">files Vite copies verbatim into dist/ — favicons, logo, previews, and now the feedback page</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">feedback.html</span>
+        <span class="ctx-sum">NEW FILE ~230 LOC — standalone form page in the app&#x27;s terminal aesthetic; no JS framework</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">&lt;head&gt; — fonts + inline styles</span><span class="ol-sum">Red Hat Mono, dark paper palette, form styling</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Header + lede</span><span class="ol-sum">← CITY EDIT link, page intro</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Success banner</span><span class="ol-sum">hidden div shown when ?sent=1</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">The form</span><span class="ol-sum">FormSubmit POST: _cc, _subject, honeypot, name/email/message</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Footer + script</span><span class="ol-sum">Spherical Harmonics / Donate links; ?sent=1 banner toggle</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Whole file is new — the feedback.cityedit.org page.</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/public/feedback.html b/client-react/public/feedback.html</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..0e6b15c</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/public/feedback.html</span>
+<span class="d-hunk">@@ -0,0 +1,218 @@</span>
+<span class="d-add">+&lt;!DOCTYPE html&gt;</span>
+<span class="d-add">+&lt;html lang=&quot;en&quot;&gt;</span>
+<span class="d-add">+  &lt;head&gt;</span>
+<span class="d-add">+    &lt;meta charset=&quot;UTF-8&quot; /&gt;</span>
+<span class="d-add">+    &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot; /&gt;</span>
+<span class="d-add">+    &lt;title&gt;Feedback — City Edit&lt;/title&gt;</span>
+<span class="d-add">+    &lt;link rel=&quot;icon&quot; type=&quot;image/svg+xml&quot; href=&quot;/favicon.svg&quot; /&gt;</span>
+<span class="d-add">+    &lt;link rel=&quot;icon&quot; type=&quot;image/png&quot; sizes=&quot;32x32&quot; href=&quot;/favicon-32x32.png&quot; /&gt;</span>
+<span class="d-add">+    &lt;link rel=&quot;preconnect&quot; href=&quot;https://fonts.googleapis.com&quot; /&gt;</span>
+<span class="d-add">+    &lt;link rel=&quot;preconnect&quot; href=&quot;https://fonts.gstatic.com&quot; crossorigin /&gt;</span>
+<span class="d-add">+    &lt;link</span>
+<span class="d-add">+      href=&quot;https://fonts.googleapis.com/css2?family=Red+Hat+Mono:ital,wght@0,300..700;1,300..700&amp;display=swap&quot;</span>
+<span class="d-add">+      rel=&quot;stylesheet&quot;</span>
+<span class="d-add">+    /&gt;</span>
+<span class="d-add">+    &lt;style&gt;</span>
+<span class="d-add">+      :root {</span>
+<span class="d-add">+        --font-main: &quot;Red Hat Mono&quot;, &quot;Courier New&quot;, Courier, monospace;</span>
+<span class="d-add">+        --paper: #0d0d0d;</span>
+<span class="d-add">+        --ink: #d4d4d4;</span>
+<span class="d-add">+        --hairline: rgba(212, 212, 212, 0.2);</span>
+<span class="d-add">+        --hover-bg: rgba(212, 212, 212, 0.06);</span>
+<span class="d-add">+        --accent: #e0a23a;</span>
+<span class="d-add">+        --space-2: 8px;</span>
+<span class="d-add">+        --space-3: 12px;</span>
+<span class="d-add">+        --space-4: 16px;</span>
+<span class="d-add">+        --space-6: 24px;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      * {</span>
+<span class="d-add">+        box-sizing: border-box;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      html,</span>
+<span class="d-add">+      body {</span>
+<span class="d-add">+        margin: 0;</span>
+<span class="d-add">+        padding: 0;</span>
+<span class="d-add">+        background: var(--paper);</span>
+<span class="d-add">+        color: var(--ink);</span>
+<span class="d-add">+        font-family: var(--font-main);</span>
+<span class="d-add">+        min-height: 100%;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      .wrap {</span>
+<span class="d-add">+        max-width: 560px;</span>
+<span class="d-add">+        margin: 0 auto;</span>
+<span class="d-add">+        padding: 48px var(--space-4) 64px;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      .brand {</span>
+<span class="d-add">+        display: inline-block;</span>
+<span class="d-add">+        color: var(--ink);</span>
+<span class="d-add">+        text-decoration: none;</span>
+<span class="d-add">+        font-size: 13px;</span>
+<span class="d-add">+        letter-spacing: 0.08em;</span>
+<span class="d-add">+        border: 1px solid var(--hairline);</span>
+<span class="d-add">+        padding: 6px 10px;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      .brand:hover {</span>
+<span class="d-add">+        background: var(--hover-bg);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      h1 {</span>
+<span class="d-add">+        font-size: 22px;</span>
+<span class="d-add">+        font-weight: 600;</span>
+<span class="d-add">+        margin: var(--space-6) 0 var(--space-2);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      p.lede {</span>
+<span class="d-add">+        font-size: 14px;</span>
+<span class="d-add">+        line-height: 1.6;</span>
+<span class="d-add">+        margin: 0 0 var(--space-6);</span>
+<span class="d-add">+        opacity: 0.8;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      form {</span>
+<span class="d-add">+        display: flex;</span>
+<span class="d-add">+        flex-direction: column;</span>
+<span class="d-add">+        gap: var(--space-4);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      label {</span>
+<span class="d-add">+        display: flex;</span>
+<span class="d-add">+        flex-direction: column;</span>
+<span class="d-add">+        gap: var(--space-2);</span>
+<span class="d-add">+        font-size: 13px;</span>
+<span class="d-add">+        letter-spacing: 0.04em;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      label .optional {</span>
+<span class="d-add">+        opacity: 0.5;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      input,</span>
+<span class="d-add">+      textarea {</span>
+<span class="d-add">+        font-family: var(--font-main);</span>
+<span class="d-add">+        font-size: 15px;</span>
+<span class="d-add">+        color: var(--ink);</span>
+<span class="d-add">+        background: transparent;</span>
+<span class="d-add">+        border: 1px solid var(--hairline);</span>
+<span class="d-add">+        border-radius: 0;</span>
+<span class="d-add">+        padding: 10px var(--space-3);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      textarea {</span>
+<span class="d-add">+        min-height: 160px;</span>
+<span class="d-add">+        resize: vertical;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      input:focus,</span>
+<span class="d-add">+      textarea:focus {</span>
+<span class="d-add">+        outline: none;</span>
+<span class="d-add">+        border-color: var(--accent);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      button[type=&quot;submit&quot;] {</span>
+<span class="d-add">+        font-family: var(--font-main);</span>
+<span class="d-add">+        font-size: 15px;</span>
+<span class="d-add">+        font-weight: 600;</span>
+<span class="d-add">+        color: #111;</span>
+<span class="d-add">+        background: var(--accent);</span>
+<span class="d-add">+        border: 1px solid var(--accent);</span>
+<span class="d-add">+        border-radius: 0;</span>
+<span class="d-add">+        padding: 12px var(--space-4);</span>
+<span class="d-add">+        cursor: pointer;</span>
+<span class="d-add">+        align-self: flex-start;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      button[type=&quot;submit&quot;]:hover {</span>
+<span class="d-add">+        filter: brightness(1.1);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      .sent {</span>
+<span class="d-add">+        display: none;</span>
+<span class="d-add">+        border: 1px solid var(--accent);</span>
+<span class="d-add">+        color: var(--ink);</span>
+<span class="d-add">+        padding: var(--space-3) var(--space-4);</span>
+<span class="d-add">+        font-size: 14px;</span>
+<span class="d-add">+        line-height: 1.5;</span>
+<span class="d-add">+        margin-bottom: var(--space-6);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      .sent.visible {</span>
+<span class="d-add">+        display: block;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      footer {</span>
+<span class="d-add">+        margin-top: 48px;</span>
+<span class="d-add">+        font-size: 12px;</span>
+<span class="d-add">+        opacity: 0.5;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      footer a {</span>
+<span class="d-add">+        color: var(--ink);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    &lt;/style&gt;</span>
+<span class="d-add">+  &lt;/head&gt;</span>
+<span class="d-add">+  &lt;body&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;wrap&quot;&gt;</span>
+<span class="d-add">+      &lt;a class=&quot;brand&quot; href=&quot;https://cityedit.org&quot;&gt;← CITY EDIT&lt;/a&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+      &lt;h1&gt;Feedback&lt;/h1&gt;</span>
+<span class="d-add">+      &lt;p class=&quot;lede&quot;&gt;</span>
+<span class="d-add">+        Found a bug, have an idea, or want a map for your city? Tell us — your</span>
+<span class="d-add">+        message goes straight to the people who build City Edit.</span>
+<span class="d-add">+      &lt;/p&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+      &lt;div id=&quot;sent&quot; class=&quot;sent&quot;&gt;</span>
+<span class="d-add">+        Thanks — your feedback is on its way. We read everything.</span>
+<span class="d-add">+      &lt;/div&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+      &lt;form</span>
+<span class="d-add">+        id=&quot;feedback-form&quot;</span>
+<span class="d-add">+        action=&quot;https://formsubmit.co/eric@sphericalharmonics.org&quot;</span>
+<span class="d-add">+        method=&quot;POST&quot;</span>
+<span class="d-add">+      &gt;</span>
+<span class="d-add">+        &lt;input type=&quot;hidden&quot; name=&quot;_cc&quot; value=&quot;brook@sphericalharmonics.org&quot; /&gt;</span>
+<span class="d-add">+        &lt;input type=&quot;hidden&quot; name=&quot;_subject&quot; value=&quot;City Edit feedback&quot; /&gt;</span>
+<span class="d-add">+        &lt;input type=&quot;hidden&quot; name=&quot;_template&quot; value=&quot;box&quot; /&gt;</span>
+<span class="d-add">+        &lt;input type=&quot;hidden&quot; name=&quot;_captcha&quot; value=&quot;false&quot; /&gt;</span>
+<span class="d-add">+        &lt;input type=&quot;hidden&quot; name=&quot;_next&quot; value=&quot;https://feedback.cityedit.org/?sent=1&quot; /&gt;</span>
+<span class="d-add">+        &lt;!-- Honeypot: bots fill it, humans never see it --&gt;</span>
+<span class="d-add">+        &lt;input type=&quot;text&quot; name=&quot;_honey&quot; style=&quot;display: none&quot; tabindex=&quot;-1&quot; autocomplete=&quot;off&quot; /&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+        &lt;label&gt;</span>
+<span class="d-add">+          &lt;span&gt;Name &lt;span class=&quot;optional&quot;&gt;(optional)&lt;/span&gt;&lt;/span&gt;</span>
+<span class="d-add">+          &lt;input type=&quot;text&quot; name=&quot;name&quot; autocomplete=&quot;name&quot; /&gt;</span>
+<span class="d-add">+        &lt;/label&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+        &lt;label&gt;</span>
+<span class="d-add">+          &lt;span&gt;Email &lt;span class=&quot;optional&quot;&gt;(optional — if you&#x27;d like a reply)&lt;/span&gt;&lt;/span&gt;</span>
+<span class="d-add">+          &lt;input type=&quot;email&quot; name=&quot;_replyto&quot; autocomplete=&quot;email&quot; /&gt;</span>
+<span class="d-add">+        &lt;/label&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+        &lt;label&gt;</span>
+<span class="d-add">+          &lt;span&gt;Message&lt;/span&gt;</span>
+<span class="d-add">+          &lt;textarea name=&quot;message&quot; required placeholder=&quot;What&#x27;s on your mind?&quot;&gt;&lt;/textarea&gt;</span>
+<span class="d-add">+        &lt;/label&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+        &lt;button type=&quot;submit&quot;&gt;Send feedback&lt;/button&gt;</span>
+<span class="d-add">+      &lt;/form&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+      &lt;footer&gt;</span>
+<span class="d-add">+        A project by</span>
+<span class="d-add">+        &lt;a href=&quot;https://sphericalharmonics.org/&quot;&gt;Spherical Harmonics&lt;/a&gt; ·</span>
+<span class="d-add">+        &lt;a href=&quot;https://donate.cityedit.org&quot;&gt;Donate&lt;/a&gt;</span>
+<span class="d-add">+      &lt;/footer&gt;</span>
+<span class="d-add">+    &lt;/div&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    &lt;script&gt;</span>
+<span class="d-add">+      // FormSubmit redirects back here with ?sent=1 after a successful send.</span>
+<span class="d-add">+      if (new URLSearchParams(location.search).has(&quot;sent&quot;)) {</span>
+<span class="d-add">+        document.getElementById(&quot;sent&quot;).classList.add(&quot;visible&quot;);</span>
+<span class="d-add">+        document.getElementById(&quot;feedback-form&quot;).reset();</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    &lt;/script&gt;</span>
+<span class="d-add">+  &lt;/body&gt;</span>
+<span class="d-add">+&lt;/html&gt;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/Landing/Landing.tsx</span>
+            <span class="stat"><span class="d-add">+4</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/Landing</span>
+        <span class="ctx-sum">the apex-domain map picker (cards grid + footer)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Landing.tsx</span>
+        <span class="ctx-sum">~230 LOC — search, propose-a-map, map cards, footer</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">search + cards grid</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">footer</span><span class="ol-sum">© line + About · Feedback · Donate</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>footer links — sphericalharmonics.org relabeled About; + Feedback → feedback.cityedit.org</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/Landing/Landing.tsx b/client-react/src/components/Landing/Landing.tsx</span>
+<span class="d-meta">index 7418f00..3847b1c 100644</span>
+<span class="d-meta">--- a/client-react/src/components/Landing/Landing.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/Landing/Landing.tsx</span>
+<span class="d-hunk">@@ -216,7 +216,10 @@ export function Landing() {</span>
+<span class="d-ctx">       &lt;footer className=&quot;landing-footer&quot;&gt;</span>
+<span class="d-ctx">         &lt;span&gt;© {year} City Edit. All rights reserved.&lt;/span&gt;</span>
+<span class="d-ctx">         &lt;a href=&quot;https://sphericalharmonics.org/&quot; className=&quot;landing-footer-link&quot;&gt;</span>
+<span class="d-del">-          sphericalharmonics.org</span>
+<span class="d-add">+          About</span>
+<span class="d-add">+        &lt;/a&gt;</span>
+<span class="d-add">+        &lt;a href=&quot;https://feedback.cityedit.org&quot; className=&quot;landing-footer-link&quot;&gt;</span>
+<span class="d-add">+          Feedback</span>
+<span class="d-ctx">         &lt;/a&gt;</span>
+<span class="d-ctx">         &lt;a href=&quot;https://donate.cityedit.org&quot; className=&quot;landing-footer-link&quot;&gt;</span>
+<span class="d-ctx">           Donate</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/TopBar/TopBar.css</span>
+            <span class="stat"><span class="d-add">+13</span> / <span class="d-del">-3</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/TopBar</span>
+        <span class="ctx-sum">topbar-specific styles (logo, header link group)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">TopBar.css</span>
+        <span class="ctx-sum">~100 LOC — logo, mobile banner, header button group</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">logo + mobile banner</span><span class="ol-sum">incl. light-basemap invert</span></li><li class="changed"><span class="ol-label">.header-btn-group</span><span class="ol-sum">flex cell; links share text-decoration:none</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.btn-donate</span><span class="ol-sum">NEW look — accent bg/border, near-black bold label, brightness hover</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">loading pulse</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>.header-btn-group .btn-header — + text-decoration:none (all three are links now)</li><li>.btn-donate — background/border var(--accent), color #111, font-weight 600, hover brightness(1.12)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/TopBar/TopBar.css b/client-react/src/components/TopBar/TopBar.css</span>
+<span class="d-meta">index 66d3dbd..a51dd9e 100644</span>
+<span class="d-meta">--- a/client-react/src/components/TopBar/TopBar.css</span>
+<span class="d-meta">+++ b/client-react/src/components/TopBar/TopBar.css</span>
+<span class="d-hunk">@@ -58,7 +58,7 @@</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/* How-it-Works + Donate share one .topbar-actions grid cell */</span>
+<span class="d-add">+/* Feedback + About + Donate share one .topbar-actions grid cell */</span>
+<span class="d-ctx"> .header-btn-group {</span>
+<span class="d-ctx">   display: flex;</span>
+<span class="d-ctx">   align-items: stretch;</span>
+<span class="d-hunk">@@ -68,11 +68,21 @@</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> .header-btn-group .btn-header {</span>
+<span class="d-ctx">   flex: 1;</span>
+<span class="d-add">+  text-decoration: none;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/* Donate is an external link styled as a header button */</span>
+<span class="d-add">+/* Donate carries the active map&#x27;s accent so it pops against its neighbours.</span>
+<span class="d-add">+   Every theme accent is bright enough that near-black text keeps contrast. */</span>
+<span class="d-ctx"> .btn-donate {</span>
+<span class="d-del">-  text-decoration: none;</span>
+<span class="d-add">+  background: var(--accent);</span>
+<span class="d-add">+  border-color: var(--accent);</span>
+<span class="d-add">+  color: #111;</span>
+<span class="d-add">+  font-weight: 600;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.btn-donate:hover:not(:disabled) {</span>
+<span class="d-add">+  background: var(--accent);</span>
+<span class="d-add">+  filter: brightness(1.12);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /* Loading state pulse animation for route fields */</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/TopBar/TopBar.tsx</span>
+            <span class="stat"><span class="d-add">+23</span> / <span class="d-del">-5</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · components/TopBar</span>
+        <span class="ctx-sum">the map page header: legend, mode/vote switchers, cast controls, header links</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">TopBar.tsx</span>
+        <span class="ctx-sum">~310 LOC — one component rendering the whole topbar grid</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Logo + mobile banner</span><span class="ol-sum">landing links</span></li><li class="dim"><span class="ol-label">topbar-legend</span><span class="ol-sum">start/end tools, selection, votes swatch</span></li><li class="dim"><span class="ol-label">mode-switcher-group</span><span class="ol-sum">Mode: dropdown</span></li><li class="changed"><span class="ol-label">header-btn-group</span><span class="ol-sum">now Feedback · About · Donate links</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">vote-switcher-group</span><span class="ol-sum">Vote: selector</span></li><li class="changed"><span class="ol-label">actions-group</span><span class="ol-sum">How-it-Works (moved here) + calculating + Cast/Clear</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">HowItWorksModal</span><span class="ol-sum">state unchanged, still owned here</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>header-btn-group → three external &lt;a&gt; links (feedback / sphericalharmonics / donate)</li><li>actions-group → How-it-Works &lt;button&gt; prepended before the calculating indicator</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/TopBar/TopBar.tsx b/client-react/src/components/TopBar/TopBar.tsx</span>
+<span class="d-meta">index 073a108..743a6f5 100644</span>
+<span class="d-meta">--- a/client-react/src/components/TopBar/TopBar.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/TopBar/TopBar.tsx</span>
+<span class="d-hunk">@@ -219,14 +219,25 @@ export const TopBar = memo(function TopBar() {</span>
+<span class="d-ctx">           &lt;/div&gt;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">           {/* One grid cell: .topbar-actions is a strict 2×2 grid (4-across in</span>
+<span class="d-del">-              landscape), so both buttons share a wrapper to keep 4 children. */}</span>
+<span class="d-add">+              landscape), so the three links share a wrapper to keep 4 children. */}</span>
+<span class="d-ctx">           &lt;div className=&quot;header-btn-group&quot;&gt;</span>
+<span class="d-del">-            &lt;button</span>
+<span class="d-add">+            &lt;a</span>
+<span class="d-ctx">               className=&quot;btn-header&quot;</span>
+<span class="d-del">-              onClick={() =&gt; setShowHowItWorks(true)}</span>
+<span class="d-add">+              href=&quot;https://feedback.cityedit.org&quot;</span>
+<span class="d-add">+              target=&quot;_blank&quot;</span>
+<span class="d-add">+              rel=&quot;noopener noreferrer&quot;</span>
+<span class="d-ctx">             &gt;</span>
+<span class="d-del">-              How it Works</span>
+<span class="d-del">-            &lt;/button&gt;</span>
+<span class="d-add">+              Feedback</span>
+<span class="d-add">+            &lt;/a&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+            &lt;a</span>
+<span class="d-add">+              className=&quot;btn-header&quot;</span>
+<span class="d-add">+              href=&quot;https://sphericalharmonics.org&quot;</span>
+<span class="d-add">+              target=&quot;_blank&quot;</span>
+<span class="d-add">+              rel=&quot;noopener noreferrer&quot;</span>
+<span class="d-add">+            &gt;</span>
+<span class="d-add">+              About</span>
+<span class="d-add">+            &lt;/a&gt;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">             &lt;a</span>
+<span class="d-ctx">               className=&quot;btn-header btn-donate&quot;</span>
+<span class="d-hunk">@@ -244,6 +255,13 @@ export const TopBar = memo(function TopBar() {</span>
+<span class="d-ctx">           &lt;/div&gt;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">           &lt;div className=&quot;actions-group&quot;&gt;</span>
+<span class="d-add">+            &lt;button</span>
+<span class="d-add">+              className=&quot;btn-header&quot;</span>
+<span class="d-add">+              onClick={() =&gt; setShowHowItWorks(true)}</span>
+<span class="d-add">+            &gt;</span>
+<span class="d-add">+              How it Works</span>
+<span class="d-add">+            &lt;/button&gt;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">             &lt;div className={`calculating-indicator ${isLoading &amp;&amp; start.coords &amp;&amp; end.coords ? &quot;active&quot; : &quot;&quot;}`}&gt;</span>
+<span class="d-ctx">               &lt;div className=&quot;spinner&quot;&gt;&lt;/div&gt;</span>
+<span class="d-ctx">               &lt;span&gt;Calculating...&lt;/span&gt;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/styles/globals.css</span>
+            <span class="stat"><span class="d-add">+4</span> / <span class="d-del">-9</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · styles/</span>
+        <span class="ctx-sum">design tokens + all shared layout (topbar grid, buttons, modals, breakpoints)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">globals.css</span>
+        <span class="ctx-sum">~1900 LOC — tokens, topbar grid, controls, media queries</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Design tokens</span><span class="ol-sum">structural + palette (--accent injected per map)</span></li><li class="dim"><span class="ol-label">.topbar-actions grid</span><span class="ol-sum">2×2: Mode/links over Vote/actions</span></li><li class="dim"><span class="ol-label">buttons / cast / legend</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">≤1080px media query</span><span class="ol-sum">second row no longer collapses to 0 pre-selection</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">≤400px + landscape queries</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>≤1080px .topbar-actions — grid-template-rows always two control-height rows; .has-selection override removed (How-it-Works lives in row 2 now)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
+<span class="d-meta">index 5963dde..78685e3 100644</span>
+<span class="d-meta">--- a/client-react/src/styles/globals.css</span>
+<span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
+<span class="d-hunk">@@ -293,7 +293,7 @@ body {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /* ==========================================================================</span>
+<span class="d-del">-   Topbar Actions (2×2 grid: Mode/HowItWorks over VoteType/Actions)</span>
+<span class="d-add">+   Topbar Actions (2×2 grid: Mode/Feedback·About·Donate over VoteType/Actions)</span>
+<span class="d-ctx">    ========================================================================== */</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> .topbar-actions {</span>
+<span class="d-hunk">@@ -1414,17 +1414,12 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   /* The Cast/Clear group stays in the DOM (just .hidden-reserve&#x27;d) with no</span>
+<span class="d-del">-     selection, so it always sizes the right column — Mode and How-it-Works keep</span>
+<span class="d-add">+     selection, so it always sizes the right column and the header links keep</span>
+<span class="d-ctx">      a fixed *horizontal* width instead of shrinking when Cast/Clear later</span>
+<span class="d-del">-     appear. The second row itself collapses to 0 height (no row-gap) until a</span>
+<span class="d-del">-     selection, so it pops down from the banner only when the controls show. */</span>
+<span class="d-add">+     appear. The second row used to collapse to 0 until a selection, but it</span>
+<span class="d-add">+     now hosts the always-visible How-it-Works button, so it stays open. */</span>
+<span class="d-ctx">   .topbar-actions {</span>
+<span class="d-ctx">     column-gap: var(--space-2);</span>
+<span class="d-del">-    row-gap: 0;</span>
+<span class="d-del">-    grid-template-rows: var(--control-height) 0;</span>
+<span class="d-del">-  }</span>
+<span class="d-del">-</span>
+<span class="d-del">-  .topbar-actions.has-selection {</span>
+<span class="d-ctx">     row-gap: var(--space-2);</span>
+<span class="d-ctx">     grid-template-rows: var(--control-height) var(--control-height);</span>
+<span class="d-ctx">   }</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">deploy/nginx-cloudrun.conf</span>
+            <span class="stat"><span class="d-add">+13</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill on">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · deploy/</span>
+        <span class="ctx-sum">the Cloud Run container&#x27;s nginx: subdomain answers, SPA fallback, tile + preview caching</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">nginx-cloudrun.conf</span>
+        <span class="ctx-sum">~200 LOC — http block: donate/feedback subdomain servers, then the default SPA server</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">worker/env + brotli modules</span><span class="ol-sum">gzip+brotli, staging robots map</span></li><li class="dim"><span class="ol-label">tile proxy cache</span><span class="ol-sum">/tmp keys_zone for block tiles</span></li><li class="dim"><span class="ol-label">donate.cityedit.org server</span><span class="ol-sum">301 → Donorbox</span></li><li class="changed"><span class="ol-label">feedback.cityedit.org server</span><span class="ol-sum">NEW — every path serves /feedback.html</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">default SPA server</span><span class="ol-sum">try_files → index.html, asset caching, previews proxy</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>server { server_name feedback.cityedit.org; try_files /feedback.html =404; } — placed with the donate block, before the catch-all</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/deploy/nginx-cloudrun.conf b/deploy/nginx-cloudrun.conf</span>
+<span class="d-meta">index 3757d92..9debb1a 100644</span>
+<span class="d-meta">--- a/deploy/nginx-cloudrun.conf</span>
+<span class="d-meta">+++ b/deploy/nginx-cloudrun.conf</span>
+<span class="d-hunk">@@ -66,6 +66,19 @@ http {</span>
+<span class="d-ctx">         return 301 https://donorbox.org/support-spherical-harmonics;</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    # feedback.cityedit.org serves only the static feedback form (baked into</span>
+<span class="d-add">+    # the client build as /feedback.html); every path lands on the form.</span>
+<span class="d-add">+    server {</span>
+<span class="d-add">+        listen 8080;</span>
+<span class="d-add">+        server_name feedback.cityedit.org;</span>
+<span class="d-add">+        root /var/www/html;</span>
+<span class="d-add">+</span>
+<span class="d-add">+        location / {</span>
+<span class="d-add">+            try_files /feedback.html =404;</span>
+<span class="d-add">+            add_header Cache-Control &quot;no-cache&quot;;</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     server {</span>
+<span class="d-ctx">         listen 8080 default_server;</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">terraform/main.tf</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Infra · terraform/</span>
+        <span class="ctx-sum">GCP project: Cloud Run service, SQL, Redis, domain mappings, schedulers</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">main.tf</span>
+        <span class="ctx-sum">~700 LOC — all prod infra; custom_domains drives one google_cloud_run_domain_mapping per subdomain</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Cloud Run service + IAM</span><span class="ol-sum">the app resource (never applied blind — env drift)</span></li><li class="changed"><span class="ol-label">custom_domains variable</span><span class="ol-sum">cityedit.org + subdomains → feedback added</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">google_cloud_run_domain_mapping.custom</span><span class="ol-sum">for_each over custom_domains</span></li><li class="dim"><span class="ol-label">outputs</span><span class="ol-sum">domain_mapping_dns lists registrar records</span></li><li class="dim"><span class="ol-label">OSM refresh scheduler</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>custom_domains default += &quot;feedback.cityedit.org&quot; — apply with -target=google_cloud_run_domain_mapping.custom</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/terraform/main.tf b/terraform/main.tf</span>
+<span class="d-meta">index 39e5335..e31763b 100644</span>
+<span class="d-meta">--- a/terraform/main.tf</span>
+<span class="d-meta">+++ b/terraform/main.tf</span>
+<span class="d-hunk">@@ -485,6 +485,7 @@ variable &quot;custom_domains&quot; {</span>
+<span class="d-ctx">     &quot;ebikes.cityedit.org&quot;,</span>
+<span class="d-ctx">     &quot;demo.cityedit.org&quot;,</span>
+<span class="d-ctx">     &quot;donate.cityedit.org&quot;,</span>
+<span class="d-add">+    &quot;feedback.cityedit.org&quot;,</span>
+<span class="d-ctx">   ]</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes-feedback-buttons.diff</code> by
+    <code>changelog/build_report_2026_07_27.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes-feedback-buttons.diff
+    &amp;&amp; python changelog/build_report_2026_07_27.py</code>.
+  </footer>
+</div>
+</body>
+</html>
