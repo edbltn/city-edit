@@ -38,7 +38,10 @@ MASTER = REPO / "data" / "analysis" / "intersections_master.csv"
 TEMPLATES = REPO / "data" / "posters" / "templates"
 OUT = REPO / "data" / "posters" / "out"
 RENDER = REPO / "scripts" / "render_poster.sh"
-BASE_URL = "https://cityedit.org/m/nyc-walkways"
+BASE_URL = "https://cityedit.org/m/nyc-intersections"
+# Preselected vote type carried in every QR: scanning lands with the pin set
+# and this (point-kind) type ready to cast.
+QR_VOTE_TYPE = "Fix dangerous intersection"
 
 
 def load_rows():
@@ -228,7 +231,8 @@ def main():
         outdir = OUT / name
         outdir.mkdir(parents=True, exist_ok=True)
         for i, r in enumerate(targets):
-            url = f'{args.base_url}?w={r["lat"]},{r["lon"]}'
+            from urllib.parse import quote_plus
+            url = f'{args.base_url}?w={r["lat"]},{r["lon"]}&vt={quote_plus(QR_VOTE_TYPE)}'
             tag = f"{i+1:02d}_{slug(r['name_osm'])}"
             qr_png = outdir / f"{tag}_qr.png"
             qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,
