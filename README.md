@@ -25,7 +25,7 @@ container rebuild.
 ```bash
 # Backend venv + config
 cd server
-cp .env.example .env          # defaults match the Docker services below
+cp .env.example .env          # note: server/.env.example — it lives in server/, not the repo root
 uv venv env && source env/bin/activate
 uv pip install -r requirements.txt
 cd ..
