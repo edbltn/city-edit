@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deep links center on their selection + the nyc-intersections map goes live — 2026-07-27</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Deep links center on their selection + the nyc-intersections map goes live</h1>
+    <div class="dateline">2026-07-27 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#map">1</a>
+<a href="#centering">2</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">The poster campaign gets its landing map and its links start working: nyc-intersections is live in prod (terracotta theme, 14 improvement vote types), all 94 poster QRs point at it, and deep links carrying only a selection now open centered on that intersection — deployed staging-first as digest d443e966, with a prod DB snapshot taken beforehand.</p>
+
+  
+    <section class="card" id="map">
+      <div class="tag">Production data</div>
+      <h2>1 · nyc-intersections — the poster campaign's landing map</h2>
+      <h3>Context</h3>
+      <p>The poster QR codes needed a production map dedicated to <em>fixing</em> dangerous intersections: a curated set of point- and route-based improvement vote types, in a look that reads as a safety campaign.</p>
+      <h3>Root cause / how it was done</h3>
+      <ul><li>Created via the app's own <code>POST /api/maps</code> (the Propose-a-Map path — no DB surgery, all cache invalidation for free): slug <code>nyc-intersections</code>, name “NYC Dangerous Intersections”, NYC streets network, <strong>terracotta</strong> style (the light basemap with the brick-red heat ramp), symbol <code>safety</code>.</li>
+<li>14 custom vote types — 9 point-kind (Fix dangerous intersection, Add pedestrian signal, Fix signal timing, Daylight this corner, Add curb extension, Add raised crosswalk, Add pedestrian refuge island, Ban turn on red, Add intersection lighting) and 5 route-kind (Add protected bike lane, Add traffic calming, Add crosswalk, Widen sidewalk, Lower speed limit). Labels shared with presets reuse their registry ids/kinds; new labels were stamped at creation so a later cast can't mis-kind them.</li>
+<li>Dry-run: the identical payload was created and exercised on local dev first (picker filtering, icons, a smoke vote, legend) before the prod POST.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Live at <code>https://cityedit.org/m/nyc-intersections</code> (201 on create; config round-trip verified: style/subtitle/network/14 vote types).</li>
+<li><strong>generate_posters.py</strong> now QR-links every poster to this map with <code>vt=Fix+dangerous+intersection</code> preselected — a scan lands with the pin set and one tap left to cast. All 94 posters + manifest regenerated.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>scripts/generate_posters.py — BASE_URL → nyc-intersections, vt param on QR deep links</li>
+<li>data/posters/out/ — 94 posters regenerated (gitignored; manifest.csv has final URLs)</li></ul>
+    </section>
+    
+
+    <section class="card" id="centering">
+      <div class="tag">Frontend · deployed</div>
+      <h2>2 · Deep links now center the camera on what they select</h2>
+      <h3>Context</h3>
+      <p>Visiting a shared link like <code>walkways.cityedit.org/?w=40.869434,-73.826116&amp;vt=Improve+sidewalk</code> restored the selection but opened at the citywide default view — the pin was set, invisible, five zoom levels away. Every poster QR would have landed users on a borough-scale map.</p>
+      <h3>Root cause / how it was done</h3>
+      <ul><li><code>getInitialMapView()</code> only ever read the explicit camera params (<code>z/lat/lng</code>). Selection restore (<code>?w=</code>) seeds the waypoints synchronously in RouteContext, but nothing ever moved the camera to them — links shared from the app happen to carry camera params, so only <em>hand-built</em> deep links (exactly what the QR generator makes) hit the gap.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>When no explicit camera params are present, the initial view now derives from the URL selection (<code>w=</code> or legacy <code>slat/slng</code>): a single waypoint centers at street zoom 17; a multi-waypoint route fits its bounding box (cos-corrected span → zoom 11–16). Explicit camera params still always win; <code>vt</code>-only links keep the default view. Pure core extracted as <code>computeInitialMapView()</code> with 8 unit tests (305 client tests green).</li>
+<li><strong>Deployed staging-first per runbook</strong>: prod DB snapshot (<code>~/city-edit-prod-backups/20260727-204128/</code>, full dump + CSVs + checksums) → overlay image on the serving digest base (no graph rebake, no resnap) → staging service verified live (camera centered on Co-op City Blvd &amp; Bartow Ave at street zoom) → same digest <code>d443e966…</code> promoted to prod (revision 00110, 100% traffic, asset hash matches staging). Prod verified on the original repro URL and on a poster QR link.</li>
+<li>Build hygiene: repo-root <code>/data/</code> (114 MB of analysis + posters) excluded from Cloud Build uploads — anchored so <code>server/data/</code> (baked into images) keeps uploading.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/utils/mapViewState.ts — viewFromSelectionParams + computeInitialMapView</li>
+<li>client-react/src/utils/mapViewState.test.ts — NEW: 8 tests on the pure core</li>
+<li>.gcloudignore — /data/ exclusion (root-anchored)</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Client: <code>vitest run</code> — 305 passed (8 new); <code>tsc -b</code> clean.</li>
+<li>Local dev: map created with the prod payload; picker shows the 9 point types on a point selection; smoke vote landed (legend + nonzero node/edge votes in /api/graph-votes).</li>
+<li>Staging: served the built digest, repro URL centered at street zoom on the named intersection, STAGING ribbon present.</li>
+<li>Prod: asset hash identical to staging post-promotion; repro URL and a poster QR URL both center correctly; new map serves with terracotta style and vt preselect.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Scan any poster QR from <code>data/posters/out/</code> — phone should open nyc-intersections centered on the intersection with “Fix dangerous intersection” selected.</li>
+<li>Open <code>https://walkways.cityedit.org/?w=40.869434,-73.826116&amp;vt=Improve+sidewalk</code> — should land at street zoom on Co-op City Blvd &amp; Bartow Ave.</li>
+<li>Open a link WITH camera params (share a view from the app) — explicit z/lat/lng must still win.</li>
+<li>Cast a real vote on <code>cityedit.org/m/nyc-intersections</code> and confirm the terracotta heat appears on the block.</li>
+<li>If the vote-type set needs tweaks, edit the map's custom_vote_types in the DB and rebuild Redis for the map (DB-only edits are invisible until then).</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">.gcloudignore</span>
+            <span class="stat"><span class="d-add">+4</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Build config · repo root</span>
+        <span class="ctx-sum">what uploads to Cloud Build</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">.gcloudignore</span>
+        <span class="ctx-sum">upload exclusions</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">exclusions</span><span class="ol-sum">env/node_modules/osm_data/… + NEW root-anchored /data/</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>/data/ excluded (root-anchored so server/data/ still uploads)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/.gcloudignore b/.gcloudignore</span>
+<span class="d-meta">index 4396d30..3be6105 100644</span>
+<span class="d-meta">--- a/.gcloudignore</span>
+<span class="d-meta">+++ b/.gcloudignore</span>
+<span class="d-hunk">@@ -55,3 +55,7 @@ screenshots/</span>
+<span class="d-ctx"> Screenshot*.png</span>
+<span class="d-ctx"> *.jpg</span>
+<span class="d-ctx"> /*.png</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Analysis + poster pipeline artifacts (repo-root data/ only — server/data/ is</span>
+<span class="d-add">+# baked into images and must keep uploading)</span>
+<span class="d-add">+/data/</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/mapViewState.test.ts</span>
+            <span class="stat"><span class="d-add">+57</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · utils/</span>
+        <span class="ctx-sum">unit tests</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">mapViewState.test.ts</span>
+        <span class="ctx-sum">NEW — 8 cases on computeInitialMapView</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">cases</span><span class="ol-sum">default / explicit params / single w / multi w bbox / legacy / precedence / vt-only / forced-corridor token</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Whole file is new.</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/mapViewState.test.ts b/client-react/src/utils/mapViewState.test.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..2273392</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/utils/mapViewState.test.ts</span>
+<span class="d-hunk">@@ -0,0 +1,57 @@</span>
+<span class="d-add">+import { describe, it, expect } from &quot;vitest&quot;;</span>
+<span class="d-add">+import { computeInitialMapView } from &quot;./mapViewState&quot;;</span>
+<span class="d-add">+import { CONFIG } from &quot;../config&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const view = (search: string) =&gt; computeInitialMapView(new URLSearchParams(search));</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;computeInitialMapView&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;uses the default view with no params&quot;, () =&gt; {</span>
+<span class="d-add">+    const v = view(&quot;&quot;);</span>
+<span class="d-add">+    expect(v.lat).toBe(CONFIG.initialView.lat);</span>
+<span class="d-add">+    expect(v.zoom).toBe(CONFIG.initialView.zoom);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;honors explicit camera params&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(view(&quot;z=15&amp;lat=40.5&amp;lng=-73.9&quot;)).toEqual({ lat: 40.5, lng: -73.9, zoom: 15 });</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;centers on a single deep-linked waypoint at street zoom&quot;, () =&gt; {</span>
+<span class="d-add">+    const v = view(&quot;w=40.869434,-73.826116&amp;vt=Improve+sidewalk&quot;);</span>
+<span class="d-add">+    expect(v.lat).toBeCloseTo(40.869434, 6);</span>
+<span class="d-add">+    expect(v.lng).toBeCloseTo(-73.826116, 6);</span>
+<span class="d-add">+    expect(v.zoom).toBe(17);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;fits a multi-waypoint selection to its bounding box&quot;, () =&gt; {</span>
+<span class="d-add">+    const v = view(&quot;w=40.700000,-74.000000;40.720000,-73.980000&quot;);</span>
+<span class="d-add">+    expect(v.lat).toBeCloseTo(40.71, 6);</span>
+<span class="d-add">+    expect(v.lng).toBeCloseTo(-73.99, 6);</span>
+<span class="d-add">+    expect(v.zoom).toBeLessThan(17);</span>
+<span class="d-add">+    expect(v.zoom).toBeGreaterThanOrEqual(13);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;centers on legacy slat/slng deep links too&quot;, () =&gt; {</span>
+<span class="d-add">+    const v = view(&quot;slat=40.75&amp;slng=-73.99&quot;);</span>
+<span class="d-add">+    expect(v.lat).toBeCloseTo(40.75, 6);</span>
+<span class="d-add">+    expect(v.zoom).toBe(17);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;explicit camera params beat the selection&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(view(&quot;z=12&amp;lat=40.6&amp;lng=-74.1&amp;w=40.869434,-73.826116&quot;)).toEqual({</span>
+<span class="d-add">+      lat: 40.6,</span>
+<span class="d-add">+      lng: -74.1,</span>
+<span class="d-add">+      zoom: 12,</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;vt-only links keep the default view&quot;, () =&gt; {</span>
+<span class="d-add">+    const v = view(&quot;vt=Improve+sidewalk&quot;);</span>
+<span class="d-add">+    expect(v.lat).toBe(CONFIG.initialView.lat);</span>
+<span class="d-add">+    expect(v.zoom).toBe(CONFIG.initialView.zoom);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;waypoints with forced-corridor tokens still center&quot;, () =&gt; {</span>
+<span class="d-add">+    const v = view(&quot;w=40.700000,-74.000000,fabc123;40.720000,-73.980000&quot;);</span>
+<span class="d-add">+    expect(v.lat).toBeCloseTo(40.71, 6);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/mapViewState.ts</span>
+            <span class="stat"><span class="d-add">+56</span> / <span class="d-del">-4</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · utils/</span>
+        <span class="ctx-sum">camera state singleton: initial view from URL, pan helpers, current-view mirror</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">mapViewState.ts</span>
+        <span class="ctx-sum">~140 LOC — initial map view resolution + map-instance pan/state helpers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">setMapInstance / panTo</span><span class="ol-sum">imperative pan access to the Leaflet map</span></li><li class="changed"><span class="ol-label">viewFromSelectionParams</span><span class="ol-sum">NEW — derive center+zoom from ?w= / legacy slat-slng waypoints</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">computeInitialMapView</span><span class="ol-sum">NEW pure core — explicit camera params win, else selection view, else default</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">getInitialMapView</span><span class="ol-sum">thin window.location wrapper over the pure core</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">getInitialPoints / cleanNavParams</span><span class="ol-sum">legacy point params + URL cleanup</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>POINT_DEEP_LINK_ZOOM=17 + zoomForSpan() span→zoom table</li><li>viewFromSelectionParams() — single waypoint → street zoom; multi → cos-corrected bbox fit</li><li>computeInitialMapView() — extracted pure core (tested)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/mapViewState.ts b/client-react/src/utils/mapViewState.ts</span>
+<span class="d-meta">index b95dd0f..1023cd7 100644</span>
+<span class="d-meta">--- a/client-react/src/utils/mapViewState.ts</span>
+<span class="d-meta">+++ b/client-react/src/utils/mapViewState.ts</span>
+<span class="d-hunk">@@ -1,5 +1,6 @@</span>
+<span class="d-ctx"> import type L from &quot;leaflet&quot;;</span>
+<span class="d-ctx"> import { CONFIG } from &quot;../config&quot;;</span>
+<span class="d-add">+import { selectionFromParams } from &quot;../selection/serialize&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> interface MapViewState {</span>
+<span class="d-ctx">   zoom: number;</span>
+<span class="d-hunk">@@ -31,15 +32,59 @@ export function getMapViewState(): MapViewState {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> const NAV_PARAMS = [&quot;z&quot;, &quot;lat&quot;, &quot;lng&quot;, &quot;slat&quot;, &quot;slng&quot;, &quot;elat&quot;, &quot;elng&quot;, &quot;vt&quot;];</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-export function getInitialMapView(): { lat: number; lng: number; zoom: number } {</span>
+<span class="d-del">-  if (typeof window === &quot;undefined&quot;) {</span>
+<span class="d-del">-    return { lat: CONFIG.initialView.lat, lng: CONFIG.initialView.lon, zoom: CONFIG.initialView.zoom };</span>
+<span class="d-add">+/** Zoom for a single deep-linked point (an intersection fills the screen). */</span>
+<span class="d-add">+const POINT_DEEP_LINK_ZOOM = 17;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Approximate zoom that fits a lat/lng span (degrees) with breathing room. */</span>
+<span class="d-add">+function zoomForSpan(span: number): number {</span>
+<span class="d-add">+  if (span &lt; 0.004) return 16;</span>
+<span class="d-add">+  if (span &lt; 0.012) return 15;</span>
+<span class="d-add">+  if (span &lt; 0.025) return 14;</span>
+<span class="d-add">+  if (span &lt; 0.06) return 13;</span>
+<span class="d-add">+  if (span &lt; 0.12) return 12;</span>
+<span class="d-add">+  return 11;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Derive a view from the URL&#x27;s selection waypoints (`w=` or legacy</span>
+<span class="d-add">+ *  slat/slng), so a shared link without explicit camera params opens centered</span>
+<span class="d-add">+ *  on what it selects instead of the citywide default. */</span>
+<span class="d-add">+function viewFromSelectionParams(</span>
+<span class="d-add">+  params: URLSearchParams</span>
+<span class="d-add">+): { lat: number; lng: number; zoom: number } | null {</span>
+<span class="d-add">+  const parsed = selectionFromParams(params);</span>
+<span class="d-add">+  const pts = parsed?.waypoints.map((wp) =&gt; wp.coords) ?? [];</span>
+<span class="d-add">+  if (pts.length === 0) return null;</span>
+<span class="d-add">+  if (pts.length === 1) {</span>
+<span class="d-add">+    return { lat: pts[0].lat, lng: pts[0].lng, zoom: POINT_DEEP_LINK_ZOOM };</span>
+<span class="d-ctx">   }</span>
+<span class="d-del">-  const params = new URLSearchParams(window.location.search);</span>
+<span class="d-add">+  const lats = pts.map((p) =&gt; p.lat);</span>
+<span class="d-add">+  const lngs = pts.map((p) =&gt; p.lng);</span>
+<span class="d-add">+  const latMin = Math.min(...lats), latMax = Math.max(...lats);</span>
+<span class="d-add">+  const lngMin = Math.min(...lngs), lngMax = Math.max(...lngs);</span>
+<span class="d-add">+  // Longitude degrees are ~cos(lat) the size of latitude degrees.</span>
+<span class="d-add">+  const span = Math.max(latMax - latMin, (lngMax - lngMin) * Math.cos((latMin * Math.PI) / 180));</span>
+<span class="d-add">+  return {</span>
+<span class="d-add">+    lat: (latMin + latMax) / 2,</span>
+<span class="d-add">+    lng: (lngMin + lngMax) / 2,</span>
+<span class="d-add">+    zoom: zoomForSpan(span),</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Pure core of getInitialMapView (exported for tests). */</span>
+<span class="d-add">+export function computeInitialMapView(</span>
+<span class="d-add">+  params: URLSearchParams</span>
+<span class="d-add">+): { lat: number; lng: number; zoom: number } {</span>
+<span class="d-ctx">   const z = params.get(&quot;z&quot;);</span>
+<span class="d-ctx">   const lat = params.get(&quot;lat&quot;);</span>
+<span class="d-ctx">   const lng = params.get(&quot;lng&quot;);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // Explicit camera params always win; otherwise center on the deep-linked</span>
+<span class="d-add">+  // selection if the URL carries one.</span>
+<span class="d-add">+  if (!z &amp;&amp; !lat &amp;&amp; !lng) {</span>
+<span class="d-add">+    const fromSelection = viewFromSelectionParams(params);</span>
+<span class="d-add">+    if (fromSelection) return fromSelection;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   return {</span>
+<span class="d-ctx">     lat: lat ? parseFloat(lat) : CONFIG.initialView.lat,</span>
+<span class="d-ctx">     lng: lng ? parseFloat(lng) : CONFIG.initialView.lon,</span>
+<span class="d-hunk">@@ -47,6 +92,13 @@ export function getInitialMapView(): { lat: number; lng: number; zoom: number }</span>
+<span class="d-ctx">   };</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+export function getInitialMapView(): { lat: number; lng: number; zoom: number } {</span>
+<span class="d-add">+  if (typeof window === &quot;undefined&quot;) {</span>
+<span class="d-add">+    return { lat: CONFIG.initialView.lat, lng: CONFIG.initialView.lon, zoom: CONFIG.initialView.zoom };</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return computeInitialMapView(new URLSearchParams(window.location.search));</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> export function getInitialPoints(): {</span>
+<span class="d-ctx">   start: { lat: number; lng: number } | null;</span>
+<span class="d-ctx">   end: { lat: number; lng: number } | null;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">scripts/generate_posters.py</span>
+            <span class="stat"><span class="d-add">+6</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Poster tooling · scripts/</span>
+        <span class="ctx-sum">campaign generator that turns rankings into printable QR posters</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">generate_posters.py</span>
+        <span class="ctx-sum">~240 LOC — 7 campaigns × targets → filled templates → PNGs</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">BASE_URL / QR_VOTE_TYPE</span><span class="ol-sum">now nyc-intersections + vt preselect</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">slot fill / campaigns</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">main — QR generation</span><span class="ol-sum">URL now carries vt=Fix+dangerous+intersection</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>BASE_URL → https://cityedit.org/m/nyc-intersections</li><li>QR URL gains &amp;vt=&lt;quoted QR_VOTE_TYPE&gt;</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/scripts/generate_posters.py b/scripts/generate_posters.py</span>
+<span class="d-meta">index bfe383c..82ac4c7 100644</span>
+<span class="d-meta">--- a/scripts/generate_posters.py</span>
+<span class="d-meta">+++ b/scripts/generate_posters.py</span>
+<span class="d-hunk">@@ -38,7 +38,10 @@ MASTER = REPO / &quot;data&quot; / &quot;analysis&quot; / &quot;intersections_master.csv&quot;</span>
+<span class="d-ctx"> TEMPLATES = REPO / &quot;data&quot; / &quot;posters&quot; / &quot;templates&quot;</span>
+<span class="d-ctx"> OUT = REPO / &quot;data&quot; / &quot;posters&quot; / &quot;out&quot;</span>
+<span class="d-ctx"> RENDER = REPO / &quot;scripts&quot; / &quot;render_poster.sh&quot;</span>
+<span class="d-del">-BASE_URL = &quot;https://cityedit.org/m/nyc-walkways&quot;</span>
+<span class="d-add">+BASE_URL = &quot;https://cityedit.org/m/nyc-intersections&quot;</span>
+<span class="d-add">+# Preselected vote type carried in every QR: scanning lands with the pin set</span>
+<span class="d-add">+# and this (point-kind) type ready to cast.</span>
+<span class="d-add">+QR_VOTE_TYPE = &quot;Fix dangerous intersection&quot;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def load_rows():</span>
+<span class="d-hunk">@@ -228,7 +231,8 @@ def main():</span>
+<span class="d-ctx">         outdir = OUT / name</span>
+<span class="d-ctx">         outdir.mkdir(parents=True, exist_ok=True)</span>
+<span class="d-ctx">         for i, r in enumerate(targets):</span>
+<span class="d-del">-            url = f&#x27;{args.base_url}?w={r[&quot;lat&quot;]},{r[&quot;lon&quot;]}&#x27;</span>
+<span class="d-add">+            from urllib.parse import quote_plus</span>
+<span class="d-add">+            url = f&#x27;{args.base_url}?w={r[&quot;lat&quot;]},{r[&quot;lon&quot;]}&amp;vt={quote_plus(QR_VOTE_TYPE)}&#x27;</span>
+<span class="d-ctx">             tag = f&quot;{i+1:02d}_{slug(r[&#x27;name_osm&#x27;])}&quot;</span>
+<span class="d-ctx">             qr_png = outdir / f&quot;{tag}_qr.png&quot;</span>
+<span class="d-ctx">             qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

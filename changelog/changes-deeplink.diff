@@ -1,0 +1,190 @@
+diff --git a/.gcloudignore b/.gcloudignore
+index 4396d30..3be6105 100644
+--- a/.gcloudignore
++++ b/.gcloudignore
+@@ -55,3 +55,7 @@ screenshots/
+ Screenshot*.png
+ *.jpg
+ /*.png
++
++# Analysis + poster pipeline artifacts (repo-root data/ only — server/data/ is
++# baked into images and must keep uploading)
++/data/
+diff --git a/client-react/src/utils/mapViewState.test.ts b/client-react/src/utils/mapViewState.test.ts
+new file mode 100644
+index 0000000..2273392
+--- /dev/null
++++ b/client-react/src/utils/mapViewState.test.ts
+@@ -0,0 +1,57 @@
++import { describe, it, expect } from "vitest";
++import { computeInitialMapView } from "./mapViewState";
++import { CONFIG } from "../config";
++
++const view = (search: string) => computeInitialMapView(new URLSearchParams(search));
++
++describe("computeInitialMapView", () => {
++  it("uses the default view with no params", () => {
++    const v = view("");
++    expect(v.lat).toBe(CONFIG.initialView.lat);
++    expect(v.zoom).toBe(CONFIG.initialView.zoom);
++  });
++
++  it("honors explicit camera params", () => {
++    expect(view("z=15&lat=40.5&lng=-73.9")).toEqual({ lat: 40.5, lng: -73.9, zoom: 15 });
++  });
++
++  it("centers on a single deep-linked waypoint at street zoom", () => {
++    const v = view("w=40.869434,-73.826116&vt=Improve+sidewalk");
++    expect(v.lat).toBeCloseTo(40.869434, 6);
++    expect(v.lng).toBeCloseTo(-73.826116, 6);
++    expect(v.zoom).toBe(17);
++  });
++
++  it("fits a multi-waypoint selection to its bounding box", () => {
++    const v = view("w=40.700000,-74.000000;40.720000,-73.980000");
++    expect(v.lat).toBeCloseTo(40.71, 6);
++    expect(v.lng).toBeCloseTo(-73.99, 6);
++    expect(v.zoom).toBeLessThan(17);
++    expect(v.zoom).toBeGreaterThanOrEqual(13);
++  });
++
++  it("centers on legacy slat/slng deep links too", () => {
++    const v = view("slat=40.75&slng=-73.99");
++    expect(v.lat).toBeCloseTo(40.75, 6);
++    expect(v.zoom).toBe(17);
++  });
++
++  it("explicit camera params beat the selection", () => {
++    expect(view("z=12&lat=40.6&lng=-74.1&w=40.869434,-73.826116")).toEqual({
++      lat: 40.6,
++      lng: -74.1,
++      zoom: 12,
++    });
++  });
++
++  it("vt-only links keep the default view", () => {
++    const v = view("vt=Improve+sidewalk");
++    expect(v.lat).toBe(CONFIG.initialView.lat);
++    expect(v.zoom).toBe(CONFIG.initialView.zoom);
++  });
++
++  it("waypoints with forced-corridor tokens still center", () => {
++    const v = view("w=40.700000,-74.000000,fabc123;40.720000,-73.980000");
++    expect(v.lat).toBeCloseTo(40.71, 6);
++  });
++});
+diff --git a/client-react/src/utils/mapViewState.ts b/client-react/src/utils/mapViewState.ts
+index b95dd0f..1023cd7 100644
+--- a/client-react/src/utils/mapViewState.ts
++++ b/client-react/src/utils/mapViewState.ts
+@@ -1,5 +1,6 @@
+ import type L from "leaflet";
+ import { CONFIG } from "../config";
++import { selectionFromParams } from "../selection/serialize";
+ 
+ interface MapViewState {
+   zoom: number;
+@@ -31,15 +32,59 @@ export function getMapViewState(): MapViewState {
+ 
+ const NAV_PARAMS = ["z", "lat", "lng", "slat", "slng", "elat", "elng", "vt"];
+ 
+-export function getInitialMapView(): { lat: number; lng: number; zoom: number } {
+-  if (typeof window === "undefined") {
+-    return { lat: CONFIG.initialView.lat, lng: CONFIG.initialView.lon, zoom: CONFIG.initialView.zoom };
++/** Zoom for a single deep-linked point (an intersection fills the screen). */
++const POINT_DEEP_LINK_ZOOM = 17;
++
++/** Approximate zoom that fits a lat/lng span (degrees) with breathing room. */
++function zoomForSpan(span: number): number {
++  if (span < 0.004) return 16;
++  if (span < 0.012) return 15;
++  if (span < 0.025) return 14;
++  if (span < 0.06) return 13;
++  if (span < 0.12) return 12;
++  return 11;
++}
++
++/** Derive a view from the URL's selection waypoints (`w=` or legacy
++ *  slat/slng), so a shared link without explicit camera params opens centered
++ *  on what it selects instead of the citywide default. */
++function viewFromSelectionParams(
++  params: URLSearchParams
++): { lat: number; lng: number; zoom: number } | null {
++  const parsed = selectionFromParams(params);
++  const pts = parsed?.waypoints.map((wp) => wp.coords) ?? [];
++  if (pts.length === 0) return null;
++  if (pts.length === 1) {
++    return { lat: pts[0].lat, lng: pts[0].lng, zoom: POINT_DEEP_LINK_ZOOM };
+   }
+-  const params = new URLSearchParams(window.location.search);
++  const lats = pts.map((p) => p.lat);
++  const lngs = pts.map((p) => p.lng);
++  const latMin = Math.min(...lats), latMax = Math.max(...lats);
++  const lngMin = Math.min(...lngs), lngMax = Math.max(...lngs);
++  // Longitude degrees are ~cos(lat) the size of latitude degrees.
++  const span = Math.max(latMax - latMin, (lngMax - lngMin) * Math.cos((latMin * Math.PI) / 180));
++  return {
++    lat: (latMin + latMax) / 2,
++    lng: (lngMin + lngMax) / 2,
++    zoom: zoomForSpan(span),
++  };
++}
++
++/** Pure core of getInitialMapView (exported for tests). */
++export function computeInitialMapView(
++  params: URLSearchParams
++): { lat: number; lng: number; zoom: number } {
+   const z = params.get("z");
+   const lat = params.get("lat");
+   const lng = params.get("lng");
+ 
++  // Explicit camera params always win; otherwise center on the deep-linked
++  // selection if the URL carries one.
++  if (!z && !lat && !lng) {
++    const fromSelection = viewFromSelectionParams(params);
++    if (fromSelection) return fromSelection;
++  }
++
+   return {
+     lat: lat ? parseFloat(lat) : CONFIG.initialView.lat,
+     lng: lng ? parseFloat(lng) : CONFIG.initialView.lon,
+@@ -47,6 +92,13 @@ export function getInitialMapView(): { lat: number; lng: number; zoom: number }
+   };
+ }
+ 
++export function getInitialMapView(): { lat: number; lng: number; zoom: number } {
++  if (typeof window === "undefined") {
++    return { lat: CONFIG.initialView.lat, lng: CONFIG.initialView.lon, zoom: CONFIG.initialView.zoom };
++  }
++  return computeInitialMapView(new URLSearchParams(window.location.search));
++}
++
+ export function getInitialPoints(): {
+   start: { lat: number; lng: number } | null;
+   end: { lat: number; lng: number } | null;
+diff --git a/scripts/generate_posters.py b/scripts/generate_posters.py
+index bfe383c..82ac4c7 100644
+--- a/scripts/generate_posters.py
++++ b/scripts/generate_posters.py
+@@ -38,7 +38,10 @@ MASTER = REPO / "data" / "analysis" / "intersections_master.csv"
+ TEMPLATES = REPO / "data" / "posters" / "templates"
+ OUT = REPO / "data" / "posters" / "out"
+ RENDER = REPO / "scripts" / "render_poster.sh"
+-BASE_URL = "https://cityedit.org/m/nyc-walkways"
++BASE_URL = "https://cityedit.org/m/nyc-intersections"
++# Preselected vote type carried in every QR: scanning lands with the pin set
++# and this (point-kind) type ready to cast.
++QR_VOTE_TYPE = "Fix dangerous intersection"
+ 
+ 
+ def load_rows():
+@@ -228,7 +231,8 @@ def main():
+         outdir = OUT / name
+         outdir.mkdir(parents=True, exist_ok=True)
+         for i, r in enumerate(targets):
+-            url = f'{args.base_url}?w={r["lat"]},{r["lon"]}'
++            from urllib.parse import quote_plus
++            url = f'{args.base_url}?w={r["lat"]},{r["lon"]}&vt={quote_plus(QR_VOTE_TYPE)}'
+             tag = f"{i+1:02d}_{slug(r['name_osm'])}"
+             qr_png = outdir / f"{tag}_qr.png"
+             qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,

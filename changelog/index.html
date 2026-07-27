@@ -29,6 +29,19 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-27-deeplink-centering-nyc-intersections.html">
+    <div class="date">2026-07-27</div>
+    <h2>Deep links center on their selection + the nyc-intersections map goes live</h2>
+    <p>The poster campaign's landing map is live in prod: <code>nyc-intersections</code> (created via
+    the app's own POST /api/maps), terracotta light theme, 14 custom intersection-improvement vote
+    types (9 point, 5 route); all 94 poster QRs regenerated to deep-link into it with
+    "Fix dangerous intersection" preselected. And the links now work: a URL carrying only a selection
+    (<code>?w=lat,lng</code>) used to open at the citywide default view — the initial camera now
+    derives from the selection (street zoom 17 for a point, bbox fit for routes; explicit z/lat/lng
+    still win). Deployed staging-first as overlay digest <code>d443e966</code> after a fresh prod DB
+    snapshot; verified on staging, then promoted and re-verified on prod.</p>
+  </a>
+
   <a class="entry" href="./2026-07-27-feedback-about-buttons.html">
     <div class="date">2026-07-27</div>
     <h2>feedback.cityedit.org + the header link row (Feedback · About · Donate)</h2>
