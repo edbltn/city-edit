@@ -58,23 +58,43 @@ def slug(name):
 
 
 def fill_slot(doc, slot_id, content):
-    """Replace the inner HTML of the (leaf) element carrying id=slot_id."""
+    """Replace the inner HTML of the (leaf) element carrying id=slot_id.
+
+    Only safe for leaf slots (no nested same-tag children) — structured slots
+    like the ped_no1 headline are edited via targeted `swaps` instead."""
     pat = re.compile(r'(<(\w+)[^>]*\bid="' + slot_id + r'"[^>]*>).*?(</\2>)', re.S)
     if not pat.search(doc):
         return doc
     return pat.sub(lambda m: m.group(1) + content + m.group(3), doc)
 
 
+def set_style(doc, slot_id, extra_css):
+    """Append inline CSS to the element carrying id=slot_id."""
+    pat = re.compile(r'<(\w+)([^>]*\bid="' + slot_id + r'"[^>]*)>')
+    def sub(m):
+        attrs = m.group(2)
+        if 'style="' in attrs:
+            attrs = attrs.replace('style="', f'style="{extra_css};', 1)
+        else:
+            attrs += f' style="{extra_css}"'
+        return f"<{m.group(1)}{attrs}>"
+    return pat.sub(sub, doc, count=1)
+
+
+def nabe_display(nta):
+    """Poster-friendly neighborhood name: drop parenthetical qualifiers."""
+    return re.sub(r"\s*\([^)]*\)", "", nta).strip()
+
+
+def night_fraction(share):
+    from fractions import Fraction
+    f = Fraction(share).limit_denominator(10)
+    return f.numerator, f.denominator
+
+
 def set_qr(doc, qr_relpath):
     return re.sub(r'(<img[^>]*\bid="qr"[^>]*\bsrc=")[^"]*(")',
                   lambda m: m.group(1) + qr_relpath + m.group(2), doc)
-
-
-def ordinal_headline(kind, rank):
-    n = "#%d" % rank
-    if kind == "ped":
-        return f'THE {n} MOST<br>DANGEROUS INTERSECTION<br>FOR PEDESTRIANS IN NYC'
-    return f'THE {n} MOST DANGEROUS<br>INTERSECTION FOR<br>CYCLISTS IN NYC'
 
 
 def victims_line(r, window="full"):
@@ -86,23 +106,59 @@ def victims_line(r, window="full"):
         inj = int(r["f12_ped_inj"] + r["f12_cyc_inj"])
         kil = int(r["f12_ped_kill"] + r["f12_cyc_kill"])
         since = "in the last 12 months"
-    parts = [f"{inj} people injured"]
-    if kil:
-        parts.append(f"{kil} killed")
-    return f"{' and '.join(parts)} here {since}"
+    if inj and kil:
+        what = f"{inj} people injured and {kil} killed"
+    elif kil:
+        what = f"{kil} {'person' if kil == 1 else 'people'} killed"
+    else:
+        what = f"{inj} {'person' if inj == 1 else 'people'} injured"
+    return f"{what} here {since}"
+
+
+def hurt_ratio(r):
+    """Fresh-12 victims vs the intersection's own earlier yearly pace."""
+    fresh = r["f12_ped_inj"] + r["f12_cyc_inj"] + r["f12_ped_kill"] + r["f12_cyc_kill"]
+    base = (r["ped_inj"] + r["cyc_inj"] + r["ped_kill"] + r["cyc_kill"]) - fresh
+    base_yearly = max(base / 2.44, 0.5)   # 2023-01 .. 2025-06 baseline window
+    return max(2, round(fresh / base_yearly))
+
+
+def _nabe_fill(r, i):
+    name = nabe_display(r["nta"]).upper()
+    return {"neighborhood": html.escape(name),
+            "statline": html.escape(victims_line(r))}
+
+
+def _nabe_style(r, i):
+    # MELROSE (7 chars) renders at the template's native 124px; longer names
+    # shrink proportionally so the line always fits the 850px canvas.
+    name = nabe_display(r["nta"])
+    size = max(38, min(124, int(124 * 7.4 / max(len(name), 5))))
+    return {"neighborhood": f"font-size:{size}px"}
+
+
+def _after_dark_fill(r, i):
+    num, den = night_fraction(r["night_share"])
+    return {"statline": f"<b>{num} out of {den}</b> crashes here happen<br>"
+                        f"between <b>9pm and 6am</b>"}
 
 
 CAMPAIGNS = {
+    # "#1" rank posters keep their nested per-line headline markup; only the
+    # rank number is swapped in place.
     "ped_no1": {
         "template": "ped_no1.html", "default_n": 10,
         "select": lambda rows: sorted(rows, key=lambda r: -r["recency_ped"]),
-        "fill": lambda r, i: {"headline": ordinal_headline("ped", i + 1),
-                              "statline": html.escape(victims_line(r))},
+        "swaps": lambda r, i: [(r"THE #\d+ MOST", f"THE #{i + 1} MOST")],
+        # NOTE: this template's id="statline" is the YOU ARE HERE pin text —
+        # the design carries no stat line, so nothing is filled here.
+        "fill": lambda r, i: {},
     },
     "cyc_no1": {
         "template": "cyc_no1.html", "default_n": 10,
         "select": lambda rows: sorted(rows, key=lambda r: -r["recency_cyc"]),
-        "fill": lambda r, i: {"headline": ordinal_headline("cyc", i + 1)},
+        "swaps": lambda r, i: [(r"THE #\d+ MOST", f"THE #{i + 1} MOST")],
+        "fill": lambda r, i: {},
     },
     "overall": {
         "template": "bike_killer.html", "default_n": 10,
@@ -117,24 +173,22 @@ CAMPAIGNS = {
     "nabe_no1": {
         "template": "nabe_no1.html", "default_n": 30,
         "select": None,  # special-cased: one per neighborhood
-        "fill": lambda r, i: {"neighborhood": html.escape(r["nta"].upper()),
-                              "statline": html.escape(victims_line(r))},
+        "fill": _nabe_fill,
+        "style": _nabe_style,
     },
     "heating_up": {
         "template": "heating_up.html", "default_n": 12,
         "select": lambda rows: [r for r in sorted(rows, key=lambda r: -r["heat_surprise"])
                                 if r["f12_crashes"] >= 4],
         "fill": lambda r, i: {"statline": html.escape(
-            "%.0fx more people hurt here in the last 12 months than its own 3-year average"
-            % max(2, round(r["f12_crashes"] / max(r["base_rate_12mo"], 0.5))))},
+            "%dx more people hurt here in the last 12 months than its own 3-year average"
+            % hurt_ratio(r))},
     },
     "after_dark": {
         "template": "after_dark.html", "default_n": 12,
         "select": lambda rows: [r for r in sorted(rows, key=lambda r: -r["night_share"])
                                 if r["f12_crashes"] >= 4],
-        "fill": lambda r, i: {"statline": html.escape(
-            "%d out of %d crashes here happen between 9pm and 6am"
-            % (round(r["night_share"] * r["crashes"]), int(r["crashes"])))},
+        "fill": _after_dark_fill,
     },
 }
 
@@ -189,8 +243,12 @@ def main():
                 back_color="black" if dark_qr else "white").save(qr_png)
 
             doc = tpl
+            for pat, repl in (c["swaps"](r, i) if "swaps" in c else []):
+                doc = re.sub(pat, repl, doc)
             for slot, content in c["fill"](r, i).items():
                 doc = fill_slot(doc, slot, content)
+            for slot, css in (c["style"](r, i).items() if "style" in c else []):
+                doc = set_style(doc, slot, css)
             doc = set_qr(doc, qr_png.name)
             html_path = outdir / f"{tag}.html"
             html_path.write_text(doc)
