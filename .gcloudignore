@@ -56,5 +56,6 @@ Screenshot*.png
 *.jpg
 /*.png
 
-# Analysis + poster pipeline artifacts (this repo's data/ is never baked into images)
-data/
+# Analysis + poster pipeline artifacts (repo-root data/ only — server/data/ is
+# baked into images and must keep uploading)
+/data/
