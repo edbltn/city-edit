@@ -29,6 +29,21 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-27-dangerous-intersections-posters.html">
+    <div class="date">2026-07-27</div>
+    <h2>Fresh dangerous-intersections analysis + procedural QR posters</h2>
+    <p>Re-ranked NYC's dangerous intersections on crash data through 2026-06-11, because the pooled
+    2023-on PDF ranking goes stale as the city responds (only 3 of its top 20 survive in the fresh
+    top 50; Chrystie/Grand fell to #504 post-redesign). New pipeline snaps 40k ped/cyclist crashes
+    onto City Edit's own walk-graph intersections and ranks under six danger definitions — chronic,
+    fresh severity-weighted, recency-decayed, per-mode, Poisson heating/cooling outliers, night
+    share — plus per-neighborhood #1s; audit report published as an artifact. A 46-agent ultracode
+    workflow replicated the PDF's four poster mock-ups as parameterized HTML templates (judge-verified
+    against the originals) and designed three novel siblings (heating-up, neighborhood #1, after-dark);
+    <code>generate_posters.py</code> then rendered 94 posters, each with a QR deep-linking to its
+    exact intersection in the app.</p>
+  </a>
+
   <a class="entry" href="./2026-07-23-nightly-swarm.html">
     <div class="date">2026-07-23</div>
     <h2>Overnight Haiku swarm — 13 nightly tasks, 5 landed, 8 caught by review</h2>

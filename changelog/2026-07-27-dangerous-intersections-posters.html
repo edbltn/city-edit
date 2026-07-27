@@ -1,0 +1,1411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fresh dangerous-intersections analysis + procedural QR posters — 2026-07-27</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Fresh dangerous-intersections analysis + procedural QR posters</h1>
+    <div class="dateline">2026-07-27 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#analysis">1</a>
+<a href="#posters">2</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Fresh crash data, six definitions of “dangerous,” and a poster factory: the 2023-on PDF analysis re-run on data through June 2026 (the old top-20 is measurably stale), plus its four poster mock-ups replicated as parameterized templates and 94 QR posters generated procedurally.</p>
+
+  
+    <section class="card" id="analysis">
+      <div class="tag">Data pipeline</div>
+      <h2>1 · Re-ranking NYC's dangerous intersections on fresh data</h2>
+      <h3>Context</h3>
+      <p>The existing <em>NYC Intersection Data Analysis</em> PDF pooled 3½ years of crashes (2023 → mid-2026). Pooled rankings go stale: the city responds to exactly this data, so an intersection can top the all-time list years after a redesign fixed it. We needed rankings built from the <strong>latest danger indicators</strong>, under several definitions of danger, to target a poster campaign.</p>
+      <h3>What the data showed / how it was built</h3>
+      <ul><li>Re-ranked on the last 12 months only, just 3 of the PDF's top 20 stay in the citywide top 50. Chrystie St / Grand St (#7 all-time) fell to #504 (3 crashes vs a ~8/yr baseline); 8th Ave / W 57th St fell to #1048. The stale-ranking concern is measurable, not hypothetical.</li>
+<li>Crashes are snapped to intersections in <strong>City Edit's own NYC walk graph</strong> (nodes where ≥2 distinct street names meet, 56k of them) rather than a third-party intersection layer — so every ranked intersection deep-links into the app: <code>cityedit.org/m/nyc-walkways?w=&lt;lat&gt;,&lt;lon&gt;</code>.</li></ul>
+      <h3>What was built</h3>
+      <ul><li><strong>scripts/build_intersection_rankings.py</strong> — pulls stay out of the script (<code>data/raw/crashes_pedcyc_2023on.csv</code>, 47,965 rows from Socrata h9gi-nx95, data through 2026-06-11); snaps 40,103 crashes to 16,253 intersections (40 m grid index); tags each with its NTA-2020 neighborhood (shapely point-in-polygon).</li>
+<li>Six danger definitions per intersection: chronic count (the PDF's), fresh-12-month severity-weighted (<code>injured + 8×killed</code>), recency-decayed (12-month half-life — the recommended poster metric), pedestrian/cyclist-specific variants, Poisson trend surprise (heating-up / cooling-down, with a ½-crash Jeffreys prior so zero-baseline hotspots stay finite), and night share (9pm–6am).</li>
+<li>Outputs: <code>data/analysis/intersections_master.csv</code> + 11 top-25 lists + per-NTA #1s (184 neighborhoods).</li>
+<li><strong>data/analysis/report.html</strong> — self-contained audit report (PDF-top-20 movement table, definition tabs, then-vs-now bars, baseline-vs-fresh scatter with outlier classes, score distribution, poster targeting tiers, methods + caveats). Published as a private artifact; charts follow the dataviz palette rules (validated).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>scripts/build_intersection_rankings.py — NEW: snap + rank pipeline</li>
+<li>data/analysis/*.csv — master + per-definition top lists</li>
+<li>data/analysis/report_body.html / report.html — the audit report (report.html = body + inlined data)</li></ul>
+    </section>
+    
+
+    <section class="card" id="posters">
+      <div class="tag">Posters · ultracode</div>
+      <h2>2 · Poster replication + procedural generator</h2>
+      <h3>Context</h3>
+      <p>The PDF ships four poster mock-ups (bike “killer!”, pedestrian #1, cyclist #1, dark “kick your fear into gear”) that existed only as flat images. The campaign needs them as <strong>parameterized templates</strong> — per-intersection text + QR — plus new designs for the novel danger definitions.</p>
+      <h3>What the data showed / how it was built</h3>
+      <ul><li>A 46-agent workflow replicated each poster as self-contained HTML: per poster, two parallel builders (font/SVG-purist vs collage-from-PDF-cuts), an adversarial design judge picking the winner and listing concrete discrepancies, then up to three refine-and-rejudge rounds. Final judge scores 80–88/100; winners were then picked by eye across all rounds (judges oscillate).</li>
+<li>Typography was rebuilt with real fonts (Rubik Dirt, Luckiest Guy, Averia Serif Libre, Rozha One, Poppins); complex artwork (bike line-drawing, car-hits-pedestrian diamond, red bike + winding road, chainring) was cut from the 200 dpi PDF renders and inlined as data URIs.</li>
+<li>Three novel siblings in the family style: <em>heating up</em> (trend outlier, rising hand-drawn chart + thermometer), <em>neighborhood #1</em> (the PDF's own “Alternatively: Melrose / Bushwick / Harlem” idea), and <em>after dark</em> (streetlight cone + moon, night-share stat).</li></ul>
+      <h3>What was built</h3>
+      <ul><li><strong>data/posters/templates/*.html</strong> — 7 self-contained templates with substitution slots (<code>id="headline" / statline / cta / neighborhood / qr</code>).</li>
+<li><strong>scripts/generate_posters.py</strong> — feeds the master CSV through 7 campaigns (ped #N, cyc #N, overall, dark, per-NTA #1, heating-up, after-dark), generates a per-intersection QR deep link, fills slots (rank posters swap only the “#1” text to keep the nested per-line markup intact; long NTA names auto-shrink), renders print-res PNGs (1700×2268 @2x) via chrome-headless-shell. Default batch: 94 posters + manifest.csv.</li>
+<li><strong>scripts/render_poster.sh</strong> — the shared HTML→PNG renderer (also used to verify the report).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>data/posters/templates/ — 7 poster templates (4 replicas + 3 novel)</li>
+<li>data/posters/reference/ — the four PDF poster crops (comparison baseline)</li>
+<li>scripts/generate_posters.py — NEW: campaign generator (QR + slots + render)</li>
+<li>scripts/render_poster.sh — NEW: chrome-headless-shell wrapper</li>
+<li>data/posters/out/ — generated posters (gitignored; manifest.csv records name/coords/URL)</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Rankings reproduce the PDF baseline: the full-window top list contains the PDF's top intersections (8th Ave/W 42nd #1, Morris/E 149th, Utica/Eastern Pkwy, Chrystie/Grand …) from the fresh pull.</li>
+<li><code>generate_posters.py</code> full run: 94/94 posters rendered, no missing-template or missing-font failures; manifest.csv URLs spot-checked against master CSV coordinates.</li>
+<li>Replica renders visually compared side-by-side against the PDF crops (judge-verified, then hand-picked best round per poster).</li>
+<li>Report rendered headless in light and dark themes; chart palette passed the dataviz validator.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>data/analysis/report.html</code> (or the published artifact) — check the PDF-movement table reads correctly and the tabs switch.</li>
+<li>Scan a QR from any PNG under <code>data/posters/out/</code> with a phone — it should open cityedit.org with that exact intersection selected (verify the pin lands on the named corner).</li>
+<li>Flip through <code>data/posters/out/ped_no1/</code> — ranks #1–#10 should read “THE #1…#10 MOST DANGEROUS” with the pin text intact.</li>
+<li>Check <code>out/nabe_no1/</code> for the longest neighborhood names (Astoria-Ditmars-Steinway) — the red name should shrink to fit, not overflow.</li>
+<li>Re-run <code>python scripts/build_intersection_rankings.py</code> after a fresh data pull next month and regenerate posters — rankings and posters should update with no manual steps.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">data/analysis/report_body.html</span>
+            <span class="stat"><span class="d-add">+477</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Analysis deliverables · data/analysis/</span>
+        <span class="ctx-sum">the audit report + ranked CSVs consumed by the poster generator</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">report_body.html</span>
+        <span class="ctx-sum">NEW ~640 LOC — report template; report.html = this + inlined report_data.json</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Design tokens</span><span class="ol-sum">light/dark palettes, danger-audit identity</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Lead + stat band</span><span class="ol-sum">freshness framing, last-12-months totals</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§1 PDF movement table</span><span class="ol-sum">still hot / fading / cooled verdicts per PDF-top-20 row</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§2 definition cards + tabs</span><span class="ol-sum">six definitions, top-10 tables per definition</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§3 outlier charts</span><span class="ol-sum">then-vs-now bars, baseline-vs-fresh scatter, score distribution</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§4 poster targeting tiers</span><span class="ol-sum">citywide #1s / neighborhood #1s / heating-up / after-dark</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§5 methods &amp; caveats</span><span class="ol-sum">join stats, weight dials, no exposure denominator, data lag</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Whole file is new — the report the posters campaign is planned from.</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/data/analysis/report_body.html b/data/analysis/report_body.html</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..54b5e1a</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/data/analysis/report_body.html</span>
+<span class="d-hunk">@@ -0,0 +1,477 @@</span>
+<span class="d-add">+&lt;title&gt;NYC Dangerous Intersections — Fresh Audit (July 2026)&lt;/title&gt;</span>
+<span class="d-add">+&lt;style&gt;</span>
+<span class="d-add">+  :root {</span>
+<span class="d-add">+    --paper: #fbfaf7;</span>
+<span class="d-add">+    --panel: #ffffff;</span>
+<span class="d-add">+    --ink: #161512;</span>
+<span class="d-add">+    --ink-2: #52514e;</span>
+<span class="d-add">+    --muted: #898781;</span>
+<span class="d-add">+    --hairline: #e5e3db;</span>
+<span class="d-add">+    --grid: #eceae2;</span>
+<span class="d-add">+    --accent: #c8322b;</span>
+<span class="d-add">+    --accent-ink: #a02620;</span>
+<span class="d-add">+    --series-base: #2a78d6;</span>
+<span class="d-add">+    --series-fresh: #eb6834;</span>
+<span class="d-add">+    --heat: #d03b3b;</span>
+<span class="d-add">+    --cool: #2a78d6;</span>
+<span class="d-add">+    --stable: #898781;</span>
+<span class="d-add">+    --chip-heat-bg: #f9e3e1;</span>
+<span class="d-add">+    --chip-cool-bg: #e2edfa;</span>
+<span class="d-add">+    --chip-warm-bg: #fdf0d3;</span>
+<span class="d-add">+    --chip-ink: #161512;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  @media (prefers-color-scheme: dark) {</span>
+<span class="d-add">+    :root:where(:not([data-theme=&quot;light&quot;])) {</span>
+<span class="d-add">+      --paper: #141413; --panel: #1d1c1a; --ink: #f2f1ec; --ink-2: #c3c2b7;</span>
+<span class="d-add">+      --muted: #898781; --hairline: #2e2d2a; --grid: #262523;</span>
+<span class="d-add">+      --accent: #e05a52; --accent-ink: #e57a73;</span>
+<span class="d-add">+      --series-base: #3987e5; --series-fresh: #d95926;</span>
+<span class="d-add">+      --heat: #e66767; --cool: #3987e5; --stable: #898781;</span>
+<span class="d-add">+      --chip-heat-bg: #46211f; --chip-cool-bg: #1c3252; --chip-warm-bg: #443413;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  :root[data-theme=&quot;dark&quot;] {</span>
+<span class="d-add">+    --paper: #141413; --panel: #1d1c1a; --ink: #f2f1ec; --ink-2: #c3c2b7;</span>
+<span class="d-add">+    --muted: #898781; --hairline: #2e2d2a; --grid: #262523;</span>
+<span class="d-add">+    --accent: #e05a52; --accent-ink: #e57a73;</span>
+<span class="d-add">+    --series-base: #3987e5; --series-fresh: #d95926;</span>
+<span class="d-add">+    --heat: #e66767; --cool: #3987e5; --stable: #898781;</span>
+<span class="d-add">+    --chip-heat-bg: #46211f; --chip-cool-bg: #1c3252; --chip-warm-bg: #443413;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  * { box-sizing: border-box; }</span>
+<span class="d-add">+  body {</span>
+<span class="d-add">+    margin: 0;</span>
+<span class="d-add">+    background: var(--paper);</span>
+<span class="d-add">+    color: var(--ink);</span>
+<span class="d-add">+    font: 16px/1.55 system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  .wrap { max-width: 940px; margin: 0 auto; padding: 48px 24px 96px; }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  .eyebrow {</span>
+<span class="d-add">+    font-size: 12px; font-weight: 700; letter-spacing: 0.14em;</span>
+<span class="d-add">+    text-transform: uppercase; color: var(--accent);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  h1 {</span>
+<span class="d-add">+    margin: 8px 0 4px; font-size: 40px; line-height: 1.08;</span>
+<span class="d-add">+    font-weight: 800; letter-spacing: -0.015em; text-wrap: balance;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  .dateline { color: var(--ink-2); font-size: 14px; margin-bottom: 8px; }</span>
+<span class="d-add">+  .dateline strong { color: var(--ink); }</span>
+<span class="d-add">+  h2 {</span>
+<span class="d-add">+    margin: 64px 0 6px; font-size: 25px; font-weight: 800; letter-spacing: -0.01em;</span>
+<span class="d-add">+    text-wrap: balance;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  h2 .no { color: var(--accent); }</span>
+<span class="d-add">+  h3 { margin: 28px 0 6px; font-size: 17px; font-weight: 700; }</span>
+<span class="d-add">+  p { max-width: 72ch; color: var(--ink-2); margin: 10px 0; }</span>
+<span class="d-add">+  p b, p strong { color: var(--ink); }</span>
+<span class="d-add">+  .rule { height: 3px; background: var(--accent); width: 64px; border: 0; margin: 18px 0 0; }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 28px 0 8px; }</span>
+<span class="d-add">+  .stat { background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px; padding: 14px 16px; }</span>
+<span class="d-add">+  .stat .v { font-size: 27px; font-weight: 800; letter-spacing: -0.01em; }</span>
+<span class="d-add">+  .stat .v.red { color: var(--accent); }</span>
+<span class="d-add">+  .stat .l { font-size: 12.5px; color: var(--ink-2); margin-top: 2px; line-height: 1.3; }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }</span>
+<span class="d-add">+  .tblwrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px; margin: 16px 0; }</span>
+<span class="d-add">+  th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 700; padding: 10px 12px 6px; border-bottom: 1px solid var(--hairline); white-space: nowrap; }</span>
+<span class="d-add">+  th.r, td.r { text-align: right; }</span>
+<span class="d-add">+  td { padding: 7px 12px; border-bottom: 1px solid var(--grid); vertical-align: baseline; }</span>
+<span class="d-add">+  tr:last-child td { border-bottom: 0; }</span>
+<span class="d-add">+  td .nta { color: var(--muted); font-size: 12px; display: block; }</span>
+<span class="d-add">+  .chip { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 99px; white-space: nowrap; color: var(--chip-ink); }</span>
+<span class="d-add">+  .chip.heat { background: var(--chip-heat-bg); }</span>
+<span class="d-add">+  .chip.cool { background: var(--chip-cool-bg); }</span>
+<span class="d-add">+  .chip.warm { background: var(--chip-warm-bg); }</span>
+<span class="d-add">+  .dead { color: var(--accent); font-weight: 700; }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  .defs { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 20px 0; }</span>
+<span class="d-add">+  .def { background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px; padding: 14px 16px; }</span>
+<span class="d-add">+  .def h4 { margin: 0 0 4px; font-size: 14.5px; }</span>
+<span class="d-add">+  .def h4 .tag { color: var(--accent); font-weight: 800; }</span>
+<span class="d-add">+  .def p { font-size: 13px; margin: 0; }</span>
+<span class="d-add">+  .def code { font: 12px ui-monospace, &quot;SF Mono&quot;, Menlo, monospace; color: var(--ink); background: var(--grid); padding: 1px 5px; border-radius: 4px; }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0 0; }</span>
+<span class="d-add">+  .tabs button {</span>
+<span class="d-add">+    font: 600 13px system-ui, sans-serif; color: var(--ink-2);</span>
+<span class="d-add">+    background: var(--panel); border: 1px solid var(--hairline); border-radius: 99px;</span>
+<span class="d-add">+    padding: 6px 14px; cursor: pointer;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  .tabs button:hover { border-color: var(--muted); }</span>
+<span class="d-add">+  .tabs button:focus-visible { outline: 2px solid var(--series-base); outline-offset: 1px; }</span>
+<span class="d-add">+  .tabs button[aria-selected=&quot;true&quot;] { background: var(--ink); color: var(--paper); border-color: var(--ink); }</span>
+<span class="d-add">+  .tabnote { font-size: 13px; color: var(--ink-2); margin: 10px 0 0; }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  .chart { background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px; padding: 18px 18px 10px; margin: 18px 0; }</span>
+<span class="d-add">+  .chart .t { font-size: 15px; font-weight: 700; margin: 0 0 2px; }</span>
+<span class="d-add">+  .chart .s { font-size: 12.5px; color: var(--ink-2); margin: 0 0 10px; }</span>
+<span class="d-add">+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--ink-2); margin: 6px 0 4px; }</span>
+<span class="d-add">+  .legend span { display: inline-flex; align-items: center; gap: 6px; }</span>
+<span class="d-add">+  .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }</span>
+<span class="d-add">+  .sw.dot { border-radius: 50%; }</span>
+<span class="d-add">+  svg text { font: 11.5px system-ui, sans-serif; fill: var(--muted); }</span>
+<span class="d-add">+  svg .vlab { font-weight: 600; fill: var(--ink-2); }</span>
+<span class="d-add">+  svg .ylab { fill: var(--ink); font-weight: 600; }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  #tip {</span>
+<span class="d-add">+    position: fixed; pointer-events: none; z-index: 10; display: none;</span>
+<span class="d-add">+    background: var(--ink); color: var(--paper); font-size: 12.5px; line-height: 1.4;</span>
+<span class="d-add">+    padding: 8px 10px; border-radius: 6px; max-width: 260px;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  #tip b { display: block; }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  .tiers { counter-reset: tier; }</span>
+<span class="d-add">+  .tier { background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px; padding: 16px 18px; margin: 12px 0; }</span>
+<span class="d-add">+  .tier h4 { margin: 0 0 6px; font-size: 15px; }</span>
+<span class="d-add">+  .tier h4::before { counter-increment: tier; content: &quot;Tier &quot; counter(tier) &quot; · &quot;; color: var(--accent); }</span>
+<span class="d-add">+  .tier p { font-size: 13.5px; margin: 4px 0; }</span>
+<span class="d-add">+  code.path { font: 12.5px ui-monospace, &quot;SF Mono&quot;, Menlo, monospace; background: var(--grid); padding: 1px 6px; border-radius: 4px; color: var(--ink); }</span>
+<span class="d-add">+  .foot { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--hairline); font-size: 12.5px; color: var(--muted); }</span>
+<span class="d-add">+  .foot p { font-size: 12.5px; }</span>
+<span class="d-add">+  @media (prefers-reduced-motion: no-preference) {</span>
+<span class="d-add">+    .tabs button { transition: background 0.15s, color 0.15s; }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+&lt;/style&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+&lt;div class=&quot;wrap&quot;&gt;</span>
+<span class="d-add">+  &lt;div class=&quot;eyebrow&quot;&gt;City Edit · Intersection Danger Audit&lt;/div&gt;</span>
+<span class="d-add">+  &lt;h1&gt;Where NYC streets hurt people — right now&lt;/h1&gt;</span>
+<span class="d-add">+  &lt;div class=&quot;dateline&quot;&gt;</span>
+<span class="d-add">+    Crash data through &lt;strong&gt;June 11, 2026&lt;/strong&gt; (freshest NYPD release) · analysis run July 27, 2026 ·</span>
+<span class="d-add">+    supersedes the 2023-on pooled analysis in &lt;em&gt;NYC Intersection Data Analysis&lt;/em&gt; (PDF)</span>
+<span class="d-add">+  &lt;/div&gt;</span>
+<span class="d-add">+  &lt;hr class=&quot;rule&quot;&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  &lt;p&gt;</span>
+<span class="d-add">+    The previous top-20 pooled 3½ years of crashes. That was the right way to find chronically bad</span>
+<span class="d-add">+    intersections — and the wrong way to decide where to hang a poster &lt;em&gt;today&lt;/em&gt;, because the city keeps</span>
+<span class="d-add">+    responding to exactly this data. This audit re-pulls the full</span>
+<span class="d-add">+    NYPD Motor Vehicle Collisions feed, keeps every crash since 2023 that injured or killed a pedestrian or</span>
+<span class="d-add">+    cyclist, snaps each one to a named street intersection in City Edit&#x27;s own walk graph (so every ranked</span>
+<span class="d-add">+    intersection deep-links into the app), and re-ranks under six different definitions of &quot;dangerous.&quot;</span>
+<span class="d-add">+  &lt;/p&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  &lt;div class=&quot;stats&quot;&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;v&quot;&gt;11,710&lt;/div&gt;&lt;div class=&quot;l&quot;&gt;ped/cyclist crashes, last 12 months&lt;/div&gt;&lt;/div&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;v&quot;&gt;7,570&lt;/div&gt;&lt;div class=&quot;l&quot;&gt;pedestrians injured, last 12 months&lt;/div&gt;&lt;/div&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;v red&quot;&gt;88&lt;/div&gt;&lt;div class=&quot;l&quot;&gt;pedestrians killed, last 12 months&lt;/div&gt;&lt;/div&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;v&quot;&gt;4,500&lt;/div&gt;&lt;div class=&quot;l&quot;&gt;cyclists injured, last 12 months&lt;/div&gt;&lt;/div&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;v red&quot;&gt;19&lt;/div&gt;&lt;div class=&quot;l&quot;&gt;cyclists killed, last 12 months&lt;/div&gt;&lt;/div&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;stat&quot;&gt;&lt;div class=&quot;v&quot;&gt;16,253&lt;/div&gt;&lt;div class=&quot;l&quot;&gt;intersections with ≥1 such crash since 2023&lt;/div&gt;&lt;/div&gt;</span>
+<span class="d-add">+  &lt;/div&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  &lt;h2&gt;&lt;span class=&quot;no&quot;&gt;1.&lt;/span&gt; The old top-20 is stale — measurably&lt;/h2&gt;</span>
+<span class="d-add">+  &lt;p&gt;</span>
+<span class="d-add">+    Re-rank the PDF&#x27;s top 20 on &lt;b&gt;the last 12 months only&lt;/b&gt; and just three stay in the citywide top 50.</span>
+<span class="d-add">+    Chrystie St / Grand St — #7 all-time — recorded &lt;b&gt;3&lt;/b&gt; crashes in the past year against a historical pace</span>
+<span class="d-add">+    of ~8/yr and falls to #504. 8th Ave / W 57th St falls to #1048. Meanwhile E Fordham Rd / Webster Ave more</span>
+<span class="d-add">+    than doubled its own baseline. Pooled rankings memorialize where danger &lt;em&gt;was&lt;/em&gt;; the freshness-weighted</span>
+<span class="d-add">+    rankings below track where it &lt;em&gt;is&lt;/em&gt;.</span>
+<span class="d-add">+  &lt;/p&gt;</span>
+<span class="d-add">+  &lt;div class=&quot;tblwrap&quot;&gt;&lt;table id=&quot;pdfTable&quot; aria-label=&quot;PDF top 20 re-ranked on fresh data&quot;&gt;&lt;/table&gt;&lt;/div&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  &lt;h2&gt;&lt;span class=&quot;no&quot;&gt;2.&lt;/span&gt; Six definitions of &quot;most dangerous&quot;&lt;/h2&gt;</span>
+<span class="d-add">+  &lt;p&gt;</span>
+<span class="d-add">+    &quot;Dangerous&quot; is a modeling choice, and different choices target different posters. Each definition below is</span>
+<span class="d-add">+    computed for every intersection; the tabs show the citywide top 10 under each.</span>
+<span class="d-add">+  &lt;/p&gt;</span>
+<span class="d-add">+  &lt;div class=&quot;defs&quot;&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;def&quot;&gt;&lt;h4&gt;&lt;span class=&quot;tag&quot;&gt;A&lt;/span&gt; Chronic (the PDF&#x27;s definition)&lt;/h4&gt;</span>
+<span class="d-add">+      &lt;p&gt;Raw count of ped/cyclist injury-or-death crashes, 2023 → now. Finds the persistent offenders; blind to fixes.&lt;/p&gt;&lt;/div&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;def&quot;&gt;&lt;h4&gt;&lt;span class=&quot;tag&quot;&gt;B&lt;/span&gt; Fresh &amp;amp; severity-weighted&lt;/h4&gt;</span>
+<span class="d-add">+      &lt;p&gt;Last 12 months only, &lt;code&gt;injured + 8×killed&lt;/code&gt;. The headline &quot;most dangerous right now&quot; number. The 8× is a choice — deaths dominate but a single fatal crash can&#x27;t be outrun by two injuries.&lt;/p&gt;&lt;/div&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;def&quot;&gt;&lt;h4&gt;&lt;span class=&quot;tag&quot;&gt;C&lt;/span&gt; Recency-decayed&lt;/h4&gt;</span>
+<span class="d-add">+      &lt;p&gt;Every crash counts, weighted &lt;code&gt;0.5^(age/12mo)&lt;/code&gt;. Smoother than a hard 12-month cut; a fix shows up as a fading score within months. &lt;b&gt;Recommended default for poster placement.&lt;/b&gt;&lt;/p&gt;&lt;/div&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;def&quot;&gt;&lt;h4&gt;&lt;span class=&quot;tag&quot;&gt;D&lt;/span&gt; Mode-specific (ped / cyclist)&lt;/h4&gt;</span>
+<span class="d-add">+      &lt;p&gt;Definitions B–C restricted to pedestrian or cyclist victims. The two maps barely overlap — cyclist danger lives on bridge approaches and avenue bike routes, pedestrian danger on wide crossing distances.&lt;/p&gt;&lt;/div&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;def&quot;&gt;&lt;h4&gt;&lt;span class=&quot;tag&quot;&gt;E&lt;/span&gt; Heating up (trend outlier)&lt;/h4&gt;</span>
+<span class="d-add">+      &lt;p&gt;Poisson surprise: how improbable is the last-12-month count given the intersection&#x27;s own 2023→mid-2025 rate (+½ pseudo-crash prior)? Catches emerging hotspots a pooled rank won&#x27;t see for years.&lt;/p&gt;&lt;/div&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;def&quot;&gt;&lt;h4&gt;&lt;span class=&quot;tag&quot;&gt;F&lt;/span&gt; After dark&lt;/h4&gt;</span>
+<span class="d-add">+      &lt;p&gt;Share of crashes between 9pm and 6am (among intersections with ≥4 fresh crashes). A different intervention story: lighting, visibility, late-night speeds.&lt;/p&gt;&lt;/div&gt;</span>
+<span class="d-add">+  &lt;/div&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  &lt;div class=&quot;tabs&quot; role=&quot;tablist&quot; id=&quot;tabbar&quot;&gt;&lt;/div&gt;</span>
+<span class="d-add">+  &lt;p class=&quot;tabnote&quot; id=&quot;tabnote&quot;&gt;&lt;/p&gt;</span>
+<span class="d-add">+  &lt;div class=&quot;tblwrap&quot;&gt;&lt;table id=&quot;topTable&quot; aria-label=&quot;Top intersections under selected definition&quot;&gt;&lt;/table&gt;&lt;/div&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  &lt;div class=&quot;chart&quot;&gt;</span>
+<span class="d-add">+    &lt;p class=&quot;t&quot;&gt;Then vs. now — the recency-decayed top 12&lt;/p&gt;</span>
+<span class="d-add">+    &lt;p class=&quot;s&quot;&gt;Annualized crash pace, 2023 → mid-2025 baseline vs. the actual last 12 months. Persistent hotspots keep pace; new ones outrun their own history.&lt;/p&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;legend&quot;&gt;</span>
+<span class="d-add">+      &lt;span&gt;&lt;span class=&quot;sw&quot; style=&quot;background:var(--series-base)&quot;&gt;&lt;/span&gt;baseline pace (crashes/yr)&lt;/span&gt;</span>
+<span class="d-add">+      &lt;span&gt;&lt;span class=&quot;sw&quot; style=&quot;background:var(--series-fresh)&quot;&gt;&lt;/span&gt;last 12 months (crashes)&lt;/span&gt;</span>
+<span class="d-add">+    &lt;/div&gt;</span>
+<span class="d-add">+    &lt;div id=&quot;chartBars&quot;&gt;&lt;/div&gt;</span>
+<span class="d-add">+  &lt;/div&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  &lt;h2&gt;&lt;span class=&quot;no&quot;&gt;3.&lt;/span&gt; Outliers: who&#x27;s escaping their own history&lt;/h2&gt;</span>
+<span class="d-add">+  &lt;p&gt;</span>
+<span class="d-add">+    Every intersection with real signal, plotted against itself: historical pace (x) vs. the last 12 months (y).</span>
+<span class="d-add">+    On the dashed line, nothing changed. Above it and improbably so (Poisson surprise ≥ 3, i.e. p &amp;lt; 0.001):</span>
+<span class="d-add">+    &lt;b style=&quot;color:var(--heat)&quot;&gt;heating up&lt;/b&gt;. Far below with a big baseline:</span>
+<span class="d-add">+    &lt;b style=&quot;color:var(--cool)&quot;&gt;cooling&lt;/b&gt; — several of these sit exactly where DOT shipped redesigns,</span>
+<span class="d-add">+    which is the clearest evidence in the data that the city does respond and stale rankings do go stale.</span>
+<span class="d-add">+  &lt;/p&gt;</span>
+<span class="d-add">+  &lt;div class=&quot;chart&quot;&gt;</span>
+<span class="d-add">+    &lt;p class=&quot;t&quot;&gt;Baseline pace vs. last 12 months, per intersection&lt;/p&gt;</span>
+<span class="d-add">+    &lt;p class=&quot;s&quot;&gt;998 intersections with ≥3 fresh crashes or ≥8 baseline crashes. Hover any point.&lt;/p&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;legend&quot;&gt;</span>
+<span class="d-add">+      &lt;span&gt;&lt;span class=&quot;sw dot&quot; style=&quot;background:var(--heat)&quot;&gt;&lt;/span&gt;heating up (surprise ≥ 3)&lt;/span&gt;</span>
+<span class="d-add">+      &lt;span&gt;&lt;span class=&quot;sw dot&quot; style=&quot;background:var(--cool)&quot;&gt;&lt;/span&gt;cooling (surprise ≥ 1.5)&lt;/span&gt;</span>
+<span class="d-add">+      &lt;span&gt;&lt;span class=&quot;sw dot&quot; style=&quot;background:var(--stable); opacity:.55&quot;&gt;&lt;/span&gt;tracking baseline&lt;/span&gt;</span>
+<span class="d-add">+    &lt;/div&gt;</span>
+<span class="d-add">+    &lt;div id=&quot;chartScatter&quot;&gt;&lt;/div&gt;</span>
+<span class="d-add">+  &lt;/div&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  &lt;div class=&quot;chart&quot;&gt;</span>
+<span class="d-add">+    &lt;p class=&quot;t&quot;&gt;Danger is a long tail&lt;/p&gt;</span>
+<span class="d-add">+    &lt;p class=&quot;s&quot;&gt;Distribution of the fresh severity-weighted score (definition B) across all 16,253 intersections — log scale. The poster campaign targets the far right of this curve; the neighborhood-#1 threshold (score ≥ 3) already excludes 92% of intersections.&lt;/p&gt;</span>
+<span class="d-add">+    &lt;div id=&quot;chartDist&quot;&gt;&lt;/div&gt;</span>
+<span class="d-add">+  &lt;/div&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  &lt;h2&gt;&lt;span class=&quot;no&quot;&gt;4.&lt;/span&gt; Poster targeting&lt;/h2&gt;</span>
+<span class="d-add">+  &lt;p&gt;</span>
+<span class="d-add">+    Recommended placement tiers, each mapping to a poster family. Every target carries a QR deep link of the form</span>
+<span class="d-add">+    &lt;code class=&quot;path&quot;&gt;https://cityedit.org/m/nyc-walkways?w=&amp;lt;lat&amp;gt;,&amp;lt;lon&amp;gt;&lt;/code&gt; — the phone opens City Edit</span>
+<span class="d-add">+    with that exact intersection selected, ready to vote.</span>
+<span class="d-add">+  &lt;/p&gt;</span>
+<span class="d-add">+  &lt;div class=&quot;tiers&quot;&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;tier&quot;&gt;&lt;h4&gt;Citywide #1 posters (4 designs from the PDF, replicated)&lt;/h4&gt;</span>
+<span class="d-add">+      &lt;p&gt;&quot;#1 most dangerous for pedestrians in NYC&quot; → &lt;b&gt;Amsterdam Ave / W 109th St&lt;/b&gt; (2 killed, 3 injured in 12 months).</span>
+<span class="d-add">+      &quot;#1 for cyclists&quot; → &lt;b&gt;Frederick Douglass Blvd / W 125th St&lt;/b&gt; (top cyclist recency score; a cyclist killed March 2026).</span>
+<span class="d-add">+      Strongest claims, few sites.&lt;/p&gt;&lt;/div&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;tier&quot;&gt;&lt;h4&gt;Neighborhood #1 posters (novel design, ~150 sites)&lt;/h4&gt;</span>
+<span class="d-add">+      &lt;p&gt;&quot;The most dangerous intersection in &lt;b&gt;Melrose&lt;/b&gt;&quot; — one per NTA-2020 neighborhood with score ≥ 3.</span>
+<span class="d-add">+      This is the PDF&#x27;s own &quot;Alternatively:&quot; idea made procedural; 184 neighborhoods qualify today, top 15 listed below.&lt;/p&gt;&lt;/div&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;tier&quot;&gt;&lt;h4&gt;Heating-up posters (novel design)&lt;/h4&gt;</span>
+<span class="d-add">+      &lt;p&gt;&quot;This intersection is heating up&quot; for trend outliers — e.g. &lt;b&gt;Pelham Pkwy S / White Plains Rd&lt;/b&gt; (1.4/yr baseline → 11 crashes).</span>
+<span class="d-add">+      These are the places the chronic list won&#x27;t flag for years, and where a resident&#x27;s &quot;wait, it got bad here&quot; intuition is right.&lt;/p&gt;&lt;/div&gt;</span>
+<span class="d-add">+    &lt;div class=&quot;tier&quot;&gt;&lt;h4&gt;After-dark posters (novel design)&lt;/h4&gt;</span>
+<span class="d-add">+      &lt;p&gt;Night-share outliers get the dark variant (&quot;most dangerous at night&quot;). Different message, same QR mechanics.&lt;/p&gt;&lt;/div&gt;</span>
+<span class="d-add">+  &lt;/div&gt;</span>
+<span class="d-add">+  &lt;h3&gt;Neighborhood #1s — top 15 by fresh weighted score&lt;/h3&gt;</span>
+<span class="d-add">+  &lt;div class=&quot;tblwrap&quot;&gt;&lt;table id=&quot;ntaTable&quot; aria-label=&quot;Per-neighborhood most dangerous intersections&quot;&gt;&lt;/table&gt;&lt;/div&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  &lt;h2&gt;&lt;span class=&quot;no&quot;&gt;5.&lt;/span&gt; Method &amp;amp; honest caveats&lt;/h2&gt;</span>
+<span class="d-add">+  &lt;p&gt;</span>
+<span class="d-add">+    &lt;b&gt;Join.&lt;/b&gt; 47,965 crash rows pulled (Socrata &lt;code class=&quot;path&quot;&gt;h9gi-nx95&lt;/code&gt;); 2,251 lacked usable coordinates; 5,611</span>
+<span class="d-add">+    fell &amp;gt;40 m from any named intersection (mostly mid-block) and are excluded; 40,103 snapped to 16,253 intersections.</span>
+<span class="d-add">+    Intersections are nodes in City Edit&#x27;s NYC walk graph where ≥2 distinct street names meet — the same graph the app serves,</span>
+<span class="d-add">+    so poster QR coordinates resolve to selectable nodes.</span>
+<span class="d-add">+    &lt;b&gt;Weights.&lt;/b&gt; The 8× death weight and 12-month half-life are dials, not truths; rankings above are shown under multiple</span>
+<span class="d-add">+    settings precisely so the choice is visible. &lt;b&gt;Denominators.&lt;/b&gt; No exposure normalization — a Midtown intersection sees</span>
+<span class="d-add">+    100× the foot traffic of a residential one, so these are counts of harm, not per-crossing risk. That&#x27;s the right metric for</span>
+<span class="d-add">+    &quot;where should a poster hang,&quot; the wrong one for &quot;which design is most defective.&quot;</span>
+<span class="d-add">+    &lt;b&gt;Data lag.&lt;/b&gt; NYPD publishes with ~6-week delay; &quot;last 12 months&quot; means through June 11, 2026. Late-filed reports can</span>
+<span class="d-add">+    still top up recent months slightly. &lt;b&gt;Underreporting.&lt;/b&gt; Cyclist-only falls and near-misses never enter this dataset —</span>
+<span class="d-add">+    which is exactly the gap the posters ask people to fill in City Edit.</span>
+<span class="d-add">+  &lt;/p&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  &lt;div class=&quot;foot&quot;&gt;</span>
+<span class="d-add">+    &lt;p&gt;Sources: NYC Open Data — Motor Vehicle Collisions (Crashes), pulled 2026-07-27 · NTA 2020 boundaries · City Edit NYC walk graph (2026-06-17 build).</span>
+<span class="d-add">+    Reproduce: &lt;code class=&quot;path&quot;&gt;scripts/build_intersection_rankings.py&lt;/code&gt; → &lt;code class=&quot;path&quot;&gt;data/analysis/*.csv&lt;/code&gt;.</span>
+<span class="d-add">+    Posters: &lt;code class=&quot;path&quot;&gt;scripts/generate_posters.py&lt;/code&gt; · replicas &amp;amp; templates in &lt;code class=&quot;path&quot;&gt;data/posters/&lt;/code&gt;.&lt;/p&gt;</span>
+<span class="d-add">+  &lt;/div&gt;</span>
+<span class="d-add">+&lt;/div&gt;</span>
+<span class="d-add">+&lt;div id=&quot;tip&quot; role=&quot;status&quot;&gt;&lt;/div&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+&lt;script&gt;</span>
+<span class="d-add">+const DATA = /*__DATA__*/;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const $ = (s) =&gt; document.querySelector(s);</span>
+<span class="d-add">+const esc = (s) =&gt; String(s).replace(/&amp;/g, &quot;&amp;amp;&quot;).replace(/&lt;/g, &quot;&amp;lt;&quot;);</span>
+<span class="d-add">+const css = (v) =&gt; getComputedStyle(document.documentElement).getPropertyValue(v).trim();</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ---- tooltip ----</span>
+<span class="d-add">+const tip = $(&quot;#tip&quot;);</span>
+<span class="d-add">+function showTip(html, ev) {</span>
+<span class="d-add">+  tip.innerHTML = html;</span>
+<span class="d-add">+  tip.style.display = &quot;block&quot;;</span>
+<span class="d-add">+  const pad = 14;</span>
+<span class="d-add">+  let x = ev.clientX + pad, y = ev.clientY + pad;</span>
+<span class="d-add">+  const r = tip.getBoundingClientRect();</span>
+<span class="d-add">+  if (x + r.width &gt; innerWidth - 8) x = ev.clientX - r.width - pad;</span>
+<span class="d-add">+  if (y + r.height &gt; innerHeight - 8) y = ev.clientY - r.height - pad;</span>
+<span class="d-add">+  tip.style.left = x + &quot;px&quot;; tip.style.top = y + &quot;px&quot;;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+function hideTip() { tip.style.display = &quot;none&quot;; }</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ---- section 1: PDF movement table ----</span>
+<span class="d-add">+(function () {</span>
+<span class="d-add">+  const verdict = (m) =&gt; {</span>
+<span class="d-add">+    if (m.freshRank &lt;= 50) return &#x27;&lt;span class=&quot;chip heat&quot;&gt;still hot · fresh #&#x27; + m.freshRank + &quot;&lt;/span&gt;&quot;;</span>
+<span class="d-add">+    if (m.cool &gt;= 1.0) return &#x27;&lt;span class=&quot;chip cool&quot;&gt;cooled · fresh #&#x27; + m.freshRank + &quot;&lt;/span&gt;&quot;;</span>
+<span class="d-add">+    return &#x27;&lt;span class=&quot;chip warm&quot;&gt;fading · fresh #&#x27; + m.freshRank + &quot;&lt;/span&gt;&quot;;</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+  const rows = DATA.pdfMoves.filter((m) =&gt; m.matched).map((m) =&gt;</span>
+<span class="d-add">+    &quot;&lt;tr&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + m.pdfRank + &quot;&lt;/td&gt;&lt;td&gt;&quot; + esc(m.label) +</span>
+<span class="d-add">+    &quot;&lt;span class=&#x27;nta&#x27;&gt;&quot; + esc(m.nta) + &quot;&lt;/span&gt;&lt;/td&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + m.pdfCrashes +</span>
+<span class="d-add">+    &quot;&lt;/td&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + m.baseRate.toFixed(1) + &quot;&lt;/td&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + m.f12 +</span>
+<span class="d-add">+    &quot;&lt;/td&gt;&lt;td&gt;&quot; + verdict(m) + &quot;&lt;/td&gt;&lt;/tr&gt;&quot;).join(&quot;&quot;);</span>
+<span class="d-add">+  $(&quot;#pdfTable&quot;).innerHTML =</span>
+<span class="d-add">+    &quot;&lt;thead&gt;&lt;tr&gt;&lt;th class=&#x27;r&#x27;&gt;PDF #&lt;/th&gt;&lt;th&gt;Intersection&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;PDF crashes (&#x27;23→&#x27;26)&lt;/th&gt;&quot; +</span>
+<span class="d-add">+    &quot;&lt;th class=&#x27;r&#x27;&gt;Baseline pace /yr&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Last 12 mo&lt;/th&gt;&lt;th&gt;Where it stands now&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&quot; +</span>
+<span class="d-add">+    rows + &quot;&lt;/tbody&gt;&quot;;</span>
+<span class="d-add">+})();</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ---- section 2: definition tabs ----</span>
+<span class="d-add">+const TABS = [</span>
+<span class="d-add">+  { key: &quot;topFresh&quot;, label: &quot;B · Fresh weighted&quot;, note: &quot;Last 12 months, injured + 8×killed. Deaths in bold red.&quot;, cols: &quot;fresh&quot; },</span>
+<span class="d-add">+  { key: &quot;topFreshPed&quot;, label: &quot;D · Pedestrians&quot;, note: &quot;Pedestrian victims only, last 12 months, severity-weighted.&quot;, cols: &quot;ped&quot; },</span>
+<span class="d-add">+  { key: &quot;topFreshCyc&quot;, label: &quot;D · Cyclists&quot;, note: &quot;Cyclist victims only, last 12 months, severity-weighted.&quot;, cols: &quot;cyc&quot; },</span>
+<span class="d-add">+  { key: &quot;topRecency&quot;, label: &quot;C · Recency-decayed&quot;, note: &quot;All crashes, half-life 12 months. The recommended poster metric.&quot;, cols: &quot;rec&quot; },</span>
+<span class="d-add">+  { key: &quot;topFull&quot;, label: &quot;A · Chronic 2023→now&quot;, note: &quot;The PDF&#x27;s definition on fresh data — reproduces its list almost exactly.&quot;, cols: &quot;full&quot; },</span>
+<span class="d-add">+  { key: &quot;topNight&quot;, label: &quot;F · After dark&quot;, note: &quot;Highest night share (9pm–6am) among intersections with ≥4 fresh crashes.&quot;, cols: &quot;night&quot; },</span>
+<span class="d-add">+  { key: &quot;manhattanRecency&quot;, label: &quot;Manhattan only&quot;, note: &quot;Recency-decayed, restricted to Manhattan.&quot;, cols: &quot;rec&quot; },</span>
+<span class="d-add">+];</span>
+<span class="d-add">+function cellName(r) { return &quot;&lt;td&gt;&quot; + esc(r.name) + &quot;&lt;span class=&#x27;nta&#x27;&gt;&quot; + esc(r.nta) + &quot; · &quot; + esc(r.boro) + &quot;&lt;/span&gt;&lt;/td&gt;&quot;; }</span>
+<span class="d-add">+function kills(n) { return n &gt; 0 ? &quot; &lt;span class=&#x27;dead&#x27;&gt;+&quot; + n + &quot; killed&lt;/span&gt;&quot; : &quot;&quot;; }</span>
+<span class="d-add">+const COLS = {</span>
+<span class="d-add">+  fresh: { head: &quot;&lt;th class=&#x27;r&#x27;&gt;#&lt;/th&gt;&lt;th&gt;Intersection&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Score&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Crashes 12mo&lt;/th&gt;&lt;th&gt;Victims 12mo&lt;/th&gt;&quot;,</span>
+<span class="d-add">+    row: (r) =&gt; &quot;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.wAll + &quot;&lt;/td&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.f12 + &quot;&lt;/td&gt;&lt;td&gt;&quot; + (r.f12pi + r.f12ci) + &quot; injured&quot; + kills(r.f12pk + r.f12ck) + &quot;&lt;/td&gt;&quot; },</span>
+<span class="d-add">+  ped: { head: &quot;&lt;th class=&#x27;r&#x27;&gt;#&lt;/th&gt;&lt;th&gt;Intersection&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Score&lt;/th&gt;&lt;th&gt;Pedestrians 12mo&lt;/th&gt;&quot;,</span>
+<span class="d-add">+    row: (r) =&gt; &quot;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.wPed + &quot;&lt;/td&gt;&lt;td&gt;&quot; + r.f12pi + &quot; injured&quot; + kills(r.f12pk) + &quot;&lt;/td&gt;&quot; },</span>
+<span class="d-add">+  cyc: { head: &quot;&lt;th class=&#x27;r&#x27;&gt;#&lt;/th&gt;&lt;th&gt;Intersection&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Score&lt;/th&gt;&lt;th&gt;Cyclists 12mo&lt;/th&gt;&quot;,</span>
+<span class="d-add">+    row: (r) =&gt; &quot;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.wCyc + &quot;&lt;/td&gt;&lt;td&gt;&quot; + r.f12ci + &quot; injured&quot; + kills(r.f12ck) + &quot;&lt;/td&gt;&quot; },</span>
+<span class="d-add">+  rec: { head: &quot;&lt;th class=&#x27;r&#x27;&gt;#&lt;/th&gt;&lt;th&gt;Intersection&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Recency score&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Crashes 12mo&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Since 2023&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Last crash&lt;/th&gt;&quot;,</span>
+<span class="d-add">+    row: (r) =&gt; &quot;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.rec + &quot;&lt;/td&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.f12 + &quot;&lt;/td&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.crashes + &quot;&lt;/td&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.last + &quot;&lt;/td&gt;&quot; },</span>
+<span class="d-add">+  full: { head: &quot;&lt;th class=&#x27;r&#x27;&gt;#&lt;/th&gt;&lt;th&gt;Intersection&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Crashes since 2023&lt;/th&gt;&lt;th&gt;Victims since 2023&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Last 12 mo&lt;/th&gt;&quot;,</span>
+<span class="d-add">+    row: (r) =&gt; &quot;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.crashes + &quot;&lt;/td&gt;&lt;td&gt;&quot; + (r.pi + r.ci) + &quot; injured&quot; + kills(r.pk + r.ck) + &quot;&lt;/td&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.f12 + &quot;&lt;/td&gt;&quot; },</span>
+<span class="d-add">+  night: { head: &quot;&lt;th class=&#x27;r&#x27;&gt;#&lt;/th&gt;&lt;th&gt;Intersection&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Night share&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Crashes 12mo&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Since 2023&lt;/th&gt;&quot;,</span>
+<span class="d-add">+    row: (r) =&gt; &quot;&lt;td class=&#x27;r&#x27;&gt;&quot; + Math.round(r.night * 100) + &quot;%&lt;/td&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.f12 + &quot;&lt;/td&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.crashes + &quot;&lt;/td&gt;&quot; },</span>
+<span class="d-add">+};</span>
+<span class="d-add">+function renderTab(i) {</span>
+<span class="d-add">+  const t = TABS[i];</span>
+<span class="d-add">+  const c = COLS[t.cols];</span>
+<span class="d-add">+  $(&quot;#tabnote&quot;).textContent = t.note;</span>
+<span class="d-add">+  $(&quot;#topTable&quot;).innerHTML = &quot;&lt;thead&gt;&lt;tr&gt;&quot; + c.head + &quot;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&quot; +</span>
+<span class="d-add">+    DATA[t.key].map((r, j) =&gt; &quot;&lt;tr&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + (j + 1) + &quot;&lt;/td&gt;&quot; + cellName(r) + c.row(r) + &quot;&lt;/tr&gt;&quot;).join(&quot;&quot;) + &quot;&lt;/tbody&gt;&quot;;</span>
+<span class="d-add">+  document.querySelectorAll(&quot;#tabbar button&quot;).forEach((b, j) =&gt; b.setAttribute(&quot;aria-selected&quot;, j === i));</span>
+<span class="d-add">+}</span>
+<span class="d-add">+$(&quot;#tabbar&quot;).innerHTML = TABS.map((t, i) =&gt; &quot;&lt;button role=&#x27;tab&#x27; aria-selected=&#x27;&quot; + (i === 0) + &quot;&#x27;&gt;&quot; + t.label + &quot;&lt;/button&gt;&quot;).join(&quot;&quot;);</span>
+<span class="d-add">+document.querySelectorAll(&quot;#tabbar button&quot;).forEach((b, i) =&gt; b.addEventListener(&quot;click&quot;, () =&gt; renderTab(i)));</span>
+<span class="d-add">+renderTab(0);</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ---- chart 1: paired bars ----</span>
+<span class="d-add">+(function () {</span>
+<span class="d-add">+  const rows = DATA.topRecency;</span>
+<span class="d-add">+  const W = 880, LEFT = 250, RIGHT = 60, BH = 13, GAP = 2, GROUP = 40, TOP = 24;</span>
+<span class="d-add">+  const H = TOP + rows.length * GROUP + 20;</span>
+<span class="d-add">+  const maxV = Math.max(...rows.map((r) =&gt; Math.max(r.base, r.f12))) * 1.08;</span>
+<span class="d-add">+  const x = (v) =&gt; LEFT + (v / maxV) * (W - LEFT - RIGHT);</span>
+<span class="d-add">+  let s = &quot;&lt;svg viewBox=&#x27;0 0 &quot; + W + &quot; &quot; + H + &quot;&#x27; style=&#x27;width:100%;height:auto&#x27; role=&#x27;img&#x27; aria-label=&#x27;Baseline pace versus last 12 months for top 12 intersections&#x27;&gt;&quot;;</span>
+<span class="d-add">+  for (let g = 0; g &lt;= 5; g++) {</span>
+<span class="d-add">+    const v = Math.round((maxV / 5) * g);</span>
+<span class="d-add">+    s += &quot;&lt;line x1=&#x27;&quot; + x(v) + &quot;&#x27; y1=&#x27;&quot; + (TOP - 8) + &quot;&#x27; x2=&#x27;&quot; + x(v) + &quot;&#x27; y2=&#x27;&quot; + (H - 18) + &quot;&#x27; stroke=&#x27;var(--grid)&#x27; stroke-width=&#x27;1&#x27;/&gt;&quot;;</span>
+<span class="d-add">+    s += &quot;&lt;text x=&#x27;&quot; + x(v) + &quot;&#x27; y=&#x27;&quot; + (H - 4) + &quot;&#x27; text-anchor=&#x27;middle&#x27;&gt;&quot; + v + &quot;&lt;/text&gt;&quot;;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  rows.forEach((r, i) =&gt; {</span>
+<span class="d-add">+    const y = TOP + i * GROUP;</span>
+<span class="d-add">+    const nm = r.name.length &gt; 34 ? r.name.slice(0, 33) + &quot;…&quot; : r.name;</span>
+<span class="d-add">+    s += &quot;&lt;text class=&#x27;ylab&#x27; x=&#x27;&quot; + (LEFT - 10) + &quot;&#x27; y=&#x27;&quot; + (y + 12) + &quot;&#x27; text-anchor=&#x27;end&#x27;&gt;&quot; + esc(nm) + &quot;&lt;/text&gt;&quot;;</span>
+<span class="d-add">+    s += &quot;&lt;text x=&#x27;&quot; + (LEFT - 10) + &quot;&#x27; y=&#x27;&quot; + (y + 25) + &quot;&#x27; text-anchor=&#x27;end&#x27;&gt;&quot; + esc(r.nta) + &quot;&lt;/text&gt;&quot;;</span>
+<span class="d-add">+    s += &quot;&lt;rect x=&#x27;&quot; + LEFT + &quot;&#x27; y=&#x27;&quot; + y + &quot;&#x27; width=&#x27;&quot; + Math.max(1, x(r.base) - LEFT) + &quot;&#x27; height=&#x27;&quot; + BH + &quot;&#x27; rx=&#x27;2&#x27; fill=&#x27;var(--series-base)&#x27; data-i=&#x27;&quot; + i + &quot;&#x27; data-k=&#x27;base&#x27;/&gt;&quot;;</span>
+<span class="d-add">+    s += &quot;&lt;rect x=&#x27;&quot; + LEFT + &quot;&#x27; y=&#x27;&quot; + (y + BH + GAP) + &quot;&#x27; width=&#x27;&quot; + Math.max(1, x(r.f12) - LEFT) + &quot;&#x27; height=&#x27;&quot; + BH + &quot;&#x27; rx=&#x27;2&#x27; fill=&#x27;var(--series-fresh)&#x27; data-i=&#x27;&quot; + i + &quot;&#x27; data-k=&#x27;f12&#x27;/&gt;&quot;;</span>
+<span class="d-add">+    s += &quot;&lt;text class=&#x27;vlab&#x27; x=&#x27;&quot; + (x(r.base) + 5) + &quot;&#x27; y=&#x27;&quot; + (y + 11) + &quot;&#x27;&gt;&quot; + r.base.toFixed(1) + &quot;&lt;/text&gt;&quot;;</span>
+<span class="d-add">+    s += &quot;&lt;text class=&#x27;vlab&#x27; x=&#x27;&quot; + (x(r.f12) + 5) + &quot;&#x27; y=&#x27;&quot; + (y + BH + GAP + 11) + &quot;&#x27;&gt;&quot; + r.f12 + &quot;&lt;/text&gt;&quot;;</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+  s += &quot;&lt;/svg&gt;&quot;;</span>
+<span class="d-add">+  $(&quot;#chartBars&quot;).innerHTML = s;</span>
+<span class="d-add">+  $(&quot;#chartBars&quot;).querySelectorAll(&quot;rect&quot;).forEach((rc) =&gt; {</span>
+<span class="d-add">+    rc.addEventListener(&quot;mousemove&quot;, (ev) =&gt; {</span>
+<span class="d-add">+      const r = rows[+rc.dataset.i];</span>
+<span class="d-add">+      showTip(&quot;&lt;b&gt;&quot; + esc(r.name) + &quot;&lt;/b&gt;&quot; + esc(r.nta) + &quot; · &quot; + esc(r.boro) +</span>
+<span class="d-add">+        &quot;&lt;br&gt;baseline &quot; + r.base.toFixed(1) + &quot;/yr → &quot; + r.f12 + &quot; in last 12 mo&quot; +</span>
+<span class="d-add">+        &quot;&lt;br&gt;recency score &quot; + r.rec, ev);</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+    rc.addEventListener(&quot;mouseleave&quot;, hideTip);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+})();</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ---- chart 2: scatter ----</span>
+<span class="d-add">+(function () {</span>
+<span class="d-add">+  const pts = DATA.scatter;</span>
+<span class="d-add">+  const W = 880, H = 420, L = 46, R = 16, T = 14, B = 40;</span>
+<span class="d-add">+  const maxX = Math.max(...pts.map((p) =&gt; p.x)) * 1.05;</span>
+<span class="d-add">+  const maxY = Math.max(...pts.map((p) =&gt; p.y)) + 1;</span>
+<span class="d-add">+  const x = (v) =&gt; L + (v / maxX) * (W - L - R);</span>
+<span class="d-add">+  const y = (v) =&gt; T + (1 - v / maxY) * (H - T - B);</span>
+<span class="d-add">+  let s = &quot;&lt;svg viewBox=&#x27;0 0 &quot; + W + &quot; &quot; + H + &quot;&#x27; style=&#x27;width:100%;height:auto&#x27; role=&#x27;img&#x27; aria-label=&#x27;Scatter of baseline pace versus last 12 month crashes&#x27;&gt;&quot;;</span>
+<span class="d-add">+  for (let g = 0; g &lt;= 5; g++) {</span>
+<span class="d-add">+    const vy = Math.round((maxY / 5) * g);</span>
+<span class="d-add">+    s += &quot;&lt;line x1=&#x27;&quot; + L + &quot;&#x27; x2=&#x27;&quot; + (W - R) + &quot;&#x27; y1=&#x27;&quot; + y(vy) + &quot;&#x27; y2=&#x27;&quot; + y(vy) + &quot;&#x27; stroke=&#x27;var(--grid)&#x27;/&gt;&quot;;</span>
+<span class="d-add">+    s += &quot;&lt;text x=&#x27;&quot; + (L - 8) + &quot;&#x27; y=&#x27;&quot; + (y(vy) + 4) + &quot;&#x27; text-anchor=&#x27;end&#x27;&gt;&quot; + vy + &quot;&lt;/text&gt;&quot;;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  for (let vx = 0; vx &lt;= maxX; vx += 2) {</span>
+<span class="d-add">+    s += &quot;&lt;text x=&#x27;&quot; + x(vx) + &quot;&#x27; y=&#x27;&quot; + (H - 8) + &quot;&#x27; text-anchor=&#x27;middle&#x27;&gt;&quot; + vx + &quot;&lt;/text&gt;&quot;;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  const dEnd = Math.min(maxX, maxY);</span>
+<span class="d-add">+  s += &quot;&lt;line x1=&#x27;&quot; + x(0) + &quot;&#x27; y1=&#x27;&quot; + y(0) + &quot;&#x27; x2=&#x27;&quot; + x(dEnd) + &quot;&#x27; y2=&#x27;&quot; + y(dEnd) + &quot;&#x27; stroke=&#x27;var(--muted)&#x27; stroke-dasharray=&#x27;5 4&#x27; stroke-width=&#x27;1.2&#x27;/&gt;&quot;;</span>
+<span class="d-add">+  s += &quot;&lt;text x=&#x27;&quot; + (x(dEnd) - 4) + &quot;&#x27; y=&#x27;&quot; + (y(dEnd) - 8) + &quot;&#x27; text-anchor=&#x27;end&#x27;&gt;no change&lt;/text&gt;&quot;;</span>
+<span class="d-add">+  s += &quot;&lt;text x=&#x27;&quot; + ((L + W - R) / 2) + &quot;&#x27; y=&#x27;&quot; + (H - 22) + &quot;&#x27; text-anchor=&#x27;middle&#x27;&gt;baseline pace (crashes / yr, 2023 → mid-2025)&lt;/text&gt;&quot;;</span>
+<span class="d-add">+  s += &quot;&lt;text transform=&#x27;rotate(-90)&#x27; x=&#x27;&quot; + (-(H - B + T) / 2) + &quot;&#x27; y=&#x27;14&#x27; text-anchor=&#x27;middle&#x27;&gt;crashes, last 12 months&lt;/text&gt;&quot;;</span>
+<span class="d-add">+  const order = { stable: 0, cooling: 1, heating: 2 };</span>
+<span class="d-add">+  const jit = (i) =&gt; ((i * 2654435761 % 1000) / 1000 - 0.5) * 7;</span>
+<span class="d-add">+  pts.slice().sort((a, b) =&gt; order[a.c] - order[b.c]).forEach((p, i) =&gt; {</span>
+<span class="d-add">+    const st = p.c === &quot;heating&quot; ? &quot;fill=&#x27;var(--heat)&#x27; r=&#x27;5.5&#x27;&quot; :</span>
+<span class="d-add">+      p.c === &quot;cooling&quot; ? &quot;fill=&#x27;var(--cool)&#x27; r=&#x27;5&#x27; fill-opacity=&#x27;0.9&#x27;&quot; :</span>
+<span class="d-add">+      &quot;fill=&#x27;var(--stable)&#x27; r=&#x27;3.2&#x27; fill-opacity=&#x27;0.45&#x27;&quot;;</span>
+<span class="d-add">+    s += &quot;&lt;circle cx=&#x27;&quot; + (x(p.x) + (p.x === 0 ? 0 : 0)) + &quot;&#x27; cy=&#x27;&quot; + (y(p.y) + jit(i)) + &quot;&#x27; &quot; + st + &quot; data-i=&#x27;&quot; + i + &quot;&#x27;/&gt;&quot;;</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+  s += &quot;&lt;/svg&gt;&quot;;</span>
+<span class="d-add">+  $(&quot;#chartScatter&quot;).innerHTML = s;</span>
+<span class="d-add">+  const sorted = pts.slice().sort((a, b) =&gt; order[a.c] - order[b.c]);</span>
+<span class="d-add">+  $(&quot;#chartScatter&quot;).querySelectorAll(&quot;circle&quot;).forEach((c) =&gt; {</span>
+<span class="d-add">+    c.addEventListener(&quot;mousemove&quot;, (ev) =&gt; {</span>
+<span class="d-add">+      const p = sorted[+c.dataset.i];</span>
+<span class="d-add">+      showTip(&quot;&lt;b&gt;&quot; + esc(p.n) + &quot;&lt;/b&gt;&quot; + esc(p.nta) +</span>
+<span class="d-add">+        &quot;&lt;br&gt;baseline &quot; + p.x.toFixed(1) + &quot;/yr → &quot; + p.y + &quot; last 12 mo · &quot; + p.c, ev);</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+    c.addEventListener(&quot;mouseleave&quot;, hideTip);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+})();</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ---- chart 3: distribution ----</span>
+<span class="d-add">+(function () {</span>
+<span class="d-add">+  const dist = DATA.dist.filter(([v]) =&gt; v &lt;= 20);</span>
+<span class="d-add">+  const W = 880, H = 260, L = 52, R = 16, T = 14, B = 44;</span>
+<span class="d-add">+  const maxC = Math.max(...dist.map(([, c]) =&gt; c));</span>
+<span class="d-add">+  const x = (i) =&gt; L + (i / dist.length) * (W - L - R);</span>
+<span class="d-add">+  const bw = (W - L - R) / dist.length - 2;</span>
+<span class="d-add">+  const y = (c) =&gt; T + (1 - Math.log10(c + 1) / Math.log10(maxC + 1)) * (H - T - B);</span>
+<span class="d-add">+  let s = &quot;&lt;svg viewBox=&#x27;0 0 &quot; + W + &quot; &quot; + H + &quot;&#x27; style=&#x27;width:100%;height:auto&#x27; role=&#x27;img&#x27; aria-label=&#x27;Distribution of fresh severity-weighted scores&#x27;&gt;&quot;;</span>
+<span class="d-add">+  [1, 10, 100, 1000, 10000].forEach((g) =&gt; {</span>
+<span class="d-add">+    if (g &lt;= maxC) {</span>
+<span class="d-add">+      s += &quot;&lt;line x1=&#x27;&quot; + L + &quot;&#x27; x2=&#x27;&quot; + (W - R) + &quot;&#x27; y1=&#x27;&quot; + y(g) + &quot;&#x27; y2=&#x27;&quot; + y(g) + &quot;&#x27; stroke=&#x27;var(--grid)&#x27;/&gt;&quot;;</span>
+<span class="d-add">+      s += &quot;&lt;text x=&#x27;&quot; + (L - 8) + &quot;&#x27; y=&#x27;&quot; + (y(g) + 4) + &quot;&#x27; text-anchor=&#x27;end&#x27;&gt;&quot; + g.toLocaleString() + &quot;&lt;/text&gt;&quot;;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+  dist.forEach(([v, c], i) =&gt; {</span>
+<span class="d-add">+    const hot = v &gt;= 3;</span>
+<span class="d-add">+    s += &quot;&lt;rect x=&#x27;&quot; + x(i) + &quot;&#x27; y=&#x27;&quot; + y(c) + &quot;&#x27; width=&#x27;&quot; + bw + &quot;&#x27; height=&#x27;&quot; + (H - B - y(c)) + &quot;&#x27; rx=&#x27;2&#x27; fill=&#x27;&quot; +</span>
+<span class="d-add">+      (hot ? &quot;var(--series-fresh)&quot; : &quot;var(--series-base)&quot;) + &quot;&#x27; data-v=&#x27;&quot; + v + &quot;&#x27; data-c=&#x27;&quot; + c + &quot;&#x27;/&gt;&quot;;</span>
+<span class="d-add">+    s += &quot;&lt;text x=&#x27;&quot; + (x(i) + bw / 2) + &quot;&#x27; y=&#x27;&quot; + (H - 26) + &quot;&#x27; text-anchor=&#x27;middle&#x27;&gt;&quot; + v + &quot;&lt;/text&gt;&quot;;</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+  s += &quot;&lt;text x=&#x27;&quot; + ((L + W - R) / 2) + &quot;&#x27; y=&#x27;&quot; + (H - 6) + &quot;&#x27; text-anchor=&#x27;middle&#x27;&gt;fresh severity-weighted score (orange = neighborhood-#1 eligible, score ≥ 3) · y log scale&lt;/text&gt;&quot;;</span>
+<span class="d-add">+  s += &quot;&lt;/svg&gt;&quot;;</span>
+<span class="d-add">+  $(&quot;#chartDist&quot;).innerHTML = s;</span>
+<span class="d-add">+  $(&quot;#chartDist&quot;).querySelectorAll(&quot;rect&quot;).forEach((rc) =&gt; {</span>
+<span class="d-add">+    rc.addEventListener(&quot;mousemove&quot;, (ev) =&gt;</span>
+<span class="d-add">+      showTip(&quot;&lt;b&gt;score &quot; + rc.dataset.v + &quot;&lt;/b&gt;&quot; + (+rc.dataset.c).toLocaleString() + &quot; intersections&quot;, ev));</span>
+<span class="d-add">+    rc.addEventListener(&quot;mouseleave&quot;, hideTip);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+})();</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ---- NTA table ----</span>
+<span class="d-add">+(function () {</span>
+<span class="d-add">+  $(&quot;#ntaTable&quot;).innerHTML =</span>
+<span class="d-add">+    &quot;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Neighborhood&lt;/th&gt;&lt;th&gt;Intersection&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Score&lt;/th&gt;&lt;th class=&#x27;r&#x27;&gt;Crashes 12mo&lt;/th&gt;&lt;th&gt;Victims 12mo&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&quot; +</span>
+<span class="d-add">+    DATA.ntaOnes.map((r) =&gt;</span>
+<span class="d-add">+      &quot;&lt;tr&gt;&lt;td&gt;&lt;b&gt;&quot; + esc(r.nta) + &quot;&lt;/b&gt;&lt;span class=&#x27;nta&#x27;&gt;&quot; + esc(r.boro) + &quot;&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&quot; + esc(r.name) +</span>
+<span class="d-add">+      &quot;&lt;/td&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.wAll + &quot;&lt;/td&gt;&lt;td class=&#x27;r&#x27;&gt;&quot; + r.f12 + &quot;&lt;/td&gt;&lt;td&gt;&quot; +</span>
+<span class="d-add">+      (r.f12pi + r.f12ci) + &quot; injured&quot; + kills(r.f12pk + r.f12ck) + &quot;&lt;/td&gt;&lt;/tr&gt;&quot;).join(&quot;&quot;) + &quot;&lt;/tbody&gt;&quot;;</span>
+<span class="d-add">+})();</span>
+<span class="d-add">+&lt;/script&gt;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">scripts/build_intersection_rankings.py</span>
+            <span class="stat"><span class="d-add">+311</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Analysis pipeline · scripts/</span>
+        <span class="ctx-sum">offline data tooling next to the app (graph builders, exports, deploy helpers)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_intersection_rankings.py</span>
+        <span class="ctx-sum">NEW ~300 LOC — crash→intersection snap + six danger rankings</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Constants / windows</span><span class="ol-sum">data-end 2026-06-11, fresh-12/24, baseline, K_WEIGHT=8, half-life 12mo</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">load_intersection_nodes</span><span class="ol-sum">walk-graph nodes with ≥2 distinct street names + display name</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">GridIndex</span><span class="ol-sum">~50m lat/lon buckets for nearest-intersection snaps</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Poisson helpers</span><span class="ol-sum">sf/cdf for trend surprise</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main — snap loop</span><span class="ol-sum">per-crash aggregation into windows, recency decay, night share</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main — NTA join + score rows</span><span class="ol-sum">shapely point-in-polygon, per-row metrics</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main — exports</span><span class="ol-sum">master CSV + 11 top lists + per-NTA #1s</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Whole file is new — the analysis pipeline behind the report and the posters.</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/scripts/build_intersection_rankings.py b/scripts/build_intersection_rankings.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..8af1b60</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/scripts/build_intersection_rankings.py</span>
+<span class="d-hunk">@@ -0,0 +1,311 @@</span>
+<span class="d-add">+#!/usr/bin/env python3</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+Build dangerous-intersection rankings from fresh NYPD collision data.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Pipeline:</span>
+<span class="d-add">+  1. Load ped/cyclist-involved crashes (data/raw/crashes_pedcyc_2023on.csv,</span>
+<span class="d-add">+     pulled from NYC Open Data h9gi-nx95).</span>
+<span class="d-add">+  2. Identify *street intersections* in the app&#x27;s own NYC walk graph</span>
+<span class="d-add">+     (server/osm_data/nyc/walk_graph_arrays.npz): nodes whose incident edges</span>
+<span class="d-add">+     carry &gt;= 2 distinct street names. Using app graph nodes means every</span>
+<span class="d-add">+     ranked intersection has coordinates that deep-link cleanly into City Edit.</span>
+<span class="d-add">+  3. Snap each crash to the nearest intersection node within SNAP_RADIUS_M.</span>
+<span class="d-add">+  4. Aggregate per intersection over several time windows and score under</span>
+<span class="d-add">+     multiple &quot;danger&quot; definitions; tag each with its NTA-2020 neighborhood.</span>
+<span class="d-add">+  5. Emit data/analysis/intersections_master.csv + per-definition top lists.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Danger definitions (columns in the master CSV):</span>
+<span class="d-add">+  - overall injured/killed counts (ped + cyclist), full window and fresh windows</span>
+<span class="d-add">+  - pedestrian-specific and cyclist-specific severity-weighted scores</span>
+<span class="d-add">+    (injured + K_WEIGHT x killed)</span>
+<span class="d-add">+  - recency-weighted score (exponential decay, 12-month half-life) — &quot;danger</span>
+<span class="d-add">+    as of today&quot;, which discounts crashes that predate street redesigns</span>
+<span class="d-add">+  - trend outliers: Poisson surprise of the last-12-months count given the</span>
+<span class="d-add">+    intersection&#x27;s own 2023-&gt;mid-2025 baseline (heating up / cooling down)</span>
+<span class="d-add">+</span>
+<span class="d-add">+Usage:</span>
+<span class="d-add">+  python scripts/build_intersection_rankings.py</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import csv</span>
+<span class="d-add">+import json</span>
+<span class="d-add">+import math</span>
+<span class="d-add">+from collections import Counter, defaultdict</span>
+<span class="d-add">+from datetime import datetime</span>
+<span class="d-add">+from pathlib import Path</span>
+<span class="d-add">+</span>
+<span class="d-add">+import numpy as np</span>
+<span class="d-add">+</span>
+<span class="d-add">+REPO = Path(__file__).resolve().parent.parent</span>
+<span class="d-add">+RAW = REPO / &quot;data&quot; / &quot;raw&quot;</span>
+<span class="d-add">+OUT = REPO / &quot;data&quot; / &quot;analysis&quot;</span>
+<span class="d-add">+GRAPH_NPZ = REPO / &quot;server&quot; / &quot;osm_data&quot; / &quot;nyc&quot; / &quot;walk_graph_arrays.npz&quot;</span>
+<span class="d-add">+NTA_GEOJSON = RAW / &quot;nta2020.geojson&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+DATA_END = datetime(2026, 6, 11)        # freshest crash_date in the pull</span>
+<span class="d-add">+FRESH12_START = datetime(2025, 6, 12)   # last 12 months</span>
+<span class="d-add">+FRESH24_START = datetime(2024, 6, 12)   # last 24 months</span>
+<span class="d-add">+BASE_END = datetime(2025, 6, 11)        # baseline window for trend tests</span>
+<span class="d-add">+BASE_START = datetime(2023, 1, 1)</span>
+<span class="d-add">+</span>
+<span class="d-add">+SNAP_RADIUS_M = 40.0</span>
+<span class="d-add">+K_WEIGHT = 8                # one death counts as 8 injuries in weighted scores</span>
+<span class="d-add">+HALFLIFE_MONTHS = 12.0      # recency decay half-life</span>
+<span class="d-add">+MIN_FRESH_FOR_TREND = 4     # noise floor for &quot;heating up&quot; outliers</span>
+<span class="d-add">+</span>
+<span class="d-add">+M_PER_DEG_LAT = 111_320.0</span>
+<span class="d-add">+M_PER_DEG_LON = 84_288.0    # cos(40.7 deg) * 111320</span>
+<span class="d-add">+</span>
+<span class="d-add">+NYC_BBOX = (40.49, 40.94, -74.26, -73.68)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def load_intersection_nodes():</span>
+<span class="d-add">+    &quot;&quot;&quot;Graph nodes with &gt;=2 distinct incident street names -&gt; true street</span>
+<span class="d-add">+    intersections, with a display name built from the two busiest names.&quot;&quot;&quot;</span>
+<span class="d-add">+    z = np.load(GRAPH_NPZ)</span>
+<span class="d-add">+    coords = z[&quot;coords&quot;]                      # [lat, lon]</span>
+<span class="d-add">+    eu, ev, enm = z[&quot;edge_u&quot;], z[&quot;edge_v&quot;], z[&quot;edge_name&quot;]</span>
+<span class="d-add">+    meta = json.loads(z[&quot;meta&quot;].tobytes())</span>
+<span class="d-add">+    names = meta[&quot;names&quot;]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    node_names = defaultdict(Counter)</span>
+<span class="d-add">+    for u, v, n in zip(eu, ev, enm):</span>
+<span class="d-add">+        nm = names[n]</span>
+<span class="d-add">+        if nm:</span>
+<span class="d-add">+            node_names[u][nm] += 1</span>
+<span class="d-add">+            node_names[v][nm] += 1</span>
+<span class="d-add">+</span>
+<span class="d-add">+    ids, latlon, display = [], [], []</span>
+<span class="d-add">+    for node, ctr in node_names.items():</span>
+<span class="d-add">+        if len(ctr) &gt;= 2:</span>
+<span class="d-add">+            top2 = [nm for nm, _ in ctr.most_common(2)]</span>
+<span class="d-add">+            ids.append(node)</span>
+<span class="d-add">+            latlon.append(coords[node])</span>
+<span class="d-add">+            display.append(&quot; / &quot;.join(top2))</span>
+<span class="d-add">+    return np.array(ids), np.array(latlon), display</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+class GridIndex:</span>
+<span class="d-add">+    &quot;&quot;&quot;Bucket lat/lon points on a ~50m grid for nearest-neighbor snaps.&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def __init__(self, latlon):</span>
+<span class="d-add">+        self.latlon = latlon</span>
+<span class="d-add">+        self.cell = 0.0005</span>
+<span class="d-add">+        self.buckets = defaultdict(list)</span>
+<span class="d-add">+        for i, (la, lo) in enumerate(latlon):</span>
+<span class="d-add">+            self.buckets[(int(la / self.cell), int(lo / self.cell))].append(i)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def nearest(self, lat, lon, max_m):</span>
+<span class="d-add">+        ci, cj = int(lat / self.cell), int(lon / self.cell)</span>
+<span class="d-add">+        best, best_d = -1, max_m</span>
+<span class="d-add">+        for di in (-1, 0, 1):</span>
+<span class="d-add">+            for dj in (-1, 0, 1):</span>
+<span class="d-add">+                for i in self.buckets.get((ci + di, cj + dj), ()):</span>
+<span class="d-add">+                    la, lo = self.latlon[i]</span>
+<span class="d-add">+                    d = math.hypot((la - lat) * M_PER_DEG_LAT,</span>
+<span class="d-add">+                                   (lo - lon) * M_PER_DEG_LON)</span>
+<span class="d-add">+                    if d &lt; best_d:</span>
+<span class="d-add">+                        best, best_d = i, d</span>
+<span class="d-add">+        return best</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def load_nta_index():</span>
+<span class="d-add">+    from shapely.geometry import shape</span>
+<span class="d-add">+    from shapely.strtree import STRtree</span>
+<span class="d-add">+    g = json.load(open(NTA_GEOJSON))</span>
+<span class="d-add">+    polys, props = [], []</span>
+<span class="d-add">+    for f in g[&quot;features&quot;]:</span>
+<span class="d-add">+        polys.append(shape(f[&quot;geometry&quot;]))</span>
+<span class="d-add">+        props.append((f[&quot;properties&quot;][&quot;ntaname&quot;], f[&quot;properties&quot;][&quot;boroname&quot;]))</span>
+<span class="d-add">+    return STRtree(polys), polys, props</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def poisson_sf(k, lam):</span>
+<span class="d-add">+    &quot;&quot;&quot;P(X &gt;= k) for X ~ Poisson(lam).&quot;&quot;&quot;</span>
+<span class="d-add">+    if k &lt;= 0:</span>
+<span class="d-add">+        return 1.0</span>
+<span class="d-add">+    term = math.exp(-lam)</span>
+<span class="d-add">+    cdf = term</span>
+<span class="d-add">+    for i in range(1, k):</span>
+<span class="d-add">+        term *= lam / i</span>
+<span class="d-add">+        cdf += term</span>
+<span class="d-add">+    return max(1e-300, 1.0 - cdf)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def poisson_cdf(k, lam):</span>
+<span class="d-add">+    term = math.exp(-lam)</span>
+<span class="d-add">+    cdf = term</span>
+<span class="d-add">+    for i in range(1, k + 1):</span>
+<span class="d-add">+        term *= lam / i</span>
+<span class="d-add">+        cdf += term</span>
+<span class="d-add">+    return min(1.0, cdf)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def main():</span>
+<span class="d-add">+    OUT.mkdir(parents=True, exist_ok=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    print(&quot;loading graph intersections…&quot;)</span>
+<span class="d-add">+    ids, latlon, display = load_intersection_nodes()</span>
+<span class="d-add">+    print(f&quot;  {len(ids)} named-street intersections&quot;)</span>
+<span class="d-add">+    grid = GridIndex(latlon)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    print(&quot;snapping crashes…&quot;)</span>
+<span class="d-add">+    agg = defaultdict(lambda: {</span>
+<span class="d-add">+        &quot;crashes&quot;: 0, &quot;pi&quot;: 0, &quot;pk&quot;: 0, &quot;ci&quot;: 0, &quot;ck&quot;: 0,</span>
+<span class="d-add">+        &quot;f_crashes&quot;: 0, &quot;f_pi&quot;: 0, &quot;f_pk&quot;: 0, &quot;f_ci&quot;: 0, &quot;f_ck&quot;: 0,</span>
+<span class="d-add">+        &quot;f24_crashes&quot;: 0, &quot;f24_pi&quot;: 0, &quot;f24_pk&quot;: 0, &quot;f24_ci&quot;: 0, &quot;f24_ck&quot;: 0,</span>
+<span class="d-add">+        &quot;base_crashes&quot;: 0, &quot;base_w&quot;: 0.0,</span>
+<span class="d-add">+        &quot;recency&quot;: 0.0, &quot;recency_ped&quot;: 0.0, &quot;recency_cyc&quot;: 0.0,</span>
+<span class="d-add">+        &quot;night&quot;: 0, &quot;streets&quot;: Counter(), &quot;boroughs&quot;: Counter(),</span>
+<span class="d-add">+        &quot;last_date&quot;: &quot;&quot;,</span>
+<span class="d-add">+    })</span>
+<span class="d-add">+    n_rows = n_nocoord = n_unsnapped = 0</span>
+<span class="d-add">+    with open(RAW / &quot;crashes_pedcyc_2023on.csv&quot;) as f:</span>
+<span class="d-add">+        for row in csv.DictReader(f):</span>
+<span class="d-add">+            n_rows += 1</span>
+<span class="d-add">+            try:</span>
+<span class="d-add">+                lat, lon = float(row[&quot;latitude&quot;]), float(row[&quot;longitude&quot;])</span>
+<span class="d-add">+            except (ValueError, TypeError):</span>
+<span class="d-add">+                n_nocoord += 1</span>
+<span class="d-add">+                continue</span>
+<span class="d-add">+            if not (NYC_BBOX[0] &lt; lat &lt; NYC_BBOX[1] and NYC_BBOX[2] &lt; lon &lt; NYC_BBOX[3]):</span>
+<span class="d-add">+                n_nocoord += 1</span>
+<span class="d-add">+                continue</span>
+<span class="d-add">+            idx = grid.nearest(lat, lon, SNAP_RADIUS_M)</span>
+<span class="d-add">+            if idx &lt; 0:</span>
+<span class="d-add">+                n_unsnapped += 1</span>
+<span class="d-add">+                continue</span>
+<span class="d-add">+            d = datetime.fromisoformat(row[&quot;crash_date&quot;].split(&quot;.&quot;)[0])</span>
+<span class="d-add">+            pi, pk = int(row[&quot;number_of_pedestrians_injured&quot;] or 0), int(row[&quot;number_of_pedestrians_killed&quot;] or 0)</span>
+<span class="d-add">+            ci, ck = int(row[&quot;number_of_cyclist_injured&quot;] or 0), int(row[&quot;number_of_cyclist_killed&quot;] or 0)</span>
+<span class="d-add">+            a = agg[idx]</span>
+<span class="d-add">+            a[&quot;crashes&quot;] += 1</span>
+<span class="d-add">+            a[&quot;pi&quot;] += pi; a[&quot;pk&quot;] += pk; a[&quot;ci&quot;] += ci; a[&quot;ck&quot;] += ck</span>
+<span class="d-add">+            if d &gt;= FRESH12_START:</span>
+<span class="d-add">+                a[&quot;f_crashes&quot;] += 1</span>
+<span class="d-add">+                a[&quot;f_pi&quot;] += pi; a[&quot;f_pk&quot;] += pk; a[&quot;f_ci&quot;] += ci; a[&quot;f_ck&quot;] += ck</span>
+<span class="d-add">+            if d &gt;= FRESH24_START:</span>
+<span class="d-add">+                a[&quot;f24_crashes&quot;] += 1</span>
+<span class="d-add">+                a[&quot;f24_pi&quot;] += pi; a[&quot;f24_pk&quot;] += pk; a[&quot;f24_ci&quot;] += ci; a[&quot;f24_ck&quot;] += ck</span>
+<span class="d-add">+            if d &lt;= BASE_END:</span>
+<span class="d-add">+                a[&quot;base_crashes&quot;] += 1</span>
+<span class="d-add">+            age_months = (DATA_END - d).days / 30.44</span>
+<span class="d-add">+            decay = 0.5 ** (age_months / HALFLIFE_MONTHS)</span>
+<span class="d-add">+            w = (pi + ci) + K_WEIGHT * (pk + ck)</span>
+<span class="d-add">+            a[&quot;recency&quot;] += decay * w</span>
+<span class="d-add">+            a[&quot;recency_ped&quot;] += decay * (pi + K_WEIGHT * pk)</span>
+<span class="d-add">+            a[&quot;recency_cyc&quot;] += decay * (ci + K_WEIGHT * ck)</span>
+<span class="d-add">+            hh = int((row[&quot;crash_time&quot;] or &quot;12:0&quot;).split(&quot;:&quot;)[0])</span>
+<span class="d-add">+            if hh &gt;= 21 or hh &lt; 6:</span>
+<span class="d-add">+                a[&quot;night&quot;] += 1</span>
+<span class="d-add">+            on = (row[&quot;on_street_name&quot;] or &quot;&quot;).strip()</span>
+<span class="d-add">+            # NYPD sometimes records the cross street in off_street_name</span>
+<span class="d-add">+            cross = (row[&quot;cross_street_name&quot;] or &quot;&quot;).strip() or (row[&quot;off_street_name&quot;] or &quot;&quot;).strip()</span>
+<span class="d-add">+            if on and cross:</span>
+<span class="d-add">+                a[&quot;streets&quot;][f&quot;{on.title()} / {cross.title()}&quot;] += 1</span>
+<span class="d-add">+            if row[&quot;borough&quot;]:</span>
+<span class="d-add">+                a[&quot;boroughs&quot;][row[&quot;borough&quot;].title()] += 1</span>
+<span class="d-add">+            ds = row[&quot;crash_date&quot;][:10]</span>
+<span class="d-add">+            if ds &gt; a[&quot;last_date&quot;]:</span>
+<span class="d-add">+                a[&quot;last_date&quot;] = ds</span>
+<span class="d-add">+    print(f&quot;  {n_rows} rows, {n_nocoord} without usable coords, {n_unsnapped} &gt;40m from any intersection, {n_rows-n_nocoord-n_unsnapped} snapped to {len(agg)} intersections&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    print(&quot;assigning neighborhoods…&quot;)</span>
+<span class="d-add">+    from shapely.geometry import Point</span>
+<span class="d-add">+    tree, polys, props = load_nta_index()</span>
+<span class="d-add">+    node_nta = {}</span>
+<span class="d-add">+    for idx in agg:</span>
+<span class="d-add">+        p = Point(latlon[idx][1], latlon[idx][0])</span>
+<span class="d-add">+        for j in tree.query(p):</span>
+<span class="d-add">+            if polys[j].contains(p):</span>
+<span class="d-add">+                node_nta[idx] = props[j]</span>
+<span class="d-add">+                break</span>
+<span class="d-add">+</span>
+<span class="d-add">+    base_months = (BASE_END - BASE_START).days / 30.44</span>
+<span class="d-add">+    rows = []</span>
+<span class="d-add">+    for idx, a in agg.items():</span>
+<span class="d-add">+        nta, boro_nta = node_nta.get(idx, (&quot;&quot;, &quot;&quot;))</span>
+<span class="d-add">+        boro = a[&quot;boroughs&quot;].most_common(1)[0][0] if a[&quot;boroughs&quot;] else boro_nta</span>
+<span class="d-add">+        crash_name = a[&quot;streets&quot;].most_common(1)[0][0] if a[&quot;streets&quot;] else &quot;&quot;</span>
+<span class="d-add">+        # Jeffreys-style pseudo-count keeps zero-baseline intersections finite:</span>
+<span class="d-add">+        # a brand-new hotspot is surprising, not infinitely surprising.</span>
+<span class="d-add">+        lam = (a[&quot;base_crashes&quot;] + 0.5) * 12.0 / base_months</span>
+<span class="d-add">+        heat_p = poisson_sf(a[&quot;f_crashes&quot;], lam) if a[&quot;f_crashes&quot;] &gt;= MIN_FRESH_FOR_TREND else 1.0</span>
+<span class="d-add">+        cool_p = poisson_cdf(a[&quot;f_crashes&quot;], lam) if a[&quot;base_crashes&quot;] &gt;= 8 else 1.0</span>
+<span class="d-add">+        rows.append({</span>
+<span class="d-add">+            &quot;node_id&quot;: int(ids[idx]),</span>
+<span class="d-add">+            &quot;lat&quot;: round(latlon[idx][0], 6), &quot;lon&quot;: round(latlon[idx][1], 6),</span>
+<span class="d-add">+            &quot;name_osm&quot;: display[idx], &quot;name_crash&quot;: crash_name,</span>
+<span class="d-add">+            &quot;nta&quot;: nta, &quot;borough&quot;: boro_nta or boro,</span>
+<span class="d-add">+            &quot;crashes&quot;: a[&quot;crashes&quot;], &quot;ped_inj&quot;: a[&quot;pi&quot;], &quot;ped_kill&quot;: a[&quot;pk&quot;],</span>
+<span class="d-add">+            &quot;cyc_inj&quot;: a[&quot;ci&quot;], &quot;cyc_kill&quot;: a[&quot;ck&quot;],</span>
+<span class="d-add">+            &quot;f12_crashes&quot;: a[&quot;f_crashes&quot;], &quot;f12_ped_inj&quot;: a[&quot;f_pi&quot;], &quot;f12_ped_kill&quot;: a[&quot;f_pk&quot;],</span>
+<span class="d-add">+            &quot;f12_cyc_inj&quot;: a[&quot;f_ci&quot;], &quot;f12_cyc_kill&quot;: a[&quot;f_ck&quot;],</span>
+<span class="d-add">+            &quot;f24_crashes&quot;: a[&quot;f24_crashes&quot;], &quot;f24_ped_inj&quot;: a[&quot;f24_pi&quot;], &quot;f24_ped_kill&quot;: a[&quot;f24_pk&quot;],</span>
+<span class="d-add">+            &quot;f24_cyc_inj&quot;: a[&quot;f24_ci&quot;], &quot;f24_cyc_kill&quot;: a[&quot;f24_ck&quot;],</span>
+<span class="d-add">+            &quot;score_ped_w&quot;: a[&quot;pi&quot;] + K_WEIGHT * a[&quot;pk&quot;],</span>
+<span class="d-add">+            &quot;score_cyc_w&quot;: a[&quot;ci&quot;] + K_WEIGHT * a[&quot;ck&quot;],</span>
+<span class="d-add">+            &quot;score_f12_ped_w&quot;: a[&quot;f_pi&quot;] + K_WEIGHT * a[&quot;f_pk&quot;],</span>
+<span class="d-add">+            &quot;score_f12_cyc_w&quot;: a[&quot;f_ci&quot;] + K_WEIGHT * a[&quot;f_ck&quot;],</span>
+<span class="d-add">+            &quot;score_f12_all_w&quot;: a[&quot;f_pi&quot;] + a[&quot;f_ci&quot;] + K_WEIGHT * (a[&quot;f_pk&quot;] + a[&quot;f_ck&quot;]),</span>
+<span class="d-add">+            &quot;recency_score&quot;: round(a[&quot;recency&quot;], 3),</span>
+<span class="d-add">+            &quot;recency_ped&quot;: round(a[&quot;recency_ped&quot;], 3),</span>
+<span class="d-add">+            &quot;recency_cyc&quot;: round(a[&quot;recency_cyc&quot;], 3),</span>
+<span class="d-add">+            &quot;base_crashes&quot;: a[&quot;base_crashes&quot;],</span>
+<span class="d-add">+            &quot;base_rate_12mo&quot;: round(lam, 3),</span>
+<span class="d-add">+            &quot;heat_surprise&quot;: round(-math.log10(heat_p), 2),</span>
+<span class="d-add">+            &quot;cool_surprise&quot;: round(-math.log10(max(cool_p, 1e-300)), 2),</span>
+<span class="d-add">+            &quot;night_share&quot;: round(a[&quot;night&quot;] / a[&quot;crashes&quot;], 3),</span>
+<span class="d-add">+            &quot;last_crash&quot;: a[&quot;last_date&quot;],</span>
+<span class="d-add">+        })</span>
+<span class="d-add">+</span>
+<span class="d-add">+    rows.sort(key=lambda r: -r[&quot;recency_score&quot;])</span>
+<span class="d-add">+    fields = list(rows[0].keys())</span>
+<span class="d-add">+    with open(OUT / &quot;intersections_master.csv&quot;, &quot;w&quot;, newline=&quot;&quot;) as f:</span>
+<span class="d-add">+        w = csv.DictWriter(f, fieldnames=fields)</span>
+<span class="d-add">+        w.writeheader()</span>
+<span class="d-add">+        w.writerows(rows)</span>
+<span class="d-add">+    print(f&quot;wrote {OUT/&#x27;intersections_master.csv&#x27;} ({len(rows)} intersections)&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def top(rows_, key, n=25, min_val=1):</span>
+<span class="d-add">+        rr = [r for r in rows_ if r[key] &gt;= min_val]</span>
+<span class="d-add">+        return sorted(rr, key=lambda r: (-r[key], -r[&quot;recency_score&quot;]))[:n]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    lists = {</span>
+<span class="d-add">+        &quot;rank_overall_full.csv&quot;: top(rows, &quot;crashes&quot;),</span>
+<span class="d-add">+        &quot;rank_fresh12_overall.csv&quot;: top(rows, &quot;score_f12_all_w&quot;),</span>
+<span class="d-add">+        &quot;rank_fresh12_ped.csv&quot;: top(rows, &quot;score_f12_ped_w&quot;),</span>
+<span class="d-add">+        &quot;rank_fresh12_cyc.csv&quot;: top(rows, &quot;score_f12_cyc_w&quot;),</span>
+<span class="d-add">+        &quot;rank_recency_weighted.csv&quot;: top(rows, &quot;recency_score&quot;),</span>
+<span class="d-add">+        &quot;rank_recency_ped.csv&quot;: top(rows, &quot;recency_ped&quot;),</span>
+<span class="d-add">+        &quot;rank_recency_cyc.csv&quot;: top(rows, &quot;recency_cyc&quot;),</span>
+<span class="d-add">+        &quot;rank_heating_up.csv&quot;: top(rows, &quot;heat_surprise&quot;, min_val=0.01),</span>
+<span class="d-add">+        &quot;rank_cooling_down.csv&quot;: top(rows, &quot;cool_surprise&quot;, min_val=0.01),</span>
+<span class="d-add">+        &quot;rank_manhattan_fresh12.csv&quot;: top([r for r in rows if r[&quot;borough&quot;] == &quot;Manhattan&quot;], &quot;score_f12_all_w&quot;),</span>
+<span class="d-add">+        &quot;rank_manhattan_recency.csv&quot;: top([r for r in rows if r[&quot;borough&quot;] == &quot;Manhattan&quot;], &quot;recency_score&quot;),</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    for fname, rr in lists.items():</span>
+<span class="d-add">+        with open(OUT / fname, &quot;w&quot;, newline=&quot;&quot;) as f:</span>
+<span class="d-add">+            w = csv.DictWriter(f, fieldnames=fields)</span>
+<span class="d-add">+            w.writeheader()</span>
+<span class="d-add">+            w.writerows(rr)</span>
+<span class="d-add">+        print(f&quot;wrote {fname} ({len(rr)})&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # per-neighborhood #1 by fresh-12 weighted score (min 3 weighted points)</span>
+<span class="d-add">+    best_by_nta = {}</span>
+<span class="d-add">+    for r in rows:</span>
+<span class="d-add">+        if not r[&quot;nta&quot;] or r[&quot;score_f12_all_w&quot;] &lt; 3:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        cur = best_by_nta.get(r[&quot;nta&quot;])</span>
+<span class="d-add">+        if cur is None or (r[&quot;score_f12_all_w&quot;], r[&quot;recency_score&quot;]) &gt; (cur[&quot;score_f12_all_w&quot;], cur[&quot;recency_score&quot;]):</span>
+<span class="d-add">+            best_by_nta[r[&quot;nta&quot;]] = r</span>
+<span class="d-add">+    nta_rows = sorted(best_by_nta.values(), key=lambda r: -r[&quot;score_f12_all_w&quot;])</span>
+<span class="d-add">+    with open(OUT / &quot;nta_number_ones.csv&quot;, &quot;w&quot;, newline=&quot;&quot;) as f:</span>
+<span class="d-add">+        w = csv.DictWriter(f, fieldnames=fields)</span>
+<span class="d-add">+        w.writeheader()</span>
+<span class="d-add">+        w.writerows(nta_rows)</span>
+<span class="d-add">+    print(f&quot;wrote nta_number_ones.csv ({len(nta_rows)} neighborhoods)&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+if __name__ == &quot;__main__&quot;:</span>
+<span class="d-add">+    main()</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">scripts/generate_posters.py</span>
+            <span class="stat"><span class="d-add">+272</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Poster tooling · scripts/</span>
+        <span class="ctx-sum">campaign generator that turns rankings into printable QR posters</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">generate_posters.py</span>
+        <span class="ctx-sum">NEW ~230 LOC — 7 campaigns × targets → filled templates → PNGs</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">fill_slot / set_style / set_qr</span><span class="ol-sum">regex slot substitution on leaf template elements</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">victims_line / hurt_ratio / night_fraction</span><span class="ol-sum">honest stat-line copywriting from the CSV</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CAMPAIGNS</span><span class="ol-sum">template + target selector + fill/swap rules per danger definition</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">nabe_targets</span><span class="ol-sum">one #1 per NTA neighborhood (score ≥ 3)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main</span><span class="ol-sum">QR per intersection (colorway-matched), render via render_poster.sh, manifest.csv</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Whole file is new — the procedural poster generator.</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/scripts/generate_posters.py b/scripts/generate_posters.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..bfe383c</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/scripts/generate_posters.py</span>
+<span class="d-hunk">@@ -0,0 +1,272 @@</span>
+<span class="d-add">+#!/usr/bin/env python3</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+Procedurally generate street-safety posters for NYC&#x27;s most dangerous</span>
+<span class="d-add">+intersections, one per (campaign x intersection), each with a QR deep link</span>
+<span class="d-add">+into City Edit at that exact intersection.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Inputs:</span>
+<span class="d-add">+  - data/analysis/intersections_master.csv   (from build_intersection_rankings.py)</span>
+<span class="d-add">+  - data/posters/templates/&lt;campaign&gt;.html   (replica/novel templates with slot</span>
+<span class="d-add">+    ids: headline / statline / cta / qr / neighborhood — leaf elements)</span>
+<span class="d-add">+</span>
+<span class="d-add">+Campaigns (danger definition -&gt; template -&gt; copy):</span>
+<span class="d-add">+  ped_no1     rank by recency-decayed pedestrian score -&gt; &quot;THE #&lt;n&gt; MOST</span>
+<span class="d-add">+              DANGEROUS INTERSECTION FOR PEDESTRIANS IN NYC&quot; (poster 2 replica)</span>
+<span class="d-add">+  cyc_no1     recency-decayed cyclist score (poster 3 replica)</span>
+<span class="d-add">+  overall     recency-decayed combined score (poster 1 &quot;is killer!&quot; replica)</span>
+<span class="d-add">+  dark        fresh severity-weighted combined (poster 4 dark replica)</span>
+<span class="d-add">+  nabe_no1    per-NTA-neighborhood #1 by fresh weighted score (novel)</span>
+<span class="d-add">+  heating_up  Poisson trend outliers (novel)</span>
+<span class="d-add">+  after_dark  night-crash share among active intersections (novel)</span>
+<span class="d-add">+</span>
+<span class="d-add">+Usage:</span>
+<span class="d-add">+  python scripts/generate_posters.py                # all campaigns, default Ns</span>
+<span class="d-add">+  python scripts/generate_posters.py --campaign nabe_no1 --limit 40 --scale 2</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import argparse</span>
+<span class="d-add">+import csv</span>
+<span class="d-add">+import html</span>
+<span class="d-add">+import re</span>
+<span class="d-add">+import subprocess</span>
+<span class="d-add">+from pathlib import Path</span>
+<span class="d-add">+</span>
+<span class="d-add">+import qrcode</span>
+<span class="d-add">+</span>
+<span class="d-add">+REPO = Path(__file__).resolve().parent.parent</span>
+<span class="d-add">+MASTER = REPO / &quot;data&quot; / &quot;analysis&quot; / &quot;intersections_master.csv&quot;</span>
+<span class="d-add">+TEMPLATES = REPO / &quot;data&quot; / &quot;posters&quot; / &quot;templates&quot;</span>
+<span class="d-add">+OUT = REPO / &quot;data&quot; / &quot;posters&quot; / &quot;out&quot;</span>
+<span class="d-add">+RENDER = REPO / &quot;scripts&quot; / &quot;render_poster.sh&quot;</span>
+<span class="d-add">+BASE_URL = &quot;https://cityedit.org/m/nyc-walkways&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def load_rows():</span>
+<span class="d-add">+    rows = list(csv.DictReader(open(MASTER)))</span>
+<span class="d-add">+    num = [&quot;crashes&quot;, &quot;ped_inj&quot;, &quot;ped_kill&quot;, &quot;cyc_inj&quot;, &quot;cyc_kill&quot;, &quot;f12_crashes&quot;,</span>
+<span class="d-add">+           &quot;f12_ped_inj&quot;, &quot;f12_ped_kill&quot;, &quot;f12_cyc_inj&quot;, &quot;f12_cyc_kill&quot;,</span>
+<span class="d-add">+           &quot;score_f12_all_w&quot;, &quot;recency_score&quot;, &quot;recency_ped&quot;, &quot;recency_cyc&quot;,</span>
+<span class="d-add">+           &quot;base_rate_12mo&quot;, &quot;heat_surprise&quot;, &quot;cool_surprise&quot;, &quot;night_share&quot;]</span>
+<span class="d-add">+    for r in rows:</span>
+<span class="d-add">+        for k in num:</span>
+<span class="d-add">+            r[k] = float(r[k])</span>
+<span class="d-add">+    return rows</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def slug(name):</span>
+<span class="d-add">+    return re.sub(r&quot;[^a-z0-9]+&quot;, &quot;-&quot;, name.lower()).strip(&quot;-&quot;)[:60]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def fill_slot(doc, slot_id, content):</span>
+<span class="d-add">+    &quot;&quot;&quot;Replace the inner HTML of the (leaf) element carrying id=slot_id.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Only safe for leaf slots (no nested same-tag children) — structured slots</span>
+<span class="d-add">+    like the ped_no1 headline are edited via targeted `swaps` instead.&quot;&quot;&quot;</span>
+<span class="d-add">+    pat = re.compile(r&#x27;(&lt;(\w+)[^&gt;]*\bid=&quot;&#x27; + slot_id + r&#x27;&quot;[^&gt;]*&gt;).*?(&lt;/\2&gt;)&#x27;, re.S)</span>
+<span class="d-add">+    if not pat.search(doc):</span>
+<span class="d-add">+        return doc</span>
+<span class="d-add">+    return pat.sub(lambda m: m.group(1) + content + m.group(3), doc)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def set_style(doc, slot_id, extra_css):</span>
+<span class="d-add">+    &quot;&quot;&quot;Append inline CSS to the element carrying id=slot_id.&quot;&quot;&quot;</span>
+<span class="d-add">+    pat = re.compile(r&#x27;&lt;(\w+)([^&gt;]*\bid=&quot;&#x27; + slot_id + r&#x27;&quot;[^&gt;]*)&gt;&#x27;)</span>
+<span class="d-add">+    def sub(m):</span>
+<span class="d-add">+        attrs = m.group(2)</span>
+<span class="d-add">+        if &#x27;style=&quot;&#x27; in attrs:</span>
+<span class="d-add">+            attrs = attrs.replace(&#x27;style=&quot;&#x27;, f&#x27;style=&quot;{extra_css};&#x27;, 1)</span>
+<span class="d-add">+        else:</span>
+<span class="d-add">+            attrs += f&#x27; style=&quot;{extra_css}&quot;&#x27;</span>
+<span class="d-add">+        return f&quot;&lt;{m.group(1)}{attrs}&gt;&quot;</span>
+<span class="d-add">+    return pat.sub(sub, doc, count=1)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def nabe_display(nta):</span>
+<span class="d-add">+    &quot;&quot;&quot;Poster-friendly neighborhood name: drop parenthetical qualifiers.&quot;&quot;&quot;</span>
+<span class="d-add">+    return re.sub(r&quot;\s*\([^)]*\)&quot;, &quot;&quot;, nta).strip()</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def night_fraction(share):</span>
+<span class="d-add">+    from fractions import Fraction</span>
+<span class="d-add">+    f = Fraction(share).limit_denominator(10)</span>
+<span class="d-add">+    return f.numerator, f.denominator</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def set_qr(doc, qr_relpath):</span>
+<span class="d-add">+    return re.sub(r&#x27;(&lt;img[^&gt;]*\bid=&quot;qr&quot;[^&gt;]*\bsrc=&quot;)[^&quot;]*(&quot;)&#x27;,</span>
+<span class="d-add">+                  lambda m: m.group(1) + qr_relpath + m.group(2), doc)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def victims_line(r, window=&quot;full&quot;):</span>
+<span class="d-add">+    if window == &quot;full&quot;:</span>
+<span class="d-add">+        inj = int(r[&quot;ped_inj&quot;] + r[&quot;cyc_inj&quot;])</span>
+<span class="d-add">+        kil = int(r[&quot;ped_kill&quot;] + r[&quot;cyc_kill&quot;])</span>
+<span class="d-add">+        since = &quot;since 2023&quot;</span>
+<span class="d-add">+    else:</span>
+<span class="d-add">+        inj = int(r[&quot;f12_ped_inj&quot;] + r[&quot;f12_cyc_inj&quot;])</span>
+<span class="d-add">+        kil = int(r[&quot;f12_ped_kill&quot;] + r[&quot;f12_cyc_kill&quot;])</span>
+<span class="d-add">+        since = &quot;in the last 12 months&quot;</span>
+<span class="d-add">+    if inj and kil:</span>
+<span class="d-add">+        what = f&quot;{inj} people injured and {kil} killed&quot;</span>
+<span class="d-add">+    elif kil:</span>
+<span class="d-add">+        what = f&quot;{kil} {&#x27;person&#x27; if kil == 1 else &#x27;people&#x27;} killed&quot;</span>
+<span class="d-add">+    else:</span>
+<span class="d-add">+        what = f&quot;{inj} {&#x27;person&#x27; if inj == 1 else &#x27;people&#x27;} injured&quot;</span>
+<span class="d-add">+    return f&quot;{what} here {since}&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def hurt_ratio(r):</span>
+<span class="d-add">+    &quot;&quot;&quot;Fresh-12 victims vs the intersection&#x27;s own earlier yearly pace.&quot;&quot;&quot;</span>
+<span class="d-add">+    fresh = r[&quot;f12_ped_inj&quot;] + r[&quot;f12_cyc_inj&quot;] + r[&quot;f12_ped_kill&quot;] + r[&quot;f12_cyc_kill&quot;]</span>
+<span class="d-add">+    base = (r[&quot;ped_inj&quot;] + r[&quot;cyc_inj&quot;] + r[&quot;ped_kill&quot;] + r[&quot;cyc_kill&quot;]) - fresh</span>
+<span class="d-add">+    base_yearly = max(base / 2.44, 0.5)   # 2023-01 .. 2025-06 baseline window</span>
+<span class="d-add">+    return max(2, round(fresh / base_yearly))</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _nabe_fill(r, i):</span>
+<span class="d-add">+    name = nabe_display(r[&quot;nta&quot;]).upper()</span>
+<span class="d-add">+    return {&quot;neighborhood&quot;: html.escape(name),</span>
+<span class="d-add">+            &quot;statline&quot;: html.escape(victims_line(r))}</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _nabe_style(r, i):</span>
+<span class="d-add">+    # MELROSE (7 chars) renders at the template&#x27;s native 124px; longer names</span>
+<span class="d-add">+    # shrink proportionally so the line always fits the 850px canvas.</span>
+<span class="d-add">+    name = nabe_display(r[&quot;nta&quot;])</span>
+<span class="d-add">+    size = max(38, min(124, int(124 * 7.4 / max(len(name), 5))))</span>
+<span class="d-add">+    return {&quot;neighborhood&quot;: f&quot;font-size:{size}px&quot;}</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _after_dark_fill(r, i):</span>
+<span class="d-add">+    num, den = night_fraction(r[&quot;night_share&quot;])</span>
+<span class="d-add">+    return {&quot;statline&quot;: f&quot;&lt;b&gt;{num} out of {den}&lt;/b&gt; crashes here happen&lt;br&gt;&quot;</span>
+<span class="d-add">+                        f&quot;between &lt;b&gt;9pm and 6am&lt;/b&gt;&quot;}</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+CAMPAIGNS = {</span>
+<span class="d-add">+    # &quot;#1&quot; rank posters keep their nested per-line headline markup; only the</span>
+<span class="d-add">+    # rank number is swapped in place.</span>
+<span class="d-add">+    &quot;ped_no1&quot;: {</span>
+<span class="d-add">+        &quot;template&quot;: &quot;ped_no1.html&quot;, &quot;default_n&quot;: 10,</span>
+<span class="d-add">+        &quot;select&quot;: lambda rows: sorted(rows, key=lambda r: -r[&quot;recency_ped&quot;]),</span>
+<span class="d-add">+        &quot;swaps&quot;: lambda r, i: [(r&quot;THE #\d+ MOST&quot;, f&quot;THE #{i + 1} MOST&quot;)],</span>
+<span class="d-add">+        # NOTE: this template&#x27;s id=&quot;statline&quot; is the YOU ARE HERE pin text —</span>
+<span class="d-add">+        # the design carries no stat line, so nothing is filled here.</span>
+<span class="d-add">+        &quot;fill&quot;: lambda r, i: {},</span>
+<span class="d-add">+    },</span>
+<span class="d-add">+    &quot;cyc_no1&quot;: {</span>
+<span class="d-add">+        &quot;template&quot;: &quot;cyc_no1.html&quot;, &quot;default_n&quot;: 10,</span>
+<span class="d-add">+        &quot;select&quot;: lambda rows: sorted(rows, key=lambda r: -r[&quot;recency_cyc&quot;]),</span>
+<span class="d-add">+        &quot;swaps&quot;: lambda r, i: [(r&quot;THE #\d+ MOST&quot;, f&quot;THE #{i + 1} MOST&quot;)],</span>
+<span class="d-add">+        &quot;fill&quot;: lambda r, i: {},</span>
+<span class="d-add">+    },</span>
+<span class="d-add">+    &quot;overall&quot;: {</span>
+<span class="d-add">+        &quot;template&quot;: &quot;bike_killer.html&quot;, &quot;default_n&quot;: 10,</span>
+<span class="d-add">+        &quot;select&quot;: lambda rows: sorted(rows, key=lambda r: -r[&quot;recency_score&quot;]),</span>
+<span class="d-add">+        &quot;fill&quot;: lambda r, i: {&quot;headline&quot;: &quot;your commute is killer!&quot;},</span>
+<span class="d-add">+    },</span>
+<span class="d-add">+    &quot;dark&quot;: {</span>
+<span class="d-add">+        &quot;template&quot;: &quot;dark_gear.html&quot;, &quot;default_n&quot;: 10,</span>
+<span class="d-add">+        &quot;select&quot;: lambda rows: sorted(rows, key=lambda r: -r[&quot;score_f12_all_w&quot;]),</span>
+<span class="d-add">+        &quot;fill&quot;: lambda r, i: {},</span>
+<span class="d-add">+    },</span>
+<span class="d-add">+    &quot;nabe_no1&quot;: {</span>
+<span class="d-add">+        &quot;template&quot;: &quot;nabe_no1.html&quot;, &quot;default_n&quot;: 30,</span>
+<span class="d-add">+        &quot;select&quot;: None,  # special-cased: one per neighborhood</span>
+<span class="d-add">+        &quot;fill&quot;: _nabe_fill,</span>
+<span class="d-add">+        &quot;style&quot;: _nabe_style,</span>
+<span class="d-add">+    },</span>
+<span class="d-add">+    &quot;heating_up&quot;: {</span>
+<span class="d-add">+        &quot;template&quot;: &quot;heating_up.html&quot;, &quot;default_n&quot;: 12,</span>
+<span class="d-add">+        &quot;select&quot;: lambda rows: [r for r in sorted(rows, key=lambda r: -r[&quot;heat_surprise&quot;])</span>
+<span class="d-add">+                                if r[&quot;f12_crashes&quot;] &gt;= 4],</span>
+<span class="d-add">+        &quot;fill&quot;: lambda r, i: {&quot;statline&quot;: html.escape(</span>
+<span class="d-add">+            &quot;%dx more people hurt here in the last 12 months than its own 3-year average&quot;</span>
+<span class="d-add">+            % hurt_ratio(r))},</span>
+<span class="d-add">+    },</span>
+<span class="d-add">+    &quot;after_dark&quot;: {</span>
+<span class="d-add">+        &quot;template&quot;: &quot;after_dark.html&quot;, &quot;default_n&quot;: 12,</span>
+<span class="d-add">+        &quot;select&quot;: lambda rows: [r for r in sorted(rows, key=lambda r: -r[&quot;night_share&quot;])</span>
+<span class="d-add">+                                if r[&quot;f12_crashes&quot;] &gt;= 4],</span>
+<span class="d-add">+        &quot;fill&quot;: _after_dark_fill,</span>
+<span class="d-add">+    },</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def nabe_targets(rows, n):</span>
+<span class="d-add">+    best = {}</span>
+<span class="d-add">+    for r in rows:</span>
+<span class="d-add">+        if not r[&quot;nta&quot;] or r[&quot;score_f12_all_w&quot;] &lt; 3:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        cur = best.get(r[&quot;nta&quot;])</span>
+<span class="d-add">+        if cur is None or (r[&quot;score_f12_all_w&quot;], r[&quot;recency_score&quot;]) &gt; (cur[&quot;score_f12_all_w&quot;], cur[&quot;recency_score&quot;]):</span>
+<span class="d-add">+            best[r[&quot;nta&quot;]] = r</span>
+<span class="d-add">+    return sorted(best.values(), key=lambda r: -r[&quot;score_f12_all_w&quot;])[:n]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def main():</span>
+<span class="d-add">+    ap = argparse.ArgumentParser()</span>
+<span class="d-add">+    ap.add_argument(&quot;--campaign&quot;, choices=list(CAMPAIGNS), action=&quot;append&quot;,</span>
+<span class="d-add">+                    help=&quot;campaign(s) to build (default: all)&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--limit&quot;, type=int, help=&quot;posters per campaign (default per-campaign)&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--scale&quot;, type=int, default=2,</span>
+<span class="d-add">+                    help=&quot;device scale factor (2 -&gt; 1700x2268 px, good for print)&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--base-url&quot;, default=BASE_URL)</span>
+<span class="d-add">+    args = ap.parse_args()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    rows = load_rows()</span>
+<span class="d-add">+    manifest = []</span>
+<span class="d-add">+    for name in args.campaign or list(CAMPAIGNS):</span>
+<span class="d-add">+        c = CAMPAIGNS[name]</span>
+<span class="d-add">+        tpl_path = TEMPLATES / c[&quot;template&quot;]</span>
+<span class="d-add">+        if not tpl_path.exists():</span>
+<span class="d-add">+            print(f&quot;!! {name}: template {tpl_path} missing, skipping&quot;)</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        tpl = tpl_path.read_text()</span>
+<span class="d-add">+        n = args.limit or c[&quot;default_n&quot;]</span>
+<span class="d-add">+        targets = nabe_targets(rows, n) if name == &quot;nabe_no1&quot; else c[&quot;select&quot;](rows)[:n]</span>
+<span class="d-add">+        outdir = OUT / name</span>
+<span class="d-add">+        outdir.mkdir(parents=True, exist_ok=True)</span>
+<span class="d-add">+        for i, r in enumerate(targets):</span>
+<span class="d-add">+            url = f&#x27;{args.base_url}?w={r[&quot;lat&quot;]},{r[&quot;lon&quot;]}&#x27;</span>
+<span class="d-add">+            tag = f&quot;{i+1:02d}_{slug(r[&#x27;name_osm&#x27;])}&quot;</span>
+<span class="d-add">+            qr_png = outdir / f&quot;{tag}_qr.png&quot;</span>
+<span class="d-add">+            qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,</span>
+<span class="d-add">+                               border=1, box_size=12)</span>
+<span class="d-add">+            qr.add_data(url)</span>
+<span class="d-add">+            qr.make(fit=True)</span>
+<span class="d-add">+            # match each template&#x27;s QR colorway by the asset it references</span>
+<span class="d-add">+            dark_qr = &quot;qr_white_on_black&quot; in tpl</span>
+<span class="d-add">+            red_qr = &quot;qr_red&quot; in tpl</span>
+<span class="d-add">+            qr.make_image(</span>
+<span class="d-add">+                fill_color=&quot;white&quot; if dark_qr else (&quot;#d0312d&quot; if red_qr else &quot;black&quot;),</span>
+<span class="d-add">+                back_color=&quot;black&quot; if dark_qr else &quot;white&quot;).save(qr_png)</span>
+<span class="d-add">+</span>
+<span class="d-add">+            doc = tpl</span>
+<span class="d-add">+            for pat, repl in (c[&quot;swaps&quot;](r, i) if &quot;swaps&quot; in c else []):</span>
+<span class="d-add">+                doc = re.sub(pat, repl, doc)</span>
+<span class="d-add">+            for slot, content in c[&quot;fill&quot;](r, i).items():</span>
+<span class="d-add">+                doc = fill_slot(doc, slot, content)</span>
+<span class="d-add">+            for slot, css in (c[&quot;style&quot;](r, i).items() if &quot;style&quot; in c else []):</span>
+<span class="d-add">+                doc = set_style(doc, slot, css)</span>
+<span class="d-add">+            doc = set_qr(doc, qr_png.name)</span>
+<span class="d-add">+            html_path = outdir / f&quot;{tag}.html&quot;</span>
+<span class="d-add">+            html_path.write_text(doc)</span>
+<span class="d-add">+            subprocess.run([str(RENDER), str(html_path), str(outdir / f&quot;{tag}.png&quot;),</span>
+<span class="d-add">+                            &quot;850&quot;, &quot;1134&quot;, str(args.scale)],</span>
+<span class="d-add">+                           check=True, capture_output=True)</span>
+<span class="d-add">+            manifest.append({&quot;campaign&quot;: name, &quot;rank&quot;: i + 1, &quot;name&quot;: r[&quot;name_osm&quot;],</span>
+<span class="d-add">+                             &quot;nta&quot;: r[&quot;nta&quot;], &quot;borough&quot;: r[&quot;borough&quot;],</span>
+<span class="d-add">+                             &quot;lat&quot;: r[&quot;lat&quot;], &quot;lon&quot;: r[&quot;lon&quot;], &quot;url&quot;: url,</span>
+<span class="d-add">+                             &quot;png&quot;: str((outdir / f&quot;{tag}.png&quot;).relative_to(REPO))})</span>
+<span class="d-add">+            print(f&quot;{name} #{i+1}: {r[&#x27;name_osm&#x27;]} ({r[&#x27;nta&#x27;]})&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    with open(OUT / &quot;manifest.csv&quot;, &quot;w&quot;, newline=&quot;&quot;) as f:</span>
+<span class="d-add">+        w = csv.DictWriter(f, fieldnames=list(manifest[0].keys()))</span>
+<span class="d-add">+        w.writeheader()</span>
+<span class="d-add">+        w.writerows(manifest)</span>
+<span class="d-add">+    print(f&quot;\n{len(manifest)} posters -&gt; {OUT} (manifest.csv written)&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+if __name__ == &quot;__main__&quot;:</span>
+<span class="d-add">+    main()</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">scripts/render_poster.sh</span>
+            <span class="stat"><span class="d-add">+14</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Poster tooling · scripts/</span>
+        <span class="ctx-sum">shared HTML→PNG renderer</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">render_poster.sh</span>
+        <span class="ctx-sum">NEW 15 LOC — chrome-headless-shell screenshot wrapper (size + device-scale)</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">render</span><span class="ol-sum">window-size, force-device-scale-factor, virtual-time-budget for webfonts</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Whole file is new.</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/scripts/render_poster.sh b/scripts/render_poster.sh</span>
+<span class="d-meta">new file mode 100755</span>
+<span class="d-meta">index 0000000..4dcbe85</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/scripts/render_poster.sh</span>
+<span class="d-hunk">@@ -0,0 +1,14 @@</span>
+<span class="d-add">+#!/bin/bash</span>
+<span class="d-add">+# Render a poster HTML file to PNG via chrome-headless-shell.</span>
+<span class="d-add">+# Usage: render_poster.sh &lt;html-file&gt; &lt;out.png&gt; [width] [height] [scale]</span>
+<span class="d-add">+set -euo pipefail</span>
+<span class="d-add">+HTML=&quot;$(cd &quot;$(dirname &quot;$1&quot;)&quot; &amp;&amp; pwd)/$(basename &quot;$1&quot;)&quot;</span>
+<span class="d-add">+OUT=&quot;$2&quot;</span>
+<span class="d-add">+W=&quot;${3:-850}&quot;</span>
+<span class="d-add">+H=&quot;${4:-1134}&quot;</span>
+<span class="d-add">+SCALE=&quot;${5:-1}&quot;</span>
+<span class="d-add">+SHELL_BIN=&quot;/Users/ericbolton/.cache/puppeteer/chrome-headless-shell/mac_arm-148.0.7778.97/chrome-headless-shell-mac-arm64/chrome-headless-shell&quot;</span>
+<span class="d-add">+&quot;$SHELL_BIN&quot; --disable-gpu --virtual-time-budget=10000 \</span>
+<span class="d-add">+  --window-size=&quot;$W,$H&quot; --force-device-scale-factor=&quot;$SCALE&quot; --hide-scrollbars \</span>
+<span class="d-add">+  --screenshot=&quot;$OUT&quot; &quot;file://$HTML&quot; 2&gt;/dev/null</span>
+<span class="d-add">+echo &quot;rendered $OUT&quot;</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
