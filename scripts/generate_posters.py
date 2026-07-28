@@ -298,12 +298,15 @@ CAMPAIGNS = {
         "template": "dark_gear.html", "default_n": 10, "claim": "generic",
         "select": _dark_select,
         "fill": lambda r, rank: {},
+        # corner marks sit on baked navy ovals in the night field
+        "dark": True,
     },
     "after_dark": {
         "template": "after_dark.html", "default_n": 12, "claim": "generic",
         "select": lambda rows: [r for r in sorted(rows, key=lambda r: -r["night_share"])
                                 if r["f12_crashes"] >= 4],
         "fill": _after_dark_fill,
+        "dark": True,
     },
     "overall": {
         "template": "bike_killer.html", "default_n": 10, "claim": "generic",
