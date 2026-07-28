@@ -14,9 +14,8 @@ Campaigns (danger definition -> template -> copy):
               DANGEROUS INTERSECTION FOR PEDESTRIANS IN NYC" (poster 2 replica)
   cyc_no1     recency-decayed cyclist score (poster 3 replica)
   overall     recency-decayed combined score (poster 1 "is killer!" replica)
-  dark        fresh severity-weighted combined (poster 4 dark replica)
+  dark        merged ped+cyclist danger (rank-sum of both lists; poster 4 dark)
   nabe_no1    per-NTA-neighborhood #1 by fresh weighted score (novel)
-  heating_up  Poisson trend outliers (novel)
   after_dark  night-crash share among active intersections (novel)
 
 Usage:
@@ -97,12 +96,27 @@ def poster_code(campaign, rank):
     return f"{CODE_PREFIX[campaign]}-{rank:02d}"
 
 
-def stamp_code(doc, code):
-    """Append a tiny code marker to the poster HTML (bottom-left corner)."""
+def stamp_footer(doc, code, dark=False):
+    """Tiny footer on every poster: placement code bottom-left, City Edit
+    wordmark (boxed letters, echoing the app logo) + cityedit.org bottom-right."""
+    ink = "#d9d9d9" if dark else "#4a4a4a"
+    dim = "#9b9b9b" if dark else "#8a8a8a"
+    box = (
+        "display:inline-block;border:1.3px solid " + ink + ";border-radius:2px;"
+        "padding:0 2px;margin:0 0.5px;font:700 8px ui-monospace,Menlo,monospace;"
+        "line-height:11px;color:" + ink + ";"
+    )
+    letters = "".join(
+        f'<span style="{box}">{ch}</span>' if ch != " " else
+        '<span style="display:inline-block;width:4px;"></span>'
+        for ch in "CITY EDIT")
     tag = (
         '<div style="position:absolute;left:10px;bottom:5px;z-index:99;'
         "font:600 11px ui-monospace,Menlo,monospace;letter-spacing:1.5px;"
-        f'color:#9b9b9b;">{code}</div>'
+        f'color:{dim};">{code}</div>'
+        '<div style="position:absolute;right:10px;bottom:5px;z-index:99;">'
+        f'{letters}<span style="font:600 10px ui-monospace,Menlo,monospace;'
+        f'color:{dim};margin-left:6px;">cityedit.org</span></div>'
     )
     if "</body>" in doc:
         return doc.replace("</body>", tag + "</body>", 1)
@@ -143,21 +157,13 @@ def victims_line(r, window="full"):
     return f"{what} here {since}"
 
 
-def hurt_ratio(r):
-    """Fresh-12 victims vs the intersection's own earlier yearly pace."""
-    fresh = r["f12_ped_inj"] + r["f12_cyc_inj"] + r["f12_ped_kill"] + r["f12_cyc_kill"]
-    base = (r["ped_inj"] + r["cyc_inj"] + r["ped_kill"] + r["cyc_kill"]) - fresh
-    base_yearly = max(base / 2.44, 0.5)   # 2023-01 .. 2025-06 baseline window
-    return max(2, round(fresh / base_yearly))
-
-
-def _nabe_fill(r, i):
+def _nabe_fill(r, rank):
     name = nabe_display(r["nta"]).upper()
     return {"neighborhood": html.escape(name),
             "statline": html.escape(victims_line(r))}
 
 
-def _nabe_style(r, i):
+def _nabe_style(r, rank):
     # MELROSE (7 chars) renders at the template's native 124px; longer names
     # shrink proportionally so the line always fits the 850px canvas.
     name = nabe_display(r["nta"])
@@ -165,60 +171,76 @@ def _nabe_style(r, i):
     return {"neighborhood": f"font-size:{size}px"}
 
 
-def _after_dark_fill(r, i):
+def _after_dark_fill(r, rank):
     num, den = night_fraction(r["night_share"])
     return {"statline": f"<b>{num} out of {den}</b> crashes here happen<br>"
                         f"between <b>9pm and 6am</b>"}
 
 
+def _dark_select(rows):
+    """Merged ped+cyclist danger: sum each intersection's RANK on the
+    pedestrian and cyclist recency lists (Borda-style), so the winners are
+    dangerous to BOTH modes — a pure victim sum is pedestrian-dominated.
+    Requires real signal in each mode."""
+    ped_rank = {id(r): i for i, r in enumerate(sorted(rows, key=lambda r: -r["recency_ped"]))}
+    cyc_rank = {id(r): i for i, r in enumerate(sorted(rows, key=lambda r: -r["recency_cyc"]))}
+    both = [r for r in rows if r["recency_ped"] > 1 and r["recency_cyc"] > 1]
+    return sorted(both, key=lambda r: ped_rank[id(r)] + cyc_rank[id(r)])
+
+
+# Campaigns run in priority order and each intersection is claimed ONCE — a
+# location never appears twice in the packet/checklist. `claim` controls how
+# a campaign handles an already-claimed intersection:
+#   rank    → drop it but keep the true rank number (a "#N" claim must stay true)
+#   unique  → drop it (the "#1 in <nabe>" claim can't transfer to a runner-up)
+#   generic → substitute the next-best unclaimed one (claim is generic)
+CAMPAIGN_ORDER = ["ped_no1", "cyc_no1", "nabe_no1", "dark", "after_dark", "overall"]
+
 CAMPAIGNS = {
-    # "#1" rank posters keep their nested per-line headline markup; only the
+    # "#N" rank posters keep their nested per-line headline markup; only the
     # rank number is swapped in place.
     "ped_no1": {
-        "template": "ped_no1.html", "default_n": 10,
+        "template": "ped_no1.html", "default_n": 10, "claim": "rank",
         "select": lambda rows: sorted(rows, key=lambda r: -r["recency_ped"]),
-        "swaps": lambda r, i: [(r"THE #\d+ MOST", f"THE #{i + 1} MOST")],
+        "swaps": lambda r, rank: [(r"THE #\d+ MOST", f"THE #{rank} MOST")],
         # NOTE: this template's id="statline" is the YOU ARE HERE pin text —
         # the design carries no stat line, so nothing is filled here.
-        "fill": lambda r, i: {},
+        "fill": lambda r, rank: {},
     },
     "cyc_no1": {
-        "template": "cyc_no1.html", "default_n": 10,
+        "template": "cyc_no1.html", "default_n": 10, "claim": "rank",
         "select": lambda rows: sorted(rows, key=lambda r: -r["recency_cyc"]),
-        "swaps": lambda r, i: [(r"THE #\d+ MOST", f"THE #{i + 1} MOST")],
-        "fill": lambda r, i: {},
-    },
-    "overall": {
-        "template": "bike_killer.html", "default_n": 10,
-        "select": lambda rows: sorted(rows, key=lambda r: -r["recency_score"]),
-        "fill": lambda r, i: {"headline": "your commute is killer!"},
-    },
-    "dark": {
-        "template": "dark_gear.html", "default_n": 10,
-        "select": lambda rows: sorted(rows, key=lambda r: -r["score_f12_all_w"]),
-        "fill": lambda r, i: {},
+        "swaps": lambda r, rank: [(r"THE #\d+ MOST", f"THE #{rank} MOST")],
+        "fill": lambda r, rank: {},
     },
     "nabe_no1": {
-        "template": "nabe_no1.html", "default_n": 30,
+        "template": "nabe_no1.html", "default_n": 30, "claim": "unique",
         "select": None,  # special-cased: one per neighborhood
         "fill": _nabe_fill,
         "style": _nabe_style,
     },
-    "heating_up": {
-        "template": "heating_up.html", "default_n": 12,
-        "select": lambda rows: [r for r in sorted(rows, key=lambda r: -r["heat_surprise"])
-                                if r["f12_crashes"] >= 4],
-        "fill": lambda r, i: {"statline": html.escape(
-            "%dx more people hurt here in the last 12 months than its own 3-year average"
-            % hurt_ratio(r))},
+    "dark": {
+        "template": "dark_gear.html", "default_n": 10, "claim": "generic",
+        "select": _dark_select,
+        "fill": lambda r, rank: {},
     },
     "after_dark": {
-        "template": "after_dark.html", "default_n": 12,
+        "template": "after_dark.html", "default_n": 12, "claim": "generic",
         "select": lambda rows: [r for r in sorted(rows, key=lambda r: -r["night_share"])
                                 if r["f12_crashes"] >= 4],
         "fill": _after_dark_fill,
+        "dark": True,
+    },
+    "overall": {
+        "template": "bike_killer.html", "default_n": 10, "claim": "generic",
+        "select": lambda rows: sorted(rows, key=lambda r: -r["recency_score"]),
+        # The mockup's own placeholder is "your <bike thing> is killer!" — fill
+        # it with something a bike nerd would grin at that matches the drawn
+        # step-through city bike.
+        "fill": lambda r, rank: {"headline": "your step-through is killer!"},
     },
 }
+CAMPAIGNS["dark"]["dark"] = True
 
 
 def nabe_targets(rows, n):
@@ -247,7 +269,8 @@ def main():
 
     rows = load_rows()
     manifest = []
-    for name in args.campaign or list(CAMPAIGNS):
+    used = set()  # (lat, lon) already claimed — one poster per intersection
+    for name in [c for c in CAMPAIGN_ORDER if not args.campaign or c in args.campaign]:
         c = CAMPAIGNS[name]
         tpl_path = TEMPLATES / c["template"]
         if not tpl_path.exists():
@@ -255,13 +278,28 @@ def main():
             continue
         tpl = tpl_path.read_text()
         n = args.limit or c["default_n"]
-        targets = nabe_targets(rows, n) if name == "nabe_no1" else c["select"](rows)[:n]
+        cands = nabe_targets(rows, n) if name == "nabe_no1" else c["select"](rows)
+        # (row, rank) targets under the campaign's claim policy (see above).
+        targets = []
+        if c["claim"] == "generic":
+            for r in cands:
+                if (r["lat"], r["lon"]) not in used:
+                    targets.append((r, len(targets) + 1))
+                if len(targets) >= n:
+                    break
+        else:  # rank / unique: never renumber, never substitute
+            for rank, r in enumerate(cands[:n], start=1):
+                if (r["lat"], r["lon"]) in used:
+                    print(f"   {name} #{rank} already claimed, dropped: {r['name_osm']}")
+                    continue
+                targets.append((r, rank))
         outdir = OUT / name
         outdir.mkdir(parents=True, exist_ok=True)
-        for i, r in enumerate(targets):
+        for r, rank in targets:
+            used.add((r["lat"], r["lon"]))
             from urllib.parse import quote_plus
             url = f'{args.base_url}?w={r["lat"]},{r["lon"]}&vt={quote_plus(QR_VOTE_TYPE)}'
-            tag = f"{i+1:02d}_{slug(r['name_osm'])}"
+            tag = f"{rank:02d}_{slug(r['name_osm'])}"
             qr_png = outdir / f"{tag}_qr.png"
             qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,
                                border=1, box_size=12)
@@ -274,22 +312,22 @@ def main():
                 fill_color="white" if dark_qr else ("#d0312d" if red_qr else "black"),
                 back_color="black" if dark_qr else "white").save(qr_png)
 
-            code = poster_code(name, i + 1)
+            code = poster_code(name, rank)
             doc = tpl
-            for pat, repl in (c["swaps"](r, i) if "swaps" in c else []):
+            for pat, repl in (c["swaps"](r, rank) if "swaps" in c else []):
                 doc = re.sub(pat, repl, doc)
-            for slot, content in c["fill"](r, i).items():
+            for slot, content in c["fill"](r, rank).items():
                 doc = fill_slot(doc, slot, content)
-            for slot, css in (c["style"](r, i).items() if "style" in c else []):
+            for slot, css in (c["style"](r, rank).items() if "style" in c else []):
                 doc = set_style(doc, slot, css)
             doc = set_qr(doc, qr_png.name)
-            doc = stamp_code(doc, code)
+            doc = stamp_footer(doc, code, dark=c.get("dark", False))
             html_path = outdir / f"{tag}.html"
             html_path.write_text(doc)
             subprocess.run([str(RENDER), str(html_path), str(outdir / f"{tag}.png"),
                             "850", "1134", str(args.scale)],
                            check=True, capture_output=True)
-            manifest.append({"code": code, "campaign": name, "rank": i + 1,
+            manifest.append({"code": code, "campaign": name, "rank": rank,
                              "name": r["name_osm"],
                              "nta": r["nta"], "borough": r["borough"],
                              "lat": r["lat"], "lon": r["lon"], "url": url,
@@ -308,8 +346,8 @@ def main():
 
 CAMPAIGN_TITLE = {
     "ped_no1": "Pedestrian #N citywide", "cyc_no1": "Cyclist #N citywide",
-    "overall": "Overall (recency)", "dark": "Dark variant (fresh severity)",
-    "nabe_no1": "Neighborhood #1", "heating_up": "Heating up", "after_dark": "After dark",
+    "overall": "Overall (recency)", "dark": "Ped + cyclist merged",
+    "nabe_no1": "Neighborhood #1", "after_dark": "After dark",
 }
 
 CHECKLIST_ROWS_PER_PAGE = 24
