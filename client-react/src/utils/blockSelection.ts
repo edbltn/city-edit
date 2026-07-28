@@ -19,6 +19,31 @@ export interface SelectionVoteRow {
   down: number;
 }
 
+// Session cache of resolved /api/route-votes rows (distinct-voter counts per
+// selection). Keyed by an order-insensitive signature of the capped edge-id
+// set, so the route card can render server truth immediately on reopen instead
+// of flashing the inflated per-block stand-in rows. Small: entries are a
+// handful of rows each; the cap only bounds a long browse session.
+export const ROUTE_VOTES_CACHE_MAX = 64;
+
+/**
+ * Order-insensitive signature of a selection's (capped) block-edge union, used
+ * to key cached /api/route-votes rows. FNV-1a over the sorted ids — tiny keys
+ * regardless of union size (a merged block can union thousands of edges), and
+ * the length + slug prefix keeps accidental collisions vanishingly unlikely.
+ */
+export function routeVotesKey(slug: string, edgeIds: readonly number[]): string {
+  const sorted = [...edgeIds].sort((a, b) => a - b);
+  let h = 0x811c9dc5;
+  for (const e of sorted) {
+    h ^= e & 0xffff;
+    h = Math.imul(h, 0x01000193);
+    h ^= e >>> 16;
+    h = Math.imul(h, 0x01000193);
+  }
+  return `${slug}:${sorted.length}:${h >>> 0}`;
+}
+
 /**
  * Materialize a selection's touched blocks into per-block edge lists. Real
  * blocks resolve through the CSR index (subarray views, no copies — the mobile

@@ -53,7 +53,10 @@ import {
   adjEdgesOf,
   adjShortest,
 } from "./graphTopology";
-import { materializeBlocks, selectionVoteRows } from "../../utils/blockSelection";
+import {
+  materializeBlocks, selectionVoteRows,
+  ROUTE_VOTES_CACHE_MAX, routeVotesKey,
+} from "../../utils/blockSelection";
 import { iconForLabel, iconSrc, mapStyleForTheme, pointTypeForLabel } from "../../themes";
 import { buildHeatRampStops, buildPinRampStops, sampleHeatRamp, HEAT_PEAK_POS } from "../../mapStyles";
 import {
@@ -3106,14 +3109,26 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     return voteRowsForEdges(pathEdgeIds);
   }, [pathEdgeIds, voteRowsForEdges, graphVoteVersion, votesVersion, isHeatmapLoading]);
 
-  // Rows for the HOVERED diamond's corridor (its block-edge union). Same
-  // safety net as the PBTP hover card: a live top proposal never reads
-  // "No votes yet" even if the breakdown momentarily decodes empty.
+  // Session cache of resolved /api/route-votes rows (distinct-voter counts),
+  // keyed by the selection's edge-set signature. Lets a reopened selection —
+  // and the hover card of a proposal the user already opened — render server
+  // truth immediately instead of flashing the inflated per-block stand-ins.
+  const routeVotesCacheRef = useRef<Map<string, VoteTypeRow[]>>(new Map());
+
+  // Rows for the HOVERED diamond's corridor (its block-edge union): the
+  // session's resolved distinct-voter rows when the corridor has been opened
+  // before (same signature the route card caches under, so hover and card
+  // agree), else the local block-grain sums. Same safety net as the PBTP hover
+  // card: a live top proposal never reads "No votes yet" even if the breakdown
+  // momentarily decodes empty.
   const hoverRbtpRows = useMemo<VoteTypeRow[]>(() => {
     void graphVoteVersion;
     void votesVersion;
     if (!hoverRbtp) return [];
-    const rows = voteRowsForEdges(hoverRbtp.blockEdgeIds);
+    const rows =
+      routeVotesCacheRef.current.get(
+        routeVotesKey(getMapSlug(), hoverRbtp.blockEdgeIds.slice(0, ROUTE_VOTES_EDGE_CAP)))
+      ?? voteRowsForEdges(hoverRbtp.blockEdgeIds);
     return rows.length ? rows : [{ label: hoverRbtp.label, up: hoverRbtp.score, down: 0 }];
   }, [hoverRbtp, voteRowsForEdges, graphVoteVersion, votesVersion]);
 
@@ -3121,17 +3136,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // direction) across the selection's block edges (/api/route-votes). A route
   // cast fans ONE device's vote onto every edge of every block it covers, so the
   // local per-block sums above count the same person once per block — these
-  // rows count them once, period. Local rows stand in until (or if never — no
-  // DB in some dev setups) the fetch resolves. Refetched, debounced, on every
-  // vote signal (own casts via votesVersion, everyone else's via the
-  // graphVoteVersion delta bump).
-  const [routeUniqueRows, setRouteUniqueRows] = useState<VoteTypeRow[] | null>(null);
-  useEffect(() => { setRouteUniqueRows(null); }, [pathEdgeIds]);
-  useEffect(() => {
-    if (!routeBlocks || routeBlocks.length === 0) {
-      setRouteUniqueRows(null);
-      return;
-    }
+  // rows count them once, period. Local rows stand in only for a selection this
+  // session has never resolved (or if the fetch never lands — no DB in some dev
+  // setups). The first fetch for an unseen selection fires immediately — the
+  // stand-in OVERCOUNTS, so truth should replace it as fast as one round-trip
+  // allows; refetches on vote signals (own casts via votesVersion, everyone
+  // else's via the graphVoteVersion delta bump) keep the debounce that
+  // coalesces bursts into one request.
+  const routeEdgeUnion = useMemo(() => {
+    if (!routeBlocks || routeBlocks.length === 0) return null;
     // Union of the touched blocks' edges, capped to keep the request bounded
     // (a merged foot-component block can hold thousands of edges; past the cap
     // the count degrades gracefully toward the per-block numbers).
@@ -3148,7 +3161,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       }
       if (edgeIds.length >= ROUTE_VOTES_EDGE_CAP) break;
     }
+    return { edgeIds, key: routeVotesKey(getMapSlug(), edgeIds) };
+  }, [routeBlocks]);
+  const routeEdgeUnionRef = useRef(routeEdgeUnion);
+  routeEdgeUnionRef.current = routeEdgeUnion;
+
+  const [routeVotesFetched, setRouteVotesFetched] =
+    useState<{ key: string; rows: VoteTypeRow[] } | null>(null);
+  const routeVotesFetchKey = routeEdgeUnion ? routeEdgeUnion.key : null;
+  useEffect(() => {
+    const union = routeEdgeUnionRef.current;
+    if (!union) return;
+    const { edgeIds, key } = union;
     let cancelled = false;
+    const delay = routeVotesCacheRef.current.has(key) ? ROUTE_VOTES_DEBOUNCE_MS : 0;
     const timer = window.setTimeout(() => {
       fetch(`${CONFIG.apiUrl}/route-votes`, {
         method: "POST",
@@ -3158,15 +3184,34 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => {
           if (cancelled || !j?.rows) return;
-          setRouteUniqueRows(j.rows as VoteTypeRow[]);
+          const rows = j.rows as VoteTypeRow[];
+          const cache = routeVotesCacheRef.current;
+          cache.delete(key);
+          cache.set(key, rows);
+          // Bounded, insertion-ordered → dropping the first key evicts the
+          // least-recently-resolved entry.
+          while (cache.size > ROUTE_VOTES_CACHE_MAX) {
+            cache.delete(cache.keys().next().value as string);
+          }
+          setRouteVotesFetched({ key, rows });
         })
         .catch(() => {});
-    }, ROUTE_VOTES_DEBOUNCE_MS);
+    }, delay);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [routeBlocks, votesVersion, graphVoteVersion]);
+  }, [routeVotesFetchKey, votesVersion, graphVoteVersion]);
+
+  // Rows the card renders: the live fetch result for THIS selection, else the
+  // session cache, else null (→ the local stand-in). Key-matched, so one
+  // selection's server rows can never appear on another selection's card while
+  // its own fetch is in flight.
+  const routeUniqueRows = routeEdgeUnion
+    ? (routeVotesFetched?.key === routeEdgeUnion.key
+        ? routeVotesFetched.rows
+        : routeVotesCacheRef.current.get(routeEdgeUnion.key) ?? null)
+    : null;
 
   // The RBTP the current selection stands for, if any — it becomes the card's
   // header, so selecting a diamond (or manually tracing its corridor) titles
