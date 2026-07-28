@@ -1,0 +1,27 @@
+# Blocks-overlay deploy: updated code/client/nginx PLUS refreshed Layer-2
+# block artifacts (.blocks-staging/<city>/) onto the CURRENT app image. The
+# staged artifacts must be baked against the base image's own graphs — see
+# Dockerfile.blocks-overlay. Pass the digest-pinned base via _BASE_IMAGE.
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'BASE_IMAGE=${_BASE_IMAGE}'
+      - '-f'
+      - 'Dockerfile.blocks-overlay'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest']
+
+timeout: '1800s'
+
+substitutions:
+  _REGION: us-central1
+  _BASE_IMAGE: ''
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'

@@ -29,6 +29,22 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-27-heat-priority-selection.html">
+    <div class="date">2026-07-27</div>
+    <h2>Hot blocks always win the hit: heat-priority selection + corridor-disjoint NYC blocks reshipped</h2>
+    <p>The orange heat block at Rockaway Pkwy &amp; Linden Blvd was impossible to select: prod still
+    served a pre-corridor-disjoint blocks bake (1,629 overlapping pairs in that z14 tile, one 913 m²
+    Rockaway×Rockaway overlap right at the pin), and the point→block resolver took the topmost-rendered
+    polygon instead of the hottest. Now <code>hottestBlockId</code> ranks overlapping polygons by
+    |feature-state heat| (ties keep render order), and NYC's blocks were re-baked with the
+    all-classes-disjoint builder against the serving image's own graph (<code>b0ca56f8</code>, no
+    resnap; blocks <code>b6a2a72b</code>, residual overlaps 0). Bonus catch: the "atomic bake" temp
+    rename made tippecanoe silently emit SQLite mbtiles (<code>-o blocks.pmtiles.tmp</code> — format
+    is picked by extension); the temp name now ends in <code>.pmtiles</code>. Deployed staging-first
+    as blocks-overlay digest <code>db87d63b</code> after a fresh prod DB snapshot, verified on staging,
+    promoted to prod, and re-verified: the once-dead orange block selects.</p>
+  </a>
+
   <a class="entry" href="./2026-07-27-deeplink-centering-nyc-intersections.html">
     <div class="date">2026-07-27</div>
     <h2>Deep links center on their selection + the nyc-intersections map goes live</h2>

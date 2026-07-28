@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Hot blocks always win the hit: heat-priority selection + corridor-disjoint NYC blocks reshipped</title>
+<style>
+body { font: 15px/1.55 -apple-system, "Segoe UI", sans-serif; color: #1c1c1a; background: #fbfbf8;
+       max-width: 1000px; margin: 2rem auto; padding: 0 1.2rem; }
+h1 { font-size: 1.5rem; } h2 { margin-top: 2rem; }
+code { background: #f0efe9; padding: 1px 4px; border-radius: 3px; }
+.date { color: #777; }
+.ctx { border: 1px solid #ddd; border-radius: 8px; padding: 10px 14px; margin: 10px 0; background: #fff; }
+.lvl { display: flex; gap: 12px; margin: 6px 0; align-items: baseline; }
+.lbl { flex: 0 0 110px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #999; }
+.pills .pill { display: inline-block; border: 1px solid #ccc; border-radius: 999px; padding: 1px 10px;
+                margin-right: 6px; font-size: 12px; color: #aaa; }
+.pills .pill.on { border-color: #b3552e; color: #b3552e; font-weight: 600; background: #fdf1ea; }
+.fmap { display: flex; flex-wrap: wrap; gap: 4px; }
+.fm { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: #f2f1ec; color: #b6b4ac; }
+.fm.hot { background: #fdf1ea; color: #b3552e; font-weight: 600; }
+.blk { margin: 4px 0 2px 18px; padding: 0; font-size: 13.5px; }
+.diff { font: 12px/1.45 ui-monospace, Menlo, monospace; background: #14140f; color: #ddd;
+         border-radius: 8px; padding: 12px 14px; overflow-x: auto; display: block; white-space: pre; }
+.d-add { color: #7fce6c; display: block; } .d-del { color: #e06c60; display: block; }
+.d-hunk { color: #6cb6e0; display: block; } .d-meta { color: #888; display: block; }
+.d-ctx { color: #bbb; display: block; }
+section.file { margin: 2.2rem 0; }
+</style></head><body>
+<h1>Hot blocks always win the hit: heat-priority selection + corridor-disjoint NYC blocks reshipped</h1>
+<p class="date">2026-07-27 · City Edit changelog</p>
+
+<h2>What happened</h2>
+<p>On the <b>NYC Dangerous Intersections</b> map (<code>/m/nyc-intersections</code>, city
+<code>nyc</code>, network <code>streets</code>), the orange heat block at Rockaway Parkway &amp;
+Linden Boulevard was <b>impossible to hover or select</b>. Two independent causes:</p>
+<ol>
+<li><b>Prod served a pre-corridor-disjoint blocks bake.</b> The corridor-vs-corridor
+disjointness pass (<code>a720309</code>, 2026-07-22) never shipped for NYC: prod's z14 tile at
+that location carried <b>1,629 overlapping polygon pairs ≥1&nbsp;m²</b> (max 1,430&nbsp;m²), including a
+913&nbsp;m² overlap between two consecutive Rockaway&nbsp;Parkway corridor blocks — exactly the
+double-quad visible in the user's screenshot.</li>
+<li><b>The point→block resolver took the topmost-rendered polygon.</b>
+<code>blockIdAtLatLng</code> returned <code>queryRenderedFeatures(...)[0]</code> — tile/feature
+order, not heat — so wherever a cool polygon overlapped a hot one, the cool one owned every
+hover and click and the hot block underneath was unreachable.</li>
+</ol>
+<h2>The fix</h2>
+<p><b>Client:</b> the resolver now ranks all polygons under the cursor by
+<code>|feature-state heat|</code> and the hottest wins (<code>hottestBlockId</code>); ties — the
+common all-zero case — keep render order. This also covers the residual ≤20&nbsp;m² slivers
+tippecanoe's per-zoom simplification introduces at low zooms, which no geometry rebake can
+eliminate.</p>
+<p><b>Blocks:</b> NYC re-baked with the current graph-first builder (corridor cuts + duplicate
+corridor merges + ship-frame audit: <code>residual_overlap_pairs: 0</code>) <b>against the serving
+image's own graph</b> (etag <code>b0ca56f8…</code>, extracted via <code>docker cp</code> from the
+digest-pinned prod image — prod graph vintage ≠ local), staged in
+<code>.blocks-staging/nyc/</code>, and shipped with <code>Dockerfile.blocks-overlay</code> so the
+client fix and artifacts land in one image. Staging-first, then the same digest promoted to prod.
+The segmentation logic itself needed no new code — overlapping corridors were already merged/cut
+by <code>a720309</code>; what was missing was a prod re-bake carrying it.</p>
+
+<h2>Diffs</h2>
+
+<section class="file">
+<h3><code>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</code></h3>
+
+<div class="ctx">
+  <div class="lvl"><span class="lbl">System</span><div class="pills"><span class="pill">nginx</span><span class="pill">Flask API</span><span class="pill">OSRM</span><span class="pill">Redis</span><span class="pill on">React/Leaflet client</span></div></div>
+  <div class="lvl"><span class="lbl">Module</span><div>MapLibreBackground — the GL basemap + block-heat renderer; owns the MapLibre instance and the point→block resolver GraphLayer calls on every mousemove</div></div>
+  <div class="lvl"><span class="lbl">File</span><div>GL map bootstrap, block tile source/layers, heat feature-state apply, camera sync · ~560 LOC</div></div>
+  <div class="lvl"><span class="lbl">File map</span><div class="fmap"><div class="fm">imports / zoom constants</div><div class="fm">BlockVotes / BlockSelect event contracts</div><div class="fm hot">blockAtResolver bridge (blockIdAtLatLng)</div><div class="fm">blockFillPaint / blockLinePaint heat ramps</div><div class="fm hot">map init + style + tile rebind</div><div class="fm">camera sync from Leaflet</div><div class="fm">heat feature-state apply (diffed writes)</div></div></div>
+  <div class="lvl"><span class="lbl">Changed blocks</span><ol class="blk"><li><b>import hottestBlockId</b> — pull in the pure overlap-winner rule</li><li><b>blockAtResolver</b> — queryRenderedFeatures result now ranked by |feature-state heat| instead of taking feats[0] (render order) — a cool polygon overlapping a hot block no longer swallows every hover/click in the overlap region</li></ol></div>
+</div>
+<pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index 070a5e5..06916f0 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -12,6 +12,7 @@ import { Protocol } from &quot;pmtiles&quot;;</span>
+<span class="d-ctx"> import { CONFIG, type BlockTilesConfig } from &quot;../../config&quot;;</span>
+<span class="d-ctx"> import { dlog, dwarn, debugState } from &quot;../../utils/debugLog&quot;;</span>
+<span class="d-ctx"> import { maplibreRasterTiles, heatTip, type MapStyle } from &quot;../../mapStyles&quot;;</span>
+<span class="d-add">+import { hottestBlockId } from &quot;./hottestBlock&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> // Register PMTiles protocol once at module level</span>
+<span class="d-ctx"> const protocol = new Protocol();</span>
+<span class="d-hunk">@@ -334,14 +335,16 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">       // Point→block resolver for GraphLayer&#x27;s hover constraint. Fill layers</span>
+<span class="d-ctx">       // are queryable regardless of their (heat-driven, possibly 0) opacity;</span>
+<span class="d-ctx">       // guard on the layer existing so a not-yet-loaded style reads as null.</span>
+<span class="d-add">+      // Where polygons overlap, the hottest block wins the point (see</span>
+<span class="d-add">+      // hottestBlockId) — render order made hot blocks under a cool overlap</span>
+<span class="d-add">+      // unhoverable and unselectable.</span>
+<span class="d-ctx">       blockAtResolver = (lat: number, lng: number) =&gt; {</span>
+<span class="d-ctx">         const ml = mapRef.current;</span>
+<span class="d-ctx">         if (!ml || !ml.getLayer(&quot;block-heat&quot;)) return null;</span>
+<span class="d-ctx">         const feats = ml.queryRenderedFeatures(ml.project([lng, lat]), {</span>
+<span class="d-ctx">           layers: [&quot;block-heat&quot;],</span>
+<span class="d-ctx">         });</span>
+<span class="d-del">-        const id = feats[0]?.id;</span>
+<span class="d-del">-        return typeof id === &quot;number&quot; ? id : null;</span>
+<span class="d-add">+        return hottestBlockId(feats);</span>
+<span class="d-ctx">       };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       return () =&gt; {</span></pre>
+</section>
+<section class="file">
+<h3><code>client-react/src/components/MapLibreBackground/hottestBlock.test.ts</code></h3>
+
+<div class="ctx">
+  <div class="lvl"><span class="lbl">System</span><div class="pills"><span class="pill">nginx</span><span class="pill">Flask API</span><span class="pill">OSRM</span><span class="pill">Redis</span><span class="pill on">React/Leaflet client</span></div></div>
+  <div class="lvl"><span class="lbl">Module</span><div>MapLibreBackground — unit tests</div></div>
+  <div class="lvl"><span class="lbl">File</span><div>NEW — 7 vitest cases for the overlap-winner rule · ~55 LOC</div></div>
+  <div class="lvl"><span class="lbl">File map</span><div class="fmap"><div class="fm hot">hottestBlockId cases</div></div></div>
+  <div class="lvl"><span class="lbl">Changed blocks</span><ol class="blk"><li><b>tests</b> — hotter-under-cooler wins; missing state = 0; ties keep render order; cold (negative) heat ranks by magnitude; non-numeric ids ignored</li></ol></div>
+</div>
+<pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/hottestBlock.test.ts b/client-react/src/components/MapLibreBackground/hottestBlock.test.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..76bd93d</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/hottestBlock.test.ts</span>
+<span class="d-hunk">@@ -0,0 +1,55 @@</span>
+<span class="d-add">+import { describe, it, expect } from &quot;vitest&quot;;</span>
+<span class="d-add">+import { hottestBlockId } from &quot;./hottestBlock&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;hottestBlockId&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;returns null for no features&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(hottestBlockId([])).toBeNull();</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;returns the only feature&#x27;s id&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(hottestBlockId([{ id: 7, state: {} }])).toBe(7);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;picks the hotter block over render order&quot;, () =&gt; {</span>
+<span class="d-add">+    // The cool overlap renders on top (first in query results) — the hot</span>
+<span class="d-add">+    // block underneath must still win the hit.</span>
+<span class="d-add">+    const feats = [</span>
+<span class="d-add">+      { id: 1, state: { heat: 0 } },</span>
+<span class="d-add">+      { id: 2, state: { heat: 0.8 } },</span>
+<span class="d-add">+      { id: 3, state: { heat: 0.4 } },</span>
+<span class="d-add">+    ];</span>
+<span class="d-add">+    expect(hottestBlockId(feats)).toBe(2);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;treats missing heat state as zero&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(hottestBlockId([{ id: 1 }, { id: 2, state: { heat: 0.1 } }])).toBe(2);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps render order on ties (all-zero heat)&quot;, () =&gt; {</span>
+<span class="d-add">+    const feats = [</span>
+<span class="d-add">+      { id: 5, state: {} },</span>
+<span class="d-add">+      { id: 6, state: { heat: 0 } },</span>
+<span class="d-add">+    ];</span>
+<span class="d-add">+    expect(hottestBlockId(feats)).toBe(5);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;ranks negative (cold) heat by magnitude&quot;, () =&gt; {</span>
+<span class="d-add">+    // A strongly net-against block is just as visible as a hot one — it must</span>
+<span class="d-add">+    // beat a zero-heat overlap.</span>
+<span class="d-add">+    const feats = [</span>
+<span class="d-add">+      { id: 1, state: { heat: 0 } },</span>
+<span class="d-add">+      { id: 2, state: { heat: -0.9 } },</span>
+<span class="d-add">+      { id: 3, state: { heat: 0.5 } },</span>
+<span class="d-add">+    ];</span>
+<span class="d-add">+    expect(hottestBlockId(feats)).toBe(2);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;ignores features without a numeric id&quot;, () =&gt; {</span>
+<span class="d-add">+    const feats = [</span>
+<span class="d-add">+      { id: &quot;nope&quot;, state: { heat: 1 } },</span>
+<span class="d-add">+      { id: undefined, state: { heat: 1 } },</span>
+<span class="d-add">+      { id: 4, state: { heat: 0.2 } },</span>
+<span class="d-add">+    ];</span>
+<span class="d-add">+    expect(hottestBlockId(feats)).toBe(4);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+</section>
+<section class="file">
+<h3><code>client-react/src/components/MapLibreBackground/hottestBlock.ts</code></h3>
+
+<div class="ctx">
+  <div class="lvl"><span class="lbl">System</span><div class="pills"><span class="pill">nginx</span><span class="pill">Flask API</span><span class="pill">OSRM</span><span class="pill">Redis</span><span class="pill on">React/Leaflet client</span></div></div>
+  <div class="lvl"><span class="lbl">Module</span><div>MapLibreBackground — the GL basemap + block-heat renderer</div></div>
+  <div class="lvl"><span class="lbl">File</span><div>NEW — pure overlap-winner rule: highest |heat| owns the point, ties keep render order · ~31 LOC</div></div>
+  <div class="lvl"><span class="lbl">File map</span><div class="fmap"><div class="fm">BlockHitFeature shape</div><div class="fm hot">hottestBlockId()</div></div></div>
+  <div class="lvl"><span class="lbl">Changed blocks</span><ol class="blk"><li><b>hottestBlockId</b> — max |feature-state heat| wins; non-numeric ids skipped; all-zero-heat ties fall back to first = old render-order behavior</li></ol></div>
+</div>
+<pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/hottestBlock.ts b/client-react/src/components/MapLibreBackground/hottestBlock.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..efa5c7a</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/hottestBlock.ts</span>
+<span class="d-hunk">@@ -0,0 +1,31 @@</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Pick the block that wins a point hit among overlapping block polygons.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * queryRenderedFeatures returns features topmost-render-order first, but</span>
+<span class="d-add">+ * within one fill layer that order is tile/feature order — NOT heat. Where</span>
+<span class="d-add">+ * block polygons overlap (stale bakes, or tile-simplification slivers at</span>
+<span class="d-add">+ * low zooms), taking the first feature makes the hotter block underneath</span>
+<span class="d-add">+ * impossible to hover or select. The rule here: the block with the highest</span>
+<span class="d-add">+ * |feature-state heat| owns the point; ties (including the common</span>
+<span class="d-add">+ * all-zero-heat case) keep render order, i.e. the first feature.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+</span>
+<span class="d-add">+export interface BlockHitFeature {</span>
+<span class="d-add">+  id?: unknown;</span>
+<span class="d-add">+  state?: { heat?: unknown };</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+export function hottestBlockId(feats: readonly BlockHitFeature[]): number | null {</span>
+<span class="d-add">+  let best: number | null = null;</span>
+<span class="d-add">+  let bestHeat = -Infinity;</span>
+<span class="d-add">+  for (const f of feats) {</span>
+<span class="d-add">+    if (typeof f.id !== &quot;number&quot;) continue;</span>
+<span class="d-add">+    const raw = f.state?.heat;</span>
+<span class="d-add">+    const heat = typeof raw === &quot;number&quot; ? Math.abs(raw) : 0;</span>
+<span class="d-add">+    if (heat &gt; bestHeat) {</span>
+<span class="d-add">+      bestHeat = heat;</span>
+<span class="d-add">+      best = f.id;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return best;</span>
+<span class="d-add">+}</span></pre>
+</section>
+<section class="file">
+<h3><code>cloudbuild.blocks-overlay.yaml</code></h3>
+
+<div class="ctx">
+  <div class="lvl"><span class="lbl">System</span><div class="pills"><span class="pill on">nginx</span><span class="pill">Flask API</span><span class="pill">OSRM</span><span class="pill">Redis</span><span class="pill">React/Leaflet client</span></div></div>
+  <div class="lvl"><span class="lbl">Module</span><div>Deploy tooling — Cloud Build configs</div></div>
+  <div class="lvl"><span class="lbl">File</span><div>NEW — build config for Dockerfile.blocks-overlay (code+client+block artifacts on pinned base) · ~27 LOC</div></div>
+  <div class="lvl"><span class="lbl">File map</span><div class="fmap"><div class="fm hot">docker build w/ _BASE_IMAGE</div><div class="fm">push</div></div></div>
+  <div class="lvl"><span class="lbl">Changed blocks</span><ol class="blk"><li><b>steps</b> — mirrors cloudbuild.overlay.yaml but builds Dockerfile.blocks-overlay so .blocks-staging/&lt;city&gt;/ artifacts ride along with the code/client overlay</li></ol></div>
+</div>
+<pre class="diff"><span class="d-meta">diff --git a/cloudbuild.blocks-overlay.yaml b/cloudbuild.blocks-overlay.yaml</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..d160e59</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/cloudbuild.blocks-overlay.yaml</span>
+<span class="d-hunk">@@ -0,0 +1,27 @@</span>
+<span class="d-add">+# Blocks-overlay deploy: updated code/client/nginx PLUS refreshed Layer-2</span>
+<span class="d-add">+# block artifacts (.blocks-staging/&lt;city&gt;/) onto the CURRENT app image. The</span>
+<span class="d-add">+# staged artifacts must be baked against the base image&#x27;s own graphs — see</span>
+<span class="d-add">+# Dockerfile.blocks-overlay. Pass the digest-pinned base via _BASE_IMAGE.</span>
+<span class="d-add">+steps:</span>
+<span class="d-add">+  - name: &#x27;gcr.io/cloud-builders/docker&#x27;</span>
+<span class="d-add">+    args:</span>
+<span class="d-add">+      - &#x27;build&#x27;</span>
+<span class="d-add">+      - &#x27;--build-arg&#x27;</span>
+<span class="d-add">+      - &#x27;BASE_IMAGE=${_BASE_IMAGE}&#x27;</span>
+<span class="d-add">+      - &#x27;-f&#x27;</span>
+<span class="d-add">+      - &#x27;Dockerfile.blocks-overlay&#x27;</span>
+<span class="d-add">+      - &#x27;-t&#x27;</span>
+<span class="d-add">+      - &#x27;${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest&#x27;</span>
+<span class="d-add">+      - &#x27;.&#x27;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  - name: &#x27;gcr.io/cloud-builders/docker&#x27;</span>
+<span class="d-add">+    args: [&#x27;push&#x27;, &#x27;${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest&#x27;]</span>
+<span class="d-add">+</span>
+<span class="d-add">+timeout: &#x27;1800s&#x27;</span>
+<span class="d-add">+</span>
+<span class="d-add">+substitutions:</span>
+<span class="d-add">+  _REGION: us-central1</span>
+<span class="d-add">+  _BASE_IMAGE: &#x27;&#x27;</span>
+<span class="d-add">+</span>
+<span class="d-add">+images:</span>
+<span class="d-add">+  - &#x27;${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest&#x27;</span></pre>
+</section>
+<section class="file">
+<h3><code>server/streetscape_blocks/build_city_blocks.sh</code></h3>
+
+<pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_city_blocks.sh b/server/streetscape_blocks/build_city_blocks.sh</span>
+<span class="d-meta">index 2c30618..b08d56f 100755</span>
+<span class="d-meta">--- a/server/streetscape_blocks/build_city_blocks.sh</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_city_blocks.sh</span>
+<span class="d-hunk">@@ -47,11 +47,14 @@ if command -v tippecanoe &gt;/dev/null 2&gt;&amp;1; then</span>
+<span class="d-ctx">   # running server (mmap&#x27;d pmtiles reader + /api/tile/), and tippecanoe -o</span>
+<span class="d-ctx">   # writes a SQLite journal at the target path mid-bake — readers must never</span>
+<span class="d-ctx">   # observe a half-written archive.</span>
+<span class="d-del">-  tippecanoe -o &quot;$DATA_DIR/blocks.pmtiles.tmp&quot; -zg --drop-densest-as-needed \</span>
+<span class="d-add">+  # The temp name MUST end in .pmtiles: tippecanoe picks its output format</span>
+<span class="d-add">+  # from the extension, so &quot;blocks.pmtiles.tmp&quot; silently wrote an mbtiles</span>
+<span class="d-add">+  # (SQLite) archive that the server&#x27;s PMTiles reader can&#x27;t open.</span>
+<span class="d-add">+  tippecanoe -o &quot;$DATA_DIR/blocks.tmp.pmtiles&quot; -zg --drop-densest-as-needed \</span>
+<span class="d-ctx">     --extend-zooms-if-still-dropping --coalesce-densest-as-needed \</span>
+<span class="d-ctx">     --use-attribute-for-id=block_id \</span>
+<span class="d-ctx">     -l blocks --force &quot;$FINAL_FILE&quot;</span>
+<span class="d-del">-  mv -f &quot;$DATA_DIR/blocks.pmtiles.tmp&quot; &quot;$DATA_DIR/blocks.pmtiles&quot;</span>
+<span class="d-add">+  mv -f &quot;$DATA_DIR/blocks.tmp.pmtiles&quot; &quot;$DATA_DIR/blocks.pmtiles&quot;</span>
+<span class="d-ctx"> else</span>
+<span class="d-ctx">   echo &quot;tippecanoe not found — skipping PMTiles (install: brew install tippecanoe)&quot;</span>
+<span class="d-ctx"> fi</span></pre>
+</section>
+</body></html>

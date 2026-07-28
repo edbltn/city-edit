@@ -12,6 +12,7 @@ import { Protocol } from "pmtiles";
 import { CONFIG, type BlockTilesConfig } from "../../config";
 import { dlog, dwarn, debugState } from "../../utils/debugLog";
 import { maplibreRasterTiles, heatTip, type MapStyle } from "../../mapStyles";
+import { hottestBlockId } from "./hottestBlock";
 
 // Register PMTiles protocol once at module level
 const protocol = new Protocol();
@@ -334,14 +335,16 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
       // Point→block resolver for GraphLayer's hover constraint. Fill layers
       // are queryable regardless of their (heat-driven, possibly 0) opacity;
       // guard on the layer existing so a not-yet-loaded style reads as null.
+      // Where polygons overlap, the hottest block wins the point (see
+      // hottestBlockId) — render order made hot blocks under a cool overlap
+      // unhoverable and unselectable.
       blockAtResolver = (lat: number, lng: number) => {
         const ml = mapRef.current;
         if (!ml || !ml.getLayer("block-heat")) return null;
         const feats = ml.queryRenderedFeatures(ml.project([lng, lat]), {
           layers: ["block-heat"],
         });
-        const id = feats[0]?.id;
-        return typeof id === "number" ? id : null;
+        return hottestBlockId(feats);
       };
 
       return () => {
