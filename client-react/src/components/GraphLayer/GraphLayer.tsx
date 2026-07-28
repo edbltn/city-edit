@@ -4030,6 +4030,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           shareUrl={pinnedPointLatLng
             ? buildSelectionUrl(pinnedPointLatLng, pinnedWinner?.label ?? pinnedVoteTypes[0]?.label)
             : null}
+          streetViewLatLng={pinnedPointLatLng}
           onVote={castProposalVote}
           onRemove={onRemoveSelectedRef.current}
           registerEl={(el) => { pinnedModalElRef.current = el; }}
@@ -4182,6 +4183,18 @@ function LinkIcon() {
   );
 }
 
+/** The Street View pegman, in his signature yellow so the control reads as
+ *  "Street View" at a glance even at 13px. */
+function PegmanIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="#FBBC04" aria-hidden="true"
+      style={{ display: "block" }}>
+      <circle cx="12" cy="4.2" r="2.7" />
+      <path d="M12 7.6c-2.1 0-3.5 1.1-3.8 2.9l-.8 4.6h2.1l.7 6.9h1.2l.3-5.2h.6l.3 5.2h1.2l.7-6.9h2.1l-.8-4.6c-.3-1.8-1.7-2.9-3.8-2.9z" />
+    </svg>
+  );
+}
+
 /** Expand glyph — two diagonal corner brackets (top-right + bottom-left),
  *  straight and square-capped to match the app's CheckIcon aesthetic, but light
  *  enough to read as a subtle affordance. Inherits color via currentColor. */
@@ -4231,6 +4244,11 @@ interface ProposalCardProps {
   blocks?: ArrayLike<number>[] | null;
   mode?: string;
   shareUrl?: string | null;
+  /** Anchor coordinate for the Street View tool. Only the pinned POINT card
+   *  passes it — a single place you can stand and look at. Route cards span
+   *  many blocks, so a one-point pano would be misleading; they (and hover
+   *  cards) omit it, which hides the pegman. */
+  streetViewLatLng?: { lat: number; lng: number } | null;
   /** The active map's vote types, so the header icon resolves a custom vote-type
    *  set's own icon (matching markers and the selector) instead of falling back
    *  to the suggestion glyph. */
@@ -4262,7 +4280,7 @@ type AvoidRect = { left: number; top: number; right: number; bottom: number };
 
 function ProposalCard({
   winner, eyebrow = "Top Proposal", screenX, screenY, name, metaText = null, rows,
-  interactive = false, elevated = false, getAvoidRects, avoidKey, edgeId = null, blocks = null, mode = "", shareUrl = null, voteTypes, onVote, onRemove, removeLabel = "Remove this point", onHoverChange, registerEl,
+  interactive = false, elevated = false, getAvoidRects, avoidKey, edgeId = null, blocks = null, mode = "", shareUrl = null, streetViewLatLng = null, voteTypes, onVote, onRemove, removeLabel = "Remove this point", onHoverChange, registerEl,
 }: ProposalCardProps) {
   const [copied, setCopied] = useState(false);
   // Interactive cards can collapse to a small pill (icon + label + expand) so a
@@ -4473,6 +4491,20 @@ function ProposalCard({
           )}
           {interactive && (
             <div className="graph-proposal-tools">
+              {streetViewLatLng && (
+                <a
+                  className="graph-proposal-tool graph-proposal-streetview"
+                  // Maps URLs API: opens the Street View pano nearest this
+                  // viewpoint (falls back to the map if none exists).
+                  href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${streetViewLatLng.lat.toFixed(6)}%2C${streetViewLatLng.lng.toFixed(6)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Open in Google Street View"
+                  aria-label="Open this location in Google Street View"
+                >
+                  <PegmanIcon />
+                </a>
+              )}
               {shareUrl && (
                 <button
                   type="button"

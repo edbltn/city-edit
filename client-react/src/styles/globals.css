@@ -2069,6 +2069,11 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
   background: var(--hover-bg);
 }
 
+/* Street View is an external link styled as a tool button */
+.graph-proposal-streetview {
+  text-decoration: none;
+}
+
 /* The minimize "–" glyph sits high in its em box; nudge it onto the optical
    centre so it matches the ✕ and copy icons. */
 .graph-proposal-minimize {
@@ -2076,12 +2081,12 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
   line-height: 0;
 }
 
-/* Keep the top line clear of the copy / minimize / remove icons (up to three,
-   ~78px). */
+/* Keep the top line clear of the streetview / copy / minimize / remove icons
+   (up to four, ~104px). */
 .graph-proposal-card.is-interactive:not(.is-minimized) .graph-indicator-modal-header,
 .graph-proposal-card.is-interactive:not(.is-minimized) > .graph-indicator-modal-body > .graph-tooltip-name,
 .graph-proposal-card.is-interactive:not(.is-minimized) > .graph-indicator-modal-body > .graph-tooltip-meta {
-  padding-right: 80px;
+  padding-right: 106px;
 }
 
 /* Minimized state — the card shrink-wraps a single maximize control so a pinned
