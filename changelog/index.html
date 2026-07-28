@@ -29,6 +29,18 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-28-route-votes-flash.html">
+    <div class="date">2026-07-28</div>
+    <h2>Route-card vote counts no longer flash inflated numbers</h2>
+    <p>The route-summary modal (incl. Top Route Proposals) opened with local block-grain sums —
+    which count one person once <em>per block</em> — then flashed down to the server's
+    distinct-voter truth 350&nbsp;ms + a round-trip later. The first <code>/api/route-votes</code>
+    fetch now fires immediately, resolved rows are cached per selection signature
+    (<code>routeVotesKey</code>) so reopening never flashes, rows are key-matched to their
+    selection, and the diamond hover card reads the same cache. The persisted (distinct-device)
+    counts were always the accurate ones.</p>
+  </a>
+
   <a class="entry" href="./2026-07-28-streetview-button.html">
     <div class="date">2026-07-28</div>
     <h2>Street View pegman on proposal modals</h2>
