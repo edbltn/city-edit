@@ -28,7 +28,11 @@
     left: 0;
     width: 850px;
     height: 426px;
-    background: #000;
+    background:
+      repeating-linear-gradient(45deg, #2b2b31 0 3px, transparent 3px 7.5px),
+      repeating-linear-gradient(-45deg, #2b2b31 0 3px, transparent 3px 7.5px),
+      #f7f6f2;
+    border-bottom: 3px solid #26262b;
   }
 
   #frame {
@@ -52,6 +56,7 @@
     text-align: center;
     letter-spacing: 1px;
     white-space: nowrap;
+    text-shadow: -3px -3px 0 #f7f6f2, 3px -3px 0 #f7f6f2, -3px 3px 0 #f7f6f2, 3px 3px 0 #f7f6f2, -4px 0 0 #f7f6f2, 4px 0 0 #f7f6f2, 0 -4px 0 #f7f6f2, 0 4px 0 #f7f6f2, 0 0 10px #f7f6f2, 0 0 18px #f7f6f2;
   }
 
   /* ---- night scene ---- */
@@ -66,18 +71,21 @@
     position: absolute;
     top: 0;
     left: 0;
+    filter: drop-shadow(0 0 2px #f7f6f2) drop-shadow(0 0 3px #f7f6f2) drop-shadow(0 0 6px #f7f6f2);
   }
 
   #ped-sign {
     left: 292px;
     bottom: 26px;
     width: 122px;
+    filter: drop-shadow(0 0 2px #f7f6f2) drop-shadow(0 0 3px #f7f6f2) drop-shadow(0 0 6px #f7f6f2);
   }
 
   #cyclists {
     left: 428px;
     bottom: 26px;
     width: 150px;
+    filter: drop-shadow(0 0 2px #f7f6f2) drop-shadow(0 0 3px #f7f6f2) drop-shadow(0 0 6px #f7f6f2);
   }
 
   /* ---- serif block ---- */
