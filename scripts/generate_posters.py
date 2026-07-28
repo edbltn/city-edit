@@ -304,7 +304,6 @@ CAMPAIGNS = {
         "select": lambda rows: [r for r in sorted(rows, key=lambda r: -r["night_share"])
                                 if r["f12_crashes"] >= 4],
         "fill": _after_dark_fill,
-        "dark": True,
     },
     "overall": {
         "template": "bike_killer.html", "default_n": 10, "claim": "generic",
@@ -315,7 +314,6 @@ CAMPAIGNS = {
         "fill": lambda r, rank: {"headline": "your step-through is killer!"},
     },
 }
-CAMPAIGNS["dark"]["dark"] = True
 
 
 def nabe_targets(rows, n):
