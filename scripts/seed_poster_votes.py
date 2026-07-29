@@ -48,7 +48,7 @@ CAMPAIGN_VOTE_TYPE = {
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="https://cityedit.org")
-    ap.add_argument("--map", default="nyc-intersections")
+    ap.add_argument("--map", default="nyc-crossings")
     ap.add_argument("--cast", action="store_true", help="actually cast (default: dry-run)")
     args = ap.parse_args()
 

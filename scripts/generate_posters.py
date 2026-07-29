@@ -37,10 +37,14 @@ MASTER = REPO / "data" / "analysis" / "intersections_master.csv"
 TEMPLATES = REPO / "data" / "posters" / "templates"
 OUT = REPO / "data" / "posters" / "out"
 RENDER = REPO / "scripts" / "render_poster.sh"
-BASE_URL = "https://cityedit.org/m/nyc-intersections"
+BASE_URL = "https://cityedit.org/m/nyc-crossings"
 # Preselected vote type carried in every QR: scanning lands with the pin set
 # and this (point-kind) type ready to cast.
 QR_VOTE_TYPE = "Fix dangerous intersection"
+# Campaign attribution baked into every QR URL (the [MAPLOAD] src label).
+# The first print run predates this and links /m/nyc-intersections bare; that
+# retired slug's redirect (map_redirects row) retro-tags it with the same value.
+QR_SRC = "qr-poster"
 
 
 def load_rows():
@@ -342,6 +346,9 @@ def main():
     ap.add_argument("--scale", type=int, default=2,
                     help="device scale factor (2 -> 1700x2268 px, good for print)")
     ap.add_argument("--base-url", default=BASE_URL)
+    ap.add_argument("--src", default=QR_SRC,
+                    help="?src= attribution tag baked into QR URLs "
+                         "(vary per campaign/print run)")
     ap.add_argument("--pdf", action="store_true", default=True,
                     help="assemble out/poster-book.pdf (checklist + all posters)")
     ap.add_argument("--no-pdf", dest="pdf", action="store_false")
@@ -379,7 +386,8 @@ def main():
         for r, rank in targets:
             used.add((r["lat"], r["lon"]))
             from urllib.parse import quote_plus
-            url = f'{args.base_url}?w={r["lat"]},{r["lon"]}&vt={quote_plus(QR_VOTE_TYPE)}'
+            url = (f'{args.base_url}?w={r["lat"]},{r["lon"]}'
+                   f'&vt={quote_plus(QR_VOTE_TYPE)}&src={args.src}')
             tag = f"{rank:02d}_{slug(r['name_osm'])}"
             qr_png = outdir / f"{tag}_qr.png"
             qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,
@@ -577,7 +585,7 @@ def build_poster_book(manifest, scale):
                "<h1>Poster placement checklist</h1>"
                "<div class='sub'>Each poster carries its code in a corner. "
                "Tick when hung; QR links open the intersection on "
-               "cityedit.org/m/nyc-intersections.</div>"
+               "cityedit.org/m/nyc-crossings.</div>"
                f"<div class='cols'>{cols}</div>"
                f"<div class='pageno'>checklist {pi + 1} / {len(pages)}</div>")
         hp = OUT / f"checklist_{pi + 1}.html"
