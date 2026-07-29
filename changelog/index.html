@@ -29,6 +29,20 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-29-oversized-block-split.html">
+    <div class="date">2026-07-29</div>
+    <h2>Oversized blocks cut at their thinnest crossing</h2>
+    <p>The graph-first builder's merge rules had no size cap, so a park loop's arms (same two
+    endpoint junctions) or one big connected path component fused into blocks kilometres across —
+    the Central Park reservoir corridor spanned 4.3&nbsp;km as a single vote target on
+    <code>/m/nyc-intersections</code>. A new §4b pass cuts any corridor over
+    <code>SPLIT_MAX_EXTENT_M</code> (400&nbsp;m) recursively along its thinnest crossing —
+    perpendicular to the principal axis at the narrowest of 13 sampled stations — with member
+    edges following their midpoints. NYC: 1,021 corridors → 2,452 pieces, &gt;400&nbsp;m tail
+    1,013&nbsp;→&nbsp;74 (all irreducible single-edge spans), audits still 0 overlaps / 100%
+    coverage. Re-baked against the serving image's graph and shipped via the blocks overlay.</p>
+  </a>
+
   <a class="entry" href="./2026-07-28-route-votes-flash.html">
     <div class="date">2026-07-28</div>
     <h2>Route-card vote counts no longer flash inflated numbers</h2>

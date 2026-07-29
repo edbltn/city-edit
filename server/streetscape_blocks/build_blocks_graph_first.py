@@ -102,6 +102,19 @@ MAX_ROUNDS = int(os.environ.get("MERGE_MAX_ROUNDS", "25"))
 STUBBY_CLASSES = {"service", "footway", "path", "steps", "cycleway",
                   "pedestrian", "track", ""}
 
+# Oversized-block split: a corridor whose bbox diagonal exceeds
+# SPLIT_MAX_EXTENT_M is cut in two along its THINNEST crossing — the
+# perpendicular to its principal axis, placed at whichever station in the
+# middle band has the least polygon width — and each half re-checked, so a
+# merged park loop or a kilometres-long greenway becomes a chain of
+# street-scale blocks instead of one giant vote target. 400 m ≈ p99.5 of the
+# nyc corridor-extent distribution (a long Manhattan block face is ~280 m),
+# so ordinary street corridors are untouched.
+SPLIT_MAX_EXTENT_M = float(os.environ.get("SPLIT_MAX_EXTENT_M", "400"))
+SPLIT_BAND = (0.35, 0.65)      # candidate cut stations, fraction of the span
+SPLIT_STATIONS = 13            # stations sampled inside the band
+SPLIT_MAX_DEPTH = 8            # ≤ 2^8 pieces from one block (backstop)
+
 # Corridor tube half-widths per road class (from build_blocks_generic.py,
 # NYC-calibrated; classes are universal). Scaled by WIDTH_SCALE for sweeps.
 WIDTH_SCALE = float(os.environ.get("WIDTH_SCALE", "1.0"))
@@ -786,6 +799,120 @@ def main():
           f"edges re-homed, {grafts} tube grafts ({time.time()-t0:.0f}s)",
           flush=True)
 
+    # ── 4b. Oversized-corridor split (thinnest cut) ─────────────────────────
+    # The fixpoint's merge rules have no size cap: a park path loop whose two
+    # arms share endpoint junctions (rule A), or one big connected path
+    # component between few junctions, becomes a single corridor kilometres
+    # across (Central Park reservoir loop: 4.3 km bbox, 264 edges — one
+    # un-hoverable vote target). Cut every corridor whose bbox diagonal
+    # exceeds SPLIT_MAX_EXTENT_M along its thinnest crossing, recursively:
+    # sample stations across the middle of the principal axis, measure the
+    # polygon's width at each (length of its intersection with the
+    # perpendicular chord — a gap between parts measures 0 and splits free),
+    # and cut at the narrowest. Member edges follow their midpoints; a piece
+    # holding no members melts into the nearest member-holding piece. Pieces
+    # meet only along the cut line (zero shared area), so the disjointness
+    # audit below is unaffected.
+    def _principal_frame(poly):
+        pts = np.concatenate([np.asarray(p.exterior.coords)
+                              for part in _polyparts(poly)
+                              for p in (part.geoms if part.geom_type ==
+                                        "MultiPolygon" else [part])])
+        ctr = pts.mean(axis=0)
+        centered = pts - ctr
+        _, vecs = np.linalg.eigh(centered.T @ centered)
+        u = vecs[:, -1]
+        proj = centered @ u
+        return ctr, u, float(proj.min()), float(proj.max())
+
+    def _thinnest_cut(poly):
+        """Split poly at the narrowest sampled crossing; (lo, hi) halves."""
+        ctr, u, plo, phi = _principal_frame(poly)
+        span = phi - plo
+        if span < 1e-6:
+            return None
+        v = np.array([-u[1], u[0]])
+        reach = max(span, 2 * SPLIT_MAX_EXTENT_M)      # covers the whole poly
+        best_t, best_w = None, math.inf
+        for f in np.linspace(SPLIT_BAND[0], SPLIT_BAND[1], SPLIT_STATIONS):
+            t = plo + f * span
+            m = ctr + t * u
+            chord = LineString([m + reach * v, m - reach * v])
+            try:
+                w_here = poly.intersection(chord).length
+            except shapely.errors.GEOSException:
+                continue
+            if w_here < best_w:
+                best_t, best_w = t, w_here
+        if best_t is None:
+            return None
+        m = ctr + best_t * u
+        half = Polygon([m + reach * v, m - reach * v,
+                        m - reach * v - 2 * reach * u,
+                        m + reach * v - 2 * reach * u])
+        lo = _clean(poly.intersection(half))
+        hi = _clean(shapely.difference(poly, half))
+        if lo.is_empty or hi.is_empty or min(lo.area, hi.area) < 1.0:
+            return None
+        return lo, hi
+
+    def _split_to_size(poly, depth=0):
+        b = poly.bounds
+        if depth >= SPLIT_MAX_DEPTH or \
+                math.hypot(b[2] - b[0], b[3] - b[1]) <= SPLIT_MAX_EXTENT_M:
+            return [poly]
+        cut = _thinnest_cut(poly)
+        if cut is None:
+            return [poly]
+        return _split_to_size(cut[0], depth + 1) + _split_to_size(cut[1], depth + 1)
+
+    blocks_split = 0
+    split_pieces = 0
+    split_gaveup = 0
+    for c in [c for c in corr_polys]:
+        poly = corr_polys[c]
+        b = poly.bounds
+        if math.hypot(b[2] - b[0], b[3] - b[1]) <= SPLIT_MAX_EXTENT_M:
+            continue
+        pieces = _split_to_size(poly)
+        if len(pieces) == 1:
+            split_gaveup += 1
+            continue
+        # Members follow their midpoints; an edge no piece contains (stranded
+        # members metres off their polygon exist pre-split too) goes to the
+        # piece nearest its line.
+        piece_members: list[list[int]] = [[] for _ in pieces]
+        for eid in corridors[c]:
+            line = LineString([node_xy[ends[eid, 0]], node_xy[ends[eid, 1]]])
+            mid = shapely.points(np.asarray(line.coords).mean(axis=0))
+            target = next((i for i, p in enumerate(pieces) if p.covers(mid)),
+                          None)
+            if target is None:
+                target = int(np.argmin([line.distance(p) for p in pieces]))
+            piece_members[target].append(eid)
+        # A member-less piece can't hold or display a vote — melt it into the
+        # nearest piece that has members (same rationale as empty junctions).
+        live = [i for i, ms in enumerate(piece_members) if ms]
+        if not live:
+            split_gaveup += 1
+            continue
+        for i, p in enumerate(pieces):
+            if i in live or p.is_empty:
+                continue
+            j = min(live, key=lambda j: p.distance(pieces[j]))
+            pieces[j] = _clean(union_all([pieces[j], p]))
+        corridors[c] = piece_members[live[0]]
+        corr_polys[c] = pieces[live[0]]
+        for i in live[1:]:
+            corridors.append(piece_members[i])
+            corr_polys[len(corridors) - 1] = pieces[i]
+        blocks_split += 1
+        split_pieces += len(live)
+    print(f"[gf] oversized split (> {SPLIT_MAX_EXTENT_M:.0f} m): "
+          f"{blocks_split} corridors cut into {split_pieces} pieces, "
+          f"{split_gaveup} could not be split ({time.time()-t0:.0f}s)",
+          flush=True)
+
     # ── Finalize in the SHIPPED (lon/lat) frame: snap → validate → audit →
     # repair. Valid-in-metres polygons flip invalid after the lon/lat
     # transform (708 on test-mid): cut seams carry near-coincident collinear
@@ -1055,8 +1182,12 @@ def main():
         "junction_edges_rehomed": rehomed,
         "junction_tube_grafts": grafts,
         "empty_junctions_skipped": empty_junctions,
+        "oversized_blocks_split": blocks_split,
+        "split_pieces": split_pieces,
+        "split_gaveup": split_gaveup,
         "edges_overlap_ok": overlapping, "edges_overlap_checked": checked,
         "node_capture_len_m": NODE_CAPTURE_LEN_M, "stub_max_m": STUB_MAX_M,
+        "split_max_extent_m": SPLIT_MAX_EXTENT_M,
         "width_scale": WIDTH_SCALE,
     }
     with open(os.path.join(data_dir, f"edge_blocks_{NETWORK}.json"), "w") as fh:

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Oversized blocks cut at their thinnest crossing — Central Park&#x27;s 4.3 km vote target becomes street-scale pieces</title>
+<style>
+body { font: 15px/1.55 -apple-system, "Segoe UI", sans-serif; color: #1c1c1a; background: #fbfbf8;
+       max-width: 1000px; margin: 2rem auto; padding: 0 1.2rem; }
+h1 { font-size: 1.5rem; } h2 { margin-top: 2rem; }
+code { background: #f0efe9; padding: 1px 4px; border-radius: 3px; }
+.date { color: #777; }
+.ctx { border: 1px solid #ddd; border-radius: 8px; padding: 10px 14px; margin: 10px 0; background: #fff; }
+.lvl { display: flex; gap: 12px; margin: 6px 0; align-items: baseline; }
+.lbl { flex: 0 0 110px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #999; }
+.pills .pill { display: inline-block; border: 1px solid #ccc; border-radius: 999px; padding: 1px 10px;
+                margin-right: 6px; font-size: 12px; color: #aaa; }
+.pills .pill.on { border-color: #b3552e; color: #b3552e; font-weight: 600; background: #fdf1ea; }
+.fmap { display: flex; flex-wrap: wrap; gap: 4px; }
+.fm { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: #f2f1ec; color: #b6b4ac; }
+.fm.hot { background: #fdf1ea; color: #b3552e; font-weight: 600; }
+.blk { margin: 4px 0 2px 18px; padding: 0; font-size: 13.5px; }
+.diff { font: 12px/1.45 ui-monospace, Menlo, monospace; background: #14140f; color: #ddd;
+         border-radius: 8px; padding: 12px 14px; overflow-x: auto; display: block; white-space: pre; }
+.d-add { color: #7fce6c; display: block; } .d-del { color: #e06c60; display: block; }
+.d-hunk { color: #6cb6e0; display: block; } .d-meta { color: #888; display: block; }
+.d-ctx { color: #bbb; display: block; }
+section.file { margin: 2.2rem 0; }
+</style></head><body>
+<h1>Oversized blocks cut at their thinnest crossing — Central Park&#x27;s 4.3 km vote target becomes street-scale pieces</h1>
+<p class="date">2026-07-29 · City Edit changelog</p>
+
+<h2>What happened</h2>
+<p>On <b>/m/nyc-intersections</b> (city <code>nyc</code>, network <code>streets</code>) the
+merge rules in the graph-first builder sometimes produced <b>enormous blocks</b> — reported at
+the Central Park reservoir, where the running-track loop and its feeder paths fused into one
+corridor with a <b>4.3&nbsp;km bounding-box diagonal</b> (264 edges, 52k&nbsp;m² — block
+<code>56216</code> in the 07-27 bake). One hover lit kilometres of park; one vote covered all
+of it.</p>
+<p>Root cause: the §3 fixpoint's merge rules have <b>no size cap</b>. Rule&nbsp;A merges
+corridors sharing the same two endpoint junctions — exactly what a park loop's two arms do —
+and a big connected path network between few junctions is already ONE corridor component by
+construction. NYC had <b>1,013 corridors over 400&nbsp;m</b> (p99 of the corridor-extent
+distribution is ~319&nbsp;m): greenways, bridge paths, park loops.</p>
+<h2>The fix — §4b, cut at the thinnest crossing</h2>
+<p>A new pass after all disjointness/membership passes (still in the metric frame, before the
+ship-frame finalize): any corridor whose bbox diagonal exceeds
+<code>SPLIT_MAX_EXTENT_M</code> (default <b>400&nbsp;m</b>) is cut in two along its
+<b>thinnest crossing</b> — the perpendicular to its PCA principal axis, placed at whichever of
+13 stations across the middle band (35–65% of the span) measures the least polygon width
+(length of the polygon∩chord intersection; a gap between disconnected parts measures 0 and
+splits free). Each half is re-checked recursively (depth cap 8). Member edges follow their
+midpoints; a piece holding no members melts into the nearest member-holding piece — an empty
+piece could never hold or display a vote. Pieces meet only along the cut line (zero shared
+area), so the all-class pairwise disjointness audit and the coverage audit downstream are
+unaffected.</p>
+<h2>Results</h2>
+<ul>
+<li><b>test-cp</b>: 15 corridors → 56 pieces, 0 give-ups; ship-frame audit 0 overlapping
+pairs; 100% coverage, 100% member-edge∩polygon touch. Verified visually on
+<code>/m/test-central-park</code> — the reservoir ring renders as a chain of street-scale
+blocks with clean seams.</li>
+<li><b>nyc (serving-graph bake, etag <code>b0ca56f8…</code>)</b>: 1,021 corridors → 2,452
+pieces, 0 give-ups (525&nbsp;s into the 883&nbsp;s bake); 286,102 blocks emitted; ship-frame
+audit <code>residual_overlap_pairs: 0</code>; 3,304,932/3,304,932 member edges touch their
+polygon (100%). The 4,350&nbsp;m Central Park reservoir corridor is gone — the reservoir area
+now has <b>zero</b> corridors over 400&nbsp;m. Citywide the &gt;400&nbsp;m tail dropped
+1,013&nbsp;→&nbsp;74 (max 4,350&nbsp;→&nbsp;907&nbsp;m); the stragglers are 2-edge corridors
+whose single OSM edge spans 400–900&nbsp;m (bridge spans, parkway stretches) — an edge belongs
+to exactly one block, so the member-less half melts back by design and edge granularity is the
+split floor.</li>
+</ul>
+<h2>Ship</h2>
+<p>Baked against the serving image's own graph (<code>walk_graph_arrays.npz</code> extracted
+via <code>docker cp</code> from the digest-pinned prod image — prod graph vintage ≠ local),
+staged in <code>.blocks-staging/nyc/</code>, shipped with
+<code>Dockerfile.blocks-overlay</code> pinned to the serving digest
+(<code>a7e3a33c…</code>). Prod DB snapshotted to
+<code>~/city-edit-prod-backups/20260729-203632/</code> before the deploy; staging-first, then
+the same digest promoted to prod.</p>
+
+<h2>Diffs</h2>
+
+<section class="file">
+<h3><code>server/streetscape_blocks/build_blocks_graph_first.py</code></h3>
+
+<div class="ctx">
+  <div class="lvl"><span class="lbl">System</span><div class="pills"><span class="pill">nginx</span><span class="pill on">Flask API</span><span class="pill">OSRM</span><span class="pill">Redis</span><span class="pill">React/Leaflet client</span></div></div>
+  <div class="lvl"><span class="lbl">Module</span><div>streetscape_blocks — the Layer-2 graph-first block builder: edges grouped topologically (junction clusters + corridors), polygons generated FROM the groups, disjointness enforced by construction + audits</div></div>
+  <div class="lvl"><span class="lbl">File</span><div>one-pass builder: junction clustering → edge grouping → merge fixpoint → geometry → disjointness → ship-frame audit · ~1200 LOC</div></div>
+  <div class="lvl"><span class="lbl">File map</span><div class="fmap"><div class="fm hot">knobs (cluster/stub/width)</div><div class="fm">UnionFind / split_oversized / _clean helpers</div><div class="fm">§1 junction clusters</div><div class="fm">§2 edge grouping</div><div class="fm">§3 degeneracy + equivalence fixpoint</div><div class="fm">§4 geometry from membership (trim, corridor disjointness, re-home)</div><div class="fm hot">§4b oversized-corridor split (NEW)</div><div class="fm">ship-frame finalize + audit + re-home</div><div class="fm hot">§5 emit + §6 audit + meta</div></div></div>
+  <div class="lvl"><span class="lbl">Changed blocks</span><ol class="blk"><li><b>SPLIT_* knobs</b> — SPLIT_MAX_EXTENT_M=400 (env-overridable; ≈p99.5 of the nyc corridor-extent distribution — a long Manhattan block face is ~280 m), middle-band 0.35–0.65, 13 sampled stations, depth cap 8</li><li><b>§4b split pass</b> — corridors whose bbox diagonal exceeds the threshold are cut recursively along the thinnest crossing: PCA principal axis from the polygon&#x27;s exterior rings, perpendicular chord sampled at 13 stations across the middle band, narrowest measured width wins (a gap between parts measures 0 and splits free); member edges follow their midpoints, member-less pieces melt into the nearest member-holding piece; pieces meet only along the cut line so every disjointness audit downstream is unaffected</li><li><b>meta stamp</b> — oversized_blocks_split / split_pieces / split_gaveup / split_max_extent_m recorded in edge_blocks_&lt;network&gt;.json</li></ol></div>
+</div>
+<pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_blocks_graph_first.py b/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-meta">index 9c26c01..04646c4 100644</span>
+<span class="d-meta">--- a/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-hunk">@@ -102,6 +102,19 @@ MAX_ROUNDS = int(os.environ.get(&quot;MERGE_MAX_ROUNDS&quot;, &quot;25&quot;))</span>
+<span class="d-ctx"> STUBBY_CLASSES = {&quot;service&quot;, &quot;footway&quot;, &quot;path&quot;, &quot;steps&quot;, &quot;cycleway&quot;,</span>
+<span class="d-ctx">                   &quot;pedestrian&quot;, &quot;track&quot;, &quot;&quot;}</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# Oversized-block split: a corridor whose bbox diagonal exceeds</span>
+<span class="d-add">+# SPLIT_MAX_EXTENT_M is cut in two along its THINNEST crossing — the</span>
+<span class="d-add">+# perpendicular to its principal axis, placed at whichever station in the</span>
+<span class="d-add">+# middle band has the least polygon width — and each half re-checked, so a</span>
+<span class="d-add">+# merged park loop or a kilometres-long greenway becomes a chain of</span>
+<span class="d-add">+# street-scale blocks instead of one giant vote target. 400 m ≈ p99.5 of the</span>
+<span class="d-add">+# nyc corridor-extent distribution (a long Manhattan block face is ~280 m),</span>
+<span class="d-add">+# so ordinary street corridors are untouched.</span>
+<span class="d-add">+SPLIT_MAX_EXTENT_M = float(os.environ.get(&quot;SPLIT_MAX_EXTENT_M&quot;, &quot;400&quot;))</span>
+<span class="d-add">+SPLIT_BAND = (0.35, 0.65)      # candidate cut stations, fraction of the span</span>
+<span class="d-add">+SPLIT_STATIONS = 13            # stations sampled inside the band</span>
+<span class="d-add">+SPLIT_MAX_DEPTH = 8            # ≤ 2^8 pieces from one block (backstop)</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> # Corridor tube half-widths per road class (from build_blocks_generic.py,</span>
+<span class="d-ctx"> # NYC-calibrated; classes are universal). Scaled by WIDTH_SCALE for sweeps.</span>
+<span class="d-ctx"> WIDTH_SCALE = float(os.environ.get(&quot;WIDTH_SCALE&quot;, &quot;1.0&quot;))</span>
+<span class="d-hunk">@@ -786,6 +799,120 @@ def main():</span>
+<span class="d-ctx">           f&quot;edges re-homed, {grafts} tube grafts ({time.time()-t0:.0f}s)&quot;,</span>
+<span class="d-ctx">           flush=True)</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    # ── 4b. Oversized-corridor split (thinnest cut) ─────────────────────────</span>
+<span class="d-add">+    # The fixpoint&#x27;s merge rules have no size cap: a park path loop whose two</span>
+<span class="d-add">+    # arms share endpoint junctions (rule A), or one big connected path</span>
+<span class="d-add">+    # component between few junctions, becomes a single corridor kilometres</span>
+<span class="d-add">+    # across (Central Park reservoir loop: 4.3 km bbox, 264 edges — one</span>
+<span class="d-add">+    # un-hoverable vote target). Cut every corridor whose bbox diagonal</span>
+<span class="d-add">+    # exceeds SPLIT_MAX_EXTENT_M along its thinnest crossing, recursively:</span>
+<span class="d-add">+    # sample stations across the middle of the principal axis, measure the</span>
+<span class="d-add">+    # polygon&#x27;s width at each (length of its intersection with the</span>
+<span class="d-add">+    # perpendicular chord — a gap between parts measures 0 and splits free),</span>
+<span class="d-add">+    # and cut at the narrowest. Member edges follow their midpoints; a piece</span>
+<span class="d-add">+    # holding no members melts into the nearest member-holding piece. Pieces</span>
+<span class="d-add">+    # meet only along the cut line (zero shared area), so the disjointness</span>
+<span class="d-add">+    # audit below is unaffected.</span>
+<span class="d-add">+    def _principal_frame(poly):</span>
+<span class="d-add">+        pts = np.concatenate([np.asarray(p.exterior.coords)</span>
+<span class="d-add">+                              for part in _polyparts(poly)</span>
+<span class="d-add">+                              for p in (part.geoms if part.geom_type ==</span>
+<span class="d-add">+                                        &quot;MultiPolygon&quot; else [part])])</span>
+<span class="d-add">+        ctr = pts.mean(axis=0)</span>
+<span class="d-add">+        centered = pts - ctr</span>
+<span class="d-add">+        _, vecs = np.linalg.eigh(centered.T @ centered)</span>
+<span class="d-add">+        u = vecs[:, -1]</span>
+<span class="d-add">+        proj = centered @ u</span>
+<span class="d-add">+        return ctr, u, float(proj.min()), float(proj.max())</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def _thinnest_cut(poly):</span>
+<span class="d-add">+        &quot;&quot;&quot;Split poly at the narrowest sampled crossing; (lo, hi) halves.&quot;&quot;&quot;</span>
+<span class="d-add">+        ctr, u, plo, phi = _principal_frame(poly)</span>
+<span class="d-add">+        span = phi - plo</span>
+<span class="d-add">+        if span &lt; 1e-6:</span>
+<span class="d-add">+            return None</span>
+<span class="d-add">+        v = np.array([-u[1], u[0]])</span>
+<span class="d-add">+        reach = max(span, 2 * SPLIT_MAX_EXTENT_M)      # covers the whole poly</span>
+<span class="d-add">+        best_t, best_w = None, math.inf</span>
+<span class="d-add">+        for f in np.linspace(SPLIT_BAND[0], SPLIT_BAND[1], SPLIT_STATIONS):</span>
+<span class="d-add">+            t = plo + f * span</span>
+<span class="d-add">+            m = ctr + t * u</span>
+<span class="d-add">+            chord = LineString([m + reach * v, m - reach * v])</span>
+<span class="d-add">+            try:</span>
+<span class="d-add">+                w_here = poly.intersection(chord).length</span>
+<span class="d-add">+            except shapely.errors.GEOSException:</span>
+<span class="d-add">+                continue</span>
+<span class="d-add">+            if w_here &lt; best_w:</span>
+<span class="d-add">+                best_t, best_w = t, w_here</span>
+<span class="d-add">+        if best_t is None:</span>
+<span class="d-add">+            return None</span>
+<span class="d-add">+        m = ctr + best_t * u</span>
+<span class="d-add">+        half = Polygon([m + reach * v, m - reach * v,</span>
+<span class="d-add">+                        m - reach * v - 2 * reach * u,</span>
+<span class="d-add">+                        m + reach * v - 2 * reach * u])</span>
+<span class="d-add">+        lo = _clean(poly.intersection(half))</span>
+<span class="d-add">+        hi = _clean(shapely.difference(poly, half))</span>
+<span class="d-add">+        if lo.is_empty or hi.is_empty or min(lo.area, hi.area) &lt; 1.0:</span>
+<span class="d-add">+            return None</span>
+<span class="d-add">+        return lo, hi</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def _split_to_size(poly, depth=0):</span>
+<span class="d-add">+        b = poly.bounds</span>
+<span class="d-add">+        if depth &gt;= SPLIT_MAX_DEPTH or \</span>
+<span class="d-add">+                math.hypot(b[2] - b[0], b[3] - b[1]) &lt;= SPLIT_MAX_EXTENT_M:</span>
+<span class="d-add">+            return [poly]</span>
+<span class="d-add">+        cut = _thinnest_cut(poly)</span>
+<span class="d-add">+        if cut is None:</span>
+<span class="d-add">+            return [poly]</span>
+<span class="d-add">+        return _split_to_size(cut[0], depth + 1) + _split_to_size(cut[1], depth + 1)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    blocks_split = 0</span>
+<span class="d-add">+    split_pieces = 0</span>
+<span class="d-add">+    split_gaveup = 0</span>
+<span class="d-add">+    for c in [c for c in corr_polys]:</span>
+<span class="d-add">+        poly = corr_polys[c]</span>
+<span class="d-add">+        b = poly.bounds</span>
+<span class="d-add">+        if math.hypot(b[2] - b[0], b[3] - b[1]) &lt;= SPLIT_MAX_EXTENT_M:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        pieces = _split_to_size(poly)</span>
+<span class="d-add">+        if len(pieces) == 1:</span>
+<span class="d-add">+            split_gaveup += 1</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        # Members follow their midpoints; an edge no piece contains (stranded</span>
+<span class="d-add">+        # members metres off their polygon exist pre-split too) goes to the</span>
+<span class="d-add">+        # piece nearest its line.</span>
+<span class="d-add">+        piece_members: list[list[int]] = [[] for _ in pieces]</span>
+<span class="d-add">+        for eid in corridors[c]:</span>
+<span class="d-add">+            line = LineString([node_xy[ends[eid, 0]], node_xy[ends[eid, 1]]])</span>
+<span class="d-add">+            mid = shapely.points(np.asarray(line.coords).mean(axis=0))</span>
+<span class="d-add">+            target = next((i for i, p in enumerate(pieces) if p.covers(mid)),</span>
+<span class="d-add">+                          None)</span>
+<span class="d-add">+            if target is None:</span>
+<span class="d-add">+                target = int(np.argmin([line.distance(p) for p in pieces]))</span>
+<span class="d-add">+            piece_members[target].append(eid)</span>
+<span class="d-add">+        # A member-less piece can&#x27;t hold or display a vote — melt it into the</span>
+<span class="d-add">+        # nearest piece that has members (same rationale as empty junctions).</span>
+<span class="d-add">+        live = [i for i, ms in enumerate(piece_members) if ms]</span>
+<span class="d-add">+        if not live:</span>
+<span class="d-add">+            split_gaveup += 1</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        for i, p in enumerate(pieces):</span>
+<span class="d-add">+            if i in live or p.is_empty:</span>
+<span class="d-add">+                continue</span>
+<span class="d-add">+            j = min(live, key=lambda j: p.distance(pieces[j]))</span>
+<span class="d-add">+            pieces[j] = _clean(union_all([pieces[j], p]))</span>
+<span class="d-add">+        corridors[c] = piece_members[live[0]]</span>
+<span class="d-add">+        corr_polys[c] = pieces[live[0]]</span>
+<span class="d-add">+        for i in live[1:]:</span>
+<span class="d-add">+            corridors.append(piece_members[i])</span>
+<span class="d-add">+            corr_polys[len(corridors) - 1] = pieces[i]</span>
+<span class="d-add">+        blocks_split += 1</span>
+<span class="d-add">+        split_pieces += len(live)</span>
+<span class="d-add">+    print(f&quot;[gf] oversized split (&gt; {SPLIT_MAX_EXTENT_M:.0f} m): &quot;</span>
+<span class="d-add">+          f&quot;{blocks_split} corridors cut into {split_pieces} pieces, &quot;</span>
+<span class="d-add">+          f&quot;{split_gaveup} could not be split ({time.time()-t0:.0f}s)&quot;,</span>
+<span class="d-add">+          flush=True)</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     # ── Finalize in the SHIPPED (lon/lat) frame: snap → validate → audit →</span>
+<span class="d-ctx">     # repair. Valid-in-metres polygons flip invalid after the lon/lat</span>
+<span class="d-ctx">     # transform (708 on test-mid): cut seams carry near-coincident collinear</span>
+<span class="d-hunk">@@ -1055,8 +1182,12 @@ def main():</span>
+<span class="d-ctx">         &quot;junction_edges_rehomed&quot;: rehomed,</span>
+<span class="d-ctx">         &quot;junction_tube_grafts&quot;: grafts,</span>
+<span class="d-ctx">         &quot;empty_junctions_skipped&quot;: empty_junctions,</span>
+<span class="d-add">+        &quot;oversized_blocks_split&quot;: blocks_split,</span>
+<span class="d-add">+        &quot;split_pieces&quot;: split_pieces,</span>
+<span class="d-add">+        &quot;split_gaveup&quot;: split_gaveup,</span>
+<span class="d-ctx">         &quot;edges_overlap_ok&quot;: overlapping, &quot;edges_overlap_checked&quot;: checked,</span>
+<span class="d-ctx">         &quot;node_capture_len_m&quot;: NODE_CAPTURE_LEN_M, &quot;stub_max_m&quot;: STUB_MAX_M,</span>
+<span class="d-add">+        &quot;split_max_extent_m&quot;: SPLIT_MAX_EXTENT_M,</span>
+<span class="d-ctx">         &quot;width_scale&quot;: WIDTH_SCALE,</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     with open(os.path.join(data_dir, f&quot;edge_blocks_{NETWORK}.json&quot;), &quot;w&quot;) as fh:</span></pre>
+</section>
+</body></html>
