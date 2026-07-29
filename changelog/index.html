@@ -29,6 +29,20 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-29-slug-redirects-src-tracking.html">
+    <div class="date">2026-07-29</div>
+    <h2>Slug redirects + <code>?src=</code> visit tracking — and the nyc-crossings rename</h2>
+    <p>Any URL can now carry <code>?src=&lt;tag&gt;</code> for campaign attribution: captured once at
+    boot, stripped from the address bar so re-shared links stay clean, reported in the map-load beacon,
+    and surfaced as a <code>src</code> label on <code>cityedit_map_load_ms</code> — visits-by-source is
+    a Metrics Explorer group-by. Renamed maps leave a data-driven redirect behind (new
+    <code>map_redirects</code> table + <code>rename_map.py</code> CLI): the old slug keeps resolving
+    with deep-link params preserved and stays reserved forever. Applied it to rename
+    <code>nyc-intersections</code>&nbsp;→&nbsp;<code>nyc-crossings</code>, with the redirect's
+    <code>append_query</code> retro-tagging every scan of the already-printed July QR posters as
+    <code>src=qr-poster</code>; future poster prints bake the tag into the QR URL directly.</p>
+  </a>
+
   <a class="entry" href="./2026-07-29-oversized-block-split.html">
     <div class="date">2026-07-29</div>
     <h2>Oversized blocks cut at their thinnest crossing</h2>

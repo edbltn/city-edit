@@ -1,0 +1,1373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slug redirects + ?src= visit tracking — and the nyc-crossings rename — 2026-07-29</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Slug redirects + ?src= visit tracking — and the nyc-crossings rename</h1>
+    <div class="dateline">2026-07-29 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#src">1</a>
+<a href="#redirects">2</a>
+<a href="#rename">3</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Three intertwined changes: any URL can now carry <code>?src=&lt;tag&gt;</code> and show up
+  as a visits-by-source group-by in Metrics Explorer; renamed maps leave a data-driven redirect behind
+  (old slug reserved forever, deep links preserved); and <code>nyc-intersections</code> became
+  <code>nyc-crossings</code> with a redirect that retro-tags every scan of the already-printed July QR
+  posters as <code>src=qr-poster</code>.</p>
+
+  
+    <section class="card" id="src">
+      <div class="tag">Frontend + Backend + Monitoring</div>
+      <h2>1 · ?src= — campaign visit-source tracking</h2>
+      <h3>Symptom</h3>
+      <p>There was no way to answer <em>“how many people came from the QR posters?”</em> (or any future campaign). The map-load beacon already flowed client → <code>/api/client-timing</code> → the <code>[MAPLOAD]</code> log line → the <code>cityedit_map_load_ms</code> log-based metric — but it carried no attribution, so a poster scan and a bookmarked visit were indistinguishable.</p>
+      <h3>Root cause</h3>
+      <ul><li>Nothing in the URL scheme reserved a campaign tag, and the client rewrites the URL aggressively (RouteContext’s selection sync drops unknown params; the canonical-subdomain redirect is a full page load on another host) — a naïve <code>?src=</code> param would be <strong>dropped before anything could read it</strong>, or worse, <strong>survive into re-shared links</strong> and poison the attribution.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>New <code>utils/sourceTag.ts</code></strong> captures <code>?src=&lt;tag&gt;</code> <em>once</em> at map boot (first call wins — StrictMode-safe), validates it (<code>[a-zA-Z0-9_-]</code>, max 32), then <strong>strips it from the address bar</strong> via <code>history.replaceState</code> so a re-shared link doesn’t inherit the campaign. <code>App.tsx</code> calls <code>captureSourceTag()</code> at the top of the map-resolution effect, before any redirect or URL rewrite can eat it.</li>
+<li><strong>The beacon reports it.</strong> <code>loadTelemetry.ts</code> adds <code>src</code> to the existing <code>POST /api/client-timing</code> payload; absent for direct visits.</li>
+<li><strong>The server sanitizes + logs it.</strong> <code>client_timing()</code> (<code>server/app.py</code>) whitelists the tag and appends <code>src=&lt;tag|direct&gt;</code> to the <code>[MAPLOAD]</code> line.</li>
+<li><strong>The metric grows a <code>src</code> label</strong> (<code>terraform/monitoring.tf</code>, <code>REGEXP_EXTRACT</code> like the existing map/cached/nav labels) — “visits by source” is now a Metrics Explorer group-by on <code>cityedit_map_load_ms</code>’s count. Starting a new campaign = minting a new tag in the printed URL; zero code changes.</li>
+<li><strong>The tag survives the canonical-subdomain hop.</strong> <code>withSourceTag()</code> re-attaches the captured (already-stripped) tag to the <code>subdomainRedirectUrl</code> target in <code>App.tsx</code>, so e.g. <code>cityedit.org/m/nyc-bikes?src=…</code> → <code>bikepaths.cityedit.org</code> still attributes.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/utils/sourceTag.ts — NEW: captureSourceTag / getSourceTag / withSourceTag</li>
+<li>client-react/src/App.tsx — capture at boot; withSourceTag across the subdomain redirect</li>
+<li>client-react/src/utils/loadTelemetry.ts — src in the map-load beacon</li>
+<li>server/app.py — client_timing sanitizes + logs src=&lt;tag|direct&gt;</li>
+<li>terraform/monitoring.tf — src label on cityedit_map_load_ms</li></ul>
+    </section>
+    
+
+    <section class="card" id="redirects">
+      <div class="tag">Backend + Frontend</div>
+      <h2>2 · Slug redirects — renamed maps keep their old links</h2>
+      <h3>Symptom</h3>
+      <p>Renaming a map’s slug would kill every printed/shared link to the old name (<code>GET /api/maps/&lt;old&gt;</code> → 404 → the client falls back to the default map), and — worse — Propose-a-Map could <strong>re-issue the retired slug</strong> to a stranger’s map, silently rerouting printed QR codes to someone else’s content.</p>
+      <h3>Root cause</h3>
+      <ul><li>The slug was the map’s <em>only</em> address: a miss on the <code>maps</code> table was terminal, and <code>slug_available()</code> only consulted <code>maps</code> — the moment a slug was freed by a rename it was up for grabs.</li>
+<li>A rename also isn’t one UPDATE: <code>edge_votes.map_slug</code> is a denormalized TEXT copy (nothing cascades), and the heatmap serves <strong>only from Redis</strong>, keyed by slug — a half-applied rename strands votes under a dead slug.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>New <code>map_redirects</code> table</strong> (<code>from_slug</code> PK, <code>to_slug</code>, <code>append_query</code>, <code>note</code>) created in <code>database.init_db()</code>. <code>append_query</code> is the retro-tagging hook: a query string merged into the target URL by the client.</li>
+<li><strong><code>map_get</code> serves a redirect stub instead of 404.</strong> On a maps-table miss it consults <code>get_map_redirect(slug)</code> and returns <code>{slug, redirect: {toSlug, appendQuery}}</code> — a <strong>200 with <code>Cache-Control: max-age=300</code></strong>, not a 30x, because nginx serves the SPA shell before any slug lookup, so only the client can act on it (exactly like the canonical-subdomain redirect). Not stored in <code>_map_get_cache</code> (enriched map dicts only); the lookup is a single PK read.</li>
+<li><strong>The client follows it.</strong> <code>App.tsx</code> checks <code>resolved?.redirect?.toSlug</code> first and <code>location.replace</code>s to <code>slugRedirectUrl()</code> (<code>map/runtime.ts</code>): same-origin <code>/m/&lt;toSlug&gt;</code>, <strong>keeping every current query param</strong> (QR deep links carry <code>?w=</code>/<code>?vt=</code>), dropping <code>?map=</code>, and merging <code>append_query</code> <em>without overriding</em> params already present.</li>
+<li><strong>Retired slugs are reserved forever.</strong> <code>slug_available()</code> now checks <code>maps</code> UNION <code>map_redirects</code>, so Propose-a-Map (and <code>rename_map_slug</code> itself) can never re-issue one.</li>
+<li><strong>Atomic rename.</strong> <code>rename_map_slug()</code> does the whole move in one explicit BEGIN/COMMIT (get_cursor is autocommit): <code>maps.slug</code>, the denormalized <code>edge_votes.map_slug</code> rows, the redirect row, and <strong>chain flattening</strong> (existing redirects targeting the old slug are re-pointed, so a→b then b→c becomes a→c — clients never hop twice).</li>
+<li><strong>New CLI <code>server/rename_map.py</code></strong> wraps the transaction, then rebuilds Redis under the new slug (<code>vote_migration.rebuild_redis_for_map</code> — ev: replay from Postgres) and purges the old slug’s keys (<code>ev:</code>, <code>vote_rev:</code>, <code>bd:</code>/<code>bagg:</code>). Fails soft if Redis is down (DB renamed; rerun to serve votes).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/database.py — map_redirects table, get_map_redirect, list_map_redirects, rename_map_slug, slug_available checks both tables</li>
+<li>server/app.py — map_get redirect stub (200 + max-age=300)</li>
+<li>server/rename_map.py — NEW CLI: rename + Redis rebuild + old-key purge</li>
+<li>client-react/src/map/runtime.ts — MapConfig.redirect + slugRedirectUrl()</li>
+<li>client-react/src/App.tsx — follow the redirect before the subdomain check</li></ul>
+    </section>
+    
+
+    <section class="card" id="rename">
+      <div class="tag">Ops + Scripts + Docs</div>
+      <h2>3 · nyc-intersections → nyc-crossings — retro-tagging the printed posters</h2>
+      <h3>Symptom</h3>
+      <p>The July QR poster campaign went to print linking <code>cityedit.org/m/nyc-intersections</code> with <strong>no analytics tag</strong> — the posters are already hanging, so the URL on them can’t change, and their scans were about to be indistinguishable from organic traffic.</p>
+      <h3>Root cause</h3>
+      <ul><li>The two features above exist precisely to fix this: a redirect row whose <code>append_query</code> stamps <code>src=qr-poster</code> onto every visit through the old printed URL turns the rename itself into the retro-tagging mechanism.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Ran the rename</strong>: <code>python rename_map.py nyc-intersections nyc-crossings --append-query "src=qr-poster"</code> — one transaction moved the map + its votes, left the redirect row, rebuilt Redis under <code>nyc-crossings</code>, purged the old keys. Every scan of an already-printed poster now lands on <code>/m/nyc-crossings</code> with pin + vote type intact <em>and</em> reports <code>src=qr-poster</code>.</li>
+<li><strong>Future prints are tagged at the source.</strong> <code>scripts/generate_posters.py</code>: <code>BASE_URL</code> now points at <code>nyc-crossings</code>, and a new <code>QR_SRC</code>/<code>--src</code> flag bakes an explicit <code>&amp;src=qr-poster</code> into every QR URL (vary per campaign/print run); the poster-book checklist copy updated. <code>scripts/seed_poster_votes.py</code> default map updated.</li>
+<li><strong>Docs.</strong> <code>docs/url-routing.md</code> gains “Visit-source tracking (?src=)”, “Slug redirects (renamed maps)”, an “Admin runbook — rename a map slug”, and a <strong>Redirect inventory</strong> table that is now the source of truth for EVERY redirect/rewrite in the system (donate. nginx 301, feedback. rewrite, canonical-subdomain client redirect, retired-slug redirects, the staging opt-out) plus the live <code>map_redirects</code> rows. <code>README.md</code> and <code>docs/README.md</code> link to it.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>scripts/generate_posters.py — BASE_URL → nyc-crossings; QR_SRC + --src baked into QR URLs</li>
+<li>scripts/seed_poster_votes.py — default --map → nyc-crossings</li>
+<li>docs/url-routing.md — ?src= section, slug-redirects section, rename runbook, redirect inventory</li>
+<li>docs/README.md + README.md — pointers to the redirect inventory</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Rename CLI (local): <code>python rename_map.py nyc-intersections nyc-crossings --append-query "src=qr-poster"</code> — one transaction, <strong>2 votes moved</strong>, Redis rebuilt under <code>nyc-crossings</code>, old <code>ev:</code>/<code>vote_rev:</code>/<code>bd:</code>/<code>bagg:</code> keys purged.</li>
+<li><code>GET /api/maps/nyc-intersections</code> → <code>{"slug": "nyc-intersections", "redirect": {"toSlug": "nyc-crossings", "appendQuery": "src=qr-poster"}}</code> (200, <code>Cache-Control: public, max-age=300</code>).</li>
+<li><code>GET /api/maps/check-slug</code> — <strong>both</strong> <code>nyc-intersections</code> (reserved by the redirect) and <code>nyc-crossings</code> (taken by the map) report unavailable.</li>
+<li>Browser, the printed QR URL shape: <code>http://localhost:3000/m/nyc-intersections?z=17&amp;lat=…&amp;slat=…</code> landed on <code>/m/nyc-crossings</code> with the selection intact, and the Flask log shows <code>[MAPLOAD] map=nyc-crossings ms=30105 cached_topo=0 nav=navigate src=qr-poster</code> — the redirect’s <code>append_query</code> → client capture → beacon → log-label pipeline, end to end.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Visit <code>http://localhost:3000/m/nyc-crossings?src=test-tag</code> — the map loads, <code>?src=</code> vanishes from the address bar, and once the loader dismisses the Flask log shows <code>[MAPLOAD] … src=test-tag</code>. A plain visit logs <code>src=direct</code>.</li>
+<li>Open a poster deep link through the OLD slug — <code>http://localhost:3000/m/nyc-intersections?w=&lt;lat&gt;,&lt;lon&gt;&amp;vt=Fix+dangerous+intersection</code> — you should land on <code>/m/nyc-crossings</code> with the pin set and the vote type preselected, and the log line should carry <code>src=qr-poster</code> (merged by the redirect).</li>
+<li>In Propose-a-Map, try to claim the slug <code>nyc-intersections</code> — it must report unavailable (reserved by the redirect row).</li>
+<li>Regenerate one poster (<code>python scripts/generate_posters.py --limit 1</code> or similar) and scan its QR: the URL should read <code>…/m/nyc-crossings?w=…&amp;vt=…&amp;src=qr-poster</code>.</li>
+<li>After the next prod deploy + <code>terraform apply</code> of the monitoring change: in Metrics Explorer, group <code>logging/user/cityedit_map_load_ms</code>’s count by <code>src</code> and confirm <code>qr-poster</code> vs <code>direct</code> series appear.</li>
+<li>Skim <code>docs/url-routing.md</code>’s Redirect inventory — every redirect you know about should have a row (donate., feedback., canonical subdomain, retired slugs, staging opt-out).</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">README.md</span>
+            <span class="stat"><span class="d-add">+4</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · repo root</span>
+        <span class="ctx-sum">the front-door README: quickstart, architecture, deploy pointers</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">README.md</span>
+        <span class="ctx-sum">~182 LOC — quickstart, architecture overview, config, testing, GCP deploy</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Quickstart</span><span class="ol-sum">hybrid dev loop: deps in Docker, Flask + Vite on the host</span></li><li class="changed"><span class="ol-label">Architecture</span><span class="ol-sum">components + doc pointers — the url-routing pointer now sells the redirect inventory &amp; ?src=</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Configuration</span><span class="ol-sum">server/.env variables</span></li><li class="dim"><span class="ol-label">Everything in Docker (alternative)</span><span class="ol-sum">prod-shaped + dev-mode compose</span></li><li class="dim"><span class="ol-label">Testing</span><span class="ol-sum">test taxonomy pointer</span></li><li class="dim"><span class="ol-label">Deploy to GCP</span><span class="ol-sum">cloudbuild pointer</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Architecture § — url-routing.md pointer expanded: redirect inventory + ?src= campaign visit tracking</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/README.md b/README.md</span>
+<span class="d-meta">index 0551f57..1a3afc7 100644</span>
+<span class="d-meta">--- a/README.md</span>
+<span class="d-meta">+++ b/README.md</span>
+<span class="d-hunk">@@ -106,7 +106,10 @@ How votes flow from a click to every client&#x27;s heatmap — identity, codec,</span>
+<span class="d-ctx"> storage, reconciliation, migration — is documented in</span>
+<span class="d-ctx"> [docs/voting-architecture.md](docs/voting-architecture.md) (the source of</span>
+<span class="d-ctx"> truth). How the app picks *which map* to show (slug / subdomain / apex) is in</span>
+<span class="d-del">-[docs/url-routing.md](docs/url-routing.md).</span>
+<span class="d-add">+[docs/url-routing.md](docs/url-routing.md) — including the **redirect</span>
+<span class="d-add">+inventory** (every redirect/rewrite in the system: nginx vanity hosts, the</span>
+<span class="d-add">+canonical-subdomain bounce, retired-slug redirects for renamed maps) and</span>
+<span class="d-add">+`?src=` campaign visit tracking.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ## Configuration</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/App.tsx</span>
+            <span class="stat"><span class="d-add">+14</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · src/</span>
+        <span class="ctx-sum">app root: providers, map bootstrap (resolve slug → config → redirects), the #app shell</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">App.tsx</span>
+        <span class="ctx-sum">~180 LOC — resolves the map, follows redirects, then mounts the map subtree</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">FullScreenLoader</span><span class="ol-sum">the ASCII-spinner splash</span></li><li class="dim"><span class="ol-label">AppContent</span><span class="ol-sum">shell: TopBar, &lt;main&gt; map in ErrorBoundary, toasts</span></li><li class="changed"><span class="ol-label">MapApp — map-resolution effect</span><span class="ol-sum">captureSourceTag → resolveMapConfig → slug redirect → subdomain redirect → applyMap</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">App (providers)</span><span class="ol-sum">provider tree</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>imports — slugRedirectUrl (map/runtime), captureSourceTag/withSourceTag (utils/sourceTag)</li><li>captureSourceTag() at the top of the map-resolution effect — before any redirect/rewrite drops ?src</li><li>follow resolved.redirect.toSlug via location.replace(slugRedirectUrl(…)) — before the subdomain check</li><li>subdomain redirect target wrapped in withSourceTag(…) — the tag survives the host hop</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/App.tsx b/client-react/src/App.tsx</span>
+<span class="d-meta">index 2f9f7f2..45c66f4 100644</span>
+<span class="d-meta">--- a/client-react/src/App.tsx</span>
+<span class="d-meta">+++ b/client-react/src/App.tsx</span>
+<span class="d-hunk">@@ -9,10 +9,11 @@ import { useRoute, useHeatmap } from &quot;./context&quot;;</span>
+<span class="d-ctx"> import { isLandingHost, subdomainRedirectUrl } from &quot;./themes&quot;;</span>
+<span class="d-ctx"> import {</span>
+<span class="d-ctx">   resolveMapConfig, fetchMapConfig, applyMap, detectMapSlugFromUrl,</span>
+<span class="d-del">-  takePasscodeParam, authWithPasscode, getCurrentMap,</span>
+<span class="d-add">+  takePasscodeParam, authWithPasscode, getCurrentMap, slugRedirectUrl,</span>
+<span class="d-ctx">   type MapConfig,</span>
+<span class="d-ctx"> } from &quot;./map/runtime&quot;;</span>
+<span class="d-ctx"> import { reportMapLoaded } from &quot;./utils/loadTelemetry&quot;;</span>
+<span class="d-add">+import { captureSourceTag, withSourceTag } from &quot;./utils/sourceTag&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** Full-screen &quot;Loading...&quot; splash with the ASCII (| / - \) spinner. */</span>
+<span class="d-ctx"> function FullScreenLoader() {</span>
+<span class="d-hunk">@@ -75,9 +76,18 @@ function MapApp() {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-ctx">     let cancelled = false;</span>
+<span class="d-add">+    // Capture ?src= (campaign attribution) BEFORE any redirect or URL rewrite</span>
+<span class="d-add">+    // can drop it — the beacon reads it when the loader dismisses.</span>
+<span class="d-add">+    captureSourceTag();</span>
+<span class="d-ctx">     (async () =&gt; {</span>
+<span class="d-ctx">       let resolved = await resolveMapConfig();</span>
+<span class="d-ctx">       if (cancelled) return;</span>
+<span class="d-add">+      // A retired slug (renamed map): follow its DB redirect, keeping deep-link</span>
+<span class="d-add">+      // params and merging the redirect&#x27;s appendQuery (campaign ?src tag).</span>
+<span class="d-add">+      if (resolved?.redirect?.toSlug) {</span>
+<span class="d-add">+        window.location.replace(slugRedirectUrl(resolved.redirect));</span>
+<span class="d-add">+        return;</span>
+<span class="d-add">+      }</span>
+<span class="d-ctx">       // A map with a canonical subdomain (presets + admin-assigned vanity hosts)</span>
+<span class="d-ctx">       // settles on that host: send apex /m/&lt;slug&gt; and shared/typed visitors to</span>
+<span class="d-ctx">       // e.g. bikepaths.cityedit.org, preserving any ?slat/?vt deep-link params.</span>
+<span class="d-hunk">@@ -86,7 +96,9 @@ function MapApp() {</span>
+<span class="d-ctx">       if (resolved?.subdomain &amp;&amp; !resolved.staging) {</span>
+<span class="d-ctx">         const target = subdomainRedirectUrl(resolved.subdomain);</span>
+<span class="d-ctx">         if (target) {</span>
+<span class="d-del">-          window.location.replace(target);</span>
+<span class="d-add">+          // withSourceTag: the ?src tag was captured+stripped above; carry it</span>
+<span class="d-add">+          // across the host hop so the campaign still gets attributed.</span>
+<span class="d-add">+          window.location.replace(withSourceTag(target));</span>
+<span class="d-ctx">           return;</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx">       }</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/map/runtime.ts</span>
+            <span class="stat"><span class="d-add">+26</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · map/</span>
+        <span class="ctx-sum">map-config runtime: resolve slug/subdomain → MapConfig, apply it, passcode auth</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">runtime.ts</span>
+        <span class="ctx-sum">~274 LOC — MapConfig types, slug detection, config fetch/resolve/apply, passcode helpers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">MapVoteType / MapConfig interfaces</span><span class="ol-sum">the config shape — now with the redirect?: {toSlug, appendQuery} field</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">getCurrentMap / getMapSlug / detectMapSlugFromUrl</span><span class="ol-sum">current-map accessors + /m/&lt;slug&gt; · ?map= parsing</span></li><li class="changed"><span class="ol-label">slugRedirectUrl</span><span class="ol-sum">NEW — retired-slug target URL: keep query, drop ?map, merge appendQuery (no overrides)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">applyStyleOverride / fetchMapConfig / fetchMapConfigBySubdomain / resolveMapConfig</span><span class="ol-sum">?style preview + the config fetch/resolution chain</span></li><li class="dim"><span class="ol-label">applyMap / withMap</span><span class="ol-sum">install the config; slug-qualify links</span></li><li class="dim"><span class="ol-label">Passcode helpers</span><span class="ol-sum">tokenKey…authWithPasscode — private-map auth</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>MapConfig.redirect?: { toSlug; appendQuery? } — the retired-slug stub shape</li><li>slugRedirectUrl() — /m/&lt;toSlug&gt; + current query (minus ?map) + appendQuery merged without overriding</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/map/runtime.ts b/client-react/src/map/runtime.ts</span>
+<span class="d-meta">index 08e46ad..2173123 100644</span>
+<span class="d-meta">--- a/client-react/src/map/runtime.ts</span>
+<span class="d-meta">+++ b/client-react/src/map/runtime.ts</span>
+<span class="d-hunk">@@ -43,6 +43,10 @@ export interface MapConfig {</span>
+<span class="d-ctx">   /** Server runs with APP_ENV=staging: skip the canonical-subdomain redirect</span>
+<span class="d-ctx">    *  (it would bounce testers to prod) and show the STAGING ribbon. */</span>
+<span class="d-ctx">   staging?: boolean;</span>
+<span class="d-add">+  /** The slug was retired by a rename (DB map_redirects row): no map config —</span>
+<span class="d-add">+   *  navigate to `toSlug`, keeping the current query and merging `appendQuery`</span>
+<span class="d-add">+   *  (e.g. &quot;src=qr-poster&quot;, how pre-printed QR links get campaign-tagged). */</span>
+<span class="d-add">+  redirect?: { toSlug: string; appendQuery?: string | null };</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> // The map shown when the URL names no slug and the host has no mapped subdomain.</span>
+<span class="d-hunk">@@ -83,6 +87,28 @@ export function detectMapSlugFromUrl(): string | null {</span>
+<span class="d-ctx">   return params.get(&quot;map&quot;);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Target URL for a retired slug&#x27;s redirect (MapConfig.redirect). Same-origin</span>
+<span class="d-add">+ * path only: keeps every current query param (QR deep links carry ?w/?vt or</span>
+<span class="d-add">+ * ?z/?lat/?lng), drops ?map= (it names the retired slug), and merges the</span>
+<span class="d-add">+ * redirect&#x27;s appendQuery WITHOUT overriding params already present.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function slugRedirectUrl(</span>
+<span class="d-add">+  redirect: { toSlug: string; appendQuery?: string | null },</span>
+<span class="d-add">+  search: string = window.location.search,</span>
+<span class="d-add">+  hash: string = window.location.hash</span>
+<span class="d-add">+): string {</span>
+<span class="d-add">+  const params = new URLSearchParams(search);</span>
+<span class="d-add">+  params.delete(&quot;map&quot;);</span>
+<span class="d-add">+  if (redirect.appendQuery) {</span>
+<span class="d-add">+    new URLSearchParams(redirect.appendQuery).forEach((value, key) =&gt; {</span>
+<span class="d-add">+      if (!params.has(key)) params.set(key, value);</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  const qs = params.toString();</span>
+<span class="d-add">+  return `/m/${redirect.toSlug}` + (qs ? `?${qs}` : &quot;&quot;) + hash;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /**</span>
+<span class="d-ctx">  * Preview override: `?style=&lt;id&gt;` swaps ONLY the visual style (heat ramp,</span>
+<span class="d-ctx">  * basemap, marker outline) and leaves `mode` untouched, so a map&#x27;s existing</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/loadTelemetry.ts</span>
+            <span class="stat"><span class="d-add">+4</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · utils/</span>
+        <span class="ctx-sum">the one-per-pageload map-load beacon (navigation start → loader dismissed)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">loadTelemetry.ts</span>
+        <span class="ctx-sum">~55 LOC — sendBeacon of {map, ms, cachedTopo, nav} to /api/client-timing</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Module state</span><span class="ol-sum">topoSource / sent — one beacon per page load</span></li><li class="dim"><span class="ol-label">reportTopologySource</span><span class="ol-sum">cache-vs-network flag from GraphLayer</span></li><li class="changed"><span class="ol-label">reportMapLoaded</span><span class="ol-sum">build + sendBeacon the payload — now carries src (campaign tag)</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>import getSourceTag; payload gains src: getSourceTag() ?? undefined (absent → server labels &quot;direct&quot;)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/loadTelemetry.ts b/client-react/src/utils/loadTelemetry.ts</span>
+<span class="d-meta">index c6730a6..8a613a0 100644</span>
+<span class="d-meta">--- a/client-react/src/utils/loadTelemetry.ts</span>
+<span class="d-meta">+++ b/client-react/src/utils/loadTelemetry.ts</span>
+<span class="d-hunk">@@ -11,6 +11,7 @@</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> import { CONFIG } from &quot;../config&quot;;</span>
+<span class="d-ctx"> import { getMapSlug, detectMapSlugFromUrl } from &quot;../map/runtime&quot;;</span>
+<span class="d-add">+import { getSourceTag } from &quot;./sourceTag&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> let topoSource: &quot;cache&quot; | &quot;network&quot; | null = null;</span>
+<span class="d-ctx"> let sent = false;</span>
+<span class="d-hunk">@@ -35,6 +36,9 @@ export function reportMapLoaded() {</span>
+<span class="d-ctx">       ms,</span>
+<span class="d-ctx">       cachedTopo: topoSource === &quot;cache&quot;,</span>
+<span class="d-ctx">       nav,</span>
+<span class="d-add">+      // Campaign attribution (?src=…, captured+stripped at boot); absent for</span>
+<span class="d-add">+      // direct visits — the server labels those &quot;direct&quot;.</span>
+<span class="d-add">+      src: getSourceTag() ?? undefined,</span>
+<span class="d-ctx">     });</span>
+<span class="d-ctx">     const url = `${CONFIG.apiUrl}/client-timing`;</span>
+<span class="d-ctx">     // Send as a plain string (text/plain — CORS-safelisted). A Blob typed</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">docs/README.md</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · docs/</span>
+        <span class="ctx-sum">the docs index: per-doc one-liners, naming canon, style conventions</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">README.md</span>
+        <span class="ctx-sum">~46 LOC — documents table + conventions</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Documents table</span><span class="ol-sum">one row per doc — url-routing.md row now claims source-of-truth for redirects + ?src=</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Naming canon</span><span class="ol-sum">slug / map / city / mode vocabulary</span></li><li class="dim"><span class="ol-label">Style conventions</span><span class="ol-sum">how docs are written</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>url-routing.md row — adds slug renames, the redirect inventory, and ?src= visit-source tracking</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/README.md b/docs/README.md</span>
+<span class="d-meta">index 56735c7..6567782 100644</span>
+<span class="d-meta">--- a/docs/README.md</span>
+<span class="d-meta">+++ b/docs/README.md</span>
+<span class="d-hunk">@@ -8,7 +8,7 @@ Index and conventions for everything under `docs/`. Start here.</span>
+<span class="d-ctx"> |-----|----------------|</span>
+<span class="d-ctx"> | [three-layer-model.md](three-layer-model.md) | **Source of truth** for the three-layer separation — edge/node graph (storage) → blocks (aggregation, display, interaction) → route proposals (derived clustering) — and the block-scoped vote semantics (clear-then-cast, the one-direction-per-block invariant). |</span>
+<span class="d-ctx"> | [voting-architecture.md](voting-architecture.md) | **Source of truth** for Layer-1 vote mechanics — how a vote is identified, stored, reconciled, and migrated (the unified edge-based model). Write-path *semantics* are defined by three-layer-model.md §4. |</span>
+<span class="d-del">-| [url-routing.md](url-routing.md) | How the SPA resolves *which map* to show (slug / subdomain / apex), how links are built, and how an admin adds a vanity subdomain. |</span>
+<span class="d-add">+| [url-routing.md](url-routing.md) | How the SPA resolves *which map* to show (slug / subdomain / apex), how links are built, and how an admin adds a vanity subdomain or renames a slug. **Source of truth** for the redirect inventory (every redirect/rewrite the system performs) and `?src=` visit-source tracking. |</span>
+<span class="d-ctx"> | [flask-considerations.md](flask-considerations.md) | Backend architecture notes for the real-time vote broadcast path and running across multiple Flask servers. |</span>
+<span class="d-ctx"> | [testing.md](testing.md) | The test taxonomy — (backend, frontend) × (unit, integration, E2E) — and how to run each. |</span>
+<span class="d-ctx"> | [debugging.md](debugging.md) | The debugging workflow: named debug tabs (`?tab=&lt;name&gt;`), client `[channel]` debug logging + `cityedit.dumpState()`, the server log-tag table, and curl probes. |</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">docs/url-routing.md</span>
+            <span class="stat"><span class="d-add">+95</span> / <span class="d-del">-4</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · docs/</span>
+        <span class="ctx-sum">SOURCE OF TRUTH for map addressing: slug/subdomain/apex resolution, link building, redirects</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">url-routing.md</span>
+        <span class="ctx-sum">~216 LOC — address space, client/server resolution, prod hosts, admin runbooks, redirect inventory</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Intro</span><span class="ol-sum">no router library; every redirect must be in the inventory table</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">The address space</span><span class="ol-sum">slug forms + NEW “Visit-source tracking (?src=)” subsection</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Client resolution (the load path)</span><span class="ol-sum">resolveMapConfig chain + NEW “Slug redirects (renamed maps)” subsection</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Link building (sharing)</span><span class="ol-sum">withMap / shareLink</span></li><li class="dim"><span class="ol-label">Server resolution</span><span class="ol-sum">/api/maps/&lt;slug&gt; + by-subdomain</span></li><li class="dim"><span class="ol-label">Production (cityedit.org)</span><span class="ol-sum">hosts, nginx, Cloud Run</span></li><li class="dim"><span class="ol-label">Admin runbook — add a vanity subdomain</span><span class="ol-sum">set_map_subdomain flow</span></li><li class="changed"><span class="ol-label">Admin runbook — rename a map slug</span><span class="ol-sum">NEW — rename_map.py usage, prod-tunnel notes, cache caveats</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Redirect inventory</span><span class="ol-sum">NEW — source-of-truth table of EVERY redirect/rewrite + live map_redirects rows</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Intro — “renames a slug”; pointer: every redirect goes in the inventory</li><li>Address space — retired slugs still resolve; NEW ?src= section (capture→strip→beacon→[MAPLOAD]→src label; tag rules)</li><li>NEW “Slug redirects (renamed maps)” — 200-stub rationale, param preservation, reserved-forever, append_query retro-tagging</li><li>NEW “Admin runbook — rename a map slug” — the one-command flow + prod tunnels + TTL/preview caveats</li><li>NEW “Redirect inventory” — donate. 301, feedback. rewrite, canonical-subdomain, retired slugs, staging opt-out; nyc-intersections→nyc-crossings row</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/url-routing.md b/docs/url-routing.md</span>
+<span class="d-meta">index ad16621..7b2111e 100644</span>
+<span class="d-meta">--- a/docs/url-routing.md</span>
+<span class="d-meta">+++ b/docs/url-routing.md</span>
+<span class="d-hunk">@@ -1,10 +1,12 @@</span>
+<span class="d-ctx"> # URL &amp; Routing Architecture</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> How the app decides *which map* to show, how links are built, and how an admin</span>
+<span class="d-del">-adds a vanity subdomain. There is **no router library** — the SPA inspects the</span>
+<span class="d-del">-URL directly. Maps are addressed by **slug**; the legacy `?theme=` query param</span>
+<span class="d-del">-is gone (the only mention left is a comment in `utils/shareLink.ts` documenting</span>
+<span class="d-del">-that it no longer exists).</span>
+<span class="d-add">+adds a vanity subdomain or renames a slug. There is **no router library** — the</span>
+<span class="d-add">+SPA inspects the URL directly. Maps are addressed by **slug**; the legacy</span>
+<span class="d-add">+`?theme=` query param is gone (the only mention left is a comment in</span>
+<span class="d-add">+`utils/shareLink.ts` documenting that it no longer exists). Every redirect the</span>
+<span class="d-add">+system performs is listed in [Redirect inventory](#redirect-inventory) — add to</span>
+<span class="d-add">+that table whenever you add one.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ## The address space</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -18,6 +20,21 @@ that it no longer exists).</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> The slug is the single source of truth. Subdomains are an optional alias that</span>
+<span class="d-ctx"> resolve **to** a slug; the camera/selection params ride along on either form.</span>
+<span class="d-add">+A *retired* slug (a renamed map&#x27;s old name) is not a map but still resolves —</span>
+<span class="d-add">+see [Slug redirects](#slug-redirects-renamed-maps).</span>
+<span class="d-add">+</span>
+<span class="d-add">+### Visit-source tracking (`?src=`)</span>
+<span class="d-add">+</span>
+<span class="d-add">+Any City Edit URL may carry `?src=&lt;tag&gt;` (e.g. `?src=qr-poster`) to attribute</span>
+<span class="d-add">+the visit to a campaign. The client captures the tag once at boot</span>
+<span class="d-add">+(`utils/sourceTag.ts`), strips it from the address bar (so re-shared links</span>
+<span class="d-add">+don&#x27;t inherit the attribution), and reports it in the map-load beacon</span>
+<span class="d-add">+(`utils/loadTelemetry.ts` → `POST /api/client-timing` → the `[MAPLOAD] … src=…`</span>
+<span class="d-add">+log line). The `cityedit_map_load_ms` metric (`terraform/monitoring.tf`)</span>
+<span class="d-add">+extracts it as the `src` label, so **visits by source** is a Metrics Explorer /</span>
+<span class="d-add">+dashboard group-by; untagged visits are labeled `direct`. Tags are</span>
+<span class="d-add">+`[a-zA-Z0-9_-]`, max 32 chars. To start a new campaign, just mint a new tag in</span>
+<span class="d-add">+the printed/shared URL — no code change.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ## Client resolution (the load path)</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -44,6 +61,30 @@ selection is restored on the subdomain. No redirect loop: on the canonical host</span>
+<span class="d-ctx"> `detectSubdomain()` already equals the map&#x27;s subdomain, so the helper returns</span>
+<span class="d-ctx"> `null`.</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+### Slug redirects (renamed maps)</span>
+<span class="d-add">+</span>
+<span class="d-add">+When a map is renamed, its old slug moves to the `map_redirects` table</span>
+<span class="d-add">+(`from_slug → to_slug + append_query`, `server/database.py`) instead of dying:</span>
+<span class="d-add">+</span>
+<span class="d-add">+- `GET /api/maps/&lt;old-slug&gt;` returns `{&quot;slug&quot;, &quot;redirect&quot;: {&quot;toSlug&quot;,</span>
+<span class="d-add">+  &quot;appendQuery&quot;}}` (200, not a 30x — nginx serves the SPA shell before any slug</span>
+<span class="d-add">+  lookup, so only the client can act on it, exactly like the subdomain</span>
+<span class="d-add">+  redirect). `App.tsx` then `location.replace`s to `/m/&lt;toSlug&gt;` via</span>
+<span class="d-add">+  `slugRedirectUrl()` (`map/runtime.ts`), **keeping all current query params**</span>
+<span class="d-add">+  (deep links survive) and merging `append_query` without overriding anything</span>
+<span class="d-add">+  already present.</span>
+<span class="d-add">+- The old slug stays **reserved forever**: `slug_available()` checks both</span>
+<span class="d-add">+  `maps` and `map_redirects`, so Propose-a-Map can never re-issue it to</span>
+<span class="d-add">+  someone else&#x27;s map (printed links would land on a stranger&#x27;s map).</span>
+<span class="d-add">+- `append_query` is the retro-tagging hook: a redirect row with</span>
+<span class="d-add">+  `append_query = &#x27;src=qr-poster&#x27;` stamps campaign attribution onto every</span>
+<span class="d-add">+  visit through the old printed URL.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Rows are created by `server/rename_map.py` (see the</span>
+<span class="d-add">+[rename runbook](#admin-runbook--rename-a-map-slug)), never by hand-editing</span>
+<span class="d-add">+the DB in isolation — the rename must also move `edge_votes.map_slug` and</span>
+<span class="d-add">+rebuild Redis.</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> ### Theme/styling</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> `ThemeContext` derives the active theme from the **loaded map** (`themeFromMap`),</span>
+<span class="d-hunk">@@ -123,3 +164,53 @@ column is set and the host resolves, `bikes.cityedit.org` serves that map and</span>
+<span class="d-ctx"> `cityedit.org/m/ny-bike-test` redirects to it. The preset hosts</span>
+<span class="d-ctx"> (`bikepaths`/`trees`/`walkways`) are just rows seeded this same way in</span>
+<span class="d-ctx"> `presets.py`.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Admin runbook — rename a map slug</span>
+<span class="d-add">+</span>
+<span class="d-add">+Goal: `/m/&lt;old&gt;` becomes `/m/&lt;new&gt;`; the old slug redirects (optionally</span>
+<span class="d-add">+stamping a campaign `?src=` tag) and stays reserved.</span>
+<span class="d-add">+</span>
+<span class="d-add">+```bash</span>
+<span class="d-add">+cd server &amp;&amp; source env/bin/activate</span>
+<span class="d-add">+python rename_map.py &lt;old-slug&gt; &lt;new-slug&gt; \</span>
+<span class="d-add">+  --append-query &quot;src=&lt;campaign-tag&gt;&quot; \</span>
+<span class="d-add">+  --note &quot;why this redirect exists&quot;</span>
+<span class="d-add">+```</span>
+<span class="d-add">+</span>
+<span class="d-add">+One Postgres transaction (`database.rename_map_slug`): `maps.slug`, the</span>
+<span class="d-add">+denormalized `edge_votes.map_slug` copies (plain TEXT — nothing cascades), a</span>
+<span class="d-add">+`map_redirects` row, and any existing redirects chained onto the old slug are</span>
+<span class="d-add">+flattened to the new one. Then Redis — the only store the heatmap serves from —</span>
+<span class="d-add">+is rebuilt under the new slug and the old slug&#x27;s keys (`ev:`, `vote_rev:`,</span>
+<span class="d-add">+`bd:`/`bagg:`) are purged.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Against **prod**, run it through the bastion tunnels (Postgres on local</span>
+<span class="d-add">+`:5433`, Redis on `:6380` — see `docs/gcp-deployment.md`), passing</span>
+<span class="d-add">+`DATABASE_URL`/`REDIS_HOST`/`REDIS_PORT` inline for the one command; never</span>
+<span class="d-add">+repoint `server/.env`. Notes:</span>
+<span class="d-add">+</span>
+<span class="d-add">+- Running Flask instances hold in-process map caches (30–60s TTL); the old</span>
+<span class="d-add">+  slug may serve its old config for up to a minute after the rename.</span>
+<span class="d-add">+- Anything keyed by slug resets client-side on first visit to the new slug</span>
+<span class="d-add">+  (IndexedDB vote cache, `localStorage` passcode tokens) — self-healing.</span>
+<span class="d-add">+- `/previews/&lt;new-slug&gt;.png` is missing until the next daily screenshot job.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Redirect inventory</span>
+<span class="d-add">+</span>
+<span class="d-add">+**Source of truth** for every redirect/rewrite the system performs. If you add</span>
+<span class="d-add">+one, add a row here.</span>
+<span class="d-add">+</span>
+<span class="d-add">+| What | Mechanism | Where | Query params |</span>
+<span class="d-add">+|------|-----------|-------|--------------|</span>
+<span class="d-add">+| `donate.cityedit.org` → donorbox | nginx `return 301` | `deploy/nginx-cloudrun.conf` | dropped |</span>
+<span class="d-add">+| `feedback.cityedit.org` → feedback page | nginx `try_files` rewrite (not a redirect) | `deploy/nginx-cloudrun.conf` | n/a |</span>
+<span class="d-add">+| Canonical-subdomain redirect (`/m/nyc-bikes` → `bikepaths.cityedit.org`) | client `location.replace` after map-config fetch | `App.tsx` + `themes.ts subdomainRedirectUrl` | preserved (+ re-attached `src`) |</span>
+<span class="d-add">+| Retired-slug redirects (renamed maps) | client `location.replace` on `MapConfig.redirect` | DB `map_redirects` table + `App.tsx` + `map/runtime.ts slugRedirectUrl` | preserved, `append_query` merged |</span>
+<span class="d-add">+| Staging: subdomain redirect disabled | `APP_ENV=staging` → `staging: true` on map config | `app.py` / `App.tsx` | n/a |</span>
+<span class="d-add">+</span>
+<span class="d-add">+Current `map_redirects` rows (query the DB for the live list:</span>
+<span class="d-add">+`SELECT * FROM map_redirects;`):</span>
+<span class="d-add">+</span>
+<span class="d-add">+| From | To | Appends | Why |</span>
+<span class="d-add">+|------|----|---------|-----|</span>
+<span class="d-add">+| `nyc-intersections` | `nyc-crossings` | `src=qr-poster` | 2026-07 QR poster campaign was printed without a `src` tag; the redirect retro-tags those scans |</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">scripts/generate_posters.py</span>
+            <span class="stat"><span class="d-add">+11</span> / <span class="d-del">-3</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Scripts · scripts/</span>
+        <span class="ctx-sum">the QR poster generator: intersections CSV → filled HTML templates → rendered PNGs + poster book</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">generate_posters.py</span>
+        <span class="ctx-sum">~612 LOC — row loading, template fill/style helpers, QR minting, poster book + map page</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Constants</span><span class="ol-sum">MASTER/TEMPLATES/OUT paths, BASE_URL → nyc-crossings, QR_VOTE_TYPE, NEW QR_SRC</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Template helpers</span><span class="ol-sum">load_rows … set_qr — slot fill, styling, footer stamping, QR embedding</span></li><li class="dim"><span class="ol-label">Per-template fills/selectors</span><span class="ol-sum">_nabe_fill / _after_dark_fill / _dark_select / nabe_targets</span></li><li class="changed"><span class="ol-label">main()</span><span class="ol-sum">argparse + render loop — NEW --src flag; QR URL now carries &amp;src=</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">build_map_page</span><span class="ol-sum">the overview map HTML</span></li><li class="changed"><span class="ol-label">build_poster_book</span><span class="ol-sum">checklist + PDF assembly — checklist copy now says nyc-crossings</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>BASE_URL → https://cityedit.org/m/nyc-crossings; QR_SRC = &quot;qr-poster&quot; (first print run retro-tagged by the redirect instead)</li><li>--src flag (default QR_SRC) — vary per campaign/print run</li><li>QR URL — ?w=&lt;lat&gt;,&lt;lon&gt;&amp;vt=…&amp;src=&lt;args.src&gt;</li><li>poster-book checklist copy — cityedit.org/m/nyc-crossings</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/scripts/generate_posters.py b/scripts/generate_posters.py</span>
+<span class="d-meta">index 6149d07..c1cd11b 100644</span>
+<span class="d-meta">--- a/scripts/generate_posters.py</span>
+<span class="d-meta">+++ b/scripts/generate_posters.py</span>
+<span class="d-hunk">@@ -37,10 +37,14 @@ MASTER = REPO / &quot;data&quot; / &quot;analysis&quot; / &quot;intersections_master.csv&quot;</span>
+<span class="d-ctx"> TEMPLATES = REPO / &quot;data&quot; / &quot;posters&quot; / &quot;templates&quot;</span>
+<span class="d-ctx"> OUT = REPO / &quot;data&quot; / &quot;posters&quot; / &quot;out&quot;</span>
+<span class="d-ctx"> RENDER = REPO / &quot;scripts&quot; / &quot;render_poster.sh&quot;</span>
+<span class="d-del">-BASE_URL = &quot;https://cityedit.org/m/nyc-intersections&quot;</span>
+<span class="d-add">+BASE_URL = &quot;https://cityedit.org/m/nyc-crossings&quot;</span>
+<span class="d-ctx"> # Preselected vote type carried in every QR: scanning lands with the pin set</span>
+<span class="d-ctx"> # and this (point-kind) type ready to cast.</span>
+<span class="d-ctx"> QR_VOTE_TYPE = &quot;Fix dangerous intersection&quot;</span>
+<span class="d-add">+# Campaign attribution baked into every QR URL (the [MAPLOAD] src label).</span>
+<span class="d-add">+# The first print run predates this and links /m/nyc-intersections bare; that</span>
+<span class="d-add">+# retired slug&#x27;s redirect (map_redirects row) retro-tags it with the same value.</span>
+<span class="d-add">+QR_SRC = &quot;qr-poster&quot;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def load_rows():</span>
+<span class="d-hunk">@@ -342,6 +346,9 @@ def main():</span>
+<span class="d-ctx">     ap.add_argument(&quot;--scale&quot;, type=int, default=2,</span>
+<span class="d-ctx">                     help=&quot;device scale factor (2 -&gt; 1700x2268 px, good for print)&quot;)</span>
+<span class="d-ctx">     ap.add_argument(&quot;--base-url&quot;, default=BASE_URL)</span>
+<span class="d-add">+    ap.add_argument(&quot;--src&quot;, default=QR_SRC,</span>
+<span class="d-add">+                    help=&quot;?src= attribution tag baked into QR URLs &quot;</span>
+<span class="d-add">+                         &quot;(vary per campaign/print run)&quot;)</span>
+<span class="d-ctx">     ap.add_argument(&quot;--pdf&quot;, action=&quot;store_true&quot;, default=True,</span>
+<span class="d-ctx">                     help=&quot;assemble out/poster-book.pdf (checklist + all posters)&quot;)</span>
+<span class="d-ctx">     ap.add_argument(&quot;--no-pdf&quot;, dest=&quot;pdf&quot;, action=&quot;store_false&quot;)</span>
+<span class="d-hunk">@@ -379,7 +386,8 @@ def main():</span>
+<span class="d-ctx">         for r, rank in targets:</span>
+<span class="d-ctx">             used.add((r[&quot;lat&quot;], r[&quot;lon&quot;]))</span>
+<span class="d-ctx">             from urllib.parse import quote_plus</span>
+<span class="d-del">-            url = f&#x27;{args.base_url}?w={r[&quot;lat&quot;]},{r[&quot;lon&quot;]}&amp;vt={quote_plus(QR_VOTE_TYPE)}&#x27;</span>
+<span class="d-add">+            url = (f&#x27;{args.base_url}?w={r[&quot;lat&quot;]},{r[&quot;lon&quot;]}&#x27;</span>
+<span class="d-add">+                   f&#x27;&amp;vt={quote_plus(QR_VOTE_TYPE)}&amp;src={args.src}&#x27;)</span>
+<span class="d-ctx">             tag = f&quot;{rank:02d}_{slug(r[&#x27;name_osm&#x27;])}&quot;</span>
+<span class="d-ctx">             qr_png = outdir / f&quot;{tag}_qr.png&quot;</span>
+<span class="d-ctx">             qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,</span>
+<span class="d-hunk">@@ -577,7 +585,7 @@ def build_poster_book(manifest, scale):</span>
+<span class="d-ctx">                &quot;&lt;h1&gt;Poster placement checklist&lt;/h1&gt;&quot;</span>
+<span class="d-ctx">                &quot;&lt;div class=&#x27;sub&#x27;&gt;Each poster carries its code in a corner. &quot;</span>
+<span class="d-ctx">                &quot;Tick when hung; QR links open the intersection on &quot;</span>
+<span class="d-del">-               &quot;cityedit.org/m/nyc-intersections.&lt;/div&gt;&quot;</span>
+<span class="d-add">+               &quot;cityedit.org/m/nyc-crossings.&lt;/div&gt;&quot;</span>
+<span class="d-ctx">                f&quot;&lt;div class=&#x27;cols&#x27;&gt;{cols}&lt;/div&gt;&quot;</span>
+<span class="d-ctx">                f&quot;&lt;div class=&#x27;pageno&#x27;&gt;checklist {pi + 1} / {len(pages)}&lt;/div&gt;&quot;)</span>
+<span class="d-ctx">         hp = OUT / f&quot;checklist_{pi + 1}.html&quot;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">scripts/seed_poster_votes.py</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Scripts · scripts/</span>
+        <span class="ctx-sum">seeds the poster campaign&#x27;s starter votes against the live API (dry-run by default)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">seed_poster_votes.py</span>
+        <span class="ctx-sum">~92 LOC — campaign vote-type table + a cast loop over the poster intersections</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">CAMPAIGN_VOTE_TYPE</span><span class="ol-sum">per-campaign vote-type labels</span></li><li class="changed"><span class="ol-label">main()</span><span class="ol-sum">argparse (--base-url / --map / --cast) + seed loop — default map → nyc-crossings</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>--map default nyc-intersections → nyc-crossings</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/scripts/seed_poster_votes.py b/scripts/seed_poster_votes.py</span>
+<span class="d-meta">index eb4370a..c1b5074 100644</span>
+<span class="d-meta">--- a/scripts/seed_poster_votes.py</span>
+<span class="d-meta">+++ b/scripts/seed_poster_votes.py</span>
+<span class="d-hunk">@@ -48,7 +48,7 @@ CAMPAIGN_VOTE_TYPE = {</span>
+<span class="d-ctx"> def main():</span>
+<span class="d-ctx">     ap = argparse.ArgumentParser()</span>
+<span class="d-ctx">     ap.add_argument(&quot;--base-url&quot;, default=&quot;https://cityedit.org&quot;)</span>
+<span class="d-del">-    ap.add_argument(&quot;--map&quot;, default=&quot;nyc-intersections&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--map&quot;, default=&quot;nyc-crossings&quot;)</span>
+<span class="d-ctx">     ap.add_argument(&quot;--cast&quot;, action=&quot;store_true&quot;, help=&quot;actually cast (default: dry-run)&quot;)</span>
+<span class="d-ctx">     args = ap.parse_args()</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+19</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask backend · server/</span>
+        <span class="ctx-sum">HTTP + WebSocket routes, the per-map vote cache, graph + OSRM registries, startup warmup</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~2430 LOC — every API/WS route plus the vote-response cache and city registries</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Flask / Redis / registries setup</span><span class="ol-sum">app, CORS, sock, redis client, GraphRegistry, DB imports</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Map resolution + passcode gate</span><span class="ol-sum">resolve_map, _map_get_cache, private-map tokens</span></li><li class="dim"><span class="ol-label">Per-map vote response cache + saturation valve</span><span class="ol-sum">bounded LRU · single-flight · shed valve</span></li><li class="changed"><span class="ol-label">Maps API</span><span class="ol-sum">/api/maps CRUD — map_get now serves the retired-slug redirect stub</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">WebSocket + Routes API</span><span class="ol-sum">/ws delta hub, /api/routes via OSRM</span></li><li class="dim"><span class="ol-label">Vote API</span><span class="ol-sum">/api/vote — block-scoped clear-then-cast</span></li><li class="dim"><span class="ol-label">Graph data APIs</span><span class="ol-sum">/api/graph-topology, /api/graph-votes, /api/graph-version</span></li><li class="changed"><span class="ol-label">Telemetry + admin APIs</span><span class="ol-sum">client_timing ([MAPLOAD] — now with src=), subdomain, refresh-osm, stats</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>import get_map_redirect from database</li><li>map_get — on maps-table miss, serve {slug, redirect:{toSlug, appendQuery}} as 200 + max-age=300 (not cached in _map_get_cache)</li><li>client_timing — sanitize payload src ([a-zA-Z0-9_-], ≤32) and append src=&lt;tag|direct&gt; to the [MAPLOAD] line</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index 079bb2f..b83c89c 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -42,7 +42,7 @@ from database import (</span>
+<span class="d-ctx">     count_devices_per_ip_for_edges, count_unique_voters_for_edges,</span>
+<span class="d-ctx">     evict_lru_devices_for_edges,</span>
+<span class="d-ctx">     seed_presets, backfill_vote_type_kinds, normalize_point_type,</span>
+<span class="d-del">-    list_maps, get_map, get_map_by_subdomain, slug_available,</span>
+<span class="d-add">+    list_maps, get_map, get_map_by_subdomain, slug_available, get_map_redirect,</span>
+<span class="d-ctx">     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,</span>
+<span class="d-ctx">     promote_vote_types, fetch_voted_vote_type_labels,</span>
+<span class="d-ctx">     DATABASE_URL,</span>
+<span class="d-hunk">@@ -1037,6 +1037,19 @@ def map_get(slug):</span>
+<span class="d-ctx">             return resp</span>
+<span class="d-ctx">         m = get_map(slug)</span>
+<span class="d-ctx">         if not m:</span>
+<span class="d-add">+            # Retired slug? Serve its redirect (map_redirects row, created by</span>
+<span class="d-add">+            # rename_map.py) so old links — printed QR posters — keep working.</span>
+<span class="d-add">+            # A 200 + `redirect` field rather than a 30x: the SPA shell is</span>
+<span class="d-add">+            # served by nginx before any slug lookup, so only the client can</span>
+<span class="d-add">+            # act on it (mirrors the canonical-subdomain redirect in App.tsx).</span>
+<span class="d-add">+            # Not stored in _map_get_cache (that holds enriched map dicts</span>
+<span class="d-add">+            # only); the lookup is a single PK read and browsers hold it for</span>
+<span class="d-add">+            # max-age anyway.</span>
+<span class="d-add">+            r = get_map_redirect(slug)</span>
+<span class="d-add">+            if r:</span>
+<span class="d-add">+                resp = jsonify({&quot;slug&quot;: slug, &quot;redirect&quot;: r})</span>
+<span class="d-add">+                resp.headers[&quot;Cache-Control&quot;] = &quot;public, max-age=300&quot;</span>
+<span class="d-add">+                return resp</span>
+<span class="d-ctx">             return jsonify({&quot;error&quot;: &quot;Map not found&quot;}), 404</span>
+<span class="d-ctx">         if m.get(&quot;requiresPasscode&quot;) and not _passcode_ok(slug):</span>
+<span class="d-ctx">             return _locked_stub(slug)</span>
+<span class="d-hunk">@@ -2211,7 +2224,11 @@ def client_timing():</span>
+<span class="d-ctx">     slug = re.sub(r&quot;[^a-zA-Z0-9_-]&quot;, &quot;&quot;, str(payload.get(&quot;map&quot;) or &quot;&quot;))[:64] or &quot;unknown&quot;</span>
+<span class="d-ctx">     nav = re.sub(r&quot;[^a-z_]&quot;, &quot;&quot;, str(payload.get(&quot;nav&quot;) or &quot;&quot;))[:16] or &quot;unknown&quot;</span>
+<span class="d-ctx">     cached = 1 if payload.get(&quot;cachedTopo&quot;) else 0</span>
+<span class="d-del">-    logger.info(f&quot;[MAPLOAD] map={slug} ms={int(ms)} cached_topo={cached} nav={nav}&quot;)</span>
+<span class="d-add">+    # Campaign source (?src=… captured by the client, e.g. &quot;qr-poster&quot;) —</span>
+<span class="d-add">+    # extracted as the `src` label on cityedit_map_load_ms, so visits-by-source</span>
+<span class="d-add">+    # is a Metrics Explorer group-by. &quot;direct&quot; = untagged visit.</span>
+<span class="d-add">+    src = re.sub(r&quot;[^a-zA-Z0-9_-]&quot;, &quot;&quot;, str(payload.get(&quot;src&quot;) or &quot;&quot;))[:32] or &quot;direct&quot;</span>
+<span class="d-add">+    logger.info(f&quot;[MAPLOAD] map={slug} ms={int(ms)} cached_topo={cached} nav={nav} src={src}&quot;)</span>
+<span class="d-ctx">     return &quot;&quot;, 204</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/database.py</span>
+            <span class="stat"><span class="d-add">+123</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask backend · server/</span>
+        <span class="ctx-sum">the Postgres layer: schema init, edge-vote storage, vote types, maps registry</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">database.py</span>
+        <span class="ctx-sum">~1290 LOC — connection pool, schema, edge_votes read/write, migration helpers, maps &amp; lists</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Pool + get_cursor</span><span class="ol-sum">ThreadedConnectionPool, autocommit cursor contextmanager</span></li><li class="changed"><span class="ol-label">Schema — init_db</span><span class="ol-sum">edge_votes / vote_types / maps … + NEW map_redirects table</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Edge-vote write/read path</span><span class="ol-sum">record/delete/anchors/voter-directions/eviction</span></li><li class="dim"><span class="ol-label">Vote types (label ↔ id)</span><span class="ol-sum">fetch/normalize/get_or_create</span></li><li class="dim"><span class="ol-label">Aggregates / vote migration / admin</span><span class="ol-sum">replay, resnap, orphan repair, counts</span></li><li class="changed"><span class="ol-label">Maps &amp; vote-type lists</span><span class="ol-sum">seed_presets, list/get/create map, set_map_subdomain, slug_available (now checks both tables)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Slug redirects (renamed maps)</span><span class="ol-sum">NEW — get_map_redirect / list_map_redirects / rename_map_slug (atomic)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Passcode</span><span class="ol-sum">get_map_passcode_hash</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>init_db — CREATE TABLE map_redirects (from_slug PK, to_slug, append_query, note, created_at)</li><li>slug_available — maps UNION ALL map_redirects: a retired slug is reserved forever</li><li>get_map_redirect — PK read → {toSlug, appendQuery} (mirrors MapConfig.redirect)</li><li>list_map_redirects — admin/docs transparency listing</li><li>rename_map_slug — explicit BEGIN/COMMIT: maps.slug + edge_votes.map_slug + redirect row + chain flattening (a→b, b→c ⇒ a→c); rolls back whole on any failure</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/database.py b/server/database.py</span>
+<span class="d-meta">index 878642f..6456ea4 100644</span>
+<span class="d-meta">--- a/server/database.py</span>
+<span class="d-meta">+++ b/server/database.py</span>
+<span class="d-hunk">@@ -274,6 +274,23 @@ def init_db():</span>
+<span class="d-ctx">                 ON maps(subdomain) WHERE subdomain IS NOT NULL</span>
+<span class="d-ctx">             &quot;&quot;&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+            # Slug redirects: after a map is renamed, its old slug lives here so</span>
+<span class="d-add">+            # printed links (QR posters) keep working AND the old slug stays</span>
+<span class="d-add">+            # reserved (slug_available checks both tables). append_query is a</span>
+<span class="d-add">+            # query string (&quot;src=qr-poster&quot;) merged into the target URL by the</span>
+<span class="d-add">+            # client — the mechanism that retro-tags a campaign&#x27;s traffic.</span>
+<span class="d-add">+            # `note` records why the redirect exists; every row is surfaced in</span>
+<span class="d-add">+            # docs/url-routing.md&#x27;s redirect inventory.</span>
+<span class="d-add">+            cursor.execute(&quot;&quot;&quot;</span>
+<span class="d-add">+                CREATE TABLE IF NOT EXISTS map_redirects (</span>
+<span class="d-add">+                    from_slug TEXT PRIMARY KEY,</span>
+<span class="d-add">+                    to_slug TEXT NOT NULL,</span>
+<span class="d-add">+                    append_query TEXT,</span>
+<span class="d-add">+                    note TEXT,</span>
+<span class="d-add">+                    created_at TIMESTAMP DEFAULT NOW()</span>
+<span class="d-add">+                )</span>
+<span class="d-add">+            &quot;&quot;&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-ctx">             logger.info(&quot;[DB] Database schema initialized successfully&quot;)</span>
+<span class="d-ctx">             return True</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1107,17 +1124,122 @@ def set_map_subdomain(slug: str, subdomain: Optional[str]) -&gt; tuple[bool, str]:</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def slug_available(slug: str) -&gt; bool:</span>
+<span class="d-add">+    &quot;&quot;&quot;A slug is takeable only if no map uses it AND no redirect reserves it —</span>
+<span class="d-add">+    a renamed map&#x27;s old slug must never be re-claimed (printed QR links would</span>
+<span class="d-add">+    suddenly land on a stranger&#x27;s map).&quot;&quot;&quot;</span>
+<span class="d-ctx">     if not DATABASE_URL:</span>
+<span class="d-ctx">         return False</span>
+<span class="d-ctx">     try:</span>
+<span class="d-ctx">         with get_cursor() as cursor:</span>
+<span class="d-del">-            cursor.execute(&quot;SELECT 1 FROM maps WHERE slug = %s&quot;, (slug,))</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;&quot;&quot;SELECT 1 FROM maps WHERE slug = %s</span>
+<span class="d-add">+                   UNION ALL</span>
+<span class="d-add">+                   SELECT 1 FROM map_redirects WHERE from_slug = %s&quot;&quot;&quot;,</span>
+<span class="d-add">+                (slug, slug),</span>
+<span class="d-add">+            )</span>
+<span class="d-ctx">             return cursor.fetchone() is None</span>
+<span class="d-ctx">     except Exception as e:</span>
+<span class="d-ctx">         logger.error(f&quot;[DB] slug_available check failed: {e}&quot;)</span>
+<span class="d-ctx">         return False</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# ── Slug redirects (renamed maps) ───────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+def get_map_redirect(from_slug: str) -&gt; Optional[dict]:</span>
+<span class="d-add">+    &quot;&quot;&quot;The redirect for a retired slug, or None. Shape mirrors the client&#x27;s</span>
+<span class="d-add">+    MapConfig.redirect field: {&quot;toSlug&quot;, &quot;appendQuery&quot;}.&quot;&quot;&quot;</span>
+<span class="d-add">+    if not DATABASE_URL:</span>
+<span class="d-add">+        return None</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        with get_cursor() as cursor:</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;SELECT to_slug, append_query FROM map_redirects WHERE from_slug = %s&quot;,</span>
+<span class="d-add">+                (from_slug,),</span>
+<span class="d-add">+            )</span>
+<span class="d-add">+            row = cursor.fetchone()</span>
+<span class="d-add">+            if not row:</span>
+<span class="d-add">+                return None</span>
+<span class="d-add">+            return {&quot;toSlug&quot;: row[0], &quot;appendQuery&quot;: row[1] or None}</span>
+<span class="d-add">+    except Exception as e:</span>
+<span class="d-add">+        logger.error(f&quot;[DB] get_map_redirect &#x27;{from_slug}&#x27; failed: {e}&quot;)</span>
+<span class="d-add">+        return None</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def list_map_redirects() -&gt; list[dict]:</span>
+<span class="d-add">+    &quot;&quot;&quot;All slug redirects (admin/docs transparency).&quot;&quot;&quot;</span>
+<span class="d-add">+    if not DATABASE_URL:</span>
+<span class="d-add">+        return []</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        with get_cursor() as cursor:</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;&quot;&quot;SELECT from_slug, to_slug, append_query, note, created_at</span>
+<span class="d-add">+                   FROM map_redirects ORDER BY created_at&quot;&quot;&quot;</span>
+<span class="d-add">+            )</span>
+<span class="d-add">+            return [</span>
+<span class="d-add">+                {&quot;fromSlug&quot;: r[0], &quot;toSlug&quot;: r[1], &quot;appendQuery&quot;: r[2],</span>
+<span class="d-add">+                 &quot;note&quot;: r[3], &quot;createdAt&quot;: r[4].isoformat() if r[4] else None}</span>
+<span class="d-add">+                for r in cursor.fetchall()</span>
+<span class="d-add">+            ]</span>
+<span class="d-add">+    except Exception as e:</span>
+<span class="d-add">+        logger.error(f&quot;[DB] list_map_redirects failed: {e}&quot;)</span>
+<span class="d-add">+        return []</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def rename_map_slug(</span>
+<span class="d-add">+    old_slug: str, new_slug: str,</span>
+<span class="d-add">+    append_query: Optional[str] = None, note: Optional[str] = None,</span>
+<span class="d-add">+) -&gt; dict:</span>
+<span class="d-add">+    &quot;&quot;&quot;Rename a map&#x27;s slug, atomically.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    One transaction: maps.slug, the denormalized edge_votes.map_slug copies</span>
+<span class="d-add">+    (plain TEXT, nothing cascades), and a map_redirects row so the old slug</span>
+<span class="d-add">+    keeps resolving AND stays reserved. Raises on any failure (whole txn rolls</span>
+<span class="d-add">+    back). Caller must rebuild the map&#x27;s Redis aggregate under the new slug —</span>
+<span class="d-add">+    the heatmap serves from Redis only (see rename_map.py).</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    if not DATABASE_URL:</span>
+<span class="d-add">+        raise RuntimeError(&quot;DATABASE_URL not set&quot;)</span>
+<span class="d-add">+    with get_cursor() as cursor:</span>
+<span class="d-add">+        # get_cursor is autocommit — an explicit BEGIN/COMMIT makes the rename</span>
+<span class="d-add">+        # atomic (a half-applied rename would strand votes under a dead slug).</span>
+<span class="d-add">+        cursor.execute(&quot;BEGIN&quot;)</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            cursor.execute(&quot;SELECT 1 FROM maps WHERE slug = %s&quot;, (old_slug,))</span>
+<span class="d-add">+            if not cursor.fetchone():</span>
+<span class="d-add">+                raise ValueError(f&quot;no map with slug &#x27;{old_slug}&#x27;&quot;)</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;&quot;&quot;SELECT 1 FROM maps WHERE slug = %s</span>
+<span class="d-add">+                   UNION ALL SELECT 1 FROM map_redirects WHERE from_slug = %s&quot;&quot;&quot;,</span>
+<span class="d-add">+                (new_slug, new_slug),</span>
+<span class="d-add">+            )</span>
+<span class="d-add">+            if cursor.fetchone():</span>
+<span class="d-add">+                raise ValueError(f&quot;slug &#x27;{new_slug}&#x27; is already taken or reserved&quot;)</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;UPDATE maps SET slug = %s WHERE slug = %s&quot;, (new_slug, old_slug)</span>
+<span class="d-add">+            )</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;UPDATE edge_votes SET map_slug = %s WHERE map_slug = %s&quot;,</span>
+<span class="d-add">+                (new_slug, old_slug),</span>
+<span class="d-add">+            )</span>
+<span class="d-add">+            votes_moved = cursor.rowcount</span>
+<span class="d-add">+            # Re-point any redirect that targeted the old slug (chain</span>
+<span class="d-add">+            # flattening: a→b then b→c becomes a→c, so clients never hop twice).</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;UPDATE map_redirects SET to_slug = %s WHERE to_slug = %s&quot;,</span>
+<span class="d-add">+                (new_slug, old_slug),</span>
+<span class="d-add">+            )</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;&quot;&quot;INSERT INTO map_redirects (from_slug, to_slug, append_query, note)</span>
+<span class="d-add">+                   VALUES (%s, %s, %s, %s)&quot;&quot;&quot;,</span>
+<span class="d-add">+                (old_slug, new_slug, append_query or None, note or None),</span>
+<span class="d-add">+            )</span>
+<span class="d-add">+            cursor.execute(&quot;COMMIT&quot;)</span>
+<span class="d-add">+        except Exception:</span>
+<span class="d-add">+            cursor.execute(&quot;ROLLBACK&quot;)</span>
+<span class="d-add">+            raise</span>
+<span class="d-add">+    return {&quot;old&quot;: old_slug, &quot;new&quot;: new_slug, &quot;votesMoved&quot;: votes_moved}</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> def create_map(</span>
+<span class="d-ctx">     slug: str, name: str, city_id: str,</span>
+<span class="d-ctx">     subtitle: Optional[str] = None,</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">terraform/monitoring.tf</span>
+            <span class="stat"><span class="d-add">+11</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Infra · terraform/</span>
+        <span class="ctx-sum">GCP monitoring: uptime checks, log-based metrics, alert policies, the system dashboard</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">monitoring.tf</span>
+        <span class="ctx-sum">~1220 LOC — notification channel, uptime check, api_latency + map_load_ms metrics, 8 alerts, dashboard</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Notification channel + uptime check</span><span class="ol-sum">email_eric, app_health probe</span></li><li class="dim"><span class="ol-label">api_latency log metric</span><span class="ol-sum">[API] request-latency distribution</span></li><li class="changed"><span class="ol-label">map_load_ms log metric</span><span class="ol-sum">[MAPLOAD] client-perceived first-load — now labeled by src</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Alert policies</span><span class="ol-sum">uptime, 5xx, p99, app/OSRM/Redis memory, SQL disk</span></li><li class="dim"><span class="ol-label">system_health dashboard</span><span class="ol-sum">the wall of charts</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>map_load_ms header comment — the [MAPLOAD] line format now ends src=&lt;tag|direct&gt;; visits-by-source = count grouped by src</li><li>labels — new src STRING label</li><li>label_extractors — src = REGEXP_EXTRACT(textPayload, &quot;src=([a-zA-Z0-9_-]+)&quot;)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/terraform/monitoring.tf b/terraform/monitoring.tf</span>
+<span class="d-meta">index 09cca3f..8fd7247 100644</span>
+<span class="d-meta">--- a/terraform/monitoring.tf</span>
+<span class="d-meta">+++ b/terraform/monitoring.tf</span>
+<span class="d-hunk">@@ -123,9 +123,12 @@ resource &quot;google_logging_metric&quot; &quot;api_latency&quot; {</span>
+<span class="d-ctx"> # First-map-load latency — CLIENT-perceived, not server-side. The client</span>
+<span class="d-ctx"> # beacons one measurement per page load (navigation start → full-screen loader</span>
+<span class="d-ctx"> # dismissed) to /api/client-timing, which logs a single line:</span>
+<span class="d-del">-#   [MAPLOAD] map=&lt;slug&gt; ms=&lt;int&gt; cached_topo=&lt;0|1&gt; nav=&lt;navigate|reload|...&gt;</span>
+<span class="d-add">+#   [MAPLOAD] map=&lt;slug&gt; ms=&lt;int&gt; cached_topo=&lt;0|1&gt; nav=&lt;navigate|reload|...&gt; src=&lt;tag|direct&gt;</span>
+<span class="d-ctx"> # cached_topo separates true cold first loads (topology from network) from</span>
+<span class="d-ctx"> # repeat visits (IndexedDB hit) — the &quot;first time&quot; P99 lives in cached_topo=0.</span>
+<span class="d-add">+# src is the campaign attribution tag (?src=… in the visited URL, e.g. QR</span>
+<span class="d-add">+# posters carry src=qr-poster); &quot;direct&quot; = untagged. Visits-by-source is this</span>
+<span class="d-add">+# metric&#x27;s count grouped by src (the latency value is just along for the ride).</span>
+<span class="d-ctx"> # Values are MILLISECONDS.</span>
+<span class="d-ctx"> # -----------------------------------------------------------------------------</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -161,6 +164,12 @@ resource &quot;google_logging_metric&quot; &quot;map_load_ms&quot; {</span>
+<span class="d-ctx">       value_type  = &quot;STRING&quot;</span>
+<span class="d-ctx">       description = &quot;Navigation type (navigate / reload / back_forward)&quot;</span>
+<span class="d-ctx">     }</span>
+<span class="d-add">+</span>
+<span class="d-add">+    labels {</span>
+<span class="d-add">+      key         = &quot;src&quot;</span>
+<span class="d-add">+      value_type  = &quot;STRING&quot;</span>
+<span class="d-add">+      description = &quot;Campaign source tag (?src=… in the URL, e.g. qr-poster); direct = untagged&quot;</span>
+<span class="d-add">+    }</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   value_extractor = &quot;REGEXP_EXTRACT(textPayload, \&quot;ms=([0-9]+)\&quot;)&quot;</span>
+<span class="d-hunk">@@ -169,6 +178,7 @@ resource &quot;google_logging_metric&quot; &quot;map_load_ms&quot; {</span>
+<span class="d-ctx">     map    = &quot;REGEXP_EXTRACT(textPayload, \&quot;map=([a-zA-Z0-9_-]+)\&quot;)&quot;</span>
+<span class="d-ctx">     cached = &quot;REGEXP_EXTRACT(textPayload, \&quot;cached_topo=([01])\&quot;)&quot;</span>
+<span class="d-ctx">     nav    = &quot;REGEXP_EXTRACT(textPayload, \&quot;nav=([a-z_]+)\&quot;)&quot;</span>
+<span class="d-add">+    src    = &quot;REGEXP_EXTRACT(textPayload, \&quot;src=([a-zA-Z0-9_-]+)\&quot;)&quot;</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   # 50ms … ~10min in 30% steps — first loads live in the 0.5s–60s range.</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/sourceTag.ts</span>
+            <span class="stat"><span class="d-add">+49</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · utils/</span>
+        <span class="ctx-sum">NEW — ?src= campaign attribution: capture once, strip, report, re-attach on redirects</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">sourceTag.ts</span>
+        <span class="ctx-sum">NEW FILE, 49 LOC — capture/strip the tag at boot; expose it to the beacon and redirects</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">SRC_PATTERN / captured</span><span class="ol-sum">[a-zA-Z0-9_-]{1,32} whitelist; module-level once-only state</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">captureSourceTag</span><span class="ol-sum">read + validate ?src, strip via history.replaceState — idempotent (StrictMode-safe)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">getSourceTag</span><span class="ol-sum">the captured tag, or null for a direct visit</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">withSourceTag</span><span class="ol-sum">re-attach the (already-stripped) tag to a redirect target URL</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Whole file is new — capture-once + strip keeps re-shared links from inheriting the campaign&#x27;s attribution.</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/sourceTag.ts b/client-react/src/utils/sourceTag.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..2a10701</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/utils/sourceTag.ts</span>
+<span class="d-hunk">@@ -0,0 +1,49 @@</span>
+<span class="d-add">+// Campaign source tag (?src=…).</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// Attribution for a page visit — e.g. QR posters carry ?src=qr-poster (either</span>
+<span class="d-add">+// printed into the QR URL, or merged in by a retired slug&#x27;s redirect). Captured</span>
+<span class="d-add">+// once at map boot, reported in the map-load beacon (loadTelemetry → [MAPLOAD]</span>
+<span class="d-add">+// src=… → the `src` label on cityedit_map_load_ms), then stripped from the</span>
+<span class="d-add">+// address bar so a re-shared link doesn&#x27;t inherit the campaign&#x27;s attribution.</span>
+<span class="d-add">+// Untagged visits report as &quot;direct&quot; server-side.</span>
+<span class="d-add">+</span>
+<span class="d-add">+const SRC_PATTERN = /^[a-zA-Z0-9_-]{1,32}$/;</span>
+<span class="d-add">+</span>
+<span class="d-add">+let captured: string | null = null;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Read + strip the `?src=` param. Idempotent: the first call wins (React</span>
+<span class="d-add">+ * StrictMode re-runs effects; the second call finds a stripped URL). Must run</span>
+<span class="d-add">+ * before anything rewrites the URL (RouteContext&#x27;s selection sync drops</span>
+<span class="d-add">+ * unknown params) — App calls it at the top of the map-resolution effect.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function captureSourceTag(): void {</span>
+<span class="d-add">+  if (typeof window === &quot;undefined&quot; || captured !== null) return;</span>
+<span class="d-add">+  const params = new URLSearchParams(window.location.search);</span>
+<span class="d-add">+  const raw = params.get(&quot;src&quot;);</span>
+<span class="d-add">+  if (!raw) return;</span>
+<span class="d-add">+  if (SRC_PATTERN.test(raw)) captured = raw;</span>
+<span class="d-add">+  params.delete(&quot;src&quot;);</span>
+<span class="d-add">+  const qs = params.toString();</span>
+<span class="d-add">+  const url = window.location.pathname + (qs ? `?${qs}` : &quot;&quot;) + window.location.hash;</span>
+<span class="d-add">+  try {</span>
+<span class="d-add">+    window.history.replaceState(null, &quot;&quot;, url);</span>
+<span class="d-add">+  } catch {</span>
+<span class="d-add">+    /* ignore */</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** The captured source tag, or null for a direct visit. */</span>
+<span class="d-add">+export function getSourceTag(): string | null {</span>
+<span class="d-add">+  return captured;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Re-attach the captured tag to a redirect target. The canonical-subdomain</span>
+<span class="d-add">+ * redirect is a full page load on another host — without this the tag</span>
+<span class="d-add">+ * (already stripped from this page&#x27;s URL) would die on the hop.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function withSourceTag(url: string): string {</span>
+<span class="d-add">+  if (!captured) return url;</span>
+<span class="d-add">+  return url + (url.includes(&quot;?&quot;) ? &quot;&amp;&quot; : &quot;?&quot;) + &quot;src=&quot; + encodeURIComponent(captured);</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/rename_map.py</span>
+            <span class="stat"><span class="d-add">+104</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask backend · server/</span>
+        <span class="ctx-sum">NEW — admin CLI: rename a map slug, leave a redirect, rebuild Redis</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">rename_map.py</span>
+        <span class="ctx-sum">NEW FILE, 104 LOC — argparse wrapper around database.rename_map_slug + the Redis rebuild</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Module docstring</span><span class="ol-sum">usage, prod-tunnel notes, the 30–60s map-cache caveat</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_redis_client</span><span class="ol-sum">connect or warn-and-continue (DB renamed; rerun for Redis)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main</span><span class="ol-sum">rename txn → rebuild_redis_for_map(new) → purge old ev:/vote_rev:/bd:/bagg: keys → JSON summary</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Whole file is new — the only sanctioned way to create a map_redirects row (a bare DB edit would skip edge_votes + Redis).</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/rename_map.py b/server/rename_map.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..4ef3ec9</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/rename_map.py</span>
+<span class="d-hunk">@@ -0,0 +1,104 @@</span>
+<span class="d-add">+#!/usr/bin/env python3</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+Rename a map&#x27;s slug, leaving a redirect behind (CLI).</span>
+<span class="d-add">+</span>
+<span class="d-add">+The old slug becomes a `map_redirects` row: /m/&lt;old&gt; keeps resolving (the</span>
+<span class="d-add">+client follows it, preserving deep-link params and merging --append-query —</span>
+<span class="d-add">+how a printed QR campaign gets retro-tagged with ?src=…), and the old slug</span>
+<span class="d-add">+stays reserved (slug_available refuses it forever). Postgres moves in ONE</span>
+<span class="d-add">+transaction; Redis (the only store the heatmap serves from) is then rebuilt</span>
+<span class="d-add">+under the new slug and the old slug&#x27;s keys are purged.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Usage:</span>
+<span class="d-add">+    python rename_map.py nyc-intersections nyc-crossings \</span>
+<span class="d-add">+        --append-query &quot;src=qr-poster&quot; \</span>
+<span class="d-add">+        --note &quot;2026-07 QR poster campaign printed without a src tag&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+Against prod: run through the bastion tunnels (Postgres :5433, Redis :6380),</span>
+<span class="d-add">+passing the prod URLs inline — never repoint server/.env. Full runbook:</span>
+<span class="d-add">+docs/url-routing.md &quot;Renaming a map slug&quot;.</span>
+<span class="d-add">+</span>
+<span class="d-add">+In-process map caches on running Flask instances (30-60s TTL) age out on</span>
+<span class="d-add">+their own; until then the old slug may briefly serve its old config.</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+import argparse</span>
+<span class="d-add">+import json</span>
+<span class="d-add">+import logging</span>
+<span class="d-add">+import os</span>
+<span class="d-add">+import sys</span>
+<span class="d-add">+</span>
+<span class="d-add">+import redis</span>
+<span class="d-add">+from dotenv import load_dotenv</span>
+<span class="d-add">+</span>
+<span class="d-add">+load_dotenv()  # DATABASE_URL / REDIS_HOST, read at import by database.py</span>
+<span class="d-add">+</span>
+<span class="d-add">+import block_votes</span>
+<span class="d-add">+import database</span>
+<span class="d-add">+import vote_migration</span>
+<span class="d-add">+import vote_store</span>
+<span class="d-add">+</span>
+<span class="d-add">+logging.basicConfig(level=logging.INFO, format=&quot;%(asctime)s [%(levelname)s] %(message)s&quot;)</span>
+<span class="d-add">+logger = logging.getLogger(&quot;rename_map&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _redis_client():</span>
+<span class="d-add">+    host = os.environ.get(&quot;REDIS_HOST&quot;, &quot;localhost&quot;)</span>
+<span class="d-add">+    port = int(os.environ.get(&quot;REDIS_PORT&quot;, &quot;6379&quot;))</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        c = redis.Redis(host=host, port=port, db=0, decode_responses=True)</span>
+<span class="d-add">+        c.ping()</span>
+<span class="d-add">+        return c</span>
+<span class="d-add">+    except redis.ConnectionError as e:</span>
+<span class="d-add">+        logger.warning(f&quot;Redis unavailable ({e}); DB renamed only — run again or &quot;</span>
+<span class="d-add">+                       f&quot;rebuild_redis_for_map manually before the map will serve votes&quot;)</span>
+<span class="d-add">+        return None</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def main():</span>
+<span class="d-add">+    ap = argparse.ArgumentParser(description=&quot;Rename a map slug, leaving a redirect&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;old_slug&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;new_slug&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--append-query&quot;, default=None,</span>
+<span class="d-add">+                    help=&#x27;Query string the redirect merges into the target URL, &#x27;</span>
+<span class="d-add">+                         &#x27;e.g. &quot;src=qr-poster&quot; (existing params win)&#x27;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--note&quot;, default=None,</span>
+<span class="d-add">+                    help=&quot;Why this redirect exists (stored on the row)&quot;)</span>
+<span class="d-add">+    args = ap.parse_args()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if not database.DATABASE_URL:</span>
+<span class="d-add">+        logger.error(&quot;DATABASE_URL not set&quot;)</span>
+<span class="d-add">+        sys.exit(1)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    m = database.get_map(args.old_slug, with_vote_count=False)</span>
+<span class="d-add">+    if not m:</span>
+<span class="d-add">+        logger.error(f&quot;No map with slug &#x27;{args.old_slug}&#x27;&quot;)</span>
+<span class="d-add">+        sys.exit(1)</span>
+<span class="d-add">+    mode_int = vote_store.mode_to_int(m.get(&quot;mode&quot;, &quot;walk&quot;))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    result = database.rename_map_slug(</span>
+<span class="d-add">+        args.old_slug, args.new_slug,</span>
+<span class="d-add">+        append_query=args.append_query, note=args.note,</span>
+<span class="d-add">+    )</span>
+<span class="d-add">+    logger.info(f&quot;[RENAME] {result}&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    rc = _redis_client()</span>
+<span class="d-add">+    fields = None</span>
+<span class="d-add">+    if rc is not None:</span>
+<span class="d-add">+        vote_store.load_vote_types()</span>
+<span class="d-add">+        fields = vote_migration.rebuild_redis_for_map(rc, args.new_slug, mode_int)</span>
+<span class="d-add">+        # Old-slug leftovers: aggregate hash + revision, and the derived block</span>
+<span class="d-add">+        # state (bd:/bagg:). The new slug&#x27;s block state rebuilds lazily from</span>
+<span class="d-add">+        # Postgres on its next /api/graph-votes build.</span>
+<span class="d-add">+        rc.delete(vote_store.hash_key(args.old_slug))</span>
+<span class="d-add">+        rc.delete(vote_store.revision_key(args.old_slug))</span>
+<span class="d-add">+        block_votes.clear(rc, args.old_slug, mode_int)</span>
+<span class="d-add">+        block_votes.clear(rc, args.new_slug, mode_int)</span>
+<span class="d-add">+        logger.info(f&quot;[RENAME] Redis rebuilt under &#x27;{args.new_slug}&#x27; &quot;</span>
+<span class="d-add">+                    f&quot;({fields} fields), old keys purged&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    print(json.dumps({**result, &quot;appendQuery&quot;: args.append_query,</span>
+<span class="d-add">+                      &quot;redisFields&quot;: fields}, indent=2))</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+if __name__ == &quot;__main__&quot;:</span>
+<span class="d-add">+    main()</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

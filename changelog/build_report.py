@@ -2,7 +2,7 @@
 """Generate the HTML changelog report from the captured unified diff.
 
 Run from repo root: python changelog/build_report.py
-Reads changelog/changes.diff, writes changelog/2026-06-14-caching-concurrency-zoom.html
+Reads changelog/changes.diff, writes changelog/2026-07-29-slug-redirects-src-tracking.html
 """
 import html
 import os
@@ -10,10 +10,10 @@ import re
 
 HERE = os.path.dirname(__file__)
 DIFF_PATH = os.path.join(HERE, "changes.diff")
-OUT_PATH = os.path.join(HERE, "2026-06-14-caching-concurrency-zoom.html")
+OUT_PATH = os.path.join(HERE, "2026-07-29-slug-redirects-src-tracking.html")
 
-DATE = "2026-06-14"
-TITLE = "Backend caching + concurrency, and the zoom overhaul"
+DATE = "2026-07-29"
+TITLE = "Slug redirects + ?src= visit tracking — and the nyc-crossings rename"
 
 
 def split_by_file(diff_text: str):
@@ -57,142 +57,193 @@ def colorize(diff_chunk: str) -> str:
 
 SECTIONS = [
     {
-        "id": "crash",
+        "id": "src",
+        "tag": "Frontend + Backend + Monitoring",
+        "title": "1 · ?src= — campaign visit-source tracking",
+        "symptom": (
+            "There was no way to answer <em>“how many people came from the QR posters?”</em> "
+            "(or any future campaign). The map-load beacon already flowed client → "
+            "<code>/api/client-timing</code> → the <code>[MAPLOAD]</code> log line → the "
+            "<code>cityedit_map_load_ms</code> log-based metric — but it carried no attribution, "
+            "so a poster scan and a bookmarked visit were indistinguishable."
+        ),
+        "cause": [
+            "Nothing in the URL scheme reserved a campaign tag, and the client rewrites the URL "
+            "aggressively (RouteContext’s selection sync drops unknown params; the "
+            "canonical-subdomain redirect is a full page load on another host) — a naïve "
+            "<code>?src=</code> param would be <strong>dropped before anything could read it</strong>, "
+            "or worse, <strong>survive into re-shared links</strong> and poison the attribution.",
+        ],
+        "fixes": [
+            "<strong>New <code>utils/sourceTag.ts</code></strong> captures <code>?src=&lt;tag&gt;</code> "
+            "<em>once</em> at map boot (first call wins — StrictMode-safe), validates it "
+            "(<code>[a-zA-Z0-9_-]</code>, max 32), then <strong>strips it from the address bar</strong> "
+            "via <code>history.replaceState</code> so a re-shared link doesn’t inherit the campaign. "
+            "<code>App.tsx</code> calls <code>captureSourceTag()</code> at the top of the map-resolution "
+            "effect, before any redirect or URL rewrite can eat it.",
+            "<strong>The beacon reports it.</strong> <code>loadTelemetry.ts</code> adds "
+            "<code>src</code> to the existing <code>POST /api/client-timing</code> payload; absent for "
+            "direct visits.",
+            "<strong>The server sanitizes + logs it.</strong> <code>client_timing()</code> "
+            "(<code>server/app.py</code>) whitelists the tag and appends "
+            "<code>src=&lt;tag|direct&gt;</code> to the <code>[MAPLOAD]</code> line.",
+            "<strong>The metric grows a <code>src</code> label</strong> "
+            "(<code>terraform/monitoring.tf</code>, <code>REGEXP_EXTRACT</code> like the existing "
+            "map/cached/nav labels) — “visits by source” is now a Metrics Explorer group-by on "
+            "<code>cityedit_map_load_ms</code>’s count. Starting a new campaign = minting a new tag in "
+            "the printed URL; zero code changes.",
+            "<strong>The tag survives the canonical-subdomain hop.</strong> "
+            "<code>withSourceTag()</code> re-attaches the captured (already-stripped) tag to the "
+            "<code>subdomainRedirectUrl</code> target in <code>App.tsx</code>, so e.g. "
+            "<code>cityedit.org/m/nyc-bikes?src=…</code> → <code>bikepaths.cityedit.org</code> still "
+            "attributes.",
+        ],
+        "files": [
+            "client-react/src/utils/sourceTag.ts — NEW: captureSourceTag / getSourceTag / withSourceTag",
+            "client-react/src/App.tsx — capture at boot; withSourceTag across the subdomain redirect",
+            "client-react/src/utils/loadTelemetry.ts — src in the map-load beacon",
+            "server/app.py — client_timing sanitizes + logs src=<tag|direct>",
+            "terraform/monitoring.tf — src label on cityedit_map_load_ms",
+        ],
+    },
+    {
+        "id": "redirects",
         "tag": "Backend + Frontend",
-        "title": "1 · Stale-cache crash on heatmap load",
+        "title": "2 · Slug redirects — renamed maps keep their old links",
         "symptom": (
-            "On mobile (iOS Safari) the app showed <em>“a problem repeatedly occurred”</em> "
-            "on heatmap load — reproduced on the NYC e-bikes (station-network) map. That message "
-            "is Safari’s crash-reload loop: the page throws, Safari reloads, it throws again."
+            "Renaming a map’s slug would kill every printed/shared link to the old name "
+            "(<code>GET /api/maps/&lt;old&gt;</code> → 404 → the client falls back to the default map), "
+            "and — worse — Propose-a-Map could <strong>re-issue the retired slug</strong> to a "
+            "stranger’s map, silently rerouting printed QR codes to someone else’s content."
         ),
         "cause": [
-            "The heatmap is painted by indexing per-edge / per-node vote arrays returned by "
-            "<code>/api/graph-votes</code> against the graph <strong>topology</strong> the client "
-            "holds. Topology is cached aggressively (IndexedDB + a day-long HTTP <code>max-age</code>); "
-            "votes refresh every few seconds.",
-            "When the two disagree on dimensions — a stale cached topology with a different node/edge "
-            "count than the fresh votes (after a graph rebuild, or when the version probe fails so the "
-            "cache-busting URL is skipped) — the render indexes <strong>past the end</strong> of the "
-            "arrays, or the binary topology decoder allocates garbage from a corrupt blob. Either throws, "
-            "and there was <strong>no error boundary</strong>, so the whole React tree died → Safari loop.",
+            "The slug was the map’s <em>only</em> address: a miss on the <code>maps</code> table was "
+            "terminal, and <code>slug_available()</code> only consulted <code>maps</code> — the moment "
+            "a slug was freed by a rename it was up for grabs.",
+            "A rename also isn’t one UPDATE: <code>edge_votes.map_slug</code> is a denormalized TEXT "
+            "copy (nothing cascades), and the heatmap serves <strong>only from Redis</strong>, keyed by "
+            "slug — a half-applied rename strands votes under a dead slug.",
         ],
         "fixes": [
-            "<strong>Server stamps the topology dimensions onto the votes</strong> "
-            "(<code>n_edges</code>, <code>n_nodes</code>, <code>topology_version</code>) so the client "
-            "can detect a mismatch instead of trusting that the arrays line up. "
-            "(<code>server/app.py</code> · <code>_build_graph_votes_body_locked</code>)",
-            "<strong>Client validates before painting.</strong> <code>votesMatchTopology()</code> "
-            "compares the stamped dimensions to the held topology; on mismatch it refetches the topology "
-            "fresh — bypassing both the IndexedDB and the HTTP cache (<code>cache:&nbsp;\"reload\"</code>) — "
-            "rebuilds the indices, and only then applies the votes. If it still can’t reconcile, it clears "
-            "the persisted cache and bails rather than paint a crash.",
-            "<strong>Hardened the binary topology decoder.</strong> <code>decodeTopologyBin()</code> now "
-            "validates the <code>GTB1</code> magic + the exact byte length <em>before</em> allocating, "
-            "and clamps out-of-range node indices — a corrupt/truncated cached blob throws cleanly and "
-            "falls back to a fresh fetch instead of OOM-ing the tab. <code>buildEdgeIndex()</code> no "
-            "longer dereferences a missing node.",
-            "<strong>Added a React error boundary</strong> around the map. The first render crash in a "
-            "session clears the (usually poisoned) graph cache and reloads <em>once</em>; a second crash "
-            "shows a manual “Reload the map” fallback instead of looping. This is the definitive backstop "
-            "for “a problem repeatedly occurred”, whatever the trigger.",
+            "<strong>New <code>map_redirects</code> table</strong> (<code>from_slug</code> PK, "
+            "<code>to_slug</code>, <code>append_query</code>, <code>note</code>) created in "
+            "<code>database.init_db()</code>. <code>append_query</code> is the retro-tagging hook: a "
+            "query string merged into the target URL by the client.",
+            "<strong><code>map_get</code> serves a redirect stub instead of 404.</strong> On a maps-table "
+            "miss it consults <code>get_map_redirect(slug)</code> and returns "
+            "<code>{slug, redirect: {toSlug, appendQuery}}</code> — a <strong>200 with "
+            "<code>Cache-Control: max-age=300</code></strong>, not a 30x, because nginx serves the SPA "
+            "shell before any slug lookup, so only the client can act on it (exactly like the "
+            "canonical-subdomain redirect). Not stored in <code>_map_get_cache</code> (enriched map "
+            "dicts only); the lookup is a single PK read.",
+            "<strong>The client follows it.</strong> <code>App.tsx</code> checks "
+            "<code>resolved?.redirect?.toSlug</code> first and <code>location.replace</code>s to "
+            "<code>slugRedirectUrl()</code> (<code>map/runtime.ts</code>): same-origin "
+            "<code>/m/&lt;toSlug&gt;</code>, <strong>keeping every current query param</strong> (QR deep "
+            "links carry <code>?w=</code>/<code>?vt=</code>), dropping <code>?map=</code>, and merging "
+            "<code>append_query</code> <em>without overriding</em> params already present.",
+            "<strong>Retired slugs are reserved forever.</strong> <code>slug_available()</code> now "
+            "checks <code>maps</code> UNION <code>map_redirects</code>, so Propose-a-Map (and "
+            "<code>rename_map_slug</code> itself) can never re-issue one.",
+            "<strong>Atomic rename.</strong> <code>rename_map_slug()</code> does the whole move in one "
+            "explicit BEGIN/COMMIT (get_cursor is autocommit): <code>maps.slug</code>, the denormalized "
+            "<code>edge_votes.map_slug</code> rows, the redirect row, and <strong>chain flattening</strong> "
+            "(existing redirects targeting the old slug are re-pointed, so a→b then b→c becomes a→c — "
+            "clients never hop twice).",
+            "<strong>New CLI <code>server/rename_map.py</code></strong> wraps the transaction, then "
+            "rebuilds Redis under the new slug (<code>vote_migration.rebuild_redis_for_map</code> — "
+            "ev: replay from Postgres) and purges the old slug’s keys (<code>ev:</code>, "
+            "<code>vote_rev:</code>, <code>bd:</code>/<code>bagg:</code>). Fails soft if Redis is down "
+            "(DB renamed; rerun to serve votes).",
         ],
         "files": [
-            "server/app.py — stamp n_edges / n_nodes / topology_version onto the votes body",
-            "client-react/src/components/GraphLayer/GraphLayer.tsx — votesMatchTopology, fresh-topology refetch, decoder + edge-index hardening",
-            "client-react/src/utils/graphCache.ts — clearGraphCache()",
-            "client-react/src/components/ErrorBoundary/ErrorBoundary.tsx (+ .css) — recovery boundary",
-            "client-react/src/App.tsx — wrap <MapView> in the boundary",
+            "server/database.py — map_redirects table, get_map_redirect, list_map_redirects, rename_map_slug, slug_available checks both tables",
+            "server/app.py — map_get redirect stub (200 + max-age=300)",
+            "server/rename_map.py — NEW CLI: rename + Redis rebuild + old-key purge",
+            "client-react/src/map/runtime.ts — MapConfig.redirect + slugRedirectUrl()",
+            "client-react/src/App.tsx — follow the redirect before the subdomain check",
         ],
     },
     {
-        "id": "concurrency",
-        "tag": "Backend",
-        "title": "2 · Concurrency — safe under >1 instance / many tenants",
+        "id": "rename",
+        "tag": "Ops + Scripts + Docs",
+        "title": "3 · nyc-intersections → nyc-crossings — retro-tagging the printed posters",
         "symptom": (
-            "The app crashed when more than one tenant used it at once, and couldn’t safely scale past "
-            "a single Flask instance."
+            "The July QR poster campaign went to print linking "
+            "<code>cityedit.org/m/nyc-intersections</code> with <strong>no analytics tag</strong> — "
+            "the posters are already hanging, so the URL on them can’t change, and their scans were "
+            "about to be indistinguishable from organic traffic."
         ),
         "cause": [
-            "Production runs a <strong>single gevent gunicorn worker</strong> (the NYC graph is too big "
-            "to duplicate across workers). gevent greenlets don’t preempt on CPU, so the seconds-long, "
-            "pure-Python build of the vote arrays (~2M NYC edges) <strong>froze the whole worker</strong> "
-            "— concurrent tenants’ requests (and the health probe) stalled behind it. Worse, N concurrent "
-            "first-requests for the same map each rebuilt the same body in series (head-of-line blocking).",
-            "The in-memory <code>_vote_cache</code> was an <strong>unbounded dict</strong>: every "
-            "(map, mode) ever requested kept its full JSON body resident forever — a steady memory leak "
-            "that OOM-crashes a multi-tenant server with many maps. Its invalidation also only popped the "
-            "bare slug, never the per-mode <code>&lt;slug&gt;:&lt;mode&gt;</code> keys it actually stored.",
-            "The voter read-modify-write was guarded only by a <strong>per-process</strong> "
-            "<code>threading.Lock</code> — meaningless across instances/workers, so two near-simultaneous "
-            "votes from one voter could double-apply.",
+            "The two features above exist precisely to fix this: a redirect row whose "
+            "<code>append_query</code> stamps <code>src=qr-poster</code> onto every visit through the "
+            "old printed URL turns the rename itself into the retro-tagging mechanism.",
         ],
         "fixes": [
-            "<strong>Bounded LRU vote cache.</strong> <code>_vote_cache</code> is now a capped "
-            "<code>OrderedDict</code> (<code>VOTE_CACHE_MAX</code>, default 64) guarded by a lock — memory "
-            "stays flat no matter how many tenant maps exist.",
-            "<strong>Correct, mode-aware invalidation.</strong> <code>_invalidate_vote_cache(slug)</code> "
-            "drops the bare slug <em>and</em> every <code>&lt;slug&gt;:&lt;mode&gt;</code> variant; wired "
-            "into the vote path, the pub/sub delta listener, and the graph-reload re-snap.",
-            "<strong>Single-flight on the expensive build.</strong> A per-cache-key lock means one greenlet "
-            "builds the arrays while the rest wait and take the result — killing the head-of-line stampede "
-            "that stalled the worker under concurrent tenants.",
-            "<strong>Cross-instance voter lock.</strong> <code>vote_store.voter_lock()</code> is a short "
-            "Redis <code>SET NX</code> lock keyed by (slug, device) that serializes a voter’s "
-            "read-modify-write <em>fleet-wide</em>; it auto-expires and fails open so a vote never hangs on "
-            "Redis. Combined with the bounded shared-state design, this is what makes running more than one "
-            "instance safe.",
+            "<strong>Ran the rename</strong>: <code>python rename_map.py nyc-intersections "
+            "nyc-crossings --append-query \"src=qr-poster\"</code> — one transaction moved the map + its "
+            "votes, left the redirect row, rebuilt Redis under <code>nyc-crossings</code>, purged the "
+            "old keys. Every scan of an already-printed poster now lands on "
+            "<code>/m/nyc-crossings</code> with pin + vote type intact <em>and</em> reports "
+            "<code>src=qr-poster</code>.",
+            "<strong>Future prints are tagged at the source.</strong> "
+            "<code>scripts/generate_posters.py</code>: <code>BASE_URL</code> now points at "
+            "<code>nyc-crossings</code>, and a new <code>QR_SRC</code>/<code>--src</code> flag bakes an "
+            "explicit <code>&amp;src=qr-poster</code> into every QR URL (vary per campaign/print run); "
+            "the poster-book checklist copy updated. <code>scripts/seed_poster_votes.py</code> default "
+            "map updated.",
+            "<strong>Docs.</strong> <code>docs/url-routing.md</code> gains “Visit-source tracking "
+            "(?src=)”, “Slug redirects (renamed maps)”, an “Admin runbook — rename a map slug”, and a "
+            "<strong>Redirect inventory</strong> table that is now the source of truth for EVERY "
+            "redirect/rewrite in the system (donate. nginx 301, feedback. rewrite, canonical-subdomain "
+            "client redirect, retired-slug redirects, the staging opt-out) plus the live "
+            "<code>map_redirects</code> rows. <code>README.md</code> and <code>docs/README.md</code> "
+            "link to it.",
         ],
         "files": [
-            "server/app.py — bounded LRU + _vote_cache_get/put, _invalidate_vote_cache, _build_lock_for single-flight, voter_lock wiring",
-            "server/vote_store.py — voter_lock() cross-instance Redis lock",
-        ],
-    },
-    {
-        "id": "zoom",
-        "tag": "Frontend",
-        "title": "3 · Zoom overhaul — heatmap scales instead of vanishing",
-        "symptom": (
-            "The heatmap disappeared while zooming and only snapped back after the zoom finished."
-        ),
-        "cause": [
-            "The heatmap is a hand-managed <code>&lt;canvas&gt;</code> in a custom Leaflet pane. On "
-            "<code>zoomstart</code> the canvas was <strong>cleared</strong>, and it was only repainted on "
-            "<code>zoomend</code> — so for the whole ~250&nbsp;ms zoom animation it was blank. Unlike "
-            "Leaflet’s own tile / canvas renderers, it never rode the zoom animation’s transform.",
-        ],
-        "fixes": [
-            "Stopped clearing the heatmap canvas on <code>zoomstart</code> — the existing bitmap stays up.",
-            "Gave both canvases the <code>leaflet-zoom-animated</code> class so Leaflet’s zoom-animation CSS "
-            "transition applies to their <code>transform</code>.",
-            "Added a <code>zoomanim</code> handler that sets each canvas’s transform to where its top-left "
-            "geographic corner lands at the target zoom, scaled by the zoom ratio "
-            "(<code>getZoomScale</code> + <code>_latLngToNewLayerPoint</code> — the exact mechanism "
-            "<code>L.Canvas</code> uses). The browser tweens it, so the heatmap glides and scales with the "
-            "map. <code>zoomend</code> then repaints crisply at the new resolution and line widths.",
-            "The draw state (zoom + top-left lat/lng) is recorded at the end of every paint so the animation "
-            "transform is always anchored to the right geography.",
-        ],
-        "files": [
-            "client-react/src/components/GraphLayer/GraphLayer.tsx — drawStateRef, leaflet-zoom-animated class, handleZoomAnim, zoomstart no longer clears the heatmap",
+            "scripts/generate_posters.py — BASE_URL → nyc-crossings; QR_SRC + --src baked into QR URLs",
+            "scripts/seed_poster_votes.py — default --map → nyc-crossings",
+            "docs/url-routing.md — ?src= section, slug-redirects section, rename runbook, redirect inventory",
+            "docs/README.md + README.md — pointers to the redirect inventory",
         ],
     },
 ]
 
 VERIFY = [
-    "Backend: <code>python -m py_compile app.py vote_store.py</code> — clean.",
-    "Backend: <code>pytest tests/unit/test_hydration.py tests/unit/test_vote_counts.py</code> — 10 passed (these exercise the vote cache + build path).",
-    "Frontend: <code>tsc -b &amp;&amp; vite build</code> — clean production build.",
-    "Frontend: <code>vitest run</code> — 101 passed.",
-    "Frontend: <code>eslint</code> on the changed files — 0 errors (4 pre-existing exhaustive-deps warnings on mount-once effects).",
+    "Rename CLI (local): <code>python rename_map.py nyc-intersections nyc-crossings "
+    "--append-query \"src=qr-poster\"</code> — one transaction, <strong>2 votes moved</strong>, Redis "
+    "rebuilt under <code>nyc-crossings</code>, old <code>ev:</code>/<code>vote_rev:</code>/"
+    "<code>bd:</code>/<code>bagg:</code> keys purged.",
+    "<code>GET /api/maps/nyc-intersections</code> → <code>{\"slug\": \"nyc-intersections\", "
+    "\"redirect\": {\"toSlug\": \"nyc-crossings\", \"appendQuery\": \"src=qr-poster\"}}</code> "
+    "(200, <code>Cache-Control: public, max-age=300</code>).",
+    "<code>GET /api/maps/check-slug</code> — <strong>both</strong> <code>nyc-intersections</code> "
+    "(reserved by the redirect) and <code>nyc-crossings</code> (taken by the map) report unavailable.",
+    "Browser, the printed QR URL shape: "
+    "<code>http://localhost:3000/m/nyc-intersections?z=17&amp;lat=…&amp;slat=…</code> landed on "
+    "<code>/m/nyc-crossings</code> with the selection intact, and the Flask log shows "
+    "<code>[MAPLOAD] map=nyc-crossings ms=30105 cached_topo=0 nav=navigate src=qr-poster</code> — "
+    "the redirect’s <code>append_query</code> → client capture → beacon → log-label pipeline, "
+    "end to end.",
 ]
 
 CHECKLIST = [
-    "Open the NYC e-bikes map on a phone (or iOS Simulator Safari). It should load the station heatmap without the “a problem repeatedly occurred” loop. To simulate a poisoned cache, in devtools set IndexedDB <code>desire-path-cache</code> to garbage — the error boundary should clear it and recover on one reload.",
-    "Zoom in and out (scroll, pinch, and the +/- control). The heatmap should scale smoothly <em>with</em> the map, not blink out and reappear.",
-    "Cast a few votes from two browsers/devices at once on the same map — counts should stay correct (no double-count), and the heatmap should update for both.",
-    "Hit <code>/api/graph-votes?map=&lt;slug&gt;&amp;mode=&lt;mode&gt;</code> and confirm the JSON now includes <code>n_edges</code>, <code>n_nodes</code>, and <code>topology_version</code>.",
-    "Leave the app open across many maps/modes for a while and watch the worker’s memory — it should stay flat (bounded vote cache) rather than climbing.",
-    "Optionally bump the deploy to more than one Cloud Run instance and load-test concurrent voting; the Redis voter lock keeps the read-modify-write correct across instances.",
+    "Visit <code>http://localhost:3000/m/nyc-crossings?src=test-tag</code> — the map loads, "
+    "<code>?src=</code> vanishes from the address bar, and once the loader dismisses the Flask log "
+    "shows <code>[MAPLOAD] … src=test-tag</code>. A plain visit logs <code>src=direct</code>.",
+    "Open a poster deep link through the OLD slug — "
+    "<code>http://localhost:3000/m/nyc-intersections?w=&lt;lat&gt;,&lt;lon&gt;&amp;vt=Fix+dangerous+intersection</code> "
+    "— you should land on <code>/m/nyc-crossings</code> with the pin set and the vote type "
+    "preselected, and the log line should carry <code>src=qr-poster</code> (merged by the redirect).",
+    "In Propose-a-Map, try to claim the slug <code>nyc-intersections</code> — it must report "
+    "unavailable (reserved by the redirect row).",
+    "Regenerate one poster (<code>python scripts/generate_posters.py --limit 1</code> or similar) and "
+    "scan its QR: the URL should read <code>…/m/nyc-crossings?w=…&amp;vt=…&amp;src=qr-poster</code>.",
+    "After the next prod deploy + <code>terraform apply</code> of the monitoring change: in Metrics "
+    "Explorer, group <code>logging/user/cityedit_map_load_ms</code>’s count by <code>src</code> and "
+    "confirm <code>qr-poster</code> vs <code>direct</code> series appear.",
+    "Skim <code>docs/url-routing.md</code>’s Redirect inventory — every redirect you know about "
+    "should have a row (donate., feedback., canonical subdomain, retired slugs, staging opt-out).",
 ]
 
 
@@ -230,139 +281,220 @@ SYSTEM_COMPONENTS = ["nginx", "Flask API", "OSRM", "Redis", "React / Leaflet cli
 
 # label, summary, changed?
 FILE_CONTEXT = {
-    "server/app.py": {
-        "on": ["Flask API", "Redis"],
-        "module": ("Flask backend · server/", "HTTP + WebSocket routes, the per-map vote cache, graph + OSRM registries, startup warmup"),
-        "file": ("app.py", "~1660 LOC — every API/WS route plus the vote-response cache and city registries"),
+    "README.md": {
+        "on": [],
+        "module": ("Docs · repo root", "the front-door README: quickstart, architecture, deploy pointers"),
+        "file": ("README.md", "~182 LOC — quickstart, architecture overview, config, testing, GCP deploy"),
         "outline": [
-            ("Flask / Redis / registries setup", "app, CORS, sock, redis client, GraphRegistry", False),
-            ("Map resolution — resolve_map", "slug → city / graph / OSRM / policy", False),
-            ("Passcode gate", "private-map token check + lockout", False),
-            ("Per-map vote response cache", "bounded LRU · single-flight build · mode-aware invalidation · stamps topology dims", True),
-            ("Startup warmup + pub-sub listeners", "Postgres→Redis replay; delta listener invalidates cache", True),
-            ("Vote API — /api/vote", "directional voting; now wraps the read-modify-write in a cross-instance Redis lock", True),
-            ("Graph data APIs", "/api/graph-topology, /api/graph-votes, /api/graph-version", False),
-            ("Admin APIs", "subdomain, refresh-osm, stats", False),
+            ("Quickstart", "hybrid dev loop: deps in Docker, Flask + Vite on the host", False),
+            ("Architecture", "components + doc pointers — the url-routing pointer now sells the redirect inventory & ?src=", True),
+            ("Configuration", "server/.env variables", False),
+            ("Everything in Docker (alternative)", "prod-shaped + dev-mode compose", False),
+            ("Testing", "test taxonomy pointer", False),
+            ("Deploy to GCP", "cloudbuild pointer", False),
         ],
         "blocks": [
-            "import OrderedDict",
-            "Bounded-LRU _vote_cache + _vote_cache_get/put + _invalidate_vote_cache + single-flight _build_lock_for",
-            "_build_graph_votes_body → single-flight wrapper + _build_graph_votes_body_locked (stamps n_edges / n_nodes / topology_version)",
-            "pub-sub delta listener + _resnap_city_maps → _invalidate_vote_cache (was pop(slug))",
-            "cast_vote → with vote_store.voter_lock(…), _proposal_vote_lock",
+            "Architecture § — url-routing.md pointer expanded: redirect inventory + ?src= campaign visit tracking",
         ],
-    },
-    "server/vote_store.py": {
-        "on": ["Flask API", "Redis"],
-        "module": ("Flask backend · server/", "the Redis vote-cache layer: bit-packed fields, read/write path, derived arrays"),
-        "file": ("vote_store.py", "~390 LOC — packs votes into Redis fields, builds the heatmap arrays, vote-type cache"),
-        "outline": [
-            ("Cross-instance voter lock", "NEW — Redis SET-NX lock per (slug, device) serializing a voter fleet-wide", True),
-            ("Keys / mode enum", "hash_key, channel_key, revision_key, MODE_IDS", False),
-            ("Vote-type cache", "label↔id cache backed by Postgres", False),
-            ("Bit packing", "pack / unpack / redis_field (45-bit field)", False),
-            ("Write path", "apply_directional, publish_delta", False),
-            ("Read path", "read_all, read_edge_vt_counts, build_arrays", False),
-            ("Coordinate → edge mapping", "coords_to_edge_ids, osm_nodes_to_edge_ids", False),
-        ],
-        "blocks": [
-            "import contextlib / os / time",
-            "voter_lock() — @contextmanager Redis SET-NX lock, auto-expiring, fails open",
-        ],
-    },
-    "client-react/src/components/GraphLayer/GraphLayer.tsx": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · components/GraphLayer", "the canvas heatmap + topology loader + proposal-marker renderer — the heart of the map"),
-        "file": ("GraphLayer.tsx", "~3340 LOC — one big component: load topology+votes, paint the heat canvas, hit-test, render proposals"),
-        "outline": [
-            ("Module helpers", "decodeTopologyBin, buildEdgeIndex, votesMatchTopology, buildNodeAdj", True),
-            ("Component state & refs", "canvas / topology / graphData refs, projCacheRef, drawStateRef", True),
-            ("Canvas init", "create heat + hover canvases, attach to graphPane, leaflet-zoom-animated", True),
-            ("Topology + vote loading", "version → IndexedDB cache → network fetch → reconcile dims → paint", True),
-            ("redraw — heat passes", "viewport-culled multi-pass canvas paint; captures draw-state", True),
-            ("Map event handlers (pan / zoom)", "zoomanim transform; zoomstart no longer clears the heatmap", True),
-            ("Hover / hit-testing", "nearest-edge snap, tooltips, pinned cards", False),
-            ("Indicator markers", "vote winners / station markers / cluster fan-out", False),
-        ],
-        "blocks": [
-            "decodeTopologyBin — validate GTB1 magic + byte length before allocating; clamp bad node indices",
-            "buildEdgeIndex — index a degenerate box instead of dereferencing a missing node",
-            "votesMatchTopology() — NEW dimension guard",
-            "drawStateRef — records {zoom, top-left latlng} each paint",
-            "canvas init — add `leaflet-zoom-animated` to both canvases",
-            "load effect — fetchTopologyFromNetwork(forceReload) + stale-topology refetch on mismatch",
-            "fetchVotes — skip applying a mid-session dimension mismatch",
-            "redraw — capture drawStateRef at end of paint",
-            "zoom handlers — handleZoomAnim (transform) + don't clear heat on zoomstart",
-        ],
-    },
-    "client-react/src/utils/graphCache.ts": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · utils/", "IndexedDB persistence for topology + vote arrays, keyed by graph version"),
-        "file": ("graphCache.ts", "~175 LOC — get/set cached topology (JSON + binary) and votes; version-busting"),
-        "outline": [
-            ("DB open / upgrade", "desire-path-cache, DB_VERSION=2 clears stale store", False),
-            ("idbGet / idbSet", "best-effort key/value helpers", False),
-            ("Topology cache", "getCachedTopology / Bin + setters", False),
-            ("Votes cache", "getCachedVotes / setCachedVotes (version-scoped)", False),
-            ("clearGraphCache", "NEW — wipe every entry; recovery path for a poisoned cache", True),
-        ],
-        "blocks": [
-            "clearGraphCache() — clears the object store so a poisoned cache can't survive a reload",
-        ],
-    },
-    "client-react/src/components/ErrorBoundary/ErrorBoundary.tsx": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · components/ErrorBoundary", "NEW — render-crash recovery boundary around the map"),
-        "file": ("ErrorBoundary.tsx", "NEW FILE — class boundary: clear the graph cache + reload once, then a manual fallback"),
-        "outline": [
-            ("getDerivedStateFromError", "flip to the crashed state", True),
-            ("componentDidMount", "clear the recovery flag after ~12s of health", True),
-            ("componentDidCatch", "first crash → clear cache + reload once; second → manual fallback", True),
-            ("render", "fallback card with a Reload button", True),
-        ],
-        "blocks": ["Whole file is new — the safety net for “a problem repeatedly occurred”."],
-    },
-    "client-react/src/components/ErrorBoundary/ErrorBoundary.css": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · components/ErrorBoundary", "NEW — styles for the fallback card"),
-        "file": ("ErrorBoundary.css", "NEW FILE — full-screen centered fallback, editorial paper/ink palette"),
-        "outline": [(".error-boundary*", "overlay, card, title, body, button", True)],
-        "blocks": ["New stylesheet for the fallback UI."],
-    },
-    "client-react/src/components/index.ts": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · components/", "barrel re-exporting the component public surface"),
-        "file": ("index.ts", "~12 LOC — barrel exports"),
-        "outline": [("exports", "TopBar, MapView, …, + ErrorBoundary", True)],
-        "blocks": ["export { ErrorBoundary } from \"./ErrorBoundary/ErrorBoundary\""],
     },
     "client-react/src/App.tsx": {
         "on": ["React / Leaflet client"],
-        "module": ("React client · src/", "app root: providers, map bootstrap, the #app shell"),
-        "file": ("App.tsx", "app root — resolves the map, then mounts the map subtree"),
+        "module": ("React client · src/", "app root: providers, map bootstrap (resolve slug → config → redirects), the #app shell"),
+        "file": ("App.tsx", "~180 LOC — resolves the map, follows redirects, then mounts the map subtree"),
         "outline": [
             ("FullScreenLoader", "the ASCII-spinner splash", False),
-            ("AppContent", "shell: TopBar, <main> map, toasts — now wraps MapView in ErrorBoundary", True),
-            ("MapApp / providers", "resolve map config, provider tree", False),
+            ("AppContent", "shell: TopBar, <main> map in ErrorBoundary, toasts", False),
+            ("MapApp — map-resolution effect", "captureSourceTag → resolveMapConfig → slug redirect → subdomain redirect → applyMap", True),
+            ("App (providers)", "provider tree", False),
         ],
         "blocks": [
-            "import ErrorBoundary",
-            "wrap <MapView /> in <ErrorBoundary>",
+            "imports — slugRedirectUrl (map/runtime), captureSourceTag/withSourceTag (utils/sourceTag)",
+            "captureSourceTag() at the top of the map-resolution effect — before any redirect/rewrite drops ?src",
+            "follow resolved.redirect.toSlug via location.replace(slugRedirectUrl(…)) — before the subdomain check",
+            "subdomain redirect target wrapped in withSourceTag(…) — the tag survives the host hop",
         ],
     },
-    "CLAUDE.md": {
-        "on": [],
-        "module": ("Docs · repo root", "the project’s agent + architecture instructions"),
-        "file": ("CLAUDE.md", "agent instructions, architecture overview, runbooks"),
+    "client-react/src/map/runtime.ts": {
+        "on": ["React / Leaflet client"],
+        "module": ("React client · map/", "map-config runtime: resolve slug/subdomain → MapConfig, apply it, passcode auth"),
+        "file": ("runtime.ts", "~274 LOC — MapConfig types, slug detection, config fetch/resolve/apply, passcode helpers"),
         "outline": [
-            ("In-progress note", "this workstream summary", True),
-            ("Changelog + dev-server conventions", "standing instructions added this turn", True),
-            ("Architecture / runbooks", "unchanged", False),
+            ("MapVoteType / MapConfig interfaces", "the config shape — now with the redirect?: {toSlug, appendQuery} field", True),
+            ("getCurrentMap / getMapSlug / detectMapSlugFromUrl", "current-map accessors + /m/<slug> · ?map= parsing", False),
+            ("slugRedirectUrl", "NEW — retired-slug target URL: keep query, drop ?map, merge appendQuery (no overrides)", True),
+            ("applyStyleOverride / fetchMapConfig / fetchMapConfigBySubdomain / resolveMapConfig", "?style preview + the config fetch/resolution chain", False),
+            ("applyMap / withMap", "install the config; slug-qualify links", False),
+            ("Passcode helpers", "tokenKey…authWithPasscode — private-map auth", False),
         ],
         "blocks": [
-            "In-progress workstream note (links the changelog)",
-            "New standing instructions: changelog diagrams + redeploy to localhost:3000",
+            "MapConfig.redirect?: { toSlug; appendQuery? } — the retired-slug stub shape",
+            "slugRedirectUrl() — /m/<toSlug> + current query (minus ?map) + appendQuery merged without overriding",
+        ],
+    },
+    "client-react/src/utils/loadTelemetry.ts": {
+        "on": ["React / Leaflet client"],
+        "module": ("React client · utils/", "the one-per-pageload map-load beacon (navigation start → loader dismissed)"),
+        "file": ("loadTelemetry.ts", "~55 LOC — sendBeacon of {map, ms, cachedTopo, nav} to /api/client-timing"),
+        "outline": [
+            ("Module state", "topoSource / sent — one beacon per page load", False),
+            ("reportTopologySource", "cache-vs-network flag from GraphLayer", False),
+            ("reportMapLoaded", "build + sendBeacon the payload — now carries src (campaign tag)", True),
+        ],
+        "blocks": [
+            "import getSourceTag; payload gains src: getSourceTag() ?? undefined (absent → server labels \"direct\")",
+        ],
+    },
+    "client-react/src/utils/sourceTag.ts": {
+        "on": ["React / Leaflet client"],
+        "module": ("React client · utils/", "NEW — ?src= campaign attribution: capture once, strip, report, re-attach on redirects"),
+        "file": ("sourceTag.ts", "NEW FILE, 49 LOC — capture/strip the tag at boot; expose it to the beacon and redirects"),
+        "outline": [
+            ("SRC_PATTERN / captured", "[a-zA-Z0-9_-]{1,32} whitelist; module-level once-only state", True),
+            ("captureSourceTag", "read + validate ?src, strip via history.replaceState — idempotent (StrictMode-safe)", True),
+            ("getSourceTag", "the captured tag, or null for a direct visit", True),
+            ("withSourceTag", "re-attach the (already-stripped) tag to a redirect target URL", True),
+        ],
+        "blocks": [
+            "Whole file is new — capture-once + strip keeps re-shared links from inheriting the campaign's attribution.",
+        ],
+    },
+    "docs/README.md": {
+        "on": [],
+        "module": ("Docs · docs/", "the docs index: per-doc one-liners, naming canon, style conventions"),
+        "file": ("README.md", "~46 LOC — documents table + conventions"),
+        "outline": [
+            ("Documents table", "one row per doc — url-routing.md row now claims source-of-truth for redirects + ?src=", True),
+            ("Naming canon", "slug / map / city / mode vocabulary", False),
+            ("Style conventions", "how docs are written", False),
+        ],
+        "blocks": [
+            "url-routing.md row — adds slug renames, the redirect inventory, and ?src= visit-source tracking",
+        ],
+    },
+    "docs/url-routing.md": {
+        "on": [],
+        "module": ("Docs · docs/", "SOURCE OF TRUTH for map addressing: slug/subdomain/apex resolution, link building, redirects"),
+        "file": ("url-routing.md", "~216 LOC — address space, client/server resolution, prod hosts, admin runbooks, redirect inventory"),
+        "outline": [
+            ("Intro", "no router library; every redirect must be in the inventory table", True),
+            ("The address space", "slug forms + NEW “Visit-source tracking (?src=)” subsection", True),
+            ("Client resolution (the load path)", "resolveMapConfig chain + NEW “Slug redirects (renamed maps)” subsection", True),
+            ("Link building (sharing)", "withMap / shareLink", False),
+            ("Server resolution", "/api/maps/<slug> + by-subdomain", False),
+            ("Production (cityedit.org)", "hosts, nginx, Cloud Run", False),
+            ("Admin runbook — add a vanity subdomain", "set_map_subdomain flow", False),
+            ("Admin runbook — rename a map slug", "NEW — rename_map.py usage, prod-tunnel notes, cache caveats", True),
+            ("Redirect inventory", "NEW — source-of-truth table of EVERY redirect/rewrite + live map_redirects rows", True),
+        ],
+        "blocks": [
+            "Intro — “renames a slug”; pointer: every redirect goes in the inventory",
+            "Address space — retired slugs still resolve; NEW ?src= section (capture→strip→beacon→[MAPLOAD]→src label; tag rules)",
+            "NEW “Slug redirects (renamed maps)” — 200-stub rationale, param preservation, reserved-forever, append_query retro-tagging",
+            "NEW “Admin runbook — rename a map slug” — the one-command flow + prod tunnels + TTL/preview caveats",
+            "NEW “Redirect inventory” — donate. 301, feedback. rewrite, canonical-subdomain, retired slugs, staging opt-out; nyc-intersections→nyc-crossings row",
+        ],
+    },
+    "scripts/generate_posters.py": {
+        "on": [],
+        "module": ("Scripts · scripts/", "the QR poster generator: intersections CSV → filled HTML templates → rendered PNGs + poster book"),
+        "file": ("generate_posters.py", "~612 LOC — row loading, template fill/style helpers, QR minting, poster book + map page"),
+        "outline": [
+            ("Constants", "MASTER/TEMPLATES/OUT paths, BASE_URL → nyc-crossings, QR_VOTE_TYPE, NEW QR_SRC", True),
+            ("Template helpers", "load_rows … set_qr — slot fill, styling, footer stamping, QR embedding", False),
+            ("Per-template fills/selectors", "_nabe_fill / _after_dark_fill / _dark_select / nabe_targets", False),
+            ("main()", "argparse + render loop — NEW --src flag; QR URL now carries &src=", True),
+            ("build_map_page", "the overview map HTML", False),
+            ("build_poster_book", "checklist + PDF assembly — checklist copy now says nyc-crossings", True),
+        ],
+        "blocks": [
+            "BASE_URL → https://cityedit.org/m/nyc-crossings; QR_SRC = \"qr-poster\" (first print run retro-tagged by the redirect instead)",
+            "--src flag (default QR_SRC) — vary per campaign/print run",
+            "QR URL — ?w=<lat>,<lon>&vt=…&src=<args.src>",
+            "poster-book checklist copy — cityedit.org/m/nyc-crossings",
+        ],
+    },
+    "scripts/seed_poster_votes.py": {
+        "on": [],
+        "module": ("Scripts · scripts/", "seeds the poster campaign's starter votes against the live API (dry-run by default)"),
+        "file": ("seed_poster_votes.py", "~92 LOC — campaign vote-type table + a cast loop over the poster intersections"),
+        "outline": [
+            ("CAMPAIGN_VOTE_TYPE", "per-campaign vote-type labels", False),
+            ("main()", "argparse (--base-url / --map / --cast) + seed loop — default map → nyc-crossings", True),
+        ],
+        "blocks": [
+            "--map default nyc-intersections → nyc-crossings",
+        ],
+    },
+    "server/app.py": {
+        "on": ["Flask API", "Redis"],
+        "module": ("Flask backend · server/", "HTTP + WebSocket routes, the per-map vote cache, graph + OSRM registries, startup warmup"),
+        "file": ("app.py", "~2430 LOC — every API/WS route plus the vote-response cache and city registries"),
+        "outline": [
+            ("Flask / Redis / registries setup", "app, CORS, sock, redis client, GraphRegistry, DB imports", True),
+            ("Map resolution + passcode gate", "resolve_map, _map_get_cache, private-map tokens", False),
+            ("Per-map vote response cache + saturation valve", "bounded LRU · single-flight · shed valve", False),
+            ("Maps API", "/api/maps CRUD — map_get now serves the retired-slug redirect stub", True),
+            ("WebSocket + Routes API", "/ws delta hub, /api/routes via OSRM", False),
+            ("Vote API", "/api/vote — block-scoped clear-then-cast", False),
+            ("Graph data APIs", "/api/graph-topology, /api/graph-votes, /api/graph-version", False),
+            ("Telemetry + admin APIs", "client_timing ([MAPLOAD] — now with src=), subdomain, refresh-osm, stats", True),
+        ],
+        "blocks": [
+            "import get_map_redirect from database",
+            "map_get — on maps-table miss, serve {slug, redirect:{toSlug, appendQuery}} as 200 + max-age=300 (not cached in _map_get_cache)",
+            "client_timing — sanitize payload src ([a-zA-Z0-9_-], ≤32) and append src=<tag|direct> to the [MAPLOAD] line",
+        ],
+    },
+    "server/database.py": {
+        "on": ["Flask API"],
+        "module": ("Flask backend · server/", "the Postgres layer: schema init, edge-vote storage, vote types, maps registry"),
+        "file": ("database.py", "~1290 LOC — connection pool, schema, edge_votes read/write, migration helpers, maps & lists"),
+        "outline": [
+            ("Pool + get_cursor", "ThreadedConnectionPool, autocommit cursor contextmanager", False),
+            ("Schema — init_db", "edge_votes / vote_types / maps … + NEW map_redirects table", True),
+            ("Edge-vote write/read path", "record/delete/anchors/voter-directions/eviction", False),
+            ("Vote types (label ↔ id)", "fetch/normalize/get_or_create", False),
+            ("Aggregates / vote migration / admin", "replay, resnap, orphan repair, counts", False),
+            ("Maps & vote-type lists", "seed_presets, list/get/create map, set_map_subdomain, slug_available (now checks both tables)", True),
+            ("Slug redirects (renamed maps)", "NEW — get_map_redirect / list_map_redirects / rename_map_slug (atomic)", True),
+            ("Passcode", "get_map_passcode_hash", False),
+        ],
+        "blocks": [
+            "init_db — CREATE TABLE map_redirects (from_slug PK, to_slug, append_query, note, created_at)",
+            "slug_available — maps UNION ALL map_redirects: a retired slug is reserved forever",
+            "get_map_redirect — PK read → {toSlug, appendQuery} (mirrors MapConfig.redirect)",
+            "list_map_redirects — admin/docs transparency listing",
+            "rename_map_slug — explicit BEGIN/COMMIT: maps.slug + edge_votes.map_slug + redirect row + chain flattening (a→b, b→c ⇒ a→c); rolls back whole on any failure",
+        ],
+    },
+    "server/rename_map.py": {
+        "on": ["Flask API", "Redis"],
+        "module": ("Flask backend · server/", "NEW — admin CLI: rename a map slug, leave a redirect, rebuild Redis"),
+        "file": ("rename_map.py", "NEW FILE, 104 LOC — argparse wrapper around database.rename_map_slug + the Redis rebuild"),
+        "outline": [
+            ("Module docstring", "usage, prod-tunnel notes, the 30–60s map-cache caveat", True),
+            ("_redis_client", "connect or warn-and-continue (DB renamed; rerun for Redis)", True),
+            ("main", "rename txn → rebuild_redis_for_map(new) → purge old ev:/vote_rev:/bd:/bagg: keys → JSON summary", True),
+        ],
+        "blocks": [
+            "Whole file is new — the only sanctioned way to create a map_redirects row (a bare DB edit would skip edge_votes + Redis).",
+        ],
+    },
+    "terraform/monitoring.tf": {
+        "on": [],
+        "module": ("Infra · terraform/", "GCP monitoring: uptime checks, log-based metrics, alert policies, the system dashboard"),
+        "file": ("monitoring.tf", "~1220 LOC — notification channel, uptime check, api_latency + map_load_ms metrics, 8 alerts, dashboard"),
+        "outline": [
+            ("Notification channel + uptime check", "email_eric, app_health probe", False),
+            ("api_latency log metric", "[API] request-latency distribution", False),
+            ("map_load_ms log metric", "[MAPLOAD] client-perceived first-load — now labeled by src", True),
+            ("Alert policies", "uptime, 5xx, p99, app/OSRM/Redis memory, SQL disk", False),
+            ("system_health dashboard", "the wall of charts", False),
+        ],
+        "blocks": [
+            "map_load_ms header comment — the [MAPLOAD] line format now ends src=<tag|direct>; visits-by-source = count grouped by src",
+            "labels — new src STRING label",
+            "label_extractors — src = REGEXP_EXTRACT(textPayload, \"src=([a-zA-Z0-9_-]+)\")",
         ],
     },
 }
@@ -533,15 +665,18 @@ def main():
   <header class="masthead">
     <div class="kicker">City Edit · Change log</div>
     <h1>{TITLE}</h1>
-    <div class="dateline">{DATE} · branch <code>fix/unify-voting</code></div>
+    <div class="dateline">{DATE} · branch <code>main</code></div>
   </header>
 
   <nav class="toc">{nav}
     <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
   </nav>
 
-  <p class="lede">Three fixes in one pass: the stale-cache crash that loops mobile Safari on heatmap load,
-  the concurrency limits that broke the app under multiple tenants, and the heatmap that vanished mid-zoom.</p>
+  <p class="lede">Three intertwined changes: any URL can now carry <code>?src=&lt;tag&gt;</code> and show up
+  as a visits-by-source group-by in Metrics Explorer; renamed maps leave a data-driven redirect behind
+  (old slug reserved forever, deep links preserved); and <code>nyc-intersections</code> became
+  <code>nyc-crossings</code> with a redirect that retro-tags every scan of the already-printed July QR
+  posters as <code>src=qr-poster</code>.</p>
 
   {sections_html}
 
