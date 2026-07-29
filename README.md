@@ -106,7 +106,10 @@ How votes flow from a click to every client's heatmap — identity, codec,
 storage, reconciliation, migration — is documented in
 [docs/voting-architecture.md](docs/voting-architecture.md) (the source of
 truth). How the app picks *which map* to show (slug / subdomain / apex) is in
-[docs/url-routing.md](docs/url-routing.md).
+[docs/url-routing.md](docs/url-routing.md) — including the **redirect
+inventory** (every redirect/rewrite in the system: nginx vanity hosts, the
+canonical-subdomain bounce, retired-slug redirects for renamed maps) and
+`?src=` campaign visit tracking.
 
 ## Configuration
 

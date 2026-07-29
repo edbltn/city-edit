@@ -8,7 +8,7 @@ Index and conventions for everything under `docs/`. Start here.
 |-----|----------------|
 | [three-layer-model.md](three-layer-model.md) | **Source of truth** for the three-layer separation — edge/node graph (storage) → blocks (aggregation, display, interaction) → route proposals (derived clustering) — and the block-scoped vote semantics (clear-then-cast, the one-direction-per-block invariant). |
 | [voting-architecture.md](voting-architecture.md) | **Source of truth** for Layer-1 vote mechanics — how a vote is identified, stored, reconciled, and migrated (the unified edge-based model). Write-path *semantics* are defined by three-layer-model.md §4. |
-| [url-routing.md](url-routing.md) | How the SPA resolves *which map* to show (slug / subdomain / apex), how links are built, and how an admin adds a vanity subdomain. |
+| [url-routing.md](url-routing.md) | How the SPA resolves *which map* to show (slug / subdomain / apex), how links are built, and how an admin adds a vanity subdomain or renames a slug. **Source of truth** for the redirect inventory (every redirect/rewrite the system performs) and `?src=` visit-source tracking. |
 | [flask-considerations.md](flask-considerations.md) | Backend architecture notes for the real-time vote broadcast path and running across multiple Flask servers. |
 | [testing.md](testing.md) | The test taxonomy — (backend, frontend) × (unit, integration, E2E) — and how to run each. |
 | [debugging.md](debugging.md) | The debugging workflow: named debug tabs (`?tab=<name>`), client `[channel]` debug logging + `cityedit.dumpState()`, the server log-tag table, and curl probes. |

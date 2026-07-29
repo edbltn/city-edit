@@ -1,10 +1,12 @@
 # URL & Routing Architecture
 
 How the app decides *which map* to show, how links are built, and how an admin
-adds a vanity subdomain. There is **no router library** — the SPA inspects the
-URL directly. Maps are addressed by **slug**; the legacy `?theme=` query param
-is gone (the only mention left is a comment in `utils/shareLink.ts` documenting
-that it no longer exists).
+adds a vanity subdomain or renames a slug. There is **no router library** — the
+SPA inspects the URL directly. Maps are addressed by **slug**; the legacy
+`?theme=` query param is gone (the only mention left is a comment in
+`utils/shareLink.ts` documenting that it no longer exists). Every redirect the
+system performs is listed in [Redirect inventory](#redirect-inventory) — add to
+that table whenever you add one.
 
 ## The address space
 
@@ -18,6 +20,21 @@ that it no longer exists).
 
 The slug is the single source of truth. Subdomains are an optional alias that
 resolve **to** a slug; the camera/selection params ride along on either form.
+A *retired* slug (a renamed map's old name) is not a map but still resolves —
+see [Slug redirects](#slug-redirects-renamed-maps).
+
+### Visit-source tracking (`?src=`)
+
+Any City Edit URL may carry `?src=<tag>` (e.g. `?src=qr-poster`) to attribute
+the visit to a campaign. The client captures the tag once at boot
+(`utils/sourceTag.ts`), strips it from the address bar (so re-shared links
+don't inherit the attribution), and reports it in the map-load beacon
+(`utils/loadTelemetry.ts` → `POST /api/client-timing` → the `[MAPLOAD] … src=…`
+log line). The `cityedit_map_load_ms` metric (`terraform/monitoring.tf`)
+extracts it as the `src` label, so **visits by source** is a Metrics Explorer /
+dashboard group-by; untagged visits are labeled `direct`. Tags are
+`[a-zA-Z0-9_-]`, max 32 chars. To start a new campaign, just mint a new tag in
+the printed/shared URL — no code change.
 
 ## Client resolution (the load path)
 
@@ -43,6 +60,30 @@ string is preserved**, so a shared deep link
 selection is restored on the subdomain. No redirect loop: on the canonical host
 `detectSubdomain()` already equals the map's subdomain, so the helper returns
 `null`.
+
+### Slug redirects (renamed maps)
+
+When a map is renamed, its old slug moves to the `map_redirects` table
+(`from_slug → to_slug + append_query`, `server/database.py`) instead of dying:
+
+- `GET /api/maps/<old-slug>` returns `{"slug", "redirect": {"toSlug",
+  "appendQuery"}}` (200, not a 30x — nginx serves the SPA shell before any slug
+  lookup, so only the client can act on it, exactly like the subdomain
+  redirect). `App.tsx` then `location.replace`s to `/m/<toSlug>` via
+  `slugRedirectUrl()` (`map/runtime.ts`), **keeping all current query params**
+  (deep links survive) and merging `append_query` without overriding anything
+  already present.
+- The old slug stays **reserved forever**: `slug_available()` checks both
+  `maps` and `map_redirects`, so Propose-a-Map can never re-issue it to
+  someone else's map (printed links would land on a stranger's map).
+- `append_query` is the retro-tagging hook: a redirect row with
+  `append_query = 'src=qr-poster'` stamps campaign attribution onto every
+  visit through the old printed URL.
+
+Rows are created by `server/rename_map.py` (see the
+[rename runbook](#admin-runbook--rename-a-map-slug)), never by hand-editing
+the DB in isolation — the rename must also move `edge_votes.map_slug` and
+rebuild Redis.
 
 ### Theme/styling
 
@@ -123,3 +164,53 @@ column is set and the host resolves, `bikes.cityedit.org` serves that map and
 `cityedit.org/m/ny-bike-test` redirects to it. The preset hosts
 (`bikepaths`/`trees`/`walkways`) are just rows seeded this same way in
 `presets.py`.
+
+## Admin runbook — rename a map slug
+
+Goal: `/m/<old>` becomes `/m/<new>`; the old slug redirects (optionally
+stamping a campaign `?src=` tag) and stays reserved.
+
+```bash
+cd server && source env/bin/activate
+python rename_map.py <old-slug> <new-slug> \
+  --append-query "src=<campaign-tag>" \
+  --note "why this redirect exists"
+```
+
+One Postgres transaction (`database.rename_map_slug`): `maps.slug`, the
+denormalized `edge_votes.map_slug` copies (plain TEXT — nothing cascades), a
+`map_redirects` row, and any existing redirects chained onto the old slug are
+flattened to the new one. Then Redis — the only store the heatmap serves from —
+is rebuilt under the new slug and the old slug's keys (`ev:`, `vote_rev:`,
+`bd:`/`bagg:`) are purged.
+
+Against **prod**, run it through the bastion tunnels (Postgres on local
+`:5433`, Redis on `:6380` — see `docs/gcp-deployment.md`), passing
+`DATABASE_URL`/`REDIS_HOST`/`REDIS_PORT` inline for the one command; never
+repoint `server/.env`. Notes:
+
+- Running Flask instances hold in-process map caches (30–60s TTL); the old
+  slug may serve its old config for up to a minute after the rename.
+- Anything keyed by slug resets client-side on first visit to the new slug
+  (IndexedDB vote cache, `localStorage` passcode tokens) — self-healing.
+- `/previews/<new-slug>.png` is missing until the next daily screenshot job.
+
+## Redirect inventory
+
+**Source of truth** for every redirect/rewrite the system performs. If you add
+one, add a row here.
+
+| What | Mechanism | Where | Query params |
+|------|-----------|-------|--------------|
+| `donate.cityedit.org` → donorbox | nginx `return 301` | `deploy/nginx-cloudrun.conf` | dropped |
+| `feedback.cityedit.org` → feedback page | nginx `try_files` rewrite (not a redirect) | `deploy/nginx-cloudrun.conf` | n/a |
+| Canonical-subdomain redirect (`/m/nyc-bikes` → `bikepaths.cityedit.org`) | client `location.replace` after map-config fetch | `App.tsx` + `themes.ts subdomainRedirectUrl` | preserved (+ re-attached `src`) |
+| Retired-slug redirects (renamed maps) | client `location.replace` on `MapConfig.redirect` | DB `map_redirects` table + `App.tsx` + `map/runtime.ts slugRedirectUrl` | preserved, `append_query` merged |
+| Staging: subdomain redirect disabled | `APP_ENV=staging` → `staging: true` on map config | `app.py` / `App.tsx` | n/a |
+
+Current `map_redirects` rows (query the DB for the live list:
+`SELECT * FROM map_redirects;`):
+
+| From | To | Appends | Why |
+|------|----|---------|-----|
+| `nyc-intersections` | `nyc-crossings` | `src=qr-poster` | 2026-07 QR poster campaign was printed without a `src` tag; the redirect retro-tags those scans |
