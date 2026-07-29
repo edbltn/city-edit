@@ -9,10 +9,11 @@ import { useRoute, useHeatmap } from "./context";
 import { isLandingHost, subdomainRedirectUrl } from "./themes";
 import {
   resolveMapConfig, fetchMapConfig, applyMap, detectMapSlugFromUrl,
-  takePasscodeParam, authWithPasscode, getCurrentMap,
+  takePasscodeParam, authWithPasscode, getCurrentMap, slugRedirectUrl,
   type MapConfig,
 } from "./map/runtime";
 import { reportMapLoaded } from "./utils/loadTelemetry";
+import { captureSourceTag, withSourceTag } from "./utils/sourceTag";
 
 /** Full-screen "Loading..." splash with the ASCII (| / - \) spinner. */
 function FullScreenLoader() {
@@ -75,9 +76,18 @@ function MapApp() {
 
   useEffect(() => {
     let cancelled = false;
+    // Capture ?src= (campaign attribution) BEFORE any redirect or URL rewrite
+    // can drop it — the beacon reads it when the loader dismisses.
+    captureSourceTag();
     (async () => {
       let resolved = await resolveMapConfig();
       if (cancelled) return;
+      // A retired slug (renamed map): follow its DB redirect, keeping deep-link
+      // params and merging the redirect's appendQuery (campaign ?src tag).
+      if (resolved?.redirect?.toSlug) {
+        window.location.replace(slugRedirectUrl(resolved.redirect));
+        return;
+      }
       // A map with a canonical subdomain (presets + admin-assigned vanity hosts)
       // settles on that host: send apex /m/<slug> and shared/typed visitors to
       // e.g. bikepaths.cityedit.org, preserving any ?slat/?vt deep-link params.
@@ -86,7 +96,9 @@ function MapApp() {
       if (resolved?.subdomain && !resolved.staging) {
         const target = subdomainRedirectUrl(resolved.subdomain);
         if (target) {
-          window.location.replace(target);
+          // withSourceTag: the ?src tag was captured+stripped above; carry it
+          // across the host hop so the campaign still gets attributed.
+          window.location.replace(withSourceTag(target));
           return;
         }
       }

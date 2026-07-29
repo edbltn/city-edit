@@ -11,6 +11,7 @@
 
 import { CONFIG } from "../config";
 import { getMapSlug, detectMapSlugFromUrl } from "../map/runtime";
+import { getSourceTag } from "./sourceTag";
 
 let topoSource: "cache" | "network" | null = null;
 let sent = false;
@@ -35,6 +36,9 @@ export function reportMapLoaded() {
       ms,
       cachedTopo: topoSource === "cache",
       nav,
+      // Campaign attribution (?src=…, captured+stripped at boot); absent for
+      // direct visits — the server labels those "direct".
+      src: getSourceTag() ?? undefined,
     });
     const url = `${CONFIG.apiUrl}/client-timing`;
     // Send as a plain string (text/plain — CORS-safelisted). A Blob typed

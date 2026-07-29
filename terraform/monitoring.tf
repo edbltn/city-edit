@@ -123,9 +123,12 @@ resource "google_logging_metric" "api_latency" {
 # First-map-load latency — CLIENT-perceived, not server-side. The client
 # beacons one measurement per page load (navigation start → full-screen loader
 # dismissed) to /api/client-timing, which logs a single line:
-#   [MAPLOAD] map=<slug> ms=<int> cached_topo=<0|1> nav=<navigate|reload|...>
+#   [MAPLOAD] map=<slug> ms=<int> cached_topo=<0|1> nav=<navigate|reload|...> src=<tag|direct>
 # cached_topo separates true cold first loads (topology from network) from
 # repeat visits (IndexedDB hit) — the "first time" P99 lives in cached_topo=0.
+# src is the campaign attribution tag (?src=… in the visited URL, e.g. QR
+# posters carry src=qr-poster); "direct" = untagged. Visits-by-source is this
+# metric's count grouped by src (the latency value is just along for the ride).
 # Values are MILLISECONDS.
 # -----------------------------------------------------------------------------
 
@@ -161,6 +164,12 @@ resource "google_logging_metric" "map_load_ms" {
       value_type  = "STRING"
       description = "Navigation type (navigate / reload / back_forward)"
     }
+
+    labels {
+      key         = "src"
+      value_type  = "STRING"
+      description = "Campaign source tag (?src=… in the URL, e.g. qr-poster); direct = untagged"
+    }
   }
 
   value_extractor = "REGEXP_EXTRACT(textPayload, \"ms=([0-9]+)\")"
@@ -169,6 +178,7 @@ resource "google_logging_metric" "map_load_ms" {
     map    = "REGEXP_EXTRACT(textPayload, \"map=([a-zA-Z0-9_-]+)\")"
     cached = "REGEXP_EXTRACT(textPayload, \"cached_topo=([01])\")"
     nav    = "REGEXP_EXTRACT(textPayload, \"nav=([a-z_]+)\")"
+    src    = "REGEXP_EXTRACT(textPayload, \"src=([a-zA-Z0-9_-]+)\")"
   }
 
   # 50ms … ~10min in 30% steps — first loads live in the 0.5s–60s range.

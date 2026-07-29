@@ -274,6 +274,23 @@ def init_db():
                 ON maps(subdomain) WHERE subdomain IS NOT NULL
             """)
 
+            # Slug redirects: after a map is renamed, its old slug lives here so
+            # printed links (QR posters) keep working AND the old slug stays
+            # reserved (slug_available checks both tables). append_query is a
+            # query string ("src=qr-poster") merged into the target URL by the
+            # client — the mechanism that retro-tags a campaign's traffic.
+            # `note` records why the redirect exists; every row is surfaced in
+            # docs/url-routing.md's redirect inventory.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS map_redirects (
+                    from_slug TEXT PRIMARY KEY,
+                    to_slug TEXT NOT NULL,
+                    append_query TEXT,
+                    note TEXT,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+
             logger.info("[DB] Database schema initialized successfully")
             return True
 
@@ -1107,15 +1124,120 @@ def set_map_subdomain(slug: str, subdomain: Optional[str]) -> tuple[bool, str]:
 
 
 def slug_available(slug: str) -> bool:
+    """A slug is takeable only if no map uses it AND no redirect reserves it —
+    a renamed map's old slug must never be re-claimed (printed QR links would
+    suddenly land on a stranger's map)."""
     if not DATABASE_URL:
         return False
     try:
         with get_cursor() as cursor:
-            cursor.execute("SELECT 1 FROM maps WHERE slug = %s", (slug,))
+            cursor.execute(
+                """SELECT 1 FROM maps WHERE slug = %s
+                   UNION ALL
+                   SELECT 1 FROM map_redirects WHERE from_slug = %s""",
+                (slug, slug),
+            )
             return cursor.fetchone() is None
     except Exception as e:
         logger.error(f"[DB] slug_available check failed: {e}")
         return False
+
+
+# ── Slug redirects (renamed maps) ───────────────────────────────────────────
+
+def get_map_redirect(from_slug: str) -> Optional[dict]:
+    """The redirect for a retired slug, or None. Shape mirrors the client's
+    MapConfig.redirect field: {"toSlug", "appendQuery"}."""
+    if not DATABASE_URL:
+        return None
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                "SELECT to_slug, append_query FROM map_redirects WHERE from_slug = %s",
+                (from_slug,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {"toSlug": row[0], "appendQuery": row[1] or None}
+    except Exception as e:
+        logger.error(f"[DB] get_map_redirect '{from_slug}' failed: {e}")
+        return None
+
+
+def list_map_redirects() -> list[dict]:
+    """All slug redirects (admin/docs transparency)."""
+    if not DATABASE_URL:
+        return []
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                """SELECT from_slug, to_slug, append_query, note, created_at
+                   FROM map_redirects ORDER BY created_at"""
+            )
+            return [
+                {"fromSlug": r[0], "toSlug": r[1], "appendQuery": r[2],
+                 "note": r[3], "createdAt": r[4].isoformat() if r[4] else None}
+                for r in cursor.fetchall()
+            ]
+    except Exception as e:
+        logger.error(f"[DB] list_map_redirects failed: {e}")
+        return []
+
+
+def rename_map_slug(
+    old_slug: str, new_slug: str,
+    append_query: Optional[str] = None, note: Optional[str] = None,
+) -> dict:
+    """Rename a map's slug, atomically.
+
+    One transaction: maps.slug, the denormalized edge_votes.map_slug copies
+    (plain TEXT, nothing cascades), and a map_redirects row so the old slug
+    keeps resolving AND stays reserved. Raises on any failure (whole txn rolls
+    back). Caller must rebuild the map's Redis aggregate under the new slug —
+    the heatmap serves from Redis only (see rename_map.py).
+    """
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL not set")
+    with get_cursor() as cursor:
+        # get_cursor is autocommit — an explicit BEGIN/COMMIT makes the rename
+        # atomic (a half-applied rename would strand votes under a dead slug).
+        cursor.execute("BEGIN")
+        try:
+            cursor.execute("SELECT 1 FROM maps WHERE slug = %s", (old_slug,))
+            if not cursor.fetchone():
+                raise ValueError(f"no map with slug '{old_slug}'")
+            cursor.execute(
+                """SELECT 1 FROM maps WHERE slug = %s
+                   UNION ALL SELECT 1 FROM map_redirects WHERE from_slug = %s""",
+                (new_slug, new_slug),
+            )
+            if cursor.fetchone():
+                raise ValueError(f"slug '{new_slug}' is already taken or reserved")
+            cursor.execute(
+                "UPDATE maps SET slug = %s WHERE slug = %s", (new_slug, old_slug)
+            )
+            cursor.execute(
+                "UPDATE edge_votes SET map_slug = %s WHERE map_slug = %s",
+                (new_slug, old_slug),
+            )
+            votes_moved = cursor.rowcount
+            # Re-point any redirect that targeted the old slug (chain
+            # flattening: a→b then b→c becomes a→c, so clients never hop twice).
+            cursor.execute(
+                "UPDATE map_redirects SET to_slug = %s WHERE to_slug = %s",
+                (new_slug, old_slug),
+            )
+            cursor.execute(
+                """INSERT INTO map_redirects (from_slug, to_slug, append_query, note)
+                   VALUES (%s, %s, %s, %s)""",
+                (old_slug, new_slug, append_query or None, note or None),
+            )
+            cursor.execute("COMMIT")
+        except Exception:
+            cursor.execute("ROLLBACK")
+            raise
+    return {"old": old_slug, "new": new_slug, "votesMoved": votes_moved}
 
 
 def create_map(

@@ -43,6 +43,10 @@ export interface MapConfig {
   /** Server runs with APP_ENV=staging: skip the canonical-subdomain redirect
    *  (it would bounce testers to prod) and show the STAGING ribbon. */
   staging?: boolean;
+  /** The slug was retired by a rename (DB map_redirects row): no map config —
+   *  navigate to `toSlug`, keeping the current query and merging `appendQuery`
+   *  (e.g. "src=qr-poster", how pre-printed QR links get campaign-tagged). */
+  redirect?: { toSlug: string; appendQuery?: string | null };
 }
 
 // The map shown when the URL names no slug and the host has no mapped subdomain.
@@ -81,6 +85,28 @@ export function detectMapSlugFromUrl(): string | null {
   if (m) return m[1];
   const params = new URLSearchParams(window.location.search);
   return params.get("map");
+}
+
+/**
+ * Target URL for a retired slug's redirect (MapConfig.redirect). Same-origin
+ * path only: keeps every current query param (QR deep links carry ?w/?vt or
+ * ?z/?lat/?lng), drops ?map= (it names the retired slug), and merges the
+ * redirect's appendQuery WITHOUT overriding params already present.
+ */
+export function slugRedirectUrl(
+  redirect: { toSlug: string; appendQuery?: string | null },
+  search: string = window.location.search,
+  hash: string = window.location.hash
+): string {
+  const params = new URLSearchParams(search);
+  params.delete("map");
+  if (redirect.appendQuery) {
+    new URLSearchParams(redirect.appendQuery).forEach((value, key) => {
+      if (!params.has(key)) params.set(key, value);
+    });
+  }
+  const qs = params.toString();
+  return `/m/${redirect.toSlug}` + (qs ? `?${qs}` : "") + hash;
 }
 
 /**

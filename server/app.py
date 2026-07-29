@@ -42,7 +42,7 @@ from database import (
     count_devices_per_ip_for_edges, count_unique_voters_for_edges,
     evict_lru_devices_for_edges,
     seed_presets, backfill_vote_type_kinds, normalize_point_type,
-    list_maps, get_map, get_map_by_subdomain, slug_available,
+    list_maps, get_map, get_map_by_subdomain, slug_available, get_map_redirect,
     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,
     promote_vote_types, fetch_voted_vote_type_labels,
     DATABASE_URL,
@@ -1037,6 +1037,19 @@ def map_get(slug):
             return resp
         m = get_map(slug)
         if not m:
+            # Retired slug? Serve its redirect (map_redirects row, created by
+            # rename_map.py) so old links — printed QR posters — keep working.
+            # A 200 + `redirect` field rather than a 30x: the SPA shell is
+            # served by nginx before any slug lookup, so only the client can
+            # act on it (mirrors the canonical-subdomain redirect in App.tsx).
+            # Not stored in _map_get_cache (that holds enriched map dicts
+            # only); the lookup is a single PK read and browsers hold it for
+            # max-age anyway.
+            r = get_map_redirect(slug)
+            if r:
+                resp = jsonify({"slug": slug, "redirect": r})
+                resp.headers["Cache-Control"] = "public, max-age=300"
+                return resp
             return jsonify({"error": "Map not found"}), 404
         if m.get("requiresPasscode") and not _passcode_ok(slug):
             return _locked_stub(slug)
@@ -2211,7 +2224,11 @@ def client_timing():
     slug = re.sub(r"[^a-zA-Z0-9_-]", "", str(payload.get("map") or ""))[:64] or "unknown"
     nav = re.sub(r"[^a-z_]", "", str(payload.get("nav") or ""))[:16] or "unknown"
     cached = 1 if payload.get("cachedTopo") else 0
-    logger.info(f"[MAPLOAD] map={slug} ms={int(ms)} cached_topo={cached} nav={nav}")
+    # Campaign source (?src=… captured by the client, e.g. "qr-poster") —
+    # extracted as the `src` label on cityedit_map_load_ms, so visits-by-source
+    # is a Metrics Explorer group-by. "direct" = untagged visit.
+    src = re.sub(r"[^a-zA-Z0-9_-]", "", str(payload.get("src") or ""))[:32] or "direct"
+    logger.info(f"[MAPLOAD] map={slug} ms={int(ms)} cached_topo={cached} nav={nav} src={src}")
     return "", 204
 
 
