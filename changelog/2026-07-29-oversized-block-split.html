@@ -71,10 +71,21 @@ split floor.</li>
 <p>Baked against the serving image's own graph (<code>walk_graph_arrays.npz</code> extracted
 via <code>docker cp</code> from the digest-pinned prod image — prod graph vintage ≠ local),
 staged in <code>.blocks-staging/nyc/</code>, shipped with
-<code>Dockerfile.blocks-overlay</code> pinned to the serving digest
-(<code>a7e3a33c…</code>). Prod DB snapshotted to
-<code>~/city-edit-prod-backups/20260729-203632/</code> before the deploy; staging-first, then
-the same digest promoted to prod.</p>
+<code>Dockerfile.blocks-artifacts-overlay</code> (artifacts ONLY) pinned to the serving digest
+(<code>a7e3a33c…</code>) → new digest <code>973ea9d6…</code>, prod revision
+<code>desire-path-mapper-00114</code>. Prod DB snapshotted to
+<code>~/city-edit-prod-backups/20260729-203632/</code> before the deploy; staging-first
+(verified blocksVersion, tile content at the reservoir, and the bagg self-heal), then the same
+digest promoted to prod and re-verified.</p>
+<p><b>Why artifacts-only, and a landmine for the next deploy:</b> the full
+<code>Dockerfile.blocks-overlay</code> (code + client + artifacts) failed twice. First the
+source tarball raced live edits in the working tree (<code>App.tsx</code> was saved mid-upload,
+so the remote saw imports without their usages — build from a clean <code>git archive HEAD</code>
+export, never the dirty tree). Then Docker's <b>127-layer cap</b>: the serving image is at
+<b>119 layers</b> after weeks of stacked overlays, and the 8-layer code overlay exceeds it —
+only the 2-layer artifacts overlay still fits. <b>The next code deploy must be a full rebuild
+(<code>cloudbuild.app.yaml</code> + full-bake flow) to reset the layer depth</b>; further
+code overlays on this base will fail with <code>max depth exceeded</code>.</p>
 
 <h2>Diffs</h2>
 
