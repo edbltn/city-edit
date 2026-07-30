@@ -276,6 +276,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // edge `name` (the intersection) is its label. See graph_registry.load_station_graph.
   const stationNetwork = getCurrentMap()?.network;
   const isStationNetwork = !!stationNetwork && stationNetwork !== "streets";
+  // Per-map override of the top-proposal support floor (maps.top_proposal_min_net);
+  // curated/imported maps set 0 so one-vote-per-proposal entries still surface.
+  const topProposalMinNet = getCurrentMap()?.topProposalMinNet ?? TOP_PROPOSAL_MIN_NET;
   // One shared icon for every station, like a pin. Prefer a point-type vote type
   // (stations are points), else the map's first vote type.
   const stationLabel =
@@ -805,9 +808,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       isStationNetwork ? undefined : voteTypeKindOf,
       // Station networks don't badge winners as "top proposals" (every station
       // renders its own pin regardless), so the support floor stays off there.
-      isStationNetwork ? 0 : TOP_PROPOSAL_MIN_NET,
+      isStationNetwork ? 0 : topProposalMinNet,
     ), legendChanged);
-  }, [setStableWinners, isStationNetwork, voteTypeKindOf]);
+  }, [setStableWinners, isStationNetwork, voteTypeKindOf, topProposalMinNet]);
 
   const recomputeTopProposalsRef = useRef(recomputeTopProposals);
   useEffect(() => { recomputeTopProposalsRef.current = recomputeTopProposals; }, [recomputeTopProposals]);
@@ -1426,10 +1429,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // (GraphLayer already built one for hover/selection).
     const job = createRouteProposalJob(topo, adj, data, {
       kindOf: voteTypeKindOf, blockIndex: blockIndexRef.current,
-      // The top-proposal support floor (>TOP_PROPOSAL_MIN_NET net votes),
+      // The top-proposal support floor (>topProposalMinNet net votes),
       // expressed as the pipeline's minimum path score — same rule the PBTP
       // winners apply, so both proposal families share one bar.
-      minRouteScore: TOP_PROPOSAL_MIN_NET + 1,
+      minRouteScore: topProposalMinNet + 1,
     });
     const perType: RouteProposal[][] = [];
     let i = 0;
@@ -1465,7 +1468,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // The first slice is deferred too, so the caller (often itself an idle
     // callback that just ran the PBTP scan) returns before any heavy type runs.
     scheduleIdleSlice(slice);
-  }, [voteTypeKindOf]);
+  }, [voteTypeKindOf, topProposalMinNet]);
 
   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);
   useEffect(() => { recomputeRouteProposalsRef.current = recomputeRouteProposals; }, [recomputeRouteProposals]);

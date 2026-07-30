@@ -264,6 +264,14 @@ def init_db():
             # What the map votes on: "streets" (default) or a station network
             # (e.g. "ebikes"). NULL/absent reads back as "streets".
             cursor.execute("ALTER TABLE maps ADD COLUMN IF NOT EXISTS network TEXT")
+            # Per-map override of the client's top-proposal support floor
+            # (TOP_PROPOSAL_MIN_NET). NULL = client default. 0 admits any
+            # net-positive proposal — used by curated/imported maps (e.g.
+            # nyc-proposals, one vote per official DOT proposal) where the
+            # crowdsourced >100-net bar would hide every entry.
+            cursor.execute(
+                "ALTER TABLE maps ADD COLUMN IF NOT EXISTS top_proposal_min_net INT"
+            )
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_maps_city ON maps(city_id)
             """)
@@ -993,7 +1001,7 @@ def _map_row_to_dict(row) -> dict:
     """Shape a maps JOIN vote_type_lists row into the public map dict."""
     (slug, name, subtitle, city_id, allow_suggestions, has_passcode,
      subdomain, list_vote_types, custom_vote_types, vote_count, symbol, style,
-     network) = row
+     network, top_proposal_min_net) = row
     vote_types = custom_vote_types or list_vote_types or []
     # The proposer-chosen visual style wins; presets keep their subdomain style;
     # everything else falls back to the neutral default. The vote namespace
@@ -1017,6 +1025,9 @@ def _map_row_to_dict(row) -> dict:
         # The map's display icon for the landing card. Falls back to the first
         # vote type's icon when the proposer didn't pick one explicitly.
         "symbol": symbol or (vote_types[0].get("icon") if vote_types else "") or "",
+        # Only present when the row overrides the client's default floor.
+        **({"topProposalMinNet": top_proposal_min_net}
+           if top_proposal_min_net is not None else {}),
     }
 
 
@@ -1029,7 +1040,8 @@ _MAP_COLUMNS = """
     SELECT m.slug, m.name, m.subtitle, m.city_id, m.allow_suggestions,
            (m.passcode_hash IS NOT NULL) AS has_passcode,
            m.subdomain, vtl.vote_types, m.custom_vote_types,
-           {vote_count} AS vote_count, m.symbol, m.style, m.network
+           {vote_count} AS vote_count, m.symbol, m.style, m.network,
+           m.top_proposal_min_net
     FROM maps m
     LEFT JOIN vote_type_lists vtl ON vtl.id = m.vote_type_list_id
 """

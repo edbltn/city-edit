@@ -27,6 +27,11 @@ export interface MapConfig {
   /** What the map votes on: "streets" (routable) or a station network like
    *  "ebikes" (NYC-only fixed points, no routing). Absent ⇒ "streets". */
   network?: string;
+  /** Per-map override of the top-proposal support floor (both PBTP winners
+   *  and RBTP corridors). Absent ⇒ TOP_PROPOSAL_MIN_NET. 0 admits any
+   *  net-positive proposal — curated/imported maps whose entries carry one
+   *  vote each would otherwise show nothing. */
+  topProposalMinNet?: number;
   symbol: string; // proposer-chosen display icon (in /icons/), may be ""
   allowSuggestions: boolean;
   requiresPasscode: boolean;
