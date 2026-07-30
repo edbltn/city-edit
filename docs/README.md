@@ -13,6 +13,7 @@ Index and conventions for everything under `docs/`. Start here.
 | [testing.md](testing.md) | The test taxonomy — (backend, frontend) × (unit, integration, E2E) — and how to run each. |
 | [debugging.md](debugging.md) | The debugging workflow: named debug tabs (`?tab=<name>`), client `[channel]` debug logging + `cityedit.dumpState()`, the server log-tag table, and curl probes. |
 | [gcp-deployment.md](gcp-deployment.md) | Deploying to Google Cloud (Cloud Run + Memorystore + Artifact Registry + Cloud Build), mapping custom domains, and reaching/backing up prod Postgres. |
+| [nyc-proposal-data-sources.md](nyc-proposal-data-sources.md) | Where NYC's **official** street-change proposals live (nycdotprojects.info, the VZV SIPs Socrata datasets, DOT yearly project pages) and verified scrape recipes for each — companion script `tools/nyc_proposals/fetch_latest.py`. |
 | [archive/](archive/) | Historical design docs that no longer match the code. See [archive/README.md](archive/README.md). |
 
 The frontend and load test have their own local READMEs: [`client-react/README.md`](../client-react/README.md) and [`loadtest/README.md`](../loadtest/README.md). The top-level [`README.md`](../README.md) is the project front door (quickstart + architecture).
