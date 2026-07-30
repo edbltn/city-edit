@@ -16,7 +16,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 ENV PYTHONUNBUFFERED=1
 
 # brotli modules: ~15-20% smaller than gzip on the big topology/JSON payloads.
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx libnginx-mod-http-brotli-filter libnginx-mod-http-brotli-static \
     supervisor curl \
     && rm -rf /var/lib/apt/lists/*
@@ -60,5 +60,12 @@ COPY deploy/healthcheck.sh /app/deploy/healthcheck.sh
 RUN chmod +x /app/deploy/healthcheck.sh
 
 EXPOSE 8080
+
+# Status-only probe (Cloud Run ignores Docker HEALTHCHECK; deploy/healthcheck.sh
+# under supervisor does the actual self-healing). Long start period + high
+# retries: the background graph warmup can freeze the gevent hub for minutes,
+# during which /health can't respond — mirror healthcheck.sh's 15×60s tolerance.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=900s --retries=15 \
+  CMD curl -fsS http://127.0.0.1:5001/health || exit 1
 
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

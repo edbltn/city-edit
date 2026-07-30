@@ -36,7 +36,14 @@ FROM osrm/osrm-backend:v5.25.0
 WORKDIR /data
 COPY --from=builder /data/combined.osrm* /data/
 
-# Cloud Run injects $PORT (8080); local compose leaves it unset -> default 5000.
+# Cloud Run overrides $PORT (8080); local compose keeps the default 5000.
 # osrm-routed must bind 0.0.0.0 so the container is reachable.
-ENV OSRM_DATASET=/data/combined.osrm
+ENV OSRM_DATASET=/data/combined.osrm \
+    PORT=5000
+EXPOSE 5000
+
+# The osrm-backend runtime image ships neither curl nor wget, so an HTTP probe
+# can never pass (it pinned the container "unhealthy" while serving fine).
+HEALTHCHECK NONE
+
 CMD ["sh", "-c", "exec osrm-routed --algorithm mld --ip 0.0.0.0 --port ${PORT:-5000} \"$OSRM_DATASET\""]

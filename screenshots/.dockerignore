@@ -1,0 +1,6 @@
+# Context for screenshots/Dockerfile — only requirements.txt + capture.py ship.
+capenv
+__pycache__
+*.pyc
+*.png
+.DS_Store

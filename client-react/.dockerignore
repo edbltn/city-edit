@@ -1,0 +1,8 @@
+# Context for client-react/Dockerfile (COPY . . into the npm build stage).
+node_modules
+dist
+coverage
+.env
+.env.*
+.DS_Store
+*.log

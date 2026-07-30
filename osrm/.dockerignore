@@ -1,0 +1,5 @@
+# Context for osrm/Dockerfile — only the .lua profiles + build-merged.sh are
+# copied; keep any local OSM/OSRM artifacts out of the upload.
+*.osm.pbf
+*.osrm*
+.DS_Store

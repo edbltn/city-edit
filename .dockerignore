@@ -1,0 +1,36 @@
+# Root build context — feeds Dockerfile + every Dockerfile.*overlay.
+# Those builds only COPY: client-react/ (source), server/*.py, server/data/,
+# server/requirements.txt, deploy/, .arrays-staging/, .blocks-staging/.
+# Everything else stays out of the context upload.
+
+# VCS / editor
+.git
+.gitignore
+**/.DS_Store
+**/*.swp
+
+# Secrets & local env — must never enter a build context
+**/.env
+!**/.env.example
+
+# Python local state
+server/env
+**/__pycache__
+**/*.pyc
+
+# Heavy artifacts rebuilt (client) or baked in-image (graphs/tiles)
+server/osm_data
+**/node_modules
+client-react/dist
+
+# Sibling build contexts + repo material no root-context build copies
+osrm
+screenshots
+changelog
+docs
+data
+tools
+terraform
+google-cloud-sdk
+*.tar.gz
+**/*.log

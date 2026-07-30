@@ -1,0 +1,18 @@
+# droast (Dockerfile linter) project policy — deliberate deviations only.
+# Everything not listed here is expected to lint clean.
+#
+# DF005  apt version pinning: Debian point releases rotate old versions out of
+#        the mirrors, so pinned `pkg=ver` installs start failing on rebuild.
+#        We pin base images (python:3.13-slim, osrm-backend:v5.25.0) instead.
+# DF011  "single-stage heavy build image": misfires here — python:3.13-slim
+#        images carry no build toolchain, and the playwright image needs its
+#        browser deps at runtime, so a multi-stage split buys nothing.
+# DF020  no USER: each image has a concrete root requirement — nginx/supervisor
+#        masters (main + client images), playwright `install --with-deps`
+#        (apt at build) + Chromium sandbox (screenshots), and the shared
+#        osm_data volume written by the osm-refresh sidecar (server image).
+#        Cloud Run additionally sandboxes prod (gVisor).
+# DF036  no CMD/ENTRYPOINT: the Dockerfile.*overlay files build FROM the
+#        digest-pinned ${BASE_IMAGE} serving prod and inherit its CMD; droast
+#        cannot resolve an ARG-based FROM.
+skip = ["DF005", "DF011", "DF020", "DF036"]

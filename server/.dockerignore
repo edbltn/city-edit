@@ -1,0 +1,11 @@
+# Context for `build: ./server` (compose flask + osm-refresh sidecar).
+# The build only COPYs requirements.txt and top-level *.py.
+env
+.env
+!.env.example
+__pycache__
+**/__pycache__
+*.pyc
+osm_data
+tests
+.pytest_cache

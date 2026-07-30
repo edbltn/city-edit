@@ -3,8 +3,13 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+# Unbuffered so logs stream to docker logs; no .pyc litter in the image.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 # Install curl for health checks
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
@@ -20,5 +25,10 @@ COPY *.py ./
 RUN mkdir -p osm_data
 
 EXPOSE 5001
+
+# Health checking lives at the compose level: this image is shared by the
+# `flask` service (curl /health) and the `osm-refresh` sidecar, whose command
+# runs no server — an image-level probe would pin the sidecar "unhealthy".
+HEALTHCHECK NONE
 
 CMD ["python", "app.py"]
