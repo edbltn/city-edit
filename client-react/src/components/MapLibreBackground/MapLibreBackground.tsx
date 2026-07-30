@@ -243,9 +243,13 @@ function buildStyle(
         paint: blockLinePaint(mapStyle),
       },
       // Block selection — feature-state { selected } lights the block polygons
-      // covering the current selection/hover: a subtle translucent fill plus a
-      // 2px casing in the style's selection token (white on dark, near-black on
-      // light), so it reads as selection over the heat in both themes.
+      // covering the current selection/hover: a faint translucent fill plus a
+      // hairline casing in the style's selection token (white on dark,
+      // near-black on light). Deliberately SUBTLER than the route trace
+      // (Leaflet's thick selection polyline drawn above): the route line is
+      // the primary "what you selected" signal, the block wash is secondary
+      // "what it covers" context — a clear visual hierarchy instead of two
+      // competing white treatments.
       {
         id: "block-select",
         type: "fill",
@@ -254,7 +258,7 @@ function buildStyle(
         paint: {
           "fill-color": mapStyle.selection,
           "fill-opacity": [
-            "case", ["boolean", ["feature-state", "selected"], false], 0.14, 0,
+            "case", ["boolean", ["feature-state", "selected"], false], 0.08, 0,
           ],
         },
       },
@@ -265,9 +269,9 @@ function buildStyle(
         "source-layer": "blocks",
         paint: {
           "line-color": mapStyle.selection,
-          "line-width": 2,
+          "line-width": 1,
           "line-opacity": [
-            "case", ["boolean", ["feature-state", "selected"], false], 0.85, 0,
+            "case", ["boolean", ["feature-state", "selected"], false], 0.4, 0,
           ],
         },
       },
