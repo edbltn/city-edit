@@ -10,10 +10,10 @@ import re
 
 HERE = os.path.dirname(__file__)
 DIFF_PATH = os.path.join(HERE, "changes.diff")
-OUT_PATH = os.path.join(HERE, "2026-07-30-top-proposal-threshold-ghost-waypoints.html")
+OUT_PATH = os.path.join(HERE, "2026-07-30-droast-dockerfile-hygiene.html")
 
 DATE = "2026-07-30"
-TITLE = "Top-proposal support floor, modal badges, and routing-consistent corridors with ghost waypoints"
+TITLE = "droast Dockerfile hygiene pass + the ForcedCorridor build-breaker (overlay deploy)"
 
 
 def split_by_file(diff_text: str):
@@ -57,169 +57,117 @@ def colorize(diff_chunk: str) -> str:
 
 SECTIONS = [
     {
-        "id": "floor",
-        "tag": "React client · proposals",
-        "title": "1 · Top proposals now require &gt;100 net votes",
+        "id": "buildfix",
+        "tag": "React client · build",
+        "title": "1 · A missing type import silently broke every Docker client build",
         "symptom": (
-            "A vote type with a handful of votes could still be a <em>Top Proposal</em> — its best "
-            "edge only had to beat the rest of its own (rare) type. Selecting such a pin opened a "
-            "modal where OTHER vote types showed far higher counts right below the “top” one, which "
-            "read as a contradiction."
+            "Building the client image (and therefore ANY overlay deploy) failed at <code>tsc -b</code> with "
+            "<code>TS2304: Cannot find name 'ForcedCorridor'</code> ×2 in MapView.tsx. Localhost looked perfectly "
+            "healthy the whole time — Vite's dev server transpiles without type-checking, so the error only "
+            "existed at image-build time. Surfaced by the droast validation builds, not by any dev workflow."
         ),
         "cause": [
-            "PBTP winner selection (<code>computeVoteTypeWinners</code>) admitted any edge with net &gt; 0 "
-            "— the bar was <em>relative to the type</em>, never absolute.",
-            "RBTP corridors had only structural gates (<code>MIN_ROUTE_SCORE</code> = 3, edges, blocks) — "
-            "again no absolute support bar.",
+            "<code>536fb76</code> (ghost-waypoint corridors) added <code>ForcedCorridor</code> type annotations to "
+            "MapView's <code>corridorChainOf</code>/<code>corridorChainFor</code> without importing the type — every "
+            "other user (RouteContext, reducer) already imported it from <code>selection/types</code>.",
+            "Nothing in the dev loop runs <code>tsc</code>; the first consumer to notice would have been the next "
+            "overlay deploy's Cloud Build, mid-deploy.",
         ],
         "fixes": [
-            "<strong><code>TOP_PROPOSAL_MIN_NET = 100</code></strong> (topProposals.ts): a proposal counts as "
-            "“top” only with STRICTLY more than 100 net votes. Threaded as a <code>minNet</code> param through "
-            "<code>computeVoteTypeWinners</code> / <code>selectTopProposals</code> (default = the floor, so the "
-            "product rule is the default; tests pass 0 to probe mechanics).",
-            "GraphLayer passes the floor for street maps and <strong>0 for station networks</strong> — station "
-            "pins are synthesized per station, not vote winners, so the floor would only break their few "
-            "internal winner uses.",
-            "RBTPs share the same bar: the proposal job gets <code>minRouteScore: TOP_PROPOSAL_MIN_NET + 1</code> "
-            "(score = sum of path-edge nets), and the pipeline now SKIPS any connected component whose total "
-            "weight can't reach the score gate — with the 100-floor that prunes almost every component before "
-            "any routing work runs (the perf enabler for §3).",
+            "One line: <code>import type {{ ForcedCorridor }} from \"../../selection/types\";</code> — same style as "
+            "RouteContext's import.",
+            "Verified by host <code>tsc -b</code> (clean) and a full <code>docker build</code> of "
+            "client-react/Dockerfile (image builds through <code>vite build</code>).",
         ],
         "files": [
-            "client-react/src/components/GraphLayer/topProposals.ts",
-            "client-react/src/components/GraphLayer/topProposals.test.ts",
-            "client-react/src/components/GraphLayer/GraphLayer.tsx",
-        ],
-    },
-    {
-        "id": "badges",
-        "tag": "React client · modal",
-        "title": "2 · The modal badges every vote type that is a top proposal there",
-        "symptom": (
-            "Even with the floor, a modal row's counts alone can't tell you WHICH vote type earned the pin "
-            "you clicked — the top-proposal row could sit below rows with bigger raw numbers (distinct-voter "
-            "rows vs fanned-out net scores) with nothing marking it."
-        ),
-        "cause": [
-            "The cards (<code>ProposalCard</code>) rendered label + −/net/+ tallies only; “is this label a "
-            "current top proposal for what this card shows?” existed nowhere as data.",
-        ],
-        "fixes": [
-            "<strong>Purely derived, never stored</strong>: <code>topKindsFor(edgeIds, includeRoutes)</code> in "
-            "GraphLayer computes a <code>Map&lt;label, \"point\"|\"route\"|\"both\"&gt;</code> from the SAME "
-            "<code>winners</code>/<code>routeProposals</code> arrays that render the map pins, so a badge can never "
-            "disagree with a pin (both refresh on the same batched proposal sweep).",
-            "<strong>point</strong>: a PBTP winner sits on one of the card's blocks — the same block grain the rows "
-            "sum over. <strong>route</strong>: an RBTP whose corridor is FULLY contained in the selection "
-            "(<code>expandSelectionToUndirected</code> + <code>isRouteCovered</code> — brushing a corridor doesn't "
-            "badge it). Point-only cards skip the containment scan (a one-block card can't contain a ≥5-block corridor).",
-            "Per-card memos feed all four cards (pinned point, edge hover, diamond hover, route summary); "
-            "<code>ProposalCard</code> gains a <code>topKinds</code> prop and renders a mini square (point) / "
-            "diamond (route) badge before the label + bolds the row — the same glyph language as the map pins "
-            "(<code>proposalShapeClass</code>). CSS in globals.css.",
-        ],
-        "files": [
-            "client-react/src/components/GraphLayer/GraphLayer.tsx",
-            "client-react/src/styles/globals.css",
-        ],
-    },
-    {
-        "id": "ghosts",
-        "tag": "React client · proposals + selection + URL",
-        "title": "3 · Corridors grow routing-consistently — ghost waypoints in the URL",
-        "symptom": (
-            "Route proposals were built by greedily chaining high-vote edges with no regard for how the app "
-            "actually ROUTES. A selected proposal's URL carried just its two anchors plus an "
-            "<code>f&lt;id&gt;</code> token — the corridor reproduced only while the live proposal existed; once "
-            "votes reshaped it, the OSRM fallback between the anchors could wander far off the corridor, so "
-            "shared top-proposal links didn't persist. Roundaboutness was held down by geometric heuristics "
-            "(straightness splitting + budget-window trimming) rather than anything routing-shaped."
-        ),
-        "cause": [
-            "<code>greedyHeaviestPath</code>/<code>exactHeaviestPath</code> optimized path WEIGHT on the voted "
-            "subgraph only — nothing constrained the corridor to be reproducible by routing between any set of "
-            "waypoints, so no waypoint set could persist it.",
-        ],
-        "fixes": [
-            "<strong>New growth</strong> (<code>growCorridor</code>): start at the component's heaviest edge; "
-            "repeatedly take the heaviest net-positive arc off either tip (ties: lowest edge id) that fits the "
-            "support-earned length budget. An extension is accepted outright only if the OPEN SEGMENT (tip → "
-            "nearest inner waypoint) <em>stays a shortest path through the full graph</em>; otherwise the previous "
-            "tip is pinned as a <strong>ghost waypoint</strong>. At most <code>MAX_GHOST_WAYPOINTS</code> (3) pins — "
-            "the 3rd ends growth — so every proposal is reproducible as ≤ 5 route waypoints. This REPLACES "
-            "<code>splitLoopyPath</code> + <code>capPathToLengthBudget</code> (roundaboutness is now bounded by the "
-            "pin budget, per spec).",
-            "<strong>The oracle</strong> (<code>makeSegmentShortestCheck</code>): a bounded, deterministic A* over the "
-            "full topology — crow-flies heuristic (×0.999 for admissibility), every g-score pruned at the corridor "
-            "length, so the search explores exactly the ellipse of paths that could beat the corridor (razor-thin "
-            "for the near-straight segments consistent growth produces). Ties and sub-eps (1 m) shortcuts are NOT "
-            "detours; pop cap fails OPEN. Injectable via <code>opts.segmentShortestCheck</code> for tests.",
-            "<strong>Proposal shape</strong>: <code>RouteProposal</code> gains <code>waypointNodes</code> / "
-            "<code>waypointCoords</code> ([anchor, ghosts…, anchor]) and per-segment <code>segments</code> edge "
-            "slices; the wire parse synthesizes anchor-only chains for legacy payloads.",
-            "<strong>Selection = the chain</strong>: clicking a diamond selects ALL waypoints (per-segment forced "
-            "flags), so the URL serializes <code>?w=a,f&lt;id&gt;;g1,f&lt;id&gt;;…;b</code> — the serializer already "
-            "supported per-waypoint tokens. The corridor resolver now slices the live proposal between the two "
-            "waypoints nearest each segment (<code>corridorSliceBetween</code>); retired proposals fall back to the "
-            "per-segment edge snapshots, then to OSRM through the ghosts — which now approximates the corridor by "
-            "construction. That's the persistence story.",
-            "<strong>Threading generalized pair → chain</strong>: RouteContext's corridor ops "
-            "(<code>selectCorridor</code>, <code>replaceStart/EndWithChain</code>, "
-            "<code>insertWaypointChainAtSegment</code>, <code>replaceGhostWaypointWithChain</code>) insert the whole "
-            "chain with end-dedupe against neighbors; MapView's click/drop handlers orient the chain via "
-            "<code>chooseAnchorOrder</code> on its endpoints; <code>anchorsAreWaypoints</code> now requires every "
-            "chain point to be a consecutive route waypoint (either direction); the diamond's [×] pulls the whole "
-            "chain back out.",
-        ],
-        "files": [
-            "client-react/src/components/GraphLayer/routeProposals.ts",
-            "client-react/src/components/GraphLayer/routeProposals.test.ts",
-            "client-react/src/components/GraphLayer/routeProposals.perf.test.ts",
-            "client-react/src/components/GraphLayer/GraphLayer.tsx",
-            "client-react/src/context/RouteContext.tsx",
             "client-react/src/components/MapView/MapView.tsx",
-            "docs/three-layer-model.md",
+        ],
+    },
+    {
+        "id": "droast",
+        "tag": "Docker · all images",
+        "title": "2 · droast lint pass: 1 error / 12 warnings / 27 infos → clean",
+        "symptom": (
+            "Ran <a href=\"https://github.com/immanuwell/dockerfile-roast\">droast</a> 1.4.11 over all 10 "
+            "Dockerfiles: 1 error (osrm CMD referenced an undeclared <code>$PORT</code>), 12 warnings (no USER, "
+            "no CMD in overlays, COPY-everything, single-stage), 27 infos (no .dockerignore anywhere, unpinned "
+            "apt, missing Python env vars, missing healthchecks). No build context in the repo had a "
+            ".dockerignore, so local docker builds could sweep secrets (<code>server/.env</code>), "
+            "<code>server/osm_data</code> graphs, and node_modules into context uploads."
+        ),
+        "cause": [
+            "The Dockerfiles accreted per-workstream (main bake, 5 surgical overlays, 3 service images, 1 batch "
+            "job) without a shared hygiene pass; <code>screenshots/Dockerfile</code> even used bare "
+            "<code>pip</code> against the project's own uv mandate.",
+        ],
+        "fixes": [
+            "<strong>.dockerignore per build context</strong> (root + server + client-react + osrm + screenshots). "
+            "The root one feeds the app image AND all 5 overlays, so it excludes secrets/graphs/node_modules while "
+            "preserving every COPY'd path (client-react/, server/*.py + data/, deploy/, .arrays-staging/, "
+            ".blocks-staging/).",
+            "<strong>osrm</strong>: the one ERROR — <code>ENV PORT=5000</code> declares the var the CMD "
+            "interpolates (Cloud Run still overrides with 8080); plus <code>EXPOSE 5000</code> and an explicit "
+            "<code>HEALTHCHECK NONE</code> (the runtime image ships no curl/wget — same rationale already "
+            "documented on the compose service).",
+            "<strong>Main image</strong>: <code>--no-install-recommends</code>; a status-only HEALTHCHECK probing "
+            "<code>/health</code> with a 900s start period + 15 retries, mirroring deploy/healthcheck.sh's "
+            "graph-warmup tolerance (Cloud Run ignores Docker HEALTHCHECK — this is for compose runs).",
+            "<strong>server</strong>: <code>PYTHONUNBUFFERED</code>/<code>PYTHONDONTWRITEBYTECODE</code>, "
+            "<code>--no-install-recommends</code>, explicit <code>HEALTHCHECK NONE</code> — the image is shared "
+            "with the osm-refresh sidecar (whose command runs no server), so compose owns the flask probe.",
+            "<strong>client-react</strong>: explicit COPY of the six build inputs instead of <code>COPY . .</code> "
+            "(unrelated files no longer bust the npm build cache) + a busybox-wget healthcheck on the nginx stage.",
+            "<strong>screenshots</strong>: bare <code>pip</code> → <code>uv pip install --system</code> (CLAUDE.md "
+            "mandate), Python env vars, <code>HEALTHCHECK NONE</code> (one-shot batch job).",
+            "<strong>droast.toml</strong> records the four deliberate global skips with rationale — DF005 apt "
+            "pinning (Debian point-release churn breaks rebuilds; we pin base images instead), DF020 USER (each "
+            "image has a concrete root requirement), DF011 single-stage (slim images carry no toolchain), DF036 "
+            "no-CMD (overlays inherit CMD from the digest-pinned <code>${{BASE_IMAGE}}</code>). Future runs lint "
+            "clean: <code>droast</code> exits 0.",
+        ],
+        "files": [
+            "Dockerfile",
+            "server/Dockerfile",
+            "client-react/Dockerfile",
+            "osrm/Dockerfile",
+            "screenshots/Dockerfile",
+            ".dockerignore",
+            "server/.dockerignore",
+            "client-react/.dockerignore",
+            "osrm/.dockerignore",
+            "screenshots/.dockerignore",
+            "droast.toml",
         ],
     },
 ]
 
 VERIFY = [
-    "Unit: <code>npx vitest run</code> — 327 tests green, incl. 73 in routeProposals.test.ts "
-    "(new suites: A* oracle accepts only-path / rejects shortcut / tolerates ties / fails open at the "
-    "pop cap; growCorridor no-ghost, pin-on-inconsistency, 3-pin stop, budget skip, determinism; "
-    "end-to-end ghost pinning on a triangle-with-shortcut topology; segments always partition the path; "
-    "corridorSliceBetween slicing/orientation) and 37 in topProposals.test.ts (floor default, "
-    "strictly-greater, minNet 0 escape hatch).",
-    "Perf (real nyc-bikes graph, 3.3M edges, ~183k voted, PERF=1 harness now passing the app's "
-    "<code>minRouteScore</code>): full recompute <strong>~1.33s</strong>, worst per-type slice "
-    "<strong>341ms</strong>, 20 corridors — same ballpark as the old pipeline (~750ms/250ms) despite "
-    "per-extension A* checks, thanks to the component-weight prune.",
-    "Browser (localhost:3000/m/nyc-bikes): 20 diamonds render; clicking one produced "
-    "<code>?w=40.741481,-73.988975,ffa1a7130;40.767609,-73.981485</code>, traced Broadway verbatim, and "
-    "the route card showed “TOP ROUTE PROPOSAL — Add sharrow” with the <strong>Add sharrow row bolded + "
-    "diamond-badged</strong> while higher-count rows (Add bike lane +394…) stayed plain — the exact "
-    "confusion this fixes.",
-    "Deep-link restore: fresh navigation to that URL re-selected the corridor, re-traced it via the "
-    "forced-corridor slice resolver, and re-badged the card.",
-    "A low-net point modal (net 1 “Add bike lane”) shows NO badge and a plain “Proposal” eyebrow — "
-    "the floor working on the point side.",
+    "droast over all 10 Dockerfiles: <strong>exit 0</strong> — one intentional info remains (no EXPOSE on the "
+    "screenshots batch job, which has no port).",
+    "<code>docker build --check</code> (BuildKit lint) on all 10: clean except two pre-existing, by-design "
+    "warnings (ARG BASE_IMAGE deliberately has no default; osrm's amd64 base on an arm64 Mac).",
+    "Real builds: client-react image (validates the explicit COPY set through <code>tsc -b && vite build</code>) "
+    "and server image — both green.",
+    "Prod DB backed up pre-deploy: <code>pg_dump -Fc</code> via the bastion tunnel (:5433) into "
+    "<code>~/city-edit-prod-backups/</code> (27 MB).",
+    "Overlay image built from a CLEAN worktree of HEAD (the working tree carried unrelated in-flight edits to "
+    "GraphLayer.tsx / runtime.ts / database.py that must not ship), base = the serving digest "
+    "<code>f38b2659…</code> — no graph rebuild, no edge-id shift, no resnap.",
+    "Staging-first: new digest deployed to <code>ce-stg-*</code>, verified (/health, graph-votes fields, served "
+    "asset hash), then the SAME digest promoted to <code>desire-path-mapper</code> and re-verified.",
 ]
 
 CHECKLIST = [
-    "Open <code>http://localhost:3000/m/nyc-bikes</code> — every square/diamond pin should belong to a "
-    "type with real support (&gt;100 net); hover a low-vote street: its card rows show no badge.",
-    "Click a diamond: the URL should list the proposal's waypoints (2–5) each with an "
-    "<code>,f&lt;id&gt;</code> token, the corridor should trace exactly, and the route card should bold + "
-    "diamond-badge the proposal's own row.",
-    "Copy that URL into a fresh tab — the corridor, card header, and badge should all restore.",
-    "Trace a route that fully contains a corridor by hand (start before, end after) — the diamond's row "
-    "badges in the route card; shorten the route so a block drops out — the badge disappears.",
-    "Drag your route's END onto a diamond — the whole chain threads in (ghost pins appear for ghosted "
-    "proposals); the diamond's [×] pulls all of them back out at once.",
-    "On a map with a corridor that bends around a shorter parallel path, confirm the proposal carries "
-    "mid ghost pins (≤3) and that routing through them (delete the f-token from the URL to force OSRM) "
-    "still follows the corridor.",
+    "Run <code>droast</code> from the repo root — it should exit 0 with only the screenshots EXPOSE info.",
+    "<code>docker compose build flask nginx</code> — both images should build; check <code>docker compose ps</code> "
+    "shows flask healthy (compose probe) and nginx healthy (new image probe).",
+    "Confirm a context upload shrank: <code>docker build -f Dockerfile.overlay --build-arg BASE_IMAGE=python:3.13-slim .</code> "
+    "should transfer a context WITHOUT server/osm_data or node_modules (watch the “transferring context” line).",
+    "Open the prod map and click a top-proposal diamond — corridor + badges restore (this deploy also shipped "
+    "536fb76's floor/badges/ghost-waypoint work to prod for the first time).",
+    "Check prod logs for a clean boot: <code>gcloud run services logs read desire-path-mapper --limit=50</code>.",
 ]
+
 
 def li(items):
     return "\n".join(f"<li>{x}</li>" for x in items)
@@ -255,174 +203,143 @@ SYSTEM_COMPONENTS = ["nginx", "Flask API", "OSRM", "Redis", "React / Leaflet cli
 
 # label, summary, changed?
 FILE_CONTEXT = {
-    "client-react/src/components/GraphLayer/topProposals.ts": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · GraphLayer/", "PBTP selection: which edges earn a point-based Top Proposal square"),
-        "file": ("topProposals.ts", "~360 LOC — the 5-step winner pipeline (per-type winners → edge/block dedupe → spacing → limit)"),
-        "outline": [
-            ("shuffleKey / compareWinners", "salted deterministic tiebreak", False),
-            ("TOP_PROPOSAL_MIN_NET", "NEW — the >100 net support floor both proposal families share", True),
-            ("computeVoteTypeWinners", "step 1 — now drops edges at/below max(0, minNet)", True),
-            ("topLabelForEdges", "deep-link vote-type fallback", False),
-            ("dedupeWinnersByEdge / ByBlock / spaceOutWinners / applyTopProposalLimit", "steps 2–5", False),
-            ("selectTopProposals", "full path — minNet param, default = the floor", True),
-        ],
-        "blocks": [
-            "TOP_PROPOSAL_MIN_NET = 100 — strictly-greater floor, doc'd as the shared PBTP/RBTP bar",
-            "computeVoteTypeWinners(…, minNet = 0) — count <= max(0, minNet) skips",
-            "selectTopProposals(…, minNet = TOP_PROPOSAL_MIN_NET) — threads the floor through step 1",
-        ],
-    },
-    "client-react/src/components/GraphLayer/topProposals.test.ts": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · GraphLayer/", "unit tests for the PBTP winner pipeline"),
-        "file": ("topProposals.test.ts", "~400 LOC — per-step + full-path suites"),
-        "outline": [
-            ("computeVoteTypeWinners / dedupe / spacing suites", "mechanics probes — now pass minNet 0 where counts are tiny", True),
-            ("top-proposal support floor suite", "NEW — default floor, strictly-greater, minNet-0 escape hatch", True),
-        ],
-        "blocks": [
-            "5 selectTopProposals call sites gain (600, undefined, 0) — mechanics tests opt out of the floor",
-            "new describe: floor default drops net-3 winner, keeps net-130; net == 100 excluded (strict)",
-        ],
-    },
-    "client-react/src/components/GraphLayer/routeProposals.ts": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · GraphLayer/", "RBTP corridors: client-side deterministic extraction + selection/corridor helpers"),
-        "file": ("routeProposals.ts", "~1180 LOC — parse/shape/coverage helpers, the growth pipeline, the resumable job"),
-        "outline": [
-            ("RouteProposal + wire parse", "now carries waypointNodes / waypointCoords / per-segment `segments` (legacy synthesized)", True),
-            ("shape / coverage / dedupe helpers", "diamond class, isRouteCovered, twin expansion, point subsumption", False),
-            ("corridorCoordinates / corridorFromEdgeIds", "verbatim geometry + snapshot fallback", False),
-            ("corridorSliceBetween", "NEW — the sub-chain between the waypoints nearest a/b, oriented a→b (per-segment resolver)", True),
-            ("chooseAnchorOrder / Before", "chain-orientation choice for drops", False),
-            ("constants", "MAX_GHOST_WAYPOINTS / ROUTE_CONSISTENCY_EPS_M / ROUTE_CHECK_MAX_POPS join the gates; splitLoopy/straightness constants deleted", True),
-            ("makeSegmentShortestCheck", "NEW — bounded deterministic A* consistency oracle (fails open at the pop cap)", True),
-            ("growCorridor", "NEW — routing-consistent two-tip growth; pins ghosts, 3rd pin ends growth; budget-gated", True),
-            ("peelCorridors", "grow-and-remove peel (replaces peelPaths + exact/greedy heaviest path + loop split + window trim)", True),
-            ("createRouteProposalJob / computeRouteProposals", "component-weight prune; proposals carry the waypoint chain", True),
-        ],
-        "blocks": [
-            "RouteProposal { waypointNodes, waypointCoords, segments } + wire parse synthesis",
-            "corridorSliceBetween — walk the chain, locate waypoint positions from segment lengths, slice + orient",
-            "MAX_GHOST_WAYPOINTS=3, ROUTE_CONSISTENCY_EPS_M=1, ROUTE_CHECK_MAX_POPS=30000",
-            "makeSegmentShortestCheck — A* from segment end toward its bound; g pruned at corridor length; ties tolerated",
-            "growCorridor — heaviest-seed, best-arc-off-either-tip, open-segment bookkeeping per side, pin/stop rules, segments assembly",
-            "step() — skip components whose total weight < minRouteScore; peelCorridors(grow); proposals with waypoint fields",
-            "DELETED: exactHeaviestPath, greedyHeaviestPath, pathWeight, heaviestPathFromAdj, peelPaths, splitLoopyPath, capPathToLengthBudget, EXACT_PATH_MAX_VERTICES, ROUTE_STRAIGHTNESS_*/WINDOW_*/SPLIT_MAX_DEPTH",
-        ],
-    },
-    "client-react/src/components/GraphLayer/routeProposals.test.ts": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · GraphLayer/", "unit + integration tests for the corridor pipeline"),
-        "file": ("routeProposals.test.ts", "~740 LOC — parse/coverage/dedupe suites + the new growth/oracle/slice suites"),
-        "outline": [
-            ("fixtures", "route()/bareRoute() gain waypoint fields (default = anchors, one segment)", True),
-            ("parse / shape / coverage / dedupe suites", "kept — parse now also checks waypoint synthesis + wire carry", True),
-            ("computeRouteProposals mechanics suites", "net weighting, peeling, per-type, blocks, gates, quota, determinism — expectations preserved under growth", True),
-            ("splitLoopyPath + capPathToLengthBudget suites", "DELETED with the functions", True),
-            ("makeSegmentShortestCheck suite", "NEW — only-path, shortcut, tie, pop-cap fail-open", True),
-            ("growCorridor suite", "NEW — no-ghost, pin, 3-pin stop, budget skip, tie determinism (fake oracles)", True),
-            ("ghost end-to-end + corridorSliceBetween suites", "NEW — triangle-with-shortcut pins node 1; U with no shortcut stays whole; slice orientation/nulls", True),
-        ],
-        "blocks": [
-            "imports swap splitLoopy/cap for growCorridor/makeSegmentShortestCheck/corridorSliceBetween/MAX_GHOST_WAYPOINTS",
-            "makeTopo2D helper — 2-D coords (makeTopo's colinear nodes make every corridor trivially shortest)",
-            "the corridor-length-cap suite now documents budget-limited GROWTH (same expectations, new mechanism)",
-        ],
-    },
-    "client-react/src/components/GraphLayer/routeProposals.perf.test.ts": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · GraphLayer/", "opt-in perf harness against the real nyc-bikes graph (PERF=1)"),
-        "file": ("routeProposals.perf.test.ts", "~75 LOC — decode, adjacency, timed recomputes, per-slice timings"),
-        "outline": [
-            ("timed runs + job slices", "now pass minRouteScore: TOP_PROPOSAL_MIN_NET + 1 — the in-app shape", True),
-        ],
-        "blocks": [
-            "all three createRouteProposalJob/computeRouteProposals call sites mirror the app's floor",
-        ],
-    },
-    "client-react/src/components/GraphLayer/GraphLayer.tsx": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · GraphLayer/", "the canvas heatmap + proposal pins + cards host (4.7k LOC hub)"),
-        "file": ("GraphLayer.tsx", "~4700 LOC — heatmap, hover/pinned/route cards, PBTP squares, RBTP diamonds, resolvers"),
-        "outline": [
-            ("corridor resolver registration", "live proposal → corridorSliceBetween per segment; snapshot / OSRM fallback", True),
-            ("recomputeTopProposals", "passes the support floor (stations exempt)", True),
-            ("anchorsAreWaypoints", "now chain-aware: every proposal waypoint consecutive in the route, either direction", True),
-            ("recomputeRouteProposals job", "opts gain minRouteScore: TOP_PROPOSAL_MIN_NET + 1", True),
-            ("hover/pinned card content", "hoverRowsEdgeId tracked for the badge grain", True),
-            ("topKindsFor + per-card memos", "NEW — derived Map<label, point|route|both> from live winners/routeProposals", True),
-            ("marker memos / cluster engine", "unchanged", False),
-            ("ProposalCard", "topKinds prop; rows render square/diamond badges + bold", True),
-        ],
-        "blocks": [
-            "import swap: corridorCoordinates → corridorSliceBetween; + TOP_PROPOSAL_MIN_NET",
-            "resolver: corridorSliceBetween(topo, p, a, b) — anchor-only proposals degenerate to the whole corridor",
-            "selectTopProposals(…, isStationNetwork ? 0 : TOP_PROPOSAL_MIN_NET)",
-            "createRouteProposalJob opts + minRouteScore comment (shared bar)",
-            "anchorsAreWaypoints — index-run check over p.waypointCoords",
-            "hoverRowsEdgeId — the edge the hover rows summed over",
-            "topKindsFor + pinnedTopKinds/hoverTopKinds/hoverRbtpTopKinds/routeTopKinds memos",
-            "TopProposalKind/TopKindMap types; ProposalCardProps.topKinds; row badge markup",
-        ],
-    },
-    "client-react/src/context/RouteContext.tsx": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · context/", "the canonical selection owner: waypoints, routing, casts, history"),
-        "file": ("RouteContext.tsx", "~1740 LOC — selection state, recalc choreography, corridor ops, history"),
-        "outline": [
-            ("interface — corridor ops", "pair signatures → chain signatures (points + per-segment corridors)", True),
-            ("selection seed / history / recalc core", "unchanged", False),
-            ("replaceGhostWaypointWithChain", "mid → whole chain; end-dedupe vs neighbors; per-segment stamps", True),
-            ("insertWaypointChainAtSegment", "chain into a segment; chainStart accounting mirrors the old 4 pair cases", True),
-            ("replaceEnd/StartWithChain", "chain threads at an endpoint; no-op re-drop check generalized", True),
-            ("selectCorridor", "the chain BECOMES the selection (≤5 waypoints, flags stamped)", True),
-            ("removeWaypointsNear / notifyCorridorsChanged", "unchanged (already list-shaped)", False),
-        ],
-        "blocks": [
-            "four ops renamed *WithPair → *WithChain; all bodies generalized from 2 anchors to k-point chains",
-            "selectCorridor builds waypoints from chain.map with forcedCorridor per leading index",
-        ],
-    },
     "client-react/src/components/MapView/MapView.tsx": {
         "on": ["React / Leaflet client"],
-        "module": ("React client · MapView/", "the map shell: tools, click/drag handlers, marker wiring"),
-        "file": ("MapView.tsx", "~800 LOC — placement handlers, corridor threading, marker render"),
+        "module": ("React client · MapView/", "the map shell: tools, click/drag handlers, corridor threading"),
+        "file": ("MapView.tsx", "~800 LOC — placement handlers, chain threading (536fb76), marker render"),
         "outline": [
-            ("corridorChainOf", "NEW — proposal → oriented {points, corridors} (per-segment stamps)", True),
-            ("handleRouteProposalClick", "selects the full chain; re-tap no-op compares whole chain either direction", True),
-            ("corridorChainFor", "drop → oriented chain via chooseAnchorOrder on the chain endpoints", True),
-            ("ghost/segment/end/start drop handlers", "thread the chain instead of a pair", True),
-            ("removeRouteProposal", "removes ALL chain waypoints", True),
+            ("imports", "gains the type import 536fb76 forgot", True),
+            ("corridorChainOf / corridorChainFor", "the ForcedCorridor-annotated helpers that failed tsc", False),
+            ("click/drop handlers, marker wiring", "unchanged", False),
         ],
         "blocks": [
-            "corridorChainOf(p, reversed) — reverse points + segment order; slice edge order left to the resolver",
-            "handlers call the renamed chain ops; orientation from chooseAnchorOrder/Before on [first,last]",
+            "import type { ForcedCorridor } from \"../../selection/types\" — matches RouteContext's import style",
         ],
     },
-    "client-react/src/styles/globals.css": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · styles/", "the app-wide stylesheet (cards, pins, controls)"),
-        "file": ("globals.css", "~2200 LOC — design tokens through component styles"),
+    "Dockerfile": {
+        "on": ["nginx", "Flask API", "React / Leaflet client"],
+        "module": ("Deploy · repo root", "the full app image bake: client build + graphs + PMTiles + nginx/supervisor"),
+        "file": ("Dockerfile", "~65 LOC — 2-stage: node client build → python+nginx with in-image graph bakes"),
         "outline": [
-            ("proposal card rows", "gains the top-proposal badge styles", True),
+            ("client-builder stage", "npm ci + vite build", False),
+            ("apt install", "now --no-install-recommends", True),
+            ("uv deps / graph bakes / pmtiles", "unchanged (takes effect next FULL rebuild only)", False),
+            ("EXPOSE + HEALTHCHECK + CMD", "status-only /health probe, 900s start period ×15 retries", True),
         ],
         "blocks": [
-            ".graph-proposal-row.is-top-proposal — bold label",
-            ".graph-proposal-row-top(-square/-diamond) — 6px ink squares, diamond = rotate(45deg)",
+            "apt-get install -y --no-install-recommends nginx …",
+            "HEALTHCHECK --interval=60s --start-period=900s --retries=15 CMD curl -fsS :5001/health — mirrors deploy/healthcheck.sh's warmup tolerance; Cloud Run ignores it",
         ],
     },
-    "docs/three-layer-model.md": {
+    "server/Dockerfile": {
+        "on": ["Flask API"],
+        "module": ("Deploy · server/", "the local-dev flask image (compose flask + osm-refresh sidecar)"),
+        "file": ("Dockerfile", "~35 LOC — python:3.13-slim + uv deps + app code"),
+        "outline": [
+            ("ENV", "PYTHONUNBUFFERED + PYTHONDONTWRITEBYTECODE", True),
+            ("apt curl", "now --no-install-recommends", True),
+            ("uv deps / code copy", "unchanged", False),
+            ("HEALTHCHECK NONE", "explicit — image shared with the serverless osm-refresh sidecar; compose owns the flask probe", True),
+        ],
+        "blocks": [
+            "ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1",
+            "apt-get install -y --no-install-recommends curl",
+            "HEALTHCHECK NONE + rationale comment",
+        ],
+    },
+    "client-react/Dockerfile": {
+        "on": ["nginx", "React / Leaflet client"],
+        "module": ("Deploy · client-react/", "the standalone client image (compose nginx service)"),
+        "file": ("Dockerfile", "~20 LOC — node build stage → nginx:alpine serve stage"),
+        "outline": [
+            ("build stage COPY", "COPY . . → explicit six build inputs (cache-friendly, silences DF007)", True),
+            ("serve stage", "gains a busybox-wget healthcheck", True),
+        ],
+        "blocks": [
+            "COPY index.html vite.config.ts tsconfig*.json ./ + public/ src/ scripts/",
+            "HEALTHCHECK … wget -q --spider http://127.0.0.1/",
+        ],
+    },
+    "osrm/Dockerfile": {
+        "on": ["OSRM"],
+        "module": ("Deploy · osrm/", "the merged-OSRM image: osmium merge → extract/partition/customize → serve"),
+        "file": ("Dockerfile", "~50 LOC — 3-stage; dataset baked at build"),
+        "outline": [
+            ("merger + builder stages", "unchanged", False),
+            ("runtime ENV/EXPOSE/HEALTHCHECK", "PORT declared (fixes the DF087 ERROR), EXPOSE 5000, HEALTHCHECK NONE", True),
+            ("CMD", "unchanged — ${PORT:-5000} still honors Cloud Run's 8080", False),
+        ],
+        "blocks": [
+            "ENV OSRM_DATASET=… PORT=5000 — CMD no longer interpolates an undeclared var",
+            "EXPOSE 5000; HEALTHCHECK NONE (runtime image ships no curl/wget — compose comment's rationale, now in-image)",
+        ],
+    },
+    "screenshots/Dockerfile": {
         "on": [],
-        "module": ("Docs · docs/", "the three-layer voting model: graph / blocks / proposals"),
-        "file": ("three-layer-model.md", "~380 LOC — model, pipeline, selection behavior"),
+        "module": ("Deploy · screenshots/", "the daily map-preview capture job (playwright + chromium)"),
+        "file": ("Dockerfile", "~20 LOC — python:3.13-slim + playwright, one-shot CMD"),
         "outline": [
-            ("§3.2 clustering pipeline", "steps 2–5 rewritten: component prune, routing-consistent growth, ghost pins, budget-as-growth-limit", True),
-            ("§3.3 selection behavior", "unchanged", False),
+            ("ENV + uv", "Python env vars; bare pip → uv pip --system (CLAUDE.md mandate)", True),
+            ("playwright install / CMD", "unchanged", False),
+            ("HEALTHCHECK NONE", "one-shot batch job", True),
         ],
         "blocks": [
-            "step 3 now documents growCorridor / makeSegmentShortestCheck / MAX_GHOST_WAYPOINTS and the URL-persistence rationale",
+            "COPY --from=ghcr.io/astral-sh/uv:latest + uv pip install --system --no-cache",
+            "ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1; HEALTHCHECK NONE",
+        ],
+    },
+    ".dockerignore": {
+        "on": ["nginx", "Flask API", "React / Leaflet client"],
+        "module": ("Deploy · repo root", "NEW — governs the root build context (app image + all 5 overlays)"),
+        "file": (".dockerignore", "~40 lines — excludes secrets/graphs/node_modules, preserves every COPY'd path"),
+        "outline": [
+            ("secrets & env", "**/.env (keep .env.example), server/env", True),
+            ("heavy artifacts", "server/osm_data, **/node_modules, client-react/dist", True),
+            ("repo material", ".git, docs, changelog, data, tools, sibling contexts", True),
+        ],
+        "blocks": [
+            "header documents the exact COPY surface of the 6 root-context builds",
+            "patterns anchored so server/data (needed) survives while root data/ (analysis files) is excluded",
+        ],
+    },
+    "server/.dockerignore": {
+        "on": ["Flask API"],
+        "module": ("Deploy · server/", "NEW — context for compose's build: ./server"),
+        "file": (".dockerignore", "10 lines"),
+        "outline": [("env/.env/osm_data/tests/__pycache__", "excluded; build COPYs only requirements.txt + *.py", True)],
+        "blocks": ["env, .env (compose injects it at runtime via env_file), osm_data (volume-mounted), tests"],
+    },
+    "client-react/.dockerignore": {
+        "on": ["React / Leaflet client"],
+        "module": ("Deploy · client-react/", "NEW — context for the standalone client image"),
+        "file": (".dockerignore", "8 lines"),
+        "outline": [("node_modules/dist/coverage/.env*", "excluded", True)],
+        "blocks": ["node_modules, dist, coverage, .env*, logs"],
+    },
+    "osrm/.dockerignore": {
+        "on": ["OSRM"],
+        "module": ("Deploy · osrm/", "NEW — context for the OSRM image"),
+        "file": (".dockerignore", "5 lines"),
+        "outline": [("local OSM/OSRM artifacts", "*.osm.pbf / *.osrm* kept out of uploads", True)],
+        "blocks": ["*.osm.pbf, *.osrm*, .DS_Store — only the .lua profiles + build-merged.sh ship"],
+    },
+    "screenshots/.dockerignore": {
+        "on": [],
+        "module": ("Deploy · screenshots/", "NEW — context for the capture job"),
+        "file": (".dockerignore", "6 lines"),
+        "outline": [("capenv venv + captures", "excluded", True)],
+        "blocks": ["capenv (a full venv sat in this context), *.png, __pycache__"],
+    },
+    "droast.toml": {
+        "on": [],
+        "module": ("Deploy · repo root", "NEW — droast project policy: the deliberate deviations, with rationale"),
+        "file": ("droast.toml", "~25 lines — comments + a 4-rule skip list"),
+        "outline": [
+            ("rationale comments", "one block per skipped rule", True),
+            ("skip list", "DF005 / DF011 / DF020 / DF036", True),
+        ],
+        "blocks": [
+            "DF005 apt pinning (mirror churn), DF011 single-stage (slim images), DF020 USER (documented root needs), DF036 overlay CMD inheritance",
         ],
     },
 }

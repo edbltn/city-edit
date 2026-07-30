@@ -29,6 +29,22 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-30-droast-dockerfile-hygiene.html">
+    <div class="date">2026-07-30</div>
+    <h2>droast Dockerfile hygiene pass + the ForcedCorridor build-breaker (overlay deploy)</h2>
+    <p>Ran the <code>droast</code> Dockerfile linter over all 10 Dockerfiles and implemented its findings:
+    a <code>.dockerignore</code> for every build context (the root one guards the app image + all five
+    overlays — secrets, <code>server/osm_data</code>, and node_modules no longer ride along), the osrm
+    image's undeclared <code>$PORT</code> error fixed, apt/uv hygiene, Python env vars, and healthchecks
+    where meaningful (explicit <code>HEALTHCHECK NONE</code> with rationale where not). Deliberate
+    deviations live in <code>droast.toml</code>, so future runs lint clean. The validation builds also
+    surfaced a real build-breaker: 536fb76 used <code>ForcedCorridor</code> in MapView without importing
+    it — Vite dev never type-checks, so every Docker client build (and thus any overlay deploy) had been
+    silently broken. Fixed, built from a clean worktree, and shipped staging→prod as digest
+    <code>143dbf45…</code> (prod DB backed up first) — which also put yesterday's floor/badges/ghost-waypoint
+    work in front of users for the first time.</p>
+  </a>
+
   <a class="entry" href="./2026-07-30-top-proposal-threshold-ghost-waypoints.html">
     <div class="date">2026-07-30</div>
     <h2>Top-proposal support floor, modal badges, and routing-consistent corridors with ghost waypoints</h2>

@@ -1,0 +1,838 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>droast Dockerfile hygiene pass + the ForcedCorridor build-breaker (overlay deploy) — 2026-07-30</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>droast Dockerfile hygiene pass + the ForcedCorridor build-breaker (overlay deploy)</h1>
+    <div class="dateline">2026-07-30 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#buildfix">1</a>
+<a href="#droast">2</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Three fixes to Top Proposals: a pin now takes real support (&gt;100 net votes, both point and route families); every modal badges the vote types that are CURRENT top proposals for what it shows (square = point, diamond = route fully inside the selection); and route corridors are now grown ROUTING-CONSISTENTLY — an extension either keeps the segment a shortest path or pins a ghost waypoint (max 3), and the whole waypoint chain lands in the URL, so a shared top-proposal link keeps routing into its corridor long after the proposal itself has churned away.</p>
+
+  
+    <section class="card" id="buildfix">
+      <div class="tag">React client · build</div>
+      <h2>1 · A missing type import silently broke every Docker client build</h2>
+      <h3>Symptom</h3>
+      <p>Building the client image (and therefore ANY overlay deploy) failed at <code>tsc -b</code> with <code>TS2304: Cannot find name 'ForcedCorridor'</code> ×2 in MapView.tsx. Localhost looked perfectly healthy the whole time — Vite's dev server transpiles without type-checking, so the error only existed at image-build time. Surfaced by the droast validation builds, not by any dev workflow.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>536fb76</code> (ghost-waypoint corridors) added <code>ForcedCorridor</code> type annotations to MapView's <code>corridorChainOf</code>/<code>corridorChainFor</code> without importing the type — every other user (RouteContext, reducer) already imported it from <code>selection/types</code>.</li>
+<li>Nothing in the dev loop runs <code>tsc</code>; the first consumer to notice would have been the next overlay deploy's Cloud Build, mid-deploy.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>One line: <code>import type {{ ForcedCorridor }} from "../../selection/types";</code> — same style as RouteContext's import.</li>
+<li>Verified by host <code>tsc -b</code> (clean) and a full <code>docker build</code> of client-react/Dockerfile (image builds through <code>vite build</code>).</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/MapView/MapView.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="droast">
+      <div class="tag">Docker · all images</div>
+      <h2>2 · droast lint pass: 1 error / 12 warnings / 27 infos → clean</h2>
+      <h3>Symptom</h3>
+      <p>Ran <a href="https://github.com/immanuwell/dockerfile-roast">droast</a> 1.4.11 over all 10 Dockerfiles: 1 error (osrm CMD referenced an undeclared <code>$PORT</code>), 12 warnings (no USER, no CMD in overlays, COPY-everything, single-stage), 27 infos (no .dockerignore anywhere, unpinned apt, missing Python env vars, missing healthchecks). No build context in the repo had a .dockerignore, so local docker builds could sweep secrets (<code>server/.env</code>), <code>server/osm_data</code> graphs, and node_modules into context uploads.</p>
+      <h3>Root cause</h3>
+      <ul><li>The Dockerfiles accreted per-workstream (main bake, 5 surgical overlays, 3 service images, 1 batch job) without a shared hygiene pass; <code>screenshots/Dockerfile</code> even used bare <code>pip</code> against the project's own uv mandate.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>.dockerignore per build context</strong> (root + server + client-react + osrm + screenshots). The root one feeds the app image AND all 5 overlays, so it excludes secrets/graphs/node_modules while preserving every COPY'd path (client-react/, server/*.py + data/, deploy/, .arrays-staging/, .blocks-staging/).</li>
+<li><strong>osrm</strong>: the one ERROR — <code>ENV PORT=5000</code> declares the var the CMD interpolates (Cloud Run still overrides with 8080); plus <code>EXPOSE 5000</code> and an explicit <code>HEALTHCHECK NONE</code> (the runtime image ships no curl/wget — same rationale already documented on the compose service).</li>
+<li><strong>Main image</strong>: <code>--no-install-recommends</code>; a status-only HEALTHCHECK probing <code>/health</code> with a 900s start period + 15 retries, mirroring deploy/healthcheck.sh's graph-warmup tolerance (Cloud Run ignores Docker HEALTHCHECK — this is for compose runs).</li>
+<li><strong>server</strong>: <code>PYTHONUNBUFFERED</code>/<code>PYTHONDONTWRITEBYTECODE</code>, <code>--no-install-recommends</code>, explicit <code>HEALTHCHECK NONE</code> — the image is shared with the osm-refresh sidecar (whose command runs no server), so compose owns the flask probe.</li>
+<li><strong>client-react</strong>: explicit COPY of the six build inputs instead of <code>COPY . .</code> (unrelated files no longer bust the npm build cache) + a busybox-wget healthcheck on the nginx stage.</li>
+<li><strong>screenshots</strong>: bare <code>pip</code> → <code>uv pip install --system</code> (CLAUDE.md mandate), Python env vars, <code>HEALTHCHECK NONE</code> (one-shot batch job).</li>
+<li><strong>droast.toml</strong> records the four deliberate global skips with rationale — DF005 apt pinning (Debian point-release churn breaks rebuilds; we pin base images instead), DF020 USER (each image has a concrete root requirement), DF011 single-stage (slim images carry no toolchain), DF036 no-CMD (overlays inherit CMD from the digest-pinned <code>${{BASE_IMAGE}}</code>). Future runs lint clean: <code>droast</code> exits 0.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>Dockerfile</li>
+<li>server/Dockerfile</li>
+<li>client-react/Dockerfile</li>
+<li>osrm/Dockerfile</li>
+<li>screenshots/Dockerfile</li>
+<li>.dockerignore</li>
+<li>server/.dockerignore</li>
+<li>client-react/.dockerignore</li>
+<li>osrm/.dockerignore</li>
+<li>screenshots/.dockerignore</li>
+<li>droast.toml</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>droast over all 10 Dockerfiles: <strong>exit 0</strong> — one intentional info remains (no EXPOSE on the screenshots batch job, which has no port).</li>
+<li><code>docker build --check</code> (BuildKit lint) on all 10: clean except two pre-existing, by-design warnings (ARG BASE_IMAGE deliberately has no default; osrm's amd64 base on an arm64 Mac).</li>
+<li>Real builds: client-react image (validates the explicit COPY set through <code>tsc -b && vite build</code>) and server image — both green.</li>
+<li>Prod DB backed up pre-deploy: <code>pg_dump -Fc</code> via the bastion tunnel (:5433) into <code>~/city-edit-prod-backups/</code> (27 MB).</li>
+<li>Overlay image built from a CLEAN worktree of HEAD (the working tree carried unrelated in-flight edits to GraphLayer.tsx / runtime.ts / database.py that must not ship), base = the serving digest <code>f38b2659…</code> — no graph rebuild, no edge-id shift, no resnap.</li>
+<li>Staging-first: new digest deployed to <code>ce-stg-*</code>, verified (/health, graph-votes fields, served asset hash), then the SAME digest promoted to <code>desire-path-mapper</code> and re-verified.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Run <code>droast</code> from the repo root — it should exit 0 with only the screenshots EXPOSE info.</li>
+<li><code>docker compose build flask nginx</code> — both images should build; check <code>docker compose ps</code> shows flask healthy (compose probe) and nginx healthy (new image probe).</li>
+<li>Confirm a context upload shrank: <code>docker build -f Dockerfile.overlay --build-arg BASE_IMAGE=python:3.13-slim .</code> should transfer a context WITHOUT server/osm_data or node_modules (watch the “transferring context” line).</li>
+<li>Open the prod map and click a top-proposal diamond — corridor + badges restore (this deploy also shipped 536fb76's floor/badges/ghost-waypoint work to prod for the first time).</li>
+<li>Check prod logs for a clean boot: <code>gcloud run services logs read desire-path-mapper --limit=50</code>.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">.dockerignore</span>
+            <span class="stat"><span class="d-add">+36</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill on">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · repo root</span>
+        <span class="ctx-sum">NEW — governs the root build context (app image + all 5 overlays)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">.dockerignore</span>
+        <span class="ctx-sum">~40 lines — excludes secrets/graphs/node_modules, preserves every COPY&#x27;d path</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">secrets &amp; env</span><span class="ol-sum">**/.env (keep .env.example), server/env</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">heavy artifacts</span><span class="ol-sum">server/osm_data, **/node_modules, client-react/dist</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">repo material</span><span class="ol-sum">.git, docs, changelog, data, tools, sibling contexts</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>header documents the exact COPY surface of the 6 root-context builds</li><li>patterns anchored so server/data (needed) survives while root data/ (analysis files) is excluded</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/.dockerignore b/.dockerignore</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..7f24d21</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/.dockerignore</span>
+<span class="d-hunk">@@ -0,0 +1,36 @@</span>
+<span class="d-add">+# Root build context — feeds Dockerfile + every Dockerfile.*overlay.</span>
+<span class="d-add">+# Those builds only COPY: client-react/ (source), server/*.py, server/data/,</span>
+<span class="d-add">+# server/requirements.txt, deploy/, .arrays-staging/, .blocks-staging/.</span>
+<span class="d-add">+# Everything else stays out of the context upload.</span>
+<span class="d-add">+</span>
+<span class="d-add">+# VCS / editor</span>
+<span class="d-add">+.git</span>
+<span class="d-add">+.gitignore</span>
+<span class="d-add">+**/.DS_Store</span>
+<span class="d-add">+**/*.swp</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Secrets &amp; local env — must never enter a build context</span>
+<span class="d-add">+**/.env</span>
+<span class="d-add">+!**/.env.example</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Python local state</span>
+<span class="d-add">+server/env</span>
+<span class="d-add">+**/__pycache__</span>
+<span class="d-add">+**/*.pyc</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Heavy artifacts rebuilt (client) or baked in-image (graphs/tiles)</span>
+<span class="d-add">+server/osm_data</span>
+<span class="d-add">+**/node_modules</span>
+<span class="d-add">+client-react/dist</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Sibling build contexts + repo material no root-context build copies</span>
+<span class="d-add">+osrm</span>
+<span class="d-add">+screenshots</span>
+<span class="d-add">+changelog</span>
+<span class="d-add">+docs</span>
+<span class="d-add">+data</span>
+<span class="d-add">+tools</span>
+<span class="d-add">+terraform</span>
+<span class="d-add">+google-cloud-sdk</span>
+<span class="d-add">+*.tar.gz</span>
+<span class="d-add">+**/*.log</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">Dockerfile</span>
+            <span class="stat"><span class="d-add">+8</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill on">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · repo root</span>
+        <span class="ctx-sum">the full app image bake: client build + graphs + PMTiles + nginx/supervisor</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Dockerfile</span>
+        <span class="ctx-sum">~65 LOC — 2-stage: node client build → python+nginx with in-image graph bakes</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">client-builder stage</span><span class="ol-sum">npm ci + vite build</span></li><li class="changed"><span class="ol-label">apt install</span><span class="ol-sum">now --no-install-recommends</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">uv deps / graph bakes / pmtiles</span><span class="ol-sum">unchanged (takes effect next FULL rebuild only)</span></li><li class="changed"><span class="ol-label">EXPOSE + HEALTHCHECK + CMD</span><span class="ol-sum">status-only /health probe, 900s start period ×15 retries</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>apt-get install -y --no-install-recommends nginx …</li><li>HEALTHCHECK --interval=60s --start-period=900s --retries=15 CMD curl -fsS :5001/health — mirrors deploy/healthcheck.sh&#x27;s warmup tolerance; Cloud Run ignores it</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/Dockerfile b/Dockerfile</span>
+<span class="d-meta">index e174fb6..4dec93b 100644</span>
+<span class="d-meta">--- a/Dockerfile</span>
+<span class="d-meta">+++ b/Dockerfile</span>
+<span class="d-hunk">@@ -16,7 +16,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/</span>
+<span class="d-ctx"> ENV PYTHONUNBUFFERED=1</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # brotli modules: ~15-20% smaller than gzip on the big topology/JSON payloads.</span>
+<span class="d-del">-RUN apt-get update &amp;&amp; apt-get install -y \</span>
+<span class="d-add">+RUN apt-get update &amp;&amp; apt-get install -y --no-install-recommends \</span>
+<span class="d-ctx">     nginx libnginx-mod-http-brotli-filter libnginx-mod-http-brotli-static \</span>
+<span class="d-ctx">     supervisor curl \</span>
+<span class="d-ctx">     &amp;&amp; rm -rf /var/lib/apt/lists/*</span>
+<span class="d-hunk">@@ -61,4 +61,11 @@ RUN chmod +x /app/deploy/healthcheck.sh</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> EXPOSE 8080</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# Status-only probe (Cloud Run ignores Docker HEALTHCHECK; deploy/healthcheck.sh</span>
+<span class="d-add">+# under supervisor does the actual self-healing). Long start period + high</span>
+<span class="d-add">+# retries: the background graph warmup can freeze the gevent hub for minutes,</span>
+<span class="d-add">+# during which /health can&#x27;t respond — mirror healthcheck.sh&#x27;s 15×60s tolerance.</span>
+<span class="d-add">+HEALTHCHECK --interval=60s --timeout=10s --start-period=900s --retries=15 \</span>
+<span class="d-add">+  CMD curl -fsS http://127.0.0.1:5001/health || exit 1</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> CMD [&quot;/usr/bin/supervisord&quot;, &quot;-c&quot;, &quot;/etc/supervisor/conf.d/supervisord.conf&quot;]</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/.dockerignore</span>
+            <span class="stat"><span class="d-add">+8</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · client-react/</span>
+        <span class="ctx-sum">NEW — context for the standalone client image</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">.dockerignore</span>
+        <span class="ctx-sum">8 lines</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">node_modules/dist/coverage/.env*</span><span class="ol-sum">excluded</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>node_modules, dist, coverage, .env*, logs</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/.dockerignore b/client-react/.dockerignore</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..bfc9b0e</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/.dockerignore</span>
+<span class="d-hunk">@@ -0,0 +1,8 @@</span>
+<span class="d-add">+# Context for client-react/Dockerfile (COPY . . into the npm build stage).</span>
+<span class="d-add">+node_modules</span>
+<span class="d-add">+dist</span>
+<span class="d-add">+coverage</span>
+<span class="d-add">+.env</span>
+<span class="d-add">+.env.*</span>
+<span class="d-add">+.DS_Store</span>
+<span class="d-add">+*.log</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/Dockerfile</span>
+            <span class="stat"><span class="d-add">+7</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill on">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · client-react/</span>
+        <span class="ctx-sum">the standalone client image (compose nginx service)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Dockerfile</span>
+        <span class="ctx-sum">~20 LOC — node build stage → nginx:alpine serve stage</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">build stage COPY</span><span class="ol-sum">COPY . . → explicit six build inputs (cache-friendly, silences DF007)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">serve stage</span><span class="ol-sum">gains a busybox-wget healthcheck</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>COPY index.html vite.config.ts tsconfig*.json ./ + public/ src/ scripts/</li><li>HEALTHCHECK … wget -q --spider http://127.0.0.1/</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/Dockerfile b/client-react/Dockerfile</span>
+<span class="d-meta">index d85dcb9..78acd60 100644</span>
+<span class="d-meta">--- a/client-react/Dockerfile</span>
+<span class="d-meta">+++ b/client-react/Dockerfile</span>
+<span class="d-hunk">@@ -3,11 +3,17 @@ FROM node:20-alpine AS builder</span>
+<span class="d-ctx"> WORKDIR /app</span>
+<span class="d-ctx"> COPY package.json package-lock.json ./</span>
+<span class="d-ctx"> RUN npm ci</span>
+<span class="d-del">-COPY . .</span>
+<span class="d-add">+# Explicit build inputs (not COPY . .) so unrelated files never bust the cache.</span>
+<span class="d-add">+COPY index.html vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json ./</span>
+<span class="d-add">+COPY public ./public</span>
+<span class="d-add">+COPY src ./src</span>
+<span class="d-add">+COPY scripts ./scripts</span>
+<span class="d-ctx"> RUN npm run build</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Serve stage</span>
+<span class="d-ctx"> FROM nginx:alpine</span>
+<span class="d-ctx"> COPY --from=builder /app/dist /usr/share/nginx/html</span>
+<span class="d-ctx"> EXPOSE 80</span>
+<span class="d-add">+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \</span>
+<span class="d-add">+  CMD wget -q --spider http://127.0.0.1/ || exit 1</span>
+<span class="d-ctx"> CMD [&quot;nginx&quot;, &quot;-g&quot;, &quot;daemon off;&quot;]</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapView/MapView.tsx</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · MapView/</span>
+        <span class="ctx-sum">the map shell: tools, click/drag handlers, corridor threading</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapView.tsx</span>
+        <span class="ctx-sum">~800 LOC — placement handlers, chain threading (536fb76), marker render</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports</span><span class="ol-sum">gains the type import 536fb76 forgot</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">corridorChainOf / corridorChainFor</span><span class="ol-sum">the ForcedCorridor-annotated helpers that failed tsc</span></li><li class="dim"><span class="ol-label">click/drop handlers, marker wiring</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>import type { ForcedCorridor } from &quot;../../selection/types&quot; — matches RouteContext&#x27;s import style</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapView/MapView.tsx b/client-react/src/components/MapView/MapView.tsx</span>
+<span class="d-meta">index 6a1d199..8475e98 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapView/MapView.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapView/MapView.tsx</span>
+<span class="d-hunk">@@ -26,6 +26,7 @@ import { GraphLayer } from &quot;../GraphLayer/GraphLayer&quot;;</span>
+<span class="d-ctx"> import { BoundaryLayer } from &quot;../BoundaryLayer&quot;;</span>
+<span class="d-ctx"> import { MapLibreBackground } from &quot;../MapLibreBackground&quot;;</span>
+<span class="d-ctx"> import type { LatLng, ProposalMatch } from &quot;../../types&quot;;</span>
+<span class="d-add">+import type { ForcedCorridor } from &quot;../../selection/types&quot;;</span>
+<span class="d-ctx"> import &quot;leaflet/dist/leaflet.css&quot;;</span>
+<span class="d-ctx"> import &quot;maplibre-gl/dist/maplibre-gl.css&quot;;</span>
+<span class="d-ctx"> import &quot;./MapView.css&quot;;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">droast.toml</span>
+            <span class="stat"><span class="d-add">+18</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · repo root</span>
+        <span class="ctx-sum">NEW — droast project policy: the deliberate deviations, with rationale</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">droast.toml</span>
+        <span class="ctx-sum">~25 lines — comments + a 4-rule skip list</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">rationale comments</span><span class="ol-sum">one block per skipped rule</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">skip list</span><span class="ol-sum">DF005 / DF011 / DF020 / DF036</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>DF005 apt pinning (mirror churn), DF011 single-stage (slim images), DF020 USER (documented root needs), DF036 overlay CMD inheritance</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/droast.toml b/droast.toml</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..85f894a</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/droast.toml</span>
+<span class="d-hunk">@@ -0,0 +1,18 @@</span>
+<span class="d-add">+# droast (Dockerfile linter) project policy — deliberate deviations only.</span>
+<span class="d-add">+# Everything not listed here is expected to lint clean.</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# DF005  apt version pinning: Debian point releases rotate old versions out of</span>
+<span class="d-add">+#        the mirrors, so pinned `pkg=ver` installs start failing on rebuild.</span>
+<span class="d-add">+#        We pin base images (python:3.13-slim, osrm-backend:v5.25.0) instead.</span>
+<span class="d-add">+# DF011  &quot;single-stage heavy build image&quot;: misfires here — python:3.13-slim</span>
+<span class="d-add">+#        images carry no build toolchain, and the playwright image needs its</span>
+<span class="d-add">+#        browser deps at runtime, so a multi-stage split buys nothing.</span>
+<span class="d-add">+# DF020  no USER: each image has a concrete root requirement — nginx/supervisor</span>
+<span class="d-add">+#        masters (main + client images), playwright `install --with-deps`</span>
+<span class="d-add">+#        (apt at build) + Chromium sandbox (screenshots), and the shared</span>
+<span class="d-add">+#        osm_data volume written by the osm-refresh sidecar (server image).</span>
+<span class="d-add">+#        Cloud Run additionally sandboxes prod (gVisor).</span>
+<span class="d-add">+# DF036  no CMD/ENTRYPOINT: the Dockerfile.*overlay files build FROM the</span>
+<span class="d-add">+#        digest-pinned ${BASE_IMAGE} serving prod and inherit its CMD; droast</span>
+<span class="d-add">+#        cannot resolve an ARG-based FROM.</span>
+<span class="d-add">+skip = [&quot;DF005&quot;, &quot;DF011&quot;, &quot;DF020&quot;, &quot;DF036&quot;]</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">osrm/.dockerignore</span>
+            <span class="stat"><span class="d-add">+5</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill on">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · osrm/</span>
+        <span class="ctx-sum">NEW — context for the OSRM image</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">.dockerignore</span>
+        <span class="ctx-sum">5 lines</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">local OSM/OSRM artifacts</span><span class="ol-sum">*.osm.pbf / *.osrm* kept out of uploads</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>*.osm.pbf, *.osrm*, .DS_Store — only the .lua profiles + build-merged.sh ship</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/osrm/.dockerignore b/osrm/.dockerignore</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..1e2e2b7</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/osrm/.dockerignore</span>
+<span class="d-hunk">@@ -0,0 +1,5 @@</span>
+<span class="d-add">+# Context for osrm/Dockerfile — only the .lua profiles + build-merged.sh are</span>
+<span class="d-add">+# copied; keep any local OSM/OSRM artifacts out of the upload.</span>
+<span class="d-add">+*.osm.pbf</span>
+<span class="d-add">+*.osrm*</span>
+<span class="d-add">+.DS_Store</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">osrm/Dockerfile</span>
+            <span class="stat"><span class="d-add">+9</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill on">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · osrm/</span>
+        <span class="ctx-sum">the merged-OSRM image: osmium merge → extract/partition/customize → serve</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Dockerfile</span>
+        <span class="ctx-sum">~50 LOC — 3-stage; dataset baked at build</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">merger + builder stages</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">runtime ENV/EXPOSE/HEALTHCHECK</span><span class="ol-sum">PORT declared (fixes the DF087 ERROR), EXPOSE 5000, HEALTHCHECK NONE</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">CMD</span><span class="ol-sum">unchanged — ${PORT:-5000} still honors Cloud Run&#x27;s 8080</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>ENV OSRM_DATASET=… PORT=5000 — CMD no longer interpolates an undeclared var</li><li>EXPOSE 5000; HEALTHCHECK NONE (runtime image ships no curl/wget — compose comment&#x27;s rationale, now in-image)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/osrm/Dockerfile b/osrm/Dockerfile</span>
+<span class="d-meta">index 7f8d673..345fc08 100644</span>
+<span class="d-meta">--- a/osrm/Dockerfile</span>
+<span class="d-meta">+++ b/osrm/Dockerfile</span>
+<span class="d-hunk">@@ -36,7 +36,14 @@ FROM osrm/osrm-backend:v5.25.0</span>
+<span class="d-ctx"> WORKDIR /data</span>
+<span class="d-ctx"> COPY --from=builder /data/combined.osrm* /data/</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# Cloud Run injects $PORT (8080); local compose leaves it unset -&gt; default 5000.</span>
+<span class="d-add">+# Cloud Run overrides $PORT (8080); local compose keeps the default 5000.</span>
+<span class="d-ctx"> # osrm-routed must bind 0.0.0.0 so the container is reachable.</span>
+<span class="d-del">-ENV OSRM_DATASET=/data/combined.osrm</span>
+<span class="d-add">+ENV OSRM_DATASET=/data/combined.osrm \</span>
+<span class="d-add">+    PORT=5000</span>
+<span class="d-add">+EXPOSE 5000</span>
+<span class="d-add">+</span>
+<span class="d-add">+# The osrm-backend runtime image ships neither curl nor wget, so an HTTP probe</span>
+<span class="d-add">+# can never pass (it pinned the container &quot;unhealthy&quot; while serving fine).</span>
+<span class="d-add">+HEALTHCHECK NONE</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> CMD [&quot;sh&quot;, &quot;-c&quot;, &quot;exec osrm-routed --algorithm mld --ip 0.0.0.0 --port ${PORT:-5000} \&quot;$OSRM_DATASET\&quot;&quot;]</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">screenshots/.dockerignore</span>
+            <span class="stat"><span class="d-add">+6</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · screenshots/</span>
+        <span class="ctx-sum">NEW — context for the capture job</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">.dockerignore</span>
+        <span class="ctx-sum">6 lines</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">capenv venv + captures</span><span class="ol-sum">excluded</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>capenv (a full venv sat in this context), *.png, __pycache__</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/screenshots/.dockerignore b/screenshots/.dockerignore</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..779a26c</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/screenshots/.dockerignore</span>
+<span class="d-hunk">@@ -0,0 +1,6 @@</span>
+<span class="d-add">+# Context for screenshots/Dockerfile — only requirements.txt + capture.py ship.</span>
+<span class="d-add">+capenv</span>
+<span class="d-add">+__pycache__</span>
+<span class="d-add">+*.pyc</span>
+<span class="d-add">+*.png</span>
+<span class="d-add">+.DS_Store</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">screenshots/Dockerfile</span>
+            <span class="stat"><span class="d-add">+10</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · screenshots/</span>
+        <span class="ctx-sum">the daily map-preview capture job (playwright + chromium)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Dockerfile</span>
+        <span class="ctx-sum">~20 LOC — python:3.13-slim + playwright, one-shot CMD</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">ENV + uv</span><span class="ol-sum">Python env vars; bare pip → uv pip --system (CLAUDE.md mandate)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">playwright install / CMD</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">HEALTHCHECK NONE</span><span class="ol-sum">one-shot batch job</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>COPY --from=ghcr.io/astral-sh/uv:latest + uv pip install --system --no-cache</li><li>ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1; HEALTHCHECK NONE</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/screenshots/Dockerfile b/screenshots/Dockerfile</span>
+<span class="d-meta">index 0c15108..9069f16 100644</span>
+<span class="d-meta">--- a/screenshots/Dockerfile</span>
+<span class="d-meta">+++ b/screenshots/Dockerfile</span>
+<span class="d-hunk">@@ -2,10 +2,19 @@ FROM python:3.13-slim</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> WORKDIR /app</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# Unbuffered so Cloud Run job logs stream live; no .pyc litter in the image.</span>
+<span class="d-add">+ENV PYTHONUNBUFFERED=1 \</span>
+<span class="d-add">+    PYTHONDONTWRITEBYTECODE=1</span>
+<span class="d-add">+</span>
+<span class="d-add">+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> COPY requirements.txt .</span>
+<span class="d-del">-RUN pip install --no-cache-dir -r requirements.txt \</span>
+<span class="d-add">+RUN uv pip install --system --no-cache -r requirements.txt \</span>
+<span class="d-ctx">     &amp;&amp; playwright install --with-deps chromium</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> COPY capture.py .</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# One-shot batch job (capture → upload → exit); nothing to health-probe.</span>
+<span class="d-add">+HEALTHCHECK NONE</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> CMD [&quot;python&quot;, &quot;capture.py&quot;, &quot;--output&quot;, &quot;/tmp/previews&quot;]</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/.dockerignore</span>
+            <span class="stat"><span class="d-add">+11</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · server/</span>
+        <span class="ctx-sum">NEW — context for compose&#x27;s build: ./server</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">.dockerignore</span>
+        <span class="ctx-sum">10 lines</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">env/.env/osm_data/tests/__pycache__</span><span class="ol-sum">excluded; build COPYs only requirements.txt + *.py</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>env, .env (compose injects it at runtime via env_file), osm_data (volume-mounted), tests</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/.dockerignore b/server/.dockerignore</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..104637f</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/.dockerignore</span>
+<span class="d-hunk">@@ -0,0 +1,11 @@</span>
+<span class="d-add">+# Context for `build: ./server` (compose flask + osm-refresh sidecar).</span>
+<span class="d-add">+# The build only COPYs requirements.txt and top-level *.py.</span>
+<span class="d-add">+env</span>
+<span class="d-add">+.env</span>
+<span class="d-add">+!.env.example</span>
+<span class="d-add">+__pycache__</span>
+<span class="d-add">+**/__pycache__</span>
+<span class="d-add">+*.pyc</span>
+<span class="d-add">+osm_data</span>
+<span class="d-add">+tests</span>
+<span class="d-add">+.pytest_cache</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/Dockerfile</span>
+            <span class="stat"><span class="d-add">+11</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · server/</span>
+        <span class="ctx-sum">the local-dev flask image (compose flask + osm-refresh sidecar)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Dockerfile</span>
+        <span class="ctx-sum">~35 LOC — python:3.13-slim + uv deps + app code</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">ENV</span><span class="ol-sum">PYTHONUNBUFFERED + PYTHONDONTWRITEBYTECODE</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">apt curl</span><span class="ol-sum">now --no-install-recommends</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">uv deps / code copy</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">HEALTHCHECK NONE</span><span class="ol-sum">explicit — image shared with the serverless osm-refresh sidecar; compose owns the flask probe</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1</li><li>apt-get install -y --no-install-recommends curl</li><li>HEALTHCHECK NONE + rationale comment</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/Dockerfile b/server/Dockerfile</span>
+<span class="d-meta">index 874ccf9..f6d1d35 100644</span>
+<span class="d-meta">--- a/server/Dockerfile</span>
+<span class="d-meta">+++ b/server/Dockerfile</span>
+<span class="d-hunk">@@ -3,8 +3,13 @@ FROM python:3.13-slim</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> WORKDIR /app</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# Unbuffered so logs stream to docker logs; no .pyc litter in the image.</span>
+<span class="d-add">+ENV PYTHONUNBUFFERED=1 \</span>
+<span class="d-add">+    PYTHONDONTWRITEBYTECODE=1</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> # Install curl for health checks</span>
+<span class="d-del">-RUN apt-get update &amp;&amp; apt-get install -y curl &amp;&amp; rm -rf /var/lib/apt/lists/*</span>
+<span class="d-add">+RUN apt-get update &amp;&amp; apt-get install -y --no-install-recommends curl \</span>
+<span class="d-add">+    &amp;&amp; rm -rf /var/lib/apt/lists/*</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Install uv</span>
+<span class="d-ctx"> COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/</span>
+<span class="d-hunk">@@ -21,4 +26,9 @@ RUN mkdir -p osm_data</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> EXPOSE 5001</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# Health checking lives at the compose level: this image is shared by the</span>
+<span class="d-add">+# `flask` service (curl /health) and the `osm-refresh` sidecar, whose command</span>
+<span class="d-add">+# runs no server — an image-level probe would pin the sidecar &quot;unhealthy&quot;.</span>
+<span class="d-add">+HEALTHCHECK NONE</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> CMD [&quot;python&quot;, &quot;app.py&quot;]</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
