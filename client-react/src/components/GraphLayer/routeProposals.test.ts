@@ -11,24 +11,26 @@ import {
   computeRouteProposals,
   corridorCoordinates,
   corridorFromEdgeIds,
+  corridorSliceBetween,
   dedupeRoutes,
-  capPathToLengthBudget,
+  growCorridor,
+  makeSegmentShortestCheck,
   routeLengthBudgetM,
-  splitLoopyPath,
+  MAX_GHOST_WAYPOINTS,
   MIN_ROUTE_SCORE,
   MIN_ROUTE_EDGES,
   MIN_ROUTE_BLOCKS,
-  ROUTE_STRAIGHTNESS_MIN,
   ROUTE_LENGTH_BASE_M,
   ROUTE_LENGTH_PER_SQRT_SCORE_M,
   ROUTE_LENGTH_MAX_M,
-  type PathResult,
   type RouteProposal,
   type RouteProposalOptions,
+  type SegmentShortestCheck,
 } from "./routeProposals";
 import {
   topologyFromJson,
   buildNodeAdj,
+  edgeLengthMeters,
   type GraphTopology,
 } from "./graphTopology";
 import type { LatLng } from "../../types";
@@ -36,7 +38,7 @@ import type { LatLng } from "../../types";
 const ll = (lat: number, lng: number): LatLng => ({ lat, lng });
 
 function route(over: Partial<RouteProposal> = {}): RouteProposal {
-  return {
+  const base: RouteProposal = {
     id: "r1",
     label: "Bike lane",
     legendIdx: 0,
@@ -46,8 +48,12 @@ function route(over: Partial<RouteProposal> = {}): RouteProposal {
     blockEdgeIds: [0, 5, 1, 2],
     anchors: [10, 13],
     anchorCoords: [ll(40.70, -74.00), ll(40.70, -73.99)],
+    waypointNodes: [10, 13],
+    waypointCoords: [ll(40.70, -74.00), ll(40.70, -73.99)],
+    segments: [[0, 1, 2]],
     ...over,
   };
+  return base;
 }
 
 describe("parseRouteProposal", () => {
@@ -61,6 +67,33 @@ describe("parseRouteProposal", () => {
     expect(p.blockEdgeIds).toEqual([3, 4]);
     expect(p.anchorCoords[0]).toEqual({ lat: 40.1, lng: -74.1 });
     expect(p.legendIdx).toBe(1);
+  });
+
+  it("synthesizes anchor-only waypoints on legacy payloads", () => {
+    const p = parseRouteProposal({
+      id: "abc", label: "Tree", legendIdx: 1, score: 12,
+      edge_ids: [3, 4], blocks: [[3], [4]], block_edge_ids: [3, 4],
+      anchors: [7, 9], anchor_coords: [[40.1, -74.1], [40.2, -74.2]],
+    });
+    expect(p.waypointNodes).toEqual([7, 9]);
+    expect(p.waypointCoords).toEqual([
+      { lat: 40.1, lng: -74.1 }, { lat: 40.2, lng: -74.2 },
+    ]);
+    expect(p.segments).toEqual([[3, 4]]);
+  });
+
+  it("carries ghost waypoints + per-segment edges when the wire has them", () => {
+    const p = parseRouteProposal({
+      id: "abc", label: "Tree", legendIdx: 1, score: 12,
+      edge_ids: [3, 4], blocks: [[3], [4]], block_edge_ids: [3, 4],
+      anchors: [7, 9], anchor_coords: [[40.1, -74.1], [40.2, -74.2]],
+      waypoint_nodes: [7, 8, 9],
+      waypoint_coords: [[40.1, -74.1], [40.15, -74.15], [40.2, -74.2]],
+      segments: [[3], [4]],
+    });
+    expect(p.waypointNodes).toEqual([7, 8, 9]);
+    expect(p.waypointCoords[1]).toEqual({ lat: 40.15, lng: -74.15 });
+    expect(p.segments).toEqual([[3], [4]]);
   });
 });
 
@@ -223,10 +256,19 @@ function compute(
 }
 
 function bareRoute(over: Partial<RouteProposal>): RouteProposal {
-  return {
+  const merged = {
     id: "x", label: "Bike lane", legendIdx: BIKE, score: 0,
-    edgeIds: [], blocks: [], blockEdgeIds: [], anchors: [0, 0],
-    anchorCoords: [ll(0, 0), ll(0, 0)],
+    edgeIds: [] as number[], blocks: [] as number[][], blockEdgeIds: [] as number[],
+    anchors: [0, 0] as [number, number],
+    anchorCoords: [ll(0, 0), ll(0, 0)] as [LatLng, LatLng],
+    ...over,
+  };
+  return {
+    // Waypoints default to the (possibly overridden) anchors, one segment.
+    waypointNodes: [...merged.anchors],
+    waypointCoords: [...merged.anchorCoords],
+    segments: [merged.edgeIds],
+    ...merged,
     ...over,
   };
 }
@@ -607,48 +649,6 @@ describe("routeLengthBudgetM", () => {
   });
 });
 
-describe("capPathToLengthBudget", () => {
-  // Path of 5 edges, 100m each; per-edge weights below.
-  const path = (weights: number[]): { p: PathResult; weightOf: (e: number) => number } => ({
-    p: {
-      edges: weights.map((_, i) => i),
-      nodes: weights.map((_, i) => i).concat(weights.length),
-      weight: weights.reduce((a, b) => a + b, 0),
-    },
-    weightOf: (e: number) => weights[e],
-  });
-  const len100 = () => 100;
-
-  it("returns the path unchanged when it fits the budget", () => {
-    const { p, weightOf } = path([1, 1, 1]);
-    expect(capPathToLengthBudget(p, 300, len100, weightOf)).toBe(p);
-  });
-
-  it("trims to the hottest contiguous window under the budget", () => {
-    // 500m total, budget 200m (2 edges). Hot stretch is edges 2–3.
-    const { p, weightOf } = path([1, 1, 9, 8, 1]);
-    const out = capPathToLengthBudget(p, 200, len100, weightOf);
-    expect(out.edges).toEqual([2, 3]);
-    expect(out.nodes).toEqual([2, 3, 4]); // endpoints of the kept window
-    expect(out.weight).toBe(17);
-  });
-
-  it("prefers the shorter window on equal weight, then the earliest", () => {
-    const { p, weightOf } = path([5, 0, 5, 5]);
-    // Budget 200: windows [2,3] (weight 10, 200m) beat [0,1] (5) and [1,2] (5).
-    expect(capPathToLengthBudget(p, 200, len100, weightOf).edges).toEqual([2, 3]);
-    // Budget 100: [0], [2], [3] all weigh 5 — earliest wins.
-    expect(capPathToLengthBudget(p, 100, len100, weightOf).edges).toEqual([0]);
-  });
-
-  it("keeps a single over-budget edge rather than trimming to nothing", () => {
-    const { p, weightOf } = path([1, 50, 1]);
-    const out = capPathToLengthBudget(p, 60, len100, weightOf);
-    expect(out.edges).toEqual([1]);
-    expect(out.weight).toBe(50);
-  });
-});
-
 describe("computeRouteProposals — corridor length cap", () => {
   it("caps a long corridor to its best-supported stretch", () => {
     // A 12-edge chain (~84m/edge ≈ 1.0km) with a hot 4-edge core. A 400m
@@ -744,135 +744,245 @@ describe("computeRouteProposals — min-blocks gate", () => {
 });
 
 // ==========================================================================
-// splitLoopyPath — corridors are split where they turn back on themselves
+// Routing-consistent growth — growCorridor + makeSegmentShortestCheck
 // ==========================================================================
 
-describe("splitLoopyPath", () => {
-  // Synthetic geometry: points in METERS near lat 0, so 1m of x ≈ 1/111320°
-  // of longitude and 1m of y ≈ 1/110574° of latitude.
-  const mkPath = (pts: [number, number][], weights?: number[]) => {
-    const n = pts.length - 1;
-    const latLngOf = (i: number): [number, number] =>
-      [pts[i][1] / 110574, pts[i][0] / 111320];
-    const lengthOf = (e: number) =>
-      Math.hypot(pts[e + 1][0] - pts[e][0], pts[e + 1][1] - pts[e][1]);
-    const weightOf = (e: number) => weights?.[e] ?? 1;
-    const path: PathResult = {
-      edges: Array.from({ length: n }, (_, i) => i),
-      nodes: Array.from({ length: n + 1 }, (_, i) => i),
-      weight: Array.from({ length: n }, (_, i) => weightOf(i)).reduce((a, b) => a + b, 0),
-    };
-    return { path, lengthOf, latLngOf, weightOf };
-  };
-  const straightnessOf = (
-    frag: PathResult,
-    pts: [number, number][],
-    lengthOf: (e: number) => number,
-  ) => {
-    const a = pts[frag.nodes[0]];
-    const b = pts[frag.nodes[frag.nodes.length - 1]];
-    const arc = frag.edges.reduce((s, e) => s + lengthOf(e), 0);
-    return Math.hypot(b[0] - a[0], b[1] - a[1]) / arc;
-  };
+// A tiny 2-D topology builder (makeTopo's nodes are colinear, which makes
+// every corridor trivially shortest — useless for consistency tests).
+function makeTopo2D(
+  nodes: [number, number][],
+  edges: [number, number][],
+): GraphTopology {
+  return topologyFromJson({ nodes, edges: edges.map(([u, v]) => [u, v, ""]) });
+}
 
-  it("keeps a straight corridor whole", () => {
-    const pts: [number, number][] = Array.from({ length: 11 }, (_, i) => [100 * i, 0]);
-    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
-    const frags = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
-    expect(frags).toHaveLength(1);
-    expect(frags[0].edges).toEqual(path.edges);
+describe("makeSegmentShortestCheck (A* consistency oracle)", () => {
+  // Right triangle: hypotenuse 0–2 is the direct edge; the corridor 0–1–2
+  // takes the two legs, which are strictly longer.
+  //   node0 (40.700, -74.000), node1 (40.701, -74.000), node2 (40.700, -73.999)
+  const nodes: [number, number][] = [
+    [40.700, -74.000], [40.701, -74.000], [40.700, -73.999],
+  ];
+  const legs: [number, number][] = [[0, 1], [1, 2]];
+
+  it("accepts a corridor that is the only path", () => {
+    const topo = makeTopo2D(nodes, legs);
+    const check = makeSegmentShortestCheck(topo, buildNodeAdj(topo));
+    // Corridor 0→2 over the two legs, at its EXACT length (the contract:
+    // growth passes the sum of the segment's own edge lengths).
+    const len = edgeLengthMeters(topo, 0) + edgeLengthMeters(topo, 1);
+    expect(check(0, 2, len)).toBe(true);
   });
 
-  it("splits a hairpin at its apex into two straight-ish halves", () => {
-    // Out 1km east along y=0, jog north 100m, back 1km west along y=100.
-    const out: [number, number][] = Array.from({ length: 6 }, (_, i) => [200 * i, 0]);
-    const back: [number, number][] = Array.from({ length: 6 }, (_, i) => [1000 - 200 * i, 100]);
-    const pts = [...out, ...back];
-    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
-    const frags = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
-    expect(frags.length).toBeGreaterThanOrEqual(2);
-    // Every fragment is straighter than the split threshold, and the fragments
-    // partition the original path in order.
-    for (const f of frags) {
-      expect(straightnessOf(f, pts, lengthOf)).toBeGreaterThanOrEqual(ROUTE_STRAIGHTNESS_MIN);
-    }
-    expect(frags.flatMap((f) => f.edges)).toEqual(path.edges);
+  it("rejects a corridor when a strictly shorter path exists", () => {
+    const topo = makeTopo2D(nodes, [...legs, [0, 2]]); // add the hypotenuse
+    const check = makeSegmentShortestCheck(topo, buildNodeAdj(topo));
+    // Hypotenuse ≈ 84.7m beats the ~250m legs.
+    expect(check(0, 2, 250)).toBe(false);
   });
 
-  it("splits a double-back buried in an otherwise straight corridor (window rule)", () => {
-    // 3km straight line with a 400m out-and-back spur at x=1500. Endpoint
-    // straightness stays high (~0.79), so only the WINDOW rule can see it.
-    const pts: [number, number][] = [];
-    for (let x = 0; x <= 1500; x += 100) pts.push([x, 0]);
-    for (let y = 100; y <= 400; y += 100) pts.push([1500, y]);   // out
-    pts.push([1520, 400]);                                        // tip
-    for (let y = 300; y >= 0; y -= 100) pts.push([1520, y]);      // back
-    for (let x = 1600; x <= 3000; x += 100) pts.push([x, 0]);
-    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
-    const frags = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
-    expect(frags.length).toBeGreaterThanOrEqual(2);
-    // The out-leg and the back-leg never share a fragment: no fragment holds
-    // both a node at (1500, 400) and one at (1520, 300)-side of the spur.
-    const tipIdx = pts.findIndex(([x, y]) => x === 1520 && y === 400);
-    for (const f of frags) {
-      const hasOut = f.nodes.some((n) => n < tipIdx && pts[n][1] === 400);
-      const hasBack = f.nodes.some((n) => n > tipIdx && pts[n][1] > 0 && pts[n][0] === 1520);
-      expect(hasOut && hasBack).toBe(false);
-    }
-    expect(frags.flatMap((f) => f.edges)).toEqual(path.edges);
+  it("tolerates ties (an equal-length alternative is not a detour)", () => {
+    // A grid square: two equal L-shaped paths 0–1–3 and 0–2–3.
+    const sq: [number, number][] = [
+      [40.700, -74.000], [40.701, -74.000], [40.700, -73.999], [40.701, -73.999],
+    ];
+    const topo = makeTopo2D(sq, [[0, 1], [1, 3], [0, 2], [2, 3]]);
+    const check = makeSegmentShortestCheck(topo, buildNodeAdj(topo));
+    const lenL = 110.6 + 84.4; // ≈ leg lengths; the corridor's own length
+    expect(check(0, 3, lenL)).toBe(true);
   });
 
-  it("recomputes fragment weights from weightOf and preserves the total", () => {
-    const out: [number, number][] = Array.from({ length: 6 }, (_, i) => [200 * i, 0]);
-    const back: [number, number][] = Array.from({ length: 6 }, (_, i) => [1000 - 200 * i, 100]);
-    const pts = [...out, ...back];
-    const weights = Array.from({ length: pts.length - 1 }, (_, i) => i + 1);
-    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts, weights);
-    const frags = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
-    expect(frags.length).toBeGreaterThanOrEqual(2);
-    expect(frags.reduce((s, f) => s + f.weight, 0)).toBe(path.weight);
-    for (const f of frags) {
-      expect(f.weight).toBe(f.edges.reduce((s, e) => s + weightOf(e), 0));
-    }
-  });
-
-  it("returns short paths (< 4 edges) unsplit, however loopy", () => {
-    const pts: [number, number][] = [[0, 0], [500, 0], [500, 20], [0, 20]];
-    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
-    expect(splitLoopyPath(path, lengthOf, latLngOf, weightOf)).toEqual([path]);
-  });
-
-  it("is deterministic", () => {
-    const out: [number, number][] = Array.from({ length: 8 }, (_, i) => [150 * i, 0]);
-    const back: [number, number][] = Array.from({ length: 8 }, (_, i) => [1050 - 150 * i, 60]);
-    const pts = [...out, ...back];
-    const { path, lengthOf, latLngOf, weightOf } = mkPath(pts);
-    const a = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
-    const b = splitLoopyPath(path, lengthOf, latLngOf, weightOf);
-    expect(a).toEqual(b);
+  it("fails open at the pop cap (bounded work, corridor kept)", () => {
+    const topo = makeTopo2D(nodes, [...legs, [0, 2]]);
+    const check = makeSegmentShortestCheck(topo, buildNodeAdj(topo), { maxPops: 0 });
+    expect(check(0, 2, 250)).toBe(true);
   });
 });
 
-describe("computeRouteProposals — loop-back corridors become several proposals", () => {
-  it("splits a hot U-shaped corridor into its two straight legs", () => {
-    // A U on a real topology: 8 edges south, 2 east, 8 north — every edge
-    // equally hot. One snake before; two straight corridors after.
+describe("growCorridor (routing-consistent extension + ghost waypoints)", () => {
+  // Chain-of-arcs adjacency helper over edge list with weights.
+  const typeAdjOf = (
+    edges: [number, number][],
+    weights: number[],
+  ) => {
+    const adj = new Map<number, { n: number; e: number; w: number }[]>();
+    const nodeIds = [...new Set(edges.flat())].sort((a, b) => a - b);
+    for (const nid of nodeIds) {
+      const arcs: { n: number; e: number; w: number }[] = [];
+      edges.forEach(([u, v], e) => {
+        if (u === nid) arcs.push({ n: v, e, w: weights[e] });
+        else if (v === nid) arcs.push({ n: u, e, w: weights[e] });
+      });
+      adj.set(nid, arcs);
+    }
+    return adj;
+  };
+  const len100 = () => 100;
+  const always: SegmentShortestCheck = () => true;
+  const never: SegmentShortestCheck = () => false;
+
+  it("with a consistent route: no ghosts, two waypoints, one segment", () => {
+    const adj = typeAdjOf([[0, 1], [1, 2], [2, 3]], [5, 9, 5]);
+    const g = growCorridor(adj, len100, always)!;
+    expect(g.edges).toEqual([0, 1, 2]);
+    expect(g.weight).toBe(19);
+    expect(g.waypointNodes).toEqual([0, 3]);
+    expect(g.segments).toEqual([[0, 1, 2]]);
+  });
+
+  it("pins the previous endpoint as a ghost when the route would change", () => {
+    const adj = typeAdjOf([[0, 1], [1, 2]], [9, 5]);
+    // Seed 0–1 accepted unchecked; extending to 2 breaks consistency → node 1
+    // (the previous endpoint) becomes a ghost waypoint.
+    const g = growCorridor(adj, len100, never)!;
+    expect(g.edges).toEqual([0, 1]);
+    expect(g.waypointNodes).toEqual([0, 1, 2]);
+    expect(g.segments).toEqual([[0], [1]]);
+  });
+
+  it("stops at MAX_GHOST_WAYPOINTS pins (up to 5 waypoints total)", () => {
+    expect(MAX_GHOST_WAYPOINTS).toBe(3);
+    // A long hot chain where EVERY extension changes the route: each accepted
+    // extension pins a ghost; the 3rd pin ends growth.
+    const chain: [number, number][] = Array.from({ length: 8 }, (_, i) => [i, i + 1]);
+    const g = growCorridor(typeAdjOf(chain, chain.map(() => 5)), len100, never)!;
+    expect(g.waypointNodes.length).toBe(5); // 2 anchors + 3 ghosts
+    expect(g.edges.length).toBe(4);         // seed + one edge per pin
+    expect(g.segments.map((s) => s.length)).toEqual([1, 1, 1, 1]);
+    expect(g.segments.flat()).toEqual(g.edges);
+  });
+
+  it("with the ghost budget spent, only still-consistent extensions continue", () => {
+    // Consistency flips false only when the segment grows past 300m — so the
+    // corridor picks up ghosts as it lengthens, and once 3 are spent it keeps
+    // growing while segments stay short… but the pins land where needed.
+    const chain: [number, number][] = Array.from({ length: 20 }, (_, i) => [i, i + 1]);
+    const check: SegmentShortestCheck = (_f, _t, len) => len <= 300;
+    const g = growCorridor(typeAdjOf(chain, chain.map(() => 5)), len100, check)!;
+    // Segments between waypoints never exceed 300m + the pinned edge.
+    expect(g.waypointNodes.length).toBeLessThanOrEqual(5);
+    expect(g.segments.flat()).toEqual(g.edges);
+  });
+
+  it("skips candidates that would blow the support-earned length budget", () => {
+    const adj = typeAdjOf([[0, 1], [1, 2], [2, 3]], [5, 5, 5]);
+    // Budget so small only the seed fits.
+    const g = growCorridor(adj, len100, always, { budgetOf: () => 150 })!;
+    expect(g.edges.length).toBe(1);
+    expect(g.waypointNodes.length).toBe(2);
+  });
+
+  it("is deterministic (ties by edge id)", () => {
+    const edges: [number, number][] = [[0, 1], [1, 2], [1, 3]];
+    const adj = () => typeAdjOf(edges, [5, 5, 5]);
+    const a = growCorridor(adj(), len100, always)!;
+    const b = growCorridor(adj(), len100, always)!;
+    expect(a).toEqual(b);
+    // Equal-weight fork at node 1 → lower edge id (1→2) wins.
+    expect(a.edges).toEqual([0, 1]);
+  });
+});
+
+describe("computeRouteProposals — ghost waypoints end-to-end", () => {
+  it("pins a ghost where votes leave the shortest path", () => {
+    // Right triangle: hot corridor rides the two legs 0–1–2 while the
+    // unvoted hypotenuse 0–2 is shorter — routing 0→2 would cut the corner,
+    // so the corner (node 1) must become a ghost waypoint.
+    const nodes: [number, number][] = [
+      [40.700, -74.000], [40.701, -74.000], [40.700, -73.999],
+    ];
+    const topo = makeTopo2D(nodes, [[0, 1], [1, 2], [0, 2]]);
+    const ps = computeRouteProposals(topo, buildNodeAdj(topo), {
+      edge_vote_types: [[[BIKE, 9, 0]], [[BIKE, 8, 0]], []],
+      vote_type_legend: LEGEND,
+    }, { minRouteBlocks: 1 });
+    expect(ps).toHaveLength(1);
+    expect(ps[0].edgeIds).toEqual(expect.arrayContaining([0, 1]));
+    expect(ps[0].waypointNodes).toEqual([0, 1, 2]);
+    expect(ps[0].waypointCoords[1]).toEqual({ lat: 40.701, lng: -74.000 });
+    expect(ps[0].segments.map((s) => s.length)).toEqual([1, 1]);
+  });
+
+  it("keeps a genuinely-only-path corridor whole with anchor-only waypoints", () => {
+    // A U-shaped chain with NO shortcut in the graph: routing reproduces the
+    // whole U, so no ghosts are needed and the corridor stays one piece.
     const nodes: [number, number][] = [];
-    for (let i = 0; i <= 8; i++) nodes.push([40.7 + 0.001 * (8 - i), -74.0]);          // west leg ↓
-    for (let i = 1; i <= 2; i++) nodes.push([40.7, -74.0 + 0.001 * i]);                // bottom →
-    for (let i = 1; i <= 8; i++) nodes.push([40.7 + 0.001 * i, -74.0 + 0.002]);        // east leg ↑
-    const edges: [number, number][] = Array.from({ length: nodes.length - 1 }, (_, i) => [i, i + 1]);
-    const topo = topologyFromJson({ nodes, edges: edges.map(([u, v]) => [u, v, ""]) });
+    for (let i = 0; i <= 4; i++) nodes.push([40.7 + 0.001 * (4 - i), -74.0]);   // west leg ↓
+    nodes.push([40.7, -73.999]);                                                 // bottom →
+    for (let i = 0; i <= 4; i++) nodes.push([40.7 + 0.001 * i, -73.998]);        // east leg ↑
+    const edges: [number, number][] =
+      Array.from({ length: nodes.length - 1 }, (_, i) => [i, i + 1]);
+    const topo = makeTopo2D(nodes, edges);
     const ps = computeRouteProposals(topo, buildNodeAdj(topo), {
       edge_vote_types: edges.map((): [number, number, number][] => [[BIKE, 5, 0]]),
       vote_type_legend: LEGEND,
     });
-    expect(ps.length).toBeGreaterThanOrEqual(2);
-    // No proposal contains edges from both vertical legs (indices ≤7 vs ≥10).
+    expect(ps).toHaveLength(1);
+    expect(ps[0].edgeIds.length).toBe(edges.length);
+    expect(ps[0].waypointNodes).toEqual([ps[0].anchors[0], ps[0].anchors[1]]);
+  });
+
+  it("waypoint segments always partition the path edges", () => {
+    const edges: [number, number][] = [
+      [0, 1], [1, 2], [2, 3], [0, 2], [3, 4], [10, 11], [11, 12], [2, 12],
+    ];
+    const ps = compute(edges, evt(
+      [[BIKE, 5, 0]], [[BIKE, 4, 1]], [[BIKE, 7, 0]], [[BIKE, 2, 0]],
+      [[BIKE, 3, 0]], [[TREE, 6, 0]], [[TREE, 5, 0]], [[TREE, 2, 0]],
+    ));
     for (const p of ps) {
-      const west = p.edgeIds.some((e) => e <= 7);
-      const east = p.edgeIds.some((e) => e >= 10);
-      expect(west && east).toBe(false);
+      expect(p.segments.flat()).toEqual(p.edgeIds);
+      expect(p.waypointNodes.length).toBe(p.segments.length + 1);
+      expect(p.waypointNodes.length).toBeLessThanOrEqual(2 + MAX_GHOST_WAYPOINTS);
+      expect(p.waypointNodes[0]).toBe(p.anchors[0]);
+      expect(p.waypointNodes[p.waypointNodes.length - 1]).toBe(p.anchors[1]);
+      expect(p.waypointCoords.length).toBe(p.waypointNodes.length);
     }
+  });
+});
+
+describe("corridorSliceBetween (per-segment corridor resolution)", () => {
+  // Chain 0–1–2–3–4 with a ghost at node 2: segments [[0,1],[2,3]].
+  const nodeLL = (i: number) => ll(40.7, -74.0 + 0.001 * i);
+  const topo = makeTopo([[0, 1], [1, 2], [2, 3], [3, 4]]);
+  const p = bareRoute({
+    edgeIds: [0, 1, 2, 3],
+    anchors: [0, 4],
+    anchorCoords: [nodeLL(0), nodeLL(4)],
+    waypointNodes: [0, 2, 4],
+    waypointCoords: [nodeLL(0), nodeLL(2), nodeLL(4)],
+    segments: [[0, 1], [2, 3]],
+  });
+
+  it("resolves the slice between two consecutive waypoints, oriented a→b", () => {
+    const s = corridorSliceBetween(topo, p, nodeLL(2), nodeLL(4));
+    expect(s?.edgeIds).toEqual([2, 3]);
+    expect(s?.coordinates[0]).toEqual([-73.998, 40.7]);
+    expect(s?.coordinates[2]).toEqual([-73.996, 40.7]);
+    const rev = corridorSliceBetween(topo, p, nodeLL(4), nodeLL(2));
+    expect(rev?.coordinates).toEqual([...s!.coordinates].reverse());
+  });
+
+  it("degenerates to the whole corridor for a two-waypoint proposal", () => {
+    const whole = bareRoute({
+      edgeIds: [0, 1, 2, 3],
+      anchors: [0, 4],
+      anchorCoords: [nodeLL(0), nodeLL(4)],
+    });
+    const s = corridorSliceBetween(topo, whole, nodeLL(0), nodeLL(4));
+    expect(s?.edgeIds).toEqual([0, 1, 2, 3]);
+    expect(s?.coordinates).toHaveLength(5);
+  });
+
+  it("returns null when both points resolve to the same waypoint or the shape is stale", () => {
+    expect(corridorSliceBetween(topo, p, nodeLL(2), nodeLL(2))).toBeNull();
+    const stale = bareRoute({
+      edgeIds: [0, 1, 2, 3],
+      anchors: [0, 4],
+      waypointNodes: [0, 2, 4],
+      waypointCoords: [nodeLL(0), nodeLL(2), nodeLL(4)],
+      segments: [[0, 1]], // doesn't cover the path
+    });
+    expect(corridorSliceBetween(topo, stale, nodeLL(0), nodeLL(2))).toBeNull();
   });
 });

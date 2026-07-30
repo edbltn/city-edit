@@ -221,21 +221,32 @@ Per vote type `T`, over edges with net(T) ≥ `MIN_NET` (high-activity gate #1):
 
 1. **Type subgraph** — nodes = intersections touched, edge weight = net.
 2. **Localize** — connected components (a deterministic replacement for the
-   server-side Leiden step: components localize naturally, and path peeling
-   separates parallel corridors inside one component).
-3. **Peel heaviest simple paths** — exact DFS for components ≤ 12 vertices,
-   greedy two-way extension above; peel up to `PEEL_MAX_PATHS`, keeping paths
-   scoring ≥ `PEEL_DOMINANCE` × the first. All iteration orders and tie-breaks
-   are by ascending edge/node id — same vote state ⇒ same proposals on every
-   client.
-4. **Length budget** — a peeled path is trimmed to its **best-supported
-   contiguous window** within a meter budget that grows with support:
-   `min(ROUTE_LENGTH_MAX_M, ROUTE_LENGTH_BASE_M +
-   ROUTE_LENGTH_PER_SQRT_SCORE_M · √score)` (600 + 150·√score, ≤ 2500 m). A
-   corridor *earns* length with votes; greedy extension can no longer snake
-   for miles on chains of net-1 edges (`capPathToLengthBudget` — sliding
-   window, deterministic ties: shorter then earliest).
-5. **High-activity gate #2** — the trimmed path survives only with score ≥
+   server-side Leiden step: components localize naturally, and corridor
+   peeling separates parallel corridors inside one component). Components
+   whose TOTAL weight can't reach `minRouteScore` are skipped outright — with
+   the top-proposal support floor (`TOP_PROPOSAL_MIN_NET`, net > 100, the same
+   bar PBTP winners clear) as the in-app score gate, this prunes nearly
+   everything before any routing work.
+3. **Routing-consistent growth** (`growCorridor`) — grow one corridor from the
+   component's heaviest edge, repeatedly taking the heaviest net-positive arc
+   off either tip (ties: lowest edge id) that fits the length budget. An
+   extension is accepted outright only if the **open segment stays a shortest
+   path** through the full graph (`makeSegmentShortestCheck` — a bounded,
+   deterministic A* that tolerates ties and sub-eps shortcuts); otherwise the
+   previous tip is pinned as a **ghost waypoint**. At most
+   `MAX_GHOST_WAYPOINTS` (3) pins — the 3rd ends growth — so a proposal is
+   always reproducible as ≤ 5 route waypoints (`waypointNodes`, with
+   per-segment `segments` edge slices), which is what keeps a shared
+   top-proposal URL routing back into the corridor after the proposal
+   retires, and what bounds how roundabout a corridor can get (this replaces
+   the old straightness-splitting + budget-window trimming). Peel the grown
+   corridor's edges out and repeat up to `PEEL_MAX_PATHS`, keeping corridors
+   scoring ≥ `PEEL_DOMINANCE` × the first.
+4. **Length budget** — growth may not extend past a meter budget that grows
+   with support: `min(ROUTE_LENGTH_MAX_M, ROUTE_LENGTH_BASE_M +
+   ROUTE_LENGTH_PER_SQRT_SCORE_M · √score)`. A corridor *earns* length with
+   votes; extension can no longer snake for miles on chains of net-1 edges.
+5. **High-activity gate #2** — the grown corridor survives only with score ≥
    `MIN_ROUTE_SCORE` and ≥ `MIN_ROUTE_EDGES` edges.
 6. **Blocks projection** — each path edge expands to its block:
    `blocks: number[][]` (ordered distinct blocks along the path),

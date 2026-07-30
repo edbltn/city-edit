@@ -76,26 +76,40 @@ export function compareWinners(
 export type VoteTypeKindResolver = (label: string) => "route" | "point" | null;
 
 /**
+ * Support floor for the "Top Proposal" badge: a proposal only counts as a top
+ * proposal with STRICTLY MORE than this many net votes. Without it, a rare
+ * vote type's best edge earns a pin at net 1–2 while the modal shows other
+ * types with far higher counts right next to it — confusing. Applies to BOTH
+ * families: PBTP winners (net on the winning edge) and RBTP corridors (path
+ * score = sum of nets); see GraphLayer's selectTopProposals /
+ * createRouteProposalJob call sites.
+ */
+export const TOP_PROPOSAL_MIN_NET = 100;
+
+/**
  * Step 1 — for each vote type, the top `perTypeLimit` edges by net support
- * (highest first). Vote types whose best edge is net ≤ 0 are dropped (a
- * net-downvoted proposal is not a "top proposal"), as are ROUTE-kind types
- * when a `kindOf` resolver is supplied — their corridors surface as RBTPs.
+ * (highest first). Vote types whose best edge is net ≤ max(0, minNet) are
+ * dropped (a net-downvoted proposal is not a "top proposal", and below the
+ * support floor it isn't "top" either), as are ROUTE-kind types when a
+ * `kindOf` resolver is supplied — their corridors surface as RBTPs.
  */
 export function computeVoteTypeWinners(
   legend: string[],
   edgeVoteTypes: [number, number, number][][],
   perTypeLimit = 1,
-  kindOf?: VoteTypeKindResolver
+  kindOf?: VoteTypeKindResolver,
+  minNet = 0
 ): VoteTypeWinner[] {
   if (!legend.length || !edgeVoteTypes.length) return [];
 
+  const floor = Math.max(0, minNet);
   const edgesByType = new Map<number, { edgeIdx: number; count: number }[]>();
   for (let edgeIdx = 0; edgeIdx < edgeVoteTypes.length; edgeIdx++) {
     const pairs = edgeVoteTypes[edgeIdx];
     if (!pairs) continue;
     for (const [legendIdx, up, down] of pairs) {
       const count = up - down;
-      if (count <= 0) continue;
+      if (count <= floor) continue;
       const list = edgesByType.get(legendIdx);
       if (list) list.push({ edgeIdx, count });
       else edgesByType.set(legendIdx, [{ edgeIdx, count }]);
@@ -315,6 +329,8 @@ export const TOP_PROPOSAL_MIN_SPACING_M = 600;
  * `limit` by net. Each surviving edge appears once and consumes one slot.
  * `kindOf` (label → kind) keeps ROUTE-kind vote types out of the point family;
  * omit it (e.g. station networks, where every vote is a point) to admit all.
+ * `minNet` is the top-proposal support floor (strictly-greater; default
+ * TOP_PROPOSAL_MIN_NET) — pass 0 to admit any positive net.
  */
 export function selectTopProposals(
   data:
@@ -323,14 +339,16 @@ export function selectTopProposals(
   salt: number,
   limit: number,
   minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M,
-  kindOf?: VoteTypeKindResolver
+  kindOf?: VoteTypeKindResolver,
+  minNet = TOP_PROPOSAL_MIN_NET
 ): VoteTypeWinner[] {
   if (!data) return [];
   const perType = computeVoteTypeWinners(
     data.vote_type_legend ?? [],
     data.edge_vote_types ?? [],
     TOP_PROPOSALS_PER_TYPE,
-    kindOf
+    kindOf,
+    minNet
   );
   const perEdge = dedupeWinnersByEdge(perType, salt);
   const perBlock = dedupeWinnersByBlock(

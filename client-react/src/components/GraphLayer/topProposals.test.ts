@@ -188,6 +188,7 @@ describe("selectTopProposals (full path)", () => {
     // dropping C. Correct: edge 0 collapses to one (A) + edge 1 (C).
     const out = selectTopProposals(
       { vote_type_legend: legend, edge_vote_types: evt, ...topo([], []) }, SALT, 2,
+      600, undefined, 0,
     );
     expect(out.map((w) => w.edgeIdx).sort()).toEqual([0, 1]);
     expect(out.find((w) => w.edgeIdx === 0)!.label).toBe("A");
@@ -201,6 +202,7 @@ describe("selectTopProposals (full path)", () => {
     ];
     const out = selectTopProposals(
       { vote_type_legend: legend, edge_vote_types: evt, ...topo([], []) }, SALT, 1,
+      600, undefined, 0,
     );
     expect(out).toHaveLength(1);
     expect(out[0].edgeIdx).toBe(0);
@@ -224,12 +226,40 @@ describe("selectTopProposals (full path)", () => {
     ];
     const out = selectTopProposals(
       { vote_type_legend: ["Bike"], edge_vote_types: evt, ...topo(nodes, edges) }, SALT, 10,
+      600, undefined, 0,
     );
     expect(out.map((w) => w.edgeIdx).sort()).toEqual([0, 2]);
   });
 
   it("returns [] for null data", () => {
     expect(selectTopProposals(null, SALT, 10)).toEqual([]);
+  });
+});
+
+describe("top-proposal support floor (TOP_PROPOSAL_MIN_NET)", () => {
+  const legend = ["Rare", "Popular"];
+  const evt: [number, number, number][][] = [
+    [[0, 3, 0]],    // edge 0: Rare net 3 — below the floor
+    [[1, 150, 20]], // edge 1: Popular net 130 — above it
+    [[1, 100, 0]],  // edge 2: Popular net 100 — exactly at it (excluded: strictly greater)
+  ];
+
+  it("selectTopProposals defaults to the floor and drops low-support winners", () => {
+    const out = selectTopProposals(
+      { vote_type_legend: legend, edge_vote_types: evt, ...topo([], []) }, SALT, 10,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ label: "Popular", edgeIdx: 1, count: 130 });
+  });
+
+  it("requires STRICTLY more than minNet (net == floor is out)", () => {
+    const w = computeVoteTypeWinners(legend, evt, 3, undefined, 100);
+    expect(w.map((x) => x.edgeIdx)).toEqual([1]);
+  });
+
+  it("minNet 0 restores the any-positive-net behavior", () => {
+    const w = computeVoteTypeWinners(legend, evt, 3, undefined, 0);
+    expect(w).toHaveLength(3);
   });
 });
 
@@ -349,7 +379,7 @@ describe("selectTopProposals — block uniqueness + kind filter (full path)", ()
     };
     data.edgeBlockId = Int32Array.from([0, 0, 1]);
     data.nBlocks = 2;
-    const out = selectTopProposals(data, SALT, 10);
+    const out = selectTopProposals(data, SALT, 10, 600, undefined, 0);
     expect(out.map((w) => w.label).sort()).toEqual(["Bench", "Bike"]);
   });
 
@@ -364,7 +394,7 @@ describe("selectTopProposals — block uniqueness + kind filter (full path)", ()
     };
     const kindOf = (label: string) =>
       label === "Add bike greenway" ? "route" as const : "point" as const;
-    const out = selectTopProposals(data, SALT, 10, 600, kindOf);
+    const out = selectTopProposals(data, SALT, 10, 600, kindOf, 0);
     expect(out.map((w) => w.label)).toEqual(["Add bike parking"]);
   });
 });

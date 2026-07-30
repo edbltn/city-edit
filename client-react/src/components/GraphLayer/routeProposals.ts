@@ -53,6 +53,18 @@ export interface RouteProposal {
   anchors: [number, number];
   /** Coordinates of the two anchors. */
   anchorCoords: [LatLng, LatLng];
+  /** Route waypoints along the path: [anchor A, ghost mids…, anchor B] as
+   *  node indices. Ghosts mark where growth had to PIN the corridor because
+   *  routing between the surrounding waypoints would otherwise leave it (at
+   *  most MAX_GHOST_WAYPOINTS). Selecting the proposal threads ALL of these
+   *  into the selection — and thus the URL — so a shared link re-routes into
+   *  (approximately) this corridor even after the proposal retires. */
+  waypointNodes: number[];
+  /** Coordinates of `waypointNodes` (same order). */
+  waypointCoords: LatLng[];
+  /** Path edge ids per waypoint segment: segments[i] joins waypointNodes[i] →
+   *  waypointNodes[i+1]; concatenated they equal `edgeIds`. */
+  segments: number[][];
 }
 
 interface RouteProposalJson {
@@ -65,11 +77,22 @@ interface RouteProposalJson {
   block_edge_ids: number[];
   anchors: [number, number];
   anchor_coords: [[number, number], [number, number]];
+  /** Optional ghost-waypoint fields; absent on legacy payloads (then the
+   *  waypoints are just the two anchors and the path is one segment). */
+  waypoint_nodes?: number[];
+  waypoint_coords?: [number, number][];
+  segments?: number[][];
 }
 
 /** Map the server wire shape (snake_case, [lat,lng] tuples) to a RouteProposal. */
 export function parseRouteProposal(j: RouteProposalJson): RouteProposal {
   const toLatLng = ([lat, lng]: [number, number]): LatLng => ({ lat, lng });
+  const anchorCoords: [LatLng, LatLng] =
+    [toLatLng(j.anchor_coords[0]), toLatLng(j.anchor_coords[1])];
+  const hasWaypoints =
+    j.waypoint_nodes && j.waypoint_coords &&
+    j.waypoint_nodes.length === j.waypoint_coords.length &&
+    j.waypoint_nodes.length >= 2;
   return {
     id: j.id,
     label: j.label,
@@ -79,7 +102,10 @@ export function parseRouteProposal(j: RouteProposalJson): RouteProposal {
     blocks: j.blocks,
     blockEdgeIds: j.block_edge_ids,
     anchors: j.anchors,
-    anchorCoords: [toLatLng(j.anchor_coords[0]), toLatLng(j.anchor_coords[1])],
+    anchorCoords,
+    waypointNodes: hasWaypoints ? j.waypoint_nodes! : [...j.anchors],
+    waypointCoords: hasWaypoints ? j.waypoint_coords!.map(toLatLng) : [...anchorCoords],
+    segments: j.segments && j.segments.length ? j.segments : [j.edge_ids],
   };
 }
 
@@ -254,6 +280,66 @@ export function corridorFromEdgeIds(
   };
 }
 
+/**
+ * The corridor's sub-chain between the proposal WAYPOINTS nearest `a` and `b`,
+ * oriented a→b — the per-segment corridor resolver for a selection that
+ * threads a multi-waypoint (ghosted) proposal: each selection segment between
+ * two consecutive proposal waypoints resolves to exactly its slice of the
+ * corridor. With a two-waypoint proposal this degenerates to the whole
+ * corridor. Null when the chain breaks (stale topology), the segment shape
+ * doesn't match the path, or `a`/`b` land on the same waypoint.
+ */
+export function corridorSliceBetween(
+  topo: GraphTopology,
+  p: RouteProposal,
+  a: LatLng,
+  b: LatLng,
+): { coordinates: [number, number][]; edgeIds: number[] } | null {
+  if (p.edgeIds.length === 0) return null;
+  // Node chain of the full corridor, anchors[0] → anchors[1].
+  let cur = p.anchors[0];
+  if (cur >= topo.nNodes) return null;
+  const chain: number[] = [cur];
+  for (const e of p.edgeIds) {
+    if (e >= topo.nEdges) return null;
+    const u = topo.ends[2 * e];
+    const v = topo.ends[2 * e + 1];
+    const next = u === cur ? v : v === cur ? u : null;
+    if (next === null || next >= topo.nNodes) return null;
+    chain.push(next);
+    cur = next;
+  }
+  // Waypoint positions along the chain, from the per-segment edge counts.
+  const wpPos: number[] = [0];
+  for (const seg of p.segments) wpPos.push(wpPos[wpPos.length - 1] + seg.length);
+  if (wpPos.length !== p.waypointNodes.length || wpPos[wpPos.length - 1] !== p.edgeIds.length) {
+    return null;
+  }
+  const sq = (n: number, q: LatLng) => {
+    const [lat, lng] = nodeLatLng(topo, n);
+    return (lat - q.lat) ** 2 + (lng - q.lng) ** 2;
+  };
+  const nearestWp = (q: LatLng) => {
+    let bi = 0;
+    let bd = Infinity;
+    for (let i = 0; i < wpPos.length; i++) {
+      const d = sq(chain[wpPos[i]], q);
+      if (d < bd) { bd = d; bi = i; }
+    }
+    return bi;
+  };
+  const ia = nearestWp(a);
+  const ib = nearestWp(b);
+  if (ia === ib) return null;
+  const [lo, hi] = ia < ib ? [ia, ib] : [ib, ia];
+  const edgeIds = p.edgeIds.slice(wpPos[lo], wpPos[hi]);
+  const coords = chain.slice(wpPos[lo], wpPos[hi] + 1).map((n) => {
+    const [lat, lng] = nodeLatLng(topo, n);
+    return [lng, lat] as [number, number];
+  });
+  return { coordinates: ia < ib ? coords : coords.reverse(), edgeIds };
+}
+
 // --------------------------------------------------------------------------
 // Ghost-waypoint forcing — choose the faster anchor insertion order.
 // --------------------------------------------------------------------------
@@ -302,31 +388,51 @@ export function chooseAnchorOrderBefore(
 }
 
 // ==========================================================================
-// Client-side deterministic clustering (port of server/route_proposals.py)
+// Client-side deterministic clustering
 // ==========================================================================
 // Pipeline per ROUTE-kind vote type (docs/three-layer-model.md §3.2; point-
 // kind types are skipped — their votes surface as PBTP pins): net-positive
-// subgraph → connected components (the deterministic replacement for the
-// server's Leiden step — components localize; path peeling separates parallel
-// corridors inside one component) → peel heaviest simple paths → split each at
-// its loop-back points into straight-ish corridors (splitLoopyPath) → trim
-// each to its support-earned meter budget (capPathToLengthBudget) → activity
-// gates (score, edges, blocks) → block projection → same-type dedupe → rank
-// with a per-type diversity quota (MAX_PER_TYPE) + cap.
+// subgraph → connected components (components localize; corridor peeling
+// separates parallel corridors inside one component) → grow a corridor from
+// the heaviest edge by ROUTING-CONSISTENT extension (growCorridor: an
+// extension must keep the open segment a shortest path, or it pins the
+// previous endpoint as a GHOST WAYPOINT — at most MAX_GHOST_WAYPOINTS, then
+// growth ends) → peel its edges out and repeat → activity gates (score,
+// edges, blocks) → block projection → same-type dedupe → rank with a
+// per-type diversity quota (MAX_PER_TYPE) + cap.
+//
+// Why routing-consistent: a proposal's waypoints (anchors + ghosts) go into
+// the selection URL when it's picked, so the link must ROUTE back into the
+// corridor even after the proposal retires. Growth therefore only accepts
+// extensions the router would reproduce, and spends the 3-ghost budget where
+// it wouldn't — which also bounds how roundabout a corridor can get (the old
+// straightness-splitting + budget-window trimming this replaces).
 //
 // Determinism contract: NO randomness, NO clock. Every iteration order and
-// tie-break is by ascending edge/node id, so the same (topology, vote state)
-// yields byte-identical proposals (ids and order) on every client.
+// tie-break is by ascending edge/node id (the A* check breaks heap ties by
+// node id), so the same (topology, vote state) yields byte-identical
+// proposals (ids and order) on every client.
 
 /** Minimum net (up − down) for an edge to enter a type's subgraph. */
 export const MIN_NET = 1;
-/** Exact heaviest-simple-path search up to this many component vertices;
- *  greedy two-way extension above (longest path is NP-hard). */
-export const EXACT_PATH_MAX_VERTICES = 12;
-/** Peel at most this many paths out of one component. */
+/** Peel at most this many corridors out of one component. */
 export const PEEL_MAX_PATHS = 8;
-/** A peeled path survives only at ≥ this fraction of the component's first. */
+/** A peeled corridor survives only at ≥ this fraction of the component's first. */
 export const PEEL_DOMINANCE = 0.25;
+/** Ghost-waypoint budget: growth may pin the corridor at most this many times
+ *  (so a proposal carries at most 2 anchors + 3 ghosts = 5 waypoints). The 3rd
+ *  pin ends growth — "3 path modifications and we're done". */
+export const MAX_GHOST_WAYPOINTS = 3;
+/** An alternate path must be shorter than the corridor segment by MORE than
+ *  this to count as "routing would leave the corridor". Absorbs float noise
+ *  and meaningless sub-meter shortcuts (grid tie-paths stay ties). */
+export const ROUTE_CONSISTENCY_EPS_M = 1;
+/** A* node-pop cap per consistency check. The search explores the ellipse
+ *  {x : d(seg start,x)+crow(x,seg end) ≤ segment length}, razor-thin for the
+ *  near-straight segments consistent growth produces — this cap only bites on
+ *  pathological geometry, where the check FAILS OPEN (treats the corridor as
+ *  shortest) to keep recompute time bounded. Deterministic either way. */
+export const ROUTE_CHECK_MAX_POPS = 30000;
 /** High-activity gate: minimum path score (sum of nets). */
 export const MIN_ROUTE_SCORE = 3;
 /** High-activity gate: minimum number of path edges. */
@@ -367,139 +473,6 @@ export function routeLengthBudgetM(score: number, maxM = ROUTE_LENGTH_MAX_M): nu
   return Math.min(maxM, earned);
 }
 
-// ── Loop-back splitting ─────────────────────────────────────────────────────
-// The peel extends by heaviest arc with no regard for direction, so a hot
-// region yields corridors that snake or double back — and the length budget
-// happily fills with the loop. A proposal should read as a corridor: a long,
-// roughly straight line. Straightness of a stretch is measured as
-// crow-flies(endpoints) / arc length (1.0 = ruler, ~0.33 = U-turn); a path is
-// split where it turns back on itself and each side re-judged recursively, so
-// one snake becomes several straight corridors that then earn their own
-// length budgets and pass the activity gates independently.
-/** Split when endpoint straightness of the whole stretch falls below this.
- *  Calibration: an L-corner or a grid staircase sits near 0.71, a half-circle
- *  arc at 0.64, a U-turn at ~0.33 — so 0.55 keeps corners and gentle arcs and
- *  splits anything that meaningfully comes back on itself. */
-export const ROUTE_STRAIGHTNESS_MIN = 0.55;
-/** Hairpin detector: slide a window of this arc length along the path… */
-export const ROUTE_WINDOW_M = 800;
-/** …and split when any window's straightness falls below this — catches a
- *  local double-back buried in an otherwise straight corridor, which the
- *  endpoint measure can't see. */
-export const ROUTE_WINDOW_STRAIGHTNESS_MIN = 0.4;
-/** Recursion bound (≤ 2^depth fragments per peeled path). */
-export const ROUTE_SPLIT_MAX_DEPTH = 6;
-
-/**
- * Split a peeled path at its loop-back points into straight-ish fragments.
- * Two triggers, checked per stretch: a WINDOW that doubles back (split at the
- * excursion apex — the window point farthest from its start) and a whole
- * stretch that ends near where it began (split at the point that maximizes the
- * weaker half's straightness). Fragments recurse until straight, too short to
- * judge (< 4 edges), or ROUTE_SPLIT_MAX_DEPTH. Deterministic: pure arithmetic
- * over node coordinates, ties keep the earliest index. Fragment weights are
- * recomputed from `weightOf` (simple paths — edges are distinct).
- */
-export function splitLoopyPath(
-  path: PathResult,
-  lengthOf: (edgeId: number) => number,
-  latLngOf: (nodeId: number) => [number, number],
-  weightOf: (edgeId: number) => number,
-): PathResult[] {
-  const n = path.edges.length;
-  if (n < 4) return [path];
-
-  // Planar meters (equirectangular — fine at city scale, and deterministic).
-  const lat0 = (latLngOf(path.nodes[0])[0] * Math.PI) / 180;
-  const kx = 111320 * Math.cos(lat0);
-  const ky = 110574;
-  const xs = new Float64Array(n + 1);
-  const ys = new Float64Array(n + 1);
-  for (let i = 0; i <= n; i++) {
-    const [lat, lng] = latLngOf(path.nodes[i]);
-    xs[i] = lng * kx;
-    ys[i] = lat * ky;
-  }
-  const arc = new Float64Array(n + 2);
-  for (let i = 0; i < n; i++) arc[i + 1] = arc[i] + lengthOf(path.edges[i]);
-  const crow = (i: number, j: number) => Math.hypot(xs[j] - xs[i], ys[j] - ys[i]);
-  // Straightness of the stretch i..j; degenerate (zero-arc) stretches count as
-  // straight so they never trigger a split.
-  const straight = (i: number, j: number) => {
-    const s = arc[j] - arc[i];
-    return s > 0 ? crow(i, j) / s : 1;
-  };
-
-  const out: PathResult[] = [];
-  const emit = (i0: number, i1: number) => {
-    let w = 0;
-    for (let i = i0; i < i1; i++) w += weightOf(path.edges[i]);
-    out.push({
-      edges: path.edges.slice(i0, i1),
-      nodes: path.nodes.slice(i0, i1 + 1),
-      weight: w,
-    });
-  };
-
-  const rec = (i0: number, i1: number, depth: number) => {
-    if (i1 - i0 < 4 || depth >= ROUTE_SPLIT_MAX_DEPTH) {
-      emit(i0, i1);
-      return;
-    }
-    // Worst window: for each end j, judge the longest window fitting the arc
-    // budget. Windows under 60% full are skipped (edge-of-path stubs).
-    let worst = 1;
-    let wi = -1;
-    let wj = -1;
-    {
-      let i = i0;
-      for (let j = i0 + 1; j <= i1; j++) {
-        while (arc[j] - arc[i] > ROUTE_WINDOW_M && i < j - 1) i++;
-        if (arc[j] - arc[i] < ROUTE_WINDOW_M * 0.6) continue;
-        const r = straight(i, j);
-        if (r < worst) {
-          worst = r;
-          wi = i;
-          wj = j;
-        }
-      }
-    }
-    let k = -1;
-    if (worst < ROUTE_WINDOW_STRAIGHTNESS_MIN) {
-      // Split at the excursion apex: the farthest point from the window start.
-      let best = -1;
-      for (let m = wi + 1; m < wj; m++) {
-        const d = crow(wi, m);
-        if (d > best) {
-          best = d;
-          k = m;
-        }
-      }
-    }
-    if (k <= i0 && straight(i0, i1) < ROUTE_STRAIGHTNESS_MIN) {
-      // Whole stretch comes back on itself: split where both halves are
-      // straightest (maximize the weaker half).
-      let best = -1;
-      for (let m = i0 + 1; m < i1; m++) {
-        const v = Math.min(straight(i0, m), straight(m, i1));
-        if (v > best) {
-          best = v;
-          k = m;
-        }
-      }
-    }
-    if (k <= i0 || k >= i1) {
-      emit(i0, i1);
-      return;
-    }
-    rec(i0, k, depth + 1);
-    rec(k, i1, depth + 1);
-  };
-
-  rec(0, n, 0);
-  return out;
-}
-
 export interface RouteProposalOptions {
   limit?: number;
   /** Max proposals of one vote type in the ranked list (MAX_PER_TYPE). */
@@ -512,6 +485,11 @@ export interface RouteProposalOptions {
   minRouteBlocks?: number;
   /** Hard ceiling override for the corridor length budget (meters). */
   maxRouteLengthM?: number;
+  /** Ghost-waypoint budget for corridor growth (MAX_GHOST_WAYPOINTS). */
+  maxGhostWaypoints?: number;
+  /** Routing-consistency oracle override (tests inject fakes). Default:
+   *  makeSegmentShortestCheck(topo, adj) — bounded A* over the full graph. */
+  segmentShortestCheck?: SegmentShortestCheck;
   /** Prebuilt edge→block index for `topo` (GraphLayer already holds one).
    *  Omitted, one is built here — an O(nEdges) pass worth skipping per call. */
   blockIndex?: BlockIndex | null;
@@ -647,121 +625,262 @@ function connectedComponents(typeAdj: TypeAdj): TypeAdj[] {
 
 export type PathResult = { edges: number[]; nodes: number[]; weight: number };
 
-/** Exact heaviest simple path by DFS from every node (small components only).
- *  Strictly-greater comparisons keep the FIRST best found — ties resolve to the
- *  lowest start node / lowest edge id, matching the ascending iteration order. */
-function exactHeaviestPath(adj: TypeAdj): PathResult {
-  let bestW = -1;
-  let bestNodes: number[] = [];
-  let bestEdges: number[] = [];
-  const seen = new Set<number>();
-  const nodes: number[] = [];
-  const edges: number[] = [];
-
-  const dfs = (node: number, weight: number) => {
-    if (weight > bestW) {
-      bestW = weight;
-      bestNodes = [...nodes];
-      bestEdges = [...edges];
-    }
-    for (const arc of adj.get(node) ?? []) {
-      if (seen.has(arc.n)) continue;
-      seen.add(arc.n);
-      nodes.push(arc.n);
-      edges.push(arc.e);
-      dfs(arc.n, weight + arc.w);
-      seen.delete(arc.n);
-      nodes.pop();
-      edges.pop();
-    }
-  };
-
-  for (const start of adj.keys()) {
-    seen.clear();
-    seen.add(start);
-    nodes.length = 0;
-    nodes.push(start);
-    edges.length = 0;
-    dfs(start, 0);
-  }
-  return { edges: bestEdges, nodes: bestNodes, weight: Math.max(bestW, 0) };
+/** A grown corridor: the path plus the route waypoints that reproduce it —
+ *  [tip A, ghost pins…, tip B] in path order — and the path edges of each
+ *  waypoint-to-waypoint segment (concatenated they equal `edges`). */
+export interface GrownCorridor extends PathResult {
+  waypointNodes: number[];
+  segments: number[][];
 }
 
-/** Sum of distinct edge weights along a (possibly overlapping) edge list. */
-function pathWeight(edgeIds: number[], adj: TypeAdj): number {
-  const wanted = new Set(edgeIds);
-  const counted = new Set<number>();
-  let total = 0;
-  for (const arcs of adj.values()) {
-    for (const arc of arcs) {
-      if (wanted.has(arc.e) && !counted.has(arc.e)) {
-        counted.add(arc.e);
-        total += arc.w;
+/**
+ * Routing-consistency oracle: is the corridor segment from `fromNode` to
+ * `toNode` of length `corridorLenM` (still) a shortest path through the FULL
+ * graph? "Shortest" tolerates ties and sub-eps shortcuts
+ * (ROUTE_CONSISTENCY_EPS_M): routing may pick an equal-length alternative,
+ * but that is a tie the block-grain display forgives, not a detour.
+ */
+export type SegmentShortestCheck = (
+  fromNode: number,
+  toNode: number,
+  corridorLenM: number,
+) => boolean;
+
+/**
+ * The default oracle: bounded A* over the full topology. Searches from
+ * `toNode` toward `fromNode` with a crow-flies heuristic (equirectangular,
+ * scaled ×0.999 to stay admissible under the per-edge mean-latitude lengths)
+ * and prunes every g-score above the corridor length — the explored region is
+ * exactly the ellipse of paths that could beat the corridor, razor-thin for
+ * the near-straight segments consistent growth produces. Returns false only
+ * when a strictly (> eps) shorter path EXISTS; exhausting the frontier, a
+ * crow distance already at/over the corridor, or the pop cap (fail open,
+ * bounded work) all return true. Deterministic: heap ties break by node id.
+ */
+export function makeSegmentShortestCheck(
+  topo: GraphTopology,
+  adj: NodeAdj,
+  opts: { epsM?: number; maxPops?: number } = {},
+): SegmentShortestCheck {
+  const eps = opts.epsM ?? ROUTE_CONSISTENCY_EPS_M;
+  const maxPops = opts.maxPops ?? ROUTE_CHECK_MAX_POPS;
+  const { ends } = topo;
+  return (fromNode, toNode, corridorLenM) => {
+    if (fromNode === toNode) return true;
+    const limit = corridorLenM - eps;
+    if (limit <= 0) return true;
+    const [tLat, tLng] = nodeLatLng(topo, fromNode);
+    const kx = 111320 * Math.cos((tLat * Math.PI) / 180);
+    const ky = 110574;
+    const crowToTarget = (n: number): number => {
+      const [lat, lng] = nodeLatLng(topo, n);
+      return Math.hypot((lat - tLat) * ky, (lng - tLng) * kx) * 0.999;
+    };
+    if (crowToTarget(toNode) > limit) return true;
+
+    // Binary min-heap of (f, node) pairs; lazy deletes via the closed set.
+    const heapF: number[] = [];
+    const heapN: number[] = [];
+    const less = (i: number, j: number) =>
+      heapF[i] < heapF[j] || (heapF[i] === heapF[j] && heapN[i] < heapN[j]);
+    const swap = (i: number, j: number) => {
+      const f = heapF[i]; heapF[i] = heapF[j]; heapF[j] = f;
+      const n = heapN[i]; heapN[i] = heapN[j]; heapN[j] = n;
+    };
+    const push = (f: number, n: number) => {
+      heapF.push(f); heapN.push(n);
+      let i = heapF.length - 1;
+      while (i > 0) {
+        const par = (i - 1) >> 1;
+        if (!less(i, par)) break;
+        swap(i, par); i = par;
+      }
+    };
+    const pop = (): number => {
+      const top = heapN[0];
+      const lastF = heapF.pop()!;
+      const lastN = heapN.pop()!;
+      if (heapF.length) {
+        heapF[0] = lastF; heapN[0] = lastN;
+        let i = 0;
+        for (;;) {
+          const l = 2 * i + 1, r = l + 1;
+          let m = i;
+          if (l < heapF.length && less(l, m)) m = l;
+          if (r < heapF.length && less(r, m)) m = r;
+          if (m === i) break;
+          swap(i, m); i = m;
+        }
+      }
+      return top;
+    };
+
+    const g = new Map<number, number>([[toNode, 0]]);
+    const closed = new Set<number>();
+    push(crowToTarget(toNode), toNode);
+    let pops = 0;
+    while (heapF.length) {
+      const f = heapF[0];
+      const n = pop();
+      if (closed.has(n)) continue;
+      closed.add(n);
+      if (f > limit) return true;   // best possible remaining path ≥ corridor
+      // Pushes are pruned at g > limit, so reaching the target means a path
+      // strictly shorter (by > eps) than the corridor exists.
+      if (n === fromNode) return false;
+      if (++pops > maxPops) return true;
+      const gn = g.get(n)!;
+      const row = adjEdgesOf(adj, n);
+      for (let i = 0; i < row.length; i++) {
+        const e = row[i];
+        const u = ends[2 * e];
+        const v = ends[2 * e + 1];
+        const other = u === n ? v : u;
+        if (other === n || closed.has(other)) continue;
+        const ng = gn + edgeLengthMeters(topo, e);
+        if (ng > limit) continue;
+        const cur = g.get(other);
+        if (cur !== undefined && cur <= ng) continue;
+        g.set(other, ng);
+        push(ng + crowToTarget(other), other);
       }
     }
-  }
-  return total;
+    return true; // frontier exhausted: nothing beats the corridor
+  };
 }
 
-/** Greedy heaviest path: seed at the heaviest edge, extend both ways picking
- *  the heaviest unvisited arc, splice the halves. Cheap and path-valued for
- *  large components (port of _greedy_heaviest_path). */
-function greedyHeaviestPath(adj: TypeAdj): PathResult {
-  let seedA = -1;
-  let seedB = -1;
-  let seedE = -1;
-  let seedW = -1;
+/**
+ * Grow ONE corridor from the component's heaviest edge by routing-consistent
+ * extension. Each step considers the net-positive arcs leaving EITHER tip and
+ * takes the heaviest that fits the support-earned length budget (ties: lowest
+ * edge id). The open segment between a tip and its nearest inner waypoint
+ * must remain a shortest path (`isSegmentShortest`): an extension that keeps
+ * it so is taken outright; one that breaks it PINS the previous tip as a
+ * GHOST WAYPOINT — the route now passes through it, so a link routing through
+ * the waypoints still reproduces the corridor — and the 3rd pin ends growth
+ * ("3 path modifications and we're done"). With the ghost budget spent, only
+ * still-consistent extensions are taken. The seed edge itself is accepted
+ * unchecked: there is nothing to pin between two adjacent nodes, and the
+ * forced-corridor flag still pins exact geometry while the proposal lives.
+ */
+export function growCorridor(
+  adj: TypeAdj,
+  lengthOf: (edgeId: number) => number,
+  isSegmentShortest: SegmentShortestCheck,
+  opts: { maxGhosts?: number; budgetOf?: (weight: number) => number } = {},
+): GrownCorridor | null {
+  const maxGhosts = opts.maxGhosts ?? MAX_GHOST_WAYPOINTS;
+  const budgetOf = opts.budgetOf ?? ((w: number) => routeLengthBudgetM(w));
+
+  // Seed: the heaviest arc; strict > keeps the first found (lowest node id,
+  // then the row's ascending edge order) — the old greedy's exact seed rule.
+  let seedA = -1, seedB = -1, seedE = -1, seedW = -1;
   for (const [a, arcs] of adj) {
     for (const arc of arcs) {
-      if (arc.w > seedW) {
-        seedA = a;
-        seedB = arc.n;
-        seedE = arc.e;
-        seedW = arc.w;
-      }
+      if (arc.w > seedW) { seedA = a; seedB = arc.n; seedE = arc.e; seedW = arc.w; }
     }
   }
-  if (seedA < 0) return { edges: [], nodes: [], weight: 0 };
+  if (seedA < 0) return null;
 
-  const extend = (frm: number, to: number, firstEid: number) => {
-    const nodes = [frm, to];
-    const edges = [firstEid];
-    const seen = new Set([frm, to]);
-    let cur = to;
-    for (;;) {
-      let nxt: Arc | null = null;
-      for (const arc of adj.get(cur) ?? []) {
-        if (seen.has(arc.n)) continue;
-        if (!nxt || arc.w > nxt.w) nxt = arc;
+  const seedLen = lengthOf(seedE);
+  const nodes: number[] = [seedA, seedB];
+  const edges: number[] = [seedE];
+  const seen = new Set<number>([seedA, seedB]);
+  const ghostSet = new Set<number>();
+  let weight = seedW;
+  let totalLen = seedLen;
+  let ghostCount = 0;
+  // Open-segment state per side: the inner waypoint bounding the segment that
+  // ends at that side's tip, and the corridor length between them. With no
+  // ghosts pinned yet, both segments ARE the whole path (both tips move, the
+  // bounds chase them).
+  let boundA = seedB, segLenA = seedLen;
+  let boundB = seedA, segLenB = seedLen;
+  // Arcs that would need a pin after the budget was spent — never reconsidered
+  // (the tip they left stays fixed once rejected in that state).
+  const rejected = new Set<number>();
+
+  let done = false;
+  while (!done) {
+    const tipA = nodes[0];
+    const tipB = nodes[nodes.length - 1];
+    // Candidates off both tips, heaviest first (ties: lowest edge id).
+    const cands: { side: 0 | 1; n: number; e: number; w: number; len: number }[] = [];
+    for (const [side, tip] of [[0, tipA], [1, tipB]] as const) {
+      for (const arc of adj.get(tip) ?? []) {
+        if (seen.has(arc.n) || rejected.has(arc.e)) continue;
+        cands.push({ side, n: arc.n, e: arc.e, w: arc.w, len: lengthOf(arc.e) });
       }
-      if (!nxt) break;
-      seen.add(nxt.n);
-      nodes.push(nxt.n);
-      edges.push(nxt.e);
-      cur = nxt.n;
     }
-    return { nodes, edges };
-  };
+    cands.sort((x, y) => y.w - x.w || x.e - y.e);
 
-  // Extend from b away from a, and from a away from b, then splice into one
-  // path joined on the seed edge (the bwd half reversed, seed edge kept once).
-  // The bwd half contributes everything BEFORE seedA (drop its trailing
-  // seedA+seedB after reversing — fwd starts at seedA), keeping nodes aligned
-  // with edges (nodes[i] is the node entering edges[i]) for window slicing.
-  const fwd = extend(seedA, seedB, seedE);
-  const bwd = extend(seedB, seedA, seedE);
-  const leftNodes = [...bwd.nodes].reverse().slice(0, -2);
-  const leftEdges = [...bwd.edges.slice(1)].reverse(); // edges past the seed, reversed
-  const nodes = [...leftNodes, ...fwd.nodes];
-  const edges = [...leftEdges, ...fwd.edges];
-  return { edges, nodes, weight: pathWeight(edges, adj) };
-}
+    let took = false;
+    for (const c of cands) {
+      // Support-earned length budget — support buys reach as it accumulates.
+      // A skipped candidate is retried next round (more weight, more budget).
+      if (totalLen + c.len > budgetOf(weight + c.w)) continue;
+      const prevTip = c.side === 0 ? tipA : tipB;
+      const bound = c.side === 0 ? boundA : boundB;
+      const segLen = (c.side === 0 ? segLenA : segLenB) + c.len;
+      const consistent = isSegmentShortest(bound, c.n, segLen);
+      if (!consistent && ghostCount >= maxGhosts) {
+        rejected.add(c.e);
+        continue;
+      }
+      // Accept the extension.
+      if (c.side === 0) { nodes.unshift(c.n); edges.unshift(c.e); }
+      else { nodes.push(c.n); edges.push(c.e); }
+      seen.add(c.n);
+      weight += c.w;
+      totalLen += c.len;
+      if (consistent) {
+        if (ghostCount === 0) {
+          segLenA = segLenB = totalLen;
+          boundA = nodes[nodes.length - 1];
+          boundB = nodes[0];
+        } else if (c.side === 0) {
+          segLenA = segLen;
+        } else {
+          segLenB = segLen;
+        }
+      } else {
+        // Pin the previous tip: routing from the bound would leave the
+        // corridor here, so the URL must carry this point.
+        ghostSet.add(prevTip);
+        const firstGhost = ghostCount === 0;
+        ghostCount++;
+        // The pinned side's open segment restarts at the pin (one edge). The
+        // FIRST pin also becomes the other side's inner bound: until now that
+        // side's segment spanned the whole path.
+        if (c.side === 0) {
+          boundA = prevTip; segLenA = c.len;
+          if (firstGhost) { boundB = prevTip; segLenB = totalLen - c.len; }
+        } else {
+          boundB = prevTip; segLenB = c.len;
+          if (firstGhost) { boundA = prevTip; segLenA = totalLen - c.len; }
+        }
+        if (ghostCount >= maxGhosts) done = true;
+      }
+      took = true;
+      break;
+    }
+    if (!took) break;
+  }
 
-function heaviestPathFromAdj(adj: TypeAdj): PathResult {
-  let arcCount = 0;
-  for (const arcs of adj.values()) arcCount += arcs.length;
-  if (arcCount === 0) return { edges: [], nodes: [], weight: 0 };
-  return adj.size <= EXACT_PATH_MAX_VERTICES ? exactHeaviestPath(adj) : greedyHeaviestPath(adj);
+  // Waypoints in path order + the per-segment edge slices they delimit.
+  const waypointNodes: number[] = [nodes[0]];
+  const segments: number[][] = [];
+  let segStart = 0;
+  for (let i = 1; i < nodes.length - 1; i++) {
+    if (ghostSet.has(nodes[i])) {
+      waypointNodes.push(nodes[i]);
+      segments.push(edges.slice(segStart, i));
+      segStart = i;
+    }
+  }
+  waypointNodes.push(nodes[nodes.length - 1]);
+  segments.push(edges.slice(segStart));
+  return { edges, nodes, weight, waypointNodes, segments };
 }
 
 /** Adjacency with `eids` removed (drops now-isolated nodes, keeps key order). */
@@ -774,73 +893,25 @@ function removeEdges(adj: TypeAdj, eids: Set<number>): TypeAdj {
   return out;
 }
 
-/** Successively pull the heaviest simple path out of a component, removing its
- *  edges each round — a region's real parallel corridors surface while weak
- *  dead-end residue (below PEEL_DOMINANCE × the first path) is dropped. */
-function peelPaths(adj: TypeAdj): PathResult[] {
-  const paths: PathResult[] = [];
+/** Successively grow-and-remove corridors out of a component — a region's
+ *  real parallel corridors surface while weak dead-end residue (below
+ *  PEEL_DOMINANCE × the first corridor's weight) is dropped. */
+function peelCorridors(
+  adj: TypeAdj,
+  grow: (work: TypeAdj) => GrownCorridor | null,
+): GrownCorridor[] {
+  const out: GrownCorridor[] = [];
   let first: number | null = null;
   let work = adj;
-  while (work.size && paths.length < PEEL_MAX_PATHS) {
-    const path = heaviestPathFromAdj(work);
-    if (path.edges.length === 0) break;
-    if (first === null) first = path.weight;
-    else if (path.weight < PEEL_DOMINANCE * first) break;
-    paths.push(path);
-    work = removeEdges(work, new Set(path.edges));
+  while (work.size && out.length < PEEL_MAX_PATHS) {
+    const grown = grow(work);
+    if (!grown || grown.edges.length === 0) break;
+    if (first === null) first = grown.weight;
+    else if (grown.weight < PEEL_DOMINANCE * first) break;
+    out.push(grown);
+    work = removeEdges(work, new Set(grown.edges));
   }
-  return paths;
-}
-
-/**
- * Trim an ordered path to its best-supported contiguous window within a meter
- * budget. Slides a window over the path's edges keeping total length ≤
- * `budgetM` and returns the window with the highest weight sum — the hottest
- * stretch survives, straggly low-support reach is dropped. Deterministic ties:
- * equal weight prefers the shorter window, then the earliest along the path.
- * A single edge longer than the whole budget is kept (a corridor is never
- * trimmed to nothing); paths already within budget return unchanged.
- */
-export function capPathToLengthBudget(
-  path: PathResult,
-  budgetM: number,
-  lengthOf: (edgeId: number) => number,
-  weightOf: (edgeId: number) => number,
-): PathResult {
-  const n = path.edges.length;
-  if (n <= 1) return path;
-  const lens = path.edges.map(lengthOf);
-  if (lens.reduce((a, b) => a + b, 0) <= budgetM) return path;
-
-  let bestI = 0;
-  let bestJ = 0;
-  let bestW = -Infinity;
-  let bestLen = Infinity;
-  let i = 0;
-  let sumW = 0;
-  let sumL = 0;
-  for (let j = 0; j < n; j++) {
-    sumW += weightOf(path.edges[j]);
-    sumL += lens[j];
-    // Shrink from the left until within budget — but never below one edge, so
-    // an over-budget single edge (a long bridge) still yields a window.
-    while (sumL > budgetM && i < j) {
-      sumW -= weightOf(path.edges[i]);
-      sumL -= lens[i];
-      i++;
-    }
-    if (sumW > bestW || (sumW === bestW && sumL < bestLen)) {
-      bestI = i;
-      bestJ = j;
-      bestW = sumW;
-      bestLen = sumL;
-    }
-  }
-  return {
-    edges: path.edges.slice(bestI, bestJ + 1),
-    nodes: path.nodes.slice(bestI, bestJ + 2),
-    weight: bestW,
-  };
+  return out;
 }
 
 /** Expand an ordered path into its distinct blocks (in path order) + the union
@@ -944,6 +1015,9 @@ export function createRouteProposalJob(
   const minRouteEdges = opts.minRouteEdges ?? MIN_ROUTE_EDGES;
   const minRouteBlocks = opts.minRouteBlocks ?? MIN_ROUTE_BLOCKS;
   const maxRouteLengthM = opts.maxRouteLengthM ?? ROUTE_LENGTH_MAX_M;
+  const maxGhosts = opts.maxGhostWaypoints ?? MAX_GHOST_WAYPOINTS;
+  const segmentShortest =
+    opts.segmentShortestCheck ?? makeSegmentShortestCheck(topo, adj);
   const blockIndex = opts.blockIndex !== undefined ? opts.blockIndex : buildBlockIndex(topo);
   const netsPerType = netsByType(edgeVoteTypes, topo.nEdges, legend.length);
 
@@ -964,40 +1038,51 @@ export function createRouteProposalJob(
     const typeAdj = buildTypeAdj(topo, adj, nets, minNet);
     const typeProposals: RouteProposal[] = [];
     const lengthOf = (e: number) => edgeLengthMeters(topo, e);
-    const weightOf = (e: number) => nets.get(e) ?? 0;
-    const latLngOf = (nid: number) => nodeLatLng(topo, nid);
+    const budgetOf = (w: number) => routeLengthBudgetM(w, maxRouteLengthM);
+    const grow = (work: TypeAdj) =>
+      growCorridor(work, lengthOf, segmentShortest, { maxGhosts, budgetOf });
     for (const compAdj of connectedComponents(typeAdj)) {
-      for (const peeled of peelPaths(compAdj)) {
-        // Split loop-backs FIRST (a snake becomes several straight corridors),
-        // then trim each fragment to the meter budget ITS OWN support earned,
-        // BEFORE the activity gates — the gates judge the corridor that will
-        // actually be shown.
-        for (const frag of splitLoopyPath(peeled, lengthOf, latLngOf, weightOf)) {
-          const path = capPathToLengthBudget(
-            frag,
-            routeLengthBudgetM(frag.weight, maxRouteLengthM),
-            lengthOf,
-            weightOf,
-          );
-          if (path.weight < minRouteScore || path.edges.length < minRouteEdges) continue;
-          const { blocks, blockEdgeIds } = groupBlocks(path.edges, topo, blockIndex);
-          if (blocks.length < minRouteBlocks) continue;
-          const a = path.nodes[0];
-          const b = path.nodes[path.nodes.length - 1];
-          const [aLat, aLng] = nodeLatLng(topo, a);
-          const [bLat, bLng] = nodeLatLng(topo, b);
-          typeProposals.push({
-            id: proposalIdOf(legendIdx, path.edges),
-            label,
-            legendIdx,
-            score: path.weight,
-            edgeIds: path.edges,
-            blocks,
-            blockEdgeIds,
-            anchors: [a, b],
-            anchorCoords: [{ lat: aLat, lng: aLng }, { lat: bLat, lng: bLng }],
-          });
+      // No corridor can outscore its component's total support, so cold
+      // components skip growth (and its A* checks) entirely. With the
+      // top-proposal floor as minRouteScore this prunes almost everything.
+      let compWeight = 0;
+      {
+        const counted = new Set<number>();
+        for (const arcs of compAdj.values()) {
+          for (const arc of arcs) {
+            if (!counted.has(arc.e)) {
+              counted.add(arc.e);
+              compWeight += arc.w;
+            }
+          }
         }
+      }
+      if (compWeight < minRouteScore) continue;
+      for (const path of peelCorridors(compAdj, grow)) {
+        if (path.weight < minRouteScore || path.edges.length < minRouteEdges) continue;
+        const { blocks, blockEdgeIds } = groupBlocks(path.edges, topo, blockIndex);
+        if (blocks.length < minRouteBlocks) continue;
+        const a = path.nodes[0];
+        const b = path.nodes[path.nodes.length - 1];
+        const [aLat, aLng] = nodeLatLng(topo, a);
+        const [bLat, bLng] = nodeLatLng(topo, b);
+        typeProposals.push({
+          id: proposalIdOf(legendIdx, path.edges),
+          label,
+          legendIdx,
+          score: path.weight,
+          edgeIds: path.edges,
+          blocks,
+          blockEdgeIds,
+          anchors: [a, b],
+          anchorCoords: [{ lat: aLat, lng: aLng }, { lat: bLat, lng: bLng }],
+          waypointNodes: path.waypointNodes,
+          waypointCoords: path.waypointNodes.map((n) => {
+            const [lat, lng] = nodeLatLng(topo, n);
+            return { lat, lng };
+          }),
+          segments: path.segments,
+        });
       }
     }
     return dedupeRoutes(typeProposals, jaccardThreshold);

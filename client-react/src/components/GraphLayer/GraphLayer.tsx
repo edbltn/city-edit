@@ -28,9 +28,9 @@ import {
 } from "../MapLibreBackground/MapLibreBackground";
 import { makeVoteTypeIcon } from "./voteTypeIcon";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
-import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, type VoteTypeWinner } from "./topProposals";
+import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, TOP_PROPOSAL_MIN_NET, type VoteTypeWinner } from "./topProposals";
 import {
-  createRouteProposalJob, corridorCoordinates, corridorFromEdgeIds, routeBlockEdges, isRouteCovered,
+  createRouteProposalJob, corridorFromEdgeIds, corridorSliceBetween, routeBlockEdges, isRouteCovered,
   expandSelectionToUndirected,
   type RouteProposal,
 } from "./routeProposals";
@@ -557,21 +557,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       if (!topo) return null;
       const p = routeProposalsRef.current.find((x) => x.id === forced.proposalId);
       if (p) {
-        const coords = corridorCoordinates(topo, p);
-        if (coords) {
-          // Orient a→b: the walk starts at anchors[0]; reverse when `a` is the
-          // other anchor (compare squared deltas — the anchors are far apart).
-          const sq = (x: { lat: number; lng: number }, y: { lat: number; lng: number }) =>
-            (x.lat - y.lat) ** 2 + (x.lng - y.lng) ** 2;
-          const backward = sq(a, p.anchorCoords[1]) < sq(a, p.anchorCoords[0]);
-          return {
-            coordinates: backward ? [...coords].reverse() : coords,
-            edgeIds: p.edgeIds,
-          };
-        }
+        // The SLICE of the live corridor between the proposal waypoints
+        // nearest a/b, oriented a→b. A ghosted proposal threads one selection
+        // segment per waypoint pair, so each segment resolves to its own
+        // slice; an anchor-only proposal degenerates to the whole corridor
+        // (the old behavior).
+        const slice = corridorSliceBetween(topo, p, a, b);
+        if (slice) return slice;
       }
       // Proposal retired/reshaped (or not computed yet): rebuild from the
-      // snapshot taken when the user threaded it.
+      // snapshot taken when the user threaded it (per-segment snapshots for
+      // ghosted proposals — each waypoint's flag carries its own slice).
       if (forced.edgeIds?.length) return corridorFromEdgeIds(topo, forced.edgeIds, a, b);
       return null;
     });
@@ -807,6 +803,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       data, tiebreakSaltRef.current, TOP_PROPOSAL_LIMIT,
       TOP_PROPOSAL_MIN_SPACING_M,
       isStationNetwork ? undefined : voteTypeKindOf,
+      // Station networks don't badge winners as "top proposals" (every station
+      // renders its own pin regardless), so the support floor stays off there.
+      isStationNetwork ? 0 : TOP_PROPOSAL_MIN_NET,
     ), legendChanged);
   }, [setStableWinners, isStationNetwork, voteTypeKindOf]);
 
@@ -989,26 +988,31 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   }, [midEdgeIdxs]);
 
   // Does the current route still run its corridor leg through this RBTP's
-  // anchors — i.e. are both anchors waypoints AND consecutive ones (no mid
-  // between them)? Governs how long an explicitly-tapped diamond stays
-  // selected: the tap inserted these exact anchor coords as waypoints, so a
-  // tight meters match (they only move if the user edits them) is the right
-  // "still my selection" test — not path-edge coverage, which OSRM's routing
-  // between the anchors rarely satisfies. Adjacency matters because inserting
-  // a mid BETWEEN the anchors un-forces the corridor segment (reducer
-  // insertMid → clearForcedAt): the leg reverts to OSRM and stops selecting
-  // the corridor's blocks, so the proposal must read deselected too.
+  // waypoint chain — i.e. is EVERY proposal waypoint (anchors + ghosts) a
+  // route waypoint, and are they consecutive, in order (forward or reversed)?
+  // Governs how long an explicitly-tapped diamond stays selected: the tap
+  // inserted these exact coords as waypoints, so a tight meters match (they
+  // only move if the user edits them) is the right "still my selection" test —
+  // not path-edge coverage, which OSRM's routing rarely satisfies.
+  // Consecutiveness matters because inserting a mid INSIDE the chain un-forces
+  // that corridor segment (reducer insertMid → clearForcedAt): the leg reverts
+  // to OSRM and stops selecting the corridor's blocks, so the proposal must
+  // read deselected too.
   const anchorsAreWaypoints = useCallback((p: RouteProposal): boolean => {
     const wps: { lat: number; lng: number }[] = [];
     if (startLat !== null && startLng !== null) wps.push({ lat: startLat, lng: startLng });
     wps.push(...ghostWaypointsRef.current);
     if (endLat !== null && endLng !== null) wps.push({ lat: endLat, lng: endLng });
-    if (wps.length < 2) return false;
-    // Route-ordered list (start, mids…, end): each anchor must match a
-    // waypoint, and the two matches must be neighbors.
-    const idx = p.anchorCoords.map((a) =>
-      wps.findIndex((w) => map.distance([a.lat, a.lng], [w.lat, w.lng]) < 5));
-    return idx[0] >= 0 && idx[1] >= 0 && Math.abs(idx[0] - idx[1]) === 1;
+    const chain = p.waypointCoords;
+    if (wps.length < chain.length || chain.length < 2) return false;
+    // Route-ordered list (start, mids…, end): every chain point must match a
+    // waypoint, and the matches must be consecutive in one direction.
+    const idx = chain.map((c) =>
+      wps.findIndex((w) => map.distance([c.lat, c.lng], [w.lat, w.lng]) < 5));
+    if (idx.some((i) => i < 0)) return false;
+    const dir = Math.sign(idx[idx.length - 1] - idx[0]);
+    if (dir === 0) return false;
+    return idx.every((v, k) => k === 0 || v - idx[k - 1] === dir);
     // ghostKey stands in for the mids (read via ref; the array identity churns).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startLat, startLng, endLat, endLng, ghostKey, map]);
@@ -1422,6 +1426,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // (GraphLayer already built one for hover/selection).
     const job = createRouteProposalJob(topo, adj, data, {
       kindOf: voteTypeKindOf, blockIndex: blockIndexRef.current,
+      // The top-proposal support floor (>TOP_PROPOSAL_MIN_NET net votes),
+      // expressed as the pipeline's minimum path score — same rule the PBTP
+      // winners apply, so both proposal families share one bar.
+      minRouteScore: TOP_PROPOSAL_MIN_NET + 1,
     });
     const perType: RouteProposal[][] = [];
     let i = 0;
@@ -2930,6 +2938,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const legend = data?.vote_type_legend ?? [];
   let tooltipName = "";
   let hoverVoteTypes: VoteTypeRow[] = [];
+  // The edge whose block the hover card's rows were summed over — feeds the
+  // card's top-proposal row badges (same grain as the rows themselves).
+  let hoverRowsEdgeId: number | null = null;
 
   if (hoverTarget && data) {
     if (hoverTarget.kind === "edge") {
@@ -2943,6 +2954,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         // over the hovered edge's block; per-edge rows when blocks are absent.
         hoverVoteTypes = selectionVoteRows(data, [hoverTarget.index])
           ?? decodeVoteTypes((data.edge_vote_types ?? [])[hoverTarget.index], legend);
+        hoverRowsEdgeId = hoverTarget.index;
       }
     } else {
       if (hoverTarget.index < data.nNodes) {
@@ -2952,6 +2964,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         const hoverNodeEdge = adjShortest(data, nodeAdjRef.current, hoverTarget.index);
         hoverVoteTypes = (hoverNodeEdge != null ? selectionVoteRows(data, [hoverNodeEdge]) : null)
           ?? decodeVoteTypes((data.node_vote_types ?? [])[hoverTarget.index], legend);
+        hoverRowsEdgeId = hoverNodeEdge;
       }
     }
     // A station carries its name on its self-edge (index == node index); use it
@@ -3229,6 +3242,64 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const tapped = routeProposals.find((p) => p.id === selectedRbtpId) ?? null;
     return tapped && anchorsAreWaypoints(tapped) ? tapped : null;
   }, [pathEdgeIds, routeProposals, isHeatmapLoading, selectedRbtpId, anchorsAreWaypoints]);
+
+  // -------------------------------------------------------------------------
+  // Top-proposal row badges — which of a card's vote-type rows are CURRENT top
+  // proposals for what that card shows. PURELY DERIVED, never stored: computed
+  // from the same `winners` / `routeProposals` arrays that render the map pins,
+  // so a badge can never disagree with the pins (both refresh on the same
+  // batched proposal sweep).
+  //   - "point": a PBTP winner sits on one of the card's blocks (the same
+  //     block-grain the rows sum over, so the badge marks a row whose count
+  //     includes that winner's votes).
+  //   - "route": an RBTP whose corridor is FULLY contained in the selection
+  //     (every block covered, direction twins forgiven) — a selection that
+  //     merely brushes a corridor doesn't badge it.
+  // -------------------------------------------------------------------------
+  const topKindsFor = useCallback(
+    (edgeIds: readonly number[] | null | undefined, includeRoutes: boolean): TopKindMap => {
+      const out = new Map<string, TopProposalKind>();
+      const topo = topologyRef.current;
+      if (!topo || !edgeIds || edgeIds.length === 0) return out;
+      if (winners.length > 0) {
+        const blockEdges = new Set<number>();
+        for (const block of materializeBlocks(topo, blockIndexRef.current, edgeIds as number[])) {
+          for (let i = 0; i < block.length; i++) blockEdges.add(block[i]);
+        }
+        for (const w of winners) {
+          if (blockEdges.has(w.edgeIdx)) out.set(w.label, "point");
+        }
+      }
+      if (includeRoutes && routeProposals.length > 0) {
+        const sel = expandSelectionToUndirected(
+          topo, edgeIds, routeProposals.flatMap((p) => p.blockEdgeIds));
+        for (const p of routeProposals) {
+          if (!isRouteCovered(p.blocks, sel)) continue;
+          out.set(p.label, out.get(p.label) === "point" ? "both" : (out.get(p.label) ?? "route"));
+        }
+      }
+      return out;
+    },
+    [winners, routeProposals],
+  );
+
+  // Per-card maps. Route containment only applies where a corridor could
+  // actually fit: the route-summary card (the selection's path) and the
+  // hovered diamond's corridor — a single point/block card can never contain a
+  // multi-block corridor, so those skip the containment scan.
+  const pinnedTopKinds = useMemo(
+    () => topKindsFor(pinnedVoteEdgeId != null ? [pinnedVoteEdgeId] : null, false),
+    // graphVoteVersion re-derives in lockstep with the rows' vote decode.
+    [pinnedVoteEdgeId, topKindsFor, graphVoteVersion, isHeatmapLoading]);
+  const hoverTopKinds = useMemo(
+    () => topKindsFor(hoverRowsEdgeId != null ? [hoverRowsEdgeId] : null, false),
+    [hoverRowsEdgeId, topKindsFor, graphVoteVersion]);
+  const hoverRbtpTopKinds = useMemo(
+    () => topKindsFor(hoverRbtp?.blockEdgeIds ?? null, true),
+    [hoverRbtp, topKindsFor, graphVoteVersion]);
+  const routeTopKinds = useMemo(
+    () => topKindsFor(pathEdgeIds, true),
+    [pathEdgeIds, topKindsFor, graphVoteVersion, isHeatmapLoading]);
 
   // geocodeVersion used to re-render when async geocode completes
   void geocodeVersion;
@@ -4064,6 +4135,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           screenY={pinnedScreenPos.y}
           name={pinnedName}
           rows={pinnedVoteTypes}
+          topKinds={isStationNetwork ? undefined : pinnedTopKinds}
           interactive
           getAvoidRects={getWaypointAvoidRects}
           edgeId={pinnedVoteEdgeId}
@@ -4099,6 +4171,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           screenY={tooltipPos.y}
           name={tooltipName}
           rows={hoverVoteTypes}
+          topKinds={isStationNetwork ? undefined : hoverTopKinds}
           voteTypes={theme.suggestions}
           getAvoidRects={getHoverAvoidRects}
           // The open modal can re-anchor (vote tick, pan) while the hover
@@ -4127,6 +4200,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           name=""
           metaText={`Covers ${hoverRbtp.blocks.length} ${hasBlocksRef.current ? "block" : "segment"}${hoverRbtp.blocks.length !== 1 ? "s" : ""}`}
           rows={hoverRbtpRows}
+          topKinds={hoverRbtpTopKinds}
           voteTypes={theme.suggestions}
           getAvoidRects={getHoverAvoidRects}
           avoidKey={`${pinnedScreenPos?.x},${pinnedScreenPos?.y};${routeCardPos?.x},${routeCardPos?.y}`}
@@ -4168,6 +4242,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           // Distinct-voter rows once the server answers (one person = one vote
           // however many blocks their cast fanned across); local sums meanwhile.
           rows={routeUniqueRows ?? routeVoteRows}
+          topKinds={routeTopKinds}
           interactive
           elevated
           getAvoidRects={getWaypointAvoidRects}
@@ -4254,6 +4329,11 @@ function ExpandIcon({ size = 12 }: { size?: number }) {
   );
 }
 
+/** How a card row's vote type qualifies as a top proposal: a PBTP winner on
+ *  the card's block(s), an RBTP fully contained in the selection, or both. */
+type TopProposalKind = "point" | "route" | "both";
+type TopKindMap = ReadonlyMap<string, TopProposalKind>;
+
 interface ProposalCardProps {
   winner: VoteTypeWinner | null;
   /** Header eyebrow text naming the kind of selection: "Proposal" (plain
@@ -4269,6 +4349,11 @@ interface ProposalCardProps {
    *  puts its block count here ("selects N blocks"). */
   metaText?: string | null;
   rows: VoteTypeRow[];
+  /** Labels among `rows` that are CURRENT top proposals for this card, with
+   *  how they qualify (point winner on the card's blocks / route corridor
+   *  fully contained in the selection / both). Derived by the host from the
+   *  live winners + routeProposals — see topKindsFor. */
+  topKinds?: TopKindMap;
   interactive?: boolean;
   /** Lifts the card one z tier above sibling cards (route summary vs transient
    *  hover). Portals mount at different times, so DOM order can't order them. */
@@ -4324,7 +4409,7 @@ type CardPos = {
 type AvoidRect = { left: number; top: number; right: number; bottom: number };
 
 function ProposalCard({
-  winner, eyebrow = "Top Proposal", screenX, screenY, name, metaText = null, rows,
+  winner, eyebrow = "Top Proposal", screenX, screenY, name, metaText = null, rows, topKinds,
   interactive = false, elevated = false, getAvoidRects, avoidKey, edgeId = null, blocks = null, mode = "", shareUrl = null, streetViewLatLng = null, voteTypes, onVote, onRemove, removeLabel = "Remove this point", onHoverChange, registerEl,
 }: ProposalCardProps) {
   const [copied, setCopied] = useState(false);
@@ -4589,16 +4674,44 @@ function ProposalCard({
             </div>
             {rows.length > 0 && (
               <div className="graph-proposal-rows" style={voteColumnWidths(rows)}>
-                {rows.map((row) => (
-                  <div className="graph-proposal-row" key={row.label}>
-                    <span className="graph-proposal-row-label">{row.label}</span>
-                    <span className="graph-vote" role="group" aria-label={`${row.label} votes`}>
-                      {tally(row, -1)}
-                      <span className="graph-vote-net" title="net votes (up − down)">{row.up - row.down}</span>
-                      {tally(row, 1)}
-                    </span>
-                  </div>
-                ))}
+                {rows.map((row) => {
+                  // Top-proposal badge: mirrors the map pin shapes (square =
+                  // point proposal, diamond = route corridor) so the row reads
+                  // as "this type has a pin here".
+                  const topKind = topKinds?.get(row.label);
+                  return (
+                    <div
+                      className={`graph-proposal-row${topKind ? " is-top-proposal" : ""}`}
+                      key={row.label}
+                    >
+                      <span className="graph-proposal-row-label">
+                        {topKind && (
+                          <span
+                            className="graph-proposal-row-top"
+                            title={topKind === "point"
+                              ? "Top proposal on this block"
+                              : topKind === "route"
+                                ? "Top route proposal — fully inside this selection"
+                                : "Top proposal here — point and route"}
+                          >
+                            {(topKind === "point" || topKind === "both") && (
+                              <span className="graph-proposal-row-top-square" />
+                            )}
+                            {(topKind === "route" || topKind === "both") && (
+                              <span className="graph-proposal-row-top-diamond" />
+                            )}
+                          </span>
+                        )}
+                        {row.label}
+                      </span>
+                      <span className="graph-vote" role="group" aria-label={`${row.label} votes`}>
+                        {tally(row, -1)}
+                        <span className="graph-vote-net" title="net votes (up − down)">{row.up - row.down}</span>
+                        {tally(row, 1)}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

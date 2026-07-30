@@ -1949,6 +1949,38 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   white-space: nowrap;
 }
 
+/* A row whose vote type is a CURRENT top proposal for this card reads a notch
+   stronger than its neighbors — the badge does the pointing, the weight does
+   the ranking. */
+.graph-proposal-row.is-top-proposal .graph-proposal-row-label {
+  font-weight: 600;
+}
+
+/* Top-proposal badge: mini map-pin shapes before the label — square = point
+   proposal (PBTP), diamond = route corridor (RBTP), both when both apply. */
+.graph-proposal-row-top {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 5px;
+  vertical-align: 1px;
+}
+
+.graph-proposal-row-top-square,
+.graph-proposal-row-top-diamond {
+  width: 6px;
+  height: 6px;
+  display: inline-block;
+  background: var(--ink);
+  opacity: 0.85;
+}
+
+/* The diamond is the square rotated 45° — same glyph language as the RBTP
+   marker (proposalShapeClass). */
+.graph-proposal-row-top-diamond {
+  transform: rotate(45deg) scale(0.9);
+}
+
 /* Connected vote control: [ −down │ net │ +up ] reads as ONE unit rather than
    three free-floating numbers. Square (radius 0) and tabular monospace to match
    the terminal aesthetic; the outer hairline + internal dividers do the framing. */
