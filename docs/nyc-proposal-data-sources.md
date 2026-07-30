@@ -130,6 +130,43 @@ diff the page HTML to detect additions.
 
 ---
 
+## Importing proposals as votes (`import_to_map.py` / `weekly_import.py`)
+
+The pipeline above feeds the **nyc-proposals** map: every DOT project becomes
+one vote from a synthetic voter (`dotproj:<sha1(url)>`, `ip_from_voter` — the
+Lyft/Citibike import convention), cast through the public HTTP API so the
+server does all snapping (no graph-version coupling):
+
+- **Corridor projects** ("X from A to B" in title/description) geocode both
+  endpoints (via the app's own `/api/geocode`), route via `POST /api/routes`,
+  and cast a route vote on the corridor's edges → they surface as corridor
+  (RBTP) proposals. Guards: ≤ 8 km endpoint spread, ≤ 600 edges (a failed
+  geocode otherwise routes across boroughs — "5th Ave & 57 St" once hit
+  Sunset Park instead of Midtown; E/W-numbered cross streets retry with
+  Manhattan first).
+- **Point projects** (intersections, plazas) cast on the snapped point → PBTP
+  pins. Route-kind classifications whose corridor could not be parsed demote
+  to the point-kind "Street redesign" label — point casts of route-kind types
+  are invisible to pin selection by design.
+- The map's `maps.top_proposal_min_net = 0` override (served as
+  `topProposalMinNet`) exempts it from the >100-net top-proposal support
+  floor — every one-vote proposal still gets its pin/corridor.
+
+Two-phase CLI (plan is reviewable before anything is cast; both idempotent):
+
+```bash
+python3 tools/nyc_proposals/import_to_map.py plan \
+    --projects dot_projects.jsonl -o plan.jsonl --base http://localhost:5001
+python3 tools/nyc_proposals/import_to_map.py cast --plan plan.jsonl \
+    --base http://localhost:5001 --map nyc-proposals
+```
+
+**Weekly prod refresh**: `weekly_import.py` (Cloud Run job
+`dot-proposals-import-prod`, Mondays 07:00 NY, `terraform/dot-import-job.tf` —
+apply with `-target` only) re-runs fetch→plan→cast for pages changed in the
+last 8 days against `https://cityedit.org`. Image:
+`gcloud builds submit tools/nyc_proposals --tag <region>-docker.pkg.dev/<project>/desire-path-mapper/dot-import:latest`.
+
 ## Watch-list ideas (not yet wired up)
 
 - **Community-board agendas** (each CB posts PDF agendas; DOT items appear
