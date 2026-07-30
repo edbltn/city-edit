@@ -26,6 +26,7 @@ import { GraphLayer } from "../GraphLayer/GraphLayer";
 import { BoundaryLayer } from "../BoundaryLayer";
 import { MapLibreBackground } from "../MapLibreBackground";
 import type { LatLng, ProposalMatch } from "../../types";
+import type { ForcedCorridor } from "../../selection/types";
 import "leaflet/dist/leaflet.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./MapView.css";
