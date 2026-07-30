@@ -106,7 +106,22 @@ staged in <code>.blocks-staging/nyc/</code>, shipped with
 <code>~/city-edit-prod-backups/20260729-203632/</code> before the deploy; staging-first
 (verified blocksVersion, tile content at the reservoir, and the bagg self-heal), then the same
 digest promoted to prod and re-verified.</p>
-<p><b>Why artifacts-only, and a landmine for the next deploy:</b> the full
+<h2>Full-rebuild follow-up (same evening)</h2>
+<p>The layer-cap reset happened hours later: a full <code>cloudbuild.app.yaml</code> rebuild
+(fresh Geofabrik PBFs, ~2h20m — the first attempt hit the 2h config timeout in the last
+PMTiles step) produced a ~20-layer base with new graphs for all five cities (nyc
+<code>6a07332e</code>, +8.3k edges of fresh OSM), then blocks were re-baked per city against
+the new graphs — the split pass reached every city for the first time (nyc 1,020 / dc 584 /
+philly 579 / chicago 216 / sf 137 corridors split; all audits 0 overlaps, 100% coverage) —
+staged with the test-city dirs (absent from a fresh image) and shipped as an artifacts overlay
+(digest <code>f38b2659</code>, prod rev <code>00116</code>). Staging rehearsed the
+<code>graph_reload</code> resnap against the full prod-sized vote set; prod then resnapped
+868,774/868,793 votes (19 expected dedup merges) pinned to one instance.
+<b>New landmine found:</b> right after a deploy, the DRAINING old revision still subscribes to
+<code>graph_reload</code> (PUBSUB NUMSUB showed 2) and would resnap with its OLD graph —
+last-writer-wins on edge ids. Wait for <code>PUBSUB NUMSUB graph_reload</code> = 1 before
+publishing, then publish again to be safe (anchors make the resnap idempotent).</p>
+<p><b>Why the first ship was artifacts-only, and the (now-reset) layer landmine:</b> the full
 <code>Dockerfile.blocks-overlay</code> (code + client + artifacts) failed twice. First the
 source tarball raced live edits in the working tree (<code>App.tsx</code> was saved mid-upload,
 so the remote saw imports without their usages — build from a clean <code>git archive HEAD</code>
