@@ -29,6 +29,23 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-30-nyc-proposals-import.html">
+    <div class="date">2026-07-30</div>
+    <h2>nyc-proposals: map rename, official DOT proposal import + weekly job, per-map proposal floor</h2>
+    <p>Renamed <code>nyc-crossings</code> → <code>nyc-proposals</code> ("NYC Proposals") on prod, staging,
+    and local — chain flattening kept the printed QR posters' <code>nyc-intersections</code> redirect
+    (with its <code>src=qr-poster</code> retro-tag) resolving in one hop. Then imported every official
+    NYC DOT street-change proposal from nycdotprojects.info as one vote each (60 cast: 8 corridors via
+    <code>/api/routes</code> edge ids, 52 pins; synthetic voters <code>dotproj:&lt;sha1(url)&gt;</code>,
+    idempotent), with a two-sided junk filter, borough-aware geocoding guards, and a point-kind fallback
+    so route-kind projects without parseable corridors still pin. Because the same-day &gt;100-net
+    top-proposal floor would have hidden every net-1 import, <code>maps.top_proposal_min_net</code> is
+    now a per-map override (served as <code>topProposalMinNet</code>, set 0 for nyc-proposals). Shipped
+    as overlay digest <code>9ed734b9…</code> staging→prod; a weekly Cloud Run job
+    (<code>dot-proposals-import-prod</code>, Mondays 07:00 NY, terraform <code>-target</code>) keeps the
+    map current with an 8-day overlapping window.</p>
+  </a>
+
   <a class="entry" href="./2026-07-30-droast-dockerfile-hygiene.html">
     <div class="date">2026-07-30</div>
     <h2>droast Dockerfile hygiene pass + the ForcedCorridor build-breaker (overlay deploy)</h2>

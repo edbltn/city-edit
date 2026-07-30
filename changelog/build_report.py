@@ -10,10 +10,10 @@ import re
 
 HERE = os.path.dirname(__file__)
 DIFF_PATH = os.path.join(HERE, "changes.diff")
-OUT_PATH = os.path.join(HERE, "2026-07-30-droast-dockerfile-hygiene.html")
+OUT_PATH = os.path.join(HERE, "2026-07-30-nyc-proposals-import.html")
 
 DATE = "2026-07-30"
-TITLE = "droast Dockerfile hygiene pass + the ForcedCorridor build-breaker (overlay deploy)"
+TITLE = "nyc-proposals: map rename, official DOT proposal import + weekly job, per-map proposal floor"
 
 
 def split_by_file(diff_text: str):
@@ -57,89 +57,62 @@ def colorize(diff_chunk: str) -> str:
 
 SECTIONS = [
     {
-        "id": "buildfix",
-        "tag": "React client · build",
-        "title": "1 · A missing type import silently broke every Docker client build",
-        "symptom": (
-            "Building the client image (and therefore ANY overlay deploy) failed at <code>tsc -b</code> with "
-            "<code>TS2304: Cannot find name 'ForcedCorridor'</code> ×2 in MapView.tsx. Localhost looked perfectly "
-            "healthy the whole time — Vite's dev server transpiles without type-checking, so the error only "
-            "existed at image-build time. Surfaced by the droast validation builds, not by any dev workflow."
-        ),
+        "id": "rename",
+        "tag": "DATA / ROUTING",
+        "title": "nyc-crossings → nyc-proposals (rename + QR chain)",
+        "symptom": "The dangerous-intersections map was being broadened to cover ALL city proposals; the printed QR posters point at /m/nyc-intersections and had to keep resolving.",
         "cause": [
-            "<code>536fb76</code> (ghost-waypoint corridors) added <code>ForcedCorridor</code> type annotations to "
-            "MapView's <code>corridorChainOf</code>/<code>corridorChainFor</code> without importing the type — every "
-            "other user (RouteContext, reducer) already imported it from <code>selection/types</code>.",
-            "Nothing in the dev loop runs <code>tsc</code>; the first consumer to notice would have been the next "
-            "overlay deploy's Cloud Build, mid-deploy.",
+            "Slug renames are data-driven (map_redirects) since 2026-07-29 — no code change needed",
+            "rename_map_slug's chain flattening repoints any redirect targeting the old slug, so nyc-intersections → nyc-proposals kept its src=qr-poster retro-tag",
         ],
         "fixes": [
-            "One line: <code>import type {{ ForcedCorridor }} from \"../../selection/types\";</code> — same style as "
-            "RouteContext's import.",
-            "Verified by host <code>tsc -b</code> (clean) and a full <code>docker build</code> of "
-            "client-react/Dockerfile (image builds through <code>vite build</code>).",
+            "rename_map.py nyc-crossings nyc-proposals run against prod, staging, and local (73/73/2 votes moved; Redis rebuilt under the new slug)",
+            "Display name/subtitle updated to \"NYC Proposals\" / \"Every proposal to improve the city, in one place\"",
+            "Redirect inventory rows updated in docs/url-routing.md",
         ],
-        "files": [
-            "client-react/src/components/MapView/MapView.tsx",
-        ],
+        "files": ["docs/url-routing.md"],
     },
     {
-        "id": "droast",
-        "tag": "Docker · all images",
-        "title": "2 · droast lint pass: 1 error / 12 warnings / 27 infos → clean",
-        "symptom": (
-            "Ran <a href=\"https://github.com/immanuwell/dockerfile-roast\">droast</a> 1.4.11 over all 10 "
-            "Dockerfiles: 1 error (osrm CMD referenced an undeclared <code>$PORT</code>), 12 warnings (no USER, "
-            "no CMD in overlays, COPY-everything, single-stage), 27 infos (no .dockerignore anywhere, unpinned "
-            "apt, missing Python env vars, missing healthchecks). No build context in the repo had a "
-            ".dockerignore, so local docker builds could sweep secrets (<code>server/.env</code>), "
-            "<code>server/osm_data</code> graphs, and node_modules into context uploads."
-        ),
+        "id": "floor",
+        "tag": "CLIENT + SERVER",
+        "title": "Per-map top-proposal support floor override",
+        "symptom": "The same-day TOP_PROPOSAL_MIN_NET=100 floor (536bf76) would hide every imported proposal: one vote per DOT project means net 1, and block heat only paints top proposals — the import would have been invisible.",
         "cause": [
-            "The Dockerfiles accreted per-workstream (main bake, 5 surgical overlays, 3 service images, 1 batch "
-            "job) without a shared hygiene pass; <code>screenshots/Dockerfile</code> even used bare "
-            "<code>pip</code> against the project's own uv mandate.",
+            "The floor is the right default for crowdsourced maps but wrong for curated/imported ones",
+            "It gates BOTH families: PBTP winner selection and RBTP minRouteScore",
         ],
         "fixes": [
-            "<strong>.dockerignore per build context</strong> (root + server + client-react + osrm + screenshots). "
-            "The root one feeds the app image AND all 5 overlays, so it excludes secrets/graphs/node_modules while "
-            "preserving every COPY'd path (client-react/, server/*.py + data/, deploy/, .arrays-staging/, "
-            ".blocks-staging/).",
-            "<strong>osrm</strong>: the one ERROR — <code>ENV PORT=5000</code> declares the var the CMD "
-            "interpolates (Cloud Run still overrides with 8080); plus <code>EXPOSE 5000</code> and an explicit "
-            "<code>HEALTHCHECK NONE</code> (the runtime image ships no curl/wget — same rationale already "
-            "documented on the compose service).",
-            "<strong>Main image</strong>: <code>--no-install-recommends</code>; a status-only HEALTHCHECK probing "
-            "<code>/health</code> with a 900s start period + 15 retries, mirroring deploy/healthcheck.sh's "
-            "graph-warmup tolerance (Cloud Run ignores Docker HEALTHCHECK — this is for compose runs).",
-            "<strong>server</strong>: <code>PYTHONUNBUFFERED</code>/<code>PYTHONDONTWRITEBYTECODE</code>, "
-            "<code>--no-install-recommends</code>, explicit <code>HEALTHCHECK NONE</code> — the image is shared "
-            "with the osm-refresh sidecar (whose command runs no server), so compose owns the flask probe.",
-            "<strong>client-react</strong>: explicit COPY of the six build inputs instead of <code>COPY . .</code> "
-            "(unrelated files no longer bust the npm build cache) + a busybox-wget healthcheck on the nginx stage.",
-            "<strong>screenshots</strong>: bare <code>pip</code> → <code>uv pip install --system</code> (CLAUDE.md "
-            "mandate), Python env vars, <code>HEALTHCHECK NONE</code> (one-shot batch job).",
-            "<strong>droast.toml</strong> records the four deliberate global skips with rationale — DF005 apt "
-            "pinning (Debian point-release churn breaks rebuilds; we pin base images instead), DF020 USER (each "
-            "image has a concrete root requirement), DF011 single-stage (slim images carry no toolchain), DF036 "
-            "no-CMD (overlays inherit CMD from the digest-pinned <code>${{BASE_IMAGE}}</code>). Future runs lint "
-            "clean: <code>droast</code> exits 0.",
+            "maps.top_proposal_min_net (nullable INT) → served as topProposalMinNet on the map config only when set",
+            "GraphLayer resolves getCurrentMap()?.topProposalMinNet ?? TOP_PROPOSAL_MIN_NET and threads it through both proposal families",
+            "nyc-proposals rows set to 0 on local/staging/prod (data change; composes with the floor workstream rather than reverting it)",
         ],
-        "files": [
-            "Dockerfile",
-            "server/Dockerfile",
-            "client-react/Dockerfile",
-            "osrm/Dockerfile",
-            "screenshots/Dockerfile",
-            ".dockerignore",
-            "server/.dockerignore",
-            "client-react/.dockerignore",
-            "osrm/.dockerignore",
-            "screenshots/.dockerignore",
-            "droast.toml",
+        "files": ["server/database.py", "client-react/src/map/runtime.ts",
+                  "client-react/src/components/GraphLayer/GraphLayer.tsx"],
+    },
+    {
+        "id": "import",
+        "tag": "TOOLS / INFRA",
+        "title": "Official DOT proposals imported as votes (60 cast) + weekly job",
+        "symptom": "Get every official NYC street-change proposal onto the map, one vote each, and keep it fresh weekly.",
+        "cause": [
+            "nycdotprojects.info is the freshest proposal source (docs/nyc-proposal-data-sources.md) but mixes real project pages with outreach/blog posts under bare slugs",
+            "Route-kind vote types only surface as corridors — a point cast of one would be invisible by design",
+            "Same-named streets across boroughs make naive geocoding cast cross-borough 'corridors' (5th Ave & 57 St hit Sunset Park)",
         ],
+        "fixes": [
+            "import_to_map.py: plan (geocode via the app's /api/geocode + classify + two-sided junk filter) → cast (public /api/vote, voter dotproj:<sha1(url)>, ip_from_voter)",
+            "Corridor projects route via /api/routes and cast on the edge ids (8 corridors); guards: ≤8km endpoint spread, ≤600 edges, Manhattan-first retry for E/W-numbered cross streets",
+            "Route-kind entries without parseable endpoints demote to point-kind 'Street redesign' so they still pin (52 points)",
+            "weekly_import.py + Dockerfile + terraform/dot-import-job.tf: Cloud Run job dot-proposals-import-prod, scheduler Mondays 07:00 NY, 8-day overlapping window, idempotent",
+            "Shipped via overlay deploy (digest 9ed734b9…) staging-first, then 60 proposals cast on staging and prod (1550 voted edges, 9 vote types)",
+        ],
+        "files": ["tools/nyc_proposals/import_to_map.py", "tools/nyc_proposals/weekly_import.py",
+                  "tools/nyc_proposals/Dockerfile", "terraform/dot-import-job.tf",
+                  "docs/nyc-proposal-data-sources.md"],
     },
 ]
+
+
 
 VERIFY = [
     "droast over all 10 Dockerfiles: <strong>exit 0</strong> — one intentional info remains (no EXPOSE on the "
@@ -203,146 +176,126 @@ SYSTEM_COMPONENTS = ["nginx", "Flask API", "OSRM", "Redis", "React / Leaflet cli
 
 # label, summary, changed?
 FILE_CONTEXT = {
-    "client-react/src/components/MapView/MapView.tsx": {
-        "on": ["React / Leaflet client"],
-        "module": ("React client · MapView/", "the map shell: tools, click/drag handlers, corridor threading"),
-        "file": ("MapView.tsx", "~800 LOC — placement handlers, chain threading (536fb76), marker render"),
+    "docs/url-routing.md": {
+        "on": [],
+        "module": ("Docs · routing", "URL/slug/subdomain architecture + the redirect inventory (source of truth)"),
+        "file": ("url-routing.md", "~215 lines — address space, slug redirects, rename runbook, redirect inventory"),
         "outline": [
-            ("imports", "gains the type import 536fb76 forgot", True),
-            ("corridorChainOf / corridorChainFor", "the ForcedCorridor-annotated helpers that failed tsc", False),
-            ("click/drop handlers, marker wiring", "unchanged", False),
+            ("address space / resolution", "unchanged", False),
+            ("redirect inventory", "nyc-intersections row repointed; nyc-crossings row added", True),
         ],
         "blocks": [
-            "import type { ForcedCorridor } from \"../../selection/types\" — matches RouteContext's import style",
+            "nyc-intersections → nyc-proposals (src=qr-poster, chain-flattened) · nyc-crossings → nyc-proposals",
         ],
     },
-    "Dockerfile": {
-        "on": ["nginx", "Flask API", "React / Leaflet client"],
-        "module": ("Deploy · repo root", "the full app image bake: client build + graphs + PMTiles + nginx/supervisor"),
-        "file": ("Dockerfile", "~65 LOC — 2-stage: node client build → python+nginx with in-image graph bakes"),
-        "outline": [
-            ("client-builder stage", "npm ci + vite build", False),
-            ("apt install", "now --no-install-recommends", True),
-            ("uv deps / graph bakes / pmtiles", "unchanged (takes effect next FULL rebuild only)", False),
-            ("EXPOSE + HEALTHCHECK + CMD", "status-only /health probe, 900s start period ×15 retries", True),
-        ],
-        "blocks": [
-            "apt-get install -y --no-install-recommends nginx …",
-            "HEALTHCHECK --interval=60s --start-period=900s --retries=15 CMD curl -fsS :5001/health — mirrors deploy/healthcheck.sh's warmup tolerance; Cloud Run ignores it",
-        ],
-    },
-    "server/Dockerfile": {
+    "server/database.py": {
         "on": ["Flask API"],
-        "module": ("Deploy · server/", "the local-dev flask image (compose flask + osm-refresh sidecar)"),
-        "file": ("Dockerfile", "~35 LOC — python:3.13-slim + uv deps + app code"),
+        "module": ("Flask API · persistence", "Postgres schema + maps/vote/redirect queries"),
+        "file": ("database.py", "~1300 LOC — schema init, map CRUD, vote rows, rename/redirect txn"),
         "outline": [
-            ("ENV", "PYTHONUNBUFFERED + PYTHONDONTWRITEBYTECODE", True),
-            ("apt curl", "now --no-install-recommends", True),
-            ("uv deps / code copy", "unchanged", False),
-            ("HEALTHCHECK NONE", "explicit — image shared with the serverless osm-refresh sidecar; compose owns the flask probe", True),
+            ("schema init", "ALTER maps ADD top_proposal_min_net INT", True),
+            ("_map_row_to_dict / _MAP_COLUMNS", "unpack + emit topProposalMinNet only when set", True),
+            ("rename_map_slug / votes / redirects", "unchanged", False),
         ],
         "blocks": [
-            "ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1",
-            "apt-get install -y --no-install-recommends curl",
-            "HEALTHCHECK NONE + rationale comment",
+            "ALTER TABLE maps ADD COLUMN IF NOT EXISTS top_proposal_min_net INT",
+            "**({\"topProposalMinNet\": v} if v is not None else {}) — absent key = client default",
         ],
     },
-    "client-react/Dockerfile": {
-        "on": ["nginx", "React / Leaflet client"],
-        "module": ("Deploy · client-react/", "the standalone client image (compose nginx service)"),
-        "file": ("Dockerfile", "~20 LOC — node build stage → nginx:alpine serve stage"),
-        "outline": [
-            ("build stage COPY", "COPY . . → explicit six build inputs (cache-friendly, silences DF007)", True),
-            ("serve stage", "gains a busybox-wget healthcheck", True),
-        ],
-        "blocks": [
-            "COPY index.html vite.config.ts tsconfig*.json ./ + public/ src/ scripts/",
-            "HEALTHCHECK … wget -q --spider http://127.0.0.1/",
-        ],
-    },
-    "osrm/Dockerfile": {
-        "on": ["OSRM"],
-        "module": ("Deploy · osrm/", "the merged-OSRM image: osmium merge → extract/partition/customize → serve"),
-        "file": ("Dockerfile", "~50 LOC — 3-stage; dataset baked at build"),
-        "outline": [
-            ("merger + builder stages", "unchanged", False),
-            ("runtime ENV/EXPOSE/HEALTHCHECK", "PORT declared (fixes the DF087 ERROR), EXPOSE 5000, HEALTHCHECK NONE", True),
-            ("CMD", "unchanged — ${PORT:-5000} still honors Cloud Run's 8080", False),
-        ],
-        "blocks": [
-            "ENV OSRM_DATASET=… PORT=5000 — CMD no longer interpolates an undeclared var",
-            "EXPOSE 5000; HEALTHCHECK NONE (runtime image ships no curl/wget — compose comment's rationale, now in-image)",
-        ],
-    },
-    "screenshots/Dockerfile": {
-        "on": [],
-        "module": ("Deploy · screenshots/", "the daily map-preview capture job (playwright + chromium)"),
-        "file": ("Dockerfile", "~20 LOC — python:3.13-slim + playwright, one-shot CMD"),
-        "outline": [
-            ("ENV + uv", "Python env vars; bare pip → uv pip --system (CLAUDE.md mandate)", True),
-            ("playwright install / CMD", "unchanged", False),
-            ("HEALTHCHECK NONE", "one-shot batch job", True),
-        ],
-        "blocks": [
-            "COPY --from=ghcr.io/astral-sh/uv:latest + uv pip install --system --no-cache",
-            "ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1; HEALTHCHECK NONE",
-        ],
-    },
-    ".dockerignore": {
-        "on": ["nginx", "Flask API", "React / Leaflet client"],
-        "module": ("Deploy · repo root", "NEW — governs the root build context (app image + all 5 overlays)"),
-        "file": (".dockerignore", "~40 lines — excludes secrets/graphs/node_modules, preserves every COPY'd path"),
-        "outline": [
-            ("secrets & env", "**/.env (keep .env.example), server/env", True),
-            ("heavy artifacts", "server/osm_data, **/node_modules, client-react/dist", True),
-            ("repo material", ".git, docs, changelog, data, tools, sibling contexts", True),
-        ],
-        "blocks": [
-            "header documents the exact COPY surface of the 6 root-context builds",
-            "patterns anchored so server/data (needed) survives while root data/ (analysis files) is excluded",
-        ],
-    },
-    "server/.dockerignore": {
-        "on": ["Flask API"],
-        "module": ("Deploy · server/", "NEW — context for compose's build: ./server"),
-        "file": (".dockerignore", "10 lines"),
-        "outline": [("env/.env/osm_data/tests/__pycache__", "excluded; build COPYs only requirements.txt + *.py", True)],
-        "blocks": ["env, .env (compose injects it at runtime via env_file), osm_data (volume-mounted), tests"],
-    },
-    "client-react/.dockerignore": {
+    "client-react/src/map/runtime.ts": {
         "on": ["React / Leaflet client"],
-        "module": ("Deploy · client-react/", "NEW — context for the standalone client image"),
-        "file": (".dockerignore", "8 lines"),
-        "outline": [("node_modules/dist/coverage/.env*", "excluded", True)],
-        "blocks": ["node_modules, dist, coverage, .env*, logs"],
-    },
-    "osrm/.dockerignore": {
-        "on": ["OSRM"],
-        "module": ("Deploy · osrm/", "NEW — context for the OSRM image"),
-        "file": (".dockerignore", "5 lines"),
-        "outline": [("local OSM/OSRM artifacts", "*.osm.pbf / *.osrm* kept out of uploads", True)],
-        "blocks": ["*.osm.pbf, *.osrm*, .DS_Store — only the .lua profiles + build-merged.sh ship"],
-    },
-    "screenshots/.dockerignore": {
-        "on": [],
-        "module": ("Deploy · screenshots/", "NEW — context for the capture job"),
-        "file": (".dockerignore", "6 lines"),
-        "outline": [("capenv venv + captures", "excluded", True)],
-        "blocks": ["capenv (a full venv sat in this context), *.png, __pycache__"],
-    },
-    "droast.toml": {
-        "on": [],
-        "module": ("Deploy · repo root", "NEW — droast project policy: the deliberate deviations, with rationale"),
-        "file": ("droast.toml", "~25 lines — comments + a 4-rule skip list"),
+        "module": ("React client · map/", "map-config resolution: slug/subdomain → /api/maps → MapConfig"),
+        "file": ("runtime.ts", "~200 LOC — MapConfig type, resolveMapConfig, slugRedirectUrl"),
         "outline": [
-            ("rationale comments", "one block per skipped rule", True),
-            ("skip list", "DF005 / DF011 / DF020 / DF036", True),
+            ("MapConfig interface", "gains topProposalMinNet?: number", True),
+            ("resolveMapConfig / redirects", "unchanged", False),
         ],
         "blocks": [
-            "DF005 apt pinning (mirror churn), DF011 single-stage (slim images), DF020 USER (documented root needs), DF036 overlay CMD inheritance",
+            "topProposalMinNet?: number — per-map floor override, absent ⇒ TOP_PROPOSAL_MIN_NET",
+        ],
+    },
+    "client-react/src/components/GraphLayer/GraphLayer.tsx": {
+        "on": ["React / Leaflet client"],
+        "module": ("React client · GraphLayer/", "vote heat, PBTP/RBTP proposal selection, pin rendering"),
+        "file": ("GraphLayer.tsx", "~1700 LOC — topology load, heat paint, proposal recompute jobs"),
+        "outline": [
+            ("map flags", "topProposalMinNet resolved from getCurrentMap()", True),
+            ("recomputeTopProposals (PBTP)", "floor now the per-map value", True),
+            ("route-proposal job (RBTP)", "minRouteScore: topProposalMinNet + 1", True),
+            ("hover/selection/markers", "unchanged", False),
+        ],
+        "blocks": [
+            "const topProposalMinNet = getCurrentMap()?.topProposalMinNet ?? TOP_PROPOSAL_MIN_NET",
+            "isStationNetwork ? 0 : topProposalMinNet — station networks keep their existing exemption",
+            "minRouteScore: topProposalMinNet + 1 — both families share one bar",
+        ],
+    },
+    "tools/nyc_proposals/import_to_map.py": {
+        "on": ["Flask API", "React / Leaflet client"],
+        "module": ("Tools · nyc_proposals/", "official-DOT-proposals → votes pipeline (plan/cast CLI)"),
+        "file": ("import_to_map.py", "~300 LOC — filters, classifier, geocoding, corridor guards, casting"),
+        "outline": [
+            ("SKIP_TITLE / PROJECT_TITLE / looks_like_project", "two-sided junk filter", True),
+            ("CLASSIFY_RULES + POINT_FALLBACK_LABEL", "title → vote type + kind", True),
+            ("CORRIDOR_RE + street_name()", "endpoint parsing, trailing-cap-run street trim", True),
+            ("plan_project / cast_entry", "geocode+guards → /api/routes → /api/vote", True),
+        ],
+        "blocks": [
+            "MAX_CORRIDOR_KM = 8.0 / MAX_CORRIDOR_EDGES = 600 — cross-borough geocode guard",
+            "voter_id = dotproj:<sha1(url)[:16]> + ip_from_voter — idempotent, per-IP-cap-safe",
+            "route-kind without endpoints → 'Street redesign' (point) — stays visible",
+        ],
+    },
+    "tools/nyc_proposals/weekly_import.py": {
+        "on": ["Flask API"],
+        "module": ("Tools · nyc_proposals/", "Cloud Run job entrypoint: fetch → plan → cast weekly"),
+        "file": ("weekly_import.py", "~70 LOC — 8-day overlapping window against BASE_URL"),
+        "outline": [
+            ("env config", "BASE_URL / MAP_SLUG / WINDOW_DAYS", True),
+            ("main loop", "changed pages → plan_project → cast_entry, stats", True),
+        ],
+        "blocks": [
+            "8-day window + idempotent casts: overlap is safe, missed weeks self-heal on the next run",
+        ],
+    },
+    "tools/nyc_proposals/Dockerfile": {
+        "on": ["Flask API"],
+        "module": ("Deploy · tools/nyc_proposals/", "the dot-import job image"),
+        "file": ("Dockerfile", "python:3.13-slim + the three stdlib-only scripts"),
+        "outline": [
+            ("image", "no deps to install; HEALTHCHECK NONE (one-shot job)", True),
+        ],
+        "blocks": [
+            "CMD [\"python\", \"weekly_import.py\"]",
+        ],
+    },
+    "terraform/dot-import-job.tf": {
+        "on": ["Flask API"],
+        "module": ("Terraform · prod", "weekly import job: SA + Cloud Run v2 job + scheduler"),
+        "file": ("dot-import-job.tf", "~100 lines — mirrors the map-screenshot job pattern"),
+        "outline": [
+            ("dot_import_sa + invoker IAM", "job-scoped SA", True),
+            ("google_cloud_run_v2_job.dot_import", "512Mi / 1800s / max_retries 1", True),
+            ("google_cloud_scheduler_job.dot_import", "0 7 * * 1 America/New_York", True),
+        ],
+        "blocks": [
+            "apply with -target only — blanket applies remain a landmine (docs/gcp-deployment.md)",
+        ],
+    },
+    "docs/nyc-proposal-data-sources.md": {
+        "on": [],
+        "module": ("Docs · data sources", "where official street-change proposals live + scrape recipes"),
+        "file": ("nyc-proposal-data-sources.md", "~180 lines — nycdotprojects/SIPs/nyc.gov + import pipeline"),
+        "outline": [
+            ("sources + recipes", "unchanged (authored by the research agent)", False),
+            ("importing proposals as votes", "new section: pipeline, guards, weekly job", True),
+        ],
+        "blocks": [
+            "documents the corridor/point cast split, the floor-0 override, and the weekly job runbook",
         ],
     },
 }
+
 
 
 def context_html(path: str) -> str:

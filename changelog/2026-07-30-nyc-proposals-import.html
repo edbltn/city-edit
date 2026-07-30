@@ -1,0 +1,1257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nyc-proposals: map rename, official DOT proposal import + weekly job, per-map proposal floor — 2026-07-30</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>nyc-proposals: map rename, official DOT proposal import + weekly job, per-map proposal floor</h1>
+    <div class="dateline">2026-07-30 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#rename">nyc-crossings → nyc-proposals (rename + QR chain)</a>
+<a href="#floor">Per-map top-proposal support floor override</a>
+<a href="#import">Official DOT proposals imported as votes (60 cast) + weekly job</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Three fixes to Top Proposals: a pin now takes real support (&gt;100 net votes, both point and route families); every modal badges the vote types that are CURRENT top proposals for what it shows (square = point, diamond = route fully inside the selection); and route corridors are now grown ROUTING-CONSISTENTLY — an extension either keeps the segment a shortest path or pins a ghost waypoint (max 3), and the whole waypoint chain lands in the URL, so a shared top-proposal link keeps routing into its corridor long after the proposal itself has churned away.</p>
+
+  
+    <section class="card" id="rename">
+      <div class="tag">DATA / ROUTING</div>
+      <h2>nyc-crossings → nyc-proposals (rename + QR chain)</h2>
+      <h3>Symptom</h3>
+      <p>The dangerous-intersections map was being broadened to cover ALL city proposals; the printed QR posters point at /m/nyc-intersections and had to keep resolving.</p>
+      <h3>Root cause</h3>
+      <ul><li>Slug renames are data-driven (map_redirects) since 2026-07-29 — no code change needed</li>
+<li>rename_map_slug's chain flattening repoints any redirect targeting the old slug, so nyc-intersections → nyc-proposals kept its src=qr-poster retro-tag</li></ul>
+      <h3>What changed</h3>
+      <ul><li>rename_map.py nyc-crossings nyc-proposals run against prod, staging, and local (73/73/2 votes moved; Redis rebuilt under the new slug)</li>
+<li>Display name/subtitle updated to "NYC Proposals" / "Every proposal to improve the city, in one place"</li>
+<li>Redirect inventory rows updated in docs/url-routing.md</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>docs/url-routing.md</li></ul>
+    </section>
+    
+
+    <section class="card" id="floor">
+      <div class="tag">CLIENT + SERVER</div>
+      <h2>Per-map top-proposal support floor override</h2>
+      <h3>Symptom</h3>
+      <p>The same-day TOP_PROPOSAL_MIN_NET=100 floor (536bf76) would hide every imported proposal: one vote per DOT project means net 1, and block heat only paints top proposals — the import would have been invisible.</p>
+      <h3>Root cause</h3>
+      <ul><li>The floor is the right default for crowdsourced maps but wrong for curated/imported ones</li>
+<li>It gates BOTH families: PBTP winner selection and RBTP minRouteScore</li></ul>
+      <h3>What changed</h3>
+      <ul><li>maps.top_proposal_min_net (nullable INT) → served as topProposalMinNet on the map config only when set</li>
+<li>GraphLayer resolves getCurrentMap()?.topProposalMinNet ?? TOP_PROPOSAL_MIN_NET and threads it through both proposal families</li>
+<li>nyc-proposals rows set to 0 on local/staging/prod (data change; composes with the floor workstream rather than reverting it)</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/database.py</li>
+<li>client-react/src/map/runtime.ts</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="import">
+      <div class="tag">TOOLS / INFRA</div>
+      <h2>Official DOT proposals imported as votes (60 cast) + weekly job</h2>
+      <h3>Symptom</h3>
+      <p>Get every official NYC street-change proposal onto the map, one vote each, and keep it fresh weekly.</p>
+      <h3>Root cause</h3>
+      <ul><li>nycdotprojects.info is the freshest proposal source (docs/nyc-proposal-data-sources.md) but mixes real project pages with outreach/blog posts under bare slugs</li>
+<li>Route-kind vote types only surface as corridors — a point cast of one would be invisible by design</li>
+<li>Same-named streets across boroughs make naive geocoding cast cross-borough 'corridors' (5th Ave & 57 St hit Sunset Park)</li></ul>
+      <h3>What changed</h3>
+      <ul><li>import_to_map.py: plan (geocode via the app's /api/geocode + classify + two-sided junk filter) → cast (public /api/vote, voter dotproj:<sha1(url)>, ip_from_voter)</li>
+<li>Corridor projects route via /api/routes and cast on the edge ids (8 corridors); guards: ≤8km endpoint spread, ≤600 edges, Manhattan-first retry for E/W-numbered cross streets</li>
+<li>Route-kind entries without parseable endpoints demote to point-kind 'Street redesign' so they still pin (52 points)</li>
+<li>weekly_import.py + Dockerfile + terraform/dot-import-job.tf: Cloud Run job dot-proposals-import-prod, scheduler Mondays 07:00 NY, 8-day overlapping window, idempotent</li>
+<li>Shipped via overlay deploy (digest 9ed734b9…) staging-first, then 60 proposals cast on staging and prod (1550 voted edges, 9 vote types)</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>tools/nyc_proposals/import_to_map.py</li>
+<li>tools/nyc_proposals/weekly_import.py</li>
+<li>tools/nyc_proposals/Dockerfile</li>
+<li>terraform/dot-import-job.tf</li>
+<li>docs/nyc-proposal-data-sources.md</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>droast over all 10 Dockerfiles: <strong>exit 0</strong> — one intentional info remains (no EXPOSE on the screenshots batch job, which has no port).</li>
+<li><code>docker build --check</code> (BuildKit lint) on all 10: clean except two pre-existing, by-design warnings (ARG BASE_IMAGE deliberately has no default; osrm's amd64 base on an arm64 Mac).</li>
+<li>Real builds: client-react image (validates the explicit COPY set through <code>tsc -b && vite build</code>) and server image — both green.</li>
+<li>Prod DB backed up pre-deploy: <code>pg_dump -Fc</code> via the bastion tunnel (:5433) into <code>~/city-edit-prod-backups/</code> (27 MB).</li>
+<li>Overlay image built from a CLEAN worktree of HEAD (the working tree carried unrelated in-flight edits to GraphLayer.tsx / runtime.ts / database.py that must not ship), base = the serving digest <code>f38b2659…</code> — no graph rebuild, no edge-id shift, no resnap.</li>
+<li>Staging-first: new digest deployed to <code>ce-stg-*</code>, verified (/health, graph-votes fields, served asset hash), then the SAME digest promoted to <code>desire-path-mapper</code> and re-verified.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Run <code>droast</code> from the repo root — it should exit 0 with only the screenshots EXPOSE info.</li>
+<li><code>docker compose build flask nginx</code> — both images should build; check <code>docker compose ps</code> shows flask healthy (compose probe) and nginx healthy (new image probe).</li>
+<li>Confirm a context upload shrank: <code>docker build -f Dockerfile.overlay --build-arg BASE_IMAGE=python:3.13-slim .</code> should transfer a context WITHOUT server/osm_data or node_modules (watch the “transferring context” line).</li>
+<li>Open the prod map and click a top-proposal diamond — corridor + badges restore (this deploy also shipped 536fb76's floor/badges/ghost-waypoint work to prod for the first time).</li>
+<li>Check prod logs for a clean boot: <code>gcloud run services logs read desire-path-mapper --limit=50</code>.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">docs/url-routing.md</span>
+            <span class="stat"><span class="d-add">+2</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · routing</span>
+        <span class="ctx-sum">URL/slug/subdomain architecture + the redirect inventory (source of truth)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">url-routing.md</span>
+        <span class="ctx-sum">~215 lines — address space, slug redirects, rename runbook, redirect inventory</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">address space / resolution</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">redirect inventory</span><span class="ol-sum">nyc-intersections row repointed; nyc-crossings row added</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>nyc-intersections → nyc-proposals (src=qr-poster, chain-flattened) · nyc-crossings → nyc-proposals</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/url-routing.md b/docs/url-routing.md</span>
+<span class="d-meta">index 7b2111e..9c0ff35 100644</span>
+<span class="d-meta">--- a/docs/url-routing.md</span>
+<span class="d-meta">+++ b/docs/url-routing.md</span>
+<span class="d-hunk">@@ -213,4 +213,5 @@ Current `map_redirects` rows (query the DB for the live list:</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> | From | To | Appends | Why |</span>
+<span class="d-ctx"> |------|----|---------|-----|</span>
+<span class="d-del">-| `nyc-intersections` | `nyc-crossings` | `src=qr-poster` | 2026-07 QR poster campaign was printed without a `src` tag; the redirect retro-tags those scans |</span>
+<span class="d-add">+| `nyc-intersections` | `nyc-proposals` | `src=qr-poster` | 2026-07 QR poster campaign was printed without a `src` tag; the redirect retro-tags those scans (chain-flattened from `nyc-crossings` on the 2026-07-30 rename) |</span>
+<span class="d-add">+| `nyc-crossings` | `nyc-proposals` | — | 2026-07-30: map broadened from dangerous intersections to all NYC proposals |</span>
+<span class="d-ctx">&nbsp;</span>
+<span class="d-ctx">commit 811af074555fc42a814c659fd6d1c0b64c0e7db3</span>
+<span class="d-ctx">Author: Eric Bolton &lt;eric.didier.bolton@gmail.com&gt;</span>
+<span class="d-ctx">Date:   Thu Jul 30 19:12:06 2026 -0400</span>
+<span class="d-ctx">&nbsp;</span>
+<span class="d-ctx">    feat(proposals): per-map top-proposal support floor override</span>
+<span class="d-ctx">    </span>
+<span class="d-ctx">    maps.top_proposal_min_net (NULL = client default of 100) is served as</span>
+<span class="d-ctx">    topProposalMinNet on the map config; GraphLayer uses it for both proposal</span>
+<span class="d-ctx">    families (PBTP winner floor and RBTP minRouteScore). Curated/imported maps</span>
+<span class="d-ctx">    — nyc-proposals carries one vote per official DOT proposal — set 0 so their</span>
+<span class="d-ctx">    net-1 entries still surface as pins/corridors; crowdsourced maps keep the</span>
+<span class="d-ctx">    &gt;100-net bar.</span>
+<span class="d-ctx">    </span>
+<span class="d-ctx">    Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+8</span> / <span class="d-del">-5</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · GraphLayer/</span>
+        <span class="ctx-sum">vote heat, PBTP/RBTP proposal selection, pin rendering</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~1700 LOC — topology load, heat paint, proposal recompute jobs</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">map flags</span><span class="ol-sum">topProposalMinNet resolved from getCurrentMap()</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">recomputeTopProposals (PBTP)</span><span class="ol-sum">floor now the per-map value</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">route-proposal job (RBTP)</span><span class="ol-sum">minRouteScore: topProposalMinNet + 1</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">hover/selection/markers</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>const topProposalMinNet = getCurrentMap()?.topProposalMinNet ?? TOP_PROPOSAL_MIN_NET</li><li>isStationNetwork ? 0 : topProposalMinNet — station networks keep their existing exemption</li><li>minRouteScore: topProposalMinNet + 1 — both families share one bar</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 8712719..19c0182 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -276,6 +276,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // edge `name` (the intersection) is its label. See graph_registry.load_station_graph.</span>
+<span class="d-ctx">   const stationNetwork = getCurrentMap()?.network;</span>
+<span class="d-ctx">   const isStationNetwork = !!stationNetwork &amp;&amp; stationNetwork !== &quot;streets&quot;;</span>
+<span class="d-add">+  // Per-map override of the top-proposal support floor (maps.top_proposal_min_net);</span>
+<span class="d-add">+  // curated/imported maps set 0 so one-vote-per-proposal entries still surface.</span>
+<span class="d-add">+  const topProposalMinNet = getCurrentMap()?.topProposalMinNet ?? TOP_PROPOSAL_MIN_NET;</span>
+<span class="d-ctx">   // One shared icon for every station, like a pin. Prefer a point-type vote type</span>
+<span class="d-ctx">   // (stations are points), else the map&#x27;s first vote type.</span>
+<span class="d-ctx">   const stationLabel =</span>
+<span class="d-hunk">@@ -805,9 +808,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       isStationNetwork ? undefined : voteTypeKindOf,</span>
+<span class="d-ctx">       // Station networks don&#x27;t badge winners as &quot;top proposals&quot; (every station</span>
+<span class="d-ctx">       // renders its own pin regardless), so the support floor stays off there.</span>
+<span class="d-del">-      isStationNetwork ? 0 : TOP_PROPOSAL_MIN_NET,</span>
+<span class="d-add">+      isStationNetwork ? 0 : topProposalMinNet,</span>
+<span class="d-ctx">     ), legendChanged);</span>
+<span class="d-del">-  }, [setStableWinners, isStationNetwork, voteTypeKindOf]);</span>
+<span class="d-add">+  }, [setStableWinners, isStationNetwork, voteTypeKindOf, topProposalMinNet]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const recomputeTopProposalsRef = useRef(recomputeTopProposals);</span>
+<span class="d-ctx">   useEffect(() =&gt; { recomputeTopProposalsRef.current = recomputeTopProposals; }, [recomputeTopProposals]);</span>
+<span class="d-hunk">@@ -1426,10 +1429,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     // (GraphLayer already built one for hover/selection).</span>
+<span class="d-ctx">     const job = createRouteProposalJob(topo, adj, data, {</span>
+<span class="d-ctx">       kindOf: voteTypeKindOf, blockIndex: blockIndexRef.current,</span>
+<span class="d-del">-      // The top-proposal support floor (&gt;TOP_PROPOSAL_MIN_NET net votes),</span>
+<span class="d-add">+      // The top-proposal support floor (&gt;topProposalMinNet net votes),</span>
+<span class="d-ctx">       // expressed as the pipeline&#x27;s minimum path score — same rule the PBTP</span>
+<span class="d-ctx">       // winners apply, so both proposal families share one bar.</span>
+<span class="d-del">-      minRouteScore: TOP_PROPOSAL_MIN_NET + 1,</span>
+<span class="d-add">+      minRouteScore: topProposalMinNet + 1,</span>
+<span class="d-ctx">     });</span>
+<span class="d-ctx">     const perType: RouteProposal[][] = [];</span>
+<span class="d-ctx">     let i = 0;</span>
+<span class="d-hunk">@@ -1465,7 +1468,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     // The first slice is deferred too, so the caller (often itself an idle</span>
+<span class="d-ctx">     // callback that just ran the PBTP scan) returns before any heavy type runs.</span>
+<span class="d-ctx">     scheduleIdleSlice(slice);</span>
+<span class="d-del">-  }, [voteTypeKindOf]);</span>
+<span class="d-add">+  }, [voteTypeKindOf, topProposalMinNet]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);</span>
+<span class="d-ctx">   useEffect(() =&gt; { recomputeRouteProposalsRef.current = recomputeRouteProposals; }, [recomputeRouteProposals]);</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/map/runtime.ts</span>
+            <span class="stat"><span class="d-add">+5</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · map/</span>
+        <span class="ctx-sum">map-config resolution: slug/subdomain → /api/maps → MapConfig</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">runtime.ts</span>
+        <span class="ctx-sum">~200 LOC — MapConfig type, resolveMapConfig, slugRedirectUrl</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">MapConfig interface</span><span class="ol-sum">gains topProposalMinNet?: number</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">resolveMapConfig / redirects</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>topProposalMinNet?: number — per-map floor override, absent ⇒ TOP_PROPOSAL_MIN_NET</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/map/runtime.ts b/client-react/src/map/runtime.ts</span>
+<span class="d-meta">index 2173123..dc83ec6 100644</span>
+<span class="d-meta">--- a/client-react/src/map/runtime.ts</span>
+<span class="d-meta">+++ b/client-react/src/map/runtime.ts</span>
+<span class="d-hunk">@@ -27,6 +27,11 @@ export interface MapConfig {</span>
+<span class="d-ctx">   /** What the map votes on: &quot;streets&quot; (routable) or a station network like</span>
+<span class="d-ctx">    *  &quot;ebikes&quot; (NYC-only fixed points, no routing). Absent ⇒ &quot;streets&quot;. */</span>
+<span class="d-ctx">   network?: string;</span>
+<span class="d-add">+  /** Per-map override of the top-proposal support floor (both PBTP winners</span>
+<span class="d-add">+   *  and RBTP corridors). Absent ⇒ TOP_PROPOSAL_MIN_NET. 0 admits any</span>
+<span class="d-add">+   *  net-positive proposal — curated/imported maps whose entries carry one</span>
+<span class="d-add">+   *  vote each would otherwise show nothing. */</span>
+<span class="d-add">+  topProposalMinNet?: number;</span>
+<span class="d-ctx">   symbol: string; // proposer-chosen display icon (in /icons/), may be &quot;&quot;</span>
+<span class="d-ctx">   allowSuggestions: boolean;</span>
+<span class="d-ctx">   requiresPasscode: boolean;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/database.py</span>
+            <span class="stat"><span class="d-add">+14</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · persistence</span>
+        <span class="ctx-sum">Postgres schema + maps/vote/redirect queries</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">database.py</span>
+        <span class="ctx-sum">~1300 LOC — schema init, map CRUD, vote rows, rename/redirect txn</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">schema init</span><span class="ol-sum">ALTER maps ADD top_proposal_min_net INT</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_map_row_to_dict / _MAP_COLUMNS</span><span class="ol-sum">unpack + emit topProposalMinNet only when set</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">rename_map_slug / votes / redirects</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>ALTER TABLE maps ADD COLUMN IF NOT EXISTS top_proposal_min_net INT</li><li>**({&quot;topProposalMinNet&quot;: v} if v is not None else {}) — absent key = client default</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/database.py b/server/database.py</span>
+<span class="d-meta">index 6456ea4..d54cb70 100644</span>
+<span class="d-meta">--- a/server/database.py</span>
+<span class="d-meta">+++ b/server/database.py</span>
+<span class="d-hunk">@@ -264,6 +264,14 @@ def init_db():</span>
+<span class="d-ctx">             # What the map votes on: &quot;streets&quot; (default) or a station network</span>
+<span class="d-ctx">             # (e.g. &quot;ebikes&quot;). NULL/absent reads back as &quot;streets&quot;.</span>
+<span class="d-ctx">             cursor.execute(&quot;ALTER TABLE maps ADD COLUMN IF NOT EXISTS network TEXT&quot;)</span>
+<span class="d-add">+            # Per-map override of the client&#x27;s top-proposal support floor</span>
+<span class="d-add">+            # (TOP_PROPOSAL_MIN_NET). NULL = client default. 0 admits any</span>
+<span class="d-add">+            # net-positive proposal — used by curated/imported maps (e.g.</span>
+<span class="d-add">+            # nyc-proposals, one vote per official DOT proposal) where the</span>
+<span class="d-add">+            # crowdsourced &gt;100-net bar would hide every entry.</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;ALTER TABLE maps ADD COLUMN IF NOT EXISTS top_proposal_min_net INT&quot;</span>
+<span class="d-add">+            )</span>
+<span class="d-ctx">             cursor.execute(&quot;&quot;&quot;</span>
+<span class="d-ctx">                 CREATE INDEX IF NOT EXISTS idx_maps_city ON maps(city_id)</span>
+<span class="d-ctx">             &quot;&quot;&quot;)</span>
+<span class="d-hunk">@@ -993,7 +1001,7 @@ def _map_row_to_dict(row) -&gt; dict:</span>
+<span class="d-ctx">     &quot;&quot;&quot;Shape a maps JOIN vote_type_lists row into the public map dict.&quot;&quot;&quot;</span>
+<span class="d-ctx">     (slug, name, subtitle, city_id, allow_suggestions, has_passcode,</span>
+<span class="d-ctx">      subdomain, list_vote_types, custom_vote_types, vote_count, symbol, style,</span>
+<span class="d-del">-     network) = row</span>
+<span class="d-add">+     network, top_proposal_min_net) = row</span>
+<span class="d-ctx">     vote_types = custom_vote_types or list_vote_types or []</span>
+<span class="d-ctx">     # The proposer-chosen visual style wins; presets keep their subdomain style;</span>
+<span class="d-ctx">     # everything else falls back to the neutral default. The vote namespace</span>
+<span class="d-hunk">@@ -1017,6 +1025,9 @@ def _map_row_to_dict(row) -&gt; dict:</span>
+<span class="d-ctx">         # The map&#x27;s display icon for the landing card. Falls back to the first</span>
+<span class="d-ctx">         # vote type&#x27;s icon when the proposer didn&#x27;t pick one explicitly.</span>
+<span class="d-ctx">         &quot;symbol&quot;: symbol or (vote_types[0].get(&quot;icon&quot;) if vote_types else &quot;&quot;) or &quot;&quot;,</span>
+<span class="d-add">+        # Only present when the row overrides the client&#x27;s default floor.</span>
+<span class="d-add">+        **({&quot;topProposalMinNet&quot;: top_proposal_min_net}</span>
+<span class="d-add">+           if top_proposal_min_net is not None else {}),</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1029,7 +1040,8 @@ _MAP_COLUMNS = &quot;&quot;&quot;</span>
+<span class="d-ctx">     SELECT m.slug, m.name, m.subtitle, m.city_id, m.allow_suggestions,</span>
+<span class="d-ctx">            (m.passcode_hash IS NOT NULL) AS has_passcode,</span>
+<span class="d-ctx">            m.subdomain, vtl.vote_types, m.custom_vote_types,</span>
+<span class="d-del">-           {vote_count} AS vote_count, m.symbol, m.style, m.network</span>
+<span class="d-add">+           {vote_count} AS vote_count, m.symbol, m.style, m.network,</span>
+<span class="d-add">+           m.top_proposal_min_net</span>
+<span class="d-ctx">     FROM maps m</span>
+<span class="d-ctx">     LEFT JOIN vote_type_lists vtl ON vtl.id = m.vote_type_list_id</span>
+<span class="d-ctx"> &quot;&quot;&quot;</span>
+<span class="d-ctx">&nbsp;</span>
+<span class="d-ctx">commit 24d6b8f2b79109ab320ec79c0f71f04a427847a8</span>
+<span class="d-ctx">Author: Eric Bolton &lt;eric.didier.bolton@gmail.com&gt;</span>
+<span class="d-ctx">Date:   Thu Jul 30 19:12:06 2026 -0400</span>
+<span class="d-ctx">&nbsp;</span>
+<span class="d-ctx">    feat(tools): NYC DOT proposals → nyc-proposals vote import + weekly job</span>
+<span class="d-ctx">    </span>
+<span class="d-ctx">    import_to_map.py: two-phase (plan → cast) importer for nycdotprojects.info</span>
+<span class="d-ctx">    projects. Plan geocodes via the app&#x27;s /api/geocode (corridor endpoints for</span>
+<span class="d-ctx">    &#x27;X from A to B&#x27; projects, single points otherwise), classifies titles onto</span>
+<span class="d-ctx">    the map&#x27;s vote types, and filters outreach/blog pages (two-sided: junk</span>
+<span class="d-ctx">    blacklist + required project-shaped title token). Cast goes through the</span>
+<span class="d-ctx">    public /api/vote — one synthetic voter per proposal (dotproj:&lt;sha1(url)&gt;,</span>
+<span class="d-ctx">    ip_from_voter), corridors via /api/routes edge ids so route-kind types</span>
+<span class="d-ctx">    surface as RBTP corridors. Guards: ≤8km corridor endpoint spread and ≤600</span>
+<span class="d-ctx">    edges (same-named streets in other boroughs otherwise produce cross-borough</span>
+<span class="d-ctx">    &#x27;corridors&#x27;); route-kind entries without parseable endpoints demote to the</span>
+<span class="d-ctx">    point-kind &#x27;Street redesign&#x27; label so they stay visible.</span>
+<span class="d-ctx">    </span>
+<span class="d-ctx">    weekly_import.py + Dockerfile + terraform/dot-import-job.tf: Cloud Run job</span>
+<span class="d-ctx">    (Mondays 07:00 NY, scheduler-triggered, apply with -target) re-running the</span>
+<span class="d-ctx">    pipeline for pages changed in the last 8 days against prod. Local run:</span>
+<span class="d-ctx">    60 proposals cast (8 corridors, 52 pins), verified on the map.</span>
+<span class="d-ctx">    </span>
+<span class="d-ctx">    Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">docs/nyc-proposal-data-sources.md</span>
+            <span class="stat"><span class="d-add">+37</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · data sources</span>
+        <span class="ctx-sum">where official street-change proposals live + scrape recipes</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">nyc-proposal-data-sources.md</span>
+        <span class="ctx-sum">~180 lines — nycdotprojects/SIPs/nyc.gov + import pipeline</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">sources + recipes</span><span class="ol-sum">unchanged (authored by the research agent)</span></li><li class="changed"><span class="ol-label">importing proposals as votes</span><span class="ol-sum">new section: pipeline, guards, weekly job</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>documents the corridor/point cast split, the floor-0 override, and the weekly job runbook</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/nyc-proposal-data-sources.md b/docs/nyc-proposal-data-sources.md</span>
+<span class="d-meta">index 6a1b03b..0690b23 100644</span>
+<span class="d-meta">--- a/docs/nyc-proposal-data-sources.md</span>
+<span class="d-meta">+++ b/docs/nyc-proposal-data-sources.md</span>
+<span class="d-hunk">@@ -130,6 +130,43 @@ diff the page HTML to detect additions.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ---</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+## Importing proposals as votes (`import_to_map.py` / `weekly_import.py`)</span>
+<span class="d-add">+</span>
+<span class="d-add">+The pipeline above feeds the **nyc-proposals** map: every DOT project becomes</span>
+<span class="d-add">+one vote from a synthetic voter (`dotproj:&lt;sha1(url)&gt;`, `ip_from_voter` — the</span>
+<span class="d-add">+Lyft/Citibike import convention), cast through the public HTTP API so the</span>
+<span class="d-add">+server does all snapping (no graph-version coupling):</span>
+<span class="d-add">+</span>
+<span class="d-add">+- **Corridor projects** (&quot;X from A to B&quot; in title/description) geocode both</span>
+<span class="d-add">+  endpoints (via the app&#x27;s own `/api/geocode`), route via `POST /api/routes`,</span>
+<span class="d-add">+  and cast a route vote on the corridor&#x27;s edges → they surface as corridor</span>
+<span class="d-add">+  (RBTP) proposals. Guards: ≤ 8 km endpoint spread, ≤ 600 edges (a failed</span>
+<span class="d-add">+  geocode otherwise routes across boroughs — &quot;5th Ave &amp; 57 St&quot; once hit</span>
+<span class="d-add">+  Sunset Park instead of Midtown; E/W-numbered cross streets retry with</span>
+<span class="d-add">+  Manhattan first).</span>
+<span class="d-add">+- **Point projects** (intersections, plazas) cast on the snapped point → PBTP</span>
+<span class="d-add">+  pins. Route-kind classifications whose corridor could not be parsed demote</span>
+<span class="d-add">+  to the point-kind &quot;Street redesign&quot; label — point casts of route-kind types</span>
+<span class="d-add">+  are invisible to pin selection by design.</span>
+<span class="d-add">+- The map&#x27;s `maps.top_proposal_min_net = 0` override (served as</span>
+<span class="d-add">+  `topProposalMinNet`) exempts it from the &gt;100-net top-proposal support</span>
+<span class="d-add">+  floor — every one-vote proposal still gets its pin/corridor.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Two-phase CLI (plan is reviewable before anything is cast; both idempotent):</span>
+<span class="d-add">+</span>
+<span class="d-add">+```bash</span>
+<span class="d-add">+python3 tools/nyc_proposals/import_to_map.py plan \</span>
+<span class="d-add">+    --projects dot_projects.jsonl -o plan.jsonl --base http://localhost:5001</span>
+<span class="d-add">+python3 tools/nyc_proposals/import_to_map.py cast --plan plan.jsonl \</span>
+<span class="d-add">+    --base http://localhost:5001 --map nyc-proposals</span>
+<span class="d-add">+```</span>
+<span class="d-add">+</span>
+<span class="d-add">+**Weekly prod refresh**: `weekly_import.py` (Cloud Run job</span>
+<span class="d-add">+`dot-proposals-import-prod`, Mondays 07:00 NY, `terraform/dot-import-job.tf` —</span>
+<span class="d-add">+apply with `-target` only) re-runs fetch→plan→cast for pages changed in the</span>
+<span class="d-add">+last 8 days against `https://cityedit.org`. Image:</span>
+<span class="d-add">+`gcloud builds submit tools/nyc_proposals --tag &lt;region&gt;-docker.pkg.dev/&lt;project&gt;/desire-path-mapper/dot-import:latest`.</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> ## Watch-list ideas (not yet wired up)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> - **Community-board agendas** (each CB posts PDF agendas; DOT items appear</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">terraform/dot-import-job.tf</span>
+            <span class="stat"><span class="d-add">+100</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Terraform · prod</span>
+        <span class="ctx-sum">weekly import job: SA + Cloud Run v2 job + scheduler</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">dot-import-job.tf</span>
+        <span class="ctx-sum">~100 lines — mirrors the map-screenshot job pattern</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">dot_import_sa + invoker IAM</span><span class="ol-sum">job-scoped SA</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">google_cloud_run_v2_job.dot_import</span><span class="ol-sum">512Mi / 1800s / max_retries 1</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">google_cloud_scheduler_job.dot_import</span><span class="ol-sum">0 7 * * 1 America/New_York</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>apply with -target only — blanket applies remain a landmine (docs/gcp-deployment.md)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/terraform/dot-import-job.tf b/terraform/dot-import-job.tf</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..df5f8d3</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/terraform/dot-import-job.tf</span>
+<span class="d-hunk">@@ -0,0 +1,100 @@</span>
+<span class="d-add">+# Weekly NYC DOT proposals import (tools/nyc_proposals/weekly_import.py):</span>
+<span class="d-add">+# fetches street-change proposals from nycdotprojects.info and casts one vote</span>
+<span class="d-add">+# per new/changed proposal on the nyc-proposals map, through the public app</span>
+<span class="d-add">+# API. Mirrors the map-screenshot job pattern. Apply with -target (see</span>
+<span class="d-add">+# docs/gcp-deployment.md on blanket-apply landmines):</span>
+<span class="d-add">+#</span>
+<span class="d-add">+#   terraform apply \</span>
+<span class="d-add">+#     -target=google_service_account.dot_import_sa \</span>
+<span class="d-add">+#     -target=google_cloud_run_v2_job.dot_import \</span>
+<span class="d-add">+#     -target=google_cloud_run_v2_job_iam_member.dot_import_invoker \</span>
+<span class="d-add">+#     -target=google_cloud_scheduler_job.dot_import</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# Image build: gcloud builds submit tools/nyc_proposals \</span>
+<span class="d-add">+#   --tag ${region}-docker.pkg.dev/${project}/desire-path-mapper/dot-import:latest</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_service_account&quot; &quot;dot_import_sa&quot; {</span>
+<span class="d-add">+  account_id   = &quot;dot-import&quot;</span>
+<span class="d-add">+  display_name = &quot;DOT Proposals Import Job&quot;</span>
+<span class="d-add">+  description  = &quot;Runs the weekly nycdotprojects.info → nyc-proposals vote import&quot;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_cloud_run_v2_job&quot; &quot;dot_import&quot; {</span>
+<span class="d-add">+  name     = &quot;dot-proposals-import-${var.environment}&quot;</span>
+<span class="d-add">+  location = var.region</span>
+<span class="d-add">+</span>
+<span class="d-add">+  template {</span>
+<span class="d-add">+    template {</span>
+<span class="d-add">+      containers {</span>
+<span class="d-add">+        image = &quot;${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper/dot-import:latest&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+        env {</span>
+<span class="d-add">+          name  = &quot;BASE_URL&quot;</span>
+<span class="d-add">+          value = &quot;https://cityedit.org&quot;</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+        env {</span>
+<span class="d-add">+          name  = &quot;MAP_SLUG&quot;</span>
+<span class="d-add">+          value = &quot;nyc-proposals&quot;</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+</span>
+<span class="d-add">+        resources {</span>
+<span class="d-add">+          limits = {</span>
+<span class="d-add">+            cpu    = &quot;1&quot;</span>
+<span class="d-add">+            memory = &quot;512Mi&quot;</span>
+<span class="d-add">+          }</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+</span>
+<span class="d-add">+      service_account = google_service_account.dot_import_sa.email</span>
+<span class="d-add">+      # Fetch (1 req/s, polite) + geocode + cast for a week&#x27;s changed pages;</span>
+<span class="d-add">+      # generous headroom over the observed full-sweep runtime.</span>
+<span class="d-add">+      timeout     = &quot;1800s&quot;</span>
+<span class="d-add">+      max_retries = 1</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  depends_on = [</span>
+<span class="d-add">+    google_project_service.cloud_run,</span>
+<span class="d-add">+    google_artifact_registry_repository.app,</span>
+<span class="d-add">+  ]</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_cloud_run_v2_job_iam_member&quot; &quot;dot_import_invoker&quot; {</span>
+<span class="d-add">+  name     = google_cloud_run_v2_job.dot_import.name</span>
+<span class="d-add">+  location = var.region</span>
+<span class="d-add">+  role     = &quot;roles/run.invoker&quot;</span>
+<span class="d-add">+  member   = &quot;serviceAccount:${google_service_account.dot_import_sa.email}&quot;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+resource &quot;google_cloud_scheduler_job&quot; &quot;dot_import&quot; {</span>
+<span class="d-add">+  name        = &quot;dot-proposals-import-weekly-${var.environment}&quot;</span>
+<span class="d-add">+  description = &quot;Weekly NYC DOT proposals → nyc-proposals vote import&quot;</span>
+<span class="d-add">+  # Monday 07:00 New York — after DOT&#x27;s typical end-of-week page updates,</span>
+<span class="d-add">+  # before US morning traffic.</span>
+<span class="d-add">+  schedule  = &quot;0 7 * * 1&quot;</span>
+<span class="d-add">+  time_zone = &quot;America/New_York&quot;</span>
+<span class="d-add">+  region    = var.region</span>
+<span class="d-add">+</span>
+<span class="d-add">+  retry_config {</span>
+<span class="d-add">+    retry_count = 1</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  http_target {</span>
+<span class="d-add">+    http_method = &quot;POST&quot;</span>
+<span class="d-add">+    uri         = &quot;https://run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/jobs/${google_cloud_run_v2_job.dot_import.name}:run&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    oauth_token {</span>
+<span class="d-add">+      service_account_email = google_service_account.dot_import_sa.email</span>
+<span class="d-add">+      scope                 = &quot;https://www.googleapis.com/auth/cloud-platform&quot;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  depends_on = [</span>
+<span class="d-add">+    google_project_service.cloudscheduler,</span>
+<span class="d-add">+    google_cloud_run_v2_job.dot_import,</span>
+<span class="d-add">+  ]</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+output &quot;dot_import_job&quot; {</span>
+<span class="d-add">+  value = google_cloud_run_v2_job.dot_import.name</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">tools/nyc_proposals/Dockerfile</span>
+            <span class="stat"><span class="d-add">+15</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · tools/nyc_proposals/</span>
+        <span class="ctx-sum">the dot-import job image</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Dockerfile</span>
+        <span class="ctx-sum">python:3.13-slim + the three stdlib-only scripts</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">image</span><span class="ol-sum">no deps to install; HEALTHCHECK NONE (one-shot job)</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>CMD [&quot;python&quot;, &quot;weekly_import.py&quot;]</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/tools/nyc_proposals/Dockerfile b/tools/nyc_proposals/Dockerfile</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..2ebaddf</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/tools/nyc_proposals/Dockerfile</span>
+<span class="d-hunk">@@ -0,0 +1,15 @@</span>
+<span class="d-add">+FROM python:3.13-slim</span>
+<span class="d-add">+</span>
+<span class="d-add">+WORKDIR /app</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Unbuffered so Cloud Run job logs stream live; no .pyc litter in the image.</span>
+<span class="d-add">+ENV PYTHONUNBUFFERED=1 \</span>
+<span class="d-add">+    PYTHONDONTWRITEBYTECODE=1</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Stdlib-only pipeline — no requirements to install.</span>
+<span class="d-add">+COPY fetch_latest.py import_to_map.py weekly_import.py ./</span>
+<span class="d-add">+</span>
+<span class="d-add">+# One-shot batch job (fetch → plan → cast → exit); nothing to health-probe.</span>
+<span class="d-add">+HEALTHCHECK NONE</span>
+<span class="d-add">+</span>
+<span class="d-add">+CMD [&quot;python&quot;, &quot;weekly_import.py&quot;]</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">tools/nyc_proposals/import_to_map.py</span>
+            <span class="stat"><span class="d-add">+340</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Tools · nyc_proposals/</span>
+        <span class="ctx-sum">official-DOT-proposals → votes pipeline (plan/cast CLI)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">import_to_map.py</span>
+        <span class="ctx-sum">~300 LOC — filters, classifier, geocoding, corridor guards, casting</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">SKIP_TITLE / PROJECT_TITLE / looks_like_project</span><span class="ol-sum">two-sided junk filter</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CLASSIFY_RULES + POINT_FALLBACK_LABEL</span><span class="ol-sum">title → vote type + kind</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CORRIDOR_RE + street_name()</span><span class="ol-sum">endpoint parsing, trailing-cap-run street trim</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">plan_project / cast_entry</span><span class="ol-sum">geocode+guards → /api/routes → /api/vote</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>MAX_CORRIDOR_KM = 8.0 / MAX_CORRIDOR_EDGES = 600 — cross-borough geocode guard</li><li>voter_id = dotproj:&lt;sha1(url)[:16]&gt; + ip_from_voter — idempotent, per-IP-cap-safe</li><li>route-kind without endpoints → &#x27;Street redesign&#x27; (point) — stays visible</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/tools/nyc_proposals/import_to_map.py b/tools/nyc_proposals/import_to_map.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..820035a</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/tools/nyc_proposals/import_to_map.py</span>
+<span class="d-hunk">@@ -0,0 +1,340 @@</span>
+<span class="d-add">+#!/usr/bin/env python3</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+Import official NYC DOT street-change proposals as votes on a City Edit map.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Input: a JSONL of nycdotprojects.info project pages (url, title, description —</span>
+<span class="d-add">+see fetch_latest.py / docs/nyc-proposal-data-sources.md). Two phases so the</span>
+<span class="d-add">+plan can be reviewed before anything is cast:</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # 1. Geocode + classify every project into a castable plan</span>
+<span class="d-add">+    python3 import_to_map.py plan --projects dot_projects.jsonl -o plan.jsonl \</span>
+<span class="d-add">+        --base http://localhost:5001 --map nyc-proposals</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # 2. Cast the plan&#x27;s votes (idempotent: voter_id is derived from the</span>
+<span class="d-add">+    #    project URL, and /api/vote is clear-then-cast per voter+type)</span>
+<span class="d-add">+    python3 import_to_map.py cast --plan plan.jsonl \</span>
+<span class="d-add">+        --base http://localhost:5001 --map nyc-proposals</span>
+<span class="d-add">+</span>
+<span class="d-add">+Each project becomes ONE vote from its own synthetic voter</span>
+<span class="d-add">+(`dotproj:&lt;sha1(url)&gt;`, sent with ip_from_voter so the per-IP cap never</span>
+<span class="d-add">+collapses the batch — same convention as the Lyft/Citibike imports):</span>
+<span class="d-add">+</span>
+<span class="d-add">+- Corridor projects (&quot;X from A to B&quot;) vote on the whole corridor: geocode both</span>
+<span class="d-add">+  endpoints, `POST /api/routes` for the edge ids, cast a route vote. This is</span>
+<span class="d-add">+  what lets route-kind vote types surface as corridor (RBTP) proposals.</span>
+<span class="d-add">+- Point projects (intersections, squares) cast on the snapped edge under the</span>
+<span class="d-add">+  geocoded point.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Everything goes through the public HTTP API — the server does all snapping, so</span>
+<span class="d-add">+there is no graph-version coupling and the same plan can be cast against</span>
+<span class="d-add">+local, staging, and prod. Stdlib only.</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+import argparse</span>
+<span class="d-add">+import hashlib</span>
+<span class="d-add">+import json</span>
+<span class="d-add">+import re</span>
+<span class="d-add">+import sys</span>
+<span class="d-add">+import time</span>
+<span class="d-add">+import urllib.parse</span>
+<span class="d-add">+import urllib.request</span>
+<span class="d-add">+</span>
+<span class="d-add">+REQUEST_DELAY_S = 0.5   # geocoding goes through Flask to Photon — stay polite</span>
+<span class="d-add">+CAST_DELAY_S = 0.15</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Corridor sanity: DOT corridor projects run along ONE street, so endpoints</span>
+<span class="d-add">+# beyond this straight-line distance mean a geocode grabbed the wrong borough&#x27;s</span>
+<span class="d-add">+# same-named street (e.g. &quot;5th Ave &amp; 57 St&quot; hitting Sunset Park instead of</span>
+<span class="d-add">+# Midtown). Such entries demote to a point cast at the project&#x27;s best hit.</span>
+<span class="d-add">+MAX_CORRIDOR_KM = 8.0</span>
+<span class="d-add">+# And the routed corridor may not resolve to absurdly many edges (a cross-</span>
+<span class="d-add">+# borough route is ~700+; the longest legitimate corridors are ~400).</span>
+<span class="d-add">+MAX_CORRIDOR_EDGES = 600</span>
+<span class="d-add">+</span>
+<span class="d-add">+# NYC bounds — geocode hits outside are treated as failures.</span>
+<span class="d-add">+NYC_BBOX = (-74.26, 40.49, -73.70, 40.92)</span>
+<span class="d-add">+</span>
+<span class="d-add">+BOROUGHS = [&quot;Brooklyn&quot;, &quot;Bronx&quot;, &quot;Queens&quot;, &quot;Manhattan&quot;, &quot;Staten Island&quot;]</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Pages on nycdotprojects.info that are not street-change proposals. The bare</span>
+<span class="d-add">+# slugs mix real project homepages with outreach/blog posts (&quot;Thanks for</span>
+<span class="d-add">+# attending!&quot;, &quot;DOT at the Queens Pride Festival&quot;), so filtering is two-sided:</span>
+<span class="d-add">+# a junk blacklist AND a required project-shaped token in the title.</span>
+<span class="d-add">+SKIP_TITLE = re.compile(</span>
+<span class="d-add">+    r&quot;feedback map|newsletter|survey|^home$|^about|street ambassador|&quot;</span>
+<span class="d-add">+    r&quot;art program|^press |publication|&quot;</span>
+<span class="d-add">+    r&quot;thanks?\b|thank you|join us|workshop|meeting|open house|save the date|&quot;</span>
+<span class="d-add">+    r&quot;welcome|presentation|come |miss our|recap|ribbon|tabling|giveaway|&quot;</span>
+<span class="d-add">+    r&quot;parade|festival|tour|clean-?up|volunteer|celebration|update|released|&quot;</span>
+<span class="d-add">+    r&quot;introduction|announce|construction|stay tuned|kick-?off|video|vimeo|&quot;</span>
+<span class="d-add">+    r&quot;portal|comment|your (input|thoughts|feedback|participation)|&quot;</span>
+<span class="d-add">+    r&quot;\btest\b|sample|archive|places to visit|what&#x27;s|what were|riders|&quot;</span>
+<span class="d-add">+    r&quot;conversations|visits?\b|dot at |suggest|scooter|carshare|charger|&quot;</span>
+<span class="d-add">+    r&quot;ferry|rezoning|loading zone|pay-by-app|implemented|&quot;</span>
+<span class="d-add">+    r&quot;greenway (grub|gatherings|groundwork|change)|waterfront fun|&quot;</span>
+<span class="d-add">+    r&quot;ride the|beautify|graphics on|bonanza|one day plaza|outreach|&quot;</span>
+<span class="d-add">+    r&quot;presented|\bmap\b|charging|^greenways$|bike east|route selection&quot;,</span>
+<span class="d-add">+    re.I)</span>
+<span class="d-add">+</span>
+<span class="d-add">+# ...and the title must look like a street/place/project, not a sentence.</span>
+<span class="d-add">+PROJECT_TITLE = re.compile(</span>
+<span class="d-add">+    r&quot;street|\bst\b|avenue|\bave\b|boulevard|blvd|road|\brd\b|broadway|&quot;</span>
+<span class="d-add">+    r&quot;concourse|parkway|pkwy|square|\bsq\b|plaza|bridge|corridor|busway|&quot;</span>
+<span class="d-add">+    r&quot;greenway|bikeway|bike network|bike boulevard|\bsbs\b|study|plan\b|&quot;</span>
+<span class="d-add">+    r&quot;redesign|re-?imagin|improvements?|safety|area\b|neighborhood|downtown|&quot;</span>
+<span class="d-add">+    r&quot;waterfront|crosstown|connector|intersection|slip lane|shared st|&quot;</span>
+<span class="d-add">+    r&quot;\bbikes?\b|\bcurbs?\b|\bbus(es)?\b&quot;,</span>
+<span class="d-add">+    re.I)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def looks_like_project(title: str) -&gt; bool:</span>
+<span class="d-add">+    return (bool(title) and not SKIP_TITLE.search(title)</span>
+<span class="d-add">+            and bool(PROJECT_TITLE.search(title)))</span>
+<span class="d-add">+</span>
+<span class="d-add">+# First matching rule wins. kind is the vote type&#x27;s point_type: &#x27;route&#x27; labels</span>
+<span class="d-add">+# surface as corridor (RBTP) proposals and MUST be cast on a corridor&#x27;s edges;</span>
+<span class="d-add">+# &#x27;point&#x27; labels surface as pins (PBTP) and are cast on the snapped point.</span>
+<span class="d-add">+CLASSIFY_RULES: list[tuple[str, str, str]] = [</span>
+<span class="d-add">+    (r&quot;busway|select bus|\bsbs\b|bus lane|bus priority&quot;, &quot;Add bus lane&quot;, &quot;route&quot;),</span>
+<span class="d-add">+    (r&quot;bike|bicycle|greenway|cycl&quot;, &quot;Add protected bike lane&quot;, &quot;route&quot;),</span>
+<span class="d-add">+    (r&quot;plaza|open street|shared street&quot;, &quot;Add pedestrian plaza&quot;, &quot;point&quot;),</span>
+<span class="d-add">+    (r&quot;speed limit&quot;, &quot;Lower speed limit&quot;, &quot;route&quot;),</span>
+<span class="d-add">+    (r&quot;sidewalk&quot;, &quot;Widen sidewalk&quot;, &quot;route&quot;),</span>
+<span class="d-add">+    (r&quot;raised cross&quot;, &quot;Add raised crosswalk&quot;, &quot;point&quot;),</span>
+<span class="d-add">+    (r&quot;crosswalk&quot;, &quot;Add crosswalk&quot;, &quot;route&quot;),</span>
+<span class="d-add">+    (r&quot;daylight&quot;, &quot;Daylight this corner&quot;, &quot;point&quot;),</span>
+<span class="d-add">+    (r&quot;curb extension|neckdown&quot;, &quot;Add curb extension&quot;, &quot;point&quot;),</span>
+<span class="d-add">+    (r&quot;refuge|median|pedestrian island&quot;, &quot;Add pedestrian refuge island&quot;, &quot;point&quot;),</span>
+<span class="d-add">+    (r&quot;signal timing|retim&quot;, &quot;Fix signal timing&quot;, &quot;point&quot;),</span>
+<span class="d-add">+    (r&quot;signal|leading pedestrian&quot;, &quot;Add pedestrian signal&quot;, &quot;point&quot;),</span>
+<span class="d-add">+    (r&quot;lighting&quot;, &quot;Add intersection lighting&quot;, &quot;point&quot;),</span>
+<span class="d-add">+    (r&quot;turn on red&quot;, &quot;Ban turn on red&quot;, &quot;point&quot;),</span>
+<span class="d-add">+    (r&quot;intersection|\bsquare\b|triangle|\bcircle\b&quot;, &quot;Fix dangerous intersection&quot;, &quot;point&quot;),</span>
+<span class="d-add">+    # DOT corridor redesigns / safety projects with no sharper signal.</span>
+<span class="d-add">+    (r&quot;&quot;, &quot;Add traffic calming&quot;, &quot;route&quot;),</span>
+<span class="d-add">+]</span>
+<span class="d-add">+</span>
+<span class="d-add">+# A route-kind classification whose corridor endpoints could NOT be parsed</span>
+<span class="d-add">+# still needs to be visible: point casts of route-kind types are excluded from</span>
+<span class="d-add">+# pin selection by design (their family is corridors). Substitute a point-kind</span>
+<span class="d-add">+# catch-all so the project gets a pin at its geocoded location instead of</span>
+<span class="d-add">+# silently painting nothing.</span>
+<span class="d-add">+POINT_FALLBACK_LABEL = &quot;Street redesign&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+# &quot;X from A to B&quot; / &quot;X between A and B&quot; / &quot;X, A to B&quot; — corridor with endpoints.</span>
+<span class="d-add">+CORRIDOR_RE = re.compile(</span>
+<span class="d-add">+    r&quot;([A-Z][\w .&#x27;&amp;-]+?)\s+(?:from|between)\s+([A-Z0-9][\w .&#x27;&amp;-]+?)&quot;</span>
+<span class="d-add">+    r&quot;\s+(?:to|and)\s+([A-Z0-9][\w .&#x27;&amp;-]+?)(?:[,.;)|]|$)&quot;)</span>
+<span class="d-add">+TITLE_SPAN_RE = re.compile(r&quot;^([^,]+),\s*(.+?)\s+to\s+(.+)$&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def street_name(raw: str) -&gt; str:</span>
+<span class="d-add">+    &quot;&quot;&quot;Trim a corridor match&#x27;s street capture to the actual street name.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Prose like &quot;Multi-phase safety improvements on Linden Boulevard&quot; matches</span>
+<span class="d-add">+    CORRIDOR_RE&#x27;s lazy prefix; keep only the trailing run of capitalized/</span>
+<span class="d-add">+    numbered tokens (&quot;Linden Boulevard&quot;, &quot;E 161st Street&quot;).</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    words = raw.strip(&quot; .,&quot;).split()</span>
+<span class="d-add">+    run: list[str] = []</span>
+<span class="d-add">+    for w in reversed(words):</span>
+<span class="d-add">+        if re.match(r&quot;^[A-Z0-9]&quot;, w) or w in (&quot;of&quot;, &quot;the&quot;):</span>
+<span class="d-add">+            run.append(w)</span>
+<span class="d-add">+        else:</span>
+<span class="d-add">+            break</span>
+<span class="d-add">+    return &quot; &quot;.join(reversed(run)) if run else raw.strip(&quot; .,&quot;)</span>
+<span class="d-add">+INTERSECTION_RE = re.compile(</span>
+<span class="d-add">+    r&quot;([A-Z][\w .&#x27;-]+?(?:Street|Avenue|Boulevard|Road|Place|Parkway|Broadway|Concourse))&quot;</span>
+<span class="d-add">+    r&quot;\s+(?:and|at|&amp;)\s+([A-Z][\w .&#x27;-]+?(?:Street|Avenue|Boulevard|Road|Place|Parkway|Broadway|Concourse))&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def http_json(url: str, payload: dict | None = None) -&gt; dict:</span>
+<span class="d-add">+    body = json.dumps(payload).encode() if payload is not None else None</span>
+<span class="d-add">+    req = urllib.request.Request(</span>
+<span class="d-add">+        url, data=body,</span>
+<span class="d-add">+        headers={&quot;Content-Type&quot;: &quot;application/json&quot;,</span>
+<span class="d-add">+                 &quot;User-Agent&quot;: &quot;city-edit-import/1.0&quot;})</span>
+<span class="d-add">+    with urllib.request.urlopen(req, timeout=60) as resp:</span>
+<span class="d-add">+        return json.loads(resp.read())</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def in_nyc(lat: float, lon: float) -&gt; bool:</span>
+<span class="d-add">+    w, s, e, n = NYC_BBOX</span>
+<span class="d-add">+    return s &lt;= lat &lt;= n and w &lt;= lon &lt;= e</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def straight_km(a: tuple[float, float], b: tuple[float, float]) -&gt; float:</span>
+<span class="d-add">+    import math</span>
+<span class="d-add">+    lat = math.radians((a[0] + b[0]) / 2)</span>
+<span class="d-add">+    dy = (a[0] - b[0]) * 111.32</span>
+<span class="d-add">+    dx = (a[1] - b[1]) * 111.32 * math.cos(lat)</span>
+<span class="d-add">+    return (dx * dx + dy * dy) ** 0.5</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def geocode(base: str, slug: str, query: str) -&gt; tuple[float, float] | None:</span>
+<span class="d-add">+    time.sleep(REQUEST_DELAY_S)</span>
+<span class="d-add">+    url = f&quot;{base}/api/geocode?&quot; + urllib.parse.urlencode({&quot;q&quot;: query, &quot;map&quot;: slug})</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        results = http_json(url).get(&quot;results&quot;) or []</span>
+<span class="d-add">+    except Exception:</span>
+<span class="d-add">+        return None</span>
+<span class="d-add">+    for r in results:</span>
+<span class="d-add">+        lat, lon = float(r[&quot;lat&quot;]), float(r[&quot;lon&quot;])</span>
+<span class="d-add">+        if in_nyc(lat, lon):</span>
+<span class="d-add">+            return lat, lon</span>
+<span class="d-add">+    return None</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def classify(text: str) -&gt; tuple[str, str]:</span>
+<span class="d-add">+    for pattern, label, kind in CLASSIFY_RULES:</span>
+<span class="d-add">+        if re.search(pattern, text, re.I):</span>
+<span class="d-add">+            return label, kind</span>
+<span class="d-add">+    return CLASSIFY_RULES[-1][1], CLASSIFY_RULES[-1][2]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def borough_of(text: str) -&gt; str:</span>
+<span class="d-add">+    for b in BOROUGHS:</span>
+<span class="d-add">+        if re.search(rf&quot;\b{b}\b&quot;, text, re.I):</span>
+<span class="d-add">+            return b</span>
+<span class="d-add">+    return &quot;New York&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def plan_project(base: str, slug: str, proj: dict) -&gt; dict | None:</span>
+<span class="d-add">+    title = (proj.get(&quot;title&quot;) or &quot;&quot;).strip()</span>
+<span class="d-add">+    if proj.get(&quot;error&quot;) or not looks_like_project(title):</span>
+<span class="d-add">+        return None</span>
+<span class="d-add">+    desc = (proj.get(&quot;description&quot;) or &quot;&quot;).strip()</span>
+<span class="d-add">+    text = f&quot;{title}. {desc}&quot;</span>
+<span class="d-add">+    label, kind = classify(text)</span>
+<span class="d-add">+    boro = borough_of(text)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    entry = {&quot;url&quot;: proj[&quot;url&quot;], &quot;title&quot;: title, &quot;description&quot;: desc,</span>
+<span class="d-add">+             &quot;vote_type&quot;: label, &quot;kind&quot;: kind}</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # Corridor: two geocodable endpoints along a named street.</span>
+<span class="d-add">+    m = CORRIDOR_RE.search(text) or TITLE_SPAN_RE.match(title)</span>
+<span class="d-add">+    if m and kind == &quot;route&quot;:</span>
+<span class="d-add">+        street = street_name(m.group(1))</span>
+<span class="d-add">+        a, b = (s.strip(&quot; .,&quot;) for s in m.groups()[1:])</span>
+<span class="d-add">+        # &quot;E 57 St&quot;/&quot;W 181st&quot; cross streets imply Manhattan — try it first when</span>
+<span class="d-add">+        # no borough was named, so same-named streets elsewhere don&#x27;t win.</span>
+<span class="d-add">+        boros = [boro]</span>
+<span class="d-add">+        if boro == &quot;New York&quot; and re.search(r&quot;\b[EW]\.? ?\d&quot;, f&quot;{a} {b}&quot;):</span>
+<span class="d-add">+            boros.insert(0, &quot;Manhattan&quot;)</span>
+<span class="d-add">+        for try_boro in boros:</span>
+<span class="d-add">+            start = geocode(base, slug, f&quot;{street} &amp; {a}, {try_boro}&quot;)</span>
+<span class="d-add">+            end = geocode(base, slug, f&quot;{street} &amp; {b}, {try_boro}&quot;)</span>
+<span class="d-add">+            if (start and end and start != end</span>
+<span class="d-add">+                    and straight_km(start, end) &lt;= MAX_CORRIDOR_KM):</span>
+<span class="d-add">+                entry.update(cast=&quot;route&quot;, start=start, end=end,</span>
+<span class="d-add">+                             query=f&quot;{street}: {a} → {b} ({try_boro})&quot;)</span>
+<span class="d-add">+                return entry</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # Point: an intersection, or the best single hit for the project name.</span>
+<span class="d-add">+    for q in _point_queries(title, text, boro):</span>
+<span class="d-add">+        pt = geocode(base, slug, q)</span>
+<span class="d-add">+        if pt:</span>
+<span class="d-add">+            if kind == &quot;route&quot;:</span>
+<span class="d-add">+                # Corridor project without parseable endpoints — pin it with</span>
+<span class="d-add">+                # the point-kind catch-all so it still shows on the map.</span>
+<span class="d-add">+                entry.update(vote_type=POINT_FALLBACK_LABEL, kind=&quot;point&quot;)</span>
+<span class="d-add">+            entry.update(cast=&quot;point&quot;, point=pt, query=q)</span>
+<span class="d-add">+            return entry</span>
+<span class="d-add">+    entry.update(cast=&quot;skip&quot;, reason=&quot;geocode-failed&quot;)</span>
+<span class="d-add">+    return entry</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _point_queries(title: str, text: str, boro: str):</span>
+<span class="d-add">+    m = INTERSECTION_RE.search(text)</span>
+<span class="d-add">+    if m:</span>
+<span class="d-add">+        yield f&quot;{m.group(1).strip()} &amp; {m.group(2).strip()}, {boro}&quot;</span>
+<span class="d-add">+    # The title itself, then its leading street name, city-biased.</span>
+<span class="d-add">+    clean = re.sub(r&quot;\b(Feedback|Project|Pilot|Redesign|Improvements?|Safety|&quot;</span>
+<span class="d-add">+                   r&quot;Study|Phase \w+)\b&quot;, &quot;&quot;, title, flags=re.I).strip(&quot; -:,&quot;)</span>
+<span class="d-add">+    if clean:</span>
+<span class="d-add">+        yield f&quot;{clean}, {boro}&quot;</span>
+<span class="d-add">+    first = re.split(r&quot;,| - |:&quot;, title)[0].strip()</span>
+<span class="d-add">+    if first and first != clean:</span>
+<span class="d-add">+        yield f&quot;{first}, {boro}&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def voter_id(url: str) -&gt; str:</span>
+<span class="d-add">+    return &quot;dotproj:&quot; + hashlib.sha1(url.encode()).hexdigest()[:16]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def cast_entry(base: str, slug: str, entry: dict, mode: str = &quot;walk&quot;) -&gt; dict:</span>
+<span class="d-add">+    if entry.get(&quot;cast&quot;) == &quot;route&quot;:</span>
+<span class="d-add">+        route = http_json(f&quot;{base}/api/routes&quot;, {</span>
+<span class="d-add">+            &quot;map&quot;: slug, &quot;start&quot;: list(entry[&quot;start&quot;]), &quot;end&quot;: list(entry[&quot;end&quot;]),</span>
+<span class="d-add">+        })</span>
+<span class="d-add">+        edge_ids = route.get(&quot;edge_ids&quot;) or []</span>
+<span class="d-add">+        if not edge_ids:</span>
+<span class="d-add">+            return {&quot;status&quot;: &quot;route-failed&quot;}</span>
+<span class="d-add">+        if len(edge_ids) &gt; MAX_CORRIDOR_EDGES:</span>
+<span class="d-add">+            return {&quot;status&quot;: &quot;route-too-long&quot;, &quot;edges&quot;: len(edge_ids)}</span>
+<span class="d-add">+        payload = {&quot;edge_ids&quot;: edge_ids}</span>
+<span class="d-add">+    elif entry.get(&quot;cast&quot;) == &quot;point&quot;:</span>
+<span class="d-add">+        payload = {&quot;point&quot;: list(entry[&quot;point&quot;])}</span>
+<span class="d-add">+    else:</span>
+<span class="d-add">+        return {&quot;status&quot;: &quot;skipped&quot;}</span>
+<span class="d-add">+</span>
+<span class="d-add">+    time.sleep(CAST_DELAY_S)</span>
+<span class="d-add">+    resp = http_json(f&quot;{base}/api/vote&quot;, {</span>
+<span class="d-add">+        &quot;map&quot;: slug, &quot;mode&quot;: mode, &quot;vote_type&quot;: entry[&quot;vote_type&quot;],</span>
+<span class="d-add">+        &quot;point_type&quot;: entry[&quot;kind&quot;], &quot;voter_id&quot;: voter_id(entry[&quot;url&quot;]),</span>
+<span class="d-add">+        &quot;direction&quot;: 1, &quot;ip_from_voter&quot;: True, **payload,</span>
+<span class="d-add">+    })</span>
+<span class="d-add">+    if resp.get(&quot;error&quot;):</span>
+<span class="d-add">+        return {&quot;status&quot;: &quot;error&quot;, &quot;detail&quot;: resp[&quot;error&quot;]}</span>
+<span class="d-add">+    return {&quot;status&quot;: &quot;ok&quot;,</span>
+<span class="d-add">+            &quot;edges&quot;: len(payload.get(&quot;edge_ids&quot;, [])) or 1}</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def main():</span>
+<span class="d-add">+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])</span>
+<span class="d-add">+    ap.add_argument(&quot;phase&quot;, choices=[&quot;plan&quot;, &quot;cast&quot;])</span>
+<span class="d-add">+    ap.add_argument(&quot;--projects&quot;, help=&quot;plan: input JSONL from fetch_all/fetch_latest&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--plan&quot;, help=&quot;cast: plan JSONL produced by the plan phase&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;-o&quot;, &quot;--out&quot;, help=&quot;plan: output path (default plan.jsonl)&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--base&quot;, default=&quot;http://localhost:5001&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--map&quot;, dest=&quot;slug&quot;, default=&quot;nyc-proposals&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--limit&quot;, type=int, default=0, help=&quot;stop after N entries&quot;)</span>
+<span class="d-add">+    args = ap.parse_args()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if args.phase == &quot;plan&quot;:</span>
+<span class="d-add">+        out_path = args.out or &quot;plan.jsonl&quot;</span>
+<span class="d-add">+        seen_titles: set[str] = set()</span>
+<span class="d-add">+        stats: dict[str, int] = {}</span>
+<span class="d-add">+        with open(args.projects) as f, open(out_path, &quot;w&quot;) as out:</span>
+<span class="d-add">+            for i, line in enumerate(f):</span>
+<span class="d-add">+                if args.limit and i &gt;= args.limit:</span>
+<span class="d-add">+                    break</span>
+<span class="d-add">+                proj = json.loads(line)</span>
+<span class="d-add">+                title = (proj.get(&quot;title&quot;) or &quot;&quot;).strip().lower()</span>
+<span class="d-add">+                if title in seen_titles:</span>
+<span class="d-add">+                    continue</span>
+<span class="d-add">+                seen_titles.add(title)</span>
+<span class="d-add">+                entry = plan_project(args.base, args.slug, proj)</span>
+<span class="d-add">+                if not entry:</span>
+<span class="d-add">+                    stats[&quot;filtered&quot;] = stats.get(&quot;filtered&quot;, 0) + 1</span>
+<span class="d-add">+                    continue</span>
+<span class="d-add">+                stats[entry[&quot;cast&quot;]] = stats.get(entry[&quot;cast&quot;], 0) + 1</span>
+<span class="d-add">+                out.write(json.dumps(entry) + &quot;\n&quot;)</span>
+<span class="d-add">+                out.flush()</span>
+<span class="d-add">+                print(f&quot;[{i}] {entry[&#x27;cast&#x27;]:&gt;5}  {entry[&#x27;title&#x27;][:60]}&quot;</span>
+<span class="d-add">+                      f&quot;  → {entry[&#x27;vote_type&#x27;]}&quot;, flush=True)</span>
+<span class="d-add">+        print(f&quot;PLAN DONE {stats} -&gt; {out_path}&quot;, flush=True)</span>
+<span class="d-add">+    else:</span>
+<span class="d-add">+        stats = {}</span>
+<span class="d-add">+        with open(args.plan) as f:</span>
+<span class="d-add">+            entries = [json.loads(line) for line in f]</span>
+<span class="d-add">+        if args.limit:</span>
+<span class="d-add">+            entries = entries[:args.limit]</span>
+<span class="d-add">+        for i, entry in enumerate(entries):</span>
+<span class="d-add">+            result = cast_entry(args.base, args.slug, entry)</span>
+<span class="d-add">+            stats[result[&quot;status&quot;]] = stats.get(result[&quot;status&quot;], 0) + 1</span>
+<span class="d-add">+            print(f&quot;[{i}] {result[&#x27;status&#x27;]:&gt;12}  {entry[&#x27;title&#x27;][:60]}&quot;, flush=True)</span>
+<span class="d-add">+        print(f&quot;CAST DONE {stats}&quot;, flush=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+if __name__ == &quot;__main__&quot;:</span>
+<span class="d-add">+    main()</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">tools/nyc_proposals/weekly_import.py</span>
+            <span class="stat"><span class="d-add">+68</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Tools · nyc_proposals/</span>
+        <span class="ctx-sum">Cloud Run job entrypoint: fetch → plan → cast weekly</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">weekly_import.py</span>
+        <span class="ctx-sum">~70 LOC — 8-day overlapping window against BASE_URL</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">env config</span><span class="ol-sum">BASE_URL / MAP_SLUG / WINDOW_DAYS</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main loop</span><span class="ol-sum">changed pages → plan_project → cast_entry, stats</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>8-day window + idempotent casts: overlap is safe, missed weeks self-heal on the next run</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/tools/nyc_proposals/weekly_import.py b/tools/nyc_proposals/weekly_import.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..22ee469</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/tools/nyc_proposals/weekly_import.py</span>
+<span class="d-hunk">@@ -0,0 +1,68 @@</span>
+<span class="d-add">+#!/usr/bin/env python3</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+Weekly NYC DOT proposals → City Edit import (Cloud Run job entrypoint).</span>
+<span class="d-add">+</span>
+<span class="d-add">+Fetches nycdotprojects.info project pages changed in the last WINDOW_DAYS</span>
+<span class="d-add">+(overlapping window — casts are idempotent, so re-processing a page is safe:</span>
+<span class="d-add">+voter_id derives from the project URL and /api/vote is clear-then-cast per</span>
+<span class="d-add">+voter+type), plans them (geocode + classify through the app&#x27;s own API), and</span>
+<span class="d-add">+casts one vote per new/changed proposal on the target map.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Config via env:</span>
+<span class="d-add">+    BASE_URL   app to geocode/route/cast against (default https://cityedit.org)</span>
+<span class="d-add">+    MAP_SLUG   target map                        (default nyc-proposals)</span>
+<span class="d-add">+    WINDOW_DAYS  sitemap lastmod lookback        (default 8)</span>
+<span class="d-add">+</span>
+<span class="d-add">+Run locally:  BASE_URL=http://localhost:5001 python3 weekly_import.py</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+import json</span>
+<span class="d-add">+import os</span>
+<span class="d-add">+import sys</span>
+<span class="d-add">+import tempfile</span>
+<span class="d-add">+from datetime import datetime, timedelta, timezone</span>
+<span class="d-add">+from pathlib import Path</span>
+<span class="d-add">+</span>
+<span class="d-add">+sys.path.insert(0, str(Path(__file__).parent))</span>
+<span class="d-add">+from fetch_latest import fetch_dotprojects</span>
+<span class="d-add">+from import_to_map import cast_entry, plan_project</span>
+<span class="d-add">+</span>
+<span class="d-add">+BASE_URL = os.environ.get(&quot;BASE_URL&quot;, &quot;https://cityedit.org&quot;)</span>
+<span class="d-add">+MAP_SLUG = os.environ.get(&quot;MAP_SLUG&quot;, &quot;nyc-proposals&quot;)</span>
+<span class="d-add">+WINDOW_DAYS = int(os.environ.get(&quot;WINDOW_DAYS&quot;, &quot;8&quot;))</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def main() -&gt; int:</span>
+<span class="d-add">+    since = (datetime.now(timezone.utc) - timedelta(days=WINDOW_DAYS)</span>
+<span class="d-add">+             ).strftime(&quot;%Y-%m-%d&quot;)</span>
+<span class="d-add">+    print(f&quot;[WEEKLY] fetching projects changed since {since}&quot;, flush=True)</span>
+<span class="d-add">+    changed = fetch_dotprojects(since, limit=500, fetch_pages=True)</span>
+<span class="d-add">+    projects = [p for p in changed if p[&quot;type&quot;] in (&quot;project&quot;, &quot;project-home&quot;)]</span>
+<span class="d-add">+    print(f&quot;[WEEKLY] {len(changed)} changed pages, {len(projects)} projects&quot;,</span>
+<span class="d-add">+          flush=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    stats: dict[str, int] = {}</span>
+<span class="d-add">+    seen: set[str] = set()</span>
+<span class="d-add">+    for proj in projects:</span>
+<span class="d-add">+        title = (proj.get(&quot;title&quot;) or &quot;&quot;).strip().lower()</span>
+<span class="d-add">+        if not title or title in seen:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        seen.add(title)</span>
+<span class="d-add">+        entry = plan_project(BASE_URL, MAP_SLUG, proj)</span>
+<span class="d-add">+        if not entry:</span>
+<span class="d-add">+            stats[&quot;filtered&quot;] = stats.get(&quot;filtered&quot;, 0) + 1</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        result = cast_entry(BASE_URL, MAP_SLUG, entry)</span>
+<span class="d-add">+        status = f&quot;{entry[&#x27;cast&#x27;]}:{result[&#x27;status&#x27;]}&quot;</span>
+<span class="d-add">+        stats[status] = stats.get(status, 0) + 1</span>
+<span class="d-add">+        print(f&quot;[WEEKLY] {status:&gt;20}  {entry[&#x27;title&#x27;][:60]}&quot;</span>
+<span class="d-add">+              f&quot;  → {entry[&#x27;vote_type&#x27;]}&quot;, flush=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    print(f&quot;[WEEKLY] DONE {stats}&quot;, flush=True)</span>
+<span class="d-add">+    # Only infra failures should flip the job red; geocode misses are normal.</span>
+<span class="d-add">+    errors = sum(v for k, v in stats.items() if k.endswith(&quot;:error&quot;))</span>
+<span class="d-add">+    return 1 if errors and errors == sum(</span>
+<span class="d-add">+        v for k, v in stats.items() if &quot;:&quot; in k) else 0</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+if __name__ == &quot;__main__&quot;:</span>
+<span class="d-add">+    sys.exit(main())</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
