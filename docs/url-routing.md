@@ -213,4 +213,5 @@ Current `map_redirects` rows (query the DB for the live list:
 
 | From | To | Appends | Why |
 |------|----|---------|-----|
-| `nyc-intersections` | `nyc-crossings` | `src=qr-poster` | 2026-07 QR poster campaign was printed without a `src` tag; the redirect retro-tags those scans |
+| `nyc-intersections` | `nyc-proposals` | `src=qr-poster` | 2026-07 QR poster campaign was printed without a `src` tag; the redirect retro-tags those scans (chain-flattened from `nyc-crossings` on the 2026-07-30 rename) |
+| `nyc-crossings` | `nyc-proposals` | — | 2026-07-30: map broadened from dangerous intersections to all NYC proposals |
