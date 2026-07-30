@@ -29,6 +29,21 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-07-30-top-proposal-threshold-ghost-waypoints.html">
+    <div class="date">2026-07-30</div>
+    <h2>Top-proposal support floor, modal badges, and routing-consistent corridors with ghost waypoints</h2>
+    <p>Top Proposals now require real support — strictly more than 100 net votes, one bar shared by the
+    point pins and the route corridors (<code>TOP_PROPOSAL_MIN_NET</code>). Every proposal modal badges
+    the vote types that are <em>current</em> top proposals for what it shows: a mini square for a point
+    winner on the card's blocks, a diamond for a route corridor fully contained in the selection —
+    derived live from the same arrays that render the map pins, never stored. And route corridors are
+    now grown routing-consistently: an extension must keep the open segment a shortest path (bounded
+    deterministic A*), or the previous endpoint is pinned as a ghost waypoint — at most three, then
+    growth ends — so every proposal is expressible as ≤5 route waypoints that serialize into the URL
+    (<code>?w=…,f&lt;id&gt;;…</code>) and keep a shared top-proposal link routing into its corridor even
+    after the proposal retires. Replaces the straightness-splitting + budget-window trimming heuristics.</p>
+  </a>
+
   <a class="entry" href="./2026-07-29-slug-redirects-src-tracking.html">
     <div class="date">2026-07-29</div>
     <h2>Slug redirects + <code>?src=</code> visit tracking — and the nyc-crossings rename</h2>

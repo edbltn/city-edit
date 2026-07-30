@@ -10,10 +10,10 @@ import re
 
 HERE = os.path.dirname(__file__)
 DIFF_PATH = os.path.join(HERE, "changes.diff")
-OUT_PATH = os.path.join(HERE, "2026-07-29-slug-redirects-src-tracking.html")
+OUT_PATH = os.path.join(HERE, "2026-07-30-top-proposal-threshold-ghost-waypoints.html")
 
-DATE = "2026-07-29"
-TITLE = "Slug redirects + ?src= visit tracking — and the nyc-crossings rename"
+DATE = "2026-07-30"
+TITLE = "Top-proposal support floor, modal badges, and routing-consistent corridors with ghost waypoints"
 
 
 def split_by_file(diff_text: str):
@@ -57,195 +57,169 @@ def colorize(diff_chunk: str) -> str:
 
 SECTIONS = [
     {
-        "id": "src",
-        "tag": "Frontend + Backend + Monitoring",
-        "title": "1 · ?src= — campaign visit-source tracking",
+        "id": "floor",
+        "tag": "React client · proposals",
+        "title": "1 · Top proposals now require &gt;100 net votes",
         "symptom": (
-            "There was no way to answer <em>“how many people came from the QR posters?”</em> "
-            "(or any future campaign). The map-load beacon already flowed client → "
-            "<code>/api/client-timing</code> → the <code>[MAPLOAD]</code> log line → the "
-            "<code>cityedit_map_load_ms</code> log-based metric — but it carried no attribution, "
-            "so a poster scan and a bookmarked visit were indistinguishable."
+            "A vote type with a handful of votes could still be a <em>Top Proposal</em> — its best "
+            "edge only had to beat the rest of its own (rare) type. Selecting such a pin opened a "
+            "modal where OTHER vote types showed far higher counts right below the “top” one, which "
+            "read as a contradiction."
         ),
         "cause": [
-            "Nothing in the URL scheme reserved a campaign tag, and the client rewrites the URL "
-            "aggressively (RouteContext’s selection sync drops unknown params; the "
-            "canonical-subdomain redirect is a full page load on another host) — a naïve "
-            "<code>?src=</code> param would be <strong>dropped before anything could read it</strong>, "
-            "or worse, <strong>survive into re-shared links</strong> and poison the attribution.",
+            "PBTP winner selection (<code>computeVoteTypeWinners</code>) admitted any edge with net &gt; 0 "
+            "— the bar was <em>relative to the type</em>, never absolute.",
+            "RBTP corridors had only structural gates (<code>MIN_ROUTE_SCORE</code> = 3, edges, blocks) — "
+            "again no absolute support bar.",
         ],
         "fixes": [
-            "<strong>New <code>utils/sourceTag.ts</code></strong> captures <code>?src=&lt;tag&gt;</code> "
-            "<em>once</em> at map boot (first call wins — StrictMode-safe), validates it "
-            "(<code>[a-zA-Z0-9_-]</code>, max 32), then <strong>strips it from the address bar</strong> "
-            "via <code>history.replaceState</code> so a re-shared link doesn’t inherit the campaign. "
-            "<code>App.tsx</code> calls <code>captureSourceTag()</code> at the top of the map-resolution "
-            "effect, before any redirect or URL rewrite can eat it.",
-            "<strong>The beacon reports it.</strong> <code>loadTelemetry.ts</code> adds "
-            "<code>src</code> to the existing <code>POST /api/client-timing</code> payload; absent for "
-            "direct visits.",
-            "<strong>The server sanitizes + logs it.</strong> <code>client_timing()</code> "
-            "(<code>server/app.py</code>) whitelists the tag and appends "
-            "<code>src=&lt;tag|direct&gt;</code> to the <code>[MAPLOAD]</code> line.",
-            "<strong>The metric grows a <code>src</code> label</strong> "
-            "(<code>terraform/monitoring.tf</code>, <code>REGEXP_EXTRACT</code> like the existing "
-            "map/cached/nav labels) — “visits by source” is now a Metrics Explorer group-by on "
-            "<code>cityedit_map_load_ms</code>’s count. Starting a new campaign = minting a new tag in "
-            "the printed URL; zero code changes.",
-            "<strong>The tag survives the canonical-subdomain hop.</strong> "
-            "<code>withSourceTag()</code> re-attaches the captured (already-stripped) tag to the "
-            "<code>subdomainRedirectUrl</code> target in <code>App.tsx</code>, so e.g. "
-            "<code>cityedit.org/m/nyc-bikes?src=…</code> → <code>bikepaths.cityedit.org</code> still "
-            "attributes.",
+            "<strong><code>TOP_PROPOSAL_MIN_NET = 100</code></strong> (topProposals.ts): a proposal counts as "
+            "“top” only with STRICTLY more than 100 net votes. Threaded as a <code>minNet</code> param through "
+            "<code>computeVoteTypeWinners</code> / <code>selectTopProposals</code> (default = the floor, so the "
+            "product rule is the default; tests pass 0 to probe mechanics).",
+            "GraphLayer passes the floor for street maps and <strong>0 for station networks</strong> — station "
+            "pins are synthesized per station, not vote winners, so the floor would only break their few "
+            "internal winner uses.",
+            "RBTPs share the same bar: the proposal job gets <code>minRouteScore: TOP_PROPOSAL_MIN_NET + 1</code> "
+            "(score = sum of path-edge nets), and the pipeline now SKIPS any connected component whose total "
+            "weight can't reach the score gate — with the 100-floor that prunes almost every component before "
+            "any routing work runs (the perf enabler for §3).",
         ],
         "files": [
-            "client-react/src/utils/sourceTag.ts — NEW: captureSourceTag / getSourceTag / withSourceTag",
-            "client-react/src/App.tsx — capture at boot; withSourceTag across the subdomain redirect",
-            "client-react/src/utils/loadTelemetry.ts — src in the map-load beacon",
-            "server/app.py — client_timing sanitizes + logs src=<tag|direct>",
-            "terraform/monitoring.tf — src label on cityedit_map_load_ms",
+            "client-react/src/components/GraphLayer/topProposals.ts",
+            "client-react/src/components/GraphLayer/topProposals.test.ts",
+            "client-react/src/components/GraphLayer/GraphLayer.tsx",
         ],
     },
     {
-        "id": "redirects",
-        "tag": "Backend + Frontend",
-        "title": "2 · Slug redirects — renamed maps keep their old links",
+        "id": "badges",
+        "tag": "React client · modal",
+        "title": "2 · The modal badges every vote type that is a top proposal there",
         "symptom": (
-            "Renaming a map’s slug would kill every printed/shared link to the old name "
-            "(<code>GET /api/maps/&lt;old&gt;</code> → 404 → the client falls back to the default map), "
-            "and — worse — Propose-a-Map could <strong>re-issue the retired slug</strong> to a "
-            "stranger’s map, silently rerouting printed QR codes to someone else’s content."
+            "Even with the floor, a modal row's counts alone can't tell you WHICH vote type earned the pin "
+            "you clicked — the top-proposal row could sit below rows with bigger raw numbers (distinct-voter "
+            "rows vs fanned-out net scores) with nothing marking it."
         ),
         "cause": [
-            "The slug was the map’s <em>only</em> address: a miss on the <code>maps</code> table was "
-            "terminal, and <code>slug_available()</code> only consulted <code>maps</code> — the moment "
-            "a slug was freed by a rename it was up for grabs.",
-            "A rename also isn’t one UPDATE: <code>edge_votes.map_slug</code> is a denormalized TEXT "
-            "copy (nothing cascades), and the heatmap serves <strong>only from Redis</strong>, keyed by "
-            "slug — a half-applied rename strands votes under a dead slug.",
+            "The cards (<code>ProposalCard</code>) rendered label + −/net/+ tallies only; “is this label a "
+            "current top proposal for what this card shows?” existed nowhere as data.",
         ],
         "fixes": [
-            "<strong>New <code>map_redirects</code> table</strong> (<code>from_slug</code> PK, "
-            "<code>to_slug</code>, <code>append_query</code>, <code>note</code>) created in "
-            "<code>database.init_db()</code>. <code>append_query</code> is the retro-tagging hook: a "
-            "query string merged into the target URL by the client.",
-            "<strong><code>map_get</code> serves a redirect stub instead of 404.</strong> On a maps-table "
-            "miss it consults <code>get_map_redirect(slug)</code> and returns "
-            "<code>{slug, redirect: {toSlug, appendQuery}}</code> — a <strong>200 with "
-            "<code>Cache-Control: max-age=300</code></strong>, not a 30x, because nginx serves the SPA "
-            "shell before any slug lookup, so only the client can act on it (exactly like the "
-            "canonical-subdomain redirect). Not stored in <code>_map_get_cache</code> (enriched map "
-            "dicts only); the lookup is a single PK read.",
-            "<strong>The client follows it.</strong> <code>App.tsx</code> checks "
-            "<code>resolved?.redirect?.toSlug</code> first and <code>location.replace</code>s to "
-            "<code>slugRedirectUrl()</code> (<code>map/runtime.ts</code>): same-origin "
-            "<code>/m/&lt;toSlug&gt;</code>, <strong>keeping every current query param</strong> (QR deep "
-            "links carry <code>?w=</code>/<code>?vt=</code>), dropping <code>?map=</code>, and merging "
-            "<code>append_query</code> <em>without overriding</em> params already present.",
-            "<strong>Retired slugs are reserved forever.</strong> <code>slug_available()</code> now "
-            "checks <code>maps</code> UNION <code>map_redirects</code>, so Propose-a-Map (and "
-            "<code>rename_map_slug</code> itself) can never re-issue one.",
-            "<strong>Atomic rename.</strong> <code>rename_map_slug()</code> does the whole move in one "
-            "explicit BEGIN/COMMIT (get_cursor is autocommit): <code>maps.slug</code>, the denormalized "
-            "<code>edge_votes.map_slug</code> rows, the redirect row, and <strong>chain flattening</strong> "
-            "(existing redirects targeting the old slug are re-pointed, so a→b then b→c becomes a→c — "
-            "clients never hop twice).",
-            "<strong>New CLI <code>server/rename_map.py</code></strong> wraps the transaction, then "
-            "rebuilds Redis under the new slug (<code>vote_migration.rebuild_redis_for_map</code> — "
-            "ev: replay from Postgres) and purges the old slug’s keys (<code>ev:</code>, "
-            "<code>vote_rev:</code>, <code>bd:</code>/<code>bagg:</code>). Fails soft if Redis is down "
-            "(DB renamed; rerun to serve votes).",
+            "<strong>Purely derived, never stored</strong>: <code>topKindsFor(edgeIds, includeRoutes)</code> in "
+            "GraphLayer computes a <code>Map&lt;label, \"point\"|\"route\"|\"both\"&gt;</code> from the SAME "
+            "<code>winners</code>/<code>routeProposals</code> arrays that render the map pins, so a badge can never "
+            "disagree with a pin (both refresh on the same batched proposal sweep).",
+            "<strong>point</strong>: a PBTP winner sits on one of the card's blocks — the same block grain the rows "
+            "sum over. <strong>route</strong>: an RBTP whose corridor is FULLY contained in the selection "
+            "(<code>expandSelectionToUndirected</code> + <code>isRouteCovered</code> — brushing a corridor doesn't "
+            "badge it). Point-only cards skip the containment scan (a one-block card can't contain a ≥5-block corridor).",
+            "Per-card memos feed all four cards (pinned point, edge hover, diamond hover, route summary); "
+            "<code>ProposalCard</code> gains a <code>topKinds</code> prop and renders a mini square (point) / "
+            "diamond (route) badge before the label + bolds the row — the same glyph language as the map pins "
+            "(<code>proposalShapeClass</code>). CSS in globals.css.",
         ],
         "files": [
-            "server/database.py — map_redirects table, get_map_redirect, list_map_redirects, rename_map_slug, slug_available checks both tables",
-            "server/app.py — map_get redirect stub (200 + max-age=300)",
-            "server/rename_map.py — NEW CLI: rename + Redis rebuild + old-key purge",
-            "client-react/src/map/runtime.ts — MapConfig.redirect + slugRedirectUrl()",
-            "client-react/src/App.tsx — follow the redirect before the subdomain check",
+            "client-react/src/components/GraphLayer/GraphLayer.tsx",
+            "client-react/src/styles/globals.css",
         ],
     },
     {
-        "id": "rename",
-        "tag": "Ops + Scripts + Docs",
-        "title": "3 · nyc-intersections → nyc-crossings — retro-tagging the printed posters",
+        "id": "ghosts",
+        "tag": "React client · proposals + selection + URL",
+        "title": "3 · Corridors grow routing-consistently — ghost waypoints in the URL",
         "symptom": (
-            "The July QR poster campaign went to print linking "
-            "<code>cityedit.org/m/nyc-intersections</code> with <strong>no analytics tag</strong> — "
-            "the posters are already hanging, so the URL on them can’t change, and their scans were "
-            "about to be indistinguishable from organic traffic."
+            "Route proposals were built by greedily chaining high-vote edges with no regard for how the app "
+            "actually ROUTES. A selected proposal's URL carried just its two anchors plus an "
+            "<code>f&lt;id&gt;</code> token — the corridor reproduced only while the live proposal existed; once "
+            "votes reshaped it, the OSRM fallback between the anchors could wander far off the corridor, so "
+            "shared top-proposal links didn't persist. Roundaboutness was held down by geometric heuristics "
+            "(straightness splitting + budget-window trimming) rather than anything routing-shaped."
         ),
         "cause": [
-            "The two features above exist precisely to fix this: a redirect row whose "
-            "<code>append_query</code> stamps <code>src=qr-poster</code> onto every visit through the "
-            "old printed URL turns the rename itself into the retro-tagging mechanism.",
+            "<code>greedyHeaviestPath</code>/<code>exactHeaviestPath</code> optimized path WEIGHT on the voted "
+            "subgraph only — nothing constrained the corridor to be reproducible by routing between any set of "
+            "waypoints, so no waypoint set could persist it.",
         ],
         "fixes": [
-            "<strong>Ran the rename</strong>: <code>python rename_map.py nyc-intersections "
-            "nyc-crossings --append-query \"src=qr-poster\"</code> — one transaction moved the map + its "
-            "votes, left the redirect row, rebuilt Redis under <code>nyc-crossings</code>, purged the "
-            "old keys. Every scan of an already-printed poster now lands on "
-            "<code>/m/nyc-crossings</code> with pin + vote type intact <em>and</em> reports "
-            "<code>src=qr-poster</code>.",
-            "<strong>Future prints are tagged at the source.</strong> "
-            "<code>scripts/generate_posters.py</code>: <code>BASE_URL</code> now points at "
-            "<code>nyc-crossings</code>, and a new <code>QR_SRC</code>/<code>--src</code> flag bakes an "
-            "explicit <code>&amp;src=qr-poster</code> into every QR URL (vary per campaign/print run); "
-            "the poster-book checklist copy updated. <code>scripts/seed_poster_votes.py</code> default "
-            "map updated.",
-            "<strong>Docs.</strong> <code>docs/url-routing.md</code> gains “Visit-source tracking "
-            "(?src=)”, “Slug redirects (renamed maps)”, an “Admin runbook — rename a map slug”, and a "
-            "<strong>Redirect inventory</strong> table that is now the source of truth for EVERY "
-            "redirect/rewrite in the system (donate. nginx 301, feedback. rewrite, canonical-subdomain "
-            "client redirect, retired-slug redirects, the staging opt-out) plus the live "
-            "<code>map_redirects</code> rows. <code>README.md</code> and <code>docs/README.md</code> "
-            "link to it.",
+            "<strong>New growth</strong> (<code>growCorridor</code>): start at the component's heaviest edge; "
+            "repeatedly take the heaviest net-positive arc off either tip (ties: lowest edge id) that fits the "
+            "support-earned length budget. An extension is accepted outright only if the OPEN SEGMENT (tip → "
+            "nearest inner waypoint) <em>stays a shortest path through the full graph</em>; otherwise the previous "
+            "tip is pinned as a <strong>ghost waypoint</strong>. At most <code>MAX_GHOST_WAYPOINTS</code> (3) pins — "
+            "the 3rd ends growth — so every proposal is reproducible as ≤ 5 route waypoints. This REPLACES "
+            "<code>splitLoopyPath</code> + <code>capPathToLengthBudget</code> (roundaboutness is now bounded by the "
+            "pin budget, per spec).",
+            "<strong>The oracle</strong> (<code>makeSegmentShortestCheck</code>): a bounded, deterministic A* over the "
+            "full topology — crow-flies heuristic (×0.999 for admissibility), every g-score pruned at the corridor "
+            "length, so the search explores exactly the ellipse of paths that could beat the corridor (razor-thin "
+            "for the near-straight segments consistent growth produces). Ties and sub-eps (1 m) shortcuts are NOT "
+            "detours; pop cap fails OPEN. Injectable via <code>opts.segmentShortestCheck</code> for tests.",
+            "<strong>Proposal shape</strong>: <code>RouteProposal</code> gains <code>waypointNodes</code> / "
+            "<code>waypointCoords</code> ([anchor, ghosts…, anchor]) and per-segment <code>segments</code> edge "
+            "slices; the wire parse synthesizes anchor-only chains for legacy payloads.",
+            "<strong>Selection = the chain</strong>: clicking a diamond selects ALL waypoints (per-segment forced "
+            "flags), so the URL serializes <code>?w=a,f&lt;id&gt;;g1,f&lt;id&gt;;…;b</code> — the serializer already "
+            "supported per-waypoint tokens. The corridor resolver now slices the live proposal between the two "
+            "waypoints nearest each segment (<code>corridorSliceBetween</code>); retired proposals fall back to the "
+            "per-segment edge snapshots, then to OSRM through the ghosts — which now approximates the corridor by "
+            "construction. That's the persistence story.",
+            "<strong>Threading generalized pair → chain</strong>: RouteContext's corridor ops "
+            "(<code>selectCorridor</code>, <code>replaceStart/EndWithChain</code>, "
+            "<code>insertWaypointChainAtSegment</code>, <code>replaceGhostWaypointWithChain</code>) insert the whole "
+            "chain with end-dedupe against neighbors; MapView's click/drop handlers orient the chain via "
+            "<code>chooseAnchorOrder</code> on its endpoints; <code>anchorsAreWaypoints</code> now requires every "
+            "chain point to be a consecutive route waypoint (either direction); the diamond's [×] pulls the whole "
+            "chain back out.",
         ],
         "files": [
-            "scripts/generate_posters.py — BASE_URL → nyc-crossings; QR_SRC + --src baked into QR URLs",
-            "scripts/seed_poster_votes.py — default --map → nyc-crossings",
-            "docs/url-routing.md — ?src= section, slug-redirects section, rename runbook, redirect inventory",
-            "docs/README.md + README.md — pointers to the redirect inventory",
+            "client-react/src/components/GraphLayer/routeProposals.ts",
+            "client-react/src/components/GraphLayer/routeProposals.test.ts",
+            "client-react/src/components/GraphLayer/routeProposals.perf.test.ts",
+            "client-react/src/components/GraphLayer/GraphLayer.tsx",
+            "client-react/src/context/RouteContext.tsx",
+            "client-react/src/components/MapView/MapView.tsx",
+            "docs/three-layer-model.md",
         ],
     },
 ]
 
 VERIFY = [
-    "Rename CLI (local): <code>python rename_map.py nyc-intersections nyc-crossings "
-    "--append-query \"src=qr-poster\"</code> — one transaction, <strong>2 votes moved</strong>, Redis "
-    "rebuilt under <code>nyc-crossings</code>, old <code>ev:</code>/<code>vote_rev:</code>/"
-    "<code>bd:</code>/<code>bagg:</code> keys purged.",
-    "<code>GET /api/maps/nyc-intersections</code> → <code>{\"slug\": \"nyc-intersections\", "
-    "\"redirect\": {\"toSlug\": \"nyc-crossings\", \"appendQuery\": \"src=qr-poster\"}}</code> "
-    "(200, <code>Cache-Control: public, max-age=300</code>).",
-    "<code>GET /api/maps/check-slug</code> — <strong>both</strong> <code>nyc-intersections</code> "
-    "(reserved by the redirect) and <code>nyc-crossings</code> (taken by the map) report unavailable.",
-    "Browser, the printed QR URL shape: "
-    "<code>http://localhost:3000/m/nyc-intersections?z=17&amp;lat=…&amp;slat=…</code> landed on "
-    "<code>/m/nyc-crossings</code> with the selection intact, and the Flask log shows "
-    "<code>[MAPLOAD] map=nyc-crossings ms=30105 cached_topo=0 nav=navigate src=qr-poster</code> — "
-    "the redirect’s <code>append_query</code> → client capture → beacon → log-label pipeline, "
-    "end to end.",
+    "Unit: <code>npx vitest run</code> — 327 tests green, incl. 73 in routeProposals.test.ts "
+    "(new suites: A* oracle accepts only-path / rejects shortcut / tolerates ties / fails open at the "
+    "pop cap; growCorridor no-ghost, pin-on-inconsistency, 3-pin stop, budget skip, determinism; "
+    "end-to-end ghost pinning on a triangle-with-shortcut topology; segments always partition the path; "
+    "corridorSliceBetween slicing/orientation) and 37 in topProposals.test.ts (floor default, "
+    "strictly-greater, minNet 0 escape hatch).",
+    "Perf (real nyc-bikes graph, 3.3M edges, ~183k voted, PERF=1 harness now passing the app's "
+    "<code>minRouteScore</code>): full recompute <strong>~1.33s</strong>, worst per-type slice "
+    "<strong>341ms</strong>, 20 corridors — same ballpark as the old pipeline (~750ms/250ms) despite "
+    "per-extension A* checks, thanks to the component-weight prune.",
+    "Browser (localhost:3000/m/nyc-bikes): 20 diamonds render; clicking one produced "
+    "<code>?w=40.741481,-73.988975,ffa1a7130;40.767609,-73.981485</code>, traced Broadway verbatim, and "
+    "the route card showed “TOP ROUTE PROPOSAL — Add sharrow” with the <strong>Add sharrow row bolded + "
+    "diamond-badged</strong> while higher-count rows (Add bike lane +394…) stayed plain — the exact "
+    "confusion this fixes.",
+    "Deep-link restore: fresh navigation to that URL re-selected the corridor, re-traced it via the "
+    "forced-corridor slice resolver, and re-badged the card.",
+    "A low-net point modal (net 1 “Add bike lane”) shows NO badge and a plain “Proposal” eyebrow — "
+    "the floor working on the point side.",
 ]
 
 CHECKLIST = [
-    "Visit <code>http://localhost:3000/m/nyc-crossings?src=test-tag</code> — the map loads, "
-    "<code>?src=</code> vanishes from the address bar, and once the loader dismisses the Flask log "
-    "shows <code>[MAPLOAD] … src=test-tag</code>. A plain visit logs <code>src=direct</code>.",
-    "Open a poster deep link through the OLD slug — "
-    "<code>http://localhost:3000/m/nyc-intersections?w=&lt;lat&gt;,&lt;lon&gt;&amp;vt=Fix+dangerous+intersection</code> "
-    "— you should land on <code>/m/nyc-crossings</code> with the pin set and the vote type "
-    "preselected, and the log line should carry <code>src=qr-poster</code> (merged by the redirect).",
-    "In Propose-a-Map, try to claim the slug <code>nyc-intersections</code> — it must report "
-    "unavailable (reserved by the redirect row).",
-    "Regenerate one poster (<code>python scripts/generate_posters.py --limit 1</code> or similar) and "
-    "scan its QR: the URL should read <code>…/m/nyc-crossings?w=…&amp;vt=…&amp;src=qr-poster</code>.",
-    "After the next prod deploy + <code>terraform apply</code> of the monitoring change: in Metrics "
-    "Explorer, group <code>logging/user/cityedit_map_load_ms</code>’s count by <code>src</code> and "
-    "confirm <code>qr-poster</code> vs <code>direct</code> series appear.",
-    "Skim <code>docs/url-routing.md</code>’s Redirect inventory — every redirect you know about "
-    "should have a row (donate., feedback., canonical subdomain, retired slugs, staging opt-out).",
+    "Open <code>http://localhost:3000/m/nyc-bikes</code> — every square/diamond pin should belong to a "
+    "type with real support (&gt;100 net); hover a low-vote street: its card rows show no badge.",
+    "Click a diamond: the URL should list the proposal's waypoints (2–5) each with an "
+    "<code>,f&lt;id&gt;</code> token, the corridor should trace exactly, and the route card should bold + "
+    "diamond-badge the proposal's own row.",
+    "Copy that URL into a fresh tab — the corridor, card header, and badge should all restore.",
+    "Trace a route that fully contains a corridor by hand (start before, end after) — the diamond's row "
+    "badges in the route card; shorten the route so a block drops out — the badge disappears.",
+    "Drag your route's END onto a diamond — the whole chain threads in (ghost pins appear for ghosted "
+    "proposals); the diamond's [×] pulls all of them back out at once.",
+    "On a map with a corridor that bends around a shorter parallel path, confirm the proposal carries "
+    "mid ghost pins (≤3) and that routing through them (delete the f-token from the URL to force OSRM) "
+    "still follows the corridor.",
 ]
-
 
 def li(items):
     return "\n".join(f"<li>{x}</li>" for x in items)
@@ -281,220 +255,174 @@ SYSTEM_COMPONENTS = ["nginx", "Flask API", "OSRM", "Redis", "React / Leaflet cli
 
 # label, summary, changed?
 FILE_CONTEXT = {
-    "README.md": {
-        "on": [],
-        "module": ("Docs · repo root", "the front-door README: quickstart, architecture, deploy pointers"),
-        "file": ("README.md", "~182 LOC — quickstart, architecture overview, config, testing, GCP deploy"),
-        "outline": [
-            ("Quickstart", "hybrid dev loop: deps in Docker, Flask + Vite on the host", False),
-            ("Architecture", "components + doc pointers — the url-routing pointer now sells the redirect inventory & ?src=", True),
-            ("Configuration", "server/.env variables", False),
-            ("Everything in Docker (alternative)", "prod-shaped + dev-mode compose", False),
-            ("Testing", "test taxonomy pointer", False),
-            ("Deploy to GCP", "cloudbuild pointer", False),
-        ],
-        "blocks": [
-            "Architecture § — url-routing.md pointer expanded: redirect inventory + ?src= campaign visit tracking",
-        ],
-    },
-    "client-react/src/App.tsx": {
+    "client-react/src/components/GraphLayer/topProposals.ts": {
         "on": ["React / Leaflet client"],
-        "module": ("React client · src/", "app root: providers, map bootstrap (resolve slug → config → redirects), the #app shell"),
-        "file": ("App.tsx", "~180 LOC — resolves the map, follows redirects, then mounts the map subtree"),
+        "module": ("React client · GraphLayer/", "PBTP selection: which edges earn a point-based Top Proposal square"),
+        "file": ("topProposals.ts", "~360 LOC — the 5-step winner pipeline (per-type winners → edge/block dedupe → spacing → limit)"),
         "outline": [
-            ("FullScreenLoader", "the ASCII-spinner splash", False),
-            ("AppContent", "shell: TopBar, <main> map in ErrorBoundary, toasts", False),
-            ("MapApp — map-resolution effect", "captureSourceTag → resolveMapConfig → slug redirect → subdomain redirect → applyMap", True),
-            ("App (providers)", "provider tree", False),
+            ("shuffleKey / compareWinners", "salted deterministic tiebreak", False),
+            ("TOP_PROPOSAL_MIN_NET", "NEW — the >100 net support floor both proposal families share", True),
+            ("computeVoteTypeWinners", "step 1 — now drops edges at/below max(0, minNet)", True),
+            ("topLabelForEdges", "deep-link vote-type fallback", False),
+            ("dedupeWinnersByEdge / ByBlock / spaceOutWinners / applyTopProposalLimit", "steps 2–5", False),
+            ("selectTopProposals", "full path — minNet param, default = the floor", True),
         ],
         "blocks": [
-            "imports — slugRedirectUrl (map/runtime), captureSourceTag/withSourceTag (utils/sourceTag)",
-            "captureSourceTag() at the top of the map-resolution effect — before any redirect/rewrite drops ?src",
-            "follow resolved.redirect.toSlug via location.replace(slugRedirectUrl(…)) — before the subdomain check",
-            "subdomain redirect target wrapped in withSourceTag(…) — the tag survives the host hop",
+            "TOP_PROPOSAL_MIN_NET = 100 — strictly-greater floor, doc'd as the shared PBTP/RBTP bar",
+            "computeVoteTypeWinners(…, minNet = 0) — count <= max(0, minNet) skips",
+            "selectTopProposals(…, minNet = TOP_PROPOSAL_MIN_NET) — threads the floor through step 1",
         ],
     },
-    "client-react/src/map/runtime.ts": {
+    "client-react/src/components/GraphLayer/topProposals.test.ts": {
         "on": ["React / Leaflet client"],
-        "module": ("React client · map/", "map-config runtime: resolve slug/subdomain → MapConfig, apply it, passcode auth"),
-        "file": ("runtime.ts", "~274 LOC — MapConfig types, slug detection, config fetch/resolve/apply, passcode helpers"),
+        "module": ("React client · GraphLayer/", "unit tests for the PBTP winner pipeline"),
+        "file": ("topProposals.test.ts", "~400 LOC — per-step + full-path suites"),
         "outline": [
-            ("MapVoteType / MapConfig interfaces", "the config shape — now with the redirect?: {toSlug, appendQuery} field", True),
-            ("getCurrentMap / getMapSlug / detectMapSlugFromUrl", "current-map accessors + /m/<slug> · ?map= parsing", False),
-            ("slugRedirectUrl", "NEW — retired-slug target URL: keep query, drop ?map, merge appendQuery (no overrides)", True),
-            ("applyStyleOverride / fetchMapConfig / fetchMapConfigBySubdomain / resolveMapConfig", "?style preview + the config fetch/resolution chain", False),
-            ("applyMap / withMap", "install the config; slug-qualify links", False),
-            ("Passcode helpers", "tokenKey…authWithPasscode — private-map auth", False),
+            ("computeVoteTypeWinners / dedupe / spacing suites", "mechanics probes — now pass minNet 0 where counts are tiny", True),
+            ("top-proposal support floor suite", "NEW — default floor, strictly-greater, minNet-0 escape hatch", True),
         ],
         "blocks": [
-            "MapConfig.redirect?: { toSlug; appendQuery? } — the retired-slug stub shape",
-            "slugRedirectUrl() — /m/<toSlug> + current query (minus ?map) + appendQuery merged without overriding",
+            "5 selectTopProposals call sites gain (600, undefined, 0) — mechanics tests opt out of the floor",
+            "new describe: floor default drops net-3 winner, keeps net-130; net == 100 excluded (strict)",
         ],
     },
-    "client-react/src/utils/loadTelemetry.ts": {
+    "client-react/src/components/GraphLayer/routeProposals.ts": {
         "on": ["React / Leaflet client"],
-        "module": ("React client · utils/", "the one-per-pageload map-load beacon (navigation start → loader dismissed)"),
-        "file": ("loadTelemetry.ts", "~55 LOC — sendBeacon of {map, ms, cachedTopo, nav} to /api/client-timing"),
+        "module": ("React client · GraphLayer/", "RBTP corridors: client-side deterministic extraction + selection/corridor helpers"),
+        "file": ("routeProposals.ts", "~1180 LOC — parse/shape/coverage helpers, the growth pipeline, the resumable job"),
         "outline": [
-            ("Module state", "topoSource / sent — one beacon per page load", False),
-            ("reportTopologySource", "cache-vs-network flag from GraphLayer", False),
-            ("reportMapLoaded", "build + sendBeacon the payload — now carries src (campaign tag)", True),
+            ("RouteProposal + wire parse", "now carries waypointNodes / waypointCoords / per-segment `segments` (legacy synthesized)", True),
+            ("shape / coverage / dedupe helpers", "diamond class, isRouteCovered, twin expansion, point subsumption", False),
+            ("corridorCoordinates / corridorFromEdgeIds", "verbatim geometry + snapshot fallback", False),
+            ("corridorSliceBetween", "NEW — the sub-chain between the waypoints nearest a/b, oriented a→b (per-segment resolver)", True),
+            ("chooseAnchorOrder / Before", "chain-orientation choice for drops", False),
+            ("constants", "MAX_GHOST_WAYPOINTS / ROUTE_CONSISTENCY_EPS_M / ROUTE_CHECK_MAX_POPS join the gates; splitLoopy/straightness constants deleted", True),
+            ("makeSegmentShortestCheck", "NEW — bounded deterministic A* consistency oracle (fails open at the pop cap)", True),
+            ("growCorridor", "NEW — routing-consistent two-tip growth; pins ghosts, 3rd pin ends growth; budget-gated", True),
+            ("peelCorridors", "grow-and-remove peel (replaces peelPaths + exact/greedy heaviest path + loop split + window trim)", True),
+            ("createRouteProposalJob / computeRouteProposals", "component-weight prune; proposals carry the waypoint chain", True),
         ],
         "blocks": [
-            "import getSourceTag; payload gains src: getSourceTag() ?? undefined (absent → server labels \"direct\")",
+            "RouteProposal { waypointNodes, waypointCoords, segments } + wire parse synthesis",
+            "corridorSliceBetween — walk the chain, locate waypoint positions from segment lengths, slice + orient",
+            "MAX_GHOST_WAYPOINTS=3, ROUTE_CONSISTENCY_EPS_M=1, ROUTE_CHECK_MAX_POPS=30000",
+            "makeSegmentShortestCheck — A* from segment end toward its bound; g pruned at corridor length; ties tolerated",
+            "growCorridor — heaviest-seed, best-arc-off-either-tip, open-segment bookkeeping per side, pin/stop rules, segments assembly",
+            "step() — skip components whose total weight < minRouteScore; peelCorridors(grow); proposals with waypoint fields",
+            "DELETED: exactHeaviestPath, greedyHeaviestPath, pathWeight, heaviestPathFromAdj, peelPaths, splitLoopyPath, capPathToLengthBudget, EXACT_PATH_MAX_VERTICES, ROUTE_STRAIGHTNESS_*/WINDOW_*/SPLIT_MAX_DEPTH",
         ],
     },
-    "client-react/src/utils/sourceTag.ts": {
+    "client-react/src/components/GraphLayer/routeProposals.test.ts": {
         "on": ["React / Leaflet client"],
-        "module": ("React client · utils/", "NEW — ?src= campaign attribution: capture once, strip, report, re-attach on redirects"),
-        "file": ("sourceTag.ts", "NEW FILE, 49 LOC — capture/strip the tag at boot; expose it to the beacon and redirects"),
+        "module": ("React client · GraphLayer/", "unit + integration tests for the corridor pipeline"),
+        "file": ("routeProposals.test.ts", "~740 LOC — parse/coverage/dedupe suites + the new growth/oracle/slice suites"),
         "outline": [
-            ("SRC_PATTERN / captured", "[a-zA-Z0-9_-]{1,32} whitelist; module-level once-only state", True),
-            ("captureSourceTag", "read + validate ?src, strip via history.replaceState — idempotent (StrictMode-safe)", True),
-            ("getSourceTag", "the captured tag, or null for a direct visit", True),
-            ("withSourceTag", "re-attach the (already-stripped) tag to a redirect target URL", True),
+            ("fixtures", "route()/bareRoute() gain waypoint fields (default = anchors, one segment)", True),
+            ("parse / shape / coverage / dedupe suites", "kept — parse now also checks waypoint synthesis + wire carry", True),
+            ("computeRouteProposals mechanics suites", "net weighting, peeling, per-type, blocks, gates, quota, determinism — expectations preserved under growth", True),
+            ("splitLoopyPath + capPathToLengthBudget suites", "DELETED with the functions", True),
+            ("makeSegmentShortestCheck suite", "NEW — only-path, shortcut, tie, pop-cap fail-open", True),
+            ("growCorridor suite", "NEW — no-ghost, pin, 3-pin stop, budget skip, tie determinism (fake oracles)", True),
+            ("ghost end-to-end + corridorSliceBetween suites", "NEW — triangle-with-shortcut pins node 1; U with no shortcut stays whole; slice orientation/nulls", True),
         ],
         "blocks": [
-            "Whole file is new — capture-once + strip keeps re-shared links from inheriting the campaign's attribution.",
+            "imports swap splitLoopy/cap for growCorridor/makeSegmentShortestCheck/corridorSliceBetween/MAX_GHOST_WAYPOINTS",
+            "makeTopo2D helper — 2-D coords (makeTopo's colinear nodes make every corridor trivially shortest)",
+            "the corridor-length-cap suite now documents budget-limited GROWTH (same expectations, new mechanism)",
         ],
     },
-    "docs/README.md": {
+    "client-react/src/components/GraphLayer/routeProposals.perf.test.ts": {
+        "on": ["React / Leaflet client"],
+        "module": ("React client · GraphLayer/", "opt-in perf harness against the real nyc-bikes graph (PERF=1)"),
+        "file": ("routeProposals.perf.test.ts", "~75 LOC — decode, adjacency, timed recomputes, per-slice timings"),
+        "outline": [
+            ("timed runs + job slices", "now pass minRouteScore: TOP_PROPOSAL_MIN_NET + 1 — the in-app shape", True),
+        ],
+        "blocks": [
+            "all three createRouteProposalJob/computeRouteProposals call sites mirror the app's floor",
+        ],
+    },
+    "client-react/src/components/GraphLayer/GraphLayer.tsx": {
+        "on": ["React / Leaflet client"],
+        "module": ("React client · GraphLayer/", "the canvas heatmap + proposal pins + cards host (4.7k LOC hub)"),
+        "file": ("GraphLayer.tsx", "~4700 LOC — heatmap, hover/pinned/route cards, PBTP squares, RBTP diamonds, resolvers"),
+        "outline": [
+            ("corridor resolver registration", "live proposal → corridorSliceBetween per segment; snapshot / OSRM fallback", True),
+            ("recomputeTopProposals", "passes the support floor (stations exempt)", True),
+            ("anchorsAreWaypoints", "now chain-aware: every proposal waypoint consecutive in the route, either direction", True),
+            ("recomputeRouteProposals job", "opts gain minRouteScore: TOP_PROPOSAL_MIN_NET + 1", True),
+            ("hover/pinned card content", "hoverRowsEdgeId tracked for the badge grain", True),
+            ("topKindsFor + per-card memos", "NEW — derived Map<label, point|route|both> from live winners/routeProposals", True),
+            ("marker memos / cluster engine", "unchanged", False),
+            ("ProposalCard", "topKinds prop; rows render square/diamond badges + bold", True),
+        ],
+        "blocks": [
+            "import swap: corridorCoordinates → corridorSliceBetween; + TOP_PROPOSAL_MIN_NET",
+            "resolver: corridorSliceBetween(topo, p, a, b) — anchor-only proposals degenerate to the whole corridor",
+            "selectTopProposals(…, isStationNetwork ? 0 : TOP_PROPOSAL_MIN_NET)",
+            "createRouteProposalJob opts + minRouteScore comment (shared bar)",
+            "anchorsAreWaypoints — index-run check over p.waypointCoords",
+            "hoverRowsEdgeId — the edge the hover rows summed over",
+            "topKindsFor + pinnedTopKinds/hoverTopKinds/hoverRbtpTopKinds/routeTopKinds memos",
+            "TopProposalKind/TopKindMap types; ProposalCardProps.topKinds; row badge markup",
+        ],
+    },
+    "client-react/src/context/RouteContext.tsx": {
+        "on": ["React / Leaflet client"],
+        "module": ("React client · context/", "the canonical selection owner: waypoints, routing, casts, history"),
+        "file": ("RouteContext.tsx", "~1740 LOC — selection state, recalc choreography, corridor ops, history"),
+        "outline": [
+            ("interface — corridor ops", "pair signatures → chain signatures (points + per-segment corridors)", True),
+            ("selection seed / history / recalc core", "unchanged", False),
+            ("replaceGhostWaypointWithChain", "mid → whole chain; end-dedupe vs neighbors; per-segment stamps", True),
+            ("insertWaypointChainAtSegment", "chain into a segment; chainStart accounting mirrors the old 4 pair cases", True),
+            ("replaceEnd/StartWithChain", "chain threads at an endpoint; no-op re-drop check generalized", True),
+            ("selectCorridor", "the chain BECOMES the selection (≤5 waypoints, flags stamped)", True),
+            ("removeWaypointsNear / notifyCorridorsChanged", "unchanged (already list-shaped)", False),
+        ],
+        "blocks": [
+            "four ops renamed *WithPair → *WithChain; all bodies generalized from 2 anchors to k-point chains",
+            "selectCorridor builds waypoints from chain.map with forcedCorridor per leading index",
+        ],
+    },
+    "client-react/src/components/MapView/MapView.tsx": {
+        "on": ["React / Leaflet client"],
+        "module": ("React client · MapView/", "the map shell: tools, click/drag handlers, marker wiring"),
+        "file": ("MapView.tsx", "~800 LOC — placement handlers, corridor threading, marker render"),
+        "outline": [
+            ("corridorChainOf", "NEW — proposal → oriented {points, corridors} (per-segment stamps)", True),
+            ("handleRouteProposalClick", "selects the full chain; re-tap no-op compares whole chain either direction", True),
+            ("corridorChainFor", "drop → oriented chain via chooseAnchorOrder on the chain endpoints", True),
+            ("ghost/segment/end/start drop handlers", "thread the chain instead of a pair", True),
+            ("removeRouteProposal", "removes ALL chain waypoints", True),
+        ],
+        "blocks": [
+            "corridorChainOf(p, reversed) — reverse points + segment order; slice edge order left to the resolver",
+            "handlers call the renamed chain ops; orientation from chooseAnchorOrder/Before on [first,last]",
+        ],
+    },
+    "client-react/src/styles/globals.css": {
+        "on": ["React / Leaflet client"],
+        "module": ("React client · styles/", "the app-wide stylesheet (cards, pins, controls)"),
+        "file": ("globals.css", "~2200 LOC — design tokens through component styles"),
+        "outline": [
+            ("proposal card rows", "gains the top-proposal badge styles", True),
+        ],
+        "blocks": [
+            ".graph-proposal-row.is-top-proposal — bold label",
+            ".graph-proposal-row-top(-square/-diamond) — 6px ink squares, diamond = rotate(45deg)",
+        ],
+    },
+    "docs/three-layer-model.md": {
         "on": [],
-        "module": ("Docs · docs/", "the docs index: per-doc one-liners, naming canon, style conventions"),
-        "file": ("README.md", "~46 LOC — documents table + conventions"),
+        "module": ("Docs · docs/", "the three-layer voting model: graph / blocks / proposals"),
+        "file": ("three-layer-model.md", "~380 LOC — model, pipeline, selection behavior"),
         "outline": [
-            ("Documents table", "one row per doc — url-routing.md row now claims source-of-truth for redirects + ?src=", True),
-            ("Naming canon", "slug / map / city / mode vocabulary", False),
-            ("Style conventions", "how docs are written", False),
+            ("§3.2 clustering pipeline", "steps 2–5 rewritten: component prune, routing-consistent growth, ghost pins, budget-as-growth-limit", True),
+            ("§3.3 selection behavior", "unchanged", False),
         ],
         "blocks": [
-            "url-routing.md row — adds slug renames, the redirect inventory, and ?src= visit-source tracking",
-        ],
-    },
-    "docs/url-routing.md": {
-        "on": [],
-        "module": ("Docs · docs/", "SOURCE OF TRUTH for map addressing: slug/subdomain/apex resolution, link building, redirects"),
-        "file": ("url-routing.md", "~216 LOC — address space, client/server resolution, prod hosts, admin runbooks, redirect inventory"),
-        "outline": [
-            ("Intro", "no router library; every redirect must be in the inventory table", True),
-            ("The address space", "slug forms + NEW “Visit-source tracking (?src=)” subsection", True),
-            ("Client resolution (the load path)", "resolveMapConfig chain + NEW “Slug redirects (renamed maps)” subsection", True),
-            ("Link building (sharing)", "withMap / shareLink", False),
-            ("Server resolution", "/api/maps/<slug> + by-subdomain", False),
-            ("Production (cityedit.org)", "hosts, nginx, Cloud Run", False),
-            ("Admin runbook — add a vanity subdomain", "set_map_subdomain flow", False),
-            ("Admin runbook — rename a map slug", "NEW — rename_map.py usage, prod-tunnel notes, cache caveats", True),
-            ("Redirect inventory", "NEW — source-of-truth table of EVERY redirect/rewrite + live map_redirects rows", True),
-        ],
-        "blocks": [
-            "Intro — “renames a slug”; pointer: every redirect goes in the inventory",
-            "Address space — retired slugs still resolve; NEW ?src= section (capture→strip→beacon→[MAPLOAD]→src label; tag rules)",
-            "NEW “Slug redirects (renamed maps)” — 200-stub rationale, param preservation, reserved-forever, append_query retro-tagging",
-            "NEW “Admin runbook — rename a map slug” — the one-command flow + prod tunnels + TTL/preview caveats",
-            "NEW “Redirect inventory” — donate. 301, feedback. rewrite, canonical-subdomain, retired slugs, staging opt-out; nyc-intersections→nyc-crossings row",
-        ],
-    },
-    "scripts/generate_posters.py": {
-        "on": [],
-        "module": ("Scripts · scripts/", "the QR poster generator: intersections CSV → filled HTML templates → rendered PNGs + poster book"),
-        "file": ("generate_posters.py", "~612 LOC — row loading, template fill/style helpers, QR minting, poster book + map page"),
-        "outline": [
-            ("Constants", "MASTER/TEMPLATES/OUT paths, BASE_URL → nyc-crossings, QR_VOTE_TYPE, NEW QR_SRC", True),
-            ("Template helpers", "load_rows … set_qr — slot fill, styling, footer stamping, QR embedding", False),
-            ("Per-template fills/selectors", "_nabe_fill / _after_dark_fill / _dark_select / nabe_targets", False),
-            ("main()", "argparse + render loop — NEW --src flag; QR URL now carries &src=", True),
-            ("build_map_page", "the overview map HTML", False),
-            ("build_poster_book", "checklist + PDF assembly — checklist copy now says nyc-crossings", True),
-        ],
-        "blocks": [
-            "BASE_URL → https://cityedit.org/m/nyc-crossings; QR_SRC = \"qr-poster\" (first print run retro-tagged by the redirect instead)",
-            "--src flag (default QR_SRC) — vary per campaign/print run",
-            "QR URL — ?w=<lat>,<lon>&vt=…&src=<args.src>",
-            "poster-book checklist copy — cityedit.org/m/nyc-crossings",
-        ],
-    },
-    "scripts/seed_poster_votes.py": {
-        "on": [],
-        "module": ("Scripts · scripts/", "seeds the poster campaign's starter votes against the live API (dry-run by default)"),
-        "file": ("seed_poster_votes.py", "~92 LOC — campaign vote-type table + a cast loop over the poster intersections"),
-        "outline": [
-            ("CAMPAIGN_VOTE_TYPE", "per-campaign vote-type labels", False),
-            ("main()", "argparse (--base-url / --map / --cast) + seed loop — default map → nyc-crossings", True),
-        ],
-        "blocks": [
-            "--map default nyc-intersections → nyc-crossings",
-        ],
-    },
-    "server/app.py": {
-        "on": ["Flask API", "Redis"],
-        "module": ("Flask backend · server/", "HTTP + WebSocket routes, the per-map vote cache, graph + OSRM registries, startup warmup"),
-        "file": ("app.py", "~2430 LOC — every API/WS route plus the vote-response cache and city registries"),
-        "outline": [
-            ("Flask / Redis / registries setup", "app, CORS, sock, redis client, GraphRegistry, DB imports", True),
-            ("Map resolution + passcode gate", "resolve_map, _map_get_cache, private-map tokens", False),
-            ("Per-map vote response cache + saturation valve", "bounded LRU · single-flight · shed valve", False),
-            ("Maps API", "/api/maps CRUD — map_get now serves the retired-slug redirect stub", True),
-            ("WebSocket + Routes API", "/ws delta hub, /api/routes via OSRM", False),
-            ("Vote API", "/api/vote — block-scoped clear-then-cast", False),
-            ("Graph data APIs", "/api/graph-topology, /api/graph-votes, /api/graph-version", False),
-            ("Telemetry + admin APIs", "client_timing ([MAPLOAD] — now with src=), subdomain, refresh-osm, stats", True),
-        ],
-        "blocks": [
-            "import get_map_redirect from database",
-            "map_get — on maps-table miss, serve {slug, redirect:{toSlug, appendQuery}} as 200 + max-age=300 (not cached in _map_get_cache)",
-            "client_timing — sanitize payload src ([a-zA-Z0-9_-], ≤32) and append src=<tag|direct> to the [MAPLOAD] line",
-        ],
-    },
-    "server/database.py": {
-        "on": ["Flask API"],
-        "module": ("Flask backend · server/", "the Postgres layer: schema init, edge-vote storage, vote types, maps registry"),
-        "file": ("database.py", "~1290 LOC — connection pool, schema, edge_votes read/write, migration helpers, maps & lists"),
-        "outline": [
-            ("Pool + get_cursor", "ThreadedConnectionPool, autocommit cursor contextmanager", False),
-            ("Schema — init_db", "edge_votes / vote_types / maps … + NEW map_redirects table", True),
-            ("Edge-vote write/read path", "record/delete/anchors/voter-directions/eviction", False),
-            ("Vote types (label ↔ id)", "fetch/normalize/get_or_create", False),
-            ("Aggregates / vote migration / admin", "replay, resnap, orphan repair, counts", False),
-            ("Maps & vote-type lists", "seed_presets, list/get/create map, set_map_subdomain, slug_available (now checks both tables)", True),
-            ("Slug redirects (renamed maps)", "NEW — get_map_redirect / list_map_redirects / rename_map_slug (atomic)", True),
-            ("Passcode", "get_map_passcode_hash", False),
-        ],
-        "blocks": [
-            "init_db — CREATE TABLE map_redirects (from_slug PK, to_slug, append_query, note, created_at)",
-            "slug_available — maps UNION ALL map_redirects: a retired slug is reserved forever",
-            "get_map_redirect — PK read → {toSlug, appendQuery} (mirrors MapConfig.redirect)",
-            "list_map_redirects — admin/docs transparency listing",
-            "rename_map_slug — explicit BEGIN/COMMIT: maps.slug + edge_votes.map_slug + redirect row + chain flattening (a→b, b→c ⇒ a→c); rolls back whole on any failure",
-        ],
-    },
-    "server/rename_map.py": {
-        "on": ["Flask API", "Redis"],
-        "module": ("Flask backend · server/", "NEW — admin CLI: rename a map slug, leave a redirect, rebuild Redis"),
-        "file": ("rename_map.py", "NEW FILE, 104 LOC — argparse wrapper around database.rename_map_slug + the Redis rebuild"),
-        "outline": [
-            ("Module docstring", "usage, prod-tunnel notes, the 30–60s map-cache caveat", True),
-            ("_redis_client", "connect or warn-and-continue (DB renamed; rerun for Redis)", True),
-            ("main", "rename txn → rebuild_redis_for_map(new) → purge old ev:/vote_rev:/bd:/bagg: keys → JSON summary", True),
-        ],
-        "blocks": [
-            "Whole file is new — the only sanctioned way to create a map_redirects row (a bare DB edit would skip edge_votes + Redis).",
-        ],
-    },
-    "terraform/monitoring.tf": {
-        "on": [],
-        "module": ("Infra · terraform/", "GCP monitoring: uptime checks, log-based metrics, alert policies, the system dashboard"),
-        "file": ("monitoring.tf", "~1220 LOC — notification channel, uptime check, api_latency + map_load_ms metrics, 8 alerts, dashboard"),
-        "outline": [
-            ("Notification channel + uptime check", "email_eric, app_health probe", False),
-            ("api_latency log metric", "[API] request-latency distribution", False),
-            ("map_load_ms log metric", "[MAPLOAD] client-perceived first-load — now labeled by src", True),
-            ("Alert policies", "uptime, 5xx, p99, app/OSRM/Redis memory, SQL disk", False),
-            ("system_health dashboard", "the wall of charts", False),
-        ],
-        "blocks": [
-            "map_load_ms header comment — the [MAPLOAD] line format now ends src=<tag|direct>; visits-by-source = count grouped by src",
-            "labels — new src STRING label",
-            "label_extractors — src = REGEXP_EXTRACT(textPayload, \"src=([a-zA-Z0-9_-]+)\")",
+            "step 3 now documents growCorridor / makeSegmentShortestCheck / MAX_GHOST_WAYPOINTS and the URL-persistence rationale",
         ],
     },
 }
@@ -672,11 +600,7 @@ def main():
     <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
   </nav>
 
-  <p class="lede">Three intertwined changes: any URL can now carry <code>?src=&lt;tag&gt;</code> and show up
-  as a visits-by-source group-by in Metrics Explorer; renamed maps leave a data-driven redirect behind
-  (old slug reserved forever, deep links preserved); and <code>nyc-intersections</code> became
-  <code>nyc-crossings</code> with a redirect that retro-tags every scan of the already-printed July QR
-  posters as <code>src=qr-poster</code>.</p>
+  <p class="lede">Three fixes to Top Proposals: a pin now takes real support (&gt;100 net votes, both point and route families); every modal badges the vote types that are CURRENT top proposals for what it shows (square = point, diamond = route fully inside the selection); and route corridors are now grown ROUTING-CONSISTENTLY — an extension either keeps the segment a shortest path or pins a ghost waypoint (max 3), and the whole waypoint chain lands in the URL, so a shared top-proposal link keeps routing into its corridor long after the proposal itself has churned away.</p>
 
   {sections_html}
 
