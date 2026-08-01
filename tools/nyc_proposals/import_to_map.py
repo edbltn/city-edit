@@ -49,6 +49,13 @@ MAX_CORRIDOR_KM = 8.0
 # And the routed corridor may not resolve to absurdly many edges (a cross-
 # borough route is ~700+; the longest legitimate corridors are ~400).
 MAX_CORRIDOR_EDGES = 600
+# A shortest path much longer than the endpoints' straight-line distance means
+# an endpoint snapped onto a stranded path whose only exit is far away — e.g.
+# the ESCR-era East River esplanade, one-exit-at-the-south, which turned the
+# "E River corridor" cast into a 7.75km hairpin doubling along two parallel
+# waterfront stretches (2.6× crow). DOT corridors run along ONE street, so
+# their ratio stays near 1; beyond this the route is not the project's street.
+DETOUR_RATIO_MAX = 1.8
 
 # NYC bounds — geocode hits outside are treated as failures.
 NYC_BBOX = (-74.26, 40.49, -73.70, 40.92)
@@ -271,7 +278,18 @@ def cast_entry(base: str, slug: str, entry: dict, mode: str = "walk") -> dict:
             return {"status": "route-failed"}
         if len(edge_ids) > MAX_CORRIDOR_EDGES:
             return {"status": "route-too-long", "edges": len(edge_ids)}
-        payload = {"edge_ids": edge_ids}
+        crow_km = straight_km(entry["start"], entry["end"])
+        routed_km = ((route.get("route") or {}).get("distance") or 0) / 1000.0
+        if routed_km > max(0.4, DETOUR_RATIO_MAX * crow_km):
+            # Hairpin detour (see DETOUR_RATIO_MAX): pin the project instead of
+            # painting the detour with corridor votes — same demotion (and
+            # point-kind label swap) as corridors whose endpoints never parsed.
+            entry.update(vote_type=POINT_FALLBACK_LABEL, kind="point",
+                         cast="point", point=list(entry["start"]),
+                         demoted=f"route-detour {routed_km:.1f}km/{crow_km:.1f}km")
+            payload = {"point": list(entry["point"])}
+        else:
+            payload = {"edge_ids": edge_ids}
     elif entry.get("cast") == "point":
         payload = {"point": list(entry["point"])}
     else:
@@ -285,7 +303,7 @@ def cast_entry(base: str, slug: str, entry: dict, mode: str = "walk") -> dict:
     })
     if resp.get("error"):
         return {"status": "error", "detail": resp["error"]}
-    return {"status": "ok",
+    return {"status": "ok-detour-pin" if entry.get("demoted") else "ok",
             "edges": len(payload.get("edge_ids", [])) or 1}
 
 
