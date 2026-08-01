@@ -1961,6 +1961,9 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   align-items: center;
   gap: 12px;
   line-height: 1.4;
+  /* Location links, when present, wrap onto their own full-width line. */
+  flex-wrap: wrap;
+  row-gap: 2px;
 }
 
 .graph-proposal-row-label {
@@ -2001,6 +2004,29 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
    marker (proposalShapeClass). */
 .graph-proposal-row-top-diamond {
   transform: rotate(45deg) scale(0.9);
+}
+
+/* Numbered location links ([#1] [#2] …) for a vote type with curated proposal
+   locations (maps.vote_type_links) — a full-width line under the label so a
+   long list never squeezes the label or the vote control. */
+.graph-proposal-row-links {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-proposal-row-link {
+  color: inherit;
+  opacity: 0.65;
+  text-decoration: none;
+}
+
+.graph-proposal-row-link:hover {
+  opacity: 1;
+  text-decoration: underline;
 }
 
 /* Connected vote control: [ −down │ net │ +up ] reads as ONE unit rather than

@@ -4439,6 +4439,10 @@ function ProposalCard({
   const [minimized, setMinimized] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const icon = winner ? iconForLabel(winner.label, voteTypes) : null;
+  // Per-vote-type location links (maps.vote_type_links, e.g. official DOT
+  // proposal locations on nyc-proposals) — rendered as [#1] [#2] anchors
+  // under the row's label. Resolved by label, like iconForLabel.
+  const typeLinks = getCurrentMap()?.voteTypeLinks;
   // Subscribe to the vote store so the +/- rows (which read getVote() below)
   // re-render whenever ANY vote changes — including the same edge being voted
   // from the top-bar banner. The value itself is unused; the subscription is.
@@ -4729,6 +4733,24 @@ function ProposalCard({
                         <span className="graph-vote-net" title="net votes (up − down)">{row.up - row.down}</span>
                         {tally(row, 1)}
                       </span>
+                      {(typeLinks?.[row.label]?.length ?? 0) > 0 && (
+                        <span
+                          className="graph-proposal-row-links"
+                          aria-label={`${row.label} proposal locations`}
+                        >
+                          {typeLinks![row.label].map((lnk, i) => (
+                            <a
+                              key={lnk.url}
+                              className="graph-proposal-row-link"
+                              href={lnk.url}
+                              title={lnk.title || `Location ${i + 1}`}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              [#{i + 1}]
+                            </a>
+                          ))}
+                        </span>
+                      )}
                     </div>
                   );
                 })}

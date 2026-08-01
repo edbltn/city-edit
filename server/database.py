@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from typing import Optional
 
 import psycopg2
-from psycopg2.extras import execute_values
+from psycopg2.extras import Json, execute_values
 from psycopg2.pool import ThreadedConnectionPool
 
 # Under the gevent worker, plain psycopg2 blocks the event-loop hub for the
@@ -271,6 +271,13 @@ def init_db():
             # crowdsourced >100-net bar would hide every entry.
             cursor.execute(
                 "ALTER TABLE maps ADD COLUMN IF NOT EXISTS top_proposal_min_net INT"
+            )
+            # Per-map location links for vote types: {label: [{"url", "title"?}]}.
+            # Each url is an in-app deep link (/m/<slug>?w=…&vt=…) shown as a
+            # numbered [#1] [#2] anchor beside the vote-type label in proposal
+            # cards — pilot: official NYC DOT proposal locations on nyc-proposals.
+            cursor.execute(
+                "ALTER TABLE maps ADD COLUMN IF NOT EXISTS vote_type_links JSONB"
             )
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_maps_city ON maps(city_id)
@@ -1001,7 +1008,7 @@ def _map_row_to_dict(row) -> dict:
     """Shape a maps JOIN vote_type_lists row into the public map dict."""
     (slug, name, subtitle, city_id, allow_suggestions, has_passcode,
      subdomain, list_vote_types, custom_vote_types, vote_count, symbol, style,
-     network, top_proposal_min_net) = row
+     network, top_proposal_min_net, vote_type_links) = row
     vote_types = custom_vote_types or list_vote_types or []
     # The proposer-chosen visual style wins; presets keep their subdomain style;
     # everything else falls back to the neutral default. The vote namespace
@@ -1028,6 +1035,8 @@ def _map_row_to_dict(row) -> dict:
         # Only present when the row overrides the client's default floor.
         **({"topProposalMinNet": top_proposal_min_net}
            if top_proposal_min_net is not None else {}),
+        # Only present when the map has per-vote-type location links.
+        **({"voteTypeLinks": vote_type_links} if vote_type_links else {}),
     }
 
 
@@ -1041,7 +1050,7 @@ _MAP_COLUMNS = """
            (m.passcode_hash IS NOT NULL) AS has_passcode,
            m.subdomain, vtl.vote_types, m.custom_vote_types,
            {vote_count} AS vote_count, m.symbol, m.style, m.network,
-           m.top_proposal_min_net
+           m.top_proposal_min_net, m.vote_type_links
     FROM maps m
     LEFT JOIN vote_type_lists vtl ON vtl.id = m.vote_type_list_id
 """
@@ -1132,6 +1141,41 @@ def set_map_subdomain(slug: str, subdomain: Optional[str]) -> tuple[bool, str]:
         return True, ("cleared" if sub is None else f"set to '{sub}'")
     except Exception as e:
         logger.error(f"[DB] set_map_subdomain failed: {e}")
+        return False, str(e)
+
+
+def set_map_vote_type_links(slug: str, links: Optional[dict]) -> tuple[bool, str]:
+    """Replace a map's per-vote-type location links ({label: [{"url","title"?}]}).
+
+    `links=None`/{} clears the column. The whole mapping is replaced atomically —
+    callers send the full desired state, not a delta. Returns (ok, message).
+    """
+    if not DATABASE_URL:
+        return False, "database unavailable"
+    payload = links or None
+    if payload is not None:
+        if not isinstance(payload, dict):
+            return False, "links must be an object of {label: [{url, title?}]}"
+        for label, entries in payload.items():
+            if not label or not isinstance(entries, list):
+                return False, f"invalid entries for label '{label}'"
+            for e in entries:
+                if not isinstance(e, dict) or not isinstance(e.get("url"), str) \
+                        or not e["url"]:
+                    return False, f"invalid link entry under '{label}'"
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                "UPDATE maps SET vote_type_links = %s WHERE slug = %s",
+                (Json(payload) if payload is not None else None, slug),
+            )
+            if cursor.rowcount == 0:
+                return False, f"no map with slug '{slug}'"
+        n = sum(len(v) for v in (payload or {}).values())
+        return True, ("cleared" if payload is None
+                      else f"set {n} links across {len(payload)} vote types")
+    except Exception as e:
+        logger.error(f"[DB] set_map_vote_type_links failed: {e}")
         return False, str(e)
 
 

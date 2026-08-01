@@ -17,6 +17,15 @@ export interface MapVoteType {
   pointType: "route" | "point";
 }
 
+/** One location link for a vote type — an in-app deep link (/m/<slug>?w=…&vt=…)
+ *  to a place where this vote type has a real proposal. Rendered as a numbered
+ *  [#1] [#2] anchor beside the vote-type label in proposal cards. */
+export interface VoteTypeLink {
+  url: string;
+  /** Tooltip text — e.g. the official project's title. */
+  title?: string;
+}
+
 export interface MapConfig {
   slug: string;
   name: string;
@@ -42,6 +51,10 @@ export interface MapConfig {
    *  searched, never in the default suggestion list. pointType is the kind the
    *  creating cast recorded; null on legacy rows flagged before kinds existed. */
   searchVoteTypes?: { label: string; pointType: "route" | "point" | null }[];
+  /** Per-vote-type location links keyed by label (server: maps.vote_type_links).
+   *  Present only on maps that curate them (e.g. nyc-proposals' official DOT
+   *  proposal locations). */
+  voteTypeLinks?: Record<string, VoteTypeLink[]>;
   subdomain?: string | null;
   voteCount?: number;
   city?: CityConfig;

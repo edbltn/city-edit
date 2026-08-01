@@ -44,7 +44,7 @@ from database import (
     seed_presets, backfill_vote_type_kinds, normalize_point_type,
     list_maps, get_map, get_map_by_subdomain, slug_available, get_map_redirect,
     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,
-    promote_vote_types, fetch_voted_vote_type_labels,
+    set_map_vote_type_links, promote_vote_types, fetch_voted_vote_type_labels,
     DATABASE_URL,
 )
 
@@ -188,6 +188,12 @@ def invalidate_map_cache(slug: str | None = None):
             _map_cache.clear()
         else:
             _map_cache.pop(slug, None)
+    # The /api/maps/<slug> SWR cache is separate — without this an admin
+    # mutation kept serving the pre-mutation config for up to 30s.
+    if slug is None:
+        _map_get_cache.clear()
+    else:
+        _map_get_cache.pop(slug, None)
 
 
 def resolve_map(slug: str | None) -> ResolvedMap:
@@ -2339,6 +2345,29 @@ def admin_set_subdomain(slug):
         if not sub:
             return jsonify({"error": "subdomain is required"}), 400
         ok, msg = set_map_subdomain(slug, sub)
+    if ok:
+        invalidate_map_cache(slug)
+    return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
+
+
+@app.route("/api/admin/maps/<slug>/vote-type-links", methods=["POST", "DELETE"])
+def admin_set_vote_type_links(slug):
+    """Replace (POST {links: {label: [{url, title?}]}}) or clear (DELETE) a
+    map's per-vote-type location links, rendered as [#1] [#2] anchors beside
+    vote-type labels in proposal cards.
+
+    Requires the X-Admin-Token header to match ADMIN_TOKEN. POST replaces the
+    whole mapping — send the full desired state.
+    """
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 403
+    if request.method == "DELETE":
+        ok, msg = set_map_vote_type_links(slug, None)
+    else:
+        links = (request.get_json(silent=True) or {}).get("links")
+        if not isinstance(links, dict) or not links:
+            return jsonify({"error": "links object is required"}), 400
+        ok, msg = set_map_vote_type_links(slug, links)
     if ok:
         invalidate_map_cache(slug)
     return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
