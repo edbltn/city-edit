@@ -10,6 +10,8 @@ preset list by id or supply their own custom list.
 Each vote type: {"label": str, "icon": str, "pointType": "route" | "point"}.
 """
 
+import os
+
 PRESET_LISTS: dict[str, dict] = {
     "bikes": {
         "name": "Bikes",
@@ -115,11 +117,16 @@ PRESET_MAPS: list[dict] = [
      "list_key": "walkways", "subdomain": None,
      "subtitle": "A more walkable Philadelphia"},
 
-    # Block-pipeline playground (local experiments on tiny test cities).
-    {"slug": "test-central-park", "name": "Test: Central Park", "city_id": "test-cp",
-     "list_key": "walkways", "subdomain": None,
-     "subtitle": "Block-pipeline playground — Central Park"},
-    {"slug": "test-midtown", "name": "Test: Midtown", "city_id": "test-mid",
-     "list_key": "walkways", "subdomain": None,
-     "subtitle": "Block-pipeline playground — Midtown"},
 ]
+
+# Block-pipeline playground (local experiments on tiny test cities). Opt-in via
+# SEED_TEST_MAPS=1 so seed_presets() never recreates them on prod/staging.
+if os.environ.get("SEED_TEST_MAPS", "").strip().lower() in ("1", "true", "yes"):
+    PRESET_MAPS += [
+        {"slug": "test-central-park", "name": "Test: Central Park", "city_id": "test-cp",
+         "list_key": "walkways", "subdomain": None,
+         "subtitle": "Block-pipeline playground — Central Park"},
+        {"slug": "test-midtown", "name": "Test: Midtown", "city_id": "test-mid",
+         "list_key": "walkways", "subdomain": None,
+         "subtitle": "Block-pipeline playground — Midtown"},
+    ]
