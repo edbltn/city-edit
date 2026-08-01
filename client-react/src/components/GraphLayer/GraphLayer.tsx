@@ -2645,13 +2645,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       if (hoverRbtpRef.current) {
         hoverRbtpRef.current = null;
         setHoverRbtp(null);
-        routeHighlightEdgesRef.current = null;
       }
+      // Cleared UNCONDITIONALLY — not only when a hover card exists. On touch
+      // the diamond's tap-mouseover used to set this ref while the (gated)
+      // hover card never mounted, so the old `if (hoverRbtpRef)` guard skipped
+      // exactly the strand it was meant to heal and the corridor's blocks
+      // stayed selected after tapping away. Also covers a marker unmounting
+      // mid-hover on desktop (its mouseout never fires).
+      routeHighlightEdgesRef.current = null;
       if (hoverTargetRef.current) {
         hoverTargetRef.current = null;
         setHoverTarget(null);
       }
       redrawHoverHighlightRef.current();
+      // Re-broadcast so the block-select layer drops any stale hover blocks
+      // immediately (deduped by key — a no-op when nothing was stranded).
+      dispatchBlockSelectRef.current();
     };
     map.on("click", clearStaleHover);
     return () => { map.off("click", clearStaleHover); };
@@ -4040,9 +4049,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         // icon, popping a competing street-segment card over the corridor
         // preview (the "diamond hover doesn't show the proposal" bug).
         overIndicatorRef.current = true;
-        routeHighlightEdgesRef.current = routeBlockEdges(p);
-        redrawHoverHighlightRef.current();
-        dispatchBlockSelectRef.current();
+        // Corridor hover-preview highlight — POINTER-ONLY, like the hover
+        // card below. A tap on touch fires a synthesized `mouseover` (this
+        // handler) but never the clearing `mouseout`, so setting the ref
+        // there stranded the corridor's block-edge union inside every later
+        // dispatchBlockSelect — the mobile "deselected proposal's blocks
+        // stay lit" bug. On touch the SELECTION is the only highlight.
+        if (canHover) {
+          routeHighlightEdgesRef.current = routeBlockEdges(p);
+          redrawHoverHighlightRef.current();
+          dispatchBlockSelectRef.current();
+        }
         // Hovering a fanned diamond pauses the open cluster's snap-back, same
         // as a fanned square (a locked spread has no timer to pause).
         if (!spreadLockedRef.current && spreadRef.current?.has(spreadKeyRoute(p.id))) clearSpreadTimer();
