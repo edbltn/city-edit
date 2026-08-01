@@ -29,6 +29,21 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-01-vote-type-links-zigzag.html">
+    <div class="date">2026-08-01</div>
+    <h2>Vote-type location links ([#n]) + the East River hairpin diagnosis</h2>
+    <p>Proposal-card vote rows can now carry numbered location links: <code>maps.vote_type_links</code>
+    (JSONB, per label) → <code>voteTypeLinks</code> on the map config → [#1] [#2] anchors that deep-link
+    to each proposal's place (<code>/m/&lt;slug&gt;?w=…&amp;vt=…</code>); installed for the 60 official DOT
+    proposals on nyc-proposals by <code>set_vote_type_links.py</code> via a new admin endpoint. Also
+    diagnosed why the top route proposal (<code>fa8b70e11</code>) hairpinned along the East River: not
+    the block bake (0 shared blocks between the rails) — one corridor cast ("EV/LES Waterfront Access
+    Study") geocoded an endpoint onto the ESCR-stranded esplanade, whose only exit is 1.6&nbsp;km the
+    wrong way, so the shortest path itself was a 7.75&nbsp;km hairpin (2.6× crow) and 438 net-1 votes
+    painted both rails. <code>cast_entry</code> now demotes any corridor routed &gt;1.8× its crow
+    distance to a point pin; the local hairpin was cleared + recast, and a prod repair script is staged.</p>
+  </a>
+
   <a class="entry" href="./2026-08-01-test-maps-staging-decommission.html">
     <div class="date">2026-08-01</div>
     <h2>Test maps off the prod landing page · staging decommissioned</h2>

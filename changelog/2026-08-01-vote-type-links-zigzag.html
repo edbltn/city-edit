@@ -1,0 +1,946 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vote-type location links ([#n]) + the East River hairpin diagnosis — 2026-08-01</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Vote-type location links ([#n]) + the East River hairpin diagnosis</h1>
+    <div class="dateline">2026-08-01 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#links">Per-vote-type location links ([#1] [#2] …) in proposal cards</a>
+<a href="#zigzag">The East River hairpin: why the top route proposal zig-zagged</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Three fixes to Top Proposals: a pin now takes real support (&gt;100 net votes, both point and route families); every modal badges the vote types that are CURRENT top proposals for what it shows (square = point, diamond = route fully inside the selection); and route corridors are now grown ROUTING-CONSISTENTLY — an extension either keeps the segment a shortest path or pins a ghost waypoint (max 3), and the whole waypoint chain lands in the URL, so a shared top-proposal link keeps routing into its corridor long after the proposal itself has churned away.</p>
+
+  
+    <section class="card" id="links">
+      <div class="tag">CLIENT + SERVER + TOOLS</div>
+      <h2>Per-vote-type location links ([#1] [#2] …) in proposal cards</h2>
+      <h3>Symptom</h3>
+      <p>Vote types on nyc-proposals are official DOT proposals, but a card row gave no way to jump to the places those proposals actually live — we wanted numbered links next to each vote type in the listed votes.</p>
+      <h3>Root cause</h3>
+      <ul><li>Vote-type rows carry only {label, up, down}; there was no per-map, per-vote-type metadata channel for locations</li>
+<li>Imported vote types are cast-created (no maps.custom_vote_types row), so links must resolve by label, like iconForLabel</li></ul>
+      <h3>What changed</h3>
+      <ul><li>maps.vote_type_links JSONB ({label: [{url, title?}]}) → emitted as voteTypeLinks on the map config only when set</li>
+<li>Admin endpoint POST/DELETE /api/admin/maps/&lt;slug&gt;/vote-type-links (X-Admin-Token, whole-mapping replace) + set_map_vote_type_links() with shape validation</li>
+<li>ProposalCard renders [#n] anchors on a full-width wrapping line under the label (48 links under 'Street redesign' render clean); each link is an in-app deep link /m/&lt;slug&gt;?w=…&amp;vt=… that re-applies the selection on click</li>
+<li>tools/nyc_proposals/set_vote_type_links.py builds the mapping from a plan JSONL (route → w=start;end, point → w=lat,lng; title = project title) and installs it — 60 links across 6 vote types on nyc-proposals locally</li>
+<li>invalidate_map_cache now also clears the /api/maps/&lt;slug&gt; SWR cache — admin mutations used to serve the pre-mutation config for up to 30s</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/database.py</li>
+<li>server/app.py</li>
+<li>client-react/src/map/runtime.ts</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li>
+<li>client-react/src/styles/globals.css</li>
+<li>tools/nyc_proposals/set_vote_type_links.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="zigzag">
+      <div class="tag">DATA / TOOLS</div>
+      <h2>The East River hairpin: why the top route proposal zig-zagged</h2>
+      <h3>Symptom</h3>
+      <p>nyc-proposals' top route proposal (fa8b70e11, 'Add traffic calming', 157 blocks) ran down the East River esplanade, around Corlears Hook, and back north up the parallel inland streets — both waterfront stretches selected.</p>
+      <h3>Root cause</h3>
+      <ul><li>NOT the block bake: recomputing proposals from prod data shows the 438 voted edges form a single simple path (2 endpoints, 0 branches) and zero blocks span both rails</li>
+<li>One DOT corridor cast IS the hairpin: 'EV/LES Waterfront Access Study' parsed as 'FDR Drive: Montgomery St → 14th St', and geocoding put one endpoint inside John V. Lindsay East River Park</li>
+<li>The park esplanade is a stranded stub in the current OSM walk graph (ESCR-era closures): its only exit is at the far south end — reaching a point 330m north takes a 5.4km walk</li>
+<li>So the genuine shortest path to the corridor's other endpoint is a 7.75km hairpin (2.6× the 3km crow distance); it passed the ≤8km and ≤600-edge guards and cast 438 net-1 votes along the detour, which then outscored every clean corridor by construction (score = sum of edge nets)</li></ul>
+      <h3>What changed</h3>
+      <ul><li>cast_entry gains DETOUR_RATIO_MAX = 1.8: a routed corridor longer than 1.8× its crow distance demotes to the point-kind catch-all pin (every legitimate corridor today is ≤ 1.34)</li>
+<li>Local repair executed: direction=0 cleared the voter's 438 hairpin votes, recast as a 'Street redesign' pin at Delancey &amp; the esplanade; prod repair script staged (scratchpad, needs go-ahead)</li>
+<li>scripts/analyzeZigzag.ts: Node harness that recomputes route proposals from any live API and dumps the top corridor's per-edge nets/blocks/geometry</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>tools/nyc_proposals/import_to_map.py</li>
+<li>client-react/scripts/analyzeZigzag.ts</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Prod reproduction: <code>analyzeZigzag.ts</code> against cityedit.org rebuilt the exact live proposal set (top = <code>#a8b70e11</code>, score 438, 157 blocks, 1 ghost) — and its component is a simple path: <strong>2 endpoints, 0 branch nodes</strong>; block check: <strong>0 blocks</strong> span both rails.</li>
+<li>Router probes: start → +330m north = <strong>5.4km</strong> route (stranded stub confirmed); start → corridor end = 7.75km vs 3.01km crow (ratio 2.57). All 8 corridor casts ratio-checked: culprit 2.57, every other ≤ 1.34 — the 1.8 threshold separates cleanly.</li>
+<li>Links round-trip: admin POST → <code>/api/maps/nyc-proposals</code> serves <code>voteTypeLinks</code> → [#1] renders in the pinned card → click navigates and re-applies the selection (verified in the local app).</li>
+<li>Heavy case: 48 links under 'Street redesign' wrap onto clean sub-lines without squeezing the label or ± control.</li>
+<li>Local repair verified: 438 votes cleared (rev bump), 'Add traffic calming' total 915 → 477, recast pin becomes the block's top proposal.</li>
+<li><code>npx tsc -b</code> clean; all 327 client unit tests pass; touched Python compiles.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-proposals?w=40.715500%2C-73.976500&vt=Street+redesign</code>, click the pin block — the card should show 'Street redesign' with [#1]–[#48] links; click one and confirm it deep-links.</li>
+<li>Confirm the hairpin is gone locally: the East River loop no longer paints, and the top route proposal is now Linden Boulevard (<code>#128218e4</code>).</li>
+<li>Decide on the prod repair: run <code>repair_prod_hairpin.py</code> (scratchpad) after the usual DB backup — clears the 438 prod hairpin votes and drops the replacement pin.</li>
+<li>Deploy: overlay deploy (backup → digest → verify; staging is decommissioned as of 2026-08-01) ships the [#n] client rendering + admin endpoint; then run <code>set_vote_type_links.py --base &lt;prod&gt; --token &lt;ADMIN_TOKEN&gt;</code> with the plan JSONL.</li>
+<li>Weekly job: next Monday's run now demotes any future detour corridor (watch for <code>ok-detour-pin</code> in its log).</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/scripts/analyzeZigzag.ts</span>
+            <span class="stat"><span class="d-add">+94</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client scripts</span>
+        <span class="ctx-sum">one-off diagnostics driven through the client&#x27;s own algorithms</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">analyzeZigzag.ts</span>
+        <span class="ctx-sum">~100 LOC — vite-node; fetches cfg/topology/votes, recomputes proposals</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">proposal recompute</span><span class="ol-sum">computeRouteProposals with the map&#x27;s own floor + kindOf</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dump</span><span class="ol-sum">top corridor per-edge nets/blocks/geometry + all voted edges of that type</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>API_BASE=https://cityedit.org … vite-node scripts/analyzeZigzag.ts nyc-proposals</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/scripts/analyzeZigzag.ts b/client-react/scripts/analyzeZigzag.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..040170d</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/scripts/analyzeZigzag.ts</span>
+<span class="d-hunk">@@ -0,0 +1,94 @@</span>
+<span class="d-add">+// One-off diagnosis: why is the nyc-proposals top route proposal (fa8b70e11,</span>
+<span class="d-add">+// &quot;Add traffic calming&quot;) a hairpin along the East River? Recomputes proposals</span>
+<span class="d-add">+// from PROD data with the client&#x27;s own builder and dumps the top corridor&#x27;s</span>
+<span class="d-add">+// geometry, per-edge nets, and block membership around the two parallel rails.</span>
+<span class="d-add">+// Run: cd client-react &amp;&amp; API_BASE=https://cityedit.org node_modules/.bin/vite-node scripts/analyzeZigzag.ts</span>
+<span class="d-add">+import fs from &quot;node:fs&quot;;</span>
+<span class="d-add">+import {</span>
+<span class="d-add">+  computeRouteProposals,</span>
+<span class="d-add">+  type RouteProposal,</span>
+<span class="d-add">+} from &quot;../src/components/GraphLayer/routeProposals&quot;;</span>
+<span class="d-add">+import {</span>
+<span class="d-add">+  decodeTopologyBin,</span>
+<span class="d-add">+  buildNodeAdj,</span>
+<span class="d-add">+  buildBlockIndex,</span>
+<span class="d-add">+  nodeLatLng,</span>
+<span class="d-add">+} from &quot;../src/components/GraphLayer/graphTopology&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const BASE = process.env.API_BASE ?? &quot;https://cityedit.org&quot;;</span>
+<span class="d-add">+const OUT = process.env.OUT ?? &quot;/tmp/zigzag.json&quot;;</span>
+<span class="d-add">+const slug = process.argv[2] ?? &quot;nyc-proposals&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const cfg = await (await fetch(`${BASE}/api/maps/${slug}`)).json();</span>
+<span class="d-add">+const mode = cfg.mode ?? &quot;walk&quot;;</span>
+<span class="d-add">+console.log(`map=${slug} mode=${mode} topProposalMinNet=${cfg.topProposalMinNet}`);</span>
+<span class="d-add">+const topoBuf = await (await fetch(`${BASE}/api/graph-topology?map=${slug}&amp;format=bin`)).arrayBuffer();</span>
+<span class="d-add">+const topo = decodeTopologyBin(topoBuf);</span>
+<span class="d-add">+console.log(`topo: ${topo.nNodes} nodes ${topo.nEdges} edges nBlocks=${topo.nBlocks}`);</span>
+<span class="d-add">+const votes = await (await fetch(`${BASE}/api/graph-votes?map=${slug}&amp;mode=${mode}`)).json();</span>
+<span class="d-add">+console.log(`votes rev=${votes.rev} legend=${JSON.stringify(votes.vote_type_legend)}`);</span>
+<span class="d-add">+</span>
+<span class="d-add">+const adj = buildNodeAdj(topo);</span>
+<span class="d-add">+const blockIndex = buildBlockIndex(topo);</span>
+<span class="d-add">+const kind = new Map&lt;string, &quot;route&quot; | &quot;point&quot; | null&gt;();</span>
+<span class="d-add">+for (const vt of cfg.voteTypes ?? []) kind.set(vt.label, vt.pointType ?? null);</span>
+<span class="d-add">+for (const vt of cfg.searchVoteTypes ?? []) {</span>
+<span class="d-add">+  if (!kind.has(vt.label)) kind.set(vt.label, vt.pointType ?? null);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+const minRouteScore = (cfg.topProposalMinNet ?? 100) + 1;</span>
+<span class="d-add">+const ps = computeRouteProposals(topo, adj, votes, {</span>
+<span class="d-add">+  blockIndex,</span>
+<span class="d-add">+  minRouteScore,</span>
+<span class="d-add">+  kindOf: (l: string) =&gt; kind.get(l) ?? null,</span>
+<span class="d-add">+});</span>
+<span class="d-add">+console.log(`\n${ps.length} proposals:`);</span>
+<span class="d-add">+for (const p of ps) {</span>
+<span class="d-add">+  const ghosts = p.waypointNodes.length - 2;</span>
+<span class="d-add">+  console.log(</span>
+<span class="d-add">+    `#${p.id} ${p.label} score=${p.score} edges=${p.edgeIds.length} blocks=${p.blocks.length}` +</span>
+<span class="d-add">+      (ghosts &gt; 0 ? ` GHOSTS=${ghosts}` : &quot;&quot;),</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+const top = ps[0];</span>
+<span class="d-add">+if (!top) process.exit(0);</span>
+<span class="d-add">+const evt: [number, number, number][][] = votes.edge_vote_types ?? [];</span>
+<span class="d-add">+const netOf = (eid: number, legendIdx: number): number =&gt; {</span>
+<span class="d-add">+  let net = 0;</span>
+<span class="d-add">+  for (const [li, up, down] of evt[eid] ?? []) if (li === legendIdx) net += up - down;</span>
+<span class="d-add">+  return net;</span>
+<span class="d-add">+};</span>
+<span class="d-add">+const edgeInfo = (eid: number) =&gt; {</span>
+<span class="d-add">+  const a = topo.ends[2 * eid], b = topo.ends[2 * eid + 1];</span>
+<span class="d-add">+  return {</span>
+<span class="d-add">+    eid,</span>
+<span class="d-add">+    a: nodeLatLng(topo, a),</span>
+<span class="d-add">+    b: nodeLatLng(topo, b),</span>
+<span class="d-add">+    net: netOf(eid, top.legendIdx),</span>
+<span class="d-add">+    block: topo.edgeBlockId ? topo.edgeBlockId[eid] : -1,</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+};</span>
+<span class="d-add">+</span>
+<span class="d-add">+// Every voted edge of the top proposal&#x27;s type, everywhere on the map.</span>
+<span class="d-add">+const votedEdges: ReturnType&lt;typeof edgeInfo&gt;[] = [];</span>
+<span class="d-add">+for (let eid = 0; eid &lt; topo.nEdges; eid++) {</span>
+<span class="d-add">+  if (evt[eid] &amp;&amp; netOf(eid, top.legendIdx) !== 0) votedEdges.push(edgeInfo(eid));</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+const dump = {</span>
+<span class="d-add">+  top: {</span>
+<span class="d-add">+    id: top.id,</span>
+<span class="d-add">+    label: top.label,</span>
+<span class="d-add">+    legendIdx: top.legendIdx,</span>
+<span class="d-add">+    score: top.score,</span>
+<span class="d-add">+    waypointCoords: top.waypointCoords,</span>
+<span class="d-add">+    nEdges: top.edgeIds.length,</span>
+<span class="d-add">+    nBlocks: top.blocks.length,</span>
+<span class="d-add">+    segments: top.segments.map((seg) =&gt; seg.map(edgeInfo)),</span>
+<span class="d-add">+    blockSizes: top.blocks.map((b) =&gt; b.length),</span>
+<span class="d-add">+    blockEdgeCount: top.blockEdgeIds.length,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  votedEdgesOfTopType: votedEdges,</span>
+<span class="d-add">+};</span>
+<span class="d-add">+fs.writeFileSync(OUT, JSON.stringify(dump, null, 1));</span>
+<span class="d-add">+console.log(`\ntop=#${top.id} ${top.label} → dumped ${votedEdges.length} voted edges of that type to ${OUT}`);</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+22</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · GraphLayer/</span>
+        <span class="ctx-sum">vote heat, PBTP/RBTP proposals, proposal cards</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~4800 LOC — topology load, heat paint, ProposalCard</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">ProposalCard</span><span class="ol-sum">typeLinks = getCurrentMap()?.voteTypeLinks; [#n] anchors per row</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">hover/selection/markers</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>links resolve by row.label — covers cast-created vote types with no custom_vote_types row</li><li>anchor per link: href=lnk.url, title=lnk.title, stopPropagation on click</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 46721e1..7d48c18 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -4439,6 +4439,10 @@ function ProposalCard({</span>
+<span class="d-ctx">   const [minimized, setMinimized] = useState(false);</span>
+<span class="d-ctx">   const cardRef = useRef&lt;HTMLDivElement&gt;(null);</span>
+<span class="d-ctx">   const icon = winner ? iconForLabel(winner.label, voteTypes) : null;</span>
+<span class="d-add">+  // Per-vote-type location links (maps.vote_type_links, e.g. official DOT</span>
+<span class="d-add">+  // proposal locations on nyc-proposals) — rendered as [#1] [#2] anchors</span>
+<span class="d-add">+  // under the row&#x27;s label. Resolved by label, like iconForLabel.</span>
+<span class="d-add">+  const typeLinks = getCurrentMap()?.voteTypeLinks;</span>
+<span class="d-ctx">   // Subscribe to the vote store so the +/- rows (which read getVote() below)</span>
+<span class="d-ctx">   // re-render whenever ANY vote changes — including the same edge being voted</span>
+<span class="d-ctx">   // from the top-bar banner. The value itself is unused; the subscription is.</span>
+<span class="d-hunk">@@ -4729,6 +4733,24 @@ function ProposalCard({</span>
+<span class="d-ctx">                         &lt;span className=&quot;graph-vote-net&quot; title=&quot;net votes (up − down)&quot;&gt;{row.up - row.down}&lt;/span&gt;</span>
+<span class="d-ctx">                         {tally(row, 1)}</span>
+<span class="d-ctx">                       &lt;/span&gt;</span>
+<span class="d-add">+                      {(typeLinks?.[row.label]?.length ?? 0) &gt; 0 &amp;&amp; (</span>
+<span class="d-add">+                        &lt;span</span>
+<span class="d-add">+                          className=&quot;graph-proposal-row-links&quot;</span>
+<span class="d-add">+                          aria-label={`${row.label} proposal locations`}</span>
+<span class="d-add">+                        &gt;</span>
+<span class="d-add">+                          {typeLinks![row.label].map((lnk, i) =&gt; (</span>
+<span class="d-add">+                            &lt;a</span>
+<span class="d-add">+                              key={lnk.url}</span>
+<span class="d-add">+                              className=&quot;graph-proposal-row-link&quot;</span>
+<span class="d-add">+                              href={lnk.url}</span>
+<span class="d-add">+                              title={lnk.title || `Location ${i + 1}`}</span>
+<span class="d-add">+                              onClick={(e) =&gt; e.stopPropagation()}</span>
+<span class="d-add">+                            &gt;</span>
+<span class="d-add">+                              [#{i + 1}]</span>
+<span class="d-add">+                            &lt;/a&gt;</span>
+<span class="d-add">+                          ))}</span>
+<span class="d-add">+                        &lt;/span&gt;</span>
+<span class="d-add">+                      )}</span>
+<span class="d-ctx">                     &lt;/div&gt;</span>
+<span class="d-ctx">                   );</span>
+<span class="d-ctx">                 })}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/map/runtime.ts</span>
+            <span class="stat"><span class="d-add">+13</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · map/</span>
+        <span class="ctx-sum">map-config resolution: slug/subdomain → /api/maps → MapConfig</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">runtime.ts</span>
+        <span class="ctx-sum">~215 LOC — MapConfig type, resolveMapConfig, slugRedirectUrl</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">VoteTypeLink + MapConfig</span><span class="ol-sum">voteTypeLinks?: Record&lt;label, VoteTypeLink[]&gt;</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">resolveMapConfig / redirects</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>VoteTypeLink { url, title? } — an in-app deep link (/m/&lt;slug&gt;?w=…&amp;vt=…)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/map/runtime.ts b/client-react/src/map/runtime.ts</span>
+<span class="d-meta">index dc83ec6..5eb1c40 100644</span>
+<span class="d-meta">--- a/client-react/src/map/runtime.ts</span>
+<span class="d-meta">+++ b/client-react/src/map/runtime.ts</span>
+<span class="d-hunk">@@ -17,6 +17,15 @@ export interface MapVoteType {</span>
+<span class="d-ctx">   pointType: &quot;route&quot; | &quot;point&quot;;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/** One location link for a vote type — an in-app deep link (/m/&lt;slug&gt;?w=…&amp;vt=…)</span>
+<span class="d-add">+ *  to a place where this vote type has a real proposal. Rendered as a numbered</span>
+<span class="d-add">+ *  [#1] [#2] anchor beside the vote-type label in proposal cards. */</span>
+<span class="d-add">+export interface VoteTypeLink {</span>
+<span class="d-add">+  url: string;</span>
+<span class="d-add">+  /** Tooltip text — e.g. the official project&#x27;s title. */</span>
+<span class="d-add">+  title?: string;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> export interface MapConfig {</span>
+<span class="d-ctx">   slug: string;</span>
+<span class="d-ctx">   name: string;</span>
+<span class="d-hunk">@@ -42,6 +51,10 @@ export interface MapConfig {</span>
+<span class="d-ctx">    *  searched, never in the default suggestion list. pointType is the kind the</span>
+<span class="d-ctx">    *  creating cast recorded; null on legacy rows flagged before kinds existed. */</span>
+<span class="d-ctx">   searchVoteTypes?: { label: string; pointType: &quot;route&quot; | &quot;point&quot; | null }[];</span>
+<span class="d-add">+  /** Per-vote-type location links keyed by label (server: maps.vote_type_links).</span>
+<span class="d-add">+   *  Present only on maps that curate them (e.g. nyc-proposals&#x27; official DOT</span>
+<span class="d-add">+   *  proposal locations). */</span>
+<span class="d-add">+  voteTypeLinks?: Record&lt;string, VoteTypeLink[]&gt;;</span>
+<span class="d-ctx">   subdomain?: string | null;</span>
+<span class="d-ctx">   voteCount?: number;</span>
+<span class="d-ctx">   city?: CityConfig;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/styles/globals.css</span>
+            <span class="stat"><span class="d-add">+26</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">React client · styles</span>
+        <span class="ctx-sum">global stylesheet (cards, rows, vote controls)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">globals.css</span>
+        <span class="ctx-sum">~2300 lines — proposal card + row styles live around :1950</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">.graph-proposal-row</span><span class="ol-sum">flex-wrap so the links line can wrap under</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.graph-proposal-row-links / -link</span><span class="ol-sum">full-width wrapping line, quiet until hover</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>flex: 1 0 100% — the links line never squeezes the label or the ± control</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
+<span class="d-meta">index 1ae811a..7231bdc 100644</span>
+<span class="d-meta">--- a/client-react/src/styles/globals.css</span>
+<span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
+<span class="d-hunk">@@ -1961,6 +1961,9 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx">   align-items: center;</span>
+<span class="d-ctx">   gap: 12px;</span>
+<span class="d-ctx">   line-height: 1.4;</span>
+<span class="d-add">+  /* Location links, when present, wrap onto their own full-width line. */</span>
+<span class="d-add">+  flex-wrap: wrap;</span>
+<span class="d-add">+  row-gap: 2px;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> .graph-proposal-row-label {</span>
+<span class="d-hunk">@@ -2003,6 +2006,29 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx">   transform: rotate(45deg) scale(0.9);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/* Numbered location links ([#1] [#2] …) for a vote type with curated proposal</span>
+<span class="d-add">+   locations (maps.vote_type_links) — a full-width line under the label so a</span>
+<span class="d-add">+   long list never squeezes the label or the vote control. */</span>
+<span class="d-add">+.graph-proposal-row-links {</span>
+<span class="d-add">+  flex: 1 0 100%;</span>
+<span class="d-add">+  display: flex;</span>
+<span class="d-add">+  flex-wrap: wrap;</span>
+<span class="d-add">+  gap: 1px 8px;</span>
+<span class="d-add">+  font-size: 12px;</span>
+<span class="d-add">+  font-variant-numeric: tabular-nums;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.graph-proposal-row-link {</span>
+<span class="d-add">+  color: inherit;</span>
+<span class="d-add">+  opacity: 0.65;</span>
+<span class="d-add">+  text-decoration: none;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.graph-proposal-row-link:hover {</span>
+<span class="d-add">+  opacity: 1;</span>
+<span class="d-add">+  text-decoration: underline;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /* Connected vote control: [ −down │ net │ +up ] reads as ONE unit rather than</span>
+<span class="d-ctx">    three free-floating numbers. Square (radius 0) and tabular monospace to match</span>
+<span class="d-ctx">    the terminal aesthetic; the outer hairline + internal dividers do the framing. */</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+30</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · app</span>
+        <span class="ctx-sum">routes, caches, admin endpoints</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~2400 LOC — vote/route/graph endpoints, SWR caches, admin surface</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">invalidate_map_cache</span><span class="ol-sum">now also clears the /api/maps SWR cache</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">admin endpoints</span><span class="ol-sum">+ POST/DELETE /api/admin/maps/&lt;slug&gt;/vote-type-links</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">vote / graph-votes / routes</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>_map_get_cache.pop(slug) in invalidate_map_cache — admin mutations no longer stale for 30s</li><li>admin_set_vote_type_links: X-Admin-Token gated, whole-mapping replace, invalidates on success</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index b83c89c..735fe47 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -44,7 +44,7 @@ from database import (</span>
+<span class="d-ctx">     seed_presets, backfill_vote_type_kinds, normalize_point_type,</span>
+<span class="d-ctx">     list_maps, get_map, get_map_by_subdomain, slug_available, get_map_redirect,</span>
+<span class="d-ctx">     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,</span>
+<span class="d-del">-    promote_vote_types, fetch_voted_vote_type_labels,</span>
+<span class="d-add">+    set_map_vote_type_links, promote_vote_types, fetch_voted_vote_type_labels,</span>
+<span class="d-ctx">     DATABASE_URL,</span>
+<span class="d-ctx"> )</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -188,6 +188,12 @@ def invalidate_map_cache(slug: str | None = None):</span>
+<span class="d-ctx">             _map_cache.clear()</span>
+<span class="d-ctx">         else:</span>
+<span class="d-ctx">             _map_cache.pop(slug, None)</span>
+<span class="d-add">+    # The /api/maps/&lt;slug&gt; SWR cache is separate — without this an admin</span>
+<span class="d-add">+    # mutation kept serving the pre-mutation config for up to 30s.</span>
+<span class="d-add">+    if slug is None:</span>
+<span class="d-add">+        _map_get_cache.clear()</span>
+<span class="d-add">+    else:</span>
+<span class="d-add">+        _map_get_cache.pop(slug, None)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def resolve_map(slug: str | None) -&gt; ResolvedMap:</span>
+<span class="d-hunk">@@ -2344,6 +2350,29 @@ def admin_set_subdomain(slug):</span>
+<span class="d-ctx">     return jsonify({&quot;ok&quot;: ok, &quot;slug&quot;: slug, &quot;message&quot;: msg}), (200 if ok else 400)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+@app.route(&quot;/api/admin/maps/&lt;slug&gt;/vote-type-links&quot;, methods=[&quot;POST&quot;, &quot;DELETE&quot;])</span>
+<span class="d-add">+def admin_set_vote_type_links(slug):</span>
+<span class="d-add">+    &quot;&quot;&quot;Replace (POST {links: {label: [{url, title?}]}}) or clear (DELETE) a</span>
+<span class="d-add">+    map&#x27;s per-vote-type location links, rendered as [#1] [#2] anchors beside</span>
+<span class="d-add">+    vote-type labels in proposal cards.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Requires the X-Admin-Token header to match ADMIN_TOKEN. POST replaces the</span>
+<span class="d-add">+    whole mapping — send the full desired state.</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    if not _admin_authorized():</span>
+<span class="d-add">+        return jsonify({&quot;error&quot;: &quot;Unauthorized&quot;}), 403</span>
+<span class="d-add">+    if request.method == &quot;DELETE&quot;:</span>
+<span class="d-add">+        ok, msg = set_map_vote_type_links(slug, None)</span>
+<span class="d-add">+    else:</span>
+<span class="d-add">+        links = (request.get_json(silent=True) or {}).get(&quot;links&quot;)</span>
+<span class="d-add">+        if not isinstance(links, dict) or not links:</span>
+<span class="d-add">+            return jsonify({&quot;error&quot;: &quot;links object is required&quot;}), 400</span>
+<span class="d-add">+        ok, msg = set_map_vote_type_links(slug, links)</span>
+<span class="d-add">+    if ok:</span>
+<span class="d-add">+        invalidate_map_cache(slug)</span>
+<span class="d-add">+    return jsonify({&quot;ok&quot;: ok, &quot;slug&quot;: slug, &quot;message&quot;: msg}), (200 if ok else 400)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> @app.route(&quot;/api/admin/maps/&lt;slug&gt;/promote-vote-types&quot;, methods=[&quot;POST&quot;])</span>
+<span class="d-ctx"> def admin_promote_vote_types(slug):</span>
+<span class="d-ctx">     &quot;&quot;&quot;Snapshot a map&#x27;s vote-type set into a featured vote_type_lists row so it</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/database.py</span>
+            <span class="stat"><span class="d-add">+47</span> / <span class="d-del">-3</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · persistence</span>
+        <span class="ctx-sum">Postgres schema + maps/vote/redirect queries</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">database.py</span>
+        <span class="ctx-sum">~1350 LOC — schema init, map CRUD, vote rows, admin setters</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">schema init</span><span class="ol-sum">ALTER maps ADD vote_type_links JSONB</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_map_row_to_dict / _MAP_COLUMNS</span><span class="ol-sum">unpack + emit voteTypeLinks only when set</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">set_map_vote_type_links</span><span class="ol-sum">whole-mapping replace with shape validation</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">votes / redirects / rename</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>ALTER TABLE maps ADD COLUMN IF NOT EXISTS vote_type_links JSONB</li><li>voteTypeLinks emitted only when set — absent key = no links</li><li>set_map_vote_type_links(slug, links): {label: [{url, title?}]}, Json() adapter, rowcount guard</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/database.py b/server/database.py</span>
+<span class="d-meta">index d54cb70..578d18a 100644</span>
+<span class="d-meta">--- a/server/database.py</span>
+<span class="d-meta">+++ b/server/database.py</span>
+<span class="d-hunk">@@ -11,7 +11,7 @@ from contextlib import contextmanager</span>
+<span class="d-ctx"> from typing import Optional</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> import psycopg2</span>
+<span class="d-del">-from psycopg2.extras import execute_values</span>
+<span class="d-add">+from psycopg2.extras import Json, execute_values</span>
+<span class="d-ctx"> from psycopg2.pool import ThreadedConnectionPool</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Under the gevent worker, plain psycopg2 blocks the event-loop hub for the</span>
+<span class="d-hunk">@@ -272,6 +272,13 @@ def init_db():</span>
+<span class="d-ctx">             cursor.execute(</span>
+<span class="d-ctx">                 &quot;ALTER TABLE maps ADD COLUMN IF NOT EXISTS top_proposal_min_net INT&quot;</span>
+<span class="d-ctx">             )</span>
+<span class="d-add">+            # Per-map location links for vote types: {label: [{&quot;url&quot;, &quot;title&quot;?}]}.</span>
+<span class="d-add">+            # Each url is an in-app deep link (/m/&lt;slug&gt;?w=…&amp;vt=…) shown as a</span>
+<span class="d-add">+            # numbered [#1] [#2] anchor beside the vote-type label in proposal</span>
+<span class="d-add">+            # cards — pilot: official NYC DOT proposal locations on nyc-proposals.</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;ALTER TABLE maps ADD COLUMN IF NOT EXISTS vote_type_links JSONB&quot;</span>
+<span class="d-add">+            )</span>
+<span class="d-ctx">             cursor.execute(&quot;&quot;&quot;</span>
+<span class="d-ctx">                 CREATE INDEX IF NOT EXISTS idx_maps_city ON maps(city_id)</span>
+<span class="d-ctx">             &quot;&quot;&quot;)</span>
+<span class="d-hunk">@@ -1001,7 +1008,7 @@ def _map_row_to_dict(row) -&gt; dict:</span>
+<span class="d-ctx">     &quot;&quot;&quot;Shape a maps JOIN vote_type_lists row into the public map dict.&quot;&quot;&quot;</span>
+<span class="d-ctx">     (slug, name, subtitle, city_id, allow_suggestions, has_passcode,</span>
+<span class="d-ctx">      subdomain, list_vote_types, custom_vote_types, vote_count, symbol, style,</span>
+<span class="d-del">-     network, top_proposal_min_net) = row</span>
+<span class="d-add">+     network, top_proposal_min_net, vote_type_links) = row</span>
+<span class="d-ctx">     vote_types = custom_vote_types or list_vote_types or []</span>
+<span class="d-ctx">     # The proposer-chosen visual style wins; presets keep their subdomain style;</span>
+<span class="d-ctx">     # everything else falls back to the neutral default. The vote namespace</span>
+<span class="d-hunk">@@ -1028,6 +1035,8 @@ def _map_row_to_dict(row) -&gt; dict:</span>
+<span class="d-ctx">         # Only present when the row overrides the client&#x27;s default floor.</span>
+<span class="d-ctx">         **({&quot;topProposalMinNet&quot;: top_proposal_min_net}</span>
+<span class="d-ctx">            if top_proposal_min_net is not None else {}),</span>
+<span class="d-add">+        # Only present when the map has per-vote-type location links.</span>
+<span class="d-add">+        **({&quot;voteTypeLinks&quot;: vote_type_links} if vote_type_links else {}),</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1041,7 +1050,7 @@ _MAP_COLUMNS = &quot;&quot;&quot;</span>
+<span class="d-ctx">            (m.passcode_hash IS NOT NULL) AS has_passcode,</span>
+<span class="d-ctx">            m.subdomain, vtl.vote_types, m.custom_vote_types,</span>
+<span class="d-ctx">            {vote_count} AS vote_count, m.symbol, m.style, m.network,</span>
+<span class="d-del">-           m.top_proposal_min_net</span>
+<span class="d-add">+           m.top_proposal_min_net, m.vote_type_links</span>
+<span class="d-ctx">     FROM maps m</span>
+<span class="d-ctx">     LEFT JOIN vote_type_lists vtl ON vtl.id = m.vote_type_list_id</span>
+<span class="d-ctx"> &quot;&quot;&quot;</span>
+<span class="d-hunk">@@ -1135,6 +1144,41 @@ def set_map_subdomain(slug: str, subdomain: Optional[str]) -&gt; tuple[bool, str]:</span>
+<span class="d-ctx">         return False, str(e)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+def set_map_vote_type_links(slug: str, links: Optional[dict]) -&gt; tuple[bool, str]:</span>
+<span class="d-add">+    &quot;&quot;&quot;Replace a map&#x27;s per-vote-type location links ({label: [{&quot;url&quot;,&quot;title&quot;?}]}).</span>
+<span class="d-add">+</span>
+<span class="d-add">+    `links=None`/{} clears the column. The whole mapping is replaced atomically —</span>
+<span class="d-add">+    callers send the full desired state, not a delta. Returns (ok, message).</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    if not DATABASE_URL:</span>
+<span class="d-add">+        return False, &quot;database unavailable&quot;</span>
+<span class="d-add">+    payload = links or None</span>
+<span class="d-add">+    if payload is not None:</span>
+<span class="d-add">+        if not isinstance(payload, dict):</span>
+<span class="d-add">+            return False, &quot;links must be an object of {label: [{url, title?}]}&quot;</span>
+<span class="d-add">+        for label, entries in payload.items():</span>
+<span class="d-add">+            if not label or not isinstance(entries, list):</span>
+<span class="d-add">+                return False, f&quot;invalid entries for label &#x27;{label}&#x27;&quot;</span>
+<span class="d-add">+            for e in entries:</span>
+<span class="d-add">+                if not isinstance(e, dict) or not isinstance(e.get(&quot;url&quot;), str) \</span>
+<span class="d-add">+                        or not e[&quot;url&quot;]:</span>
+<span class="d-add">+                    return False, f&quot;invalid link entry under &#x27;{label}&#x27;&quot;</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        with get_cursor() as cursor:</span>
+<span class="d-add">+            cursor.execute(</span>
+<span class="d-add">+                &quot;UPDATE maps SET vote_type_links = %s WHERE slug = %s&quot;,</span>
+<span class="d-add">+                (Json(payload) if payload is not None else None, slug),</span>
+<span class="d-add">+            )</span>
+<span class="d-add">+            if cursor.rowcount == 0:</span>
+<span class="d-add">+                return False, f&quot;no map with slug &#x27;{slug}&#x27;&quot;</span>
+<span class="d-add">+        n = sum(len(v) for v in (payload or {}).values())</span>
+<span class="d-add">+        return True, (&quot;cleared&quot; if payload is None</span>
+<span class="d-add">+                      else f&quot;set {n} links across {len(payload)} vote types&quot;)</span>
+<span class="d-add">+    except Exception as e:</span>
+<span class="d-add">+        logger.error(f&quot;[DB] set_map_vote_type_links failed: {e}&quot;)</span>
+<span class="d-add">+        return False, str(e)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> def slug_available(slug: str) -&gt; bool:</span>
+<span class="d-ctx">     &quot;&quot;&quot;A slug is takeable only if no map uses it AND no redirect reserves it —</span>
+<span class="d-ctx">     a renamed map&#x27;s old slug must never be re-claimed (printed QR links would</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">tools/nyc_proposals/import_to_map.py</span>
+            <span class="stat"><span class="d-add">+20</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Tools · nyc_proposals/</span>
+        <span class="ctx-sum">official-DOT-proposals → votes pipeline (plan/cast CLI)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">import_to_map.py</span>
+        <span class="ctx-sum">~360 LOC — filters, classifier, geocoding, corridor guards, casting</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">corridor guards</span><span class="ol-sum">+ DETOUR_RATIO_MAX = 1.8 (routed vs crow distance)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">cast_entry</span><span class="ol-sum">detour → demote to point-kind catch-all pin, status ok-detour-pin</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">plan / classify / geocode</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>routed_km &gt; max(0.4, 1.8 × crow_km) ⇒ the &#x27;corridor&#x27; is a hairpin, not the project&#x27;s street</li><li>demotion mirrors the unparseable-endpoints fallback: vote_type=&#x27;Street redesign&#x27;, kind=point, pin at start</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/tools/nyc_proposals/import_to_map.py b/tools/nyc_proposals/import_to_map.py</span>
+<span class="d-meta">index 820035a..5ad197c 100644</span>
+<span class="d-meta">--- a/tools/nyc_proposals/import_to_map.py</span>
+<span class="d-meta">+++ b/tools/nyc_proposals/import_to_map.py</span>
+<span class="d-hunk">@@ -49,6 +49,13 @@ MAX_CORRIDOR_KM = 8.0</span>
+<span class="d-ctx"> # And the routed corridor may not resolve to absurdly many edges (a cross-</span>
+<span class="d-ctx"> # borough route is ~700+; the longest legitimate corridors are ~400).</span>
+<span class="d-ctx"> MAX_CORRIDOR_EDGES = 600</span>
+<span class="d-add">+# A shortest path much longer than the endpoints&#x27; straight-line distance means</span>
+<span class="d-add">+# an endpoint snapped onto a stranded path whose only exit is far away — e.g.</span>
+<span class="d-add">+# the ESCR-era East River esplanade, one-exit-at-the-south, which turned the</span>
+<span class="d-add">+# &quot;E River corridor&quot; cast into a 7.75km hairpin doubling along two parallel</span>
+<span class="d-add">+# waterfront stretches (2.6× crow). DOT corridors run along ONE street, so</span>
+<span class="d-add">+# their ratio stays near 1; beyond this the route is not the project&#x27;s street.</span>
+<span class="d-add">+DETOUR_RATIO_MAX = 1.8</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # NYC bounds — geocode hits outside are treated as failures.</span>
+<span class="d-ctx"> NYC_BBOX = (-74.26, 40.49, -73.70, 40.92)</span>
+<span class="d-hunk">@@ -271,7 +278,18 @@ def cast_entry(base: str, slug: str, entry: dict, mode: str = &quot;walk&quot;) -&gt; dict:</span>
+<span class="d-ctx">             return {&quot;status&quot;: &quot;route-failed&quot;}</span>
+<span class="d-ctx">         if len(edge_ids) &gt; MAX_CORRIDOR_EDGES:</span>
+<span class="d-ctx">             return {&quot;status&quot;: &quot;route-too-long&quot;, &quot;edges&quot;: len(edge_ids)}</span>
+<span class="d-del">-        payload = {&quot;edge_ids&quot;: edge_ids}</span>
+<span class="d-add">+        crow_km = straight_km(entry[&quot;start&quot;], entry[&quot;end&quot;])</span>
+<span class="d-add">+        routed_km = ((route.get(&quot;route&quot;) or {}).get(&quot;distance&quot;) or 0) / 1000.0</span>
+<span class="d-add">+        if routed_km &gt; max(0.4, DETOUR_RATIO_MAX * crow_km):</span>
+<span class="d-add">+            # Hairpin detour (see DETOUR_RATIO_MAX): pin the project instead of</span>
+<span class="d-add">+            # painting the detour with corridor votes — same demotion (and</span>
+<span class="d-add">+            # point-kind label swap) as corridors whose endpoints never parsed.</span>
+<span class="d-add">+            entry.update(vote_type=POINT_FALLBACK_LABEL, kind=&quot;point&quot;,</span>
+<span class="d-add">+                         cast=&quot;point&quot;, point=list(entry[&quot;start&quot;]),</span>
+<span class="d-add">+                         demoted=f&quot;route-detour {routed_km:.1f}km/{crow_km:.1f}km&quot;)</span>
+<span class="d-add">+            payload = {&quot;point&quot;: list(entry[&quot;point&quot;])}</span>
+<span class="d-add">+        else:</span>
+<span class="d-add">+            payload = {&quot;edge_ids&quot;: edge_ids}</span>
+<span class="d-ctx">     elif entry.get(&quot;cast&quot;) == &quot;point&quot;:</span>
+<span class="d-ctx">         payload = {&quot;point&quot;: list(entry[&quot;point&quot;])}</span>
+<span class="d-ctx">     else:</span>
+<span class="d-hunk">@@ -285,7 +303,7 @@ def cast_entry(base: str, slug: str, entry: dict, mode: str = &quot;walk&quot;) -&gt; dict:</span>
+<span class="d-ctx">     })</span>
+<span class="d-ctx">     if resp.get(&quot;error&quot;):</span>
+<span class="d-ctx">         return {&quot;status&quot;: &quot;error&quot;, &quot;detail&quot;: resp[&quot;error&quot;]}</span>
+<span class="d-del">-    return {&quot;status&quot;: &quot;ok&quot;,</span>
+<span class="d-add">+    return {&quot;status&quot;: &quot;ok-detour-pin&quot; if entry.get(&quot;demoted&quot;) else &quot;ok&quot;,</span>
+<span class="d-ctx">             &quot;edges&quot;: len(payload.get(&quot;edge_ids&quot;, [])) or 1}</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">tools/nyc_proposals/set_vote_type_links.py</span>
+            <span class="stat"><span class="d-add">+77</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Tools · nyc_proposals/</span>
+        <span class="ctx-sum">plan JSONL → vote-type location links installer</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">set_vote_type_links.py</span>
+        <span class="ctx-sum">~80 LOC — stdlib only, --dry-run, admin POST</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">link_for</span><span class="ol-sum">route → w=start;end · point → w=lat,lng · title = project title</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main</span><span class="ol-sum">group by vote_type, print, POST /api/admin/…/vote-type-links</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>idempotent: the whole mapping is replaced on every run</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/tools/nyc_proposals/set_vote_type_links.py b/tools/nyc_proposals/set_vote_type_links.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..1d7d070</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/tools/nyc_proposals/set_vote_type_links.py</span>
+<span class="d-hunk">@@ -0,0 +1,77 @@</span>
+<span class="d-add">+#!/usr/bin/env python3</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+Install per-vote-type location links on a map from a plan JSONL.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Reads the plan produced by `import_to_map.py plan` and builds, for each vote</span>
+<span class="d-add">+type, the ordered list of proposal locations as in-app deep links</span>
+<span class="d-add">+(/m/&lt;slug&gt;?w=…&amp;vt=…). Installs the whole mapping via the admin API</span>
+<span class="d-add">+(maps.vote_type_links); the client renders each list as [#1] [#2] anchors</span>
+<span class="d-add">+beside the vote-type label in proposal cards.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    python3 set_vote_type_links.py --plan plan.jsonl \</span>
+<span class="d-add">+        --base http://localhost:5001 --map nyc-proposals \</span>
+<span class="d-add">+        --token $ADMIN_TOKEN [--dry-run]</span>
+<span class="d-add">+</span>
+<span class="d-add">+Idempotent: the mapping is replaced wholesale on every run.</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+import argparse</span>
+<span class="d-add">+import json</span>
+<span class="d-add">+import os</span>
+<span class="d-add">+import sys</span>
+<span class="d-add">+import urllib.request</span>
+<span class="d-add">+from urllib.parse import urlencode</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def link_for(slug: str, entry: dict) -&gt; dict | None:</span>
+<span class="d-add">+    if entry.get(&quot;cast&quot;) == &quot;route&quot;:</span>
+<span class="d-add">+        (slat, slng), (elat, elng) = entry[&quot;start&quot;], entry[&quot;end&quot;]</span>
+<span class="d-add">+        w = f&quot;{slat:.6f},{slng:.6f};{elat:.6f},{elng:.6f}&quot;</span>
+<span class="d-add">+    elif entry.get(&quot;cast&quot;) == &quot;point&quot;:</span>
+<span class="d-add">+        plat, plng = entry[&quot;point&quot;]</span>
+<span class="d-add">+        w = f&quot;{plat:.6f},{plng:.6f}&quot;</span>
+<span class="d-add">+    else:</span>
+<span class="d-add">+        return None</span>
+<span class="d-add">+    qs = urlencode({&quot;w&quot;: w, &quot;vt&quot;: entry[&quot;vote_type&quot;]})</span>
+<span class="d-add">+    return {&quot;url&quot;: f&quot;/m/{slug}?{qs}&quot;, &quot;title&quot;: entry[&quot;title&quot;]}</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def main():</span>
+<span class="d-add">+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])</span>
+<span class="d-add">+    ap.add_argument(&quot;--plan&quot;, required=True)</span>
+<span class="d-add">+    ap.add_argument(&quot;--base&quot;, default=&quot;http://localhost:5001&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--map&quot;, dest=&quot;slug&quot;, default=&quot;nyc-proposals&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--token&quot;, default=os.environ.get(&quot;ADMIN_TOKEN&quot;, &quot;&quot;))</span>
+<span class="d-add">+    ap.add_argument(&quot;--dry-run&quot;, action=&quot;store_true&quot;)</span>
+<span class="d-add">+    args = ap.parse_args()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    links: dict[str, list[dict]] = {}</span>
+<span class="d-add">+    with open(args.plan) as f:</span>
+<span class="d-add">+        for line in f:</span>
+<span class="d-add">+            entry = json.loads(line)</span>
+<span class="d-add">+            lnk = link_for(args.slug, entry)</span>
+<span class="d-add">+            if lnk:</span>
+<span class="d-add">+                links.setdefault(entry[&quot;vote_type&quot;], []).append(lnk)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    total = sum(len(v) for v in links.values())</span>
+<span class="d-add">+    for label, ls in sorted(links.items(), key=lambda kv: -len(kv[1])):</span>
+<span class="d-add">+        print(f&quot;  {label}: {len(ls)}&quot;)</span>
+<span class="d-add">+        for i, lnk in enumerate(ls):</span>
+<span class="d-add">+            print(f&quot;    [#{i + 1}] {lnk[&#x27;title&#x27;][:60]}  {lnk[&#x27;url&#x27;][:90]}&quot;)</span>
+<span class="d-add">+    print(f&quot;{total} links across {len(links)} vote types&quot;)</span>
+<span class="d-add">+    if args.dry_run:</span>
+<span class="d-add">+        return</span>
+<span class="d-add">+    if not args.token:</span>
+<span class="d-add">+        sys.exit(&quot;--token (or ADMIN_TOKEN) required&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    req = urllib.request.Request(</span>
+<span class="d-add">+        f&quot;{args.base}/api/admin/maps/{args.slug}/vote-type-links&quot;,</span>
+<span class="d-add">+        data=json.dumps({&quot;links&quot;: links}).encode(),</span>
+<span class="d-add">+        headers={&quot;Content-Type&quot;: &quot;application/json&quot;, &quot;X-Admin-Token&quot;: args.token},</span>
+<span class="d-add">+        method=&quot;POST&quot;,</span>
+<span class="d-add">+    )</span>
+<span class="d-add">+    with urllib.request.urlopen(req) as resp:</span>
+<span class="d-add">+        print(resp.status, resp.read().decode())</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+if __name__ == &quot;__main__&quot;:</span>
+<span class="d-add">+    main()</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

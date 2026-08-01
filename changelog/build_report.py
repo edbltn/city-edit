@@ -10,10 +10,10 @@ import re
 
 HERE = os.path.dirname(__file__)
 DIFF_PATH = os.path.join(HERE, "changes.diff")
-OUT_PATH = os.path.join(HERE, "2026-07-30-nyc-proposals-import.html")
+OUT_PATH = os.path.join(HERE, "2026-08-01-vote-type-links-zigzag.html")
 
-DATE = "2026-07-30"
-TITLE = "nyc-proposals: map rename, official DOT proposal import + weekly job, per-map proposal floor"
+DATE = "2026-08-01"
+TITLE = "Vote-type location links ([#n]) + the East River hairpin diagnosis"
 
 
 def split_by_file(diff_text: str):
@@ -57,88 +57,73 @@ def colorize(diff_chunk: str) -> str:
 
 SECTIONS = [
     {
-        "id": "rename",
-        "tag": "DATA / ROUTING",
-        "title": "nyc-crossings → nyc-proposals (rename + QR chain)",
-        "symptom": "The dangerous-intersections map was being broadened to cover ALL city proposals; the printed QR posters point at /m/nyc-intersections and had to keep resolving.",
+        "id": "links",
+        "tag": "CLIENT + SERVER + TOOLS",
+        "title": "Per-vote-type location links ([#1] [#2] \u2026) in proposal cards",
+        "symptom": "Vote types on nyc-proposals are official DOT proposals, but a card row gave no way to jump to the places those proposals actually live \u2014 we wanted numbered links next to each vote type in the listed votes.",
         "cause": [
-            "Slug renames are data-driven (map_redirects) since 2026-07-29 — no code change needed",
-            "rename_map_slug's chain flattening repoints any redirect targeting the old slug, so nyc-intersections → nyc-proposals kept its src=qr-poster retro-tag",
+            "Vote-type rows carry only {label, up, down}; there was no per-map, per-vote-type metadata channel for locations",
+            "Imported vote types are cast-created (no maps.custom_vote_types row), so links must resolve by label, like iconForLabel",
         ],
         "fixes": [
-            "rename_map.py nyc-crossings nyc-proposals run against prod, staging, and local (73/73/2 votes moved; Redis rebuilt under the new slug)",
-            "Display name/subtitle updated to \"NYC Proposals\" / \"Every proposal to improve the city, in one place\"",
-            "Redirect inventory rows updated in docs/url-routing.md",
+            "maps.vote_type_links JSONB ({label: [{url, title?}]}) \u2192 emitted as voteTypeLinks on the map config only when set",
+            "Admin endpoint POST/DELETE /api/admin/maps/&lt;slug&gt;/vote-type-links (X-Admin-Token, whole-mapping replace) + set_map_vote_type_links() with shape validation",
+            "ProposalCard renders [#n] anchors on a full-width wrapping line under the label (48 links under 'Street redesign' render clean); each link is an in-app deep link /m/&lt;slug&gt;?w=\u2026&amp;vt=\u2026 that re-applies the selection on click",
+            "tools/nyc_proposals/set_vote_type_links.py builds the mapping from a plan JSONL (route \u2192 w=start;end, point \u2192 w=lat,lng; title = project title) and installs it \u2014 60 links across 6 vote types on nyc-proposals locally",
+            "invalidate_map_cache now also clears the /api/maps/&lt;slug&gt; SWR cache \u2014 admin mutations used to serve the pre-mutation config for up to 30s",
         ],
-        "files": ["docs/url-routing.md"],
+        "files": ["server/database.py", "server/app.py", "client-react/src/map/runtime.ts",
+                  "client-react/src/components/GraphLayer/GraphLayer.tsx",
+                  "client-react/src/styles/globals.css", "tools/nyc_proposals/set_vote_type_links.py"],
     },
     {
-        "id": "floor",
-        "tag": "CLIENT + SERVER",
-        "title": "Per-map top-proposal support floor override",
-        "symptom": "The same-day TOP_PROPOSAL_MIN_NET=100 floor (536bf76) would hide every imported proposal: one vote per DOT project means net 1, and block heat only paints top proposals — the import would have been invisible.",
+        "id": "zigzag",
+        "tag": "DATA / TOOLS",
+        "title": "The East River hairpin: why the top route proposal zig-zagged",
+        "symptom": "nyc-proposals' top route proposal (fa8b70e11, 'Add traffic calming', 157 blocks) ran down the East River esplanade, around Corlears Hook, and back north up the parallel inland streets \u2014 both waterfront stretches selected.",
         "cause": [
-            "The floor is the right default for crowdsourced maps but wrong for curated/imported ones",
-            "It gates BOTH families: PBTP winner selection and RBTP minRouteScore",
+            "NOT the block bake: recomputing proposals from prod data shows the 438 voted edges form a single simple path (2 endpoints, 0 branches) and zero blocks span both rails",
+            "One DOT corridor cast IS the hairpin: 'EV/LES Waterfront Access Study' parsed as 'FDR Drive: Montgomery St \u2192 14th St', and geocoding put one endpoint inside John V. Lindsay East River Park",
+            "The park esplanade is a stranded stub in the current OSM walk graph (ESCR-era closures): its only exit is at the far south end \u2014 reaching a point 330m north takes a 5.4km walk",
+            "So the genuine shortest path to the corridor's other endpoint is a 7.75km hairpin (2.6\u00d7 the 3km crow distance); it passed the \u22648km and \u2264600-edge guards and cast 438 net-1 votes along the detour, which then outscored every clean corridor by construction (score = sum of edge nets)",
         ],
         "fixes": [
-            "maps.top_proposal_min_net (nullable INT) → served as topProposalMinNet on the map config only when set",
-            "GraphLayer resolves getCurrentMap()?.topProposalMinNet ?? TOP_PROPOSAL_MIN_NET and threads it through both proposal families",
-            "nyc-proposals rows set to 0 on local/staging/prod (data change; composes with the floor workstream rather than reverting it)",
+            "cast_entry gains DETOUR_RATIO_MAX = 1.8: a routed corridor longer than 1.8\u00d7 its crow distance demotes to the point-kind catch-all pin (every legitimate corridor today is \u2264 1.34)",
+            "Local repair executed: direction=0 cleared the voter's 438 hairpin votes, recast as a 'Street redesign' pin at Delancey &amp; the esplanade; prod repair script staged (scratchpad, needs go-ahead)",
+            "scripts/analyzeZigzag.ts: Node harness that recomputes route proposals from any live API and dumps the top corridor's per-edge nets/blocks/geometry",
         ],
-        "files": ["server/database.py", "client-react/src/map/runtime.ts",
-                  "client-react/src/components/GraphLayer/GraphLayer.tsx"],
-    },
-    {
-        "id": "import",
-        "tag": "TOOLS / INFRA",
-        "title": "Official DOT proposals imported as votes (60 cast) + weekly job",
-        "symptom": "Get every official NYC street-change proposal onto the map, one vote each, and keep it fresh weekly.",
-        "cause": [
-            "nycdotprojects.info is the freshest proposal source (docs/nyc-proposal-data-sources.md) but mixes real project pages with outreach/blog posts under bare slugs",
-            "Route-kind vote types only surface as corridors — a point cast of one would be invisible by design",
-            "Same-named streets across boroughs make naive geocoding cast cross-borough 'corridors' (5th Ave & 57 St hit Sunset Park)",
-        ],
-        "fixes": [
-            "import_to_map.py: plan (geocode via the app's /api/geocode + classify + two-sided junk filter) → cast (public /api/vote, voter dotproj:<sha1(url)>, ip_from_voter)",
-            "Corridor projects route via /api/routes and cast on the edge ids (8 corridors); guards: ≤8km endpoint spread, ≤600 edges, Manhattan-first retry for E/W-numbered cross streets",
-            "Route-kind entries without parseable endpoints demote to point-kind 'Street redesign' so they still pin (52 points)",
-            "weekly_import.py + Dockerfile + terraform/dot-import-job.tf: Cloud Run job dot-proposals-import-prod, scheduler Mondays 07:00 NY, 8-day overlapping window, idempotent",
-            "Shipped via overlay deploy (digest 9ed734b9…) staging-first, then 60 proposals cast on staging and prod (1550 voted edges, 9 vote types)",
-        ],
-        "files": ["tools/nyc_proposals/import_to_map.py", "tools/nyc_proposals/weekly_import.py",
-                  "tools/nyc_proposals/Dockerfile", "terraform/dot-import-job.tf",
-                  "docs/nyc-proposal-data-sources.md"],
+        "files": ["tools/nyc_proposals/import_to_map.py", "client-react/scripts/analyzeZigzag.ts"],
     },
 ]
 
 
 
 VERIFY = [
-    "droast over all 10 Dockerfiles: <strong>exit 0</strong> — one intentional info remains (no EXPOSE on the "
-    "screenshots batch job, which has no port).",
-    "<code>docker build --check</code> (BuildKit lint) on all 10: clean except two pre-existing, by-design "
-    "warnings (ARG BASE_IMAGE deliberately has no default; osrm's amd64 base on an arm64 Mac).",
-    "Real builds: client-react image (validates the explicit COPY set through <code>tsc -b && vite build</code>) "
-    "and server image — both green.",
-    "Prod DB backed up pre-deploy: <code>pg_dump -Fc</code> via the bastion tunnel (:5433) into "
-    "<code>~/city-edit-prod-backups/</code> (27 MB).",
-    "Overlay image built from a CLEAN worktree of HEAD (the working tree carried unrelated in-flight edits to "
-    "GraphLayer.tsx / runtime.ts / database.py that must not ship), base = the serving digest "
-    "<code>f38b2659…</code> — no graph rebuild, no edge-id shift, no resnap.",
-    "Staging-first: new digest deployed to <code>ce-stg-*</code>, verified (/health, graph-votes fields, served "
-    "asset hash), then the SAME digest promoted to <code>desire-path-mapper</code> and re-verified.",
+    "Prod reproduction: <code>analyzeZigzag.ts</code> against cityedit.org rebuilt the exact live proposal set "
+    "(top = <code>#a8b70e11</code>, score 438, 157 blocks, 1 ghost) \u2014 and its component is a simple path: "
+    "<strong>2 endpoints, 0 branch nodes</strong>; block check: <strong>0 blocks</strong> span both rails.",
+    "Router probes: start \u2192 +330m north = <strong>5.4km</strong> route (stranded stub confirmed); "
+    "start \u2192 corridor end = 7.75km vs 3.01km crow (ratio 2.57). All 8 corridor casts ratio-checked: "
+    "culprit 2.57, every other \u2264 1.34 \u2014 the 1.8 threshold separates cleanly.",
+    "Links round-trip: admin POST \u2192 <code>/api/maps/nyc-proposals</code> serves <code>voteTypeLinks</code> \u2192 "
+    "[#1] renders in the pinned card \u2192 click navigates and re-applies the selection (verified in the local app).",
+    "Heavy case: 48 links under 'Street redesign' wrap onto clean sub-lines without squeezing the label or \u00b1 control.",
+    "Local repair verified: 438 votes cleared (rev bump), 'Add traffic calming' total 915 \u2192 477, recast pin "
+    "becomes the block's top proposal.",
+    "<code>npx tsc -b</code> clean; all 327 client unit tests pass; touched Python compiles.",
 ]
 
 CHECKLIST = [
-    "Run <code>droast</code> from the repo root — it should exit 0 with only the screenshots EXPOSE info.",
-    "<code>docker compose build flask nginx</code> — both images should build; check <code>docker compose ps</code> "
-    "shows flask healthy (compose probe) and nginx healthy (new image probe).",
-    "Confirm a context upload shrank: <code>docker build -f Dockerfile.overlay --build-arg BASE_IMAGE=python:3.13-slim .</code> "
-    "should transfer a context WITHOUT server/osm_data or node_modules (watch the “transferring context” line).",
-    "Open the prod map and click a top-proposal diamond — corridor + badges restore (this deploy also shipped "
-    "536fb76's floor/badges/ghost-waypoint work to prod for the first time).",
-    "Check prod logs for a clean boot: <code>gcloud run services logs read desire-path-mapper --limit=50</code>.",
+    "Open <code>http://localhost:3000/m/nyc-proposals?w=40.715500%2C-73.976500&vt=Street+redesign</code>, click the "
+    "pin block \u2014 the card should show 'Street redesign' with [#1]\u2013[#48] links; click one and confirm it deep-links.",
+    "Confirm the hairpin is gone locally: the East River loop no longer paints, and the top route proposal is now "
+    "Linden Boulevard (<code>#128218e4</code>).",
+    "Decide on the prod repair: run <code>repair_prod_hairpin.py</code> (scratchpad) after the usual DB backup \u2014 "
+    "clears the 438 prod hairpin votes and drops the replacement pin.",
+    "Deploy: overlay deploy (backup \u2192 digest \u2192 verify; staging is decommissioned as of 2026-08-01) ships the "
+    "[#n] client rendering + admin endpoint; then run "
+    "<code>set_vote_type_links.py --base &lt;prod&gt; --token &lt;ADMIN_TOKEN&gt;</code> with the plan JSONL.",
+    "Weekly job: next Monday's run now demotes any future detour corridor (watch for <code>ok-detour-pin</code> in its log).",
 ]
 
 
@@ -176,122 +161,109 @@ SYSTEM_COMPONENTS = ["nginx", "Flask API", "OSRM", "Redis", "React / Leaflet cli
 
 # label, summary, changed?
 FILE_CONTEXT = {
-    "docs/url-routing.md": {
-        "on": [],
-        "module": ("Docs · routing", "URL/slug/subdomain architecture + the redirect inventory (source of truth)"),
-        "file": ("url-routing.md", "~215 lines — address space, slug redirects, rename runbook, redirect inventory"),
-        "outline": [
-            ("address space / resolution", "unchanged", False),
-            ("redirect inventory", "nyc-intersections row repointed; nyc-crossings row added", True),
-        ],
-        "blocks": [
-            "nyc-intersections → nyc-proposals (src=qr-poster, chain-flattened) · nyc-crossings → nyc-proposals",
-        ],
-    },
     "server/database.py": {
         "on": ["Flask API"],
-        "module": ("Flask API · persistence", "Postgres schema + maps/vote/redirect queries"),
-        "file": ("database.py", "~1300 LOC — schema init, map CRUD, vote rows, rename/redirect txn"),
+        "module": ("Flask API \u00b7 persistence", "Postgres schema + maps/vote/redirect queries"),
+        "file": ("database.py", "~1350 LOC \u2014 schema init, map CRUD, vote rows, admin setters"),
         "outline": [
-            ("schema init", "ALTER maps ADD top_proposal_min_net INT", True),
-            ("_map_row_to_dict / _MAP_COLUMNS", "unpack + emit topProposalMinNet only when set", True),
-            ("rename_map_slug / votes / redirects", "unchanged", False),
+            ("schema init", "ALTER maps ADD vote_type_links JSONB", True),
+            ("_map_row_to_dict / _MAP_COLUMNS", "unpack + emit voteTypeLinks only when set", True),
+            ("set_map_vote_type_links", "whole-mapping replace with shape validation", True),
+            ("votes / redirects / rename", "unchanged", False),
         ],
         "blocks": [
-            "ALTER TABLE maps ADD COLUMN IF NOT EXISTS top_proposal_min_net INT",
-            "**({\"topProposalMinNet\": v} if v is not None else {}) — absent key = client default",
+            "ALTER TABLE maps ADD COLUMN IF NOT EXISTS vote_type_links JSONB",
+            "voteTypeLinks emitted only when set \u2014 absent key = no links",
+            "set_map_vote_type_links(slug, links): {label: [{url, title?}]}, Json() adapter, rowcount guard",
+        ],
+    },
+    "server/app.py": {
+        "on": ["Flask API"],
+        "module": ("Flask API \u00b7 app", "routes, caches, admin endpoints"),
+        "file": ("app.py", "~2400 LOC \u2014 vote/route/graph endpoints, SWR caches, admin surface"),
+        "outline": [
+            ("invalidate_map_cache", "now also clears the /api/maps SWR cache", True),
+            ("admin endpoints", "+ POST/DELETE /api/admin/maps/<slug>/vote-type-links", True),
+            ("vote / graph-votes / routes", "unchanged", False),
+        ],
+        "blocks": [
+            "_map_get_cache.pop(slug) in invalidate_map_cache \u2014 admin mutations no longer stale for 30s",
+            "admin_set_vote_type_links: X-Admin-Token gated, whole-mapping replace, invalidates on success",
         ],
     },
     "client-react/src/map/runtime.ts": {
         "on": ["React / Leaflet client"],
-        "module": ("React client · map/", "map-config resolution: slug/subdomain → /api/maps → MapConfig"),
-        "file": ("runtime.ts", "~200 LOC — MapConfig type, resolveMapConfig, slugRedirectUrl"),
+        "module": ("React client \u00b7 map/", "map-config resolution: slug/subdomain \u2192 /api/maps \u2192 MapConfig"),
+        "file": ("runtime.ts", "~215 LOC \u2014 MapConfig type, resolveMapConfig, slugRedirectUrl"),
         "outline": [
-            ("MapConfig interface", "gains topProposalMinNet?: number", True),
+            ("VoteTypeLink + MapConfig", "voteTypeLinks?: Record<label, VoteTypeLink[]>", True),
             ("resolveMapConfig / redirects", "unchanged", False),
         ],
         "blocks": [
-            "topProposalMinNet?: number — per-map floor override, absent ⇒ TOP_PROPOSAL_MIN_NET",
+            "VoteTypeLink { url, title? } \u2014 an in-app deep link (/m/<slug>?w=\u2026&vt=\u2026)",
         ],
     },
     "client-react/src/components/GraphLayer/GraphLayer.tsx": {
         "on": ["React / Leaflet client"],
-        "module": ("React client · GraphLayer/", "vote heat, PBTP/RBTP proposal selection, pin rendering"),
-        "file": ("GraphLayer.tsx", "~1700 LOC — topology load, heat paint, proposal recompute jobs"),
+        "module": ("React client \u00b7 GraphLayer/", "vote heat, PBTP/RBTP proposals, proposal cards"),
+        "file": ("GraphLayer.tsx", "~4800 LOC \u2014 topology load, heat paint, ProposalCard"),
         "outline": [
-            ("map flags", "topProposalMinNet resolved from getCurrentMap()", True),
-            ("recomputeTopProposals (PBTP)", "floor now the per-map value", True),
-            ("route-proposal job (RBTP)", "minRouteScore: topProposalMinNet + 1", True),
+            ("ProposalCard", "typeLinks = getCurrentMap()?.voteTypeLinks; [#n] anchors per row", True),
             ("hover/selection/markers", "unchanged", False),
         ],
         "blocks": [
-            "const topProposalMinNet = getCurrentMap()?.topProposalMinNet ?? TOP_PROPOSAL_MIN_NET",
-            "isStationNetwork ? 0 : topProposalMinNet — station networks keep their existing exemption",
-            "minRouteScore: topProposalMinNet + 1 — both families share one bar",
+            "links resolve by row.label \u2014 covers cast-created vote types with no custom_vote_types row",
+            "anchor per link: href=lnk.url, title=lnk.title, stopPropagation on click",
+        ],
+    },
+    "client-react/src/styles/globals.css": {
+        "on": ["React / Leaflet client"],
+        "module": ("React client \u00b7 styles", "global stylesheet (cards, rows, vote controls)"),
+        "file": ("globals.css", "~2300 lines \u2014 proposal card + row styles live around :1950"),
+        "outline": [
+            (".graph-proposal-row", "flex-wrap so the links line can wrap under", True),
+            (".graph-proposal-row-links / -link", "full-width wrapping line, quiet until hover", True),
+        ],
+        "blocks": [
+            "flex: 1 0 100% \u2014 the links line never squeezes the label or the \u00b1 control",
+        ],
+    },
+    "tools/nyc_proposals/set_vote_type_links.py": {
+        "on": ["Flask API"],
+        "module": ("Tools \u00b7 nyc_proposals/", "plan JSONL \u2192 vote-type location links installer"),
+        "file": ("set_vote_type_links.py", "~80 LOC \u2014 stdlib only, --dry-run, admin POST"),
+        "outline": [
+            ("link_for", "route \u2192 w=start;end \u00b7 point \u2192 w=lat,lng \u00b7 title = project title", True),
+            ("main", "group by vote_type, print, POST /api/admin/\u2026/vote-type-links", True),
+        ],
+        "blocks": [
+            "idempotent: the whole mapping is replaced on every run",
         ],
     },
     "tools/nyc_proposals/import_to_map.py": {
-        "on": ["Flask API", "React / Leaflet client"],
-        "module": ("Tools · nyc_proposals/", "official-DOT-proposals → votes pipeline (plan/cast CLI)"),
-        "file": ("import_to_map.py", "~300 LOC — filters, classifier, geocoding, corridor guards, casting"),
-        "outline": [
-            ("SKIP_TITLE / PROJECT_TITLE / looks_like_project", "two-sided junk filter", True),
-            ("CLASSIFY_RULES + POINT_FALLBACK_LABEL", "title → vote type + kind", True),
-            ("CORRIDOR_RE + street_name()", "endpoint parsing, trailing-cap-run street trim", True),
-            ("plan_project / cast_entry", "geocode+guards → /api/routes → /api/vote", True),
-        ],
-        "blocks": [
-            "MAX_CORRIDOR_KM = 8.0 / MAX_CORRIDOR_EDGES = 600 — cross-borough geocode guard",
-            "voter_id = dotproj:<sha1(url)[:16]> + ip_from_voter — idempotent, per-IP-cap-safe",
-            "route-kind without endpoints → 'Street redesign' (point) — stays visible",
-        ],
-    },
-    "tools/nyc_proposals/weekly_import.py": {
         "on": ["Flask API"],
-        "module": ("Tools · nyc_proposals/", "Cloud Run job entrypoint: fetch → plan → cast weekly"),
-        "file": ("weekly_import.py", "~70 LOC — 8-day overlapping window against BASE_URL"),
+        "module": ("Tools \u00b7 nyc_proposals/", "official-DOT-proposals \u2192 votes pipeline (plan/cast CLI)"),
+        "file": ("import_to_map.py", "~360 LOC \u2014 filters, classifier, geocoding, corridor guards, casting"),
         "outline": [
-            ("env config", "BASE_URL / MAP_SLUG / WINDOW_DAYS", True),
-            ("main loop", "changed pages → plan_project → cast_entry, stats", True),
+            ("corridor guards", "+ DETOUR_RATIO_MAX = 1.8 (routed vs crow distance)", True),
+            ("cast_entry", "detour \u2192 demote to point-kind catch-all pin, status ok-detour-pin", True),
+            ("plan / classify / geocode", "unchanged", False),
         ],
         "blocks": [
-            "8-day window + idempotent casts: overlap is safe, missed weeks self-heal on the next run",
+            "routed_km > max(0.4, 1.8 \u00d7 crow_km) \u21d2 the 'corridor' is a hairpin, not the project's street",
+            "demotion mirrors the unparseable-endpoints fallback: vote_type='Street redesign', kind=point, pin at start",
         ],
     },
-    "tools/nyc_proposals/Dockerfile": {
-        "on": ["Flask API"],
-        "module": ("Deploy · tools/nyc_proposals/", "the dot-import job image"),
-        "file": ("Dockerfile", "python:3.13-slim + the three stdlib-only scripts"),
+    "client-react/scripts/analyzeZigzag.ts": {
+        "on": ["React / Leaflet client", "Flask API"],
+        "module": ("Client scripts", "one-off diagnostics driven through the client's own algorithms"),
+        "file": ("analyzeZigzag.ts", "~100 LOC \u2014 vite-node; fetches cfg/topology/votes, recomputes proposals"),
         "outline": [
-            ("image", "no deps to install; HEALTHCHECK NONE (one-shot job)", True),
+            ("proposal recompute", "computeRouteProposals with the map's own floor + kindOf", True),
+            ("dump", "top corridor per-edge nets/blocks/geometry + all voted edges of that type", True),
         ],
         "blocks": [
-            "CMD [\"python\", \"weekly_import.py\"]",
-        ],
-    },
-    "terraform/dot-import-job.tf": {
-        "on": ["Flask API"],
-        "module": ("Terraform · prod", "weekly import job: SA + Cloud Run v2 job + scheduler"),
-        "file": ("dot-import-job.tf", "~100 lines — mirrors the map-screenshot job pattern"),
-        "outline": [
-            ("dot_import_sa + invoker IAM", "job-scoped SA", True),
-            ("google_cloud_run_v2_job.dot_import", "512Mi / 1800s / max_retries 1", True),
-            ("google_cloud_scheduler_job.dot_import", "0 7 * * 1 America/New_York", True),
-        ],
-        "blocks": [
-            "apply with -target only — blanket applies remain a landmine (docs/gcp-deployment.md)",
-        ],
-    },
-    "docs/nyc-proposal-data-sources.md": {
-        "on": [],
-        "module": ("Docs · data sources", "where official street-change proposals live + scrape recipes"),
-        "file": ("nyc-proposal-data-sources.md", "~180 lines — nycdotprojects/SIPs/nyc.gov + import pipeline"),
-        "outline": [
-            ("sources + recipes", "unchanged (authored by the research agent)", False),
-            ("importing proposals as votes", "new section: pipeline, guards, weekly job", True),
-        ],
-        "blocks": [
-            "documents the corridor/point cast split, the floor-0 override, and the weekly job runbook",
+            "API_BASE=https://cityedit.org \u2026 vite-node scripts/analyzeZigzag.ts nyc-proposals",
         ],
     },
 }
