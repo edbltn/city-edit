@@ -340,7 +340,10 @@ body {
   position: relative;
   z-index: var(--z-dropdown);
   flex: 1;
-  min-width: 0;
+  /* Floor, not 0: the label can shrink to nothing (see .mode-btn .mode-label),
+     so this is what keeps the pill from collapsing below icon + caret on very
+     narrow screens, while still letting long map names shrink the track. */
+  min-width: 72px;
 }
 
 .mode-btn {
@@ -367,6 +370,7 @@ body {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .caret-down {
@@ -401,6 +405,24 @@ body {
 
 .mode-label {
   font-weight: 400;
+}
+
+/* Long map names on narrow pills: the label's min-content (its longest word)
+   otherwise floors the flex row and shoves the caret out through the button's
+   right border. Let it shrink, wrap to at most two lines, then ellipsize. */
+.mode-btn .mode-icon-img {
+  flex-shrink: 0;
+}
+
+.mode-btn .mode-label {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  /* Break long words so the clamp truncates by LINE and shows its ellipsis —
+     a horizontally clipped word ("NYC Propo") never gets one. */
+  overflow-wrap: anywhere;
 }
 
 .mode-dropdown {
