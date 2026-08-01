@@ -1,0 +1,1066 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test maps off the prod landing page · staging decommissioned — 2026-08-01</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  @media (max-width: 680px) { h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Test maps off the prod landing page · staging decommissioned</h1>
+    <div class="dateline">2026-08-01 · branch <code>main</code> · commits <code>f27bea6</code>, <code>0724358</code></div>
+  </header>
+
+  <nav class="toc"><a href="#testmaps">Test: Midtown & Test: Central Park</a>
+<a href="#staging">Staging environment torn down</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Two block-pipeline playground maps (“Test: Midtown”, “Test: Central Park”) were showing on the public cityedit.org landing grid — the boot-time preset seeder recreated them in every environment, so row deletion alone could never stick. They are now opt-in via <code>SEED_TEST_MAPS=1</code> and their prod rows and Redis stamps are gone. In the same session the staging environment was decommissioned entirely (not enough users to justify the parity copy): all 14 staging terraform resources destroyed with targeted applies, the staging files removed from the repo, and the deploy runbook rewritten to the direct-to-prod flow — backup → digest → verify.</p>
+
+  
+    <section class="card" id="testmaps">
+      <div class="tag">SERVER / DATA</div>
+      <h2>Test: Midtown & Test: Central Park kept resurfacing on prod</h2>
+      <h3>Symptom</h3>
+      <p>The two block-pipeline playground maps showed as public cards on the cityedit.org landing grid. Deleting their DB rows would not have stuck: they reappear on the next boot.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>seed_presets()</code> upserts every <code>PRESET_MAPS</code> entry unconditionally at startup, in every environment — the playground entries added for the block-pipeline experiments therefore self-heal into any DB, prod included</li>
+<li><code>/api/maps</code> has no hidden/archived filter: every row in <code>maps</code> renders on the landing grid</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The two playground presets are now opt-in: appended to <code>PRESET_MAPS</code> only when <code>SEED_TEST_MAPS=1</code> (never set on prod), so the seeder can no longer recreate them there</li>
+<li>Deleted their <code>maps</code> rows on prod (both had 0 votes, no redirects); purged the two orphaned <code>bver:*</code> Redis keys — the only test-map keys in prod Redis</li>
+<li>Existing local DBs keep their playground rows untouched (the seeder only upserts); a fresh local DB wants <code>SEED_TEST_MAPS=1</code></li>
+<li>Shipped as overlay digest <code>d64843f6…</code> (base: the serving <code>f0bf4262…</code>) → prod rev <code>00121-2h6</code>, after the mandatory DB backup (<code>~/city-edit-prod-backups/20260801-224221/</code>)</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/presets.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="staging">
+      <div class="tag">INFRA / TERRAFORM</div>
+      <h2>Staging environment torn down — deploys now go straight to prod</h2>
+      <h3>Symptom</h3>
+      <p>The ce-stg-* parity twin (shipped 2026-07-23) cost ~$35/mo in Memorystore plus deploy overhead, and traffic never justified the rehearsal step. Decision: prod is the only serving environment.</p>
+      <h3>Root cause</h3>
+      <ul><li>Staging duplicated the state-bearing pieces (own Redis, <code>votes_staging</code> DB, three staging secrets) purely to rehearse digest promotions — value that scales with traffic the site does not have</li></ul>
+      <h3>What changed</h3>
+      <ul><li>All 14 staging resources destroyed via <em>targeted</em> terraform (plan verified <strong>0 add / 0 change / 14 destroy</strong> before applying — a blanket apply remains a prod landmine): Cloud Run service + public IAM, Memorystore <code>desire-path-staging</code>, <code>votes_staging</code> DB + <code>app_staging</code> user (the shared prod Cloud SQL instance untouched), 3 secrets + versions + accessor grants</li>
+<li>Two destroy-order gotchas: <code>votes_staging</code> failed once with “being accessed by other users” (the draining service still held connections — retry after it is gone), and <code>app_staging</code> cannot drop until the database holding its owned objects is dropped</li>
+<li>Repo cleanup: <code>terraform/staging.tf</code> and <code>docs/staging-parity-plan.md</code> deleted (git history keeps them), <code>make stage-refresh</code> removed, <code>staging_*</code> vars stripped from the gitignored tfvars</li>
+<li>Deploy docs + CLAUDE.md rewritten to the direct-to-prod flow: mandatory backup → digest deploy → verify (asset hash + <code>/api/maps</code>)</li>
+<li>The <code>IS_STAGING</code> runtime path (staging ribbon, redirect gate, noindex) stays in code — inert without <code>APP_ENV=staging</code>; removing it would force another image build for dead code</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>terraform/staging.tf</li>
+<li>docs/staging-parity-plan.md</li>
+<li>Makefile</li>
+<li>docs/gcp-deployment.md</li>
+<li>CLAUDE.md</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Targeted destroy plan reviewed before apply: <strong>0 to add, 0 to change, 14 to destroy</strong> — all staging-named; <code>terraform state list</code> afterwards shows no staging resources.</li>
+<li>Staging URL now returns 404 from Google’s frontend; <code>gcloud run services list</code> shows only <code>desire-path-mapper</code> + <code>desire-path-osrm</code> serving City Edit.</li>
+<li><code>https://cityedit.org/api/maps</code> returns 13 maps, zero <code>test-*</code> slugs; the rendered landing grid (checked in Chrome) lists no “Test:” cards.</li>
+<li>Prod Redis scanned for <code>*test-central-park*</code> / <code>*test-midtown*</code>: only two <code>bver:</code> stamps existed, both deleted, rescan clean.</li>
+<li>Smoke on the new digest before promotion: <code>/api/maps/nyc-walkways</code> config, sparse <code>graph-votes</code> 200, landing 200.</li>
+<li><code>npx tsc -b</code> clean; overlay built from a clean worktree of <code>f27bea6</code> (the working tree ships).</li>
+<li>Fresh prod backup taken first: <code>~/city-edit-prod-backups/20260801-224221/</code> (full dump + per-table CSVs + checksums).</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>https://cityedit.org/</code> — the grid should show 13 cards and no “Test: Midtown” / “Test: Central Park” (hard-refresh; the list is cached <code>max-age=60</code>).</li>
+<li>Run <code>cd terraform && terraform state list | grep -i staging</code> — expect no output.</li>
+<li>Confirm next month’s GCP bill drops the <code>desire-path-staging</code> Memorystore line (~$35/mo).</li>
+<li>If you ever want the playground maps locally on a fresh DB, boot Flask with <code>SEED_TEST_MAPS=1</code>.</li>
+<li>Skim <code>docs/gcp-deployment.md#deploying-changes</code> — deploys are now backup → digest → prod, no staging hop; shout if any step reads wrong.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed. The two deleted files (staging.tf, staging-parity-plan.md) show as all-red.</p>
+    
+        <details>
+          <summary><span class="fname">server/presets.py</span>
+            <span class="stat"><span class="d-add">+14</span> / <span class="d-del">-7</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask API · seeding</span>
+        <span class="ctx-sum">canonical preset vote-type lists + preset maps; seed_presets() upserts these at every boot</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">presets.py</span>
+        <span class="ctx-sum">~130 LOC — PRESET_LISTS (bikes/trees/walkways), PRESET_MAPS (the landing-grid presets)</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">PRESET_LISTS</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">PRESET_MAPS</span><span class="ol-sum">playground entries moved out of the unconditional list</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">SEED_TEST_MAPS gate</span><span class="ol-sum">new: appends test-central-park / test-midtown only when the env flag is set</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>import os — the module now reads one env flag</li><li>if os.environ.get(&quot;SEED_TEST_MAPS&quot;, ...) in (&quot;1&quot;,&quot;true&quot;,&quot;yes&quot;): PRESET_MAPS += [test-central-park, test-midtown]</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/presets.py b/server/presets.py</span>
+<span class="d-meta">index 112436a..50fa7a7 100644</span>
+<span class="d-meta">--- a/server/presets.py</span>
+<span class="d-meta">+++ b/server/presets.py</span>
+<span class="d-hunk">@@ -10,6 +10,8 @@ preset list by id or supply their own custom list.</span>
+<span class="d-ctx"> Each vote type: {&quot;label&quot;: str, &quot;icon&quot;: str, &quot;pointType&quot;: &quot;route&quot; | &quot;point&quot;}.</span>
+<span class="d-ctx"> &quot;&quot;&quot;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+import os</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> PRESET_LISTS: dict[str, dict] = {</span>
+<span class="d-ctx">     &quot;bikes&quot;: {</span>
+<span class="d-ctx">         &quot;name&quot;: &quot;Bikes&quot;,</span>
+<span class="d-hunk">@@ -115,11 +117,16 @@ PRESET_MAPS: list[dict] = [</span>
+<span class="d-ctx">      &quot;list_key&quot;: &quot;walkways&quot;, &quot;subdomain&quot;: None,</span>
+<span class="d-ctx">      &quot;subtitle&quot;: &quot;A more walkable Philadelphia&quot;},</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    # Block-pipeline playground (local experiments on tiny test cities).</span>
+<span class="d-del">-    {&quot;slug&quot;: &quot;test-central-park&quot;, &quot;name&quot;: &quot;Test: Central Park&quot;, &quot;city_id&quot;: &quot;test-cp&quot;,</span>
+<span class="d-del">-     &quot;list_key&quot;: &quot;walkways&quot;, &quot;subdomain&quot;: None,</span>
+<span class="d-del">-     &quot;subtitle&quot;: &quot;Block-pipeline playground — Central Park&quot;},</span>
+<span class="d-del">-    {&quot;slug&quot;: &quot;test-midtown&quot;, &quot;name&quot;: &quot;Test: Midtown&quot;, &quot;city_id&quot;: &quot;test-mid&quot;,</span>
+<span class="d-del">-     &quot;list_key&quot;: &quot;walkways&quot;, &quot;subdomain&quot;: None,</span>
+<span class="d-del">-     &quot;subtitle&quot;: &quot;Block-pipeline playground — Midtown&quot;},</span>
+<span class="d-ctx"> ]</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Block-pipeline playground (local experiments on tiny test cities). Opt-in via</span>
+<span class="d-add">+# SEED_TEST_MAPS=1 so seed_presets() never recreates them on prod/staging.</span>
+<span class="d-add">+if os.environ.get(&quot;SEED_TEST_MAPS&quot;, &quot;&quot;).strip().lower() in (&quot;1&quot;, &quot;true&quot;, &quot;yes&quot;):</span>
+<span class="d-add">+    PRESET_MAPS += [</span>
+<span class="d-add">+        {&quot;slug&quot;: &quot;test-central-park&quot;, &quot;name&quot;: &quot;Test: Central Park&quot;, &quot;city_id&quot;: &quot;test-cp&quot;,</span>
+<span class="d-add">+         &quot;list_key&quot;: &quot;walkways&quot;, &quot;subdomain&quot;: None,</span>
+<span class="d-add">+         &quot;subtitle&quot;: &quot;Block-pipeline playground — Central Park&quot;},</span>
+<span class="d-add">+        {&quot;slug&quot;: &quot;test-midtown&quot;, &quot;name&quot;: &quot;Test: Midtown&quot;, &quot;city_id&quot;: &quot;test-mid&quot;,</span>
+<span class="d-add">+         &quot;list_key&quot;: &quot;walkways&quot;, &quot;subdomain&quot;: None,</span>
+<span class="d-add">+         &quot;subtitle&quot;: &quot;Block-pipeline playground — Midtown&quot;},</span>
+<span class="d-add">+    ]</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">CLAUDE.md</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · agent instructions</span>
+        <span class="ctx-sum">project instructions checked into the repo</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">CLAUDE.md</span>
+        <span class="ctx-sum">~470 lines — architecture, workflows, style guides</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Deploy STAGING-FIRST bullet</span><span class="ol-sum">→ deploy straight to prod (backup → digest → verify)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">everything else</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>the staging-first instruction replaced; backup-before-deploy stays mandatory</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/CLAUDE.md b/CLAUDE.md</span>
+<span class="d-meta">index 119c801..f38196a 100644</span>
+<span class="d-meta">--- a/CLAUDE.md</span>
+<span class="d-meta">+++ b/CLAUDE.md</span>
+<span class="d-hunk">@@ -12,7 +12,7 @@ Active workstream (full report with diffs: `changelog/2026-06-14-caching-concurr</span>
+<span class="d-ctx"> - **Python dependencies**: ALWAYS install and manage Python packages with `uv pip` — never bare `pip`, `pip3`, `python -m pip`, `poetry`, `conda`, or `easy_install`. Add a package by editing `requirements.in`, recompile with `uv pip compile requirements.in -o requirements.txt`, then `uv pip install -r requirements.txt`. For one-off installs use `uv pip install &lt;pkg&gt;`. This applies everywhere: local venvs, scripts, and Dockerfiles.</span>
+<span class="d-ctx"> - **gcloud commands**: Run gcloud commands directly (e.g. `gcloud builds submit`, `gcloud run services logs read`, etc.) without asking the user.</span>
+<span class="d-ctx"> - **ALWAYS back up the prod DB locally before deploying** — every deploy, no exceptions. Take a fresh `pg_dump` snapshot of `desire-path-votes-prod` into `~/city-edit-prod-backups/&lt;UTC-timestamp&gt;/` *before* running any deploy command (Cloud Build, `terraform apply`, or `gcloud run services update`). Procedure: [docs/gcp-deployment.md#database-access--backups](docs/gcp-deployment.md#database-access--backups).</span>
+<span class="d-del">-- **Deploy STAGING-FIRST**: push each new image digest to the staging service (`ce-stg-&lt;token&gt;`, `APP_ENV=staging`, own Redis + `votes_staging` DB), verify there, then promote the *same digest* to `desire-path-mapper`. The staging URL is a secret — never commit or paste it into committed files; look it up via `terraform output -raw staging_url`. Data refresh: `make stage-refresh`. Full workflow: [docs/gcp-deployment.md#staging-deploy-here-first](docs/gcp-deployment.md#staging-deploy-here-first).</span>
+<span class="d-add">+- **Deploy straight to prod (staging decommissioned 2026-08-01)**: build the image, then push the digest to `desire-path-mapper` — after the mandatory DB backup. There is no staging environment anymore (torn down for lack of traffic; `terraform/staging.tf` lives in git history if it ever needs resurrecting). Verify on prod after deploy: served-asset hash + `curl https://cityedit.org/api/maps`. Full workflow: [docs/gcp-deployment.md#deploying-changes](docs/gcp-deployment.md#deploying-changes).</span>
+<span class="d-ctx"> - **docker commands**: Run docker commands directly (e.g. `docker compose up --build -d`, `docker compose logs`, etc.) without asking the user.</span>
+<span class="d-ctx"> - **Commit every completed request**: whenever one of my messages results in code changes, land those changes as a git commit once they&#x27;re done and verified — no need to ask. Git is my precise log of everything you changed and why. Rules:</span>
+<span class="d-ctx">   - One commit per completed request; if the work naturally splits into independent pieces (e.g. a server fix + an unrelated doc cleanup), several logical commits are better than one blob.</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">Makefile</span>
+            <span class="stat"><span class="d-add">+0</span> / <span class="d-del">-16</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Tooling · dev loop</span>
+        <span class="ctx-sum">deps/dev/test/deploy targets</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Makefile</span>
+        <span class="ctx-sum">~150 lines — docker deps, dev stack, tests, deploy helpers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">deps / dev / test targets</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">stage-refresh</span><span class="ol-sum">deleted — restored prod dumps into votes_staging over two bastion tunnels</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>stage-refresh target + its tunnel preflights removed</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/Makefile b/Makefile</span>
+<span class="d-meta">index 4ef78d0..aac543b 100644</span>
+<span class="d-meta">--- a/Makefile</span>
+<span class="d-meta">+++ b/Makefile</span>
+<span class="d-hunk">@@ -124,22 +124,6 @@ deploy:</span>
+<span class="d-ctx"> test-cloud:</span>
+<span class="d-ctx"> 	./scripts/test-cloud.sh</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# Staging data refresh (docs/staging-parity-plan.md): restore the newest prod</span>
+<span class="d-del">-# backup into votes_staging, flush staging Redis, and let the app self-heal</span>
+<span class="d-del">-# (_hydrate_map_redis replays Postgres → Redis on each map&#x27;s first request).</span>
+<span class="d-del">-# Needs TWO bastion tunnels open first (see docs/gcp-deployment.md#staging):</span>
+<span class="d-del">-#   :5433 → Cloud SQL private IP   (same tunnel as prod DB access)</span>
+<span class="d-del">-#   :6380 → staging Redis host     (terraform output staging_redis_host)</span>
+<span class="d-del">-stage-refresh:</span>
+<span class="d-del">-	@lsof -ti :5433 &gt;/dev/null || { echo &quot;no tunnel on :5433 — open the bastion Cloud SQL tunnel first&quot;; exit 1; }</span>
+<span class="d-del">-	@lsof -ti :6380 &gt;/dev/null || { echo &quot;no tunnel on :6380 — open the bastion staging-Redis tunnel first&quot;; exit 1; }</span>
+<span class="d-del">-	@DUMP=$$(ls -t ~/city-edit-prod-backups/*/prod-full.dump | head -1); \</span>
+<span class="d-del">-	STG_URL=$$(gcloud secrets versions access latest --secret=database-url-staging --project=$(PROJECT_ID) | sed -E &#x27;s#@[^/]+/#@localhost:5433/#&#x27;); \</span>
+<span class="d-del">-	echo &quot;Restoring $$DUMP into votes_staging...&quot;; \</span>
+<span class="d-del">-	pg_restore --clean --if-exists --no-owner --no-privileges -d &quot;$$STG_URL&quot; &quot;$$DUMP&quot; &amp;&amp; \</span>
+<span class="d-del">-	redis-cli -p 6380 FLUSHALL &amp;&amp; \</span>
+<span class="d-del">-	echo &quot;Seeded. First request per map rehydrates its Redis hash from Postgres.&quot;</span>
+<span class="d-del">-</span>
+<span class="d-ctx"> # Unit/integration tests (offline). Frontend: vitest. Backend: pytest (fakeredis,</span>
+<span class="d-ctx"> # no DB/Redis needed for the unit suite).</span>
+<span class="d-ctx"> test: test-frontend test-backend</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">docs/gcp-deployment.md</span>
+            <span class="stat"><span class="d-add">+8</span> / <span class="d-del">-59</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · deployment</span>
+        <span class="ctx-sum">the prod GCP runbook: deploys, secrets, DB access, backups</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">gcp-deployment.md</span>
+        <span class="ctx-sum">~230 lines — deploy options, digest workflow, tunnels, snapshot recipe</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">Deploying Changes intro</span><span class="ol-sum">staging-first note → decommission note + direct-to-prod rule</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Staging (deploy here FIRST) section</span><span class="ol-sum">deleted wholesale</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Digest promotion workflow</span><span class="ol-sum">rewritten: build → backup → prod digest → asset check</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Environment &amp; Secrets / DB access &amp; backups</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>decommission note dated 2026-08-01 with git-history pointers for resurrection</li><li>3-step prod digest workflow replaces the 4-step staging promotion</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/gcp-deployment.md b/docs/gcp-deployment.md</span>
+<span class="d-meta">index 007b0d5..3b1a7dd 100644</span>
+<span class="d-meta">--- a/docs/gcp-deployment.md</span>
+<span class="d-meta">+++ b/docs/gcp-deployment.md</span>
+<span class="d-hunk">@@ -45,8 +45,10 @@ gcloud config set project google-mpf-ywspom2sxeey</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ## Deploying Changes</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-&gt; **Deploy to [staging](#staging-deploy-here-first) first**, verify, then</span>
+<span class="d-del">-&gt; promote the *same image digest* to prod.</span>
+<span class="d-add">+&gt; Staging was decommissioned 2026-08-01 (not enough traffic to justify the</span>
+<span class="d-add">+&gt; parity copy — see git history for `terraform/staging.tf` /</span>
+<span class="d-add">+&gt; `docs/staging-parity-plan.md` if it ever needs resurrecting). Deploys go</span>
+<span class="d-add">+&gt; straight to prod: **backup first**, deploy by digest, then verify.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> &gt; ## ⚠️ ALWAYS back up the prod DB locally before deploying.</span>
+<span class="d-ctx"> &gt;</span>
+<span class="d-hunk">@@ -95,72 +97,19 @@ gcloud run services update desire-path-mapper \</span>
+<span class="d-ctx">   --image=us-central1-docker.pkg.dev/google-mpf-ywspom2sxeey/desire-path-mapper/app:latest</span>
+<span class="d-ctx"> ```</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-## Staging (deploy here FIRST)</span>
+<span class="d-del">-</span>
+<span class="d-del">-Full plan/rationale: [staging-parity-plan.md](staging-parity-plan.md). Staging</span>
+<span class="d-del">-is a parity copy of the app service — same image digests, same 8Gi/4CPU shape —</span>
+<span class="d-del">-with its own Redis (`desire-path-staging`), its own database (`votes_staging`,</span>
+<span class="d-del">-co-located on the prod Cloud SQL instance), and staging-scoped</span>
+<span class="d-del">-`admin-token-staging` / `secret-key-staging` secrets. OSRM, the previews</span>
+<span class="d-del">-bucket, and the image registry are shared. It runs with `APP_ENV=staging`,</span>
+<span class="d-del">-which gates the client&#x27;s canonical-subdomain redirect (otherwise testers</span>
+<span class="d-del">-bounce to prod), shows the STAGING ribbon, and noindexes every response.</span>
+<span class="d-del">-</span>
+<span class="d-del">-**The URL is the secret.** The service name carries a random token</span>
+<span class="d-del">-(`ce-stg-&lt;token&gt;`), so its `run.app` URL is unguessable and — because run.app</span>
+<span class="d-del">-uses Google&#x27;s shared wildcard cert — never published in Certificate</span>
+<span class="d-del">-Transparency logs. Never commit or publicly paste it. Look it up with:</span>
+<span class="d-add">+### Digest promotion workflow (code-only overlay deploys)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> ```bash</span>
+<span class="d-del">-cd terraform &amp;&amp; terraform output -raw staging_url    # or:</span>
+<span class="d-del">-gcloud run services list --project=google-mpf-ywspom2sxeey --format=&#x27;value(URL)&#x27; | grep ce-stg</span>
+<span class="d-del">-```</span>
+<span class="d-del">-</span>
+<span class="d-del">-To rotate a leaked URL: change `staging_token` in `terraform.tfvars`, targeted</span>
+<span class="d-del">-apply (creates the new service), delete the old one.</span>
+<span class="d-del">-</span>
+<span class="d-del">-### Digest promotion workflow</span>
+<span class="d-del">-</span>
+<span class="d-del">-```bash</span>
+<span class="d-del">-# 1. Build the overlay image (unchanged, ~2-3 min) → note the digest D</span>
+<span class="d-add">+# 1. Build the overlay image (~2-3 min) → note the digest D</span>
+<span class="d-ctx"> gcloud builds submit --config=cloudbuild.overlay.yaml ...</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# 2. Deploy D to STAGING and verify there (load waterfall, smoke vote,</span>
+<span class="d-del">-#    [MAPLOAD] beacons filtered to the staging service name)</span>
+<span class="d-del">-gcloud run services update ce-stg-&lt;token&gt; --region=us-central1 \</span>
+<span class="d-del">-  --project=google-mpf-ywspom2sxeey --image=&lt;registry&gt;/app@sha256:D</span>
+<span class="d-del">-</span>
+<span class="d-del">-# 3. BACKUP PROD DB (mandatory, unchanged), then promote the SAME digest</span>
+<span class="d-add">+# 2. BACKUP PROD DB (mandatory), then deploy the digest to prod</span>
+<span class="d-ctx"> gcloud run services update desire-path-mapper --region=us-central1 \</span>
+<span class="d-ctx">   --project=google-mpf-ywspom2sxeey --image=&lt;registry&gt;/app@sha256:D</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# 4. Served-asset-hash check on prod (unchanged)</span>
+<span class="d-add">+# 3. Served-asset-hash check on prod</span>
+<span class="d-ctx"> ```</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-Because staging runs the exact digest, graph/edge-id parity is automatic; a</span>
+<span class="d-del">-full-bake deploy (graph changes) rehearses its resnap on staging&#x27;s DB the same</span>
+<span class="d-del">-way.</span>
+<span class="d-del">-</span>
+<span class="d-del">-### Seeding / refreshing staging data</span>
+<span class="d-del">-</span>
+<span class="d-del">-`make stage-refresh` restores the newest `~/city-edit-prod-backups/*/prod-full.dump`</span>
+<span class="d-del">-into `votes_staging` and flushes staging Redis (the app then self-heals: each</span>
+<span class="d-del">-map&#x27;s first request replays Postgres → Redis via `_hydrate_map_redis`). It</span>
+<span class="d-del">-needs two bastion tunnels open:</span>
+<span class="d-del">-</span>
+<span class="d-del">-```bash</span>
+<span class="d-del">-# :5433 → Cloud SQL (same tunnel as prod DB access — see below)</span>
+<span class="d-del">-# :6380 → staging Redis (host: cd terraform &amp;&amp; terraform output -raw staging_redis_host)</span>
+<span class="d-del">-gcloud compute ssh bastion-prod --zone=us-central1-a \</span>
+<span class="d-del">-  --project=google-mpf-ywspom2sxeey --tunnel-through-iap \</span>
+<span class="d-del">-  --ssh-flag=&quot;-N&quot; --ssh-flag=&quot;-L 5433:10.39.0.3:5432&quot; \</span>
+<span class="d-del">-  --ssh-flag=&quot;-L 6380:&lt;staging-redis-host&gt;:6379&quot;</span>
+<span class="d-del">-```</span>
+<span class="d-del">-</span>
+<span class="d-del">-The staging terraform lives in `terraform/staging.tf` — apply it **only with</span>
+<span class="d-del">-`-target`** on staging resources, and only after the plan shows adds-only (the</span>
+<span class="d-del">-blanket-apply landmines below still stand).</span>
+<span class="d-del">-</span>
+<span class="d-ctx"> ## Environment &amp; Secrets</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> App secrets are managed in Secret Manager and wired into the Cloud Run service by</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">docs/staging-parity-plan.md</span>
+            <span class="stat"><span class="d-add">+0</span> / <span class="d-del">-203</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill ">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · infra</span>
+        <span class="ctx-sum">the staging design/rationale doc — DELETED with the environment</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">staging-parity-plan.md</span>
+        <span class="ctx-sum">~260 lines — parity goals, CT-log URL rationale, seeding plan</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">whole document</span><span class="ol-sum">deleted; git history keeps the design if staging is ever resurrected</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>removed alongside terraform/staging.tf so no doc points at infrastructure that does not exist</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/staging-parity-plan.md b/docs/staging-parity-plan.md</span>
+<span class="d-meta">deleted file mode 100644</span>
+<span class="d-meta">index b3e8137..0000000</span>
+<span class="d-meta">--- a/docs/staging-parity-plan.md</span>
+<span class="d-meta">+++ /dev/null</span>
+<span class="d-hunk">@@ -1,203 +0,0 @@</span>
+<span class="d-del">-# Staging ↔ Prod Parity — Plan</span>
+<span class="d-del">-</span>
+<span class="d-del">-*Drafted 2026-07-23. Status: **EXECUTED** the same day — stack provisioned</span>
+<span class="d-del">-(terraform/staging.tf), seeded, verified, and the first digest promoted</span>
+<span class="d-del">-staging→prod (rev 00107). Live workflow docs:</span>
+<span class="d-del">-[gcp-deployment.md#staging-deploy-here-first](gcp-deployment.md#staging-deploy-here-first);</span>
+<span class="d-del">-changelog: `changelog/2026-07-23-staging-parity.html`.*</span>
+<span class="d-del">-</span>
+<span class="d-del">-## Goal</span>
+<span class="d-del">-</span>
+<span class="d-del">-A always-on staging deployment of City Edit that:</span>
+<span class="d-del">-</span>
+<span class="d-del">-1. **Matches prod by construction** — same container image (same baked graphs,</span>
+<span class="d-del">-   PMTiles, venv), same service shape, its own copy of prod-like data — so</span>
+<span class="d-del">-   &quot;worked on staging&quot; actually predicts &quot;works on prod&quot;.</span>
+<span class="d-del">-2. Is reachable at an **unguessable URL** we can hand to testers, with no</span>
+<span class="d-del">-   Google-account ceremony.</span>
+<span class="d-del">-3. Becomes the **first stop for every deploy**: build → deploy to staging →</span>
+<span class="d-del">-   verify → promote the *same image digest* to prod. No more first-visitor</span>
+<span class="d-del">-   experiments on prod (today&#x27;s cold-load work was measured live on prod</span>
+<span class="d-del">-   because there was nowhere else to measure it).</span>
+<span class="d-del">-</span>
+<span class="d-del">-## Current prod topology (what we&#x27;re mirroring)</span>
+<span class="d-del">-</span>
+<span class="d-del">-| Piece | Prod resource | Notes |</span>
+<span class="d-del">-|---|---|---|</span>
+<span class="d-del">-| App | Cloud Run `desire-path-mapper` (8Gi/4CPU, minScale 1, maxScale 8) | nginx + Flask in one container; graphs baked into image |</span>
+<span class="d-del">-| Routing | Cloud Run `desire-path-osrm` | Stateless; called with a Cloud Run ID token (audience = its URL) |</span>
+<span class="d-del">-| Votes (serving) | Memorystore Redis 1GB (`allkeys-lru`) | The heatmap serves ONLY from Redis |</span>
+<span class="d-del">-| Votes (durable) | Cloud SQL `desire-path-votes-prod` (private IP, via VPC connector) | `_populate_redis` hydrates Redis from Postgres at boot |</span>
+<span class="d-del">-| Secrets | Secret Manager: `database-url-prod`, `admin-token`, `secret-key` | secretRef&#x27;d into the service |</span>
+<span class="d-del">-| Previews | Private GCS bucket, Flask proxies `/previews/` | |</span>
+<span class="d-del">-| Domains | `cityedit.org` + per-map subdomains via Cloud Run domain mappings | |</span>
+<span class="d-del">-</span>
+<span class="d-del">-## Proposed staging topology</span>
+<span class="d-del">-</span>
+<span class="d-del">-**Duplicate** (state-bearing or config-bearing — must not be shared):</span>
+<span class="d-del">-</span>
+<span class="d-del">-- **Cloud Run app service** — name carries the unguessable token (see below),</span>
+<span class="d-del">-  e.g. `ce-stg-&lt;token&gt;`. Same image reference, same env shape, same 8Gi/4CPU</span>
+<span class="d-del">-  (parity beats savings here — memory behavior is exactly what staging must</span>
+<span class="d-del">-  reproduce), but `minScale = 0` and `maxScale = 2` (cost: ~$0 idle; the</span>
+<span class="d-del">-  ~5-min prewarm window after cold start is acceptable for staging and is</span>
+<span class="d-del">-  itself a thing we want to observe).</span>
+<span class="d-del">-- **Redis** — second Memorystore Basic 1GB instance (`redis-staging`). The</span>
+<span class="d-del">-  codebase does not namespace keys per environment, so sharing prod Redis is</span>
+<span class="d-del">-  off the table. (~$35/mo — the main recurring cost.)</span>
+<span class="d-del">-- **Database** — a separate *database* `votes_staging` + user on the **same**</span>
+<span class="d-del">-  Cloud SQL instance, with its own secret `database-url-staging`. A second</span>
+<span class="d-del">-  db-f1-micro instance (~$10/mo) is the upgrade path if staging load ever</span>
+<span class="d-del">-  visibly disturbs prod queries — start cheap, the instance is idle most of</span>
+<span class="d-del">-  the day. Seeded from our existing `pg_dump` snapshots (see below).</span>
+<span class="d-del">-- **ADMIN_TOKEN / SECRET_KEY** — staging-specific secrets, so a leaked</span>
+<span class="d-del">-  staging token can&#x27;t administer prod.</span>
+<span class="d-del">-</span>
+<span class="d-del">-**Share** (stateless or read-only):</span>
+<span class="d-del">-</span>
+<span class="d-del">-- **OSRM service** — routing is stateless and read-only; grant the staging</span>
+<span class="d-del">-  service account `run.invoker` on `desire-path-osrm`. Fork it later only if</span>
+<span class="d-del">-  we start testing profile/dataset changes on staging.</span>
+<span class="d-del">-- **Previews bucket** — read-only from staging&#x27;s point of view.</span>
+<span class="d-del">-- **Artifact Registry image** — the whole point: staging runs the digest prod</span>
+<span class="d-del">-  will run next.</span>
+<span class="d-del">-</span>
+<span class="d-del">-**Explicitly out of scope for staging:** the screenshot job, OSM refresh</span>
+<span class="d-del">-scheduler, domain mappings for map subdomains, and alerting (see Monitoring).</span>
+<span class="d-del">-</span>
+<span class="d-del">-## The unguessable URL</span>
+<span class="d-del">-</span>
+<span class="d-del">-Options, with the honest trade-offs:</span>
+<span class="d-del">-</span>
+<span class="d-del">-1. **Randomized Cloud Run service name → default run.app URL** ⭐ recommended</span>
+<span class="d-del">-   first step. Name the service with a random token, e.g. `ce-stg-x7k2m9q4` →</span>
+<span class="d-del">-   `https://ce-stg-x7k2m9q4-katze52zaq-uc.a.run.app`. The TLS cert is Google&#x27;s</span>
+<span class="d-del">-   shared `*.a.run.app` wildcard, so **nothing about the hostname is ever</span>
+<span class="d-del">-   published**. Zero DNS/cert work. Caveat: the `katze52zaq` project hash is</span>
+<span class="d-del">-   shared with prod&#x27;s run.app URL, so treat the random token as the secret —</span>
+<span class="d-del">-   16+ chars of entropy in the service name.</span>
+<span class="d-del">-2. **`stg-&lt;token&gt;.cityedit.org` domain mapping** — prettier, but a Google-</span>
+<span class="d-del">-   managed certificate is issued per hostname and **Certificate Transparency</span>
+<span class="d-del">-   logs publish every issued hostname**. Anyone watching CT for</span>
+<span class="d-del">-   `%.cityedit.org` learns the &quot;unguessable&quot; name within hours. Only viable</span>
+<span class="d-del">-   with a wildcard cert (`*.cityedit.org`) on a load balancer — real money and</span>
+<span class="d-del">-   infra for a staging nicety. Skip unless/until we want it.</span>
+<span class="d-del">-3. **Belt-and-suspenders app gate** (optional layer on top of 1): a</span>
+<span class="d-del">-   `STAGING_ACCESS_TOKEN` env — nginx or Flask middleware 404s every request</span>
+<span class="d-del">-   unless a `?key=` param or cookie matches, and the param sets the cookie.</span>
+<span class="d-del">-   The shareable link becomes `https://…/?key=&lt;token&gt;`. Cheap to add if we</span>
+<span class="d-del">-   ever suspect the URL leaked; not needed day one.</span>
+<span class="d-del">-</span>
+<span class="d-del">-Recommendation: **option 1 now**, option 3 in the back pocket. URL rotation =</span>
+<span class="d-del">-deploy under a new random name and delete the old service (10 minutes).</span>
+<span class="d-del">-</span>
+<span class="d-del">-## Code changes needed (small but real)</span>
+<span class="d-del">-</span>
+<span class="d-del">-1. **Subdomain redirect must be gated.** `MapApp` redirects any map with a</span>
+<span class="d-del">-   canonical subdomain to `&lt;subdomain&gt;.cityedit.org` — on staging, opening</span>
+<span class="d-del">-   `/m/nyc-bikes` would bounce the tester to **prod**. Add an env-driven flag</span>
+<span class="d-del">-   (e.g. server injects `staging: true` into `/api/maps/&lt;slug&gt;` config or an</span>
+<span class="d-del">-   `APP_ENV=staging` reflected in a `/api/env` or the existing config</span>
+<span class="d-del">-   endpoint) and skip `subdomainRedirectUrl` when set. This is the one change</span>
+<span class="d-del">-   that touches app logic; everything else is infra.</span>
+<span class="d-del">-2. **`X-Robots-Tag: noindex, nofollow`** on every staging response (nginx</span>
+<span class="d-del">-   `add_header` behind the same env flag) — an unguessable URL stays</span>
+<span class="d-del">-   unguessable only if it never gets indexed after an accidental link.</span>
+<span class="d-del">-3. **Telemetry separation** — free by default: the `cityedit_map_load_ms`</span>
+<span class="d-del">-   metric and alert filters all pin `resource.labels.service_name=</span>
+<span class="d-del">-   &quot;desire-path-mapper&quot;`, so staging beacons/logs won&#x27;t pollute prod</span>
+<span class="d-del">-   dashboards. Optionally add a staging row to the dashboard later.</span>
+<span class="d-del">-4. **`FLASK_ENV`-style banner (optional):** a small &quot;STAGING&quot; ribbon in the</span>
+<span class="d-del">-   client when the env flag is set, so screenshots are never mistaken for</span>
+<span class="d-del">-   prod.</span>
+<span class="d-del">-</span>
+<span class="d-del">-## Terraform strategy (respecting the landmines)</span>
+<span class="d-del">-</span>
+<span class="d-del">-The known landmines stand: a blanket `terraform apply` wipes</span>
+<span class="d-del">-`ADMIN_TOKEN`/`SECRET_KEY` secret versions and tries to create the ebikes</span>
+<span class="d-del">-domain mapping — **app deploys go through gcloud, never `terraform apply`**</span>
+<span class="d-del">-(docs/gcp-deployment.md, memory: prod-deploy-landmines).</span>
+<span class="d-del">-</span>
+<span class="d-del">-- Add staging resources **additively** in a new `terraform/staging.tf`:</span>
+<span class="d-del">-  `google_redis_instance.cache_staging`, `google_sql_database.votes_staging`,</span>
+<span class="d-del">-  `google_sql_user.staging`, `google_secret_manager_secret.database_url_staging`</span>
+<span class="d-del">-  (+ version + IAM), `google_secret_manager_secret.admin_token_staging`,</span>
+<span class="d-del">-  `secret_key_staging`, `google_cloud_run_service.app_staging` (with</span>
+<span class="d-del">-  `lifecycle { ignore_changes = [template[0].spec[0].containers[0].image] }`</span>
+<span class="d-del">-  so gcloud-driven image updates don&#x27;t fight the plan), IAM: public invoker on</span>
+<span class="d-del">-  staging app, staging SA invoker on OSRM.</span>
+<span class="d-del">-- Apply **only with `-target`** on the new resources, exactly like the</span>
+<span class="d-del">-  monitoring workflow already documents. Verify the plan shows *only adds*</span>
+<span class="d-del">-  before applying — if it wants to touch any existing prod resource, stop.</span>
+<span class="d-del">-- The service name token: generate once (`openssl rand -hex 8`), store it in</span>
+<span class="d-del">-  `terraform.tfvars` (`staging_token = &quot;…&quot;`), never commit the tfvars value.</span>
+<span class="d-del">-</span>
+<span class="d-del">-## Data seeding &amp; refresh</span>
+<span class="d-del">-</span>
+<span class="d-del">-- **Seed:** `pg_restore` the newest `~/city-edit-prod-backups/&lt;ts&gt;/prod-full.dump`</span>
+<span class="d-del">-  into `votes_staging` through the existing bastion tunnel (localhost:5433 —</span>
+<span class="d-del">-  same instance, different database name, staging creds). On first boot,</span>
+<span class="d-del">-  staging&#x27;s `_populate_redis` hydrates its own Redis from it. No resnap needed</span>
+<span class="d-del">-  as long as staging runs the same image (same graphs → same edge ids) — the</span>
+<span class="d-del">-  invariant that already powers the overlay-deploy flow.</span>
+<span class="d-del">-- **Refresh cadence:** manual to start — a `make stage-refresh` target that</span>
+<span class="d-del">-  (1) takes the routine pre-deploy prod dump we already make, (2) restores it</span>
+<span class="d-del">-  to `votes_staging`, (3) `redis-cli -h &lt;staging-redis&gt; FLUSHALL` via the</span>
+<span class="d-del">-  bastion + restart the staging service (or PUBLISH `graph_reload`) so it</span>
+<span class="d-del">-  rehydrates. Automate on a weekly Cloud Scheduler job only if manual gets</span>
+<span class="d-del">-  tedious.</span>
+<span class="d-del">-- The dump contains no real PII (device ids are hashes, voter ids are UUIDs),</span>
+<span class="d-del">-  so no scrubbing pass is required.</span>
+<span class="d-del">-</span>
+<span class="d-del">-## The new deploy workflow (the parity payoff)</span>
+<span class="d-del">-</span>
+<span class="d-del">-```</span>
+<span class="d-del">-1. cloudbuild.overlay.yaml → app:latest (digest D)          (~2-3 min, unchanged)</span>
+<span class="d-del">-2. gcloud run services update ce-stg-&lt;token&gt; --image=D       (staging first)</span>
+<span class="d-del">-3. Verify on staging: measure_load waterfall, cityedit.dumpState(),</span>
+<span class="d-del">-   smoke-vote on a staging map, [MAPLOAD] beacon in staging logs</span>
+<span class="d-del">-4. Fresh prod DB backup (unchanged, mandatory)</span>
+<span class="d-del">-5. gcloud run services update desire-path-mapper --image=D   (the SAME digest)</span>
+<span class="d-del">-6. Served-asset-hash check on prod (unchanged)</span>
+<span class="d-del">-```</span>
+<span class="d-del">-</span>
+<span class="d-del">-Step 2-3 replace &quot;measure it live on prod and hope&quot; — the exact digest gets a</span>
+<span class="d-del">-dress rehearsal including the post-deploy prewarm window. Full-bake deploys</span>
+<span class="d-del">-(graph changes) follow the same shape; because staging shares the image,</span>
+<span class="d-del">-graph/edge-id parity is automatic, and the resnap runbook applies to staging&#x27;s</span>
+<span class="d-del">-DB the same way it applies to prod&#x27;s.</span>
+<span class="d-del">-</span>
+<span class="d-del">-## Costs</span>
+<span class="d-del">-</span>
+<span class="d-del">-| Item | ~$/mo |</span>
+<span class="d-del">-|---|---|</span>
+<span class="d-del">-| Memorystore Basic 1GB (staging) | ~35 |</span>
+<span class="d-del">-| Cloud Run staging app (minScale 0, light use) | ~1-5 |</span>
+<span class="d-del">-| Extra database on existing Cloud SQL instance | 0 |</span>
+<span class="d-del">-| Shared OSRM / previews / registry | 0 |</span>
+<span class="d-del">-| **Total** | **~$40/mo** |</span>
+<span class="d-del">-</span>
+<span class="d-del">-## Rollout order</span>
+<span class="d-del">-</span>
+<span class="d-del">-1. **Code:** staging env flag (redirect gate + noindex + optional ribbon) —</span>
+<span class="d-del">-   deployable to prod safely ahead of time (flag off = no behavior change).</span>
+<span class="d-del">-2. **Terraform:** `staging.tf`, targeted apply (Redis first — it takes the</span>
+<span class="d-del">-   longest to provision), then DB/user/secrets, then the Cloud Run service.</span>
+<span class="d-del">-3. **Seed:** restore latest dump → `votes_staging`; boot staging; confirm</span>
+<span class="d-del">-   hydration (`/api/graph-votes` non-empty, legend populated).</span>
+<span class="d-del">-4. **Verify parity:** run the load-measurement harness against staging; numbers</span>
+<span class="d-del">-   should match prod&#x27;s post-00105 profile (~2.5s cold / ~1s warm).</span>
+<span class="d-del">-5. **Adopt the workflow:** update docs/gcp-deployment.md + CLAUDE.md deploy</span>
+<span class="d-del">-   instructions to make staging-first promotion the documented path.</span>
+<span class="d-del">-6. Share `https://ce-stg-&lt;token&gt;-….run.app` with testers.</span>
+<span class="d-del">-</span>
+<span class="d-del">-## Open questions for Eric</span>
+<span class="d-del">-</span>
+<span class="d-del">-- OK to co-locate `votes_staging` on the prod Cloud SQL instance to start</span>
+<span class="d-del">-  (upgrade to a separate instance only if staging load shows up in prod)?</span>
+<span class="d-del">-- Is ~$40/mo acceptable for the always-available staging Redis? (The</span>
+<span class="d-del">-  alternative — provision/teardown staging on demand — saves the $35 but</span>
+<span class="d-del">-  makes &quot;always available at a stable URL&quot; false.)</span>
+<span class="d-del">-- Should map *subdomain* behavior on staging show the map at the staging URL</span>
+<span class="d-del">-  (recommended: flag simply disables redirects), or do we ever want</span>
+<span class="d-del">-  staging-scoped subdomains (needs the wildcard-cert LB — I&#x27;d say no)?</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">terraform/staging.tf</span>
+            <span class="stat"><span class="d-add">+0</span> / <span class="d-del">-301</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill on">Terraform / GCP</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Terraform · staging</span>
+        <span class="ctx-sum">the entire staging stack — DELETED (recoverable from git history)</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">staging.tf</span>
+        <span class="ctx-sum">302 lines — vars, data-source OSRM ref, Redis, DB+user, secrets, app service, outputs</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">staging_* variables</span><span class="ol-sum">deleted</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">google_redis_instance.cache_staging</span><span class="ol-sum">deleted (the ~$35/mo Memorystore twin)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">votes_staging DB + app_staging user</span><span class="ol-sum">deleted — lived on the shared prod Cloud SQL instance</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">*-staging secrets + IAM</span><span class="ol-sum">deleted</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">google_cloud_run_service.app_staging + public IAM</span><span class="ol-sum">deleted (ce-stg-&lt;token&gt;, the URL-is-the-secret design)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">staging_url / staging_redis_host outputs</span><span class="ol-sum">deleted</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>whole file removed; the live resources were destroyed FIRST with -target (plan: 0/0/14)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/terraform/staging.tf b/terraform/staging.tf</span>
+<span class="d-meta">deleted file mode 100644</span>
+<span class="d-meta">index f1cde90..0000000</span>
+<span class="d-meta">--- a/terraform/staging.tf</span>
+<span class="d-meta">+++ /dev/null</span>
+<span class="d-hunk">@@ -1,301 +0,0 @@</span>
+<span class="d-del">-# =============================================================================</span>
+<span class="d-del">-# Staging environment (docs/staging-parity-plan.md)</span>
+<span class="d-del">-#</span>
+<span class="d-del">-# A parity copy of the app service at an UNGUESSABLE URL: the service name</span>
+<span class="d-del">-# carries a random token (var.staging_token), so the default run.app hostname</span>
+<span class="d-del">-# is the access control — Google&#x27;s shared *.a.run.app wildcard cert means the</span>
+<span class="d-del">-# hostname is never published anywhere (unlike a domain mapping, whose</span>
+<span class="d-del">-# per-hostname managed cert would land in Certificate Transparency logs).</span>
+<span class="d-del">-#</span>
+<span class="d-del">-# Staging DUPLICATES the state-bearing pieces (Redis, database, admin/session</span>
+<span class="d-del">-# secrets) and SHARES the stateless ones (OSRM, previews bucket, the container</span>
+<span class="d-del">-# image — staging runs the exact digest prod runs next). It runs as the same</span>
+<span class="d-del">-# default compute service account as prod: identical runtime behavior, and the</span>
+<span class="d-del">-# existing OSRM-invoker + previews grants apply without new IAM.</span>
+<span class="d-del">-#</span>
+<span class="d-del">-# ⚠️ Apply ONLY with -target on these resources (same rule as monitoring.tf):</span>
+<span class="d-del">-#     terraform apply -target=google_redis_instance.cache_staging \</span>
+<span class="d-del">-#                     -target=google_sql_database.votes_staging ...</span>
+<span class="d-del">-# A blanket apply still carries the known prod landmines (secret wipe, ebikes</span>
+<span class="d-del">-# domain mapping). Verify the plan shows ONLY adds before applying.</span>
+<span class="d-del">-#</span>
+<span class="d-del">-# Image updates are pushed with gcloud (deploy staging first, then promote the</span>
+<span class="d-del">-# SAME digest to prod — see docs/gcp-deployment.md); lifecycle.ignore_changes</span>
+<span class="d-del">-# keeps terraform from fighting those digest flips.</span>
+<span class="d-del">-# =============================================================================</span>
+<span class="d-del">-</span>
+<span class="d-del">-variable &quot;staging_token&quot; {</span>
+<span class="d-del">-  description = &quot;Random token embedded in the staging service name (the unguessable URL). Generate once: openssl rand -hex 8. Never commit the value.&quot;</span>
+<span class="d-del">-  type        = string</span>
+<span class="d-del">-  sensitive   = true</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-variable &quot;staging_db_password&quot; {</span>
+<span class="d-del">-  description = &quot;Password for the app_staging PostgreSQL user&quot;</span>
+<span class="d-del">-  type        = string</span>
+<span class="d-del">-  sensitive   = true</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-variable &quot;staging_admin_token&quot; {</span>
+<span class="d-del">-  description = &quot;Staging admin gate token — distinct from prod so a leaked staging token can&#x27;t administer prod&quot;</span>
+<span class="d-del">-  type        = string</span>
+<span class="d-del">-  sensitive   = true</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-variable &quot;staging_secret_key&quot; {</span>
+<span class="d-del">-  description = &quot;Staging session/passcode signing key — distinct from prod&quot;</span>
+<span class="d-del">-  type        = string</span>
+<span class="d-del">-  sensitive   = true</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-# OSRM&#x27;s URL read via a data source, NOT google_cloud_run_service.osrm: a</span>
+<span class="d-del">-# resource reference drags prod OSRM into every -target closure, and any</span>
+<span class="d-del">-# annotation drift there (e.g. gcloud&#x27;s client-name stamps) would make the</span>
+<span class="d-del">-# &quot;staging-only&quot; apply roll a new prod OSRM revision. The data source keeps</span>
+<span class="d-del">-# staging plans strictly additive.</span>
+<span class="d-del">-data &quot;google_cloud_run_service&quot; &quot;osrm_live&quot; {</span>
+<span class="d-del">-  name     = &quot;desire-path-osrm&quot;</span>
+<span class="d-del">-  location = var.region</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-# Staging Redis. The codebase does not namespace Redis keys per environment,</span>
+<span class="d-del">-# so staging cannot share prod&#x27;s instance — this Basic 1GB twin (~$35/mo) is</span>
+<span class="d-del">-# the main recurring cost of staging. No prevent_destroy: staging is meant to</span>
+<span class="d-del">-# be cheap to tear down / rotate.</span>
+<span class="d-del">-resource &quot;google_redis_instance&quot; &quot;cache_staging&quot; {</span>
+<span class="d-del">-  name           = &quot;desire-path-staging&quot;</span>
+<span class="d-del">-  tier           = &quot;BASIC&quot;</span>
+<span class="d-del">-  memory_size_gb = 1</span>
+<span class="d-del">-  region         = var.region</span>
+<span class="d-del">-</span>
+<span class="d-del">-  redis_version = &quot;REDIS_7_0&quot;</span>
+<span class="d-del">-  display_name  = &quot;City Edit Redis (staging)&quot;</span>
+<span class="d-del">-</span>
+<span class="d-del">-  redis_configs = {</span>
+<span class="d-del">-    maxmemory-policy = &quot;allkeys-lru&quot;</span>
+<span class="d-del">-  }</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-# Separate DATABASE on the shared prod Cloud SQL instance (not a second</span>
+<span class="d-del">-# instance): the instance idles most of the day, and a same-instance database</span>
+<span class="d-del">-# keeps seeding trivial (same bastion tunnel, different dbname). Upgrade path</span>
+<span class="d-del">-# if staging load ever shows up in prod queries: its own db-f1-micro.</span>
+<span class="d-del">-resource &quot;google_sql_database&quot; &quot;votes_staging&quot; {</span>
+<span class="d-del">-  name     = &quot;votes_staging&quot;</span>
+<span class="d-del">-  instance = google_sql_database_instance.votes.name</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-resource &quot;google_sql_user&quot; &quot;app_staging&quot; {</span>
+<span class="d-del">-  name     = &quot;app_staging&quot;</span>
+<span class="d-del">-  instance = google_sql_database_instance.votes.name</span>
+<span class="d-del">-  password = var.staging_db_password</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-resource &quot;google_secret_manager_secret&quot; &quot;database_url_staging&quot; {</span>
+<span class="d-del">-  secret_id = &quot;database-url-staging&quot;</span>
+<span class="d-del">-  replication {</span>
+<span class="d-del">-    auto {}</span>
+<span class="d-del">-  }</span>
+<span class="d-del">-  depends_on = [google_project_service.secretmanager]</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-resource &quot;google_secret_manager_secret_version&quot; &quot;database_url_staging&quot; {</span>
+<span class="d-del">-  secret      = google_secret_manager_secret.database_url_staging.id</span>
+<span class="d-del">-  secret_data = &quot;postgresql://app_staging:${var.staging_db_password}@${google_sql_database_instance.votes.private_ip_address}:5432/votes_staging&quot;</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-resource &quot;google_secret_manager_secret&quot; &quot;admin_token_staging&quot; {</span>
+<span class="d-del">-  secret_id = &quot;admin-token-staging&quot;</span>
+<span class="d-del">-  replication {</span>
+<span class="d-del">-    auto {}</span>
+<span class="d-del">-  }</span>
+<span class="d-del">-  depends_on = [google_project_service.secretmanager]</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-resource &quot;google_secret_manager_secret_version&quot; &quot;admin_token_staging&quot; {</span>
+<span class="d-del">-  secret      = google_secret_manager_secret.admin_token_staging.id</span>
+<span class="d-del">-  secret_data = var.staging_admin_token</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-resource &quot;google_secret_manager_secret&quot; &quot;secret_key_staging&quot; {</span>
+<span class="d-del">-  secret_id = &quot;secret-key-staging&quot;</span>
+<span class="d-del">-  replication {</span>
+<span class="d-del">-    auto {}</span>
+<span class="d-del">-  }</span>
+<span class="d-del">-  depends_on = [google_project_service.secretmanager]</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-resource &quot;google_secret_manager_secret_version&quot; &quot;secret_key_staging&quot; {</span>
+<span class="d-del">-  secret      = google_secret_manager_secret.secret_key_staging.id</span>
+<span class="d-del">-  secret_data = var.staging_secret_key</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-resource &quot;google_secret_manager_secret_iam_member&quot; &quot;cloud_run_db_staging_access&quot; {</span>
+<span class="d-del">-  secret_id = google_secret_manager_secret.database_url_staging.secret_id</span>
+<span class="d-del">-  role      = &quot;roles/secretmanager.secretAccessor&quot;</span>
+<span class="d-del">-  member    = &quot;serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com&quot;</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-resource &quot;google_secret_manager_secret_iam_member&quot; &quot;cloud_run_admin_token_staging_access&quot; {</span>
+<span class="d-del">-  secret_id = google_secret_manager_secret.admin_token_staging.secret_id</span>
+<span class="d-del">-  role      = &quot;roles/secretmanager.secretAccessor&quot;</span>
+<span class="d-del">-  member    = &quot;serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com&quot;</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-resource &quot;google_secret_manager_secret_iam_member&quot; &quot;cloud_run_secret_key_staging_access&quot; {</span>
+<span class="d-del">-  secret_id = google_secret_manager_secret.secret_key_staging.secret_id</span>
+<span class="d-del">-  role      = &quot;roles/secretmanager.secretAccessor&quot;</span>
+<span class="d-del">-  member    = &quot;serviceAccount:${data.google_project.project.number}-compute@developer.gserviceaccount.com&quot;</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-# The staging app service. Same container shape as prod (8Gi/4CPU/concurrency</span>
+<span class="d-del">-# 200 — parity beats savings: memory behavior is exactly what staging must</span>
+<span class="d-del">-# reproduce) but minScale 0 (≈$0 idle; the cold-start + prewarm window is</span>
+<span class="d-del">-# itself something we want to observe on staging) and maxScale 2.</span>
+<span class="d-del">-resource &quot;google_cloud_run_service&quot; &quot;app_staging&quot; {</span>
+<span class="d-del">-  name     = &quot;ce-stg-${var.staging_token}&quot;</span>
+<span class="d-del">-  location = var.region</span>
+<span class="d-del">-</span>
+<span class="d-del">-  template {</span>
+<span class="d-del">-    spec {</span>
+<span class="d-del">-      container_concurrency = 200</span>
+<span class="d-del">-</span>
+<span class="d-del">-      containers {</span>
+<span class="d-del">-        # :latest only seeds the FIRST revision; day-to-day the digest is</span>
+<span class="d-del">-        # pushed with gcloud (staging first, then the same digest to prod)</span>
+<span class="d-del">-        # and ignore_changes below keeps terraform out of that loop.</span>
+<span class="d-del">-        image = &quot;${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper/app:latest&quot;</span>
+<span class="d-del">-</span>
+<span class="d-del">-        # Flags staging behavior in app + client: map configs carry</span>
+<span class="d-del">-        # staging:true (redirect gate + ribbon) and every response is</span>
+<span class="d-del">-        # X-Robots-Tag noindexed. See server/app.py IS_STAGING.</span>
+<span class="d-del">-        env {</span>
+<span class="d-del">-          name  = &quot;APP_ENV&quot;</span>
+<span class="d-del">-          value = &quot;staging&quot;</span>
+<span class="d-del">-        }</span>
+<span class="d-del">-</span>
+<span class="d-del">-        env {</span>
+<span class="d-del">-          name  = &quot;REDIS_HOST&quot;</span>
+<span class="d-del">-          value = google_redis_instance.cache_staging.host</span>
+<span class="d-del">-        }</span>
+<span class="d-del">-</span>
+<span class="d-del">-        env {</span>
+<span class="d-del">-          name  = &quot;REDIS_PORT&quot;</span>
+<span class="d-del">-          value = google_redis_instance.cache_staging.port</span>
+<span class="d-del">-        }</span>
+<span class="d-del">-</span>
+<span class="d-del">-        env {</span>
+<span class="d-del">-          name  = &quot;SKIP_WARMUP&quot;</span>
+<span class="d-del">-          value = &quot;0&quot;</span>
+<span class="d-del">-        }</span>
+<span class="d-del">-</span>
+<span class="d-del">-        # Shared with prod: OSRM is stateless/read-only, and the default</span>
+<span class="d-del">-        # compute SA already holds run.invoker on it.</span>
+<span class="d-del">-        env {</span>
+<span class="d-del">-          name  = &quot;OSRM_URL&quot;</span>
+<span class="d-del">-          value = data.google_cloud_run_service.osrm_live.status[0].url</span>
+<span class="d-del">-        }</span>
+<span class="d-del">-</span>
+<span class="d-del">-        env {</span>
+<span class="d-del">-          name = &quot;DATABASE_URL&quot;</span>
+<span class="d-del">-          value_from {</span>
+<span class="d-del">-            secret_key_ref {</span>
+<span class="d-del">-              name = google_secret_manager_secret.database_url_staging.secret_id</span>
+<span class="d-del">-              key  = &quot;latest&quot;</span>
+<span class="d-del">-            }</span>
+<span class="d-del">-          }</span>
+<span class="d-del">-        }</span>
+<span class="d-del">-</span>
+<span class="d-del">-        env {</span>
+<span class="d-del">-          name  = &quot;PREVIEW_BUCKET&quot;</span>
+<span class="d-del">-          value = google_storage_bucket.previews.name</span>
+<span class="d-del">-        }</span>
+<span class="d-del">-</span>
+<span class="d-del">-        env {</span>
+<span class="d-del">-          name = &quot;ADMIN_TOKEN&quot;</span>
+<span class="d-del">-          value_from {</span>
+<span class="d-del">-            secret_key_ref {</span>
+<span class="d-del">-              name = google_secret_manager_secret.admin_token_staging.secret_id</span>
+<span class="d-del">-              key  = &quot;latest&quot;</span>
+<span class="d-del">-            }</span>
+<span class="d-del">-          }</span>
+<span class="d-del">-        }</span>
+<span class="d-del">-</span>
+<span class="d-del">-        env {</span>
+<span class="d-del">-          name = &quot;SECRET_KEY&quot;</span>
+<span class="d-del">-          value_from {</span>
+<span class="d-del">-            secret_key_ref {</span>
+<span class="d-del">-              name = google_secret_manager_secret.secret_key_staging.secret_id</span>
+<span class="d-del">-              key  = &quot;latest&quot;</span>
+<span class="d-del">-            }</span>
+<span class="d-del">-          }</span>
+<span class="d-del">-        }</span>
+<span class="d-del">-</span>
+<span class="d-del">-        resources {</span>
+<span class="d-del">-          limits = {</span>
+<span class="d-del">-            cpu    = &quot;4&quot;</span>
+<span class="d-del">-            memory = &quot;8Gi&quot;</span>
+<span class="d-del">-          }</span>
+<span class="d-del">-        }</span>
+<span class="d-del">-</span>
+<span class="d-del">-        startup_probe {</span>
+<span class="d-del">-          http_get {</span>
+<span class="d-del">-            path = &quot;/health&quot;</span>
+<span class="d-del">-          }</span>
+<span class="d-del">-          initial_delay_seconds = 5</span>
+<span class="d-del">-          period_seconds        = 5</span>
+<span class="d-del">-          failure_threshold     = 120</span>
+<span class="d-del">-          timeout_seconds       = 3</span>
+<span class="d-del">-        }</span>
+<span class="d-del">-      }</span>
+<span class="d-del">-    }</span>
+<span class="d-del">-</span>
+<span class="d-del">-    metadata {</span>
+<span class="d-del">-      annotations = {</span>
+<span class="d-del">-        &quot;autoscaling.knative.dev/minScale&quot;        = &quot;0&quot;</span>
+<span class="d-del">-        &quot;autoscaling.knative.dev/maxScale&quot;        = &quot;2&quot;</span>
+<span class="d-del">-        &quot;run.googleapis.com/startup-cpu-boost&quot;    = &quot;true&quot;</span>
+<span class="d-del">-        &quot;run.googleapis.com/vpc-access-connector&quot; = google_vpc_access_connector.connector.id</span>
+<span class="d-del">-        &quot;run.googleapis.com/vpc-access-egress&quot;    = &quot;private-ranges-only&quot;</span>
+<span class="d-del">-      }</span>
+<span class="d-del">-    }</span>
+<span class="d-del">-  }</span>
+<span class="d-del">-</span>
+<span class="d-del">-  traffic {</span>
+<span class="d-del">-    percent         = 100</span>
+<span class="d-del">-    latest_revision = true</span>
+<span class="d-del">-  }</span>
+<span class="d-del">-</span>
+<span class="d-del">-  lifecycle {</span>
+<span class="d-del">-    ignore_changes = [template[0].spec[0].containers[0].image]</span>
+<span class="d-del">-  }</span>
+<span class="d-del">-</span>
+<span class="d-del">-  depends_on = [</span>
+<span class="d-del">-    google_project_service.cloud_run,</span>
+<span class="d-del">-    google_artifact_registry_repository.app,</span>
+<span class="d-del">-    google_vpc_access_connector.connector,</span>
+<span class="d-del">-    google_secret_manager_secret_version.database_url_staging,</span>
+<span class="d-del">-    google_secret_manager_secret_iam_member.cloud_run_db_staging_access,</span>
+<span class="d-del">-    google_secret_manager_secret_version.admin_token_staging,</span>
+<span class="d-del">-    google_secret_manager_secret_iam_member.cloud_run_admin_token_staging_access,</span>
+<span class="d-del">-    google_secret_manager_secret_version.secret_key_staging,</span>
+<span class="d-del">-    google_secret_manager_secret_iam_member.cloud_run_secret_key_staging_access,</span>
+<span class="d-del">-  ]</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-# Public like prod — the unguessable hostname is the gate.</span>
+<span class="d-del">-resource &quot;google_cloud_run_service_iam_member&quot; &quot;public_staging&quot; {</span>
+<span class="d-del">-  service  = google_cloud_run_service.app_staging.name</span>
+<span class="d-del">-  location = google_cloud_run_service.app_staging.location</span>
+<span class="d-del">-  role     = &quot;roles/run.invoker&quot;</span>
+<span class="d-del">-  member   = &quot;allUsers&quot;</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-output &quot;staging_url&quot; {</span>
+<span class="d-del">-  value     = google_cloud_run_service.app_staging.status[0].url</span>
+<span class="d-del">-  sensitive = true # the URL IS the secret</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-output &quot;staging_redis_host&quot; {</span>
+<span class="d-del">-  value = google_redis_instance.cache_staging.host</span>
+<span class="d-del">-}</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_staging_decommission_report.py</code>.
+    Regenerate after further edits with <code>git show f27bea6 0724358 --format= &gt; changelog/changes.diff &amp;&amp; python changelog/build_staging_decommission_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

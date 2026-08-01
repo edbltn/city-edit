@@ -29,6 +29,20 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-01-test-maps-staging-decommission.html">
+    <div class="date">2026-08-01</div>
+    <h2>Test maps off the prod landing page · staging decommissioned</h2>
+    <p>The two block-pipeline playground maps ("Test: Midtown", "Test: Central Park") kept
+    resurfacing on cityedit.org because <code>seed_presets()</code> re-upserted them at every boot;
+    they're now opt-in via <code>SEED_TEST_MAPS=1</code>, their prod rows and <code>bver:</code>
+    Redis stamps are deleted, and overlay digest <code>d64843f6…</code> shipped the gate (prod rev
+    <code>00121-2h6</code>). The staging environment was then decommissioned entirely — all 14
+    staging terraform resources destroyed via targeted applies (plan showed 0 add / 0 change /
+    14 destroy; the shared prod Cloud SQL instance untouched), <code>staging.tf</code> and the
+    parity plan removed from the repo, and the deploy runbook rewritten to the direct-to-prod
+    flow: backup → digest → verify.</p>
+  </a>
+
   <a class="entry" href="./2026-07-30-nyc-proposals-import.html">
     <div class="date">2026-07-30</div>
     <h2>nyc-proposals: map rename, official DOT proposal import + weekly job, per-map proposal floor</h2>
