@@ -124,22 +124,6 @@ deploy:
 test-cloud:
 	./scripts/test-cloud.sh
 
-# Staging data refresh (docs/staging-parity-plan.md): restore the newest prod
-# backup into votes_staging, flush staging Redis, and let the app self-heal
-# (_hydrate_map_redis replays Postgres → Redis on each map's first request).
-# Needs TWO bastion tunnels open first (see docs/gcp-deployment.md#staging):
-#   :5433 → Cloud SQL private IP   (same tunnel as prod DB access)
-#   :6380 → staging Redis host     (terraform output staging_redis_host)
-stage-refresh:
-	@lsof -ti :5433 >/dev/null || { echo "no tunnel on :5433 — open the bastion Cloud SQL tunnel first"; exit 1; }
-	@lsof -ti :6380 >/dev/null || { echo "no tunnel on :6380 — open the bastion staging-Redis tunnel first"; exit 1; }
-	@DUMP=$$(ls -t ~/city-edit-prod-backups/*/prod-full.dump | head -1); \
-	STG_URL=$$(gcloud secrets versions access latest --secret=database-url-staging --project=$(PROJECT_ID) | sed -E 's#@[^/]+/#@localhost:5433/#'); \
-	echo "Restoring $$DUMP into votes_staging..."; \
-	pg_restore --clean --if-exists --no-owner --no-privileges -d "$$STG_URL" "$$DUMP" && \
-	redis-cli -p 6380 FLUSHALL && \
-	echo "Seeded. First request per map rehydrates its Redis hash from Postgres."
-
 # Unit/integration tests (offline). Frontend: vitest. Backend: pytest (fakeredis,
 # no DB/Redis needed for the unit suite).
 test: test-frontend test-backend
