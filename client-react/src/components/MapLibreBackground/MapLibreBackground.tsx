@@ -258,7 +258,7 @@ function buildStyle(
         paint: {
           "fill-color": mapStyle.selection,
           "fill-opacity": [
-            "case", ["boolean", ["feature-state", "selected"], false], 0.08, 0,
+            "case", ["boolean", ["feature-state", "selected"], false], 0.11, 0,
           ],
         },
       },
@@ -269,9 +269,9 @@ function buildStyle(
         "source-layer": "blocks",
         paint: {
           "line-color": mapStyle.selection,
-          "line-width": 1,
+          "line-width": 1.5,
           "line-opacity": [
-            "case", ["boolean", ["feature-state", "selected"], false], 0.4, 0,
+            "case", ["boolean", ["feature-state", "selected"], false], 0.6, 0,
           ],
         },
       },
