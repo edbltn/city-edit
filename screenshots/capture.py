@@ -33,6 +33,16 @@ FALLBACK = [
 ]
 VIEWPORT = {"width": 1400, "height": 900}
 RENDER_WAIT_MS = 12_000
+BOOTSTRAP_TIMEOUT_MS = 60_000
+
+# A real 1400x900 render is ~0.5-1.5 MB; the "Loading..." splash compresses to
+# ~11 KB. Anything this small means the app never painted, so refuse to publish
+# it rather than overwriting a good preview with a picture of a spinner.
+MIN_PNG_BYTES = 60_000
+
+# --disable-dev-shm-usage: containers give /dev/shm only 64 MB, which Chromium
+# blows through on these heatmaps and reports as an opaque renderer crash.
+BROWSER_ARGS = ["--disable-dev-shm-usage"]
 
 
 def is_local(base_url: str) -> bool:
@@ -51,21 +61,34 @@ def fetch_maps(base_url: str) -> list[dict]:
         return FALLBACK
 
 
-def map_url(base_url: str, m: dict) -> str:
-    """Preset maps render on their subdomain in prod; everything else by slug."""
+def map_urls(base_url: str, m: dict) -> list[str]:
+    """Candidate URLs for a map, most-preferred first.
+
+    Preset maps render on their subdomain in prod; everything else by slug. The
+    slug route is kept as a fallback for preset maps because a subdomain whose
+    Cloud Run domain mapping has drifted out of sync never loads at all.
+    """
     slug = m["slug"]
     subdomain = m.get("subdomain")
     if is_local(base_url):
         sep = "&" if "?" in base_url else "?"
-        return f"{base_url}/m/{slug}" if "/m/" not in base_url else f"{base_url}{sep}map={slug}"
-    if subdomain:
-        return f"https://{subdomain}.cityedit.org"
-    return f"https://cityedit.org/m/{slug}"
+        return [f"{base_url}/m/{slug}" if "/m/" not in base_url else f"{base_url}{sep}map={slug}"]
+    slug_url = f"https://cityedit.org/m/{slug}"
+    return [f"https://{subdomain}.cityedit.org", slug_url] if subdomain else [slug_url]
 
 
 async def capture_url(page, url: str) -> bytes:
     print(f"  Navigating to {url}", flush=True)
     await page.goto(url, wait_until="networkidle")
+
+    # The splash covers the whole viewport until the map has bootstrapped. Waiting
+    # it out is the only reliable "the app is past loading" signal — the canvas
+    # check below can't serve that role because maps with no votes never paint.
+    await page.wait_for_function("""() => {
+        const el = document.querySelector('.map-bootstrap');
+        return !el || el.offsetParent === null;
+    }""", timeout=BOOTSTRAP_TIMEOUT_MS)
+
     await page.wait_for_selector(".leaflet-container", state="visible")
 
     try:
@@ -100,19 +123,41 @@ async def capture_url(page, url: str) -> bytes:
 
 
 def sync_to_gcs(bucket_name: str, slug: str, png: bytes):
+    from google.cloud import storage
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    # Stable name the site can reference + a timestamped copy for history.
+    for name in (f"{slug}.png", f"{slug}-{ts}.png"):
+        blob = bucket.blob(name)
+        blob.cache_control = "public, max-age=3600"
+        blob.upload_from_string(png, content_type="image/png")
+    print(f"  Synced to gs://{bucket_name}/{slug}.png (+timestamped)")
+
+
+async def capture_map(p, base_url: str, m: dict) -> bytes:
+    """Screenshot one map in a throwaway browser, trying each candidate URL.
+
+    A fresh browser per map is what bounds memory: Chromium's footprint grew
+    across sequential navigations of these heatmaps until the container OOM'd,
+    and because every map shared one page, that single crash failed every
+    remaining map in the run.
+    """
+    browser = await p.chromium.launch(args=BROWSER_ARGS)
     try:
-        from google.cloud import storage
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-        # Stable name the site can reference + a timestamped copy for history.
-        for name in (f"{slug}.png", f"{slug}-{ts}.png"):
-            blob = bucket.blob(name)
-            blob.cache_control = "public, max-age=3600"
-            blob.upload_from_string(png, content_type="image/png")
-        print(f"  Synced to gs://{bucket_name}/{slug}.png (+timestamped)")
-    except Exception as e:
-        print(f"  GCS sync skipped: {e}", file=sys.stderr)
+        urls = map_urls(base_url, m)
+        for i, url in enumerate(urls):
+            page = await browser.new_page(viewport=VIEWPORT)
+            try:
+                return await capture_url(page, url)
+            except Exception as e:
+                if i == len(urls) - 1:
+                    raise
+                print(f"  {url} failed ({e}); trying {urls[i + 1]}", file=sys.stderr)
+            finally:
+                await page.close()
+    finally:
+        await browser.close()
 
 
 async def main():
@@ -138,31 +183,47 @@ async def main():
         wanted = {s.strip() for s in args.only.split(",") if s.strip()}
         maps = [m for m in maps if m["slug"] in wanted]
 
+    # Passcode-gated maps render an unlock prompt instead of a map, so there is
+    # nothing to capture — and a public preview would defeat the gate anyway.
+    private = [m["slug"] for m in maps if m.get("requiresPasscode")]
+    if private:
+        print(f"Skipping {len(private)} private map(s): {', '.join(private)}")
+        maps = [m for m in maps if not m.get("requiresPasscode")]
+
     print(f"Saving to: {output_dir}")
     if args.bucket:
         print(f"GCS bucket: {args.bucket}")
     print(f"Capturing {len(maps)} map(s): {', '.join(m['slug'] for m in maps)}")
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        page = await browser.new_page(viewport=VIEWPORT)
+    captured, failed = [], []
 
+    async with async_playwright() as p:
         for m in maps:
             slug = m["slug"]
             print(f"Capturing {slug}...", flush=True)
             try:
-                png = await capture_url(page, map_url(args.url, m))
+                png = await capture_map(p, args.url, m)
+                if len(png) < MIN_PNG_BYTES:
+                    raise RuntimeError(
+                        f"render is only {len(png):,} bytes (< {MIN_PNG_BYTES:,}) — "
+                        "the map never painted; refusing to publish it"
+                    )
                 local_path = output_dir / f"{slug}.png"
                 local_path.write_bytes(png)
                 print(f"  Saved {local_path} ({len(png):,} bytes)")
                 if args.bucket:
                     sync_to_gcs(args.bucket, slug, png)
+                captured.append(slug)
             except Exception as e:
                 print(f"  Error capturing {slug}: {e}", file=sys.stderr)
+                failed.append(slug)
 
-        await browser.close()
-
-    print("Done.")
+    print(f"Done. Captured {len(captured)}/{len(maps)}.")
+    if failed:
+        # Exit non-zero so a partial run shows up red instead of hiding behind a
+        # green "1/1 complete" — every map used to fail silently this way.
+        print(f"Failed: {', '.join(failed)}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

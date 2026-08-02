@@ -759,14 +759,21 @@ resource "google_cloud_run_v2_job" "screenshot" {
         resources {
           limits = {
             cpu    = "2"
-            memory = "2Gi"
+            memory = "8Gi"
           }
         }
       }
 
       service_account = google_service_account.screenshot_sa.email
-      timeout         = "300s"
-      max_retries     = 1
+
+      # Each map now gets its own browser, so the run is a series of ~30-60s
+      # captures rather than one long-lived page; 300s could not fit even the
+      # old shared-page run, which took ~5 min for 13 maps.
+      timeout = "1800s"
+
+      # Capture failures are deterministic (a map that won't paint won't paint on
+      # the second pass either), so a retry only doubles a long run.
+      max_retries = 0
     }
   }
 
