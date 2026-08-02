@@ -59,17 +59,18 @@ SECTIONS = [
     {
         "id": "links",
         "tag": "CLIENT + SERVER + TOOLS",
-        "title": "Per-vote-type location links ([#1] [#2] \u2026) in proposal cards",
-        "symptom": "Vote types on nyc-proposals are official DOT proposals, but a card row gave no way to jump to the places those proposals actually live \u2014 we wanted numbered links next to each vote type in the listed votes.",
+        "title": "Per-vote-type proposal links ([a] [b] [c]) in proposal cards",
+        "symptom": "Vote types on nyc-proposals are distilled from official DOT proposals, but a card row gave no way to reach the actual city proposals behind it \u2014 we wanted small lettered links next to each vote type in the listed votes.",
         "cause": [
             "Vote-type rows carry only {label, up, down}; there was no per-map, per-vote-type metadata channel for locations",
             "Imported vote types are cast-created (no maps.custom_vote_types row), so links must resolve by label, like iconForLabel",
         ],
         "fixes": [
-            "maps.vote_type_links JSONB ({label: [{url, title?}]}) \u2192 emitted as voteTypeLinks on the map config only when set",
+            "maps.vote_type_links JSONB ({label: [{url, title?, lat?, lng?}]}) \u2192 emitted as voteTypeLinks on the map config only when set",
             "Admin endpoint POST/DELETE /api/admin/maps/&lt;slug&gt;/vote-type-links (X-Admin-Token, whole-mapping replace) + set_map_vote_type_links() with shape validation",
-            "ProposalCard renders [#n] anchors on a full-width wrapping line under the label (48 links under 'Street redesign' render clean); each link is an in-app deep link /m/&lt;slug&gt;?w=\u2026&amp;vt=\u2026 that re-applies the selection on click",
-            "tools/nyc_proposals/set_vote_type_links.py builds the mapping from a plan JSONL (route \u2192 w=start;end, point \u2192 w=lat,lng; title = project title) and installs it \u2014 60 links across 6 vote types on nyc-proposals locally",
+            "ProposalCard renders at most 3 links as small lettered [a] [b] [c] anchors on a line under the label; each points at the proposal's SOURCE page on nycdotprojects.info (target=_blank, so the map is never navigated away)",
+            "Which 3: the proposals NEAREST the card's anchor (rowLinks, equirectangular ranking) \u2014 a Lower East Side card offers the EV/LES study, a Coney Island card offers the Coney Island + Canarsie studies, out of the same 48-entry 'Street redesign' list. Every card site passes an anchor: pinned point, both hover cards, and the route summary",
+            "tools/nyc_proposals/set_vote_type_links.py builds the mapping from a plan JSONL (url = the DOT project page, title = project title, lat/lng = the proposal's location \u2014 corridors anchored at their midpoint) and installs it \u2014 60 proposals across 6 vote types on nyc-proposals locally",
             "invalidate_map_cache now also clears the /api/maps/&lt;slug&gt; SWR cache \u2014 admin mutations used to serve the pre-mutation config for up to 30s",
         ],
         "files": ["server/database.py", "server/app.py", "client-react/src/map/runtime.ts",
@@ -106,8 +107,10 @@ VERIFY = [
     "start \u2192 corridor end = 7.75km vs 3.01km crow (ratio 2.57). All 8 corridor casts ratio-checked: "
     "culprit 2.57, every other \u2264 1.34 \u2014 the 1.8 threshold separates cleanly.",
     "Links round-trip: admin POST \u2192 <code>/api/maps/nyc-proposals</code> serves <code>voteTypeLinks</code> \u2192 "
-    "[#1] renders in the pinned card \u2192 click navigates and re-applies the selection (verified in the local app).",
-    "Heavy case: 48 links under 'Street redesign' wrap onto clean sub-lines without squeezing the label or \u00b1 control.",
+    "exactly 3 anchors render (10px, opacity .5, <code>target=_blank rel=noopener noreferrer</code>), hrefs are the "
+    "nycdotprojects.info project pages (spot-checked 4 \u2192 HTTP 200).",
+    "Proximity ranking is location-sensitive: the Delancey card lists EV/LES + N Williamsburg; the Coney Island card "
+    "lists Coney Island + Canarsie \u2014 same vote type, same 48-entry list.",
     "Local repair verified: 438 votes cleared (rev bump), 'Add traffic calming' total 915 \u2192 477, recast pin "
     "becomes the block's top proposal.",
     "<code>npx tsc -b</code> clean; all 327 client unit tests pass; touched Python compiles.",
@@ -115,7 +118,8 @@ VERIFY = [
 
 CHECKLIST = [
     "Open <code>http://localhost:3000/m/nyc-proposals?w=40.715500%2C-73.976500&vt=Street+redesign</code>, click the "
-    "pin block \u2014 the card should show 'Street redesign' with [#1]\u2013[#48] links; click one and confirm it deep-links.",
+    "pin block \u2014 the card should show 'Street redesign' with [a] [b] [c]; hover for the project titles and click one "
+    "to open the DOT page in a new tab.",
     "Confirm the hairpin is gone locally: the East River loop no longer paints, and the top route proposal is now "
     "Linden Boulevard (<code>#128218e4</code>).",
     "Decide on the prod repair: run <code>repair_prod_hairpin.py</code> (scratchpad) after the usual DB backup \u2014 "
@@ -200,7 +204,7 @@ FILE_CONTEXT = {
             ("resolveMapConfig / redirects", "unchanged", False),
         ],
         "blocks": [
-            "VoteTypeLink { url, title? } \u2014 an in-app deep link (/m/<slug>?w=\u2026&vt=\u2026)",
+            "VoteTypeLink { url, title?, lat?, lng? } \u2014 lat/lng drive the nearest-3 pick",
         ],
     },
     "client-react/src/components/GraphLayer/GraphLayer.tsx": {
@@ -208,12 +212,14 @@ FILE_CONTEXT = {
         "module": ("React client \u00b7 GraphLayer/", "vote heat, PBTP/RBTP proposals, proposal cards"),
         "file": ("GraphLayer.tsx", "~4800 LOC \u2014 topology load, heat paint, ProposalCard"),
         "outline": [
-            ("ProposalCard", "typeLinks = getCurrentMap()?.voteTypeLinks; [#n] anchors per row", True),
+            ("rowLinks helper", "nearest MAX_ROW_LINKS=3 by equirectangular distance", True),
+            ("ProposalCard", "linkAnchor prop; [a] [b] [c] external anchors per row", True),
+            ("card render sites", "all four pass an anchor (pinned/hover/RBTP/route)", True),
             ("hover/selection/markers", "unchanged", False),
         ],
         "blocks": [
             "links resolve by row.label \u2014 covers cast-created vote types with no custom_vote_types row",
-            "anchor per link: href=lnk.url, title=lnk.title, stopPropagation on click",
+            "anchor per link: href = the DOT project page, target=_blank rel=noopener noreferrer, title = project title",
         ],
     },
     "client-react/src/styles/globals.css": {
@@ -222,7 +228,7 @@ FILE_CONTEXT = {
         "file": ("globals.css", "~2300 lines \u2014 proposal card + row styles live around :1950"),
         "outline": [
             (".graph-proposal-row", "flex-wrap so the links line can wrap under", True),
-            (".graph-proposal-row-links / -link", "full-width wrapping line, quiet until hover", True),
+            (".graph-proposal-row-links / -link", "10px, opacity .5, quiet until hover", True),
         ],
         "blocks": [
             "flex: 1 0 100% \u2014 the links line never squeezes the label or the \u00b1 control",
@@ -233,11 +239,11 @@ FILE_CONTEXT = {
         "module": ("Tools \u00b7 nyc_proposals/", "plan JSONL \u2192 vote-type location links installer"),
         "file": ("set_vote_type_links.py", "~80 LOC \u2014 stdlib only, --dry-run, admin POST"),
         "outline": [
-            ("link_for", "route \u2192 w=start;end \u00b7 point \u2192 w=lat,lng \u00b7 title = project title", True),
+            ("link_for", "url = DOT project page \u00b7 lat/lng = proposal location (corridor midpoint)", True),
             ("main", "group by vote_type, print, POST /api/admin/\u2026/vote-type-links", True),
         ],
         "blocks": [
-            "idempotent: the whole mapping is replaced on every run",
+            "idempotent: the whole mapping is replaced on every run; dedupes (vote_type, url)",
         ],
     },
     "tools/nyc_proposals/import_to_map.py": {

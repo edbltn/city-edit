@@ -31,11 +31,13 @@
 
   <a class="entry" href="./2026-08-01-vote-type-links-zigzag.html">
     <div class="date">2026-08-01</div>
-    <h2>Vote-type location links ([#n]) + the East River hairpin diagnosis</h2>
-    <p>Proposal-card vote rows can now carry numbered location links: <code>maps.vote_type_links</code>
-    (JSONB, per label) → <code>voteTypeLinks</code> on the map config → [#1] [#2] anchors that deep-link
-    to each proposal's place (<code>/m/&lt;slug&gt;?w=…&amp;vt=…</code>); installed for the 60 official DOT
-    proposals on nyc-proposals by <code>set_vote_type_links.py</code> via a new admin endpoint. Also
+    <h2>Vote-type proposal links ([a] [b] [c]) + the East River hairpin diagnosis</h2>
+    <p>Proposal-card vote rows can now carry links to the real city proposals behind them:
+    <code>maps.vote_type_links</code> (JSONB, per label) → <code>voteTypeLinks</code> on the map config →
+    up to three small lettered [a] [b] [c] anchors pointing at the project's page on nycdotprojects.info.
+    Which three: the proposals <em>nearest that card</em>, so a Lower East Side card and a Coney Island
+    card draw different entries from the same 48-strong "Street redesign" list. Installed for the 60
+    official DOT proposals on nyc-proposals by <code>set_vote_type_links.py</code> via a new admin endpoint. Also
     diagnosed why the top route proposal (<code>fa8b70e11</code>) hairpinned along the East River: not
     the block bake (0 shared blocks between the rails) — one corridor cast ("EV/LES Waterfront Access
     Study") geocoded an endpoint onto the ESCR-stranded esplanade, whose only exit is 1.6&nbsp;km the

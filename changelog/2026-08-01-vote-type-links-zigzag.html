@@ -97,7 +97,7 @@
     <div class="dateline">2026-08-01 · branch <code>main</code></div>
   </header>
 
-  <nav class="toc"><a href="#links">Per-vote-type location links ([#1] [#2] …) in proposal cards</a>
+  <nav class="toc"><a href="#links">Per-vote-type proposal links ([a] [b] [c]) in proposal cards</a>
 <a href="#zigzag">The East River hairpin: why the top route proposal zig-zagged</a>
     <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
   </nav>
@@ -107,17 +107,18 @@
   
     <section class="card" id="links">
       <div class="tag">CLIENT + SERVER + TOOLS</div>
-      <h2>Per-vote-type location links ([#1] [#2] …) in proposal cards</h2>
+      <h2>Per-vote-type proposal links ([a] [b] [c]) in proposal cards</h2>
       <h3>Symptom</h3>
-      <p>Vote types on nyc-proposals are official DOT proposals, but a card row gave no way to jump to the places those proposals actually live — we wanted numbered links next to each vote type in the listed votes.</p>
+      <p>Vote types on nyc-proposals are distilled from official DOT proposals, but a card row gave no way to reach the actual city proposals behind it — we wanted small lettered links next to each vote type in the listed votes.</p>
       <h3>Root cause</h3>
       <ul><li>Vote-type rows carry only {label, up, down}; there was no per-map, per-vote-type metadata channel for locations</li>
 <li>Imported vote types are cast-created (no maps.custom_vote_types row), so links must resolve by label, like iconForLabel</li></ul>
       <h3>What changed</h3>
-      <ul><li>maps.vote_type_links JSONB ({label: [{url, title?}]}) → emitted as voteTypeLinks on the map config only when set</li>
+      <ul><li>maps.vote_type_links JSONB ({label: [{url, title?, lat?, lng?}]}) → emitted as voteTypeLinks on the map config only when set</li>
 <li>Admin endpoint POST/DELETE /api/admin/maps/&lt;slug&gt;/vote-type-links (X-Admin-Token, whole-mapping replace) + set_map_vote_type_links() with shape validation</li>
-<li>ProposalCard renders [#n] anchors on a full-width wrapping line under the label (48 links under 'Street redesign' render clean); each link is an in-app deep link /m/&lt;slug&gt;?w=…&amp;vt=… that re-applies the selection on click</li>
-<li>tools/nyc_proposals/set_vote_type_links.py builds the mapping from a plan JSONL (route → w=start;end, point → w=lat,lng; title = project title) and installs it — 60 links across 6 vote types on nyc-proposals locally</li>
+<li>ProposalCard renders at most 3 links as small lettered [a] [b] [c] anchors on a line under the label; each points at the proposal's SOURCE page on nycdotprojects.info (target=_blank, so the map is never navigated away)</li>
+<li>Which 3: the proposals NEAREST the card's anchor (rowLinks, equirectangular ranking) — a Lower East Side card offers the EV/LES study, a Coney Island card offers the Coney Island + Canarsie studies, out of the same 48-entry 'Street redesign' list. Every card site passes an anchor: pinned point, both hover cards, and the route summary</li>
+<li>tools/nyc_proposals/set_vote_type_links.py builds the mapping from a plan JSONL (url = the DOT project page, title = project title, lat/lng = the proposal's location — corridors anchored at their midpoint) and installs it — 60 proposals across 6 vote types on nyc-proposals locally</li>
 <li>invalidate_map_cache now also clears the /api/maps/&lt;slug&gt; SWR cache — admin mutations used to serve the pre-mutation config for up to 30s</li></ul>
       <h3>Files touched</h3>
       <ul class="files"><li>server/database.py</li>
@@ -154,8 +155,8 @@
     <h2>What was run</h2>
     <ul><li>Prod reproduction: <code>analyzeZigzag.ts</code> against cityedit.org rebuilt the exact live proposal set (top = <code>#a8b70e11</code>, score 438, 157 blocks, 1 ghost) — and its component is a simple path: <strong>2 endpoints, 0 branch nodes</strong>; block check: <strong>0 blocks</strong> span both rails.</li>
 <li>Router probes: start → +330m north = <strong>5.4km</strong> route (stranded stub confirmed); start → corridor end = 7.75km vs 3.01km crow (ratio 2.57). All 8 corridor casts ratio-checked: culprit 2.57, every other ≤ 1.34 — the 1.8 threshold separates cleanly.</li>
-<li>Links round-trip: admin POST → <code>/api/maps/nyc-proposals</code> serves <code>voteTypeLinks</code> → [#1] renders in the pinned card → click navigates and re-applies the selection (verified in the local app).</li>
-<li>Heavy case: 48 links under 'Street redesign' wrap onto clean sub-lines without squeezing the label or ± control.</li>
+<li>Links round-trip: admin POST → <code>/api/maps/nyc-proposals</code> serves <code>voteTypeLinks</code> → exactly 3 anchors render (10px, opacity .5, <code>target=_blank rel=noopener noreferrer</code>), hrefs are the nycdotprojects.info project pages (spot-checked 4 → HTTP 200).</li>
+<li>Proximity ranking is location-sensitive: the Delancey card lists EV/LES + N Williamsburg; the Coney Island card lists Coney Island + Canarsie — same vote type, same 48-entry list.</li>
 <li>Local repair verified: 438 votes cleared (rev bump), 'Add traffic calming' total 915 → 477, recast pin becomes the block's top proposal.</li>
 <li><code>npx tsc -b</code> clean; all 327 client unit tests pass; touched Python compiles.</li></ul>
   </section>
@@ -163,7 +164,7 @@
   <section class="card checklist" id="checklist">
     <div class="tag">For you</div>
     <h2>Manual checklist</h2>
-    <ul><li>Open <code>http://localhost:3000/m/nyc-proposals?w=40.715500%2C-73.976500&vt=Street+redesign</code>, click the pin block — the card should show 'Street redesign' with [#1]–[#48] links; click one and confirm it deep-links.</li>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-proposals?w=40.715500%2C-73.976500&vt=Street+redesign</code>, click the pin block — the card should show 'Street redesign' with [a] [b] [c]; hover for the project titles and click one to open the DOT page in a new tab.</li>
 <li>Confirm the hairpin is gone locally: the East River loop no longer paints, and the top route proposal is now Linden Boulevard (<code>#128218e4</code>).</li>
 <li>Decide on the prod repair: run <code>repair_prod_hairpin.py</code> (scratchpad) after the usual DB backup — clears the 438 prod hairpin votes and drops the replacement pin.</li>
 <li>Deploy: overlay deploy (backup → digest → verify; staging is decommissioned as of 2026-08-01) ships the [#n] client rendering + admin endpoint; then run <code>set_vote_type_links.py --base &lt;prod&gt; --token &lt;ADMIN_TOKEN&gt;</code> with the plan JSONL.</li>
@@ -309,7 +310,7 @@
         
         <details>
           <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
-            <span class="stat"><span class="d-add">+22</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+66</span> / <span class="d-del">-2</span></span>
           </summary>
           
     <div class="ctx">
@@ -330,47 +331,151 @@
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
-        <ul class="ctx-outline"><li class="changed"><span class="ol-label">ProposalCard</span><span class="ol-sum">typeLinks = getCurrentMap()?.voteTypeLinks; [#n] anchors per row</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">hover/selection/markers</span><span class="ol-sum">unchanged</span></li></ul>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">rowLinks helper</span><span class="ol-sum">nearest MAX_ROW_LINKS=3 by equirectangular distance</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ProposalCard</span><span class="ol-sum">linkAnchor prop; [a] [b] [c] external anchors per row</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">card render sites</span><span class="ol-sum">all four pass an anchor (pinned/hover/RBTP/route)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">hover/selection/markers</span><span class="ol-sum">unchanged</span></li></ul>
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">Changed blocks (top → bottom)</div>
-        <ol class="ctx-blocks"><li>links resolve by row.label — covers cast-created vote types with no custom_vote_types row</li><li>anchor per link: href=lnk.url, title=lnk.title, stopPropagation on click</li></ol>
+        <ol class="ctx-blocks"><li>links resolve by row.label — covers cast-created vote types with no custom_vote_types row</li><li>anchor per link: href = the DOT project page, target=_blank rel=noopener noreferrer, title = project title</li></ol>
       </div>
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
-<span class="d-meta">index 46721e1..7d48c18 100644</span>
+<span class="d-meta">index 46721e1..d03839b 100644</span>
 <span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
 <span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
-<span class="d-hunk">@@ -4439,6 +4439,10 @@ function ProposalCard({</span>
+<span class="d-hunk">@@ -18,7 +18,7 @@ import L from &quot;leaflet&quot;;</span>
+<span class="d-ctx"> import Flatbush from &quot;flatbush&quot;;</span>
+<span class="d-ctx"> import { CONFIG } from &quot;../../config&quot;;</span>
+<span class="d-ctx"> import { COLOR_START, COLOR_END } from &quot;../../colors&quot;;</span>
+<span class="d-del">-import { withMap, getMapSlug, passcodeHeaders, getCurrentMap } from &quot;../../map/runtime&quot;;</span>
+<span class="d-add">+import { withMap, getMapSlug, passcodeHeaders, getCurrentMap, type VoteTypeLink } from &quot;../../map/runtime&quot;;</span>
+<span class="d-ctx"> import { useWebSocketContext } from &quot;../../context/WebSocketContext&quot;;</span>
+<span class="d-ctx"> import { useGraphSnap, useTheme, useHeatmap, useGhostPin, useRoute } from &quot;../../context&quot;;</span>
+<span class="d-ctx"> import type { GraphData, ProposalMatch } from &quot;../../types&quot;;</span>
+<span class="d-hunk">@@ -4164,6 +4164,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">             : null}</span>
+<span class="d-ctx">           mode={themeMode}</span>
+<span class="d-ctx">           voteTypes={theme.suggestions}</span>
+<span class="d-add">+          linkAnchor={pinnedPointLatLng}</span>
+<span class="d-ctx">           shareUrl={pinnedPointLatLng</span>
+<span class="d-ctx">             ? buildSelectionUrl(pinnedPointLatLng, pinnedWinner?.label ?? pinnedVoteTypes[0]?.label)</span>
+<span class="d-ctx">             : null}</span>
+<span class="d-hunk">@@ -4193,6 +4194,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           rows={hoverVoteTypes}</span>
+<span class="d-ctx">           topKinds={isStationNetwork ? undefined : hoverTopKinds}</span>
+<span class="d-ctx">           voteTypes={theme.suggestions}</span>
+<span class="d-add">+          linkAnchor={targetLatLng(hoverTarget, graphDataRef.current)}</span>
+<span class="d-ctx">           getAvoidRects={getHoverAvoidRects}</span>
+<span class="d-ctx">           // The open modal can re-anchor (vote tick, pan) while the hover</span>
+<span class="d-ctx">           // target stays put — re-place the hover card when that happens.</span>
+<span class="d-hunk">@@ -4222,6 +4224,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           rows={hoverRbtpRows}</span>
+<span class="d-ctx">           topKinds={hoverRbtpTopKinds}</span>
+<span class="d-ctx">           voteTypes={theme.suggestions}</span>
+<span class="d-add">+          linkAnchor={hoverRbtp.anchorCoords[0]}</span>
+<span class="d-ctx">           getAvoidRects={getHoverAvoidRects}</span>
+<span class="d-ctx">           avoidKey={`${pinnedScreenPos?.x},${pinnedScreenPos?.y};${routeCardPos?.x},${routeCardPos?.y}`}</span>
+<span class="d-ctx">         /&gt;,</span>
+<span class="d-hunk">@@ -4270,6 +4273,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           blocks={routeBlocks}</span>
+<span class="d-ctx">           mode={themeMode}</span>
+<span class="d-ctx">           voteTypes={theme.suggestions}</span>
+<span class="d-add">+          linkAnchor={startLat != null &amp;&amp; startLng != null ? { lat: startLat, lng: startLng } : null}</span>
+<span class="d-ctx">           shareUrl={window.location.href}</span>
+<span class="d-ctx">           onVote={castRouteVote}</span>
+<span class="d-ctx">           onRemove={onClearRoute ? () =&gt; onClearRouteRef.current?.() : undefined}</span>
+<span class="d-hunk">@@ -4403,6 +4407,9 @@ interface ProposalCardProps {</span>
+<span class="d-ctx">    *  set&#x27;s own icon (matching markers and the selector) instead of falling back</span>
+<span class="d-ctx">    *  to the suggestion glyph. */</span>
+<span class="d-ctx">   voteTypes?: readonly { label: string; icon: string }[];</span>
+<span class="d-add">+  /** Where this card sits, used to pick the NEAREST location links per row</span>
+<span class="d-add">+   *  (see rowLinks). Null/absent falls back to source order. */</span>
+<span class="d-add">+  linkAnchor?: { lat: number; lng: number } | null;</span>
+<span class="d-ctx">   onVote?: (edgeId: number | null, label: string, dir: VoteDirection) =&gt; void;</span>
+<span class="d-ctx">   onRemove?: () =&gt; void;</span>
+<span class="d-ctx">   /** Title/aria for the ✕ — the route-summary card deselects a whole route, not</span>
+<span class="d-hunk">@@ -4428,9 +4435,39 @@ type CardPos = {</span>
+<span class="d-ctx">  *  the least-covering one wins. */</span>
+<span class="d-ctx"> type AvoidRect = { left: number; top: number; right: number; bottom: number };</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/** At most this many location links render per vote-type row. */</span>
+<span class="d-add">+const MAX_ROW_LINKS = 3;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** The location links to show for one vote-type row: the MAX_ROW_LINKS real</span>
+<span class="d-add">+ *  proposals of that type NEAREST the card&#x27;s anchor, so a city-wide type (48</span>
+<span class="d-add">+ *  &quot;Street redesign&quot; projects) offers the ones you&#x27;re actually looking at.</span>
+<span class="d-add">+ *  Falls back to source order when there&#x27;s no anchor or no coordinates. */</span>
+<span class="d-add">+function rowLinks(</span>
+<span class="d-add">+  byLabel: Record&lt;string, VoteTypeLink[]&gt; | undefined,</span>
+<span class="d-add">+  label: string,</span>
+<span class="d-add">+  anchor: { lat: number; lng: number } | null | undefined,</span>
+<span class="d-add">+): VoteTypeLink[] {</span>
+<span class="d-add">+  const all = byLabel?.[label];</span>
+<span class="d-add">+  if (!all || all.length === 0) return [];</span>
+<span class="d-add">+  if (!anchor || all.length &lt;= MAX_ROW_LINKS) return all.slice(0, MAX_ROW_LINKS);</span>
+<span class="d-add">+  // Equirectangular: exact enough for ranking within one city.</span>
+<span class="d-add">+  const cos = Math.cos((anchor.lat * Math.PI) / 180);</span>
+<span class="d-add">+  const dist2 = (l: VoteTypeLink) =&gt; {</span>
+<span class="d-add">+    if (l.lat == null || l.lng == null) return Infinity;</span>
+<span class="d-add">+    const dy = l.lat - anchor.lat;</span>
+<span class="d-add">+    const dx = (l.lng - anchor.lng) * cos;</span>
+<span class="d-add">+    return dy * dy + dx * dx;</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+  return all</span>
+<span class="d-add">+    .map((link, i) =&gt; ({ link, i, d: dist2(link) }))</span>
+<span class="d-add">+    .sort((a, b) =&gt; a.d - b.d || a.i - b.i)</span>
+<span class="d-add">+    .slice(0, MAX_ROW_LINKS)</span>
+<span class="d-add">+    .map((x) =&gt; x.link);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> function ProposalCard({</span>
+<span class="d-ctx">   winner, eyebrow = &quot;Top Proposal&quot;, screenX, screenY, name, metaText = null, rows, topKinds,</span>
+<span class="d-del">-  interactive = false, elevated = false, getAvoidRects, avoidKey, edgeId = null, blocks = null, mode = &quot;&quot;, shareUrl = null, streetViewLatLng = null, voteTypes, onVote, onRemove, removeLabel = &quot;Remove this point&quot;, onHoverChange, registerEl,</span>
+<span class="d-add">+  interactive = false, elevated = false, getAvoidRects, avoidKey, edgeId = null, blocks = null, mode = &quot;&quot;, shareUrl = null, streetViewLatLng = null, voteTypes, linkAnchor = null, onVote, onRemove, removeLabel = &quot;Remove this point&quot;, onHoverChange, registerEl,</span>
+<span class="d-ctx"> }: ProposalCardProps) {</span>
+<span class="d-ctx">   const [copied, setCopied] = useState(false);</span>
+<span class="d-ctx">   // Interactive cards can collapse to a small pill (icon + label + expand) so a</span>
+<span class="d-hunk">@@ -4439,6 +4476,10 @@ function ProposalCard({</span>
 <span class="d-ctx">   const [minimized, setMinimized] = useState(false);</span>
 <span class="d-ctx">   const cardRef = useRef&lt;HTMLDivElement&gt;(null);</span>
 <span class="d-ctx">   const icon = winner ? iconForLabel(winner.label, voteTypes) : null;</span>
-<span class="d-add">+  // Per-vote-type location links (maps.vote_type_links, e.g. official DOT</span>
-<span class="d-add">+  // proposal locations on nyc-proposals) — rendered as [#1] [#2] anchors</span>
-<span class="d-add">+  // under the row&#x27;s label. Resolved by label, like iconForLabel.</span>
+<span class="d-add">+  // Per-vote-type location links (maps.vote_type_links, e.g. the official DOT</span>
+<span class="d-add">+  // project pages behind nyc-proposals&#x27; vote types) — the nearest few render</span>
+<span class="d-add">+  // as [a] [b] [c] under the row&#x27;s label. Resolved by label, like iconForLabel.</span>
 <span class="d-add">+  const typeLinks = getCurrentMap()?.voteTypeLinks;</span>
 <span class="d-ctx">   // Subscribe to the vote store so the +/- rows (which read getVote() below)</span>
 <span class="d-ctx">   // re-render whenever ANY vote changes — including the same edge being voted</span>
 <span class="d-ctx">   // from the top-bar banner. The value itself is unused; the subscription is.</span>
-<span class="d-hunk">@@ -4729,6 +4733,24 @@ function ProposalCard({</span>
+<span class="d-hunk">@@ -4699,6 +4740,7 @@ function ProposalCard({</span>
+<span class="d-ctx">                   // point proposal, diamond = route corridor) so the row reads</span>
+<span class="d-ctx">                   // as &quot;this type has a pin here&quot;.</span>
+<span class="d-ctx">                   const topKind = topKinds?.get(row.label);</span>
+<span class="d-add">+                  const links = rowLinks(typeLinks, row.label, linkAnchor);</span>
+<span class="d-ctx">                   return (</span>
+<span class="d-ctx">                     &lt;div</span>
+<span class="d-ctx">                       className={`graph-proposal-row${topKind ? &quot; is-top-proposal&quot; : &quot;&quot;}`}</span>
+<span class="d-hunk">@@ -4729,6 +4771,28 @@ function ProposalCard({</span>
 <span class="d-ctx">                         &lt;span className=&quot;graph-vote-net&quot; title=&quot;net votes (up − down)&quot;&gt;{row.up - row.down}&lt;/span&gt;</span>
 <span class="d-ctx">                         {tally(row, 1)}</span>
 <span class="d-ctx">                       &lt;/span&gt;</span>
-<span class="d-add">+                      {(typeLinks?.[row.label]?.length ?? 0) &gt; 0 &amp;&amp; (</span>
+<span class="d-add">+                      {links.length &gt; 0 &amp;&amp; (</span>
 <span class="d-add">+                        &lt;span</span>
 <span class="d-add">+                          className=&quot;graph-proposal-row-links&quot;</span>
-<span class="d-add">+                          aria-label={`${row.label} proposal locations`}</span>
+<span class="d-add">+                          aria-label={`${row.label} proposals`}</span>
 <span class="d-add">+                        &gt;</span>
-<span class="d-add">+                          {typeLinks![row.label].map((lnk, i) =&gt; (</span>
+<span class="d-add">+                          {links.map((lnk, i) =&gt; (</span>
 <span class="d-add">+                            &lt;a</span>
 <span class="d-add">+                              key={lnk.url}</span>
 <span class="d-add">+                              className=&quot;graph-proposal-row-link&quot;</span>
 <span class="d-add">+                              href={lnk.url}</span>
-<span class="d-add">+                              title={lnk.title || `Location ${i + 1}`}</span>
+<span class="d-add">+                              // The source document lives outside the app, so</span>
+<span class="d-add">+                              // never navigate the map away from under someone.</span>
+<span class="d-add">+                              target=&quot;_blank&quot;</span>
+<span class="d-add">+                              rel=&quot;noopener noreferrer&quot;</span>
+<span class="d-add">+                              title={lnk.title || lnk.url}</span>
 <span class="d-add">+                              onClick={(e) =&gt; e.stopPropagation()}</span>
 <span class="d-add">+                            &gt;</span>
-<span class="d-add">+                              [#{i + 1}]</span>
+<span class="d-add">+                              [{String.fromCharCode(97 + i)}]</span>
 <span class="d-add">+                            &lt;/a&gt;</span>
 <span class="d-add">+                          ))}</span>
 <span class="d-add">+                        &lt;/span&gt;</span>
@@ -382,7 +487,7 @@
         
         <details>
           <summary><span class="fname">client-react/src/map/runtime.ts</span>
-            <span class="stat"><span class="d-add">+13</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+17</span> / <span class="d-del">-0</span></span>
           </summary>
           
     <div class="ctx">
@@ -407,31 +512,35 @@
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">Changed blocks (top → bottom)</div>
-        <ol class="ctx-blocks"><li>VoteTypeLink { url, title? } — an in-app deep link (/m/&lt;slug&gt;?w=…&amp;vt=…)</li></ol>
+        <ol class="ctx-blocks"><li>VoteTypeLink { url, title?, lat?, lng? } — lat/lng drive the nearest-3 pick</li></ol>
       </div>
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/map/runtime.ts b/client-react/src/map/runtime.ts</span>
-<span class="d-meta">index dc83ec6..5eb1c40 100644</span>
+<span class="d-meta">index dc83ec6..eede1b0 100644</span>
 <span class="d-meta">--- a/client-react/src/map/runtime.ts</span>
 <span class="d-meta">+++ b/client-react/src/map/runtime.ts</span>
-<span class="d-hunk">@@ -17,6 +17,15 @@ export interface MapVoteType {</span>
+<span class="d-hunk">@@ -17,6 +17,19 @@ export interface MapVoteType {</span>
 <span class="d-ctx">   pointType: &quot;route&quot; | &quot;point&quot;;</span>
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
-<span class="d-add">+/** One location link for a vote type — an in-app deep link (/m/&lt;slug&gt;?w=…&amp;vt=…)</span>
-<span class="d-add">+ *  to a place where this vote type has a real proposal. Rendered as a numbered</span>
-<span class="d-add">+ *  [#1] [#2] anchor beside the vote-type label in proposal cards. */</span>
+<span class="d-add">+/** One location link for a vote type: a real proposal of that type somewhere on</span>
+<span class="d-add">+ *  the map, pointing at the source document (e.g. the project&#x27;s page on</span>
+<span class="d-add">+ *  nycdotprojects.info). Rendered as a lettered [a] [b] [c] anchor beside the</span>
+<span class="d-add">+ *  vote-type label in proposal cards. `lat`/`lng` are where the proposal is, so</span>
+<span class="d-add">+ *  a card shows the ones NEAREST it rather than an arbitrary first few. */</span>
 <span class="d-add">+export interface VoteTypeLink {</span>
 <span class="d-add">+  url: string;</span>
 <span class="d-add">+  /** Tooltip text — e.g. the official project&#x27;s title. */</span>
 <span class="d-add">+  title?: string;</span>
+<span class="d-add">+  lat?: number;</span>
+<span class="d-add">+  lng?: number;</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
 <span class="d-ctx"> export interface MapConfig {</span>
 <span class="d-ctx">   slug: string;</span>
 <span class="d-ctx">   name: string;</span>
-<span class="d-hunk">@@ -42,6 +51,10 @@ export interface MapConfig {</span>
+<span class="d-hunk">@@ -42,6 +55,10 @@ export interface MapConfig {</span>
 <span class="d-ctx">    *  searched, never in the default suggestion list. pointType is the kind the</span>
 <span class="d-ctx">    *  creating cast recorded; null on legacy rows flagged before kinds existed. */</span>
 <span class="d-ctx">   searchVoteTypes?: { label: string; pointType: &quot;route&quot; | &quot;point&quot; | null }[];</span>
@@ -446,7 +555,7 @@
         
         <details>
           <summary><span class="fname">client-react/src/styles/globals.css</span>
-            <span class="stat"><span class="d-add">+26</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+28</span> / <span class="d-del">-0</span></span>
           </summary>
           
     <div class="ctx">
@@ -467,7 +576,7 @@
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
-        <ul class="ctx-outline"><li class="changed"><span class="ol-label">.graph-proposal-row</span><span class="ol-sum">flex-wrap so the links line can wrap under</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.graph-proposal-row-links / -link</span><span class="ol-sum">full-width wrapping line, quiet until hover</span><span class="ol-tag">changed</span></li></ul>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">.graph-proposal-row</span><span class="ol-sum">flex-wrap so the links line can wrap under</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.graph-proposal-row-links / -link</span><span class="ol-sum">10px, opacity .5, quiet until hover</span><span class="ol-tag">changed</span></li></ul>
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">Changed blocks (top → bottom)</div>
@@ -476,7 +585,7 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
-<span class="d-meta">index 1ae811a..7231bdc 100644</span>
+<span class="d-meta">index 1ae811a..98b8cbc 100644</span>
 <span class="d-meta">--- a/client-react/src/styles/globals.css</span>
 <span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
 <span class="d-hunk">@@ -1961,6 +1961,9 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
@@ -489,25 +598,27 @@
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx"> .graph-proposal-row-label {</span>
-<span class="d-hunk">@@ -2003,6 +2006,29 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-hunk">@@ -2003,6 +2006,31 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
 <span class="d-ctx">   transform: rotate(45deg) scale(0.9);</span>
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
-<span class="d-add">+/* Numbered location links ([#1] [#2] …) for a vote type with curated proposal</span>
-<span class="d-add">+   locations (maps.vote_type_links) — a full-width line under the label so a</span>
-<span class="d-add">+   long list never squeezes the label or the vote control. */</span>
+<span class="d-add">+/* Lettered links ([a] [b] [c]) to the real proposals behind a vote type</span>
+<span class="d-add">+   (maps.vote_type_links) — a full-width line under the label so they never</span>
+<span class="d-add">+   squeeze the label or the vote control. Deliberately small and quiet: a</span>
+<span class="d-add">+   footnote on the row, not a second control. */</span>
 <span class="d-add">+.graph-proposal-row-links {</span>
 <span class="d-add">+  flex: 1 0 100%;</span>
 <span class="d-add">+  display: flex;</span>
 <span class="d-add">+  flex-wrap: wrap;</span>
-<span class="d-add">+  gap: 1px 8px;</span>
-<span class="d-add">+  font-size: 12px;</span>
-<span class="d-add">+  font-variant-numeric: tabular-nums;</span>
+<span class="d-add">+  gap: 0 6px;</span>
+<span class="d-add">+  margin-top: -1px;</span>
+<span class="d-add">+  font-size: 10px;</span>
+<span class="d-add">+  line-height: 1.3;</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
 <span class="d-add">+.graph-proposal-row-link {</span>
 <span class="d-add">+  color: inherit;</span>
-<span class="d-add">+  opacity: 0.65;</span>
+<span class="d-add">+  opacity: 0.5;</span>
 <span class="d-add">+  text-decoration: none;</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
@@ -821,7 +932,7 @@
         
         <details>
           <summary><span class="fname">tools/nyc_proposals/set_vote_type_links.py</span>
-            <span class="stat"><span class="d-add">+77</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+86</span> / <span class="d-del">-0</span></span>
           </summary>
           
     <div class="ctx">
@@ -842,29 +953,31 @@
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
-        <ul class="ctx-outline"><li class="changed"><span class="ol-label">link_for</span><span class="ol-sum">route → w=start;end · point → w=lat,lng · title = project title</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main</span><span class="ol-sum">group by vote_type, print, POST /api/admin/…/vote-type-links</span><span class="ol-tag">changed</span></li></ul>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">link_for</span><span class="ol-sum">url = DOT project page · lat/lng = proposal location (corridor midpoint)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main</span><span class="ol-sum">group by vote_type, print, POST /api/admin/…/vote-type-links</span><span class="ol-tag">changed</span></li></ul>
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">Changed blocks (top → bottom)</div>
-        <ol class="ctx-blocks"><li>idempotent: the whole mapping is replaced on every run</li></ol>
+        <ol class="ctx-blocks"><li>idempotent: the whole mapping is replaced on every run; dedupes (vote_type, url)</li></ol>
       </div>
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/tools/nyc_proposals/set_vote_type_links.py b/tools/nyc_proposals/set_vote_type_links.py</span>
 <span class="d-meta">new file mode 100644</span>
-<span class="d-meta">index 0000000..1d7d070</span>
+<span class="d-meta">index 0000000..1db93c7</span>
 <span class="d-meta">--- /dev/null</span>
 <span class="d-meta">+++ b/tools/nyc_proposals/set_vote_type_links.py</span>
-<span class="d-hunk">@@ -0,0 +1,77 @@</span>
+<span class="d-hunk">@@ -0,0 +1,86 @@</span>
 <span class="d-add">+#!/usr/bin/env python3</span>
 <span class="d-add">+&quot;&quot;&quot;</span>
-<span class="d-add">+Install per-vote-type location links on a map from a plan JSONL.</span>
+<span class="d-add">+Install per-vote-type proposal links on a map from a plan JSONL.</span>
 <span class="d-add">+</span>
 <span class="d-add">+Reads the plan produced by `import_to_map.py plan` and builds, for each vote</span>
-<span class="d-add">+type, the ordered list of proposal locations as in-app deep links</span>
-<span class="d-add">+(/m/&lt;slug&gt;?w=…&amp;vt=…). Installs the whole mapping via the admin API</span>
-<span class="d-add">+(maps.vote_type_links); the client renders each list as [#1] [#2] anchors</span>
-<span class="d-add">+beside the vote-type label in proposal cards.</span>
+<span class="d-add">+type, the list of real proposals of that type — each linking to its SOURCE</span>
+<span class="d-add">+document (the project&#x27;s page on nycdotprojects.info, the same pages the votes</span>
+<span class="d-add">+were imported from) and carrying the proposal&#x27;s coordinates. Installs the whole</span>
+<span class="d-add">+mapping via the admin API (maps.vote_type_links); the client shows the three</span>
+<span class="d-add">+NEAREST proposals to whatever the card is anchored on, as [a] [b] [c] beside</span>
+<span class="d-add">+the vote-type label.</span>
 <span class="d-add">+</span>
 <span class="d-add">+    python3 set_vote_type_links.py --plan plan.jsonl \</span>
 <span class="d-add">+        --base http://localhost:5001 --map nyc-proposals \</span>
@@ -877,20 +990,23 @@
 <span class="d-add">+import os</span>
 <span class="d-add">+import sys</span>
 <span class="d-add">+import urllib.request</span>
-<span class="d-add">+from urllib.parse import urlencode</span>
 <span class="d-add">+</span>
 <span class="d-add">+</span>
-<span class="d-add">+def link_for(slug: str, entry: dict) -&gt; dict | None:</span>
+<span class="d-add">+def link_for(entry: dict) -&gt; dict | None:</span>
+<span class="d-add">+    &quot;&quot;&quot;{url, title, lat, lng} for a cast plan entry, or None if it wasn&#x27;t cast.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Corridors are anchored at their midpoint so proximity ranking doesn&#x27;t favor</span>
+<span class="d-add">+    whichever end happened to be geocoded first.</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
 <span class="d-add">+    if entry.get(&quot;cast&quot;) == &quot;route&quot;:</span>
 <span class="d-add">+        (slat, slng), (elat, elng) = entry[&quot;start&quot;], entry[&quot;end&quot;]</span>
-<span class="d-add">+        w = f&quot;{slat:.6f},{slng:.6f};{elat:.6f},{elng:.6f}&quot;</span>
+<span class="d-add">+        lat, lng = (slat + elat) / 2, (slng + elng) / 2</span>
 <span class="d-add">+    elif entry.get(&quot;cast&quot;) == &quot;point&quot;:</span>
-<span class="d-add">+        plat, plng = entry[&quot;point&quot;]</span>
-<span class="d-add">+        w = f&quot;{plat:.6f},{plng:.6f}&quot;</span>
+<span class="d-add">+        lat, lng = entry[&quot;point&quot;]</span>
 <span class="d-add">+    else:</span>
 <span class="d-add">+        return None</span>
-<span class="d-add">+    qs = urlencode({&quot;w&quot;: w, &quot;vt&quot;: entry[&quot;vote_type&quot;]})</span>
-<span class="d-add">+    return {&quot;url&quot;: f&quot;/m/{slug}?{qs}&quot;, &quot;title&quot;: entry[&quot;title&quot;]}</span>
+<span class="d-add">+    return {&quot;url&quot;: entry[&quot;url&quot;], &quot;title&quot;: entry[&quot;title&quot;],</span>
+<span class="d-add">+            &quot;lat&quot;: round(lat, 6), &quot;lng&quot;: round(lng, 6)}</span>
 <span class="d-add">+</span>
 <span class="d-add">+</span>
 <span class="d-add">+def main():</span>
@@ -903,19 +1019,23 @@
 <span class="d-add">+    args = ap.parse_args()</span>
 <span class="d-add">+</span>
 <span class="d-add">+    links: dict[str, list[dict]] = {}</span>
+<span class="d-add">+    seen: set[tuple[str, str]] = set()</span>
 <span class="d-add">+    with open(args.plan) as f:</span>
 <span class="d-add">+        for line in f:</span>
 <span class="d-add">+            entry = json.loads(line)</span>
-<span class="d-add">+            lnk = link_for(args.slug, entry)</span>
-<span class="d-add">+            if lnk:</span>
-<span class="d-add">+                links.setdefault(entry[&quot;vote_type&quot;], []).append(lnk)</span>
+<span class="d-add">+            lnk = link_for(entry)</span>
+<span class="d-add">+            if not lnk or (entry[&quot;vote_type&quot;], lnk[&quot;url&quot;]) in seen:</span>
+<span class="d-add">+                continue</span>
+<span class="d-add">+            seen.add((entry[&quot;vote_type&quot;], lnk[&quot;url&quot;]))</span>
+<span class="d-add">+            links.setdefault(entry[&quot;vote_type&quot;], []).append(lnk)</span>
 <span class="d-add">+</span>
 <span class="d-add">+    total = sum(len(v) for v in links.values())</span>
 <span class="d-add">+    for label, ls in sorted(links.items(), key=lambda kv: -len(kv[1])):</span>
 <span class="d-add">+        print(f&quot;  {label}: {len(ls)}&quot;)</span>
-<span class="d-add">+        for i, lnk in enumerate(ls):</span>
-<span class="d-add">+            print(f&quot;    [#{i + 1}] {lnk[&#x27;title&#x27;][:60]}  {lnk[&#x27;url&#x27;][:90]}&quot;)</span>
-<span class="d-add">+    print(f&quot;{total} links across {len(links)} vote types&quot;)</span>
+<span class="d-add">+        for lnk in ls:</span>
+<span class="d-add">+            print(f&quot;    {lnk[&#x27;lat&#x27;]:.4f},{lnk[&#x27;lng&#x27;]:.4f}  {lnk[&#x27;title&#x27;][:52]:&lt;52} {lnk[&#x27;url&#x27;]}&quot;)</span>
+<span class="d-add">+    print(f&quot;{total} proposals across {len(links)} vote types &quot;</span>
+<span class="d-add">+          f&quot;(the client shows the 3 nearest per card)&quot;)</span>
 <span class="d-add">+    if args.dry_run:</span>
 <span class="d-add">+        return</span>
 <span class="d-add">+    if not args.token:</span>

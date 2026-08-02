@@ -18,7 +18,7 @@ import L from "leaflet";
 import Flatbush from "flatbush";
 import { CONFIG } from "../../config";
 import { COLOR_START, COLOR_END } from "../../colors";
-import { withMap, getMapSlug, passcodeHeaders, getCurrentMap } from "../../map/runtime";
+import { withMap, getMapSlug, passcodeHeaders, getCurrentMap, type VoteTypeLink } from "../../map/runtime";
 import { useWebSocketContext } from "../../context/WebSocketContext";
 import { useGraphSnap, useTheme, useHeatmap, useGhostPin, useRoute } from "../../context";
 import type { GraphData, ProposalMatch } from "../../types";
@@ -4164,6 +4164,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             : null}
           mode={themeMode}
           voteTypes={theme.suggestions}
+          linkAnchor={pinnedPointLatLng}
           shareUrl={pinnedPointLatLng
             ? buildSelectionUrl(pinnedPointLatLng, pinnedWinner?.label ?? pinnedVoteTypes[0]?.label)
             : null}
@@ -4193,6 +4194,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           rows={hoverVoteTypes}
           topKinds={isStationNetwork ? undefined : hoverTopKinds}
           voteTypes={theme.suggestions}
+          linkAnchor={targetLatLng(hoverTarget, graphDataRef.current)}
           getAvoidRects={getHoverAvoidRects}
           // The open modal can re-anchor (vote tick, pan) while the hover
           // target stays put — re-place the hover card when that happens.
@@ -4222,6 +4224,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           rows={hoverRbtpRows}
           topKinds={hoverRbtpTopKinds}
           voteTypes={theme.suggestions}
+          linkAnchor={hoverRbtp.anchorCoords[0]}
           getAvoidRects={getHoverAvoidRects}
           avoidKey={`${pinnedScreenPos?.x},${pinnedScreenPos?.y};${routeCardPos?.x},${routeCardPos?.y}`}
         />,
@@ -4270,6 +4273,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           blocks={routeBlocks}
           mode={themeMode}
           voteTypes={theme.suggestions}
+          linkAnchor={startLat != null && startLng != null ? { lat: startLat, lng: startLng } : null}
           shareUrl={window.location.href}
           onVote={castRouteVote}
           onRemove={onClearRoute ? () => onClearRouteRef.current?.() : undefined}
@@ -4403,6 +4407,9 @@ interface ProposalCardProps {
    *  set's own icon (matching markers and the selector) instead of falling back
    *  to the suggestion glyph. */
   voteTypes?: readonly { label: string; icon: string }[];
+  /** Where this card sits, used to pick the NEAREST location links per row
+   *  (see rowLinks). Null/absent falls back to source order. */
+  linkAnchor?: { lat: number; lng: number } | null;
   onVote?: (edgeId: number | null, label: string, dir: VoteDirection) => void;
   onRemove?: () => void;
   /** Title/aria for the ✕ — the route-summary card deselects a whole route, not
@@ -4428,9 +4435,39 @@ type CardPos = {
  *  the least-covering one wins. */
 type AvoidRect = { left: number; top: number; right: number; bottom: number };
 
+/** At most this many location links render per vote-type row. */
+const MAX_ROW_LINKS = 3;
+
+/** The location links to show for one vote-type row: the MAX_ROW_LINKS real
+ *  proposals of that type NEAREST the card's anchor, so a city-wide type (48
+ *  "Street redesign" projects) offers the ones you're actually looking at.
+ *  Falls back to source order when there's no anchor or no coordinates. */
+function rowLinks(
+  byLabel: Record<string, VoteTypeLink[]> | undefined,
+  label: string,
+  anchor: { lat: number; lng: number } | null | undefined,
+): VoteTypeLink[] {
+  const all = byLabel?.[label];
+  if (!all || all.length === 0) return [];
+  if (!anchor || all.length <= MAX_ROW_LINKS) return all.slice(0, MAX_ROW_LINKS);
+  // Equirectangular: exact enough for ranking within one city.
+  const cos = Math.cos((anchor.lat * Math.PI) / 180);
+  const dist2 = (l: VoteTypeLink) => {
+    if (l.lat == null || l.lng == null) return Infinity;
+    const dy = l.lat - anchor.lat;
+    const dx = (l.lng - anchor.lng) * cos;
+    return dy * dy + dx * dx;
+  };
+  return all
+    .map((link, i) => ({ link, i, d: dist2(link) }))
+    .sort((a, b) => a.d - b.d || a.i - b.i)
+    .slice(0, MAX_ROW_LINKS)
+    .map((x) => x.link);
+}
+
 function ProposalCard({
   winner, eyebrow = "Top Proposal", screenX, screenY, name, metaText = null, rows, topKinds,
-  interactive = false, elevated = false, getAvoidRects, avoidKey, edgeId = null, blocks = null, mode = "", shareUrl = null, streetViewLatLng = null, voteTypes, onVote, onRemove, removeLabel = "Remove this point", onHoverChange, registerEl,
+  interactive = false, elevated = false, getAvoidRects, avoidKey, edgeId = null, blocks = null, mode = "", shareUrl = null, streetViewLatLng = null, voteTypes, linkAnchor = null, onVote, onRemove, removeLabel = "Remove this point", onHoverChange, registerEl,
 }: ProposalCardProps) {
   const [copied, setCopied] = useState(false);
   // Interactive cards can collapse to a small pill (icon + label + expand) so a
@@ -4439,9 +4476,9 @@ function ProposalCard({
   const [minimized, setMinimized] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const icon = winner ? iconForLabel(winner.label, voteTypes) : null;
-  // Per-vote-type location links (maps.vote_type_links, e.g. official DOT
-  // proposal locations on nyc-proposals) — rendered as [#1] [#2] anchors
-  // under the row's label. Resolved by label, like iconForLabel.
+  // Per-vote-type location links (maps.vote_type_links, e.g. the official DOT
+  // project pages behind nyc-proposals' vote types) — the nearest few render
+  // as [a] [b] [c] under the row's label. Resolved by label, like iconForLabel.
   const typeLinks = getCurrentMap()?.voteTypeLinks;
   // Subscribe to the vote store so the +/- rows (which read getVote() below)
   // re-render whenever ANY vote changes — including the same edge being voted
@@ -4703,6 +4740,7 @@ function ProposalCard({
                   // point proposal, diamond = route corridor) so the row reads
                   // as "this type has a pin here".
                   const topKind = topKinds?.get(row.label);
+                  const links = rowLinks(typeLinks, row.label, linkAnchor);
                   return (
                     <div
                       className={`graph-proposal-row${topKind ? " is-top-proposal" : ""}`}
@@ -4733,20 +4771,24 @@ function ProposalCard({
                         <span className="graph-vote-net" title="net votes (up − down)">{row.up - row.down}</span>
                         {tally(row, 1)}
                       </span>
-                      {(typeLinks?.[row.label]?.length ?? 0) > 0 && (
+                      {links.length > 0 && (
                         <span
                           className="graph-proposal-row-links"
-                          aria-label={`${row.label} proposal locations`}
+                          aria-label={`${row.label} proposals`}
                         >
-                          {typeLinks![row.label].map((lnk, i) => (
+                          {links.map((lnk, i) => (
                             <a
                               key={lnk.url}
                               className="graph-proposal-row-link"
                               href={lnk.url}
-                              title={lnk.title || `Location ${i + 1}`}
+                              // The source document lives outside the app, so
+                              // never navigate the map away from under someone.
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={lnk.title || lnk.url}
                               onClick={(e) => e.stopPropagation()}
                             >
-                              [#{i + 1}]
+                              [{String.fromCharCode(97 + i)}]
                             </a>
                           ))}
                         </span>

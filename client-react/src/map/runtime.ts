@@ -17,13 +17,17 @@ export interface MapVoteType {
   pointType: "route" | "point";
 }
 
-/** One location link for a vote type — an in-app deep link (/m/<slug>?w=…&vt=…)
- *  to a place where this vote type has a real proposal. Rendered as a numbered
- *  [#1] [#2] anchor beside the vote-type label in proposal cards. */
+/** One location link for a vote type: a real proposal of that type somewhere on
+ *  the map, pointing at the source document (e.g. the project's page on
+ *  nycdotprojects.info). Rendered as a lettered [a] [b] [c] anchor beside the
+ *  vote-type label in proposal cards. `lat`/`lng` are where the proposal is, so
+ *  a card shows the ones NEAREST it rather than an arbitrary first few. */
 export interface VoteTypeLink {
   url: string;
   /** Tooltip text — e.g. the official project's title. */
   title?: string;
+  lat?: number;
+  lng?: number;
 }
 
 export interface MapConfig {

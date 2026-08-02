@@ -2006,21 +2006,23 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   transform: rotate(45deg) scale(0.9);
 }
 
-/* Numbered location links ([#1] [#2] …) for a vote type with curated proposal
-   locations (maps.vote_type_links) — a full-width line under the label so a
-   long list never squeezes the label or the vote control. */
+/* Lettered links ([a] [b] [c]) to the real proposals behind a vote type
+   (maps.vote_type_links) — a full-width line under the label so they never
+   squeeze the label or the vote control. Deliberately small and quiet: a
+   footnote on the row, not a second control. */
 .graph-proposal-row-links {
   flex: 1 0 100%;
   display: flex;
   flex-wrap: wrap;
-  gap: 1px 8px;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
+  gap: 0 6px;
+  margin-top: -1px;
+  font-size: 10px;
+  line-height: 1.3;
 }
 
 .graph-proposal-row-link {
   color: inherit;
-  opacity: 0.65;
+  opacity: 0.5;
   text-decoration: none;
 }
 
