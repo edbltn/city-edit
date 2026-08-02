@@ -28,7 +28,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# ── Key helpers ─────────────────────────────────────────────────────────────
+# ── Slots and keys ──────────────────────────────────────────────────────────
+#
+# A SLOT is the (block_id, vt_id, direction bit) triple both Redis structures
+# are keyed by: `bd:` holds one device-multiplicity hash per slot, `bagg:`
+# holds one deduped count per slot. Every path below carries slots and derives
+# whichever key it needs from them — so the two encodings are written once, and
+# no code has to recover a slot by taking a key string apart again.
+
+Slot = tuple[int, int, int]
+
 
 def bd_key(slug: str, mode: int, block_id: int, vt_id: int, dbit: int) -> str:
     """Per-(block,vote_type,direction) device-multiplicity hash. HLEN = deduped count."""
@@ -51,6 +60,35 @@ def unpack_block_field(key: int) -> tuple[int, int, int]:
     return (key & 0xFF_FFFF, (key >> 24) & 0xFF_FFFF, (key >> 48) & 0x1)
 
 
+def _slot_bd_key(slug: str, mode: int, slot: Slot) -> str:
+    return bd_key(slug, mode, *slot)
+
+
+def _slot_bagg_field(slot: Slot) -> str:
+    return str(pack_block_field(*slot))
+
+
+def _transitions(block_id: int, vt_id: int,
+                 prev_dir: int, new_dir: int) -> list[tuple[Slot, int]]:
+    """The device-multiplicity moves one edge's direction change implies:
+    +1 on the slot the device enters, −1 on the slot it leaves (enter first,
+    so a same-block clear-then-recast can never transiently read as absent).
+
+    This is the whole of "which counters move" — both write paths below share
+    it, and differ only in HOW they talk to Redis. Empty when nothing changed
+    or the edge has no block.
+    """
+    from vote_store import dir_to_bit, UP, DOWN
+    if new_dir == prev_dir or block_id < 0:
+        return []
+    moves: list[tuple[Slot, int]] = []
+    if new_dir in (UP, DOWN):
+        moves.append(((block_id, vt_id, dir_to_bit(new_dir)), 1))
+    if prev_dir in (UP, DOWN):
+        moves.append(((block_id, vt_id, dir_to_bit(prev_dir)), -1))
+    return moves
+
+
 # ── Write path (incremental, called inside the voter lock) ──────────────────
 
 def apply_block_delta(
@@ -64,27 +102,26 @@ def apply_block_delta(
 
     new_dir/prev_dir use +1 (up), -1 (down), 0 (none). A no-op when unchanged or
     when the edge has no block (caller passes block_id < 0 → skip there).
+
+    One move at a time, each HINCRBY awaited before the next decision — the
+    straightforward reading of the rules, and the oracle the pipelined
+    apply_block_deltas_batch is tested against (tests/unit/test_block_votes.py).
+    Prefer the batch form for anything bigger than a single edge.
     """
-    from vote_store import dir_to_bit, UP, DOWN
-    if new_dir == prev_dir or block_id < 0:
-        return
     bagg = bagg_key(slug, mode)
     pipe = redis_client.pipeline()
-
-    if new_dir in (UP, DOWN):
-        db = dir_to_bit(new_dir)
-        # HINCRBY returns the new value; ==1 means this device just became present
-        n = redis_client.hincrby(bd_key(slug, mode, block_id, vt_id, db), device_id, 1)
-        if n == 1:
-            pipe.hincrby(bagg, str(pack_block_field(block_id, vt_id, db)), 1)
-    if prev_dir in (UP, DOWN):
-        db = dir_to_bit(prev_dir)
-        bdk = bd_key(slug, mode, block_id, vt_id, db)
-        n = redis_client.hincrby(bdk, device_id, -1)
-        if n <= 0:
+    for slot, delta in _transitions(block_id, vt_id, prev_dir, new_dir):
+        bdk = _slot_bd_key(slug, mode, slot)
+        # HINCRBY returns the new value: ==1 on the way up means this device
+        # just became present, ==0 on the way down means it fully left.
+        n = redis_client.hincrby(bdk, device_id, delta)
+        if delta > 0:
+            if n == 1:
+                pipe.hincrby(bagg, _slot_bagg_field(slot), 1)
+        elif n <= 0:
             redis_client.hdel(bdk, device_id)
-            if n == 0:  # device fully left this block for (vt,dir)
-                pipe.hincrby(bagg, str(pack_block_field(block_id, vt_id, db)), -1)
+            if n == 0:
+                pipe.hincrby(bagg, _slot_bagg_field(slot), -1)
     pipe.execute()
 
 
@@ -127,53 +164,42 @@ def apply_block_deltas_batch(
     derives from the returned multiplicities:
       · bagg moves on every presence-boundary crossing (+1 result == 1,
         −1 result == 0), same as the loop — crossings are real regardless of
-        interleaving, and opposite crossings on one field cancel via summing.
+        interleaving, and opposite crossings on one slot cancel via summing.
       · a device field is deleted only when the LAST op touching it left
         it ≤ 0 — deferring HDEL per-op could wipe a field a later op in the
         same plan re-created (clear on edge A + cast on edge B, same block).
     """
-    from vote_store import dir_to_bit, UP, DOWN
-
-    # Phase A: (bd_key, +1/-1 increment) per boundary-relevant transition.
-    incrs: list[tuple[str, int]] = []
-    for block_id, prev_dir, new_dir in block_ops:
-        if new_dir == prev_dir or block_id < 0:
-            continue
-        if new_dir in (UP, DOWN):
-            incrs.append((bd_key(slug, mode, block_id, vt_id, dir_to_bit(new_dir)), 1))
-        if prev_dir in (UP, DOWN):
-            incrs.append((bd_key(slug, mode, block_id, vt_id, dir_to_bit(prev_dir)), -1))
-    if not incrs:
+    # Phase A: every transition the plan implies, pipelined in op order.
+    moves = [move for block_id, prev_dir, new_dir in block_ops
+             for move in _transitions(block_id, vt_id, prev_dir, new_dir)]
+    if not moves:
         return
     pipe = redis_client.pipeline()
-    for bdk, delta in incrs:
-        pipe.hincrby(bdk, device_id, delta)
+    for slot, delta in moves:
+        pipe.hincrby(_slot_bd_key(slug, mode, slot), device_id, delta)
     results = pipe.execute()
 
     # Phase B: aggregate boundary crossings + final-state cleanup.
-    bagg_deltas: dict[str, int] = {}   # bd_key → net bagg move
-    final_mult: dict[str, int] = {}    # bd_key → multiplicity after last op
-    for (bdk, delta), n in zip(incrs, results):
+    bagg_moves: dict[Slot, int] = {}   # slot → net bagg move
+    final_mult: dict[Slot, int] = {}   # slot → multiplicity after its last op
+    for (slot, delta), n in zip(moves, results):
         if delta > 0 and n == 1:
-            bagg_deltas[bdk] = bagg_deltas.get(bdk, 0) + 1
+            bagg_moves[slot] = bagg_moves.get(slot, 0) + 1
         elif delta < 0 and n == 0:
-            bagg_deltas[bdk] = bagg_deltas.get(bdk, 0) - 1
-        final_mult[bdk] = n
+            bagg_moves[slot] = bagg_moves.get(slot, 0) - 1
+        final_mult[slot] = n
 
     bagg = bagg_key(slug, mode)
     pipe = redis_client.pipeline()
     queued = False
-    for bdk, n in final_mult.items():
+    for slot, n in final_mult.items():
         if n <= 0:
-            pipe.hdel(bdk, device_id)
+            pipe.hdel(_slot_bd_key(slug, mode, slot), device_id)
             queued = True
-    for bdk, move in bagg_deltas.items():
-        if move == 0:
-            continue
-        # bd:<slug>:<mode>:<block>:<vt>:<dir>
-        _, _, _, block_s, vt_s, dir_s = bdk.split(":")
-        pipe.hincrby(bagg, str(pack_block_field(int(block_s), int(vt_s), int(dir_s))), move)
-        queued = True
+    for slot, move in bagg_moves.items():
+        if move:
+            pipe.hincrby(bagg, _slot_bagg_field(slot), move)
+            queued = True
     if queued:
         pipe.execute()
 
@@ -252,8 +278,8 @@ def read_block_vt_counts(
     bagg = bagg_key(slug, mode)
     pipe = redis_client.pipeline()
     for b in block_ids:
-        pipe.hget(bagg, str(pack_block_field(b, vt_id, 0)))
-        pipe.hget(bagg, str(pack_block_field(b, vt_id, 1)))
+        pipe.hget(bagg, _slot_bagg_field((b, vt_id, 0)))
+        pipe.hget(bagg, _slot_bagg_field((b, vt_id, 1)))
     vals = pipe.execute()
     return {
         b: [int(vals[2 * i] or 0), int(vals[2 * i + 1] or 0)]
@@ -291,7 +317,7 @@ def rebuild_from_db(
         return 0
     clear(redis_client, slug, mode)
     n_edges = len(edge_block_id)
-    touched_keys: set[str] = set()
+    touched: set[Slot] = set()
     # (block, vt, device) → dbit seen so far; 2 = both seen + already warned.
     # Guards the §2.5 invariant (a block never holds both directions from one
     # device+type) — canonical rows violating it are logged, not dropped.
@@ -315,25 +341,29 @@ def rebuild_from_db(
                 f"[BLOCKVOTES] invariant violation in {slug}/{mode}: block {b} "
                 f"vt {vt_id} device {device_id} holds BOTH directions")
             seen_dir[key] = 2
-        bdk = bd_key(slug, mode, b, vt_id, dbit)
-        pipe.hincrby(bdk, device_id, 1)
-        touched_keys.add(bdk)
+        slot = (b, vt_id, dbit)
+        pipe.hincrby(_slot_bd_key(slug, mode, slot), device_id, 1)
+        touched.add(slot)
         n += 1
         if n % 5000 == 0:
             pipe.execute(); pipe = redis_client.pipeline()
     pipe.execute()
 
-    # Derive the aggregate: deduped count == HLEN of each device hash.
+    # Derive the aggregate: deduped count == HLEN of each device hash. Both
+    # halves are pipelined — a rebuild touches every voted slot in the map, so
+    # reading the lengths one at a time was one full round trip per slot.
+    slots = list(touched)
+    pipe = redis_client.pipeline()
+    for slot in slots:
+        pipe.hlen(_slot_bd_key(slug, mode, slot))
+    hlens = pipe.execute()
+
     bagg = bagg_key(slug, mode)
     pipe = redis_client.pipeline()
-    for bdk in touched_keys:
-        # bd:<slug>:<mode>:<block>:<vt>:<dir>
-        _, _, _, block_s, vt_s, dir_s = bdk.split(":")
-        hlen = redis_client.hlen(bdk)
+    for slot, hlen in zip(slots, hlens):
         if hlen > 0:
-            field = pack_block_field(int(block_s), int(vt_s), int(dir_s))
-            pipe.hset(bagg, str(field), hlen)
+            pipe.hset(bagg, _slot_bagg_field(slot), hlen)
     pipe.execute()
     logger.info(f"[BLOCKVOTES] rebuilt {slug}/{mode}: {n} edge-votes → "
-                f"{len(touched_keys)} (block,vt,dir) groups")
-    return len(touched_keys)
+                f"{len(slots)} (block,vt,dir) groups")
+    return len(slots)
