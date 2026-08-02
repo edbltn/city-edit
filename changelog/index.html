@@ -29,6 +29,25 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-02-contiguous-blocks.html">
+    <div class="date">2026-08-02</div>
+    <h2>One block, one place — the fused park ribbons that voted in two spots at once</h2>
+    <p>Selecting the block at John V. Lindsay East River Park lit <em>two</em> ribbons 72&nbsp;m apart
+    — the esplanade and the park's inland path — as one vote target, so a single click cast in both
+    places. The builder's merge rule A folds corridors that share the same two endpoint junctions,
+    which is right for a street's two sidewalks and its roadway but equally true of a park loop's two
+    arms, and it applied <em>no distance test at all</em>. (Last month's oversized-block split cuts
+    across the long axis, so it kept both arms in every piece — and this block was only 274&nbsp;m
+    across anyway.) Rule A now resolves each group anchor-first against the longest corridor — the
+    roadway between the sidewalks — claiming only what never strays past 30&nbsp;m, a threshold the
+    per-city gap histograms put squarely in a 6× valley. A new §5 pass then gives the shipped geometry
+    the last word: polygon pieces are bucketed into runs ≤20&nbsp;m apart and every bucket becomes its
+    own block. Blocks spread wider than 20&nbsp;m, across all seven maps: <strong>4,748 → 0</strong>
+    (worst 376&nbsp;m → 19.9&nbsp;m), with 100% coverage and zero polygon overlap preserved
+    throughout. Also: <code>scan_contiguity.py</code> to check the invariant from outside the builder,
+    and a slot-based tidy-up of the block-vote aggregation.</p>
+  </a>
+
   <a class="entry" href="./2026-08-02-screenshot-job-oom-cascade.html">
     <div class="date">2026-08-02</div>
     <h2>The screenshot job that reported green while capturing nothing</h2>

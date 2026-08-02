@@ -1,0 +1,1121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One block, one place — the fused park ribbons that voted in two spots at once — 2026-08-02</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>One block, one place — the fused park ribbons that voted in two spots at once</h1>
+    <div class="dateline">2026-08-02 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#fused">Two ribbons 72 m apart were one block</a>
+<a href="#calibration">Why 30 m, and how we know it is not cutting real streets</a>
+<a href="#aggregation">Block aggregation: carry the slot, stop parsing the key back apart</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">A block is supposed to be one street segment you can click and vote on. At John V. Lindsay East River Park one block was two ribbons 72&nbsp;m apart, so a single vote landed on both sides of the park — and 2,346 nyc blocks were like it. The merge rule that fuses a street&rsquo;s two sidewalks with its roadway was testing only that the corridors share both endpoint junctions, which a park loop&rsquo;s two arms do just as well. It now measures the distance too, anchored on the roadway between them; and a new final pass gives the shipped geometry the last word, splitting any block whose pieces sit more than 20&nbsp;m apart. Across all seven maps that count goes 4,748 &rarr; 0, with 100% edge coverage and zero polygon overlap untouched.</p>
+
+  
+    <section class="card" id="fused">
+      <div class="tag">CORRECTNESS / LAYER 2</div>
+      <h2>Two ribbons 72 m apart were one block</h2>
+      <h3>Symptom</h3>
+      <p>On <code>/m/nyc-proposals</code>, selecting the block at John V. Lindsay East River Park lit <strong>two disconnected ribbons</strong> — the riverside esplanade and the park&rsquo;s inland path, ~72 m of grass between them — as a single &quot;PROPOSAL&quot; target. Any vote cast there landed in both places. It was not a one-off: <strong>2,346 nyc blocks</strong> (0.8%) shipped with pieces more than 20 m apart, the worst spanning <strong>367 m</strong>.</p>
+      <h3>Root cause</h3>
+      <ul><li>The graph-first builder&rsquo;s §3 fixpoint has a rule A: <em>corridors sharing the same two endpoint junction clusters merge</em>. That is exactly right for the two sidewalks and the roadway of ONE street segment — they all run between the same pair of intersections</li>
+<li>But sharing two junctions makes corridors <em>candidates</em>, not duplicates. A park loop&rsquo;s two arms share their endpoints too. So do a street and the service road that rejoins it, and the paths either side of a median. Rule A merged them all, <strong>with no distance test whatsoever</strong></li>
+<li>The 2026-07-29 oversized-block split (§4b) capped block SIZE, not this. It cuts a long block perpendicular to its principal axis — across BOTH arms of a fused pair — so each piece kept both ribbons. East River Park&rsquo;s block was only 274 m across and never even reached the 400 m threshold</li>
+<li>Downstream geometry could fragment a block after grouping was settled too: a grade-separated crossing&rsquo;s tube slicing a corridor, a junction cell eating its middle, a ship-frame repair cut taking a bite — all shipped as extra far-flung pieces of an otherwise sane block</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Rule A now measures.</strong> Each same-endpoints group is resolved <em>anchor-first</em>: its longest corridor claims only those that never stray more than <code>PARALLEL_MAX_SEP_M</code> (30 m) from it; whatever is left re-anchors and becomes its own block. Anchoring on the longest — the roadway, where there is one — measures each sidewalk against the carriageway <em>between</em> them, so the bound is half a right-of-way, not a whole one</li>
+<li>Straying is a directed Hausdorff distance, sampled every 5 m so a single long straight edge cannot hide its own middle from the probe; the MINIMUM of the two directions is used, so a sidewalk covering only part of a segment still hugs the roadway it runs beside</li>
+<li><strong>§5 contiguity, the backstop.</strong> After every geometry pass is finished, each block&rsquo;s polygon parts are bucketed into runs no more than <code>PART_GAP_M</code> (20 m) apart and <strong>every bucket becomes its own block</strong>, members following their own geometry. Buckets are disjoint subsets of an already-audited polygon, so no split can create an overlap</li>
+<li>A bucket left holding no member edge is dropped — a shard with no edge in it can neither carry a vote nor light up, and keeping it only re-attaches a detached shape to a block that isn&rsquo;t there (0.02–0.3% of total block area across the cities)</li>
+<li><code>scan_contiguity.py</code> makes the invariant checkable from outside the builder: it measures each block&rsquo;s <em>spread</em> (the widest edge of a minimum spanning tree over its pieces — precisely the gap at which it would fall apart) and exits non-zero if any block exceeds the threshold</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/streetscape_blocks/build_blocks_graph_first.py</li>
+<li>server/streetscape_blocks/scan_contiguity.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="calibration">
+      <div class="tag">CALIBRATION</div>
+      <h2>Why 30 m, and how we know it is not cutting real streets</h2>
+      <h3>Symptom</h3>
+      <p>A distance threshold that is too tight splits a wide avenue&rsquo;s two sidewalks into separate blocks; too loose and the park ribbons stay fused. The number needed evidence, not a guess.</p>
+      <h3>Root cause</h3>
+      <ul><li>Park Avenue is ~43 m building line to building line — the widest right-of-way in the NYC set — so a sidewalk-to-sidewalk test would have to allow 43 m and would then also swallow the 72 m park pair only narrowly. Anchoring on the roadway instead halves the distance being measured to ~21 m</li>
+<li>The builder now stamps <code>parallel_gap_hist_10m</code> into the mapping meta: every rule-A candidate bucketed by how far it strayed from its anchor, first round only</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Every city shows the same shape — a dense mass under 30 m and a thin tail beyond, with the valley exactly where the cut lands. nyc: <code>[175597, 64351, 7497, 1289, 300, 156, 148, 98, 31, 20, 11, 18]</code> — <strong>7,497</strong> candidates in the 20–30 m bucket against <strong>1,289</strong> in 30–40 m, a 5.8× drop, and only 0.8% of candidates land beyond the cut at all</li>
+<li>chicago <code>[109312, 42193, 3880, 549, …]</code>, sf <code>[16566, 7275, 1075, 191, …]</code>, philly <code>[59264, 12272, 2287, 735, …]</code>, dc <code>[57843, 19099, 2997, 497, …]</code>, test-cp <code>[2465, 1942, 410, 9, …]</code> — 98.5–99.4% of all candidates sit below the cut</li>
+<li>Both knobs are env-overridable (<code>PARALLEL_MAX_SEP_M</code>, <code>PART_GAP_M</code>) and stamped into <code>edge_blocks_&lt;network&gt;.json</code>, so any bake states the rules it was built under</li>
+<li>A new <code>BLOCKS_DATA_DIR</code> override sends a bake&rsquo;s <code>.npy/.json</code> somewhere other than the city&rsquo;s live <code>osm_data/</code> — parameter sweeps and A/B runs can no longer leave the local server serving a mapping nobody meant to ship (this one bit during calibration)</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/streetscape_blocks/build_blocks_graph_first.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="aggregation">
+      <div class="tag">REFACTOR</div>
+      <h2>Block aggregation: carry the slot, stop parsing the key back apart</h2>
+      <h3>Symptom</h3>
+      <p>Unrelated to the bug, requested alongside it. <code>block_votes.py</code> built Redis key strings and then recovered the values from them with <code>bdk.split(&quot;:&quot;)</code> in two different places, and the &quot;which counters move&quot; rules were written twice.</p>
+      <h3>Root cause</h3>
+      <ul><li>Both Redis structures are keyed by the same triple — <code>(block_id, vt_id, direction bit)</code> — but only the <code>bd:</code> key string was passed around, so the aggregate field had to be reconstructed by splitting that string back up (once in the batched write path, once in the rebuild)</li>
+<li><code>apply_block_delta</code> (the reference implementation the tests use as an oracle) and <code>apply_block_deltas_batch</code> (the pipelined one prod calls) each derived the +1/-1 transitions from prev/new direction independently — the subtle half, duplicated</li>
+<li><code>rebuild_from_db</code> derived the aggregate with an unpipelined <code>HLEN</code> per group — one full round trip per (block, vote type, direction) in the map</li></ul>
+      <h3>What changed</h3>
+      <ul><li>A <code>Slot</code> is now the unit of currency: <code>_transitions()</code> returns <code>(slot, ±1)</code> moves, and <code>_slot_bd_key</code> / <code>_slot_bagg_field</code> derive whichever encoding a call site needs. No code recovers a slot from a key string any more</li>
+<li>Both write paths share <code>_transitions()</code> — they now differ only in HOW they talk to Redis (await-each-move vs two-phase pipeline), which is exactly what the equivalence test is there to check, so the oracle keeps its value</li>
+<li><code>rebuild_from_db</code> pipelines the HLEN reads as well as the writes</li>
+<li>Behaviour-preserving: the full server suite (77 tests, including the 13 block-vote tests that assert the batched path is identical to the per-edge loop) passes unchanged</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/block_votes.py</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Every city A/B&rsquo;d against the SAME graph, old rules vs new: the invariant holds exactly and the audits are untouched — <strong>100% edge coverage and 100% member-edge∩polygon overlap</strong> everywhere, <strong>0 overlapping polygon pairs ≥1 m²</strong> everywhere.</li>
+<li>Blocks spread wider than 20 m, <strong>before → after</strong>: nyc <strong>2,346 → 0</strong> (worst 367 m → 19.9 m), dc <strong>1,139 → 0</strong> (321 m), chicago <strong>864 → 0</strong> (274 m), philly <strong>825 → 0</strong> (160 m), sf <strong>302 → 0</strong> (376 m), test-mid <strong>105 → 0</strong> (143 m), test-cp <strong>69 → 0</strong> (85 m).</li>
+<li>Block counts barely move — the fix separates a small tail, it does not shred the grid: sf 44,678 → 44,926 (+0.6%), chicago 138,140 → 138,683 (+0.4%), philly 144,796 → 145,647 (+0.6%), dc 148,471 → 149,198 (+0.5%).</li>
+<li>The rule-A guard is <em>not</em> redundant with the §5 backstop: on sf, running §5 alone produced 44,697 blocks against 44,846 with both, i.e. the guard separates ~149 pairs whose tubes TOUCH and which no geometric split could ever tell apart.</li>
+<li>Verified in the running app on <code>/m/test-midtown</code> with the new mapping installed: block selection, the proposal card and the vote counters all behave, and the selection highlight is a single contiguous shape.</li>
+<li>Every staged mapping&rsquo;s <code>topology_etag</code> was checked against the serving image&rsquo;s own graph before shipping — the loader hard-rejects a mismatch, and local graphs are a different vintage from prod&rsquo;s.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open the reported link — <code>https://cityedit.org/m/nyc-proposals?z=15&amp;lat=40.72240&amp;lng=-73.98022&amp;slat=40.71931&amp;slng=-73.97336&amp;vt=Add+traffic+calming</code> — and confirm the selected block is now ONE ribbon, not two ribbons either side of the park.</li>
+<li>Click along East River Park: the esplanade and the inland path should now select independently, each lighting only itself.</li>
+<li>Spot-check a wide avenue (Park Avenue around 40.7540, -73.9760) — a normal street block should still cover the roadway AND both sidewalks as one shape; if avenues look split down the middle, <code>PARALLEL_MAX_SEP_M</code> is too tight.</li>
+<li>Confirm the block layer redrew rather than serving cached tiles: <code>curl -s https://cityedit.org/api/maps | grep -o '"blocksVersion":[0-9]*'</code> should differ from the pre-deploy value (it is the bake&rsquo;s sha, and the client appends it as <code>?v=</code>).</li>
+<li>Vote on a block and reload — the count must survive, confirming the <code>bd:</code>/<code>bagg:</code> rebuild-on-blocks-change self-heal ran against the new block ids.</li>
+<li>Re-run the audit any time with <code>python server/streetscape_blocks/scan_contiguity.py &lt;blocks_final_&lt;city&gt;.geojson&gt;</code> — it exits non-zero if any block spreads past 20 m.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">server/block_votes.py</span>
+            <span class="stat"><span class="d-add">+93</span> / <span class="d-del">-63</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Flask · block-level vote display</span>
+        <span class="ctx-sum">a deduplicated projection of edge votes onto blocks: bd: device-multiplicity hashes + the bagg: aggregate one HGETALL serves the block layer from</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">block_votes.py</span>
+        <span class="ctx-sum">keys/packing, incremental write path, read path, rebuild · ~350 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">key helpers + packing</span><span class="ol-sum">→ &#x27;Slots and keys&#x27;: the (block, vt, dir) triple both structures share, plus _slot_bd_key / _slot_bagg_field / _transitions</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">apply_block_delta</span><span class="ol-sum">reference path — now drives off _transitions()</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">apply_block_deltas</span><span class="ol-sum">per-edge convenience wrapper, unchanged</span></li><li class="changed"><span class="ol-label">apply_block_deltas_batch</span><span class="ol-sum">same two phases, keyed by slot instead of by key string</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">build_block_arrays</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">read_block_vt_counts</span><span class="ol-sum">field built via _slot_bagg_field</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">clear / rebuild_from_db</span><span class="ol-sum">tracks slots, and pipelines the HLEN derivation</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Slot = tuple[int, int, int] + the section comment explaining why the triple, not the key string, is what gets passed around</li><li>_transitions(block, vt, prev, new) — the whole of &#x27;which counters move&#x27;, shared by both write paths</li><li>apply_block_delta reduced to a loop over _transitions with the same await-each-move semantics</li><li>apply_block_deltas_batch phases keyed by Slot — the two bdk.split(&#x27;:&#x27;) reconstructions are gone</li><li>rebuild_from_db pipelines the HLEN reads (was one round trip per (block, vt, dir) group)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/block_votes.py b/server/block_votes.py</span>
+<span class="d-meta">index 1c9dbfe..6eda9ea 100644</span>
+<span class="d-meta">--- a/server/block_votes.py</span>
+<span class="d-meta">+++ b/server/block_votes.py</span>
+<span class="d-hunk">@@ -28,7 +28,16 @@ import logging</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> logger = logging.getLogger(__name__)</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# ── Key helpers ─────────────────────────────────────────────────────────────</span>
+<span class="d-add">+# ── Slots and keys ──────────────────────────────────────────────────────────</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# A SLOT is the (block_id, vt_id, direction bit) triple both Redis structures</span>
+<span class="d-add">+# are keyed by: `bd:` holds one device-multiplicity hash per slot, `bagg:`</span>
+<span class="d-add">+# holds one deduped count per slot. Every path below carries slots and derives</span>
+<span class="d-add">+# whichever key it needs from them — so the two encodings are written once, and</span>
+<span class="d-add">+# no code has to recover a slot by taking a key string apart again.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Slot = tuple[int, int, int]</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def bd_key(slug: str, mode: int, block_id: int, vt_id: int, dbit: int) -&gt; str:</span>
+<span class="d-ctx">     &quot;&quot;&quot;Per-(block,vote_type,direction) device-multiplicity hash. HLEN = deduped count.&quot;&quot;&quot;</span>
+<span class="d-hunk">@@ -51,6 +60,35 @@ def unpack_block_field(key: int) -&gt; tuple[int, int, int]:</span>
+<span class="d-ctx">     return (key &amp; 0xFF_FFFF, (key &gt;&gt; 24) &amp; 0xFF_FFFF, (key &gt;&gt; 48) &amp; 0x1)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+def _slot_bd_key(slug: str, mode: int, slot: Slot) -&gt; str:</span>
+<span class="d-add">+    return bd_key(slug, mode, *slot)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _slot_bagg_field(slot: Slot) -&gt; str:</span>
+<span class="d-add">+    return str(pack_block_field(*slot))</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _transitions(block_id: int, vt_id: int,</span>
+<span class="d-add">+                 prev_dir: int, new_dir: int) -&gt; list[tuple[Slot, int]]:</span>
+<span class="d-add">+    &quot;&quot;&quot;The device-multiplicity moves one edge&#x27;s direction change implies:</span>
+<span class="d-add">+    +1 on the slot the device enters, −1 on the slot it leaves (enter first,</span>
+<span class="d-add">+    so a same-block clear-then-recast can never transiently read as absent).</span>
+<span class="d-add">+</span>
+<span class="d-add">+    This is the whole of &quot;which counters move&quot; — both write paths below share</span>
+<span class="d-add">+    it, and differ only in HOW they talk to Redis. Empty when nothing changed</span>
+<span class="d-add">+    or the edge has no block.</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    from vote_store import dir_to_bit, UP, DOWN</span>
+<span class="d-add">+    if new_dir == prev_dir or block_id &lt; 0:</span>
+<span class="d-add">+        return []</span>
+<span class="d-add">+    moves: list[tuple[Slot, int]] = []</span>
+<span class="d-add">+    if new_dir in (UP, DOWN):</span>
+<span class="d-add">+        moves.append(((block_id, vt_id, dir_to_bit(new_dir)), 1))</span>
+<span class="d-add">+    if prev_dir in (UP, DOWN):</span>
+<span class="d-add">+        moves.append(((block_id, vt_id, dir_to_bit(prev_dir)), -1))</span>
+<span class="d-add">+    return moves</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> # ── Write path (incremental, called inside the voter lock) ──────────────────</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def apply_block_delta(</span>
+<span class="d-hunk">@@ -64,27 +102,26 @@ def apply_block_delta(</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     new_dir/prev_dir use +1 (up), -1 (down), 0 (none). A no-op when unchanged or</span>
+<span class="d-ctx">     when the edge has no block (caller passes block_id &lt; 0 → skip there).</span>
+<span class="d-add">+</span>
+<span class="d-add">+    One move at a time, each HINCRBY awaited before the next decision — the</span>
+<span class="d-add">+    straightforward reading of the rules, and the oracle the pipelined</span>
+<span class="d-add">+    apply_block_deltas_batch is tested against (tests/unit/test_block_votes.py).</span>
+<span class="d-add">+    Prefer the batch form for anything bigger than a single edge.</span>
+<span class="d-ctx">     &quot;&quot;&quot;</span>
+<span class="d-del">-    from vote_store import dir_to_bit, UP, DOWN</span>
+<span class="d-del">-    if new_dir == prev_dir or block_id &lt; 0:</span>
+<span class="d-del">-        return</span>
+<span class="d-ctx">     bagg = bagg_key(slug, mode)</span>
+<span class="d-ctx">     pipe = redis_client.pipeline()</span>
+<span class="d-del">-</span>
+<span class="d-del">-    if new_dir in (UP, DOWN):</span>
+<span class="d-del">-        db = dir_to_bit(new_dir)</span>
+<span class="d-del">-        # HINCRBY returns the new value; ==1 means this device just became present</span>
+<span class="d-del">-        n = redis_client.hincrby(bd_key(slug, mode, block_id, vt_id, db), device_id, 1)</span>
+<span class="d-del">-        if n == 1:</span>
+<span class="d-del">-            pipe.hincrby(bagg, str(pack_block_field(block_id, vt_id, db)), 1)</span>
+<span class="d-del">-    if prev_dir in (UP, DOWN):</span>
+<span class="d-del">-        db = dir_to_bit(prev_dir)</span>
+<span class="d-del">-        bdk = bd_key(slug, mode, block_id, vt_id, db)</span>
+<span class="d-del">-        n = redis_client.hincrby(bdk, device_id, -1)</span>
+<span class="d-del">-        if n &lt;= 0:</span>
+<span class="d-add">+    for slot, delta in _transitions(block_id, vt_id, prev_dir, new_dir):</span>
+<span class="d-add">+        bdk = _slot_bd_key(slug, mode, slot)</span>
+<span class="d-add">+        # HINCRBY returns the new value: ==1 on the way up means this device</span>
+<span class="d-add">+        # just became present, ==0 on the way down means it fully left.</span>
+<span class="d-add">+        n = redis_client.hincrby(bdk, device_id, delta)</span>
+<span class="d-add">+        if delta &gt; 0:</span>
+<span class="d-add">+            if n == 1:</span>
+<span class="d-add">+                pipe.hincrby(bagg, _slot_bagg_field(slot), 1)</span>
+<span class="d-add">+        elif n &lt;= 0:</span>
+<span class="d-ctx">             redis_client.hdel(bdk, device_id)</span>
+<span class="d-del">-            if n == 0:  # device fully left this block for (vt,dir)</span>
+<span class="d-del">-                pipe.hincrby(bagg, str(pack_block_field(block_id, vt_id, db)), -1)</span>
+<span class="d-add">+            if n == 0:</span>
+<span class="d-add">+                pipe.hincrby(bagg, _slot_bagg_field(slot), -1)</span>
+<span class="d-ctx">     pipe.execute()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -127,53 +164,42 @@ def apply_block_deltas_batch(</span>
+<span class="d-ctx">     derives from the returned multiplicities:</span>
+<span class="d-ctx">       · bagg moves on every presence-boundary crossing (+1 result == 1,</span>
+<span class="d-ctx">         −1 result == 0), same as the loop — crossings are real regardless of</span>
+<span class="d-del">-        interleaving, and opposite crossings on one field cancel via summing.</span>
+<span class="d-add">+        interleaving, and opposite crossings on one slot cancel via summing.</span>
+<span class="d-ctx">       · a device field is deleted only when the LAST op touching it left</span>
+<span class="d-ctx">         it ≤ 0 — deferring HDEL per-op could wipe a field a later op in the</span>
+<span class="d-ctx">         same plan re-created (clear on edge A + cast on edge B, same block).</span>
+<span class="d-ctx">     &quot;&quot;&quot;</span>
+<span class="d-del">-    from vote_store import dir_to_bit, UP, DOWN</span>
+<span class="d-del">-</span>
+<span class="d-del">-    # Phase A: (bd_key, +1/-1 increment) per boundary-relevant transition.</span>
+<span class="d-del">-    incrs: list[tuple[str, int]] = []</span>
+<span class="d-del">-    for block_id, prev_dir, new_dir in block_ops:</span>
+<span class="d-del">-        if new_dir == prev_dir or block_id &lt; 0:</span>
+<span class="d-del">-            continue</span>
+<span class="d-del">-        if new_dir in (UP, DOWN):</span>
+<span class="d-del">-            incrs.append((bd_key(slug, mode, block_id, vt_id, dir_to_bit(new_dir)), 1))</span>
+<span class="d-del">-        if prev_dir in (UP, DOWN):</span>
+<span class="d-del">-            incrs.append((bd_key(slug, mode, block_id, vt_id, dir_to_bit(prev_dir)), -1))</span>
+<span class="d-del">-    if not incrs:</span>
+<span class="d-add">+    # Phase A: every transition the plan implies, pipelined in op order.</span>
+<span class="d-add">+    moves = [move for block_id, prev_dir, new_dir in block_ops</span>
+<span class="d-add">+             for move in _transitions(block_id, vt_id, prev_dir, new_dir)]</span>
+<span class="d-add">+    if not moves:</span>
+<span class="d-ctx">         return</span>
+<span class="d-ctx">     pipe = redis_client.pipeline()</span>
+<span class="d-del">-    for bdk, delta in incrs:</span>
+<span class="d-del">-        pipe.hincrby(bdk, device_id, delta)</span>
+<span class="d-add">+    for slot, delta in moves:</span>
+<span class="d-add">+        pipe.hincrby(_slot_bd_key(slug, mode, slot), device_id, delta)</span>
+<span class="d-ctx">     results = pipe.execute()</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # Phase B: aggregate boundary crossings + final-state cleanup.</span>
+<span class="d-del">-    bagg_deltas: dict[str, int] = {}   # bd_key → net bagg move</span>
+<span class="d-del">-    final_mult: dict[str, int] = {}    # bd_key → multiplicity after last op</span>
+<span class="d-del">-    for (bdk, delta), n in zip(incrs, results):</span>
+<span class="d-add">+    bagg_moves: dict[Slot, int] = {}   # slot → net bagg move</span>
+<span class="d-add">+    final_mult: dict[Slot, int] = {}   # slot → multiplicity after its last op</span>
+<span class="d-add">+    for (slot, delta), n in zip(moves, results):</span>
+<span class="d-ctx">         if delta &gt; 0 and n == 1:</span>
+<span class="d-del">-            bagg_deltas[bdk] = bagg_deltas.get(bdk, 0) + 1</span>
+<span class="d-add">+            bagg_moves[slot] = bagg_moves.get(slot, 0) + 1</span>
+<span class="d-ctx">         elif delta &lt; 0 and n == 0:</span>
+<span class="d-del">-            bagg_deltas[bdk] = bagg_deltas.get(bdk, 0) - 1</span>
+<span class="d-del">-        final_mult[bdk] = n</span>
+<span class="d-add">+            bagg_moves[slot] = bagg_moves.get(slot, 0) - 1</span>
+<span class="d-add">+        final_mult[slot] = n</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     bagg = bagg_key(slug, mode)</span>
+<span class="d-ctx">     pipe = redis_client.pipeline()</span>
+<span class="d-ctx">     queued = False</span>
+<span class="d-del">-    for bdk, n in final_mult.items():</span>
+<span class="d-add">+    for slot, n in final_mult.items():</span>
+<span class="d-ctx">         if n &lt;= 0:</span>
+<span class="d-del">-            pipe.hdel(bdk, device_id)</span>
+<span class="d-add">+            pipe.hdel(_slot_bd_key(slug, mode, slot), device_id)</span>
+<span class="d-add">+            queued = True</span>
+<span class="d-add">+    for slot, move in bagg_moves.items():</span>
+<span class="d-add">+        if move:</span>
+<span class="d-add">+            pipe.hincrby(bagg, _slot_bagg_field(slot), move)</span>
+<span class="d-ctx">             queued = True</span>
+<span class="d-del">-    for bdk, move in bagg_deltas.items():</span>
+<span class="d-del">-        if move == 0:</span>
+<span class="d-del">-            continue</span>
+<span class="d-del">-        # bd:&lt;slug&gt;:&lt;mode&gt;:&lt;block&gt;:&lt;vt&gt;:&lt;dir&gt;</span>
+<span class="d-del">-        _, _, _, block_s, vt_s, dir_s = bdk.split(&quot;:&quot;)</span>
+<span class="d-del">-        pipe.hincrby(bagg, str(pack_block_field(int(block_s), int(vt_s), int(dir_s))), move)</span>
+<span class="d-del">-        queued = True</span>
+<span class="d-ctx">     if queued:</span>
+<span class="d-ctx">         pipe.execute()</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -252,8 +278,8 @@ def read_block_vt_counts(</span>
+<span class="d-ctx">     bagg = bagg_key(slug, mode)</span>
+<span class="d-ctx">     pipe = redis_client.pipeline()</span>
+<span class="d-ctx">     for b in block_ids:</span>
+<span class="d-del">-        pipe.hget(bagg, str(pack_block_field(b, vt_id, 0)))</span>
+<span class="d-del">-        pipe.hget(bagg, str(pack_block_field(b, vt_id, 1)))</span>
+<span class="d-add">+        pipe.hget(bagg, _slot_bagg_field((b, vt_id, 0)))</span>
+<span class="d-add">+        pipe.hget(bagg, _slot_bagg_field((b, vt_id, 1)))</span>
+<span class="d-ctx">     vals = pipe.execute()</span>
+<span class="d-ctx">     return {</span>
+<span class="d-ctx">         b: [int(vals[2 * i] or 0), int(vals[2 * i + 1] or 0)]</span>
+<span class="d-hunk">@@ -291,7 +317,7 @@ def rebuild_from_db(</span>
+<span class="d-ctx">         return 0</span>
+<span class="d-ctx">     clear(redis_client, slug, mode)</span>
+<span class="d-ctx">     n_edges = len(edge_block_id)</span>
+<span class="d-del">-    touched_keys: set[str] = set()</span>
+<span class="d-add">+    touched: set[Slot] = set()</span>
+<span class="d-ctx">     # (block, vt, device) → dbit seen so far; 2 = both seen + already warned.</span>
+<span class="d-ctx">     # Guards the §2.5 invariant (a block never holds both directions from one</span>
+<span class="d-ctx">     # device+type) — canonical rows violating it are logged, not dropped.</span>
+<span class="d-hunk">@@ -315,25 +341,29 @@ def rebuild_from_db(</span>
+<span class="d-ctx">                 f&quot;[BLOCKVOTES] invariant violation in {slug}/{mode}: block {b} &quot;</span>
+<span class="d-ctx">                 f&quot;vt {vt_id} device {device_id} holds BOTH directions&quot;)</span>
+<span class="d-ctx">             seen_dir[key] = 2</span>
+<span class="d-del">-        bdk = bd_key(slug, mode, b, vt_id, dbit)</span>
+<span class="d-del">-        pipe.hincrby(bdk, device_id, 1)</span>
+<span class="d-del">-        touched_keys.add(bdk)</span>
+<span class="d-add">+        slot = (b, vt_id, dbit)</span>
+<span class="d-add">+        pipe.hincrby(_slot_bd_key(slug, mode, slot), device_id, 1)</span>
+<span class="d-add">+        touched.add(slot)</span>
+<span class="d-ctx">         n += 1</span>
+<span class="d-ctx">         if n % 5000 == 0:</span>
+<span class="d-ctx">             pipe.execute(); pipe = redis_client.pipeline()</span>
+<span class="d-ctx">     pipe.execute()</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    # Derive the aggregate: deduped count == HLEN of each device hash.</span>
+<span class="d-add">+    # Derive the aggregate: deduped count == HLEN of each device hash. Both</span>
+<span class="d-add">+    # halves are pipelined — a rebuild touches every voted slot in the map, so</span>
+<span class="d-add">+    # reading the lengths one at a time was one full round trip per slot.</span>
+<span class="d-add">+    slots = list(touched)</span>
+<span class="d-add">+    pipe = redis_client.pipeline()</span>
+<span class="d-add">+    for slot in slots:</span>
+<span class="d-add">+        pipe.hlen(_slot_bd_key(slug, mode, slot))</span>
+<span class="d-add">+    hlens = pipe.execute()</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     bagg = bagg_key(slug, mode)</span>
+<span class="d-ctx">     pipe = redis_client.pipeline()</span>
+<span class="d-del">-    for bdk in touched_keys:</span>
+<span class="d-del">-        # bd:&lt;slug&gt;:&lt;mode&gt;:&lt;block&gt;:&lt;vt&gt;:&lt;dir&gt;</span>
+<span class="d-del">-        _, _, _, block_s, vt_s, dir_s = bdk.split(&quot;:&quot;)</span>
+<span class="d-del">-        hlen = redis_client.hlen(bdk)</span>
+<span class="d-add">+    for slot, hlen in zip(slots, hlens):</span>
+<span class="d-ctx">         if hlen &gt; 0:</span>
+<span class="d-del">-            field = pack_block_field(int(block_s), int(vt_s), int(dir_s))</span>
+<span class="d-del">-            pipe.hset(bagg, str(field), hlen)</span>
+<span class="d-add">+            pipe.hset(bagg, _slot_bagg_field(slot), hlen)</span>
+<span class="d-ctx">     pipe.execute()</span>
+<span class="d-ctx">     logger.info(f&quot;[BLOCKVOTES] rebuilt {slug}/{mode}: {n} edge-votes → &quot;</span>
+<span class="d-del">-                f&quot;{len(touched_keys)} (block,vt,dir) groups&quot;)</span>
+<span class="d-del">-    return len(touched_keys)</span>
+<span class="d-add">+                f&quot;{len(slots)} (block,vt,dir) groups&quot;)</span>
+<span class="d-add">+    return len(slots)</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/streetscape_blocks/build_blocks_graph_first.py</span>
+            <span class="stat"><span class="d-add">+216</span> / <span class="d-del">-51</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">streetscape_blocks · the Layer-2 graph-first block builder</span>
+        <span class="ctx-sum">edges grouped topologically (junction clusters + corridors), polygons generated FROM the groups, disjointness enforced by construction + audits</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_blocks_graph_first.py</span>
+        <span class="ctx-sum">one-pass builder: junction clustering → edge grouping → merge fixpoint → geometry → disjointness → contiguity → ship-frame audit · ~1355 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module docstring</span><span class="ol-sum">stages 1–4 + NEW stage 5 (contiguity) stated as an invariant</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">knobs (cluster / stub / width / split)</span><span class="ol-sum">+ PARALLEL_MAX_SEP_M, HUG_SAMPLE_M, PART_GAP_M</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">UnionFind / split_oversized / _clean helpers</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">§1 junction clusters</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">§2 edge grouping</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">corridor centreline geometry (hoisted)</span><span class="ol-sum">edge_lines / corr_geom / member_lines / strays — one cache, shared by §3 and §4</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§3 degeneracy + equivalence fixpoint</span><span class="ol-sum">rule A becomes anchor-first + distance-guarded; cache invalidated where V1/V2 move members</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§4 geometry from membership</span><span class="ol-sum">duplicate edge_lines/member_lines removed — use the hoisted pair</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">§4b oversized-corridor split</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">ship-frame finalize + audit + re-home</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">§5 contiguity split (NEW)</span><span class="ol-sum">bucket polygon parts, one block per bucket, drop member-less shards</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§6 emit</span><span class="ol-sum">single staged (polygon, members, props) list feeds one loop for corridors AND cells</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">§7 audit + meta</span><span class="ol-sum">+ contiguity_* counters, parallel_gap_hist_10m, the two new knobs</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>PARALLEL_MAX_SEP_M = 30 (env-overridable) — how far a corridor may stray from its group anchor and still count as the same street; measured against the roadway between the sidewalks, so the bound is half a right-of-way</li><li>PART_GAP_M = 20 — wider than any gap a junction cell can open in a street corridor, far narrower than the separations that read as two places</li><li>corr_geom(c) — (centrelines, sample points) cache; segmentize to 5 m so a long straight edge cannot hide its middle from a distance probe</li><li>strays(c, anchor) — directed Hausdorff; rule A takes the MIN of the two directions so a part-length sidewalk still hugs its roadway</li><li>rule A rewritten: sort the group by member length, longest anchors, claim only what hugs it, re-anchor the remainder — and record the first-round gap histogram</li><li>lines_cache invalidated in V1 (stub → junction) and V2 (junction → corridor), which also move members mid-fixpoint</li><li>§5: contiguous_buckets() union-finds polygon parts within PART_GAP_M; members follow midpoint, then line, then nearest; member-less buckets dropped</li><li>§6 emit unified — corridors and junction cells stage into one (poly, members, extra) list, so the split pass and the feature writer are each written once</li><li>BLOCKS_DATA_DIR — redirect the baked mapping away from the city&#x27;s live osm_data/ for sweeps</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_blocks_graph_first.py b/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-meta">index 04646c4..7216f85 100644</span>
+<span class="d-meta">--- a/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_blocks_graph_first.py</span>
+<span class="d-hunk">@@ -21,8 +21,12 @@ edge∩polygon overlap hold by construction:</span>
+<span class="d-ctx">      CORRIDOR — connected components linked through non-junction endpoints,</span>
+<span class="d-ctx">      i.e. one component per path segment between junctions.</span>
+<span class="d-ctx">   3. DEGENERACY + EQUIVALENCE FIXPOINT (topological): four rules iterate to</span>
+<span class="d-del">-     convergence — A) corridors with the SAME two endpoint clusters merge</span>
+<span class="d-del">-     (both sidewalks + the roadway of one street segment = one block); V1)</span>
+<span class="d-add">+     convergence — A) corridors with the SAME two endpoint clusters merge IF</span>
+<span class="d-add">+     they run alongside each other (both sidewalks + the roadway of one street</span>
+<span class="d-add">+     segment = one block, but NOT two different routes between the same pair</span>
+<span class="d-add">+     of intersections: each group is resolved anchor-first, and a corridor</span>
+<span class="d-add">+     joins only while it never strays more than PARALLEL_MAX_SEP_M from the</span>
+<span class="d-add">+     group&#x27;s longest corridor — the roadway, where there is one); V1)</span>
+<span class="d-ctx">      driveway-class stubs (extent ≤ STUB_MAX_M, one junction) melt into their</span>
+<span class="d-ctx">      junction; V2) a junction touching ≤ 1 corridor isn&#x27;t a junction and</span>
+<span class="d-ctx">      dissolves into that corridor; B) clusters with the SAME incident-corridor</span>
+<span class="d-hunk">@@ -50,6 +54,12 @@ edge∩polygon overlap hold by construction:</span>
+<span class="d-ctx">      polygon holding its midpoint (clipped tube graft as last resort), and a</span>
+<span class="d-ctx">      captured edge a cut stranded outside its own cell is RE-HOMED to the</span>
+<span class="d-ctx">      cell or corridor that holds it now — so edge∩polygon overlap is total.</span>
+<span class="d-add">+  5. CONTIGUITY: the shipped geometry has the last word on what one block is.</span>
+<span class="d-add">+     Each block&#x27;s polygon parts are bucketed into runs no more than</span>
+<span class="d-add">+     PART_GAP_M apart and EVERY BUCKET BECOMES ITS OWN BLOCK, with members</span>
+<span class="d-add">+     following their own geometry — so a block is always one place, and one</span>
+<span class="d-add">+     click can never vote in two. Buckets are disjoint subsets of an</span>
+<span class="d-add">+     already-audited polygon, so splitting cannot create an overlap.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> Outputs (same contract the server + tippecanoe already consume):</span>
+<span class="d-ctx">   output/blocks_final_&lt;city&gt;.geojson       display polygons, dense block_id</span>
+<span class="d-hunk">@@ -115,6 +125,29 @@ SPLIT_BAND = (0.35, 0.65)      # candidate cut stations, fraction of the span</span>
+<span class="d-ctx"> SPLIT_STATIONS = 13            # stations sampled inside the band</span>
+<span class="d-ctx"> SPLIT_MAX_DEPTH = 8            # ≤ 2^8 pieces from one block (backstop)</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# Contiguity. Rule A merges corridors that share both endpoint junctions —</span>
+<span class="d-add">+# right for the two sides + roadway of ONE street segment, wrong for two</span>
+<span class="d-add">+# DIFFERENT routes between the same pair of intersections (a park loop&#x27;s two</span>
+<span class="d-add">+# arms, a street and the service road that rejoins it, a path either side of a</span>
+<span class="d-add">+# median strip). Those merges shipped blocks made of ribbons 70–230 m apart:</span>
+<span class="d-add">+# one click voted in two places at once and lit two disconnected shapes.</span>
+<span class="d-add">+# PARALLEL_MAX_SEP_M is how far a corridor may stray from its group&#x27;s anchor</span>
+<span class="d-add">+# and still count as the same street. Measured against the anchor — the</span>
+<span class="d-add">+# group&#x27;s LONGEST corridor, normally the roadway lying between the sidewalks —</span>
+<span class="d-add">+# so the bound is half a right-of-way, not a full one: 30 m clears NYC&#x27;s</span>
+<span class="d-add">+# widest (Park Avenue, ~43 m building line to building line) with room to</span>
+<span class="d-add">+# spare while rejecting the East River Park arms at 72 m.</span>
+<span class="d-add">+PARALLEL_MAX_SEP_M = float(os.environ.get(&quot;PARALLEL_MAX_SEP_M&quot;, &quot;30&quot;))</span>
+<span class="d-add">+HUG_SAMPLE_M = 5.0             # densify step for the stray-distance measure</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Backstop: a block whose shipped polygon falls into pieces further apart than</span>
+<span class="d-add">+# PART_GAP_M is split into one block per piece (§5). Catches fragmentation the</span>
+<span class="d-add">+# geometry passes cause after grouping is settled — a corridor sliced through</span>
+<span class="d-add">+# by a grade-separated crossing&#x27;s tube, or by a junction cell mid-span. 20 m is</span>
+<span class="d-add">+# wider than any gap a junction cell can open in a street corridor and far</span>
+<span class="d-add">+# narrower than the separations that read as two places.</span>
+<span class="d-add">+PART_GAP_M = float(os.environ.get(&quot;PART_GAP_M&quot;, &quot;20&quot;))</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> # Corridor tube half-widths per road class (from build_blocks_generic.py,</span>
+<span class="d-ctx"> # NYC-calibrated; classes are universal). Scaled by WIDTH_SCALE for sweeps.</span>
+<span class="d-ctx"> WIDTH_SCALE = float(os.environ.get(&quot;WIDTH_SCALE&quot;, &quot;1.0&quot;))</span>
+<span class="d-hunk">@@ -333,6 +366,39 @@ def main():</span>
+<span class="d-ctx">           f&quot;{int(cross_short.sum())} crosswalk stubs + {len(corr_edges)} corridor &quot;</span>
+<span class="d-ctx">           f&quot;edges in {n_corr} corridors ({time.time()-t0:.0f}s)&quot;, flush=True)</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    # ── Corridor centreline geometry (shared by §3&#x27;s hug test and §4&#x27;s</span>
+<span class="d-add">+    # overlap arbitration; invalidated whenever a corridor&#x27;s members change) ──</span>
+<span class="d-add">+    def edge_lines(eids):</span>
+<span class="d-add">+        return [LineString([node_xy[ends[eid, 0]], node_xy[ends[eid, 1]]])</span>
+<span class="d-add">+                for eid in eids]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    lines_cache: dict[int, tuple] = {}</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def corr_geom(c):</span>
+<span class="d-add">+        &quot;&quot;&quot;(centrelines, sample points) for corridor c, in the metric frame.</span>
+<span class="d-add">+        The sample points densify the centrelines to HUG_SAMPLE_M so a single</span>
+<span class="d-add">+        long straight edge cannot hide its own middle from a distance probe.&quot;&quot;&quot;</span>
+<span class="d-add">+        geom = lines_cache.get(c)</span>
+<span class="d-add">+        if geom is None:</span>
+<span class="d-add">+            lines = shapely.multilinestrings(</span>
+<span class="d-add">+                [list(ln.coords) for ln in edge_lines(corridors[c])])</span>
+<span class="d-add">+            pts = shapely.points(shapely.get_coordinates(</span>
+<span class="d-add">+                shapely.segmentize(lines, HUG_SAMPLE_M)))</span>
+<span class="d-add">+            lines_cache[c] = geom = (lines, pts)</span>
+<span class="d-add">+        return geom</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def member_lines(c):</span>
+<span class="d-add">+        return corr_geom(c)[0]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def strays(c, anchor):</span>
+<span class="d-add">+        &quot;&quot;&quot;Farthest any point of corridor c gets from the anchor&#x27;s centrelines</span>
+<span class="d-add">+        (a directed Hausdorff distance) — small only when c runs alongside the</span>
+<span class="d-add">+        anchor for its whole length.&quot;&quot;&quot;</span>
+<span class="d-add">+        pts = corr_geom(c)[1]</span>
+<span class="d-add">+        if len(pts) == 0:</span>
+<span class="d-add">+            return math.inf</span>
+<span class="d-add">+        return float(shapely.distance(pts, member_lines(anchor)).max())</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     # ── 3. Degeneracy + equivalence fixpoint ────────────────────────────────</span>
+<span class="d-ctx">     # Four rules iterate to convergence — each strictly shrinks the corridor</span>
+<span class="d-ctx">     # or cluster count, so termination is guaranteed (MAX_ROUNDS is a</span>
+<span class="d-hunk">@@ -359,6 +425,12 @@ def main():</span>
+<span class="d-ctx">     corridors_merged = 0</span>
+<span class="d-ctx">     clusters_merged = 0</span>
+<span class="d-ctx">     rounds = 0</span>
+<span class="d-add">+    # How far each rule-A candidate strayed from its anchor, in 10 m buckets,</span>
+<span class="d-add">+    # sampled on the first round only (later rounds re-evaluate the same</span>
+<span class="d-add">+    # rejected pairs and would inflate the tail). This is the evidence for</span>
+<span class="d-add">+    # where PARALLEL_MAX_SEP_M belongs; it is stamped into the meta.</span>
+<span class="d-add">+    GAP_BUCKETS = 12</span>
+<span class="d-add">+    gap_hist = [0] * GAP_BUCKETS</span>
+<span class="d-ctx">     for _ in range(MAX_ROUNDS):</span>
+<span class="d-ctx">         rounds += 1</span>
+<span class="d-ctx">         changed = False</span>
+<span class="d-hunk">@@ -374,22 +446,45 @@ def main():</span>
+<span class="d-ctx">                     if k &gt;= 0 and cluster_alive[k]:</span>
+<span class="d-ctx">                         corr_cl[c].add(k)</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-        # A) Same endpoint-cluster pair → one corridor. (Merging same-key</span>
+<span class="d-del">-        # corridors leaves the survivor&#x27;s cluster set == the key, so corr_cl</span>
+<span class="d-del">-        # stays valid for the passes below.)</span>
+<span class="d-add">+        # A) Same endpoint-cluster pair → one corridor, IF they run together.</span>
+<span class="d-add">+        # Sharing two junctions makes corridors candidates, not duplicates: the</span>
+<span class="d-add">+        # two arms of a park loop share their endpoints too. So each group is</span>
+<span class="d-add">+        # resolved anchor-first — its longest corridor claims every corridor</span>
+<span class="d-add">+        # that never strays more than PARALLEL_MAX_SEP_M from it, and whatever</span>
+<span class="d-add">+        # is left re-anchors and forms its own block. Anchoring on the longest</span>
+<span class="d-add">+        # (the roadway, where there is one) measures each sidewalk against the</span>
+<span class="d-add">+        # carriageway between them rather than across the whole right-of-way.</span>
+<span class="d-add">+        # (Merging same-key corridors leaves the survivor&#x27;s cluster set == the</span>
+<span class="d-add">+        # key, so corr_cl stays valid for the passes below.)</span>
+<span class="d-ctx">         by_ends: dict[frozenset, list[int]] = {}</span>
+<span class="d-ctx">         for c in range(n_corr):</span>
+<span class="d-ctx">             if corr_alive[c] and len(corr_cl[c]) == 2:</span>
+<span class="d-ctx">                 by_ends.setdefault(frozenset(corr_cl[c]), []).append(c)</span>
+<span class="d-ctx">         for cs in by_ends.values():</span>
+<span class="d-del">-            if len(cs) &gt; 1:</span>
+<span class="d-del">-                root = cs[0]</span>
+<span class="d-del">-                for c in cs[1:]:</span>
+<span class="d-add">+            if len(cs) &lt; 2:</span>
+<span class="d-add">+                continue</span>
+<span class="d-add">+            pending = sorted(cs, key=lambda c: -member_lines(c).length)</span>
+<span class="d-add">+            while len(pending) &gt; 1:</span>
+<span class="d-add">+                root, rest = pending[0], pending[1:]</span>
+<span class="d-add">+                # min of the two directed distances: a sidewalk that covers</span>
+<span class="d-add">+                # only part of the segment still hugs the roadway, even though</span>
+<span class="d-add">+                # the roadway&#x27;s far end strays from the short sidewalk.</span>
+<span class="d-add">+                gaps = {c: min(strays(c, root), strays(root, c)) for c in rest}</span>
+<span class="d-add">+                claimed = {c for c, gap in gaps.items()</span>
+<span class="d-add">+                           if gap &lt;= PARALLEL_MAX_SEP_M}</span>
+<span class="d-add">+                if rounds == 1:          # later rounds re-see the same rejects</span>
+<span class="d-add">+                    for gap in gaps.values():</span>
+<span class="d-add">+                        gap_hist[min(int(gap // 10), GAP_BUCKETS - 1)] += 1</span>
+<span class="d-add">+                for c in claimed:</span>
+<span class="d-ctx">                     corridors[root].extend(corridors[c])</span>
+<span class="d-ctx">                     corridors[c] = []</span>
+<span class="d-ctx">                     corr_alive[c] = False</span>
+<span class="d-del">-                corridors_merged += len(cs) - 1</span>
+<span class="d-del">-                changed = True</span>
+<span class="d-add">+                    lines_cache.pop(c, None)</span>
+<span class="d-add">+                if claimed:</span>
+<span class="d-add">+                    lines_cache.pop(root, None)</span>
+<span class="d-add">+                    corridors_merged += len(claimed)</span>
+<span class="d-add">+                    changed = True</span>
+<span class="d-add">+                pending = [c for c in rest if c not in claimed]</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         # V1) driveway-class stub corridors melt into their only junction.</span>
+<span class="d-ctx">         for c in range(n_corr):</span>
+<span class="d-hunk">@@ -406,6 +501,7 @@ def main():</span>
+<span class="d-ctx">             edge_cluster[members] = k</span>
+<span class="d-ctx">             corr_alive[c] = False</span>
+<span class="d-ctx">             corridors[c] = []</span>
+<span class="d-add">+            lines_cache.pop(c, None)</span>
+<span class="d-ctx">             stubs_merged += 1</span>
+<span class="d-ctx">             changed = True</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -429,6 +525,7 @@ def main():</span>
+<span class="d-ctx">             c = next(iter(cs))</span>
+<span class="d-ctx">             captured = np.where(edge_cluster == k)[0]</span>
+<span class="d-ctx">             corridors[c].extend(int(x) for x in captured)</span>
+<span class="d-add">+            lines_cache.pop(c, None)</span>
+<span class="d-ctx">             edge_cluster[captured] = -1</span>
+<span class="d-ctx">             node_cluster[cl_members[k]] = -1</span>
+<span class="d-ctx">             cluster_alive[k] = False</span>
+<span class="d-hunk">@@ -469,15 +566,13 @@ def main():</span>
+<span class="d-ctx">           f&quot;corridors merged, {clusters_merged} equivalent clusters merged, &quot;</span>
+<span class="d-ctx">           f&quot;{stubs_merged} stubs → junctions, {junctions_dissolved} fake &quot;</span>
+<span class="d-ctx">           f&quot;junctions → corridors ({time.time()-t0:.0f}s)&quot;, flush=True)</span>
+<span class="d-add">+    print(f&quot;[gf] rule-A stray distance from anchor (10 m buckets, cut at &quot;</span>
+<span class="d-add">+          f&quot;{PARALLEL_MAX_SEP_M:.0f} m): {gap_hist}&quot;, flush=True)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # ── 4. Geometry from membership ─────────────────────────────────────────</span>
+<span class="d-ctx">     widths = np.array([HALF_WIDTH.get(rc, DEFAULT_HALF_WIDTH) * WIDTH_SCALE</span>
+<span class="d-ctx">                        for rc in rclass])</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    def edge_lines(eids):</span>
+<span class="d-del">-        return [LineString([node_xy[ends[eid, 0]], node_xy[ends[eid, 1]]])</span>
+<span class="d-del">-                for eid in eids]</span>
+<span class="d-del">-</span>
+<span class="d-ctx">     def tube_of(eids):</span>
+<span class="d-ctx">         return union_all(shp_buffer(np.array(edge_lines(eids), dtype=object),</span>
+<span class="d-ctx">                                     widths[list(eids)],</span>
+<span class="d-hunk">@@ -615,13 +710,6 @@ def main():</span>
+<span class="d-ctx">     corr_cuts = 0</span>
+<span class="d-ctx">     corr_merges = 0</span>
+<span class="d-ctx">     cc_residual = 0</span>
+<span class="d-del">-    lines_cache: dict[int, object] = {}</span>
+<span class="d-del">-</span>
+<span class="d-del">-    def member_lines(c):</span>
+<span class="d-del">-        if c not in lines_cache:</span>
+<span class="d-del">-            lines_cache[c] = shapely.multilinestrings(</span>
+<span class="d-del">-                [list(ln.coords) for ln in edge_lines(corridors[c])])</span>
+<span class="d-del">-        return lines_cache[c]</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     def merge_corridor(i: int, j: int):</span>
+<span class="d-ctx">         &quot;&quot;&quot;Fold corridor i (members + geometry) into corridor j.&quot;&quot;&quot;</span>
+<span class="d-hunk">@@ -1026,7 +1114,7 @@ def main():</span>
+<span class="d-ctx">     # rule, applied to EVERY member edge against the FINAL shipped geometry:</span>
+<span class="d-ctx">     # an edge whose line doesn&#x27;t touch its polygon (within one snap step)</span>
+<span class="d-ctx">     # moves to the polygon holding its midpoint, else any polygon its line</span>
+<span class="d-del">-    # crosses; a member nothing holds stays put and surfaces in §6.</span>
+<span class="d-add">+    # crosses; a member nothing holds stays put and surfaces in §7.</span>
+<span class="d-ctx">     ll_nodes = np.column_stack((nodes[:, 1], nodes[:, 0]))    # (lon, lat)</span>
+<span class="d-ctx">     repair_rehomed = 0</span>
+<span class="d-ctx">     fin_corr_ids = [c for c in corr_polys if not corr_polys[c].is_empty]</span>
+<span class="d-hunk">@@ -1072,53 +1160,119 @@ def main():</span>
+<span class="d-ctx">         print(f&quot;[gf] ship-frame re-home: {repair_rehomed} members moved to &quot;</span>
+<span class="d-ctx">               f&quot;the polygon that holds them ({time.time()-t0:.0f}s)&quot;, flush=True)</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    # ── 5. Emit: dense block ids, geojson + npy + meta ─────────────────────</span>
+<span class="d-add">+    # ── 5. Contiguity: one shipped block per contiguous piece ──────────────</span>
+<span class="d-add">+    # Everything above is settled — membership, geometry, disjointness. What</span>
+<span class="d-add">+    # can still be wrong is a block that is one GROUP but two PLACES: rule A&#x27;s</span>
+<span class="d-add">+    # anchor test keeps corridors together only while they run alongside each</span>
+<span class="d-add">+    # other, but a corridor can also come apart downstream — a grade-separated</span>
+<span class="d-add">+    # crossing&#x27;s tube slices it, a junction cell eats its middle, a ship-frame</span>
+<span class="d-add">+    # repair cut takes a bite out of it.</span>
+<span class="d-add">+    #</span>
+<span class="d-add">+    # So the last word belongs to the shipped geometry: bucket each block&#x27;s</span>
+<span class="d-add">+    # polygon parts so that every part is within PART_GAP_M of another part in</span>
+<span class="d-add">+    # its own bucket, and emit ONE BLOCK PER BUCKET. Members follow their own</span>
+<span class="d-add">+    # geometry (the bucket holding the edge&#x27;s midpoint, else the one its line</span>
+<span class="d-add">+    # crosses, else the nearest). A bucket that ends up holding no member is</span>
+<span class="d-add">+    # dropped: a shard with no edge in it can neither carry a vote nor light</span>
+<span class="d-add">+    # up, and keeping it would only re-attach a detached shape to a block that</span>
+<span class="d-add">+    # isn&#x27;t there. Buckets are disjoint subsets of an already-audited polygon,</span>
+<span class="d-add">+    # so no split can create an overlap — nothing below needs re-auditing.</span>
+<span class="d-add">+    GAP_LL = PART_GAP_M * 2.0 / (mlon + mlat)     # metres → degrees (isotropic)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def _parts(geom):</span>
+<span class="d-add">+        &quot;&quot;&quot;The individual Polygon components of any polygonal geometry.&quot;&quot;&quot;</span>
+<span class="d-add">+        return [g for p in _polyparts(geom)</span>
+<span class="d-add">+                for g in (p.geoms if p.geom_type == &quot;MultiPolygon&quot; else [p])]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def contiguous_buckets(poly):</span>
+<span class="d-add">+        &quot;&quot;&quot;Polygon parts grouped into runs no wider than PART_GAP_M apart.&quot;&quot;&quot;</span>
+<span class="d-add">+        parts = _parts(poly)</span>
+<span class="d-add">+        if len(parts) &lt; 2:</span>
+<span class="d-add">+            return [poly] if parts else []</span>
+<span class="d-add">+        uf = UnionFind(len(parts))</span>
+<span class="d-add">+        tree = STRtree(parts)</span>
+<span class="d-add">+        for i, part in enumerate(parts):</span>
+<span class="d-add">+            for j in tree.query(shp_buffer(part, GAP_LL), predicate=&quot;intersects&quot;):</span>
+<span class="d-add">+                uf.union(i, int(j))</span>
+<span class="d-add">+        runs: dict[int, list] = {}</span>
+<span class="d-add">+        for i in range(len(parts)):</span>
+<span class="d-add">+            runs.setdefault(uf.find(i), []).append(parts[i])</span>
+<span class="d-add">+        return [union_all(r) if len(r) &gt; 1 else r[0] for r in runs.values()]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # (polygon, member edge ids, geojson properties beyond the shared ones)</span>
+<span class="d-add">+    staged: list[tuple[object, list[int], dict]] = []</span>
+<span class="d-add">+    for c, poly in corr_polys.items():</span>
+<span class="d-add">+        if not poly.is_empty and corridors[c]:</span>
+<span class="d-add">+            staged.append((poly, list(corridors[c]), {}))</span>
+<span class="d-add">+    for i, k in enumerate(live_cl):</span>
+<span class="d-add">+        captured = [int(e) for e in np.where(edge_cluster == k)[0]]</span>
+<span class="d-add">+        if not cells[i].is_empty and captured:</span>
+<span class="d-add">+            staged.append((cells[i], captured,</span>
+<span class="d-add">+                           {&quot;node_id&quot;: int(cl_members[k].min()),</span>
+<span class="d-add">+                            &quot;n_nodes&quot;: len(cl_members[k])}))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    contiguity_splits = 0</span>
+<span class="d-add">+    contiguity_pieces = 0</span>
+<span class="d-add">+    shards_dropped = 0</span>
+<span class="d-add">+    split_staged: list[tuple[object, list[int], dict]] = []</span>
+<span class="d-add">+    for poly, members, extra in staged:</span>
+<span class="d-add">+        buckets = contiguous_buckets(poly)</span>
+<span class="d-add">+        if len(buckets) &lt; 2:</span>
+<span class="d-add">+            split_staged.append((poly, members, extra))</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        held: list[list[int]] = [[] for _ in buckets]</span>
+<span class="d-add">+        btree = STRtree(buckets)</span>
+<span class="d-add">+        for eid in members:</span>
+<span class="d-add">+            line = LineString([ll_nodes[ends[eid, 0]], ll_nodes[ends[eid, 1]]])</span>
+<span class="d-add">+            mid = shapely.points(np.asarray(line.coords).mean(axis=0))</span>
+<span class="d-add">+            hit = btree.query(mid, predicate=&quot;intersects&quot;)</span>
+<span class="d-add">+            if not len(hit):</span>
+<span class="d-add">+                hit = btree.query(line, predicate=&quot;intersects&quot;)</span>
+<span class="d-add">+            held[int(hit[0]) if len(hit) else</span>
+<span class="d-add">+                 int(np.argmin([line.distance(b) for b in buckets]))].append(eid)</span>
+<span class="d-add">+        live = [i for i, ms in enumerate(held) if ms]</span>
+<span class="d-add">+        shards_dropped += len(buckets) - len(live)</span>
+<span class="d-add">+        if len(live) &gt; 1:</span>
+<span class="d-add">+            contiguity_splits += 1</span>
+<span class="d-add">+            contiguity_pieces += len(live)</span>
+<span class="d-add">+        for i in live:</span>
+<span class="d-add">+            split_staged.append((buckets[i], held[i], extra))</span>
+<span class="d-add">+    staged = split_staged</span>
+<span class="d-add">+    print(f&quot;[gf] contiguity (&gt; {PART_GAP_M:.0f} m apart): {contiguity_splits} &quot;</span>
+<span class="d-add">+          f&quot;blocks split into {contiguity_pieces} pieces, {shards_dropped} &quot;</span>
+<span class="d-add">+          f&quot;member-less shards dropped ({time.time()-t0:.0f}s)&quot;, flush=True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # ── 6. Emit: dense block ids, geojson + npy + meta ─────────────────────</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # block_id starts at 1: tippecanoe/MVT cannot represent a native feature</span>
+<span class="d-ctx">     # id of 0 (it drops it), which would detach feature-state (heat/selection)</span>
+<span class="d-ctx">     # from block 0. Server arrays are sized n_blocks = len(feats)+1, slot 0 unused.</span>
+<span class="d-ctx">     # Geometry is ALREADY in the shipped lon/lat frame (finalized above);</span>
+<span class="d-del">-    # area_m2 converts via the equirectangular scale. Emptied polygons</span>
+<span class="d-del">-    # (ship-frame repairs) emit no feature; their members were re-homed above.</span>
+<span class="d-add">+    # area_m2 converts via the equirectangular scale.</span>
+<span class="d-ctx">     feats = []</span>
+<span class="d-ctx">     edge_block = np.full(n_edges, -1, dtype=np.int32)</span>
+<span class="d-ctx">     poly_of_block: dict[int, object] = {}</span>
+<span class="d-del">-    for c, poly in corr_polys.items():</span>
+<span class="d-del">-        members = corridors[c]</span>
+<span class="d-del">-        if poly.is_empty or not members:</span>
+<span class="d-del">-            continue</span>
+<span class="d-add">+    for poly, members, extra in staged:</span>
+<span class="d-ctx">         bid = len(feats) + 1</span>
+<span class="d-ctx">         edge_block[members] = bid</span>
+<span class="d-ctx">         poly_of_block[bid] = poly</span>
+<span class="d-add">+        is_junction = &quot;node_id&quot; in extra</span>
+<span class="d-ctx">         feats.append({</span>
+<span class="d-ctx">             &quot;type&quot;: &quot;Feature&quot;,</span>
+<span class="d-ctx">             &quot;properties&quot;: {</span>
+<span class="d-ctx">                 &quot;block_id&quot;: bid, &quot;seg_id&quot;: -1,</span>
+<span class="d-del">-                &quot;road_class&quot;: majority(rclass[members]) or &quot;path&quot;,</span>
+<span class="d-del">-                &quot;road_name&quot;: majority([names[i] for i in members]),</span>
+<span class="d-del">-                &quot;area_m2&quot;: round(poly.area * ll_area_m2, 1), &quot;n_edges&quot;: len(members),</span>
+<span class="d-add">+                &quot;road_class&quot;: &quot;node&quot; if is_junction else</span>
+<span class="d-add">+                              (majority(rclass[members]) or &quot;path&quot;),</span>
+<span class="d-add">+                &quot;road_name&quot;: None if is_junction else</span>
+<span class="d-add">+                             majority([names[i] for i in members]),</span>
+<span class="d-add">+                &quot;area_m2&quot;: round(poly.area * ll_area_m2, 1),</span>
+<span class="d-add">+                &quot;n_edges&quot;: len(members),</span>
+<span class="d-add">+                **extra,</span>
+<span class="d-ctx">             },</span>
+<span class="d-ctx">             &quot;geometry&quot;: mapping(poly),</span>
+<span class="d-ctx">         })</span>
+<span class="d-del">-    for i, k in enumerate(live_cl):</span>
+<span class="d-del">-        captured = np.where(edge_cluster == k)[0]</span>
+<span class="d-del">-        if cells[i].is_empty or not len(captured):</span>
+<span class="d-del">-            continue</span>
+<span class="d-del">-        bid = len(feats) + 1</span>
+<span class="d-del">-        edge_block[captured] = bid</span>
+<span class="d-del">-        poly_of_block[bid] = cells[i]</span>
+<span class="d-del">-        feats.append({</span>
+<span class="d-del">-            &quot;type&quot;: &quot;Feature&quot;,</span>
+<span class="d-del">-            &quot;properties&quot;: {</span>
+<span class="d-del">-                &quot;block_id&quot;: bid, &quot;seg_id&quot;: -1, &quot;road_class&quot;: &quot;node&quot;,</span>
+<span class="d-del">-                &quot;road_name&quot;: None, &quot;area_m2&quot;: round(cells[i].area * ll_area_m2, 1),</span>
+<span class="d-del">-                &quot;node_id&quot;: int(cl_members[k].min()), &quot;n_nodes&quot;: len(cl_members[k]),</span>
+<span class="d-del">-                &quot;n_edges&quot;: int(len(captured)),</span>
+<span class="d-del">-            },</span>
+<span class="d-del">-            &quot;geometry&quot;: mapping(cells[i]),</span>
+<span class="d-del">-        })</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    # ── 6. Audit: coverage + overlap by construction, verified anyway ──────</span>
+<span class="d-add">+    # ── 7. Audit: coverage + overlap by construction, verified anyway ──────</span>
+<span class="d-ctx">     # Touch is measured in the SHIPPED frame (2·GRID_LL ≈ 2 cm tolerance —</span>
+<span class="d-ctx">     # the snap can move a boundary by at most one grid step).</span>
+<span class="d-ctx">     mapped = int((edge_block &gt;= 0).sum())</span>
+<span class="d-hunk">@@ -1148,7 +1302,10 @@ def main():</span>
+<span class="d-ctx">         json.dump({&quot;type&quot;: &quot;FeatureCollection&quot;, &quot;features&quot;: feats}, fh)</span>
+<span class="d-ctx">     os.replace(tmp, final_path)</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    data_dir = os.path.join(_SERVER, city.data_dir)</span>
+<span class="d-add">+    # BLOCKS_DATA_DIR redirects the baked mapping away from the city&#x27;s live</span>
+<span class="d-add">+    # osm_data/ — set it for parameter sweeps and A/B runs so an experiment</span>
+<span class="d-add">+    # can&#x27;t leave the local server serving a mapping nobody meant to ship.</span>
+<span class="d-add">+    data_dir = os.environ.get(&quot;BLOCKS_DATA_DIR&quot;) or os.path.join(_SERVER, city.data_dir)</span>
+<span class="d-ctx">     os.makedirs(data_dir, exist_ok=True)</span>
+<span class="d-ctx">     np.save(os.path.join(data_dir, f&quot;edge_blocks_{NETWORK}.npy&quot;), edge_block)</span>
+<span class="d-ctx">     meta = {</span>
+<span class="d-hunk">@@ -1185,9 +1342,17 @@ def main():</span>
+<span class="d-ctx">         &quot;oversized_blocks_split&quot;: blocks_split,</span>
+<span class="d-ctx">         &quot;split_pieces&quot;: split_pieces,</span>
+<span class="d-ctx">         &quot;split_gaveup&quot;: split_gaveup,</span>
+<span class="d-add">+        &quot;contiguity_splits&quot;: contiguity_splits,</span>
+<span class="d-add">+        &quot;contiguity_pieces&quot;: contiguity_pieces,</span>
+<span class="d-add">+        &quot;contiguity_shards_dropped&quot;: shards_dropped,</span>
+<span class="d-add">+        # Rule-A candidates by how far they strayed from their group anchor,</span>
+<span class="d-add">+        # in 10 m buckets — the evidence behind parallel_max_sep_m.</span>
+<span class="d-add">+        &quot;parallel_gap_hist_10m&quot;: gap_hist,</span>
+<span class="d-ctx">         &quot;edges_overlap_ok&quot;: overlapping, &quot;edges_overlap_checked&quot;: checked,</span>
+<span class="d-ctx">         &quot;node_capture_len_m&quot;: NODE_CAPTURE_LEN_M, &quot;stub_max_m&quot;: STUB_MAX_M,</span>
+<span class="d-ctx">         &quot;split_max_extent_m&quot;: SPLIT_MAX_EXTENT_M,</span>
+<span class="d-add">+        &quot;parallel_max_sep_m&quot;: PARALLEL_MAX_SEP_M,</span>
+<span class="d-add">+        &quot;part_gap_m&quot;: PART_GAP_M,</span>
+<span class="d-ctx">         &quot;width_scale&quot;: WIDTH_SCALE,</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     with open(os.path.join(data_dir, f&quot;edge_blocks_{NETWORK}.json&quot;), &quot;w&quot;) as fh:</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/streetscape_blocks/scan_contiguity.py</span>
+            <span class="stat"><span class="d-add">+98</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">streetscape_blocks · out-of-band audits</span>
+        <span class="ctx-sum">independent scanners over a shipped blocks geojson — scan_overlaps.py for disjointness, scan_contiguity.py for one-block-one-place</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">scan_contiguity.py</span>
+        <span class="ctx-sum">NEW · ~100 LOC — spread measurement + threshold gate</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">docstring</span><span class="ol-sum">what a legitimate multi-piece block is, and what must never ship</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_pieces / spread_m</span><span class="ol-sum">MST over the block&#x27;s polygon pieces; widest edge = the gap it splits at</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">scan</span><span class="ol-sum">percentiles, over-N-metres histogram, worst offenders with coordinates</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main</span><span class="ol-sum">CLI over N geojsons, --max-spread, non-zero exit on any offender</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>spread = widest MST edge over the pieces — exactly the threshold at which the block falls apart, so &#x27;spread ≤ PART_GAP_M for every block&#x27; is the shipped invariant</li><li>offenders printed with lat,lon so a failure is directly clickable on the map</li><li>exit status 1 when any block exceeds --max-spread (default 20 m) — usable as a bake gate</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/scan_contiguity.py b/server/streetscape_blocks/scan_contiguity.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..4709085</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/scan_contiguity.py</span>
+<span class="d-hunk">@@ -0,0 +1,98 @@</span>
+<span class="d-add">+#!/usr/bin/env python3</span>
+<span class="d-add">+&quot;&quot;&quot;Scan a blocks_final_&lt;city&gt;.geojson for blocks that are one block but two</span>
+<span class="d-add">+PLACES — the defect the builder&#x27;s §4c contiguity pass exists to prevent.</span>
+<span class="d-add">+</span>
+<span class="d-add">+A block may legitimately ship as a MultiPolygon: a street corridor&#x27;s tube is</span>
+<span class="d-add">+cut wherever a junction cell or a grade-separated crossing takes a bite out of</span>
+<span class="d-add">+it, leaving pieces a few metres apart that still read as one street. What must</span>
+<span class="d-add">+never ship is a block whose pieces sit far enough apart to be different places</span>
+<span class="d-add">+— voting on it would cast in both, and selecting it would light two</span>
+<span class="d-add">+disconnected shapes on opposite sides of a park.</span>
+<span class="d-add">+</span>
+<span class="d-add">+The measure is the block&#x27;s SPREAD: build a minimum spanning tree over its</span>
+<span class="d-add">+polygon pieces (edge weight = the gap between them) and report the widest edge.</span>
+<span class="d-add">+That is exactly the gap threshold at which the block would fall apart, so</span>
+<span class="d-add">+&quot;spread &lt;= PART_GAP_M for every block&quot; is the shipped invariant.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Usage: python scan_contiguity.py &lt;geojson&gt; [&lt;geojson&gt; ...]</span>
+<span class="d-add">+Exit status is 1 if any block exceeds --max-spread (default 20 m).</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+import argparse</span>
+<span class="d-add">+import json</span>
+<span class="d-add">+import math</span>
+<span class="d-add">+import sys</span>
+<span class="d-add">+</span>
+<span class="d-add">+import numpy as np</span>
+<span class="d-add">+from shapely.geometry import shape</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _pieces(geom):</span>
+<span class="d-add">+    return list(geom.geoms) if geom.geom_type == &quot;MultiPolygon&quot; else [geom]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def spread_m(geom, mlon, mlat) -&gt; float:</span>
+<span class="d-add">+    &quot;&quot;&quot;Widest edge of the MST over the block&#x27;s pieces, in metres.&quot;&quot;&quot;</span>
+<span class="d-add">+    parts = _pieces(geom)</span>
+<span class="d-add">+    if len(parts) &lt; 2:</span>
+<span class="d-add">+        return 0.0</span>
+<span class="d-add">+    scale = (mlon + mlat) / 2          # degrees → metres, isotropic enough</span>
+<span class="d-add">+    reached, remaining, widest = [0], list(range(1, len(parts))), 0.0</span>
+<span class="d-add">+    while remaining:</span>
+<span class="d-add">+        gap, nxt = min((parts[a].distance(parts[b]) * scale, b)</span>
+<span class="d-add">+                       for a in reached for b in remaining)</span>
+<span class="d-add">+        widest = max(widest, gap)</span>
+<span class="d-add">+        reached.append(nxt)</span>
+<span class="d-add">+        remaining.remove(nxt)</span>
+<span class="d-add">+    return widest</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def scan(path: str, max_spread: float) -&gt; int:</span>
+<span class="d-add">+    with open(path) as fh:</span>
+<span class="d-add">+        feats = json.load(fh)[&quot;features&quot;]</span>
+<span class="d-add">+    lat0 = shape(feats[0][&quot;geometry&quot;]).centroid.y</span>
+<span class="d-add">+    mlat, mlon = 110574.0, 111320.0 * math.cos(math.radians(lat0))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    spreads, multi, offenders = [], 0, []</span>
+<span class="d-add">+    for ft in feats:</span>
+<span class="d-add">+        geom = shape(ft[&quot;geometry&quot;])</span>
+<span class="d-add">+        if geom.geom_type == &quot;MultiPolygon&quot;:</span>
+<span class="d-add">+            multi += 1</span>
+<span class="d-add">+        sp = spread_m(geom, mlon, mlat)</span>
+<span class="d-add">+        spreads.append(sp)</span>
+<span class="d-add">+        if sp &gt; max_spread:</span>
+<span class="d-add">+            p = ft[&quot;properties&quot;]</span>
+<span class="d-add">+            c = geom.centroid</span>
+<span class="d-add">+            offenders.append((sp, len(_pieces(geom)), p.get(&quot;block_id&quot;),</span>
+<span class="d-add">+                              p.get(&quot;n_edges&quot;), p.get(&quot;road_name&quot;),</span>
+<span class="d-add">+                              round(c.y, 5), round(c.x, 5)))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    spreads = np.array(spreads)</span>
+<span class="d-add">+    name = path.split(&quot;blocks_final_&quot;)[-1].replace(&quot;.geojson&quot;, &quot;&quot;)</span>
+<span class="d-add">+    print(f&quot;\n=== {name}: {len(feats)} blocks, {multi} multi-piece &quot;</span>
+<span class="d-add">+          f&quot;({100 * multi / len(feats):.1f}%) ===&quot;)</span>
+<span class="d-add">+    print(&quot;  spread percentiles (m): &quot; + &quot;  &quot;.join(</span>
+<span class="d-add">+        f&quot;p{q}={np.percentile(spreads, q):.1f}&quot; for q in (50, 90, 99, 100)))</span>
+<span class="d-add">+    for t in (10, 20, 30, 60, 150):</span>
+<span class="d-add">+        print(f&quot;    over {t:3d} m apart: {int((spreads &gt; t).sum()):6d}&quot;)</span>
+<span class="d-add">+    if not offenders:</span>
+<span class="d-add">+        print(f&quot;  OK — no block spreads wider than {max_spread:.0f} m&quot;)</span>
+<span class="d-add">+        return 0</span>
+<span class="d-add">+    print(f&quot;  FAIL — {len(offenders)} blocks spread wider than {max_spread:.0f} m&quot;)</span>
+<span class="d-add">+    offenders.sort(reverse=True)</span>
+<span class="d-add">+    for sp, n, bid, ne, nm, lat, lon in offenders[:15]:</span>
+<span class="d-add">+        print(f&quot;    {sp:8.0f} m  pieces={n:3d} block={bid} edges={ne} &quot;</span>
+<span class="d-add">+              f&quot;at {lat},{lon}  {nm}&quot;)</span>
+<span class="d-add">+    return 1</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def main():</span>
+<span class="d-add">+    ap = argparse.ArgumentParser()</span>
+<span class="d-add">+    ap.add_argument(&quot;geojson&quot;, nargs=&quot;+&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--max-spread&quot;, type=float, default=20.0,</span>
+<span class="d-add">+                    help=&quot;metres; must match the builder&#x27;s PART_GAP_M&quot;)</span>
+<span class="d-add">+    args = ap.parse_args()</span>
+<span class="d-add">+    sys.exit(max(scan(p, args.max_spread) for p in args.geojson))</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+if __name__ == &quot;__main__&quot;:</span>
+<span class="d-add">+    main()</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">cloudbuild.blocks-artifacts-overlay.yaml</span>
+            <span class="stat"><span class="d-add">+36</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill on">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · Cloud Build configs</span>
+        <span class="ctx-sum">one config per deploy shape: full app, code overlay, arrays overlay, blocks overlay</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">cloudbuild.blocks-artifacts-overlay.yaml</span>
+        <span class="ctx-sum">NEW · the config the artifacts-only Dockerfile never had</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">steps</span><span class="ol-sum">docker build -f Dockerfile.blocks-artifacts-overlay + push</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">substitutions</span><span class="ol-sum">_REGION, _BASE_IMAGE (digest-pinned serving image)</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Dockerfile.blocks-artifacts-overlay already existed but had no Cloud Build config, so the most surgical deploy we have had to be driven by hand</li><li>two layers only: the staged artifacts, nothing else — no server code, no client build, no nginx config</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/cloudbuild.blocks-artifacts-overlay.yaml b/cloudbuild.blocks-artifacts-overlay.yaml</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..9258ef2</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/cloudbuild.blocks-artifacts-overlay.yaml</span>
+<span class="d-hunk">@@ -0,0 +1,36 @@</span>
+<span class="d-add">+# Blocks ARTIFACTS-ONLY overlay deploy: refreshed Layer-2 block artifacts</span>
+<span class="d-add">+# (.blocks-staging/&lt;city&gt;/) onto the CURRENT app image and nothing else — no</span>
+<span class="d-add">+# server code, no client build, no nginx config. See</span>
+<span class="d-add">+# Dockerfile.blocks-artifacts-overlay for when to prefer this over</span>
+<span class="d-add">+# cloudbuild.blocks-overlay.yaml (which also ships code + a client rebuild).</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# The staged artifacts MUST be baked against the base image&#x27;s own graphs; the</span>
+<span class="d-add">+# loader hard-rejects a mapping whose stamped topology_etag doesn&#x27;t match the</span>
+<span class="d-add">+# live graph. Pass the digest-pinned serving image via _BASE_IMAGE.</span>
+<span class="d-add">+#</span>
+<span class="d-add">+#   gcloud builds submit --config=cloudbuild.blocks-artifacts-overlay.yaml \</span>
+<span class="d-add">+#     --substitutions=_BASE_IMAGE=&lt;registry&gt;/app@sha256:&lt;serving-digest&gt; \</span>
+<span class="d-add">+#     --project=google-mpf-ywspom2sxeey</span>
+<span class="d-add">+steps:</span>
+<span class="d-add">+  - name: &#x27;gcr.io/cloud-builders/docker&#x27;</span>
+<span class="d-add">+    args:</span>
+<span class="d-add">+      - &#x27;build&#x27;</span>
+<span class="d-add">+      - &#x27;--build-arg&#x27;</span>
+<span class="d-add">+      - &#x27;BASE_IMAGE=${_BASE_IMAGE}&#x27;</span>
+<span class="d-add">+      - &#x27;-f&#x27;</span>
+<span class="d-add">+      - &#x27;Dockerfile.blocks-artifacts-overlay&#x27;</span>
+<span class="d-add">+      - &#x27;-t&#x27;</span>
+<span class="d-add">+      - &#x27;${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest&#x27;</span>
+<span class="d-add">+      - &#x27;.&#x27;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  - name: &#x27;gcr.io/cloud-builders/docker&#x27;</span>
+<span class="d-add">+    args: [&#x27;push&#x27;, &#x27;${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest&#x27;]</span>
+<span class="d-add">+</span>
+<span class="d-add">+timeout: &#x27;1800s&#x27;</span>
+<span class="d-add">+</span>
+<span class="d-add">+substitutions:</span>
+<span class="d-add">+  _REGION: us-central1</span>
+<span class="d-add">+  _BASE_IMAGE: &#x27;&#x27;</span>
+<span class="d-add">+</span>
+<span class="d-add">+images:</span>
+<span class="d-add">+  - &#x27;${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest&#x27;</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
