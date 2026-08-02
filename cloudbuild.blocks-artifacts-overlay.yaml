@@ -1,0 +1,36 @@
+# Blocks ARTIFACTS-ONLY overlay deploy: refreshed Layer-2 block artifacts
+# (.blocks-staging/<city>/) onto the CURRENT app image and nothing else — no
+# server code, no client build, no nginx config. See
+# Dockerfile.blocks-artifacts-overlay for when to prefer this over
+# cloudbuild.blocks-overlay.yaml (which also ships code + a client rebuild).
+#
+# The staged artifacts MUST be baked against the base image's own graphs; the
+# loader hard-rejects a mapping whose stamped topology_etag doesn't match the
+# live graph. Pass the digest-pinned serving image via _BASE_IMAGE.
+#
+#   gcloud builds submit --config=cloudbuild.blocks-artifacts-overlay.yaml \
+#     --substitutions=_BASE_IMAGE=<registry>/app@sha256:<serving-digest> \
+#     --project=google-mpf-ywspom2sxeey
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'BASE_IMAGE=${_BASE_IMAGE}'
+      - '-f'
+      - 'Dockerfile.blocks-artifacts-overlay'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest']
+
+timeout: '1800s'
+
+substitutions:
+  _REGION: us-central1
+  _BASE_IMAGE: ''
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
