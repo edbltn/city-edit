@@ -21,8 +21,12 @@ edge∩polygon overlap hold by construction:
      CORRIDOR — connected components linked through non-junction endpoints,
      i.e. one component per path segment between junctions.
   3. DEGENERACY + EQUIVALENCE FIXPOINT (topological): four rules iterate to
-     convergence — A) corridors with the SAME two endpoint clusters merge
-     (both sidewalks + the roadway of one street segment = one block); V1)
+     convergence — A) corridors with the SAME two endpoint clusters merge IF
+     they run alongside each other (both sidewalks + the roadway of one street
+     segment = one block, but NOT two different routes between the same pair
+     of intersections: each group is resolved anchor-first, and a corridor
+     joins only while it never strays more than PARALLEL_MAX_SEP_M from the
+     group's longest corridor — the roadway, where there is one); V1)
      driveway-class stubs (extent ≤ STUB_MAX_M, one junction) melt into their
      junction; V2) a junction touching ≤ 1 corridor isn't a junction and
      dissolves into that corridor; B) clusters with the SAME incident-corridor
@@ -50,6 +54,12 @@ edge∩polygon overlap hold by construction:
      polygon holding its midpoint (clipped tube graft as last resort), and a
      captured edge a cut stranded outside its own cell is RE-HOMED to the
      cell or corridor that holds it now — so edge∩polygon overlap is total.
+  5. CONTIGUITY: the shipped geometry has the last word on what one block is.
+     Each block's polygon parts are bucketed into runs no more than
+     PART_GAP_M apart and EVERY BUCKET BECOMES ITS OWN BLOCK, with members
+     following their own geometry — so a block is always one place, and one
+     click can never vote in two. Buckets are disjoint subsets of an
+     already-audited polygon, so splitting cannot create an overlap.
 
 Outputs (same contract the server + tippecanoe already consume):
   output/blocks_final_<city>.geojson       display polygons, dense block_id
@@ -114,6 +124,29 @@ SPLIT_MAX_EXTENT_M = float(os.environ.get("SPLIT_MAX_EXTENT_M", "400"))
 SPLIT_BAND = (0.35, 0.65)      # candidate cut stations, fraction of the span
 SPLIT_STATIONS = 13            # stations sampled inside the band
 SPLIT_MAX_DEPTH = 8            # ≤ 2^8 pieces from one block (backstop)
+
+# Contiguity. Rule A merges corridors that share both endpoint junctions —
+# right for the two sides + roadway of ONE street segment, wrong for two
+# DIFFERENT routes between the same pair of intersections (a park loop's two
+# arms, a street and the service road that rejoins it, a path either side of a
+# median strip). Those merges shipped blocks made of ribbons 70–230 m apart:
+# one click voted in two places at once and lit two disconnected shapes.
+# PARALLEL_MAX_SEP_M is how far a corridor may stray from its group's anchor
+# and still count as the same street. Measured against the anchor — the
+# group's LONGEST corridor, normally the roadway lying between the sidewalks —
+# so the bound is half a right-of-way, not a full one: 30 m clears NYC's
+# widest (Park Avenue, ~43 m building line to building line) with room to
+# spare while rejecting the East River Park arms at 72 m.
+PARALLEL_MAX_SEP_M = float(os.environ.get("PARALLEL_MAX_SEP_M", "30"))
+HUG_SAMPLE_M = 5.0             # densify step for the stray-distance measure
+
+# Backstop: a block whose shipped polygon falls into pieces further apart than
+# PART_GAP_M is split into one block per piece (§5). Catches fragmentation the
+# geometry passes cause after grouping is settled — a corridor sliced through
+# by a grade-separated crossing's tube, or by a junction cell mid-span. 20 m is
+# wider than any gap a junction cell can open in a street corridor and far
+# narrower than the separations that read as two places.
+PART_GAP_M = float(os.environ.get("PART_GAP_M", "20"))
 
 # Corridor tube half-widths per road class (from build_blocks_generic.py,
 # NYC-calibrated; classes are universal). Scaled by WIDTH_SCALE for sweeps.
@@ -333,6 +366,39 @@ def main():
           f"{int(cross_short.sum())} crosswalk stubs + {len(corr_edges)} corridor "
           f"edges in {n_corr} corridors ({time.time()-t0:.0f}s)", flush=True)
 
+    # ── Corridor centreline geometry (shared by §3's hug test and §4's
+    # overlap arbitration; invalidated whenever a corridor's members change) ──
+    def edge_lines(eids):
+        return [LineString([node_xy[ends[eid, 0]], node_xy[ends[eid, 1]]])
+                for eid in eids]
+
+    lines_cache: dict[int, tuple] = {}
+
+    def corr_geom(c):
+        """(centrelines, sample points) for corridor c, in the metric frame.
+        The sample points densify the centrelines to HUG_SAMPLE_M so a single
+        long straight edge cannot hide its own middle from a distance probe."""
+        geom = lines_cache.get(c)
+        if geom is None:
+            lines = shapely.multilinestrings(
+                [list(ln.coords) for ln in edge_lines(corridors[c])])
+            pts = shapely.points(shapely.get_coordinates(
+                shapely.segmentize(lines, HUG_SAMPLE_M)))
+            lines_cache[c] = geom = (lines, pts)
+        return geom
+
+    def member_lines(c):
+        return corr_geom(c)[0]
+
+    def strays(c, anchor):
+        """Farthest any point of corridor c gets from the anchor's centrelines
+        (a directed Hausdorff distance) — small only when c runs alongside the
+        anchor for its whole length."""
+        pts = corr_geom(c)[1]
+        if len(pts) == 0:
+            return math.inf
+        return float(shapely.distance(pts, member_lines(anchor)).max())
+
     # ── 3. Degeneracy + equivalence fixpoint ────────────────────────────────
     # Four rules iterate to convergence — each strictly shrinks the corridor
     # or cluster count, so termination is guaranteed (MAX_ROUNDS is a
@@ -359,6 +425,12 @@ def main():
     corridors_merged = 0
     clusters_merged = 0
     rounds = 0
+    # How far each rule-A candidate strayed from its anchor, in 10 m buckets,
+    # sampled on the first round only (later rounds re-evaluate the same
+    # rejected pairs and would inflate the tail). This is the evidence for
+    # where PARALLEL_MAX_SEP_M belongs; it is stamped into the meta.
+    GAP_BUCKETS = 12
+    gap_hist = [0] * GAP_BUCKETS
     for _ in range(MAX_ROUNDS):
         rounds += 1
         changed = False
@@ -374,22 +446,45 @@ def main():
                     if k >= 0 and cluster_alive[k]:
                         corr_cl[c].add(k)
 
-        # A) Same endpoint-cluster pair → one corridor. (Merging same-key
-        # corridors leaves the survivor's cluster set == the key, so corr_cl
-        # stays valid for the passes below.)
+        # A) Same endpoint-cluster pair → one corridor, IF they run together.
+        # Sharing two junctions makes corridors candidates, not duplicates: the
+        # two arms of a park loop share their endpoints too. So each group is
+        # resolved anchor-first — its longest corridor claims every corridor
+        # that never strays more than PARALLEL_MAX_SEP_M from it, and whatever
+        # is left re-anchors and forms its own block. Anchoring on the longest
+        # (the roadway, where there is one) measures each sidewalk against the
+        # carriageway between them rather than across the whole right-of-way.
+        # (Merging same-key corridors leaves the survivor's cluster set == the
+        # key, so corr_cl stays valid for the passes below.)
         by_ends: dict[frozenset, list[int]] = {}
         for c in range(n_corr):
             if corr_alive[c] and len(corr_cl[c]) == 2:
                 by_ends.setdefault(frozenset(corr_cl[c]), []).append(c)
         for cs in by_ends.values():
-            if len(cs) > 1:
-                root = cs[0]
-                for c in cs[1:]:
+            if len(cs) < 2:
+                continue
+            pending = sorted(cs, key=lambda c: -member_lines(c).length)
+            while len(pending) > 1:
+                root, rest = pending[0], pending[1:]
+                # min of the two directed distances: a sidewalk that covers
+                # only part of the segment still hugs the roadway, even though
+                # the roadway's far end strays from the short sidewalk.
+                gaps = {c: min(strays(c, root), strays(root, c)) for c in rest}
+                claimed = {c for c, gap in gaps.items()
+                           if gap <= PARALLEL_MAX_SEP_M}
+                if rounds == 1:          # later rounds re-see the same rejects
+                    for gap in gaps.values():
+                        gap_hist[min(int(gap // 10), GAP_BUCKETS - 1)] += 1
+                for c in claimed:
                     corridors[root].extend(corridors[c])
                     corridors[c] = []
                     corr_alive[c] = False
-                corridors_merged += len(cs) - 1
-                changed = True
+                    lines_cache.pop(c, None)
+                if claimed:
+                    lines_cache.pop(root, None)
+                    corridors_merged += len(claimed)
+                    changed = True
+                pending = [c for c in rest if c not in claimed]
 
         # V1) driveway-class stub corridors melt into their only junction.
         for c in range(n_corr):
@@ -406,6 +501,7 @@ def main():
             edge_cluster[members] = k
             corr_alive[c] = False
             corridors[c] = []
+            lines_cache.pop(c, None)
             stubs_merged += 1
             changed = True
 
@@ -429,6 +525,7 @@ def main():
             c = next(iter(cs))
             captured = np.where(edge_cluster == k)[0]
             corridors[c].extend(int(x) for x in captured)
+            lines_cache.pop(c, None)
             edge_cluster[captured] = -1
             node_cluster[cl_members[k]] = -1
             cluster_alive[k] = False
@@ -469,14 +566,12 @@ def main():
           f"corridors merged, {clusters_merged} equivalent clusters merged, "
           f"{stubs_merged} stubs → junctions, {junctions_dissolved} fake "
           f"junctions → corridors ({time.time()-t0:.0f}s)", flush=True)
+    print(f"[gf] rule-A stray distance from anchor (10 m buckets, cut at "
+          f"{PARALLEL_MAX_SEP_M:.0f} m): {gap_hist}", flush=True)
 
     # ── 4. Geometry from membership ─────────────────────────────────────────
     widths = np.array([HALF_WIDTH.get(rc, DEFAULT_HALF_WIDTH) * WIDTH_SCALE
                        for rc in rclass])
-
-    def edge_lines(eids):
-        return [LineString([node_xy[ends[eid, 0]], node_xy[ends[eid, 1]]])
-                for eid in eids]
 
     def tube_of(eids):
         return union_all(shp_buffer(np.array(edge_lines(eids), dtype=object),
@@ -615,13 +710,6 @@ def main():
     corr_cuts = 0
     corr_merges = 0
     cc_residual = 0
-    lines_cache: dict[int, object] = {}
-
-    def member_lines(c):
-        if c not in lines_cache:
-            lines_cache[c] = shapely.multilinestrings(
-                [list(ln.coords) for ln in edge_lines(corridors[c])])
-        return lines_cache[c]
 
     def merge_corridor(i: int, j: int):
         """Fold corridor i (members + geometry) into corridor j."""
@@ -1026,7 +1114,7 @@ def main():
     # rule, applied to EVERY member edge against the FINAL shipped geometry:
     # an edge whose line doesn't touch its polygon (within one snap step)
     # moves to the polygon holding its midpoint, else any polygon its line
-    # crosses; a member nothing holds stays put and surfaces in §6.
+    # crosses; a member nothing holds stays put and surfaces in §7.
     ll_nodes = np.column_stack((nodes[:, 1], nodes[:, 0]))    # (lon, lat)
     repair_rehomed = 0
     fin_corr_ids = [c for c in corr_polys if not corr_polys[c].is_empty]
@@ -1072,53 +1160,119 @@ def main():
         print(f"[gf] ship-frame re-home: {repair_rehomed} members moved to "
               f"the polygon that holds them ({time.time()-t0:.0f}s)", flush=True)
 
-    # ── 5. Emit: dense block ids, geojson + npy + meta ─────────────────────
+    # ── 5. Contiguity: one shipped block per contiguous piece ──────────────
+    # Everything above is settled — membership, geometry, disjointness. What
+    # can still be wrong is a block that is one GROUP but two PLACES: rule A's
+    # anchor test keeps corridors together only while they run alongside each
+    # other, but a corridor can also come apart downstream — a grade-separated
+    # crossing's tube slices it, a junction cell eats its middle, a ship-frame
+    # repair cut takes a bite out of it.
+    #
+    # So the last word belongs to the shipped geometry: bucket each block's
+    # polygon parts so that every part is within PART_GAP_M of another part in
+    # its own bucket, and emit ONE BLOCK PER BUCKET. Members follow their own
+    # geometry (the bucket holding the edge's midpoint, else the one its line
+    # crosses, else the nearest). A bucket that ends up holding no member is
+    # dropped: a shard with no edge in it can neither carry a vote nor light
+    # up, and keeping it would only re-attach a detached shape to a block that
+    # isn't there. Buckets are disjoint subsets of an already-audited polygon,
+    # so no split can create an overlap — nothing below needs re-auditing.
+    GAP_LL = PART_GAP_M * 2.0 / (mlon + mlat)     # metres → degrees (isotropic)
+
+    def _parts(geom):
+        """The individual Polygon components of any polygonal geometry."""
+        return [g for p in _polyparts(geom)
+                for g in (p.geoms if p.geom_type == "MultiPolygon" else [p])]
+
+    def contiguous_buckets(poly):
+        """Polygon parts grouped into runs no wider than PART_GAP_M apart."""
+        parts = _parts(poly)
+        if len(parts) < 2:
+            return [poly] if parts else []
+        uf = UnionFind(len(parts))
+        tree = STRtree(parts)
+        for i, part in enumerate(parts):
+            for j in tree.query(shp_buffer(part, GAP_LL), predicate="intersects"):
+                uf.union(i, int(j))
+        runs: dict[int, list] = {}
+        for i in range(len(parts)):
+            runs.setdefault(uf.find(i), []).append(parts[i])
+        return [union_all(r) if len(r) > 1 else r[0] for r in runs.values()]
+
+    # (polygon, member edge ids, geojson properties beyond the shared ones)
+    staged: list[tuple[object, list[int], dict]] = []
+    for c, poly in corr_polys.items():
+        if not poly.is_empty and corridors[c]:
+            staged.append((poly, list(corridors[c]), {}))
+    for i, k in enumerate(live_cl):
+        captured = [int(e) for e in np.where(edge_cluster == k)[0]]
+        if not cells[i].is_empty and captured:
+            staged.append((cells[i], captured,
+                           {"node_id": int(cl_members[k].min()),
+                            "n_nodes": len(cl_members[k])}))
+
+    contiguity_splits = 0
+    contiguity_pieces = 0
+    shards_dropped = 0
+    split_staged: list[tuple[object, list[int], dict]] = []
+    for poly, members, extra in staged:
+        buckets = contiguous_buckets(poly)
+        if len(buckets) < 2:
+            split_staged.append((poly, members, extra))
+            continue
+        held: list[list[int]] = [[] for _ in buckets]
+        btree = STRtree(buckets)
+        for eid in members:
+            line = LineString([ll_nodes[ends[eid, 0]], ll_nodes[ends[eid, 1]]])
+            mid = shapely.points(np.asarray(line.coords).mean(axis=0))
+            hit = btree.query(mid, predicate="intersects")
+            if not len(hit):
+                hit = btree.query(line, predicate="intersects")
+            held[int(hit[0]) if len(hit) else
+                 int(np.argmin([line.distance(b) for b in buckets]))].append(eid)
+        live = [i for i, ms in enumerate(held) if ms]
+        shards_dropped += len(buckets) - len(live)
+        if len(live) > 1:
+            contiguity_splits += 1
+            contiguity_pieces += len(live)
+        for i in live:
+            split_staged.append((buckets[i], held[i], extra))
+    staged = split_staged
+    print(f"[gf] contiguity (> {PART_GAP_M:.0f} m apart): {contiguity_splits} "
+          f"blocks split into {contiguity_pieces} pieces, {shards_dropped} "
+          f"member-less shards dropped ({time.time()-t0:.0f}s)", flush=True)
+
+    # ── 6. Emit: dense block ids, geojson + npy + meta ─────────────────────
 
     # block_id starts at 1: tippecanoe/MVT cannot represent a native feature
     # id of 0 (it drops it), which would detach feature-state (heat/selection)
     # from block 0. Server arrays are sized n_blocks = len(feats)+1, slot 0 unused.
     # Geometry is ALREADY in the shipped lon/lat frame (finalized above);
-    # area_m2 converts via the equirectangular scale. Emptied polygons
-    # (ship-frame repairs) emit no feature; their members were re-homed above.
+    # area_m2 converts via the equirectangular scale.
     feats = []
     edge_block = np.full(n_edges, -1, dtype=np.int32)
     poly_of_block: dict[int, object] = {}
-    for c, poly in corr_polys.items():
-        members = corridors[c]
-        if poly.is_empty or not members:
-            continue
+    for poly, members, extra in staged:
         bid = len(feats) + 1
         edge_block[members] = bid
         poly_of_block[bid] = poly
+        is_junction = "node_id" in extra
         feats.append({
             "type": "Feature",
             "properties": {
                 "block_id": bid, "seg_id": -1,
-                "road_class": majority(rclass[members]) or "path",
-                "road_name": majority([names[i] for i in members]),
-                "area_m2": round(poly.area * ll_area_m2, 1), "n_edges": len(members),
+                "road_class": "node" if is_junction else
+                              (majority(rclass[members]) or "path"),
+                "road_name": None if is_junction else
+                             majority([names[i] for i in members]),
+                "area_m2": round(poly.area * ll_area_m2, 1),
+                "n_edges": len(members),
+                **extra,
             },
             "geometry": mapping(poly),
         })
-    for i, k in enumerate(live_cl):
-        captured = np.where(edge_cluster == k)[0]
-        if cells[i].is_empty or not len(captured):
-            continue
-        bid = len(feats) + 1
-        edge_block[captured] = bid
-        poly_of_block[bid] = cells[i]
-        feats.append({
-            "type": "Feature",
-            "properties": {
-                "block_id": bid, "seg_id": -1, "road_class": "node",
-                "road_name": None, "area_m2": round(cells[i].area * ll_area_m2, 1),
-                "node_id": int(cl_members[k].min()), "n_nodes": len(cl_members[k]),
-                "n_edges": int(len(captured)),
-            },
-            "geometry": mapping(cells[i]),
-        })
 
-    # ── 6. Audit: coverage + overlap by construction, verified anyway ──────
+    # ── 7. Audit: coverage + overlap by construction, verified anyway ──────
     # Touch is measured in the SHIPPED frame (2·GRID_LL ≈ 2 cm tolerance —
     # the snap can move a boundary by at most one grid step).
     mapped = int((edge_block >= 0).sum())
@@ -1148,7 +1302,10 @@ def main():
         json.dump({"type": "FeatureCollection", "features": feats}, fh)
     os.replace(tmp, final_path)
 
-    data_dir = os.path.join(_SERVER, city.data_dir)
+    # BLOCKS_DATA_DIR redirects the baked mapping away from the city's live
+    # osm_data/ — set it for parameter sweeps and A/B runs so an experiment
+    # can't leave the local server serving a mapping nobody meant to ship.
+    data_dir = os.environ.get("BLOCKS_DATA_DIR") or os.path.join(_SERVER, city.data_dir)
     os.makedirs(data_dir, exist_ok=True)
     np.save(os.path.join(data_dir, f"edge_blocks_{NETWORK}.npy"), edge_block)
     meta = {
@@ -1185,9 +1342,17 @@ def main():
         "oversized_blocks_split": blocks_split,
         "split_pieces": split_pieces,
         "split_gaveup": split_gaveup,
+        "contiguity_splits": contiguity_splits,
+        "contiguity_pieces": contiguity_pieces,
+        "contiguity_shards_dropped": shards_dropped,
+        # Rule-A candidates by how far they strayed from their group anchor,
+        # in 10 m buckets — the evidence behind parallel_max_sep_m.
+        "parallel_gap_hist_10m": gap_hist,
         "edges_overlap_ok": overlapping, "edges_overlap_checked": checked,
         "node_capture_len_m": NODE_CAPTURE_LEN_M, "stub_max_m": STUB_MAX_M,
         "split_max_extent_m": SPLIT_MAX_EXTENT_M,
+        "parallel_max_sep_m": PARALLEL_MAX_SEP_M,
+        "part_gap_m": PART_GAP_M,
         "width_scale": WIDTH_SCALE,
     }
     with open(os.path.join(data_dir, f"edge_blocks_{NETWORK}.json"), "w") as fh:
