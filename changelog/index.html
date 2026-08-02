@@ -29,6 +29,23 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-02-screenshot-job-oom-cascade.html">
+    <div class="date">2026-08-02</div>
+    <h2>The screenshot job that reported green while capturing nothing</h2>
+    <p>NYC Proposals had no preview at all and philly-trees/walkways had been serving an 11&nbsp;KB
+    screenshot of the "Loading…" spinner since 2026-07-09 — while the daily job reported
+    <code>✔ 1/1 complete</code> every morning. <code>capture.py</code> drove all 13 maps through one
+    shared Chromium page, so memory grew until the 2Gi container OOM'd and every map after the crash
+    died with <code>Page crashed</code>. As the heatmaps grew the crash point walked <em>backwards</em>
+    — map 12 in mid-July, map 1 by 08-02 — so recent runs captured nothing, and nyc-proposals (map 5,
+    renamed only on 07-30) was never captured once. Two compounding faults: a canvas-check timeout
+    published the screenshot <em>anyway</em> (and can't gate on its own — voteless maps never paint
+    heat), and a per-map <code>try/except</code> plus <code>exit 0</code> hid all of it. Now: a
+    throwaway browser per map, a splash-cleared + minimum-size publish gate, a non-zero exit on any
+    failure, and passcode-gated maps skipped. Job resized to 8Gi&nbsp;/&nbsp;1800s. Prod verified at
+    <strong>12/12</strong>.</p>
+  </a>
+
   <a class="entry" href="./2026-08-01-vote-type-links-zigzag.html">
     <div class="date">2026-08-01</div>
     <h2>Vote-type proposal links ([a] [b] [c]) + the East River hairpin diagnosis</h2>
