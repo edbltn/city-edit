@@ -27,6 +27,7 @@ CITIES=(
   "chicago|https://download.bbbike.org/osm/bbbike/Chicago/Chicago.osm.pbf|https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf|-87.75,41.78,-87.58,42.02"
   "dc|https://download.bbbike.org/osm/bbbike/WashingtonDC/WashingtonDC.osm.pbf|https://download.geofabrik.de/north-america/us/district-of-columbia-latest.osm.pbf|-77.12,38.79,-76.91,39.00"
   "philly|https://download.bbbike.org/osm/bbbike/Philadelphia/Philadelphia.osm.pbf|https://download.geofabrik.de/north-america/us/pennsylvania-latest.osm.pbf|-75.280,39.867,-74.956,40.138"
+  "sacramento|https://download.bbbike.org/osm/bbbike/Sacramento/Sacramento.osm.pbf|https://download.geofabrik.de/north-america/us/california-latest.osm.pbf|-121.580,38.430,-121.355,38.690"
 )
 
 # Download with retries across the primary then fallback URL. A bare `wget` under

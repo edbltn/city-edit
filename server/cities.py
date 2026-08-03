@@ -206,6 +206,23 @@ CITIES: dict[str, City] = {
         pbf_url="https://download.bbbike.org/osm/bbbike/Philadelphia/Philadelphia.osm.pbf",
         osrm_service="osrm-philly",
     ),
+    "sacramento": City(
+        id="sacramento",
+        name="Sacramento",
+        # City limits run S 38.4377 → N 38.6855, W -121.5601 → E -121.3627
+        # (Nominatim). Padded a touch on every side so osmnx's truncate_by_edge
+        # spill stays inside the votable area, and so the west edge reaches the
+        # Sacramento River crossings into West Sacramento (Tower / I Street
+        # bridges are the subject of real city projects).
+        bbox=(38.430, -121.580, 38.690, -121.355),
+        # Center on the bbox midpoint so the votable area opens centered.
+        center=(38.560, -121.4675),
+        default_zoom=12,
+        min_zoom=10,
+        max_zoom=21,
+        pbf_url="https://download.bbbike.org/osm/bbbike/Sacramento/Sacramento.osm.pbf",
+        osrm_service="osrm-sacramento",
+    ),
     # ── Block-pipeline playground areas (local experiments; reuse the NYC PBF
     # by hardlinking osm_data/nyc/source.osm.pbf into their data dirs) ────────
     "test-cp": City(
