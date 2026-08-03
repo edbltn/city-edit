@@ -755,7 +755,25 @@ export function MapView() {
           subdomains={["a", "b", "c", "d"]}
           maxZoom={CONFIG.maxZoom}
           maxNativeZoom={19}
+          zIndex={1}
           attribution={mapStyle.tileAttribution}
+        />
+      )}
+
+      {/* Place names for the fallback. MapLibre draws its own labels layer, so
+          this is gated on the same !maplibreActive as the base tiles above —
+          otherwise a WebGL browser would stack two label sets. zIndex keeps it
+          over the base raster; both live in the tile pane, below every
+          interactive overlay. */}
+      {!maplibreActive && (
+        <TileLayer
+          key={`${mapStyle.id}-labels`}
+          url={mapStyle.labelTileUrl}
+          subdomains={["a", "b", "c", "d"]}
+          maxZoom={CONFIG.maxZoom}
+          maxNativeZoom={19}
+          opacity={mapStyle.labelOpacity}
+          zIndex={2}
         />
       )}
 

@@ -40,6 +40,15 @@ export interface MapStyle {
   tileAttribution: string;
   tileMaxZoom: number;
 
+  // The labels half of the same CARTO cartography, as a transparent overlay.
+  // Drawn ABOVE the vote heat — see labelOpacity.
+  labelTileUrl: string;
+  // How loudly the labels speak. Heat is the product and labels are orientation
+  // furniture, so they're deliberately held back below full strength. The light
+  // basemap's slate text is much heavier on paper than the dark basemap's grey
+  // on near-black, so it's pulled down further.
+  labelOpacity: number;
+
   // Heatmap rendering.
   heat: HeatRamp;
   heatBlend: "screen" | "multiply";         // canvas element mix-blend-mode
@@ -56,6 +65,33 @@ const TILE_DARK =
 const TILE_LIGHT =
   "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png";
 
+// Labels-only companions to the two basemaps above: the SAME CARTO cartography
+// split into its text half, served as transparent PNGs. Keeping the basemap
+// label-free and re-adding the text as a separate layer is what lets the labels
+// sit on top of the vote heat instead of underneath it — a street name buried
+// under a translucent hot block is unreadable, and it's the heat that has to
+// stay the loudest thing on the map.
+//
+// Coverage (verified against CARTO's own tiles): street names, neighborhood and
+// borough names, water, parks and a handful of named landmarks. NOT businesses
+// — those come from the separate POI layer built off our own OSM extract.
+const TILE_DARK_LABELS =
+  "https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png";
+const TILE_LIGHT_LABELS =
+  "https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png";
+
+// Dark basemaps get the labels at FULL strength. CARTO's dark label tiles are
+// light grey with a black halo baked in — dialling them back sounds tasteful in
+// isolation, but on a busy map (Williamsburg on nyc-bikes) the heat blocks are
+// saturated blue/green and anything under ~1.0 washes the street names out
+// completely. There is no halo knob on a raster overlay, so opacity is the only
+// contrast control and it has to stay pinned.
+const LABEL_OPACITY_DARK = 1.0;
+// Light basemaps can afford restraint: the slate text is already high-contrast
+// on near-white paper, and these styles blend heat by MULTIPLY, so a hot block
+// darkens the paper *around* the text rather than lighting up behind it.
+const LABEL_OPACITY_LIGHT = 0.75;
+
 // Dark base + warm yellow-brown orange. Shared by walkways and the neutral
 // default so user maps get a sensible look out of the box.
 const DARK_WARM: Omit<MapStyle, "id"> = {
@@ -66,6 +102,8 @@ const DARK_WARM: Omit<MapStyle, "id"> = {
   tileUrl: TILE_DARK,
   tileAttribution: CARTO_ATTRIBUTION,
   tileMaxZoom: 21,
+  labelTileUrl: TILE_DARK_LABELS,
+  labelOpacity: LABEL_OPACITY_DARK,
   // Hue runs purple → red-orange → amber → gold so intensity reads as a color
   // shift, not just brightness. Peak is gold (not near-white) to keep glow tame.
   // Negative arm dives through indigo to icy blue — the opposite temperature.
@@ -93,6 +131,8 @@ function darkStyle(id: string, accent: string, heat: HeatRamp): MapStyle {
     tileUrl: TILE_DARK,
     tileAttribution: CARTO_ATTRIBUTION,
     tileMaxZoom: 21,
+    labelTileUrl: TILE_DARK_LABELS,
+    labelOpacity: LABEL_OPACITY_DARK,
     heat,
     heatBlend: "screen",
     heatComposite: "lighter",
@@ -112,6 +152,8 @@ function lightStyle(id: string, accent: string, heat: HeatRamp): MapStyle {
     tileUrl: TILE_LIGHT,
     tileAttribution: CARTO_ATTRIBUTION,
     tileMaxZoom: 21,
+    labelTileUrl: TILE_LIGHT_LABELS,
+    labelOpacity: LABEL_OPACITY_LIGHT,
     heat,
     heatBlend: "multiply",
     heatComposite: "source-over",
@@ -234,8 +276,17 @@ export function getMapStyle(id: string): MapStyle {
  * MapLibre's raster source expects (it has no {s}/{r} placeholder support).
  */
 export function maplibreRasterTiles(style: MapStyle): string[] {
+  return expandTileTemplate(style.tileUrl);
+}
+
+/** Same expansion for the labels-only overlay tiles. */
+export function maplibreLabelTiles(style: MapStyle): string[] {
+  return expandTileTemplate(style.labelTileUrl);
+}
+
+function expandTileTemplate(template: string): string[] {
   return ["a", "b", "c", "d"].map((s) =>
-    style.tileUrl.replace("{s}", s).replace("{r}", "@2x"),
+    template.replace("{s}", s).replace("{r}", "@2x"),
   );
 }
 

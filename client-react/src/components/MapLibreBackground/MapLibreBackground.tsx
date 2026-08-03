@@ -11,7 +11,12 @@ import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { CONFIG, type BlockTilesConfig } from "../../config";
 import { dlog, dwarn, debugState } from "../../utils/debugLog";
-import { maplibreRasterTiles, heatTip, type MapStyle } from "../../mapStyles";
+import {
+  maplibreRasterTiles,
+  maplibreLabelTiles,
+  heatTip,
+  type MapStyle,
+} from "../../mapStyles";
 import { hottestBlockId } from "./hottestBlock";
 
 // Register PMTiles protocol once at module level
@@ -166,6 +171,7 @@ function buildStyle(
   blockTilesUrl: string,
   blockTiles: BlockTilesConfig | null,
   tiles: string[],
+  labelTiles: string[],
   mapStyle: MapStyle,
 ): maplibregl.StyleSpecification {
   // z/x/y endpoint when the city advertises one: discrete tile URLs are
@@ -204,6 +210,16 @@ function buildStyle(
         maxzoom: 19,
         attribution:
           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      },
+      // The text half of the same CARTO cartography, as transparent PNGs. Same
+      // tile scheme and maxzoom as carto-base, so the two are pixel-locked and
+      // scale together through Leaflet's zoom-animation ride — the labels can
+      // never drift off the streets they name.
+      "carto-labels": {
+        type: "raster",
+        tiles: labelTiles,
+        tileSize: 256,
+        maxzoom: 19,
       },
       // Block polygons from PMTiles (one per street segment / merged foot path).
       // block_id is the NATIVE feature id (tippecanoe --use-attribute-for-id
@@ -275,6 +291,18 @@ function buildStyle(
           ],
         },
       },
+      // Place names — LAST, so they sit above the heat and the selection wash.
+      // Underneath them a name would be swallowed by a hot block's fill; on top
+      // it stays readable at every heat level, which is the whole point of
+      // splitting CARTO's basemap into nolabels + only_labels. Held below full
+      // opacity so orientation text supports the heat rather than competing
+      // with it.
+      {
+        id: "carto-labels",
+        type: "raster",
+        source: "carto-labels",
+        paint: { "raster-opacity": mapStyle.labelOpacity },
+      },
     ],
     glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
   };
@@ -309,6 +337,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
           CONFIG.blockTilesUrl,
           CONFIG.blockTiles,
           maplibreRasterTiles(mapStyle),
+          maplibreLabelTiles(mapStyle),
           mapStyle,
         ),
         center: [CONFIG.initialView.lon, CONFIG.initialView.lat],
