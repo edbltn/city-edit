@@ -29,6 +29,25 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-03-sacramento-city-and-proposals.html">
+    <div class="date">2026-08-03</div>
+    <h2>Sacramento — a new city, and its official proposals on the map</h2>
+    <p>Sacramento joins the registry (398K nodes / 901K edges, 102,387 blocks with zero polygon
+    overlap), and <strong>Sacramento Proposals</strong> carries one vote per official City of
+    Sacramento transportation project — 12 corridors and 17 pins across 10 vote types. The source is
+    a <em>curated</em> Public Works index rather than NYC's sitemap firehose, and each page states its
+    own limits in prose, so the junk filter has no job here. What it cost instead was three ways of
+    being confidently wrong: classifying on whole-page prose sent half the corridors to whichever
+    noun appeared first (every Vision Zero page mentions schools and bus stops in passing); Photon
+    answers an unrecognised intersection with a single-street guess <em>anywhere</em> in the bbox, so
+    <code>Broadway&nbsp;&amp;&nbsp;Franklin&nbsp;Boulevard</code> resolved 9&nbsp;km south and nothing
+    downstream could tell; and the fallback pin read a corridor's limits prose as a crossing of the
+    two limit streets. Rules are now scoped to title-vs-body by whether they key on a noun or a
+    treatment, a corridor endpoint must verify against the street it claims to be on, and an
+    unresolvable corridor pins on its own street. Shipped via the arrays overlay, so no other city's
+    edge ids move.</p>
+  </a>
+
   <a class="entry" href="./2026-08-02-contiguous-blocks.html">
     <div class="date">2026-08-02</div>
     <h2>One block, one place — the fused park ribbons that voted in two spots at once</h2>

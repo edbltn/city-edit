@@ -10,10 +10,10 @@ import re
 
 HERE = os.path.dirname(__file__)
 DIFF_PATH = os.path.join(HERE, "changes.diff")
-OUT_PATH = os.path.join(HERE, "2026-08-02-screenshot-job-oom-cascade.html")
+OUT_PATH = os.path.join(HERE, "2026-08-03-sacramento-city-and-proposals.html")
 
-DATE = "2026-08-02"
-TITLE = "The screenshot job that reported green while capturing nothing"
+DATE = "2026-08-03"
+TITLE = "Sacramento: a new city, and its official proposals on the map"
 
 
 def split_by_file(diff_text: str):
@@ -57,97 +57,96 @@ def colorize(diff_chunk: str) -> str:
 
 SECTIONS = [
     {
-        "id": "cascade",
-        "tag": "INFRA / JOBS",
-        "title": "One OOM was failing every remaining map in the run",
-        "symptom": "No preview existed for <code>nyc-proposals</code> (the Landing card 404'd outright), and philly-trees / philly-walkways served an 11 KB screenshot of the &quot;Loading\u2026&quot; splash dated 2026-07-09. Meanwhile the daily job reported a green <code>1/1 complete</code> every single morning.",
+        "id": "city",
+        "tag": "CITIES",
+        "title": "Sacramento, registered end to end",
+        "symptom": "Sacramento was not a City Edit city: not in the Propose-a-Map picker, not routable, no graph, no blocks.",
         "cause": [
-            "capture.py drove all 13 maps through ONE shared Chromium page. Memory grew across sequential navigations of these heatmaps until the 2Gi container OOM'd \u2014 and because the page was never recreated, every map after the crash died instantly with <code>Page.goto: Page crashed</code>",
-            "The crash point walked BACKWARDS as the heatmaps grew: map 12 (philly-bikes) on 07-19 and 07-22, map 1 (nyc-bikes) by 07-30, and mid-capture on map 1 by 08-02. Recent runs were capturing nothing at all",
-            "nyc-proposals is 5th in the capture order and was only renamed from nyc-crossings on 07-30 \u2014 by which point the crash had already reached map 1, so it was NEVER captured once under its current slug",
-            "No baked fallback exists for it either (client-react/public/previews has no nyc-proposals.png), so nginx's @baked_previews could not cover the gap and the card 404'd",
+            "A city is data-driven from <code>server/cities.py</code> plus a matching line in <code>osrm/build-merged.sh</code>; nothing else in the client or server hard-codes the list, and <code>GraphRegistry.max_loaded</code> already derives from <code>len(CITIES)</code>",
+            "The votable graph and the OSRM routing dataset are built from the SAME PBF + foot filter, so both entries have to name the same extract and the same bbox (in the two different orderings the two files use)",
         ],
         "fixes": [
-            "A throwaway browser per map (capture_map): bounds memory regardless of how heavy the maps get, and contains a crash to the map that caused it instead of failing the other twelve",
-            "<code>--disable-dev-shm-usage</code> \u2014 containers give /dev/shm only 64 MB, which Chromium reports as an opaque renderer crash",
-            "Job sizing follows the new shape: <strong>8Gi</strong> (nyc-trees still crashed the renderer at 4Gi even alone in the container), <strong>timeout 1800s</strong> (300s could not fit even the old shared-page run, which took ~5 min), and <strong>max_retries 0</strong> since capture failures are deterministic \u2014 a retry only doubled a long run",
+            "bbox is the city limits (Nominatim: 38.4377–38.6855 N, -121.5601–-121.3627 W) padded on each side. The padding is load-bearing twice over: osmnx's <code>truncate_by_edge</code> spills nodes just past the boundary and they must stay inside the votable area, and the west edge has to reach the Sacramento River crossings — the Tower and I Street bridges are the subject of active city projects",
+            "Source extract is BBBike's pre-clipped Sacramento PBF (28 MB, fresh), with the Geofabrik California extract as the OSRM build's fallback",
+            "Built artifacts: <strong>398K nodes / 901K edges</strong> (between Chicago and NYC in size), full-resolution graph.pmtiles, and a Layer-2 block bake of <strong>102,387 blocks with 0 overlapping pairs</strong>",
         ],
-        "files": ["screenshots/capture.py", "terraform/main.tf"],
+        "files": ["server/cities.py", "osrm/build-merged.sh"],
     },
     {
-        "id": "junk",
+        "id": "source",
+        "tag": "DATA SOURCE",
+        "title": "A curated index instead of a sitemap firehose",
+        "symptom": "The NYC Proposals map is fed by scraping nycdotprojects.info. Sacramento has no equivalent site, and its open-data portal carries no project/CIP dataset — only 311 calls, permits, crash data and boundaries.",
+        "cause": [
+            "The city's Public Works section publishes each project as its own page under <code>/public-works/engineering/projects/&lt;slug&gt;</code>, and every one of those pages carries the full index in its site navigation — so one fetch enumerates all 33",
+            "Unlike the NYC source this index is CURATED: it is capital and safety projects, not projects mixed with blog posts and outreach events, so the two-sided junk filter the NYC importer needs has no job to do here",
+            "Better still, each page's <code>&lt;meta name=\"description\"&gt;</code> states the project's limits in plain prose — &quot;located on Folsom Boulevard, between 47th Street and 67th Street&quot; — rather than requiring the limits to be parsed out of a title",
+        ],
+        "fixes": [
+            "<code>fetch_projects.py</code> pulls the index, then each project page, extracting the &lt;h1&gt;, the meta description and the body prose (sliced between the title component and the global footer, which is what separates the content from the repeated nav)",
+            "One non-street project on the index (broadband internet expansion) is dropped by a small blacklist",
+            "Output is JSONL, stdlib only, 1 req/s — the same politeness contract as the NYC fetcher",
+        ],
+        "files": ["tools/sac_proposals/fetch_projects.py"],
+    },
+    {
+        "id": "classify",
         "tag": "CORRECTNESS",
-        "title": "Publishing a screenshot of the loading spinner over a good preview",
-        "symptom": "philly-trees and philly-walkways were frozen on a picture of the app's &quot;Loading\u2026&quot; splash \u2014 11,011 bytes against ~950 KB for a real render \u2014 and had been since 2026-07-09.",
+        "title": "Three ways the import wanted to put proposals in the wrong place",
+        "symptom": "Early plan runs read plausibly and were wrong: half the corridors classified as school-crossing pins, Vision Zero corridors collapsed onto one vote type, and one pin landed 9km from its project.",
         "cause": [
-            "On canvas-check timeout capture.py printed &quot;capturing anyway&quot; and published the result regardless, so a slow cold load overwrote a good preview with a spinner",
-            "The canvas-content check CANNOT gate publication on its own: it waits for a non-transparent pixel on a Leaflet canvas, and maps with zero votes never paint heat. All three philly maps have 0 nonzero edges out of 1,177,930 \u2014 philly-bikes only looked fine because its basemap had painted by the time the 30s check gave up",
-            "Nothing ever overwrote the bad image afterwards because the OOM cascade meant the run never reached maps 12 and 13 again",
+            "<strong>Incidental nouns.</strong> Classifying on the whole page sent projects to whichever keyword appeared first in the prose. Every Vision Zero page mentions schools, bus stops and intersections in passing, so &quot;Folsom Boulevard Safety Improvements&quot; became a school crossing",
+            "<strong>Unverifiable geocodes.</strong> Photon answers an intersection it does not recognise with its best single-street guess anywhere in the bbox. <code>Broadway &amp; Franklin Boulevard</code> came back as Franklin at Cosumnes River Boulevard, 9km south — inside the city, so neither the bbox check nor the distance guard could see anything wrong",
+            "<strong>Limits read as a crossing.</strong> When a corridor could not be resolved, the fallback pin used the prose naming its endpoints: &quot;on Marysville Boulevard between Arcade Boulevard and North Avenue&quot; parsed as a crossing of Arcade and North — a corner nowhere near Marysville Boulevard",
+            "A fourth, smaller one: the guard rejecting a capture trimmed to a bare suffix (&quot;Boulevard&quot;) also rejected <strong>Broadway</strong>, which is a complete street name — silently dropping the corridor for both Broadway projects",
         ],
         "fixes": [
-            "Wait for the <code>.map-bootstrap</code> splash to clear (present-or-visible check, 60s) \u2014 the one reliable &quot;app is past loading&quot; signal that does not depend on vote data",
-            "<code>MIN_PNG_BYTES = 60_000</code> publish gate: a 1400\u00d7900 basemap is never 11 KB, so an unpainted render is refused rather than overwriting a good preview",
-            "Passcode-gated maps are skipped entirely \u2014 <code>nyc-ebike-charging</code> has <code>requiresPasscode: true</code> and can only ever render an unlock prompt; a public preview would defeat the gate",
-            "Preset maps fall back to their slug route if the subdomain does not load",
+            "<strong>Rules are scoped.</strong> A rule keyed on a noun (school, bus stop, bridge, interchange, intersection, plaza) may read only the title and description; a rule keyed on a treatment (bike lane, trail, sidewalk, repave) may fall through to the body. A title-scoped complete-street / Vision Zero rule sits after the treatment rules so a corridor safety project reads as traffic calming rather than as whichever bike lane its prose mentions",
+            "<strong>A corridor endpoint must verify against its own street.</strong> The geocode result's display_name has to name the street the point claims to be on, matched on tokens long enough to discriminate (&quot;T Street&quot; and &quot;9th Street&quot; carry no usable key, so those go unverified rather than matching on a stray letter)",
+            "<strong>The fallback pin uses the corridor's street</strong>, never the limits prose — so a corridor that fails to verify still pins somewhere true",
+            "Endpoint captures are trimmed at their street-type word, and a period only ends a capture when it is not an abbreviation in front of one — without which &quot;Martin Luther King Jr. Boulevard&quot; ended at &quot;Jr&quot;",
+            "With the street check carrying the load the distance ceiling could rise 8km → 10km, which is what let Stockton Boulevard's genuine ~8km corridor through",
         ],
-        "files": ["screenshots/capture.py"],
+        "files": ["tools/sac_proposals/import_to_map.py"],
     },
     {
-        "id": "silent",
-        "tag": "OBSERVABILITY",
-        "title": "Why nobody noticed for six weeks",
-        "symptom": "Every execution since at least 2026-07-19 reported <code>\u2714 1/1 complete</code>. The last fully-healthy run was 2026-07-22.",
+        "id": "map",
+        "tag": "THE MAP",
+        "title": "Sacramento Proposals",
+        "symptom": "—",
         "cause": [
-            "Each map was wrapped in a per-map try/except that printed to stderr and moved on, and main() never inspected the outcome \u2014 so a run where 12 of 13 maps failed still exited 0",
-            "Cloud Run only surfaces the process exit code, so the scheduler, the console, and any alerting all saw a healthy job",
+            "Mirrors nyc-proposals: <code>symbol=safety</code>, <code>style=terracotta</code>, the same subtitle, and <code>top_proposal_min_net = 0</code> — without that override the client's default &gt;100-net floor hides every net-1 imported proposal",
+            "A 14-entry vote-type list tuned to Sacramento's actual project mix (bikeways, complete streets, trails and parkways, river bridges, transit, school safety). Every label the classifier can emit is in the list, so icons and route/point kind resolve from the map's own types",
         ],
         "fixes": [
-            "main() now tracks captured/failed, prints <code>Done. Captured N/M</code>, and exits non-zero when any map fails \u2014 a partial run shows up RED",
-            "The very first post-fix run proved the point: 11/13 with a red X, which is exactly how the two genuinely-broken maps got found and fixed",
-            "sync_to_gcs no longer swallows its own exceptions \u2014 a failed upload used to count as a success",
+            "<strong>29 votes cast</strong> from 31 candidate projects: 12 corridors + 17 pins, across 10 vote types",
+            "The two skips are deliberate. An 11-school safety program and a systemwide bus-stop consolidation have no single location, and a pin would assert one falsely",
+            "Each project votes as its own synthetic voter (<code>sacproj:&lt;sha1(url)&gt;</code> with <code>ip_from_voter</code>), so re-running the import is idempotent — /api/vote is clear-then-cast per voter and type",
         ],
-        "files": ["screenshots/capture.py"],
+        "files": ["tools/sac_proposals/import_to_map.py"],
     },
 ]
-
 
 
 VERIFY = [
-    "Root cause reproduced from the job's own logs: the 2026-07-22 run shows <code>Out-of-memory event detected in "
-    "container</code> followed by <strong>12 consecutive <code>Page.goto: Page crashed</code></strong> errors \u2014 "
-    "and the Cloud Run retry restarted at map 1 and OOM'd again immediately.",
-    "The crash point demonstrably walked backwards: canonical bucket objects are dated <strong>07-22</strong> for most "
-    "slugs, <strong>07-30</strong> for nyc-bikes alone, and <strong>07-09</strong> for philly-trees/walkways.",
-    "The junk-preview mechanism confirmed by data, not inference: all three philly maps report "
-    "<strong>0 nonzero edges out of 1,177,930</strong> via /api/graph-votes, so the canvas check can never pass there.",
-    "New code exercised locally against prod BEFORE building the image: philly-trees went "
-    "<strong>11,011 \u2192 955,310 bytes</strong> (a real Philadelphia street network, not a spinner) and nyc-proposals "
-    "captured at 1,209,969 bytes.",
-    "The reject path was tested rather than assumed \u2014 with MIN_PNG_BYTES monkeypatched to 1e9 the run refused to "
-    "write the file, printed <code>Failed: philly-trees</code>, and <strong>exited 1</strong>.",
-    "Deploy discipline: prod DB backed up first (<code>~/city-edit-prod-backups/20260802-221945/prod-full.dump</code>, "
-    "27 MB), and terraform applied with <code>-target</code> \u2014 plan showed <strong>0 to add, 1 to change, "
-    "0 to destroy</strong>, touching only memory/timeout/max_retries.",
-    "First post-fix prod run: <strong>11/13, red X</strong> \u2014 no cascade, and the honest exit code immediately "
-    "surfaced the two real failures (nyc-trees renderer crash at 4Gi; nyc-ebike-charging is passcode-gated).",
-    "Final prod run after 8Gi + private-map skip: <strong>Done. Captured 12/12</strong>, job green, and all 12 public "
-    "<code>/previews/*.png</code> serve real renders (nyc-proposals 1,209,835 b; philly-trees 956,372 b). "
-    "nyc-ebike-charging still 404s \u2014 correct, it is private.",
+    "Graph built and loaded: <strong>398,472 nodes / 901,030 edges</strong>, and /api/cities lists <code>sacramento</code> after the Flask restart.",
+    "Blocks baked clean: <strong>102,387 blocks, 0 overlapping pairs</strong> in the final ship-frame audit (CC/CJ/JJ all zero).",
+    "Local OSRM rebuilt and re-verified BOTH ways: a Broadway MLK→Stockton foot route returns <strong>1,097 m</strong> (matching the ~1 km crow distance), and an existing NYC route still returns 702 m — the merged dataset gained a city without losing one.",
+    "Every classification and corridor parse was reviewed offline against all 33 pages before a single vote was cast, and the three failure modes above were each found that way rather than after the fact.",
+    "The wrong-street geocode was confirmed by hand, not inferred: <code>Broadway &amp; Franklin Boulevard</code> resolves to &quot;Franklin, Cosumnes River Boulevard, Valley Hi / North Laguna&quot;. The verification rejects it and the two corridors it legitimately cannot confirm (Marysville, La Mancha Way) now pin on their own street.",
+    "Cast result on local: <strong>29 ok, 0 route-failed, 0 detour demotions</strong>, giving 1,057 voted edges over 8 vote types and 601 blocks with heat.",
+    "Rendered and driven in the browser: topology 891,764 edges / 102,388 blocks loaded, <strong>11 route proposals</strong> computed client-side, and clicking a pin opens a TOP PROPOSAL card (&quot;Street redesign — 1 proposal&quot;) with working ±1 controls.",
+    "Deploy discipline: prod DB backed up BEFORE any build (<code>~/city-edit-prod-backups/20260803T180348Z/votes.dump</code>, 28 MB), client type-checked with <code>npx tsc -b</code> (clean) since Vite dev never type-checks, and the overlay submitted from a tree whose only diff from HEAD is this work.",
+    "Sacramento is added to the app image via the <strong>arrays overlay</strong>, not a full rebuild — the other cities keep the image's own baked graphs, so their edge ids do not shift and no vote resnap or block re-bake is needed. Only <code>sacramento</code> was staged; philly / test-cp / test-mid were moved OUT of <code>.arrays-staging/</code> first, because their stale local pickles predate the 07-29 full rebuild and copying them in would have shifted philly's edge ids.",
 ]
 
 CHECKLIST = [
-    "Open <code>https://cityedit.org/</code> and confirm the <strong>NYC Proposals</strong> card now shows a map "
-    "(terracotta corridors + proposal pins over Manhattan) instead of a broken image.",
-    "Check the two previously-frozen cards \u2014 <strong>philly-trees</strong> and <strong>philly-walkways</strong> "
-    "should show the Philadelphia street grid, not a &quot;Loading\u2026&quot; spinner.",
-    "Run <code>gcloud run jobs executions list --job=map-screenshot-prod --region=us-central1 "
-    "--project=google-mpf-ywspom2sxeey --limit=1</code> \u2014 expect a green \u2714, and note that from now on a "
-    "partial run will show a RED X rather than a misleading 1/1 complete.",
-    "Confirm the log ends with <code>Done. Captured 12/12</code> and <code>Skipping 1 private map(s): "
-    "nyc-ebike-charging</code> \u2014 that line is the new expected steady state, not a failure.",
-    "Sanity-check tomorrow's 06:00 America/New_York scheduled run lands the same 12/12 unattended.",
-    "Identical byte sizes across philly-* (956,372) and dc-* (911,284) are EXPECTED, not a bug: voteless maps of the "
-    "same city render the same basemap at the same center and zoom.",
+    "Open <code>https://cityedit.org/m/sac-proposals</code> — expect the Sacramento basemap with terracotta corridors along Broadway, Franklin, Stockton and Marysville, plus proposal pins.",
+    "Click one of the corridor lines and confirm the proposal card names a real vote type (e.g. <strong>Add traffic calming</strong> on Broadway) rather than &quot;No votes yet&quot;.",
+    "Open Propose-a-Map on any map and confirm <strong>Sacramento</strong> now appears in the city dropdown.",
+    "Spot-check that an existing city still routes: draw a route on <code>nyc-walkways</code> — the merged OSRM dataset was rebuilt, so this is the regression that matters most.",
+    "<code>curl -s https://cityedit.org/api/maps | grep sac-proposals</code> and <code>curl -s 'https://cityedit.org/api/graph-votes?map=sac-proposals&amp;mode=walk'</code> — remember the SWR trap: the first hit after a bulk cast serves the stale snapshot, so poll until the count settles before concluding votes are missing.",
+    "Compare a couple of pins against the source pages at <code>cityofsacramento.gov/public-works/engineering/projects</code> — the plan JSONL records the exact geocode query used for each one.",
 ]
 
 
@@ -185,42 +184,90 @@ SYSTEM_COMPONENTS = ["nginx", "Flask API", "OSRM", "Redis", "React / Leaflet cli
 
 # label, summary, changed?
 FILE_CONTEXT = {
-    "screenshots/capture.py": {
-        "on": ["React / Leaflet client"],
-        "module": ("Jobs \u00b7 screenshots/", "Playwright/Chromium capture of one preview PNG per map, synced to GCS"),
-        "file": ("capture.py", "~200 LOC \u2014 map discovery, per-map capture, GCS sync, CLI"),
+    "server/cities.py": {
+        "on": ["Flask API", "OSRM", "React / Leaflet client"],
+        "module": ("Server \u00b7 city registry", "The curated list of supported cities: bbox, default view, OSRM endpoint, where each city's graph/tiles/blocks live on disk"),
+        "file": ("cities.py", "~260 LOC \u2014 blocks-header cache, the City dataclass, the CITIES registry, lookups"),
         "outline": [
-            ("constants", "+ MIN_PNG_BYTES, BOOTSTRAP_TIMEOUT_MS, BROWSER_ARGS", True),
-            ("fetch_maps", "unchanged \u2014 /api/maps with a preset fallback", False),
-            ("map_url \u2192 map_urls", "returns candidates: subdomain first, slug as fallback", True),
-            ("capture_url", "+ wait for the .map-bootstrap splash to clear", True),
-            ("sync_to_gcs", "no longer swallows upload failures", True),
-            ("capture_map (new)", "throwaway browser per map, walks the candidate URLs", True),
-            ("main", "private-map skip, size gate, captured/failed tally, non-zero exit", True),
+            ("_blocks_header_info / _env_osrm_host", "unchanged \u2014 pmtiles header cache + per-city OSRM host override", False),
+            ("@dataclass City", "unchanged \u2014 data_dir, osrm_host, geocode_bbox, to_public()", False),
+            ("CITIES: nyc / sf / chicago / dc / philly", "unchanged", False),
+            ("CITIES: sacramento (new)", "+17 lines \u2014 bbox, center, zooms, PBF source, OSRM service", True),
+            ("CITIES: test-cp / test-mid", "unchanged \u2014 block-pipeline playground areas", False),
+            ("get_city / all_cities", "unchanged", False),
         ],
         "blocks": [
-            "MIN_PNG_BYTES = 60_000 \u2014 a 1400x900 basemap is never 11 KB, so an unpainted render is refused",
-            "BROWSER_ARGS = --disable-dev-shm-usage \u2014 the 64 MB container /dev/shm reads as an opaque renderer crash",
-            "map_urls: preset maps keep the subdomain but gain the slug route as a fallback",
-            "wait_for_function on .map-bootstrap (absent OR offsetParent === null) \u2014 handles unmount and hide alike",
-            "capture_map: fresh browser per map; a crash is contained to the map that caused it",
-            "requiresPasscode maps skipped \u2014 they render an unlock prompt, never a .leaflet-container",
-            "sys.exit(1) when any map failed \u2014 kills the misleading green 1/1 complete",
+            "bbox=(38.430, -121.580, 38.690, -121.355) \u2014 city limits padded: osmnx truncate_by_edge spills past the boundary, and the west edge must reach the Sacramento River bridge projects",
+            "center = the bbox midpoint, so the votable area opens centered (same convention as sf/chicago/dc/philly)",
+            "default_zoom=12, min_zoom=10 \u2014 Sacramento sprawls wider than SF, so it opens one step out",
+            "pbf_url = BBBike's pre-clipped Sacramento extract (28 MB) \u2014 same PBF the OSRM build clips from",
+            "osrm_service='osrm-sacramento' \u2014 the per-city default host; prod routes every city through the one merged service",
+            "No max_loaded bump needed: app.py derives it from len(CITIES) + len(STATION_NETWORKS)",
         ],
     },
-    "terraform/main.tf": {
-        "on": ["Flask API"],
-        "module": ("Terraform \u00b7 prod infra", "Cloud Run services + jobs, Cloud SQL, Redis, schedulers, buckets"),
-        "file": ("main.tf", "~815 lines \u2014 the screenshot job block sits around :745"),
+    "osrm/build-merged.sh": {
+        "on": ["OSRM"],
+        "module": ("OSRM \u00b7 merged dataset build", "Clips each city's PBF to its bbox and osmium-merges them into ONE routable extract; osrm-extract/partition/customize runs in the next Docker stage"),
+        "file": ("build-merged.sh", "~90 lines \u2014 the CITIES array, a retrying downloader, the clip+merge loop"),
         "outline": [
-            ("services / SQL / Redis", "unchanged", False),
-            ("google_cloud_run_v2_job.screenshot", "memory 2Gi \u2192 8Gi, timeout 300s \u2192 1800s, max_retries 1 \u2192 0", True),
-            ("scheduler / IAM / outputs", "unchanged", False),
+            ("header / WORK+OUT dirs", "unchanged", False),
+            ("CITIES array", "+1 line \u2014 the sacramento entry", True),
+            ("download_pbf", "unchanged \u2014 retries across primary then fallback URL", False),
+            ("clip loop / osmium merge", "unchanged \u2014 picks up the new entry automatically", False),
         ],
         "blocks": [
-            "memory 2Gi \u2192 8Gi \u2014 nyc-trees still crashed the renderer at 4Gi even alone in the container",
-            "timeout 300s \u2192 1800s \u2014 300s could not fit even the old run (~5 min for 13 maps)",
-            "max_retries 1 \u2192 0 \u2014 capture failures are deterministic; the retry only doubled a long run",
+            "sacramento|bbbike Sacramento PBF|geofabrik california (fallback)|-121.580,38.430,-121.355,38.690",
+            "NOTE the bbox ordering differs from cities.py: osmium wants west,south,east,north; cities.py is south,west,north,east",
+            "The fallback URL matters here \u2014 a single flaky bbbike download under `set -e` has killed ~2h builds before",
+            "Adding a city here is what makes it routable at all: one merged instance serves every city, since OSRM coordinates are global",
+        ],
+    },
+    "tools/sac_proposals/fetch_projects.py": {
+        "on": ["Flask API"],
+        "module": ("Tools \u00b7 sac_proposals", "Sacramento twin of tools/nyc_proposals: scrape the city's official project pages, then plan and cast them as votes"),
+        "file": ("fetch_projects.py", "~145 LOC \u2014 index enumeration, per-page extraction, JSONL out"),
+        "outline": [
+            ("constants / content markers", "new \u2014 index URL, politeness delay, the AEM body markers", True),
+            ("http_get / strip_tags", "new \u2014 stdlib fetch + tag stripping", True),
+            ("project_urls", "new \u2014 enumerates all 33 project slugs from one page", True),
+            ("parse_project", "new \u2014 h1, meta description, body prose", True),
+            ("main", "new \u2014 CLI, JSONL output, per-page error containment", True),
+        ],
+        "blocks": [
+            "The site nav repeats every project title on every page, so ONE fetch of the index enumerates the whole set",
+            "BODY_START/BODY_END slice between the title component and the global footer \u2014 what separates content from the repeated nav",
+            "Slicing past the END of the <h1> tag, not the start of its class attribute, or the attribute text survives into the body",
+            "AEM renders Material icon ligatures as bare words ('open_in_full') \u2014 stripped so they never reach the classifier",
+            "A single dead page is captured as {'error': ...} rather than killing a 33-page run",
+        ],
+    },
+    "tools/sac_proposals/import_to_map.py": {
+        "on": ["Flask API", "OSRM"],
+        "module": ("Tools \u00b7 sac_proposals", "Two-phase plan\u2192cast import over the public HTTP API, so the server does all snapping and one plan casts identically against local and prod"),
+        "file": ("import_to_map.py", "~470 LOC \u2014 vocabulary, classification, corridor parsing, geocode verification, cast"),
+        "outline": [
+            ("guards (MAX_CORRIDOR_KM / EDGES / DETOUR_RATIO_MAX)", "8km \u2192 10km, edges + detour inherited from the NYC importer", True),
+            ("VOTE_TYPES", "new \u2014 the map's 14-entry vocabulary", True),
+            ("CLASSIFY_RULES + SCOPE_TITLE/SCOPE_ANY", "new \u2014 scoped rules, first match wins", True),
+            ("corridor regexes (CORRIDOR_ON / NAMED / LIMITS)", "new \u2014 abbreviation-safe terminator", True),
+            ("geocode / street_keys", "new \u2014 in-bbox + verified-against-street", True),
+            ("classify", "new \u2014 two passes, different rule scopes", True),
+            ("street_name / clean_endpoint / street_variants", "new \u2014 capture trimming", True),
+            ("corridor_candidates", "new \u2014 best-evidence-first guesses", True),
+            ("plan_project / point_queries / is_placeable", "new \u2014 corridor then pin, with fallbacks", True),
+            ("cast_entry / voter_id", "new \u2014 routes \u2192 /api/vote, idempotent per project", True),
+            ("main", "new \u2014 plan / cast / vote-types phases", True),
+        ],
+        "blocks": [
+            "SCOPE_TITLE vs SCOPE_ANY \u2014 noun rules (school, bus stop, bridge) read only title+description; treatment rules (bike lane, trail, repave) may read the body",
+            "The complete-street / Vision Zero rule is title-scoped and sits AFTER the treatment rules, so corridor safety projects read as traffic calming instead of collapsing onto 'Add protected bike lane'",
+            "geocode(expect=street): the hit's display_name must name the street the point claims to be on \u2014 Photon answers an unknown intersection with a single-street guess anywhere in the bbox",
+            "street_keys drops suffixes and tokens under 4 chars, so 'T Street' goes unverified rather than matching a stray letter",
+            "SUFFIX_ONLY excludes Broadway/Trail/Expressway \u2014 rejecting a bare 'Broadway' had silently dropped both Broadway corridors",
+            "END terminator: a period only ends an endpoint capture when it is NOT an abbreviation before a street word ('Martin Luther King Jr. Boulevard')",
+            "point_queries(prefer_street) yields the corridor's own street FIRST \u2014 limits prose ('between Arcade and North') otherwise reads as a crossing far from the project",
+            "is_placeable rejects bare suffixes, mid-sentence fragments and single generic nouns ('School') \u2014 a wrong pin is worse than no pin",
+            "DETOUR_RATIO_MAX demotion and the sacproj: synthetic voter are carried over unchanged from the NYC importer",
         ],
     },
 }
