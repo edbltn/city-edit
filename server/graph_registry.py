@@ -32,6 +32,15 @@ from osrm_router import OsrmRouter
 
 logger = logging.getLogger(__name__)
 
+# Shape-rule knobs that every current block bake stamps into
+# edge_blocks_<network>.json. A mapping missing one of them was baked before
+# that rule existed, so its block SHAPES are stale even though its
+# topology_etag still matches — which is why it loads silently and shows
+# pre-fix geometry. That is a real trap: it cost a round of "the bug is still
+# there" on a dev map whose bake predated the fix by a week. Add the knob here
+# whenever the builder gains a new shape rule.
+BLOCK_SHAPE_KNOBS = ("split_max_extent_m", "parallel_max_sep_m", "part_gap_m")
+
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 # A "network" is what a map votes on. "streets" (default) is the city's full
@@ -308,6 +317,13 @@ class CityGraph:
                     f"{meta.get('topology_etag')} != live {self.topology_etag}; "
                     "ignoring (serving edge heatmap)")
                 return
+            stale_rules = [k for k in BLOCK_SHAPE_KNOBS if k not in meta]
+            if stale_rules:
+                logger.warning(
+                    f"[GRAPH] edge_blocks for '{self.city.id}:{self.network}' were "
+                    f"baked before {', '.join(stale_rules)} existed — the topology "
+                    f"matches so they LOAD, but the block shapes are stale. "
+                    f"Re-bake: streetscape_blocks/build_city_blocks.sh {self.city.id}")
             arr = np.load(npy)
             if len(arr) != self.n_edges:
                 logger.warning(f"[GRAPH] edge_blocks length {len(arr)} != "
