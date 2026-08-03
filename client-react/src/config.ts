@@ -86,6 +86,11 @@ export const CONFIG = {
   // applyCityConfig(); while null, MapLibre falls back to blockTilesUrl.
   blockTiles: null as BlockTilesConfig | null,
 
+  // Place/business label tiles. Null until applyCityConfig() sees the city
+  // advertise a placesVersion — cities without the artifact get no label
+  // layer at all rather than a source that 404s.
+  placeTilesUrl: null as string | null,
+
   // Leaflet behaviors
   preferCanvas: true,
 
@@ -130,6 +135,9 @@ export interface CityConfig {
   /** z/x/y block-tile source; null/absent when the city ships no block
    *  artifacts (or the server predates the endpoint). */
   blockTiles?: BlockTilesConfig | null;
+  /** Cache-buster for places.pmtiles (server: file mtime); null/absent when
+   *  the city ships no place-label artifact. */
+  placesVersion?: number | null;
 }
 
 /**
@@ -138,8 +146,8 @@ export interface CityConfig {
  * read the active city's values. Pan limits get generous padding around the bbox.
  */
 export function applyCityConfig(city: CityConfig): void {
-  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath, blocksVersion, blockTiles } =
-    city;
+  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath, blocksVersion, blockTiles,
+    placesVersion } = city;
   CONFIG.initialView = { lat: center.lat, lon: center.lon, zoom: defaultZoom };
   CONFIG.mappedBounds = { sw: { ...bounds.sw }, ne: { ...bounds.ne } };
   CONFIG.nycBounds = {
@@ -155,6 +163,14 @@ export function applyCityConfig(city: CityConfig): void {
     const blocksPath = tilesPath.replace("graph.pmtiles", "blocks.pmtiles")
       + (blocksVersion ? `?v=${blocksVersion}` : "");
     CONFIG.blockTilesUrl = isLocalDev ? `${devApiBase}${blocksPath}` : blocksPath;
+    // Same ?v= discipline as the blocks archive: rebuilt labels must never be
+    // read through week-old cached byte ranges of the previous build.
+    const placesPath = placesVersion
+      ? tilesPath.replace("graph.pmtiles", "places.pmtiles") + `?v=${placesVersion}`
+      : null;
+    CONFIG.placeTilesUrl = placesPath
+      ? (isLocalDev ? `${devApiBase}${placesPath}` : placesPath)
+      : null;
   }
   // z/x/y tile template — same devHost rule as the other API URLs (absolute to
   // Flask :5001 in dev, relative behind nginx in prod).

@@ -15,6 +15,7 @@ import {
   maplibreRasterTiles,
   maplibreLabelTiles,
   heatTip,
+  POI_COLORS,
   type MapStyle,
 } from "../../mapStyles";
 import { hottestBlockId } from "./hottestBlock";
@@ -166,6 +167,83 @@ function rebindBlockTiles(map: maplibregl.Map): void {
   dlog("maplibre", "blocks source rebound to z/x/y template", template);
 }
 
+/** The font stack baked by `npm run build:glyphs` and served from /fonts. */
+const PLACE_LABEL_FONT = "Red Hat Mono Regular";
+
+/**
+ * Add the place/business label layer, if the active city ships one.
+ *
+ * Done on the map's `load` event rather than in buildStyle because the GL map
+ * is created at mount while CONFIG.placeTilesUrl only resolves once the map
+ * config lands from the network — reading it here means we never add a source
+ * for a city that has no labels, instead of adding one that 404s on every pan.
+ *
+ * The layer is added LAST, so it sits above the basemap's own CARTO label
+ * raster as well as the heat. The two label systems can't collide-avoid each
+ * other (one is baked pixels, the other live symbols), which is the accepted
+ * cost of keeping CARTO's street-name cartography; POIs anchor inside blocks
+ * while street names run along centerlines, so they mostly stay out of each
+ * other's way.
+ */
+function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
+  const url = CONFIG.placeTilesUrl;
+  if (!url) {
+    dlog("maplibre", "no place-label tiles for this city — skipping layer");
+    return;
+  }
+  if (map.getSource("places")) return;
+
+  map.addSource("places", { type: "vector", url: `pmtiles://${url}` });
+
+  const palette = POI_COLORS[mapStyle.basemap];
+  const colorByCategory = [
+    "match", ["get", "cat"],
+    ...Object.entries(palette).flatMap(([cat, color]) => [cat, color]),
+    palette.retail, // a category this client build doesn't know yet
+  ] as unknown as maplibregl.ExpressionSpecification;
+
+  map.addLayer({
+    id: "place-labels",
+    type: "symbol",
+    source: "places",
+    "source-layer": "places",
+    // `minz` is a LEAFLET zoom (the units used by CONFIG.maxZoom, map URLs and
+    // the builder); MapLibre drives its camera one level lower, hence the +1.
+    filter: ["<=", ["get", "minz"], ["+", ["zoom"], 1]],
+    layout: {
+      "text-field": ["get", "name"],
+      "text-font": [PLACE_LABEL_FONT],
+      // Mono is wide, so this runs a little smaller than a sans would.
+      "text-size": ["interpolate", ["linear"], ["zoom"], 11, 9.5, 15, 10.5, 18, 12],
+      // Wrap width is in characters, and mono means characters are uniformly
+      // wide — 9 turned "New York Institute of Technology" into a three-line
+      // clump. 11 keeps most names to two lines without widening the footprint
+      // enough to start losing collisions.
+      "text-max-width": 11,
+      "text-line-height": 1.1,
+      "text-letter-spacing": 0.01,
+      // Keeps labels from crowding each other into an unreadable clump — the
+      // last line of defence after the builder's grid thinning.
+      "text-padding": 6,
+      // Lower sorts first and wins placement. `minz` IS the importance
+      // ranking: the builder reveals a POI at the earliest zoom its rank can
+      // claim, so an early-revealing landmark outranks a late-revealing deli
+      // without shipping a separate rank property.
+      "symbol-sort-key": ["get", "minz"],
+    },
+    paint: {
+      "text-color": colorByCategory,
+      // Halo in the basemap's own paper/ink so a label stays readable over a
+      // saturated heat block — the contrast control the raster label overlay
+      // above it doesn't get to have.
+      "text-halo-color": mapStyle.base,
+      "text-halo-width": 1.5,
+      "text-halo-blur": 0.3,
+    },
+  });
+  dlog("maplibre", "place labels added", url);
+}
+
 function buildStyle(
   _graphTilesUrl: string,
   blockTilesUrl: string,
@@ -304,7 +382,11 @@ function buildStyle(
         paint: { "raster-opacity": mapStyle.labelOpacity },
       },
     ],
-    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+    // Self-hosted SDF glyphs (client-react/public/fonts, baked by
+    // `npm run build:glyphs`). This used to point at demotiles.maplibre.org —
+    // fine while nothing drew text, but the place labels below make it a
+    // load-bearing dependency on MapLibre's DEMO server.
+    glyphs: "/fonts/{fontstack}/{range}.pbf",
   };
 }
 
@@ -344,6 +426,11 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         zoom: CONFIG.initialView.zoom - LEAFLET_TO_MAPLIBRE_ZOOM,
         interactive: false,
         attributionControl: false,
+        // Red Hat Mono has no CJK coverage, and baking those ranges as SDF
+        // glyphs would be megabytes. This draws CJK/kana/hangul from a system
+        // font at runtime instead — without it every Chinatown shop name would
+        // render as nothing at all.
+        localIdeographFontFamily: "sans-serif",
       });
 
       map.on("error", (e) => {
@@ -357,6 +444,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         debugState("maplibreLoaded", true);
         onReady?.(true);
         rebindBlockTiles(map);
+        addPlaceLabels(map, mapStyle);
       });
       debugState("maplibreLoaded", false);
 

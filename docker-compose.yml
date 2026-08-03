@@ -76,6 +76,8 @@ services:
         python refresh_osm.py --all 2>&1
         echo 'Building per-city PMTiles (dev profile)...'
         python build_pmtiles.py --all --profile dev 2>&1
+        echo 'Building per-city place labels...'
+        python build_place_labels.py --all 2>&1
         echo 'Initial graph + tile build complete'
 
         # Weekly refresh loop
@@ -87,6 +89,7 @@ services:
             echo 'Starting weekly OSM refresh...'
             python refresh_osm.py --all --force 2>&1
             python build_pmtiles.py --all --profile dev --force 2>&1
+            python build_place_labels.py --all --force 2>&1
             # Sleep for 1 hour to avoid running again
             sleep 3600
           fi

@@ -31,6 +31,8 @@ COPY server/*.py ./
 COPY server/data/ ./data/
 
 # Build routing graphs during image build (bakes per-city graphs into image).
+# build_place_labels.py runs INSIDE this RUN, before the `rm -f` — it reads
+# source.osm.pbf, which the same command deletes to keep the image small.
 # Separate processes so each city's osmnx memory is freed before the next.
 # build_graph also emits walk_graph_arrays.npz per city — the ONLY graph
 # artifact the runtime loads (the pkl is build-time-only input for block
@@ -45,6 +47,7 @@ RUN mkdir -p osm_data && \
     python refresh_osm.py --region dc --force && \
     python refresh_osm.py --region philly --force && \
     python refresh_osm.py --region sacramento --force && \
+    python build_place_labels.py --all && \
     rm -f osm_data/*/source.osm.pbf
 
 COPY --from=client-builder /app/dist /var/www/html/

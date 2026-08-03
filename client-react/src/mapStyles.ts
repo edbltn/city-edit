@@ -266,6 +266,35 @@ export const SELECTABLE_MAP_STYLES: { id: string; label: string }[] = [
   { id: "plum", label: "Culture (purple)" },
 ];
 
+/**
+ * Place-label text colors, keyed by the `cat` property each POI carries from
+ * build_place_labels.py. One palette per basemap rather than one per style:
+ * color coding only pays off if it's learnable, and re-hueing the categories
+ * for each of the eight map styles would mean re-learning them on every map.
+ *
+ * Retail is deliberately the most neutral of the four. It is by far the largest
+ * category, so tinting every deli and bank would turn the deep zooms into
+ * confetti — the color is there to make transit and civic anchors findable at a
+ * glance, not to decorate.
+ *
+ * There is no green here: parks and squares are labelled by the CARTO raster
+ * underneath, in its own green, and the builder drops them for that reason.
+ */
+export const POI_COLORS: Record<Basemap, Record<string, string>> = {
+  dark: {
+    transit: "#7FB2FF",
+    civic: "#E3BE79",
+    culture: "#C49BDE",
+    retail: "#BFBAB2",
+  },
+  light: {
+    transit: "#2C5FB4",
+    civic: "#8F5E12",
+    culture: "#743C93",
+    retail: "#5A554D",
+  },
+};
+
 /** Resolve a style id to its MapStyle, falling back to the default. */
 export function getMapStyle(id: string): MapStyle {
   return MAP_STYLES[id] ?? DEFAULT_MAP_STYLE;

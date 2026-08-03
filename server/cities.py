@@ -97,6 +97,11 @@ class City:
             # z/x/y block-tile source (browser/CDN-cacheable, unlike the
             # pmtiles range requests). ?v= busts every cache on re-bake.
             "blockTiles": self._block_tiles(blocks_version),
+            # Place/business labels (build_place_labels.py). Doubles as the
+            # "does this city have them?" flag — cities built before the
+            # labels existed report None and the client adds no label layer,
+            # rather than requesting an archive that 404s on every pan.
+            "placesVersion": self._places_version(),
         }
 
     def _block_tiles(self, blocks_version: int | None) -> dict | None:
@@ -127,6 +132,14 @@ class City:
     def _blocks_version(self) -> int | None:
         """mtime of this city's blocks.pmtiles, or None when absent."""
         path = os.path.join(os.path.dirname(__file__), self.data_dir, "blocks.pmtiles")
+        try:
+            return int(os.stat(path).st_mtime)
+        except OSError:
+            return None
+
+    def _places_version(self) -> int | None:
+        """mtime of this city's places.pmtiles, or None when absent."""
+        path = os.path.join(os.path.dirname(__file__), self.data_dir, "places.pmtiles")
         try:
             return int(os.stat(path).st_mtime)
         except OSError:

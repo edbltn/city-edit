@@ -87,6 +87,7 @@ graphs:
 # background network matches prod's content. Skips tiles already newer than their graph.
 tiles: graphs
 	cd server && $(PY) build_pmtiles.py --all --profile dev
+	cd server && $(PY) build_place_labels.py --all
 
 # The hybrid dev loop: ensure graphs + tiles exist, start the Docker backing
 # services, then run flask + the Vite client on the host. Ctrl-C stops flask
