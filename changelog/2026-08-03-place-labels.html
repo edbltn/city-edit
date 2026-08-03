@@ -1,0 +1,1984 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Putting names back on the map: streets, places and businesses — 2026-08-03</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Putting names back on the map: streets, places and businesses</h1>
+    <div class="dateline">2026-08-03 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#streets">The map knew where you were, but wouldn't say</a>
+<a href="#poi">Business names had to come from somewhere else</a>
+<a href="#curation">Four ways the labels wanted to feel broken</a>
+<a href="#type">Drawing text meant owning the font</a>
+<a href="#color">Four colors, one palette per basemap</a>
+<a href="#build">Built where the PBFs still exist</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Three fixes to Top Proposals: a pin now takes real support (&gt;100 net votes, both point and route families); every modal badges the vote types that are CURRENT top proposals for what it shows (square = point, diamond = route fully inside the selection); and route corridors are now grown ROUTING-CONSISTENTLY — an extension either keeps the segment a shortest path or pins a ghost waypoint (max 3), and the whole waypoint chain lands in the URL, so a shared top-proposal link keeps routing into its corridor long after the proposal itself has churned away.</p>
+
+  
+    <section class="card" id="streets">
+      <div class="tag">BASEMAP</div>
+      <h2>The map knew where you were, but wouldn't say</h2>
+      <h3>Symptom</h3>
+      <p>At neighborhood zoom the map was anonymous grey blocks. A proposal card could read &quot;Rockaway Parkway &amp; Linden Boulevard&quot; while the map underneath named neither street — you could not tell Canarsie from Corona.</p>
+      <h3>Root cause</h3>
+      <ul><li>The basemap has always been CARTO's <code>dark_nolabels</code> / <code>light_nolabels</code> tiles. That was a deliberate choice — the vote heat is the product and unlabelled tiles never compete with it — but it costs every scrap of orientation</li>
+<li>Simply switching to a labelled basemap would not work: the block heat is drawn ON TOP of the base raster, so every street name would end up buried under a translucent hot block</li></ul>
+      <h3>What changed</h3>
+      <ul><li>CARTO ships the same cartography split in two, so the text half is re-added as a separate transparent raster layer drawn <strong>last</strong> — above the heat and the selection wash. The split is the whole trick; it is what lets a street name stay readable over a hot block</li>
+<li>Labels sit at full opacity on the dark styles and 0.75 on the light ones. Dialling the dark ones back sounded tasteful and was wrong: a raster overlay has no halo knob, so opacity is the only contrast control, and on a saturated map (Williamsburg on nyc-bikes) anything under 1.0 washed the street names out entirely</li>
+<li>The no-WebGL Leaflet fallback gets the same overlay, gated on the same <code>!maplibreActive</code> so a WebGL browser never stacks two label sets</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/mapStyles.ts</li>
+<li>client-react/src/components/MapView/MapView.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="poi">
+      <div class="tag">DATA</div>
+      <h2>Business names had to come from somewhere else</h2>
+      <h3>Symptom</h3>
+      <p>CARTO's label tiles carry streets, neighborhoods and water — and no businesses or civic landmarks at any zoom. Verified against their own z13–z18 tiles over Times Square: not one theatre, shop or restaurant.</p>
+      <h3>Root cause</h3>
+      <ul><li>Positron's label layer is designed as basemap furniture, not as a POI directory. What it does label beyond streets is green space, in green caps</li>
+<li>Everything needed to build the missing half was already on disk: each city ships <code>source.osm.pbf</code>, the server already parses it with pyosmium, already encodes MVT, already writes PMTiles, and <code>/api/tiles/&lt;city&gt;/*.pmtiles</code> already serves and caches them</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>build_place_labels.py</code>: one pyosmium pass produces <code>places.pmtiles</code> per city — <strong>1.6 MB for NYC</strong>, under 0.5 MB elsewhere, ~100s to build</li>
+<li>The client adds a MapLibre <code>symbol</code> layer above the CARTO label raster, filtered by each POI's reveal zoom and sorted so important labels win collisions</li>
+<li><code>cities.py</code> advertises a <code>placesVersion</code> exactly like <code>blocksVersion</code>: it doubles as the &quot;does this city have labels?&quot; flag and as the <code>?v=</code> cache-buster, so a city built before the artifact existed adds no layer rather than requesting an archive that 404s on every pan</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/build_place_labels.py</li>
+<li>server/cities.py</li>
+<li>client-react/src/config.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="curation">
+      <div class="tag">CARTOGRAPHY</div>
+      <h2>Four ways the labels wanted to feel broken</h2>
+      <h3>Symptom</h3>
+      <p>Every intermediate version was legible and wrong: a directory dump at city zoom, subway stops that read as street labels, and park names printed twice in two different fonts.</p>
+      <h3>Root cause</h3>
+      <ul><li><strong>The raw data is mostly noise.</strong> The five most common named POI tags in the NYC extract are subway platforms (15,688 — one per track), restaurants, named rail segments (10,675), places of worship, and abandoned track (4,950). Four of those five are not places</li>
+<li><strong>Density does not tune by hand.</strong> Any fixed per-kind zoom that looks right in Midtown is empty in Canarsie, and vice versa</li>
+<li><strong>Subway stops share Grand Central's tag.</strong> Both are <code>railway=station</code>, but NYC has 470-odd stops and most are named after the street above them</li>
+<li><strong>Two cartographies can't collide-avoid each other.</strong> The CARTO labels are baked pixels; ours are live symbols. Anything both layers label gets printed twice</li></ul>
+      <h3>What changed</h3>
+      <ul><li>An explicit <strong>allowlist</strong> cuts 210,003 named features to 34,349. Anything not named in it is dropped, so a new junk tag can never leak in</li>
+<li><strong>Grid thinning</strong> decides the zoom each label appears at: at every zoom the map is divided into cells and only the highest-ranked unplaced POI in a cell earns that zoom, with already-placed labels re-claiming their cell first. The density cap is geometric, so it holds everywhere without per-neighborhood tuning. Quarter-tile cells gave ~50 labels on the city view; full-tile cells give ~18</li>
+<li>Subway stops are <strong>demoted</strong> to a neighborhood-scale label, and the demotion deliberately skips the wikidata notability bonus — nearly every stop carries one and would have claimed back exactly the rank the demotion removed</li>
+<li><strong>Green space belongs to the basemap.</strong> Parks, gardens and squares are dropped from the allowlist entirely; this layer owns buildings and businesses. Verified the division is clean: CARTO labels no stadium, hospital or university</li>
+<li>The thinning runs to zoom 21 (<code>CONFIG.maxZoom</code>), not 19. Every POI the grid never places falls back to the last zoom, and a ceiling of 19 dumped 20k labels — 60% of the set — into one ungoverned band</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/build_place_labels.py</li>
+<li>server/tests/unit/test_place_labels.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="type">
+      <div class="tag">ASSETS</div>
+      <h2>Drawing text meant owning the font</h2>
+      <h3>Symptom</h3>
+      <p>The MapLibre style's <code>glyphs</code> URL pointed at <code>demotiles.maplibre.org</code> — harmless while nothing on the map drew text, and load-bearing the moment something did.</p>
+      <h3>Root cause</h3>
+      <ul><li>MapLibre cannot render a <code>text-field</code> from a webfont; it needs signed-distance-field glyphs served as protobuf ranges</li>
+<li>Red Hat Mono — the UI's own face — has no CJK coverage, and NYC has plenty of Chinese shop names in the extract</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>scripts/build_glyphs.js</code> bakes the Latin ranges from Red Hat Mono into <code>public/fonts/</code>: <strong>144 KB total</strong>, served as static assets by Vite in dev and nginx in prod</li>
+<li>Using the UI's mono face is also a legibility decision: our labels read as visibly ours, distinct from the basemap's sans street names, which makes the two-cartography stack legible as a hierarchy rather than an inconsistency</li>
+<li>CJK is handled by MapLibre's <code>localIdeographFontFamily</code>, which draws those ranges from a system font at runtime — without it every Chinatown shop name would render as nothing at all</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/scripts/build_glyphs.js</li>
+<li>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</li>
+<li>client-react/package.json</li></ul>
+    </section>
+    
+
+    <section class="card" id="color">
+      <div class="tag">LEGEND</div>
+      <h2>Four colors, one palette per basemap</h2>
+      <h3>Symptom</h3>
+      <p>An undifferentiated wall of names is only marginally better than no names — you cannot scan it for the thing you actually want (the nearest station, the school on the corner).</p>
+      <h3>Root cause</h3>
+      <ul><li>Colour coding only pays off if it is learnable, and re-hueing categories per map style would mean re-learning them on every one of the eight styles</li>
+<li>The heat ramp already owns each style's accent hue, so a loud label palette competes with the product</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Four categories — <strong>transit</strong>, <strong>civic</strong>, <strong>culture</strong>, <strong>retail</strong> — in one palette per basemap (dark / light), not per style</li>
+<li>Retail is deliberately the most neutral of the four: it is by far the largest category, and tinting every deli and bank would turn the deep zooms into confetti</li>
+<li>Green is absent by design — parks are labelled by the CARTO raster underneath, in its own green, which makes five readable classes on screen from four of our own</li>
+<li>Halos are painted in the basemap's own paper/ink token, which is the contrast control the raster overlay above it does not get to have</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/mapStyles.ts</li>
+<li>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="build">
+      <div class="tag">BUILD</div>
+      <h2>Built where the PBFs still exist</h2>
+      <h3>Symptom</h3>
+      <p>The label build reads <code>source.osm.pbf</code>. The prod image deletes every one of them.</p>
+      <h3>Root cause</h3>
+      <ul><li>The Dockerfile's graph stage ends with <code>rm -f osm_data/*/source.osm.pbf</code> to keep the image small, and <code>build_pmtiles.py</code> runs in a LATER layer — it only needs the walk graph, so it never noticed</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>build_place_labels.py --all</code> runs inside that same <code>RUN</code>, immediately before the <code>rm -f</code></li>
+<li>The Makefile <code>tiles</code> target and the docker-compose <code>osm-refresh</code> sidecar (first-run and the weekly refresh loop) build the labels alongside the graph tiles, so dev and prod stay on the same artifacts</li>
+<li>Freshness is mtime-based against the PBF, like the graph tiles: repeated builds skip, <code>--force</code> rebuilds</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>Dockerfile</li>
+<li>Makefile</li>
+<li>docker-compose.yml</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Graph built and loaded: <strong>398,472 nodes / 901,030 edges</strong>, and /api/cities lists <code>sacramento</code> after the Flask restart.</li>
+<li>Blocks baked clean: <strong>102,387 blocks, 0 overlapping pairs</strong> in the final ship-frame audit (CC/CJ/JJ all zero).</li>
+<li>Local OSRM rebuilt and re-verified BOTH ways: a Broadway MLK→Stockton foot route returns <strong>1,097 m</strong> (matching the ~1 km crow distance), and an existing NYC route still returns 702 m — the merged dataset gained a city without losing one.</li>
+<li>Every classification and corridor parse was reviewed offline against all 33 pages before a single vote was cast, and the three failure modes above were each found that way rather than after the fact.</li>
+<li>The wrong-street geocode was confirmed by hand, not inferred: <code>Broadway &amp; Franklin Boulevard</code> resolves to &quot;Franklin, Cosumnes River Boulevard, Valley Hi / North Laguna&quot;. The verification rejects it and the two corridors it legitimately cannot confirm (Marysville, La Mancha Way) now pin on their own street.</li>
+<li>Cast result on local: <strong>29 ok, 0 route-failed, 0 detour demotions</strong>, giving 1,057 voted edges over 8 vote types and 601 blocks with heat.</li>
+<li>Rendered and driven in the browser: topology 891,764 edges / 102,388 blocks loaded, <strong>11 route proposals</strong> computed client-side, and clicking a pin opens a TOP PROPOSAL card (&quot;Street redesign — 1 proposal&quot;) with working ±1 controls.</li>
+<li>Deploy discipline: prod DB backed up BEFORE any build (<code>~/city-edit-prod-backups/20260803T180348Z/votes.dump</code>, 28 MB), client type-checked with <code>npx tsc -b</code> (clean) since Vite dev never type-checks, and the overlay submitted from a tree whose only diff from HEAD is this work.</li>
+<li>Sacramento is added to the app image via the <strong>arrays overlay</strong>, not a full rebuild — the other cities keep the image's own baked graphs, so their edge ids do not shift and no vote resnap or block re-bake is needed. Only <code>sacramento</code> was staged; philly / test-cp / test-mid were moved OUT of <code>.arrays-staging/</code> first, because their stale local pickles predate the 07-29 full rebuild and copying them in would have shifted philly's edge ids.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>https://cityedit.org/m/sac-proposals</code> — expect the Sacramento basemap with terracotta corridors along Broadway, Franklin, Stockton and Marysville, plus proposal pins.</li>
+<li>Click one of the corridor lines and confirm the proposal card names a real vote type (e.g. <strong>Add traffic calming</strong> on Broadway) rather than &quot;No votes yet&quot;.</li>
+<li>Open Propose-a-Map on any map and confirm <strong>Sacramento</strong> now appears in the city dropdown.</li>
+<li>Spot-check that an existing city still routes: draw a route on <code>nyc-walkways</code> — the merged OSRM dataset was rebuilt, so this is the regression that matters most.</li>
+<li><code>curl -s https://cityedit.org/api/maps | grep sac-proposals</code> and <code>curl -s 'https://cityedit.org/api/graph-votes?map=sac-proposals&amp;mode=walk'</code> — remember the SWR trap: the first hit after a bulk cast serves the stale snapshot, so poll until the count settles before concluding votes are missing.</li>
+<li>Compare a couple of pins against the source pages at <code>cityofsacramento.gov/public-works/engineering/projects</code> — the plan JSONL records the exact geocode query used for each one.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+            <span class="stat"><span class="d-add">+30</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GL background</span>
+        <span class="ctx-sum">The MapLibre layer stack behind Leaflet: basemap raster, block-heat fills driven by feature-state, and now the two label tiers</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapLibreBackground.tsx</span>
+        <span class="ctx-sum">~700 LOC — block paint expressions, style builder, camera sync, feature-state heat apply</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports / zoom-offset constant</span><span class="ol-sum">+POI_COLORS, +maplibreLabelTiles</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">BlockVotes / BlockSelect events + hit-test bridge</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">blockFillPaint / blockLinePaint</span><span class="ol-sum">unchanged — the heat ramp expressions</span></li><li class="dim"><span class="ol-label">rebindBlockTiles</span><span class="ol-sum">unchanged — z/x/y swap on load</span></li><li class="changed"><span class="ol-label">PLACE_LABEL_FONT / addPlaceLabels</span><span class="ol-sum">new — the POI symbol layer, added on `load`</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">buildStyle</span><span class="ol-sum">+labels raster source &amp; layer, +self-hosted glyphs URL</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Map constructor</span><span class="ol-sum">+localIdeographFontFamily</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">`load` handler</span><span class="ol-sum">+addPlaceLabels call</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">camera sync / zoom-animation ride</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">feature-state heat + selection apply</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>carto-labels is declared LAST in layers[] — above block-heat and block-select — because a street name under a translucent hot block is unreadable</li><li>It shares carto-base&#x27;s tile scheme and maxzoom, so the two are pixel-locked and ride Leaflet&#x27;s zoom animation together; labels can never drift off the streets they name</li><li>addPlaceLabels runs on the map&#x27;s `load` event, not inside buildStyle: the GL map is constructed at mount but CONFIG.placeTilesUrl only resolves once the map config lands from the network</li><li>filter compares minz against [&#x27;+&#x27;, [&#x27;zoom&#x27;], 1] — minz is a LEAFLET zoom (the units of CONFIG.maxZoom and every map URL), and MapLibre drives its camera one level lower</li><li>symbol-sort-key is minz itself: the builder reveals a POI at the earliest zoom its rank can claim, so minz IS the importance ranking and no separate rank property has to ship</li><li>text-max-width 11, not 9 — mono characters are uniformly wide and 9 turned &#x27;New York Institute of Technology&#x27; into a three-line clump</li><li>text-halo-color is the style&#x27;s own base token, which is what keeps a label readable over a saturated heat block</li><li>glyphs moved off demotiles.maplibre.org — fine while nothing drew text, a real dependency the moment this layer exists</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index 745e97a..47f5e72 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -11,7 +11,12 @@ import maplibregl from &quot;maplibre-gl&quot;;</span>
+<span class="d-ctx"> import { Protocol } from &quot;pmtiles&quot;;</span>
+<span class="d-ctx"> import { CONFIG, type BlockTilesConfig } from &quot;../../config&quot;;</span>
+<span class="d-ctx"> import { dlog, dwarn, debugState } from &quot;../../utils/debugLog&quot;;</span>
+<span class="d-del">-import { maplibreRasterTiles, heatTip, type MapStyle } from &quot;../../mapStyles&quot;;</span>
+<span class="d-add">+import {</span>
+<span class="d-add">+  maplibreRasterTiles,</span>
+<span class="d-add">+  maplibreLabelTiles,</span>
+<span class="d-add">+  heatTip,</span>
+<span class="d-add">+  type MapStyle,</span>
+<span class="d-add">+} from &quot;../../mapStyles&quot;;</span>
+<span class="d-ctx"> import { hottestBlockId } from &quot;./hottestBlock&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> // Register PMTiles protocol once at module level</span>
+<span class="d-hunk">@@ -166,6 +171,7 @@ function buildStyle(</span>
+<span class="d-ctx">   blockTilesUrl: string,</span>
+<span class="d-ctx">   blockTiles: BlockTilesConfig | null,</span>
+<span class="d-ctx">   tiles: string[],</span>
+<span class="d-add">+  labelTiles: string[],</span>
+<span class="d-ctx">   mapStyle: MapStyle,</span>
+<span class="d-ctx"> ): maplibregl.StyleSpecification {</span>
+<span class="d-ctx">   // z/x/y endpoint when the city advertises one: discrete tile URLs are</span>
+<span class="d-hunk">@@ -205,6 +211,16 @@ function buildStyle(</span>
+<span class="d-ctx">         attribution:</span>
+<span class="d-ctx">           &#x27;&amp;copy; &lt;a href=&quot;https://www.openstreetmap.org/copyright&quot;&gt;OpenStreetMap&lt;/a&gt; &amp;copy; &lt;a href=&quot;https://carto.com/attributions&quot;&gt;CARTO&lt;/a&gt;&#x27;,</span>
+<span class="d-ctx">       },</span>
+<span class="d-add">+      // The text half of the same CARTO cartography, as transparent PNGs. Same</span>
+<span class="d-add">+      // tile scheme and maxzoom as carto-base, so the two are pixel-locked and</span>
+<span class="d-add">+      // scale together through Leaflet&#x27;s zoom-animation ride — the labels can</span>
+<span class="d-add">+      // never drift off the streets they name.</span>
+<span class="d-add">+      &quot;carto-labels&quot;: {</span>
+<span class="d-add">+        type: &quot;raster&quot;,</span>
+<span class="d-add">+        tiles: labelTiles,</span>
+<span class="d-add">+        tileSize: 256,</span>
+<span class="d-add">+        maxzoom: 19,</span>
+<span class="d-add">+      },</span>
+<span class="d-ctx">       // Block polygons from PMTiles (one per street segment / merged foot path).</span>
+<span class="d-ctx">       // block_id is the NATIVE feature id (tippecanoe --use-attribute-for-id</span>
+<span class="d-ctx">       // moves the attribute onto the id and out of properties) — do NOT set</span>
+<span class="d-hunk">@@ -275,6 +291,18 @@ function buildStyle(</span>
+<span class="d-ctx">           ],</span>
+<span class="d-ctx">         },</span>
+<span class="d-ctx">       },</span>
+<span class="d-add">+      // Place names — LAST, so they sit above the heat and the selection wash.</span>
+<span class="d-add">+      // Underneath them a name would be swallowed by a hot block&#x27;s fill; on top</span>
+<span class="d-add">+      // it stays readable at every heat level, which is the whole point of</span>
+<span class="d-add">+      // splitting CARTO&#x27;s basemap into nolabels + only_labels. Held below full</span>
+<span class="d-add">+      // opacity so orientation text supports the heat rather than competing</span>
+<span class="d-add">+      // with it.</span>
+<span class="d-add">+      {</span>
+<span class="d-add">+        id: &quot;carto-labels&quot;,</span>
+<span class="d-add">+        type: &quot;raster&quot;,</span>
+<span class="d-add">+        source: &quot;carto-labels&quot;,</span>
+<span class="d-add">+        paint: { &quot;raster-opacity&quot;: mapStyle.labelOpacity },</span>
+<span class="d-add">+      },</span>
+<span class="d-ctx">     ],</span>
+<span class="d-ctx">     glyphs: &quot;https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf&quot;,</span>
+<span class="d-ctx">   };</span>
+<span class="d-hunk">@@ -309,6 +337,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">           CONFIG.blockTilesUrl,</span>
+<span class="d-ctx">           CONFIG.blockTiles,</span>
+<span class="d-ctx">           maplibreRasterTiles(mapStyle),</span>
+<span class="d-add">+          maplibreLabelTiles(mapStyle),</span>
+<span class="d-ctx">           mapStyle,</span>
+<span class="d-ctx">         ),</span>
+<span class="d-ctx">         center: [CONFIG.initialView.lon, CONFIG.initialView.lat],</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapView/MapView.tsx</span>
+            <span class="stat"><span class="d-add">+18</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · map view</span>
+        <span class="ctx-sum">The Leaflet map: interactive panes (routes, pins, drag-to-insert) plus the raster basemap fallback for browsers without WebGL</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapView.tsx</span>
+        <span class="ctx-sum">~1500 LOC — selection state, handlers, and the layer tree</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">state / handlers / selection wiring</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">CursorTracker / SnapMarker</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">TileLayer (base raster fallback)</span><span class="ol-sum">+zIndex so the labels can stack above it</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">TileLayer (labels fallback)</span><span class="ol-sum">new — same !maplibreActive gate</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">ZoomControl / DesirePathLayer / split paths</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Gated on the SAME !maplibreActive as the base tiles: MapLibre draws its own labels, so a WebGL browser would otherwise stack two label sets on top of each other</li><li>zIndex 1/2 orders the pair inside the tile pane; both stay below every interactive overlay</li><li>Leaflet fills the {r} retina placeholder from Browser.retina automatically — the existing base layer already relies on this</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapView/MapView.tsx b/client-react/src/components/MapView/MapView.tsx</span>
+<span class="d-meta">index 8475e98..1df58c3 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapView/MapView.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapView/MapView.tsx</span>
+<span class="d-hunk">@@ -755,10 +755,28 @@ export function MapView() {</span>
+<span class="d-ctx">           subdomains={[&quot;a&quot;, &quot;b&quot;, &quot;c&quot;, &quot;d&quot;]}</span>
+<span class="d-ctx">           maxZoom={CONFIG.maxZoom}</span>
+<span class="d-ctx">           maxNativeZoom={19}</span>
+<span class="d-add">+          zIndex={1}</span>
+<span class="d-ctx">           attribution={mapStyle.tileAttribution}</span>
+<span class="d-ctx">         /&gt;</span>
+<span class="d-ctx">       )}</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+      {/* Place names for the fallback. MapLibre draws its own labels layer, so</span>
+<span class="d-add">+          this is gated on the same !maplibreActive as the base tiles above —</span>
+<span class="d-add">+          otherwise a WebGL browser would stack two label sets. zIndex keeps it</span>
+<span class="d-add">+          over the base raster; both live in the tile pane, below every</span>
+<span class="d-add">+          interactive overlay. */}</span>
+<span class="d-add">+      {!maplibreActive &amp;&amp; (</span>
+<span class="d-add">+        &lt;TileLayer</span>
+<span class="d-add">+          key={`${mapStyle.id}-labels`}</span>
+<span class="d-add">+          url={mapStyle.labelTileUrl}</span>
+<span class="d-add">+          subdomains={[&quot;a&quot;, &quot;b&quot;, &quot;c&quot;, &quot;d&quot;]}</span>
+<span class="d-add">+          maxZoom={CONFIG.maxZoom}</span>
+<span class="d-add">+          maxNativeZoom={19}</span>
+<span class="d-add">+          opacity={mapStyle.labelOpacity}</span>
+<span class="d-add">+          zIndex={2}</span>
+<span class="d-add">+        /&gt;</span>
+<span class="d-add">+      )}</span>
+<span class="d-add">+</span>
+<span class="d-ctx">       {/* Zoom control in bottom right */}</span>
+<span class="d-ctx">       &lt;ZoomControl /&gt;</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/mapStyles.ts</span>
+            <span class="stat"><span class="d-add">+52</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · map identity</span>
+        <span class="ctx-sum">The visual identity of a map: two-color representation, basemap tiles, heat ramp, and now the label overlay + POI palette</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">mapStyles.ts</span>
+        <span class="ctx-sum">~410 LOC — MapStyle interface, tile constants, the eight styles, ramp sampling helpers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Basemap / HeatRamp types</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">MapStyle interface</span><span class="ol-sum">+2 fields — labelTileUrl, labelOpacity</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">TILE_DARK / TILE_LIGHT</span><span class="ol-sum">unchanged — the nolabels basemaps</span></li><li class="changed"><span class="ol-label">TILE_*_LABELS + LABEL_OPACITY_*</span><span class="ol-sum">new — the labels-only companions and their strength</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">DARK_WARM / darkStyle / lightStyle</span><span class="ol-sum">+2 lines each — wire the label tiles into every style</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">MAP_STYLES (8 styles)</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">POI_COLORS</span><span class="ol-sum">new — the four label categories, one palette per basemap</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">maplibreRasterTiles / maplibreLabelTiles</span><span class="ol-sum">refactored onto a shared expandTileTemplate</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">heatTip / heatGradientCss / ramp sampling</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>labelOpacity is per-basemap because the two label rasters are not equally loud: CARTO&#x27;s dark labels are light grey on near-black, its light ones near-black slate on paper</li><li>Dark stays at 1.0 — a raster overlay has no halo, so opacity is the ONLY contrast control, and under 1.0 the street names vanish over saturated heat blocks</li><li>Light can afford 0.75 because those styles blend heat by multiply, darkening the paper around the text rather than lighting up behind it</li><li>POI_COLORS is keyed by basemap, NOT by style id — colour coding is only worth having if it survives switching maps</li><li>No green category: parks come from the CARTO raster underneath, in its own green, so adding one here printed every park name twice</li><li>Retail is the most neutral hue on purpose — it is the biggest category and a tinted deli on every corner is confetti</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/mapStyles.ts b/client-react/src/mapStyles.ts</span>
+<span class="d-meta">index 966c0ad..4a3fedd 100644</span>
+<span class="d-meta">--- a/client-react/src/mapStyles.ts</span>
+<span class="d-meta">+++ b/client-react/src/mapStyles.ts</span>
+<span class="d-hunk">@@ -40,6 +40,15 @@ export interface MapStyle {</span>
+<span class="d-ctx">   tileAttribution: string;</span>
+<span class="d-ctx">   tileMaxZoom: number;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // The labels half of the same CARTO cartography, as a transparent overlay.</span>
+<span class="d-add">+  // Drawn ABOVE the vote heat — see labelOpacity.</span>
+<span class="d-add">+  labelTileUrl: string;</span>
+<span class="d-add">+  // How loudly the labels speak. Heat is the product and labels are orientation</span>
+<span class="d-add">+  // furniture, so they&#x27;re deliberately held back below full strength. The light</span>
+<span class="d-add">+  // basemap&#x27;s slate text is much heavier on paper than the dark basemap&#x27;s grey</span>
+<span class="d-add">+  // on near-black, so it&#x27;s pulled down further.</span>
+<span class="d-add">+  labelOpacity: number;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   // Heatmap rendering.</span>
+<span class="d-ctx">   heat: HeatRamp;</span>
+<span class="d-ctx">   heatBlend: &quot;screen&quot; | &quot;multiply&quot;;         // canvas element mix-blend-mode</span>
+<span class="d-hunk">@@ -56,6 +65,33 @@ const TILE_DARK =</span>
+<span class="d-ctx"> const TILE_LIGHT =</span>
+<span class="d-ctx">   &quot;https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+// Labels-only companions to the two basemaps above: the SAME CARTO cartography</span>
+<span class="d-add">+// split into its text half, served as transparent PNGs. Keeping the basemap</span>
+<span class="d-add">+// label-free and re-adding the text as a separate layer is what lets the labels</span>
+<span class="d-add">+// sit on top of the vote heat instead of underneath it — a street name buried</span>
+<span class="d-add">+// under a translucent hot block is unreadable, and it&#x27;s the heat that has to</span>
+<span class="d-add">+// stay the loudest thing on the map.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// Coverage (verified against CARTO&#x27;s own tiles): street names, neighborhood and</span>
+<span class="d-add">+// borough names, water, parks and a handful of named landmarks. NOT businesses</span>
+<span class="d-add">+// — those come from the separate POI layer built off our own OSM extract.</span>
+<span class="d-add">+const TILE_DARK_LABELS =</span>
+<span class="d-add">+  &quot;https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png&quot;;</span>
+<span class="d-add">+const TILE_LIGHT_LABELS =</span>
+<span class="d-add">+  &quot;https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+// Dark basemaps get the labels at FULL strength. CARTO&#x27;s dark label tiles are</span>
+<span class="d-add">+// light grey with a black halo baked in — dialling them back sounds tasteful in</span>
+<span class="d-add">+// isolation, but on a busy map (Williamsburg on nyc-bikes) the heat blocks are</span>
+<span class="d-add">+// saturated blue/green and anything under ~1.0 washes the street names out</span>
+<span class="d-add">+// completely. There is no halo knob on a raster overlay, so opacity is the only</span>
+<span class="d-add">+// contrast control and it has to stay pinned.</span>
+<span class="d-add">+const LABEL_OPACITY_DARK = 1.0;</span>
+<span class="d-add">+// Light basemaps can afford restraint: the slate text is already high-contrast</span>
+<span class="d-add">+// on near-white paper, and these styles blend heat by MULTIPLY, so a hot block</span>
+<span class="d-add">+// darkens the paper *around* the text rather than lighting up behind it.</span>
+<span class="d-add">+const LABEL_OPACITY_LIGHT = 0.75;</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> // Dark base + warm yellow-brown orange. Shared by walkways and the neutral</span>
+<span class="d-ctx"> // default so user maps get a sensible look out of the box.</span>
+<span class="d-ctx"> const DARK_WARM: Omit&lt;MapStyle, &quot;id&quot;&gt; = {</span>
+<span class="d-hunk">@@ -66,6 +102,8 @@ const DARK_WARM: Omit&lt;MapStyle, &quot;id&quot;&gt; = {</span>
+<span class="d-ctx">   tileUrl: TILE_DARK,</span>
+<span class="d-ctx">   tileAttribution: CARTO_ATTRIBUTION,</span>
+<span class="d-ctx">   tileMaxZoom: 21,</span>
+<span class="d-add">+  labelTileUrl: TILE_DARK_LABELS,</span>
+<span class="d-add">+  labelOpacity: LABEL_OPACITY_DARK,</span>
+<span class="d-ctx">   // Hue runs purple → red-orange → amber → gold so intensity reads as a color</span>
+<span class="d-ctx">   // shift, not just brightness. Peak is gold (not near-white) to keep glow tame.</span>
+<span class="d-ctx">   // Negative arm dives through indigo to icy blue — the opposite temperature.</span>
+<span class="d-hunk">@@ -93,6 +131,8 @@ function darkStyle(id: string, accent: string, heat: HeatRamp): MapStyle {</span>
+<span class="d-ctx">     tileUrl: TILE_DARK,</span>
+<span class="d-ctx">     tileAttribution: CARTO_ATTRIBUTION,</span>
+<span class="d-ctx">     tileMaxZoom: 21,</span>
+<span class="d-add">+    labelTileUrl: TILE_DARK_LABELS,</span>
+<span class="d-add">+    labelOpacity: LABEL_OPACITY_DARK,</span>
+<span class="d-ctx">     heat,</span>
+<span class="d-ctx">     heatBlend: &quot;screen&quot;,</span>
+<span class="d-ctx">     heatComposite: &quot;lighter&quot;,</span>
+<span class="d-hunk">@@ -112,6 +152,8 @@ function lightStyle(id: string, accent: string, heat: HeatRamp): MapStyle {</span>
+<span class="d-ctx">     tileUrl: TILE_LIGHT,</span>
+<span class="d-ctx">     tileAttribution: CARTO_ATTRIBUTION,</span>
+<span class="d-ctx">     tileMaxZoom: 21,</span>
+<span class="d-add">+    labelTileUrl: TILE_LIGHT_LABELS,</span>
+<span class="d-add">+    labelOpacity: LABEL_OPACITY_LIGHT,</span>
+<span class="d-ctx">     heat,</span>
+<span class="d-ctx">     heatBlend: &quot;multiply&quot;,</span>
+<span class="d-ctx">     heatComposite: &quot;source-over&quot;,</span>
+<span class="d-hunk">@@ -234,8 +276,17 @@ export function getMapStyle(id: string): MapStyle {</span>
+<span class="d-ctx">  * MapLibre&#x27;s raster source expects (it has no {s}/{r} placeholder support).</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> export function maplibreRasterTiles(style: MapStyle): string[] {</span>
+<span class="d-add">+  return expandTileTemplate(style.tileUrl);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Same expansion for the labels-only overlay tiles. */</span>
+<span class="d-add">+export function maplibreLabelTiles(style: MapStyle): string[] {</span>
+<span class="d-add">+  return expandTileTemplate(style.labelTileUrl);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+function expandTileTemplate(template: string): string[] {</span>
+<span class="d-ctx">   return [&quot;a&quot;, &quot;b&quot;, &quot;c&quot;, &quot;d&quot;].map((s) =&gt;</span>
+<span class="d-del">-    style.tileUrl.replace(&quot;{s}&quot;, s).replace(&quot;{r}&quot;, &quot;@2x&quot;),</span>
+<span class="d-add">+    template.replace(&quot;{s}&quot;, s).replace(&quot;{r}&quot;, &quot;@2x&quot;),</span>
+<span class="d-ctx">   );</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">Dockerfile</span>
+            <span class="stat"><span class="d-add">+3</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill on">nginx</span><span class="pill on">Flask API</span><span class="pill on">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · prod image</span>
+        <span class="ctx-sum">Multi-stage build: client bundle, per-city graphs, tiles, then nginx + supervisor</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Dockerfile</span>
+        <span class="ctx-sum">~80 lines — deps, client-builder, graph build, tile build, serving config</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">base deps / python env</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">client-builder stage</span><span class="ol-sum">unchanged — picks up public/fonts automatically</span></li><li class="changed"><span class="ol-label">graph build RUN (refresh_osm ×6)</span><span class="ol-sum">+build_place_labels before the rm -f</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">build_pmtiles RUN</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">nginx / supervisor / healthcheck</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The label build MUST sit inside this RUN: the same command ends with `rm -f osm_data/*/source.osm.pbf`, and the labels are built from those PBFs</li><li>build_pmtiles.py can stay in its later layer because it reads the walk graph, not the extract</li><li>The glyph pbfs need no build step here — they live in public/ and the client-builder copies them with the rest of the bundle</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/Dockerfile b/Dockerfile</span>
+<span class="d-meta">index 1cc89e8..9b60ee7 100644</span>
+<span class="d-meta">--- a/Dockerfile</span>
+<span class="d-meta">+++ b/Dockerfile</span>
+<span class="d-hunk">@@ -31,6 +31,8 @@ COPY server/*.py ./</span>
+<span class="d-ctx"> COPY server/data/ ./data/</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Build routing graphs during image build (bakes per-city graphs into image).</span>
+<span class="d-add">+# build_place_labels.py runs INSIDE this RUN, before the `rm -f` — it reads</span>
+<span class="d-add">+# source.osm.pbf, which the same command deletes to keep the image small.</span>
+<span class="d-ctx"> # Separate processes so each city&#x27;s osmnx memory is freed before the next.</span>
+<span class="d-ctx"> # build_graph also emits walk_graph_arrays.npz per city — the ONLY graph</span>
+<span class="d-ctx"> # artifact the runtime loads (the pkl is build-time-only input for block</span>
+<span class="d-hunk">@@ -45,6 +47,7 @@ RUN mkdir -p osm_data &amp;&amp; \</span>
+<span class="d-ctx">     python refresh_osm.py --region dc --force &amp;&amp; \</span>
+<span class="d-ctx">     python refresh_osm.py --region philly --force &amp;&amp; \</span>
+<span class="d-ctx">     python refresh_osm.py --region sacramento --force &amp;&amp; \</span>
+<span class="d-add">+    python build_place_labels.py --all &amp;&amp; \</span>
+<span class="d-ctx">     rm -f osm_data/*/source.osm.pbf</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> COPY --from=client-builder /app/dist /var/www/html/</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">Makefile</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Dev · local loop</span>
+        <span class="ctx-sum">make deps / graphs / tiles / dev — the hybrid loop of Docker backing services plus host Flask and Vite</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Makefile</span>
+        <span class="ctx-sum">~120 lines — dev targets, docker targets, helpers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">deps / graphs</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">tiles</span><span class="ol-sum">+build_place_labels --all</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">dev / docker targets</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Hangs off `tiles`, which already depends on `graphs`, so `make dev` produces labels without a new entry point</li><li>Freshness is mtime-vs-PBF, so repeated runs skip the ~100s NYC pass</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/Makefile b/Makefile</span>
+<span class="d-meta">index aac543b..7373e78 100644</span>
+<span class="d-meta">--- a/Makefile</span>
+<span class="d-meta">+++ b/Makefile</span>
+<span class="d-hunk">@@ -87,6 +87,7 @@ graphs:</span>
+<span class="d-ctx"> # background network matches prod&#x27;s content. Skips tiles already newer than their graph.</span>
+<span class="d-ctx"> tiles: graphs</span>
+<span class="d-ctx"> 	cd server &amp;&amp; $(PY) build_pmtiles.py --all --profile dev</span>
+<span class="d-add">+	cd server &amp;&amp; $(PY) build_place_labels.py --all</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # The hybrid dev loop: ensure graphs + tiles exist, start the Docker backing</span>
+<span class="d-ctx"> # services, then run flask + the Vite client on the host. Ctrl-C stops flask</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/package.json</span>
+            <span class="stat"><span class="d-add">+3</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · package manifest</span>
+        <span class="ctx-sum">Scripts and dependencies for the Vite client</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">package.json</span>
+        <span class="ctx-sum">~50 lines</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">scripts: dev / build / lint / test</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">scripts: build:glyphs</span><span class="ol-sum">new</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">devDependencies</span><span class="ol-sum">+fontnik</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>fontnik is a devDependency only — the generated pbfs are committed, so neither CI nor the Docker client-builder needs it</li><li>fontnik ships prebuilt binaries; no freetype/node-gyp toolchain is pulled into the image</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/package.json b/client-react/package.json</span>
+<span class="d-meta">index 457baf2..840dbab 100644</span>
+<span class="d-meta">--- a/client-react/package.json</span>
+<span class="d-meta">+++ b/client-react/package.json</span>
+<span class="d-hunk">@@ -8,7 +8,8 @@</span>
+<span class="d-ctx">     &quot;build&quot;: &quot;tsc -b &amp;&amp; vite build&quot;,</span>
+<span class="d-ctx">     &quot;lint&quot;: &quot;eslint .&quot;,</span>
+<span class="d-ctx">     &quot;preview&quot;: &quot;vite preview&quot;,</span>
+<span class="d-del">-    &quot;test&quot;: &quot;vitest run&quot;</span>
+<span class="d-add">+    &quot;test&quot;: &quot;vitest run&quot;,</span>
+<span class="d-add">+    &quot;build:glyphs&quot;: &quot;node scripts/build_glyphs.js&quot;</span>
+<span class="d-ctx">   },</span>
+<span class="d-ctx">   &quot;dependencies&quot;: {</span>
+<span class="d-ctx">     &quot;@types/leaflet&quot;: &quot;^1.9.21&quot;,</span>
+<span class="d-hunk">@@ -30,6 +31,7 @@</span>
+<span class="d-ctx">     &quot;eslint&quot;: &quot;^9.39.1&quot;,</span>
+<span class="d-ctx">     &quot;eslint-plugin-react-hooks&quot;: &quot;^7.0.1&quot;,</span>
+<span class="d-ctx">     &quot;eslint-plugin-react-refresh&quot;: &quot;^0.4.24&quot;,</span>
+<span class="d-add">+    &quot;fontnik&quot;: &quot;^0.7.7&quot;,</span>
+<span class="d-ctx">     &quot;globals&quot;: &quot;^16.5.0&quot;,</span>
+<span class="d-ctx">     &quot;typescript&quot;: &quot;~5.9.3&quot;,</span>
+<span class="d-ctx">     &quot;typescript-eslint&quot;: &quot;^8.46.4&quot;,</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/scripts/build_glyphs.js</span>
+            <span class="stat"><span class="d-add">+71</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · build tooling</span>
+        <span class="ctx-sum">One-shot asset bake: the SDF glyph ranges MapLibre needs to draw any text at all</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_glyphs.js</span>
+        <span class="ctx-sum">~60 lines — font fetch, fontnik range loop, write to public/fonts</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header / FONT_URL / FONTSTACK</span><span class="ol-sum">new — Red Hat Mono, the UI&#x27;s own face</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">RANGES</span><span class="ol-sum">new — Latin + Latin-1 + Extended + General Punctuation</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main</span><span class="ol-sum">new — read or download the TTF, emit one pbf per range</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>144 KB total for four ranges — small enough to commit, so the client build needs no native toolchain</li><li>General Punctuation is not optional: business names use U+2019 for the apostrophe in &quot;Joe&#x27;s&quot; far more often than U+0027</li><li>No CJK ranges — Red Hat Mono has no coverage, and localIdeographFontFamily draws those from a system font at runtime instead</li><li>ESM, not CJS: client-react&#x27;s package.json declares &quot;type&quot;: &quot;module&quot;</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/scripts/build_glyphs.js b/client-react/scripts/build_glyphs.js</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..6629501</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/scripts/build_glyphs.js</span>
+<span class="d-hunk">@@ -0,0 +1,71 @@</span>
+<span class="d-add">+#!/usr/bin/env node</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Generate the SDF glyph ranges MapLibre needs to draw the place-label layer.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * MapLibre cannot render a `text-field` from a webfont — it needs signed-</span>
+<span class="d-add">+ * distance-field glyphs served as protobuf ranges. The style used to point at</span>
+<span class="d-add">+ * demotiles.maplibre.org, which is MapLibre&#x27;s DEMO server and not something to</span>
+<span class="d-add">+ * put in front of real traffic, so we bake our own from the same Red Hat Mono</span>
+<span class="d-add">+ * the rest of the UI uses and serve them as static assets.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Only Latin ranges are generated. Non-Latin names (Chinatown&#x27;s Chinese shop</span>
+<span class="d-add">+ * names, for one) are handled at runtime by MapLibre&#x27;s `localIdeographFontFamily`,</span>
+<span class="d-add">+ * which draws CJK from a system font instead of from SDF glyphs — Red Hat Mono</span>
+<span class="d-add">+ * has no CJK coverage, so without that those labels would render as nothing.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ *   npm run build:glyphs        # from client-react/</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+</span>
+<span class="d-add">+import fs from &quot;node:fs&quot;;</span>
+<span class="d-add">+import path from &quot;node:path&quot;;</span>
+<span class="d-add">+import { fileURLToPath } from &quot;node:url&quot;;</span>
+<span class="d-add">+import fontnik from &quot;fontnik&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const __dirname = path.dirname(fileURLToPath(import.meta.url));</span>
+<span class="d-add">+</span>
+<span class="d-add">+const FONT_URL =</span>
+<span class="d-add">+  &quot;https://github.com/google/fonts/raw/main/ofl/redhatmono/RedHatMono%5Bwght%5D.ttf&quot;;</span>
+<span class="d-add">+const FONTSTACK = &quot;Red Hat Mono Regular&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+// Basic Latin + Latin-1 Supplement + Latin Extended-A/B cover US place names</span>
+<span class="d-add">+// including accented ones; General Punctuation carries the curly quotes and</span>
+<span class="d-add">+// dashes that show up in business names (&quot;Joe&#x27;s&quot; is often U+2019, not U+0027).</span>
+<span class="d-add">+const RANGES = [</span>
+<span class="d-add">+  [0, 255],</span>
+<span class="d-add">+  [256, 511],</span>
+<span class="d-add">+  [512, 767],</span>
+<span class="d-add">+  [8192, 8447],</span>
+<span class="d-add">+];</span>
+<span class="d-add">+</span>
+<span class="d-add">+async function main() {</span>
+<span class="d-add">+  const fontPath = process.argv[2];</span>
+<span class="d-add">+  const outDir = path.resolve(__dirname, &quot;..&quot;, &quot;public&quot;, &quot;fonts&quot;, FONTSTACK);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  let font;</span>
+<span class="d-add">+  if (fontPath) {</span>
+<span class="d-add">+    font = fs.readFileSync(fontPath);</span>
+<span class="d-add">+  } else {</span>
+<span class="d-add">+    process.stdout.write(`downloading ${FONT_URL}\n`);</span>
+<span class="d-add">+    const res = await fetch(FONT_URL);</span>
+<span class="d-add">+    if (!res.ok) throw new Error(`font download failed: ${res.status}`);</span>
+<span class="d-add">+    font = Buffer.from(await res.arrayBuffer());</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  fs.mkdirSync(outDir, { recursive: true });</span>
+<span class="d-add">+  for (const [start, end] of RANGES) {</span>
+<span class="d-add">+    const buffer = await new Promise((resolve, reject) =&gt; {</span>
+<span class="d-add">+      fontnik.range({ font, start, end }, (err, data) =&gt;</span>
+<span class="d-add">+        err ? reject(err) : resolve(data),</span>
+<span class="d-add">+      );</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+    const outPath = path.join(outDir, `${start}-${end}.pbf`);</span>
+<span class="d-add">+    fs.writeFileSync(outPath, buffer);</span>
+<span class="d-add">+    process.stdout.write(`  ${start}-${end}.pbf  ${buffer.length} bytes\n`);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  process.stdout.write(`glyphs written to ${outDir}\n`);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+main().catch((err) =&gt; {</span>
+<span class="d-add">+  process.stderr.write(`${err.stack}\n`);</span>
+<span class="d-add">+  process.exit(1);</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+            <span class="stat"><span class="d-add">+89</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GL background</span>
+        <span class="ctx-sum">The MapLibre layer stack behind Leaflet: basemap raster, block-heat fills driven by feature-state, and now the two label tiers</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapLibreBackground.tsx</span>
+        <span class="ctx-sum">~700 LOC — block paint expressions, style builder, camera sync, feature-state heat apply</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports / zoom-offset constant</span><span class="ol-sum">+POI_COLORS, +maplibreLabelTiles</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">BlockVotes / BlockSelect events + hit-test bridge</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">blockFillPaint / blockLinePaint</span><span class="ol-sum">unchanged — the heat ramp expressions</span></li><li class="dim"><span class="ol-label">rebindBlockTiles</span><span class="ol-sum">unchanged — z/x/y swap on load</span></li><li class="changed"><span class="ol-label">PLACE_LABEL_FONT / addPlaceLabels</span><span class="ol-sum">new — the POI symbol layer, added on `load`</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">buildStyle</span><span class="ol-sum">+labels raster source &amp; layer, +self-hosted glyphs URL</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Map constructor</span><span class="ol-sum">+localIdeographFontFamily</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">`load` handler</span><span class="ol-sum">+addPlaceLabels call</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">camera sync / zoom-animation ride</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">feature-state heat + selection apply</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>carto-labels is declared LAST in layers[] — above block-heat and block-select — because a street name under a translucent hot block is unreadable</li><li>It shares carto-base&#x27;s tile scheme and maxzoom, so the two are pixel-locked and ride Leaflet&#x27;s zoom animation together; labels can never drift off the streets they name</li><li>addPlaceLabels runs on the map&#x27;s `load` event, not inside buildStyle: the GL map is constructed at mount but CONFIG.placeTilesUrl only resolves once the map config lands from the network</li><li>filter compares minz against [&#x27;+&#x27;, [&#x27;zoom&#x27;], 1] — minz is a LEAFLET zoom (the units of CONFIG.maxZoom and every map URL), and MapLibre drives its camera one level lower</li><li>symbol-sort-key is minz itself: the builder reveals a POI at the earliest zoom its rank can claim, so minz IS the importance ranking and no separate rank property has to ship</li><li>text-max-width 11, not 9 — mono characters are uniformly wide and 9 turned &#x27;New York Institute of Technology&#x27; into a three-line clump</li><li>text-halo-color is the style&#x27;s own base token, which is what keeps a label readable over a saturated heat block</li><li>glyphs moved off demotiles.maplibre.org — fine while nothing drew text, a real dependency the moment this layer exists</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index 47f5e72..bbaab32 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -15,6 +15,7 @@ import {</span>
+<span class="d-ctx">   maplibreRasterTiles,</span>
+<span class="d-ctx">   maplibreLabelTiles,</span>
+<span class="d-ctx">   heatTip,</span>
+<span class="d-add">+  POI_COLORS,</span>
+<span class="d-ctx">   type MapStyle,</span>
+<span class="d-ctx"> } from &quot;../../mapStyles&quot;;</span>
+<span class="d-ctx"> import { hottestBlockId } from &quot;./hottestBlock&quot;;</span>
+<span class="d-hunk">@@ -166,6 +167,83 @@ function rebindBlockTiles(map: maplibregl.Map): void {</span>
+<span class="d-ctx">   dlog(&quot;maplibre&quot;, &quot;blocks source rebound to z/x/y template&quot;, template);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/** The font stack baked by `npm run build:glyphs` and served from /fonts. */</span>
+<span class="d-add">+const PLACE_LABEL_FONT = &quot;Red Hat Mono Regular&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Add the place/business label layer, if the active city ships one.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Done on the map&#x27;s `load` event rather than in buildStyle because the GL map</span>
+<span class="d-add">+ * is created at mount while CONFIG.placeTilesUrl only resolves once the map</span>
+<span class="d-add">+ * config lands from the network — reading it here means we never add a source</span>
+<span class="d-add">+ * for a city that has no labels, instead of adding one that 404s on every pan.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * The layer is added LAST, so it sits above the basemap&#x27;s own CARTO label</span>
+<span class="d-add">+ * raster as well as the heat. The two label systems can&#x27;t collide-avoid each</span>
+<span class="d-add">+ * other (one is baked pixels, the other live symbols), which is the accepted</span>
+<span class="d-add">+ * cost of keeping CARTO&#x27;s street-name cartography; POIs anchor inside blocks</span>
+<span class="d-add">+ * while street names run along centerlines, so they mostly stay out of each</span>
+<span class="d-add">+ * other&#x27;s way.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {</span>
+<span class="d-add">+  const url = CONFIG.placeTilesUrl;</span>
+<span class="d-add">+  if (!url) {</span>
+<span class="d-add">+    dlog(&quot;maplibre&quot;, &quot;no place-label tiles for this city — skipping layer&quot;);</span>
+<span class="d-add">+    return;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  if (map.getSource(&quot;places&quot;)) return;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  map.addSource(&quot;places&quot;, { type: &quot;vector&quot;, url: `pmtiles://${url}` });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const palette = POI_COLORS[mapStyle.basemap];</span>
+<span class="d-add">+  const colorByCategory = [</span>
+<span class="d-add">+    &quot;match&quot;, [&quot;get&quot;, &quot;cat&quot;],</span>
+<span class="d-add">+    ...Object.entries(palette).flatMap(([cat, color]) =&gt; [cat, color]),</span>
+<span class="d-add">+    palette.retail, // a category this client build doesn&#x27;t know yet</span>
+<span class="d-add">+  ] as unknown as maplibregl.ExpressionSpecification;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  map.addLayer({</span>
+<span class="d-add">+    id: &quot;place-labels&quot;,</span>
+<span class="d-add">+    type: &quot;symbol&quot;,</span>
+<span class="d-add">+    source: &quot;places&quot;,</span>
+<span class="d-add">+    &quot;source-layer&quot;: &quot;places&quot;,</span>
+<span class="d-add">+    // `minz` is a LEAFLET zoom (the units used by CONFIG.maxZoom, map URLs and</span>
+<span class="d-add">+    // the builder); MapLibre drives its camera one level lower, hence the +1.</span>
+<span class="d-add">+    filter: [&quot;&lt;=&quot;, [&quot;get&quot;, &quot;minz&quot;], [&quot;+&quot;, [&quot;zoom&quot;], 1]],</span>
+<span class="d-add">+    layout: {</span>
+<span class="d-add">+      &quot;text-field&quot;: [&quot;get&quot;, &quot;name&quot;],</span>
+<span class="d-add">+      &quot;text-font&quot;: [PLACE_LABEL_FONT],</span>
+<span class="d-add">+      // Mono is wide, so this runs a little smaller than a sans would.</span>
+<span class="d-add">+      &quot;text-size&quot;: [&quot;interpolate&quot;, [&quot;linear&quot;], [&quot;zoom&quot;], 11, 9.5, 15, 10.5, 18, 12],</span>
+<span class="d-add">+      // Wrap width is in characters, and mono means characters are uniformly</span>
+<span class="d-add">+      // wide — 9 turned &quot;New York Institute of Technology&quot; into a three-line</span>
+<span class="d-add">+      // clump. 11 keeps most names to two lines without widening the footprint</span>
+<span class="d-add">+      // enough to start losing collisions.</span>
+<span class="d-add">+      &quot;text-max-width&quot;: 11,</span>
+<span class="d-add">+      &quot;text-line-height&quot;: 1.1,</span>
+<span class="d-add">+      &quot;text-letter-spacing&quot;: 0.01,</span>
+<span class="d-add">+      // Keeps labels from crowding each other into an unreadable clump — the</span>
+<span class="d-add">+      // last line of defence after the builder&#x27;s grid thinning.</span>
+<span class="d-add">+      &quot;text-padding&quot;: 6,</span>
+<span class="d-add">+      // Lower sorts first and wins placement. `minz` IS the importance</span>
+<span class="d-add">+      // ranking: the builder reveals a POI at the earliest zoom its rank can</span>
+<span class="d-add">+      // claim, so an early-revealing landmark outranks a late-revealing deli</span>
+<span class="d-add">+      // without shipping a separate rank property.</span>
+<span class="d-add">+      &quot;symbol-sort-key&quot;: [&quot;get&quot;, &quot;minz&quot;],</span>
+<span class="d-add">+    },</span>
+<span class="d-add">+    paint: {</span>
+<span class="d-add">+      &quot;text-color&quot;: colorByCategory,</span>
+<span class="d-add">+      // Halo in the basemap&#x27;s own paper/ink so a label stays readable over a</span>
+<span class="d-add">+      // saturated heat block — the contrast control the raster label overlay</span>
+<span class="d-add">+      // above it doesn&#x27;t get to have.</span>
+<span class="d-add">+      &quot;text-halo-color&quot;: mapStyle.base,</span>
+<span class="d-add">+      &quot;text-halo-width&quot;: 1.5,</span>
+<span class="d-add">+      &quot;text-halo-blur&quot;: 0.3,</span>
+<span class="d-add">+    },</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+  dlog(&quot;maplibre&quot;, &quot;place labels added&quot;, url);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> function buildStyle(</span>
+<span class="d-ctx">   _graphTilesUrl: string,</span>
+<span class="d-ctx">   blockTilesUrl: string,</span>
+<span class="d-hunk">@@ -304,7 +382,11 @@ function buildStyle(</span>
+<span class="d-ctx">         paint: { &quot;raster-opacity&quot;: mapStyle.labelOpacity },</span>
+<span class="d-ctx">       },</span>
+<span class="d-ctx">     ],</span>
+<span class="d-del">-    glyphs: &quot;https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf&quot;,</span>
+<span class="d-add">+    // Self-hosted SDF glyphs (client-react/public/fonts, baked by</span>
+<span class="d-add">+    // `npm run build:glyphs`). This used to point at demotiles.maplibre.org —</span>
+<span class="d-add">+    // fine while nothing drew text, but the place labels below make it a</span>
+<span class="d-add">+    // load-bearing dependency on MapLibre&#x27;s DEMO server.</span>
+<span class="d-add">+    glyphs: &quot;/fonts/{fontstack}/{range}.pbf&quot;,</span>
+<span class="d-ctx">   };</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -344,6 +426,11 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">         zoom: CONFIG.initialView.zoom - LEAFLET_TO_MAPLIBRE_ZOOM,</span>
+<span class="d-ctx">         interactive: false,</span>
+<span class="d-ctx">         attributionControl: false,</span>
+<span class="d-add">+        // Red Hat Mono has no CJK coverage, and baking those ranges as SDF</span>
+<span class="d-add">+        // glyphs would be megabytes. This draws CJK/kana/hangul from a system</span>
+<span class="d-add">+        // font at runtime instead — without it every Chinatown shop name would</span>
+<span class="d-add">+        // render as nothing at all.</span>
+<span class="d-add">+        localIdeographFontFamily: &quot;sans-serif&quot;,</span>
+<span class="d-ctx">       });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       map.on(&quot;error&quot;, (e) =&gt; {</span>
+<span class="d-hunk">@@ -357,6 +444,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">         debugState(&quot;maplibreLoaded&quot;, true);</span>
+<span class="d-ctx">         onReady?.(true);</span>
+<span class="d-ctx">         rebindBlockTiles(map);</span>
+<span class="d-add">+        addPlaceLabels(map, mapStyle);</span>
+<span class="d-ctx">       });</span>
+<span class="d-ctx">       debugState(&quot;maplibreLoaded&quot;, false);</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/config.ts</span>
+            <span class="stat"><span class="d-add">+18</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · runtime config</span>
+        <span class="ctx-sum">Per-city camera, bounds, zooms and tile URLs, rebound at bootstrap from the /api/maps payload</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">config.ts</span>
+        <span class="ctx-sum">~180 LOC — the CONFIG object, the CityConfig shape, applyCityConfig</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">env detection / dev API base</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">CONFIG: camera, bounds, zooms</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">CONFIG: graphTilesUrl / blockTilesUrl / blockTiles</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">CONFIG.placeTilesUrl</span><span class="ol-sum">new — null until the city advertises labels</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">BlockTilesConfig / CityConfig</span><span class="ol-sum">+placesVersion</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">applyCityConfig</span><span class="ol-sum">+places path with the ?v= cache-buster</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>placeTilesUrl stays null when placesVersion is absent, so a city without the artifact adds no layer at all rather than a source that 404s on every pan</li><li>?v=&lt;mtime&gt; follows the same discipline as blocks.pmtiles: rebuilt labels must never be read through week-old cached byte ranges of the previous build</li><li>Dev resolves against devApiBase (Flask :5001) and prod against a relative path, matching every other tile URL here</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/config.ts b/client-react/src/config.ts</span>
+<span class="d-meta">index 02bbc2e..0d1215c 100644</span>
+<span class="d-meta">--- a/client-react/src/config.ts</span>
+<span class="d-meta">+++ b/client-react/src/config.ts</span>
+<span class="d-hunk">@@ -86,6 +86,11 @@ export const CONFIG = {</span>
+<span class="d-ctx">   // applyCityConfig(); while null, MapLibre falls back to blockTilesUrl.</span>
+<span class="d-ctx">   blockTiles: null as BlockTilesConfig | null,</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // Place/business label tiles. Null until applyCityConfig() sees the city</span>
+<span class="d-add">+  // advertise a placesVersion — cities without the artifact get no label</span>
+<span class="d-add">+  // layer at all rather than a source that 404s.</span>
+<span class="d-add">+  placeTilesUrl: null as string | null,</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   // Leaflet behaviors</span>
+<span class="d-ctx">   preferCanvas: true,</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -130,6 +135,9 @@ export interface CityConfig {</span>
+<span class="d-ctx">   /** z/x/y block-tile source; null/absent when the city ships no block</span>
+<span class="d-ctx">    *  artifacts (or the server predates the endpoint). */</span>
+<span class="d-ctx">   blockTiles?: BlockTilesConfig | null;</span>
+<span class="d-add">+  /** Cache-buster for places.pmtiles (server: file mtime); null/absent when</span>
+<span class="d-add">+   *  the city ships no place-label artifact. */</span>
+<span class="d-add">+  placesVersion?: number | null;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /**</span>
+<span class="d-hunk">@@ -138,8 +146,8 @@ export interface CityConfig {</span>
+<span class="d-ctx">  * read the active city&#x27;s values. Pan limits get generous padding around the bbox.</span>
+<span class="d-ctx">  */</span>
+<span class="d-ctx"> export function applyCityConfig(city: CityConfig): void {</span>
+<span class="d-del">-  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath, blocksVersion, blockTiles } =</span>
+<span class="d-del">-    city;</span>
+<span class="d-add">+  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath, blocksVersion, blockTiles,</span>
+<span class="d-add">+    placesVersion } = city;</span>
+<span class="d-ctx">   CONFIG.initialView = { lat: center.lat, lon: center.lon, zoom: defaultZoom };</span>
+<span class="d-ctx">   CONFIG.mappedBounds = { sw: { ...bounds.sw }, ne: { ...bounds.ne } };</span>
+<span class="d-ctx">   CONFIG.nycBounds = {</span>
+<span class="d-hunk">@@ -155,6 +163,14 @@ export function applyCityConfig(city: CityConfig): void {</span>
+<span class="d-ctx">     const blocksPath = tilesPath.replace(&quot;graph.pmtiles&quot;, &quot;blocks.pmtiles&quot;)</span>
+<span class="d-ctx">       + (blocksVersion ? `?v=${blocksVersion}` : &quot;&quot;);</span>
+<span class="d-ctx">     CONFIG.blockTilesUrl = isLocalDev ? `${devApiBase}${blocksPath}` : blocksPath;</span>
+<span class="d-add">+    // Same ?v= discipline as the blocks archive: rebuilt labels must never be</span>
+<span class="d-add">+    // read through week-old cached byte ranges of the previous build.</span>
+<span class="d-add">+    const placesPath = placesVersion</span>
+<span class="d-add">+      ? tilesPath.replace(&quot;graph.pmtiles&quot;, &quot;places.pmtiles&quot;) + `?v=${placesVersion}`</span>
+<span class="d-add">+      : null;</span>
+<span class="d-add">+    CONFIG.placeTilesUrl = placesPath</span>
+<span class="d-add">+      ? (isLocalDev ? `${devApiBase}${placesPath}` : placesPath)</span>
+<span class="d-add">+      : null;</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx">   // z/x/y tile template — same devHost rule as the other API URLs (absolute to</span>
+<span class="d-ctx">   // Flask :5001 in dev, relative behind nginx in prod).</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/mapStyles.ts</span>
+            <span class="stat"><span class="d-add">+29</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · map identity</span>
+        <span class="ctx-sum">The visual identity of a map: two-color representation, basemap tiles, heat ramp, and now the label overlay + POI palette</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">mapStyles.ts</span>
+        <span class="ctx-sum">~410 LOC — MapStyle interface, tile constants, the eight styles, ramp sampling helpers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Basemap / HeatRamp types</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">MapStyle interface</span><span class="ol-sum">+2 fields — labelTileUrl, labelOpacity</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">TILE_DARK / TILE_LIGHT</span><span class="ol-sum">unchanged — the nolabels basemaps</span></li><li class="changed"><span class="ol-label">TILE_*_LABELS + LABEL_OPACITY_*</span><span class="ol-sum">new — the labels-only companions and their strength</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">DARK_WARM / darkStyle / lightStyle</span><span class="ol-sum">+2 lines each — wire the label tiles into every style</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">MAP_STYLES (8 styles)</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">POI_COLORS</span><span class="ol-sum">new — the four label categories, one palette per basemap</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">maplibreRasterTiles / maplibreLabelTiles</span><span class="ol-sum">refactored onto a shared expandTileTemplate</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">heatTip / heatGradientCss / ramp sampling</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>labelOpacity is per-basemap because the two label rasters are not equally loud: CARTO&#x27;s dark labels are light grey on near-black, its light ones near-black slate on paper</li><li>Dark stays at 1.0 — a raster overlay has no halo, so opacity is the ONLY contrast control, and under 1.0 the street names vanish over saturated heat blocks</li><li>Light can afford 0.75 because those styles blend heat by multiply, darkening the paper around the text rather than lighting up behind it</li><li>POI_COLORS is keyed by basemap, NOT by style id — colour coding is only worth having if it survives switching maps</li><li>No green category: parks come from the CARTO raster underneath, in its own green, so adding one here printed every park name twice</li><li>Retail is the most neutral hue on purpose — it is the biggest category and a tinted deli on every corner is confetti</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/mapStyles.ts b/client-react/src/mapStyles.ts</span>
+<span class="d-meta">index 4a3fedd..3de03be 100644</span>
+<span class="d-meta">--- a/client-react/src/mapStyles.ts</span>
+<span class="d-meta">+++ b/client-react/src/mapStyles.ts</span>
+<span class="d-hunk">@@ -266,6 +266,35 @@ export const SELECTABLE_MAP_STYLES: { id: string; label: string }[] = [</span>
+<span class="d-ctx">   { id: &quot;plum&quot;, label: &quot;Culture (purple)&quot; },</span>
+<span class="d-ctx"> ];</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Place-label text colors, keyed by the `cat` property each POI carries from</span>
+<span class="d-add">+ * build_place_labels.py. One palette per basemap rather than one per style:</span>
+<span class="d-add">+ * color coding only pays off if it&#x27;s learnable, and re-hueing the categories</span>
+<span class="d-add">+ * for each of the eight map styles would mean re-learning them on every map.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Retail is deliberately the most neutral of the four. It is by far the largest</span>
+<span class="d-add">+ * category, so tinting every deli and bank would turn the deep zooms into</span>
+<span class="d-add">+ * confetti — the color is there to make transit and civic anchors findable at a</span>
+<span class="d-add">+ * glance, not to decorate.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * There is no green here: parks and squares are labelled by the CARTO raster</span>
+<span class="d-add">+ * underneath, in its own green, and the builder drops them for that reason.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export const POI_COLORS: Record&lt;Basemap, Record&lt;string, string&gt;&gt; = {</span>
+<span class="d-add">+  dark: {</span>
+<span class="d-add">+    transit: &quot;#7FB2FF&quot;,</span>
+<span class="d-add">+    civic: &quot;#E3BE79&quot;,</span>
+<span class="d-add">+    culture: &quot;#C49BDE&quot;,</span>
+<span class="d-add">+    retail: &quot;#BFBAB2&quot;,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  light: {</span>
+<span class="d-add">+    transit: &quot;#2C5FB4&quot;,</span>
+<span class="d-add">+    civic: &quot;#8F5E12&quot;,</span>
+<span class="d-add">+    culture: &quot;#743C93&quot;,</span>
+<span class="d-add">+    retail: &quot;#5A554D&quot;,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+};</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /** Resolve a style id to its MapStyle, falling back to the default. */</span>
+<span class="d-ctx"> export function getMapStyle(id: string): MapStyle {</span>
+<span class="d-ctx">   return MAP_STYLES[id] ?? DEFAULT_MAP_STYLE;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">docker-compose.yml</span>
+            <span class="stat"><span class="d-add">+3</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill on">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Dev · docker stack</span>
+        <span class="ctx-sum">Backing services plus the osm-refresh sidecar that builds graphs and tiles on first start and weekly after</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">docker-compose.yml</span>
+        <span class="ctx-sum">~140 lines — redis, postgres, osrm, flask, nginx, osm-refresh</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">redis / postgres / osrm / flask / nginx</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">osm-refresh: first-run build</span><span class="ol-sum">+build_place_labels --all</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">osm-refresh: weekly loop</span><span class="ol-sum">+build_place_labels --all --force</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Both paths are patched: a fresh checkout gets labels on first start, and the Sunday refresh rebuilds them against the new extract</li><li>--force on the weekly path matches the graph/tile rebuild — a refreshed PBF must not be read through a stale artifact</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docker-compose.yml b/docker-compose.yml</span>
+<span class="d-meta">index 853494e..b1db0b8 100644</span>
+<span class="d-meta">--- a/docker-compose.yml</span>
+<span class="d-meta">+++ b/docker-compose.yml</span>
+<span class="d-hunk">@@ -76,6 +76,8 @@ services:</span>
+<span class="d-ctx">         python refresh_osm.py --all 2&gt;&amp;1</span>
+<span class="d-ctx">         echo &#x27;Building per-city PMTiles (dev profile)...&#x27;</span>
+<span class="d-ctx">         python build_pmtiles.py --all --profile dev 2&gt;&amp;1</span>
+<span class="d-add">+        echo &#x27;Building per-city place labels...&#x27;</span>
+<span class="d-add">+        python build_place_labels.py --all 2&gt;&amp;1</span>
+<span class="d-ctx">         echo &#x27;Initial graph + tile build complete&#x27;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         # Weekly refresh loop</span>
+<span class="d-hunk">@@ -87,6 +89,7 @@ services:</span>
+<span class="d-ctx">             echo &#x27;Starting weekly OSM refresh...&#x27;</span>
+<span class="d-ctx">             python refresh_osm.py --all --force 2&gt;&amp;1</span>
+<span class="d-ctx">             python build_pmtiles.py --all --profile dev --force 2&gt;&amp;1</span>
+<span class="d-add">+            python build_place_labels.py --all --force 2&gt;&amp;1</span>
+<span class="d-ctx">             # Sleep for 1 hour to avoid running again</span>
+<span class="d-ctx">             sleep 3600</span>
+<span class="d-ctx">           fi</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/build_place_labels.py</span>
+            <span class="stat"><span class="d-add">+507</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Server · label tile builder</span>
+        <span class="ctx-sum">New sibling of build_pmtiles.py: turns a city&#x27;s OSM extract into the place/business label tileset the client draws</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_place_labels.py</span>
+        <span class="ctx-sum">~400 LOC — allowlist, classification, dedup, grid thinning, MVT/PMTiles encode</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module docstring</span><span class="ol-sum">new — why an allowlist, why grid thinning, the zoom-unit convention</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">zoom + thinning constants</span><span class="ol-sum">new — tile band, label band, GRID_OFFSET, DEDUP_METERS</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CAT_* categories</span><span class="ol-sum">new — transit / civic / culture / retail (no green, by design)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">KINDS allowlist</span><span class="ol-sum">new — (osm key, value) → category, rank, floor zoom</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">SUBWAY_STATION override</span><span class="ol-sum">new — the demotion for stops sharing Grand Central&#x27;s tag</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">classify / normalize_name</span><span class="ol-sum">new — tag priority, notability bonus, name folding</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">PoiCollector (osmium handler)</span><span class="ol-sum">new — nodes + closed-way centroids inside the city bbox</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dedup</span><span class="ol-sum">new — same-name cluster collapse within 400m</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">assign_zooms</span><span class="ol-sum">new — the grid-thinning pass that sets each label&#x27;s reveal zoom</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">build_city_place_labels / _collect_tiles</span><span class="ol-sum">new — bucket to tiles, encode, atomic replace</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main (CLI)</span><span class="ol-sum">new — --city / --all / --force, mtime freshness</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The allowlist is the whole design: 210,003 named features in the NYC extract become 34,349. The four noisiest tags — platforms, named rail segments, abandoned track, pitches — are not places at all</li><li>rank breaks collisions; floor is the earliest zoom a kind may EVER appear; assign_zooms decides the zoom it actually does</li><li>assign_zooms lets already-placed labels re-claim their cell before newcomers, so zooming in adds detail BETWEEN existing labels instead of stacking on top of them</li><li>GRID_OFFSET=0 (one cell per tile, ~256 CSS px). At 1 the city view came out at ~50 labels and read as a directory</li><li>MAX_LABEL_ZOOM=21 matches CONFIG.maxZoom: every unplaced POI falls back to the last zoom, and a ceiling of 19 dumped 60% of the set into one ungoverned band</li><li>SUBWAY_STATION returns before the wikidata bonus — nearly every NYC stop has one and would otherwise claim back the rank the demotion just removed</li><li>Point labels are never clipped by a tile edge (MapLibre draws glyphs that overflow the tile holding their anchor), so each POI goes into exactly ONE tile per zoom and no buffer is needed</li><li>Stable feature ids let MapLibre&#x27;s cross-tile index recognise the same label across adjacent tiles instead of drawing it twice</li><li>Multipolygon relations are skipped: assembling areas costs a second full pass over a 500MB extract, and the features that matter are mapped as ways</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/build_place_labels.py b/server/build_place_labels.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..ff0f265</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/build_place_labels.py</span>
+<span class="d-hunk">@@ -0,0 +1,507 @@</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+Build per-city place-label PMTiles (business and landmark names) from the OSM</span>
+<span class="d-add">+PBF each city already ships.</span>
+<span class="d-add">+</span>
+<span class="d-add">+The basemap&#x27;s CARTO label tiles carry streets, neighborhoods and water — but no</span>
+<span class="d-add">+businesses or civic landmarks at any zoom. This builder fills that gap from</span>
+<span class="d-add">+`osm_data/&lt;city&gt;/source.osm.pbf`, the same extract the walk graph and OSRM are</span>
+<span class="d-add">+built from, so a label and the street it sits on always come from one snapshot.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Output: osm_data/&lt;city&gt;/places.pmtiles, served by the existing</span>
+<span class="d-add">+/api/tiles/&lt;city&gt;/*.pmtiles route (nginx caches it like the other archives).</span>
+<span class="d-add">+</span>
+<span class="d-add">+    python build_place_labels.py --all</span>
+<span class="d-add">+    python build_place_labels.py --city nyc --force</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Why a curated allowlist</span>
+<span class="d-add">+</span>
+<span class="d-add">+Dumping every named OSM feature is what makes a label layer feel broken. The</span>
+<span class="d-add">+five most common named POI tags in the NYC extract are, in order:</span>
+<span class="d-add">+</span>
+<span class="d-add">+    15688  public_transport=platform     every subway platform, one per track</span>
+<span class="d-add">+    14825  amenity=restaurant</span>
+<span class="d-add">+    10675  railway=rail                  named track segments, dozens per line</span>
+<span class="d-add">+     8613  amenity=place_of_worship</span>
+<span class="d-add">+     4950  railway=abandoned             track that no longer exists</span>
+<span class="d-add">+</span>
+<span class="d-add">+Four of those five are noise. KINDS below is an explicit allowlist — anything</span>
+<span class="d-add">+not in it is dropped, so new junk tags can never leak in.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Why labels appear when they do</span>
+<span class="d-add">+</span>
+<span class="d-add">+Every kind gets a `rank` (who wins a collision) and a floor zoom. The zoom a</span>
+<span class="d-add">+label ACTUALLY appears at is then computed by grid thinning (see</span>
+<span class="d-add">+`assign_zooms`): at each zoom the map is divided into cells and only the</span>
+<span class="d-add">+highest-ranked unplaced POI in a cell earns that zoom. Labels already placed</span>
+<span class="d-add">+re-claim their cell first, so zooming in adds detail between existing labels</span>
+<span class="d-add">+instead of piling text on top of it. This is what keeps a dense commercial</span>
+<span class="d-add">+strip from turning into a wall of text — the cap is geometric, so it holds for</span>
+<span class="d-add">+Midtown and for Canarsie alike without any per-neighborhood tuning.</span>
+<span class="d-add">+</span>
+<span class="d-add">+## Zoom units</span>
+<span class="d-add">+</span>
+<span class="d-add">+`minz` on each feature is a LEAFLET zoom, matching CONFIG.maxZoom, map URLs and</span>
+<span class="d-add">+every other zoom number in this codebase. MapLibre drives its camera one level</span>
+<span class="d-add">+lower (512px vs 256px tile convention), so the client filter compares against</span>
+<span class="d-add">+`zoom + 1`. Tile z/x/y addresses below are MapLibre/mercantile zooms.</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import argparse</span>
+<span class="d-add">+import json</span>
+<span class="d-add">+import logging</span>
+<span class="d-add">+import math</span>
+<span class="d-add">+import os</span>
+<span class="d-add">+import sys</span>
+<span class="d-add">+import unicodedata</span>
+<span class="d-add">+</span>
+<span class="d-add">+import mapbox_vector_tile</span>
+<span class="d-add">+import mercantile</span>
+<span class="d-add">+import osmium</span>
+<span class="d-add">+from pmtiles.tile import zxy_to_tileid, TileType, Compression</span>
+<span class="d-add">+from pmtiles.writer import Writer</span>
+<span class="d-add">+</span>
+<span class="d-add">+from cities import CITIES, City, get_city</span>
+<span class="d-add">+</span>
+<span class="d-add">+logging.basicConfig(level=logging.INFO)</span>
+<span class="d-add">+logger = logging.getLogger(__name__)</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Tile zoom band (mercantile/MapLibre zooms). The client overzooms past the top</span>
+<span class="d-add">+# of the band, so the maxzoom tile carries every label regardless of its minz.</span>
+<span class="d-add">+MIN_TILE_ZOOM = 11</span>
+<span class="d-add">+MAX_TILE_ZOOM = 15</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Leaflet zoom band the thinning runs over. 11 is roughly &quot;whole city on</span>
+<span class="d-add">+# screen&quot;; 21 is CONFIG.maxZoom. Running all the way to the app&#x27;s real maximum</span>
+<span class="d-add">+# matters: every POI the grid never places falls back to the last zoom, so a</span>
+<span class="d-add">+# ceiling of 19 dumped 20k labels — 60% of the set — into one ungoverned band.</span>
+<span class="d-add">+MIN_LABEL_ZOOM = 11</span>
+<span class="d-add">+MAX_LABEL_ZOOM = 21</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Thinning cell size, as tile-zoom levels below the label zoom. 0 means one cell</span>
+<span class="d-add">+# per tile — about 256 CSS px on screen — so a 1568x774 viewport admits roughly</span>
+<span class="d-add">+# 18 newly-revealed labels per zoom level, plus the handful inherited from</span>
+<span class="d-add">+# coarser zooms. At 1 (quarter-tile cells) the city-scale view came out at ~50</span>
+<span class="d-add">+# labels and read as a directory, not a map.</span>
+<span class="d-add">+GRID_OFFSET = 0</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Two same-named POIs closer than this are the same place mapped twice (NYC</span>
+<span class="d-add">+# subway complexes carry a `railway=station` node per line, so &quot;14 St&quot; alone</span>
+<span class="d-add">+# appears five times within a block). Keep the highest-ranked one.</span>
+<span class="d-add">+DEDUP_METERS = 400.0</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Categories drive label COLOR in the client (see POI_COLORS in mapStyles.ts).</span>
+<span class="d-add">+# Deliberately few: colors have to be learnable at a glance, and every extra hue</span>
+<span class="d-add">+# is one more thing competing with the vote heat.</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# There is no green-space category, and that is a division of labor, not an</span>
+<span class="d-add">+# oversight. The basemap&#x27;s CARTO label raster already draws parks, gardens and</span>
+<span class="d-add">+# squares in green caps, and it is drawn UNDER this layer — so labelling them</span>
+<span class="d-add">+# here too printed &quot;Grand Street Garden&quot; twice, once in each cartography, which</span>
+<span class="d-add">+# is exactly the kind of thing that reads as a broken map. Green space belongs</span>
+<span class="d-add">+# to the basemap; buildings and businesses belong here. Verified against CARTO&#x27;s</span>
+<span class="d-add">+# own tiles: it labels no stadium, hospital or university, so everything below</span>
+<span class="d-add">+# is genuinely unclaimed.</span>
+<span class="d-add">+CAT_TRANSIT = &quot;transit&quot;</span>
+<span class="d-add">+CAT_CIVIC = &quot;civic&quot;</span>
+<span class="d-add">+CAT_CULTURE = &quot;culture&quot;</span>
+<span class="d-add">+CAT_RETAIL = &quot;retail&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+# (osm_key, osm_value) -&gt; (category, rank, floor zoom in LEAFLET zoom units).</span>
+<span class="d-add">+# rank breaks collisions: higher wins the cell and the pixel.</span>
+<span class="d-add">+KINDS: dict[tuple[str, str], tuple[str, int, int]] = {</span>
+<span class="d-add">+    # ── Transit ────────────────────────────────────────────────────────────</span>
+<span class="d-add">+    # Stations only. Platforms and stop positions are per-track duplicates of a</span>
+<span class="d-add">+    # station that is already labelled, and named track segments are not places.</span>
+<span class="d-add">+    (&quot;aeroway&quot;, &quot;aerodrome&quot;): (CAT_TRANSIT, 98, 11),</span>
+<span class="d-add">+    # Mainline terminals and commuter-rail stops: Penn, Grand Central, the LIRR</span>
+<span class="d-add">+    # and Metro-North. Genuinely city-scale landmarks.</span>
+<span class="d-add">+    (&quot;railway&quot;, &quot;station&quot;): (CAT_TRANSIT, 90, 13),</span>
+<span class="d-add">+    (&quot;railway&quot;, &quot;halt&quot;): (CAT_TRANSIT, 70, 15),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;ferry_terminal&quot;): (CAT_TRANSIT, 85, 14),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;bus_station&quot;): (CAT_TRANSIT, 80, 14),</span>
+<span class="d-add">+    (&quot;public_transport&quot;, &quot;station&quot;): (CAT_TRANSIT, 74, 14),</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # ── Venues ─────────────────────────────────────────────────────────────</span>
+<span class="d-add">+    # What&#x27;s left of `leisure` once green space goes to the basemap: these are</span>
+<span class="d-add">+    # buildings you go into, not open space, so they carry a venue color rather</span>
+<span class="d-add">+    # than a park one.</span>
+<span class="d-add">+    (&quot;leisure&quot;, &quot;stadium&quot;): (CAT_CULTURE, 88, 13),</span>
+<span class="d-add">+    (&quot;leisure&quot;, &quot;sports_centre&quot;): (CAT_RETAIL, 58, 16),</span>
+<span class="d-add">+    (&quot;leisure&quot;, &quot;fitness_centre&quot;): (CAT_RETAIL, 45, 17),</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # ── Civic &amp; education ──────────────────────────────────────────────────</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;university&quot;): (CAT_CIVIC, 92, 13),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;college&quot;): (CAT_CIVIC, 80, 14),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;hospital&quot;): (CAT_CIVIC, 84, 14),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;townhall&quot;): (CAT_CIVIC, 76, 15),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;courthouse&quot;): (CAT_CIVIC, 72, 15),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;library&quot;): (CAT_CIVIC, 68, 15),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;community_centre&quot;): (CAT_CIVIC, 56, 16),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;school&quot;): (CAT_CIVIC, 54, 16),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;place_of_worship&quot;): (CAT_CIVIC, 48, 16),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;post_office&quot;): (CAT_CIVIC, 52, 17),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;fire_station&quot;): (CAT_CIVIC, 50, 17),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;police&quot;): (CAT_CIVIC, 50, 17),</span>
+<span class="d-add">+    (&quot;office&quot;, &quot;government&quot;): (CAT_CIVIC, 44, 17),</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # ── Culture ────────────────────────────────────────────────────────────</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;zoo&quot;): (CAT_CULTURE, 90, 13),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;aquarium&quot;): (CAT_CULTURE, 90, 13),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;theme_park&quot;): (CAT_CULTURE, 88, 13),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;museum&quot;): (CAT_CULTURE, 85, 14),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;attraction&quot;): (CAT_CULTURE, 80, 14),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;theatre&quot;): (CAT_CULTURE, 70, 15),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;gallery&quot;): (CAT_CULTURE, 58, 16),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;cinema&quot;): (CAT_CULTURE, 60, 16),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;arts_centre&quot;): (CAT_CULTURE, 60, 16),</span>
+<span class="d-add">+    (&quot;historic&quot;, &quot;monument&quot;): (CAT_CULTURE, 62, 16),</span>
+<span class="d-add">+    (&quot;historic&quot;, &quot;memorial&quot;): (CAT_CULTURE, 44, 17),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;artwork&quot;): (CAT_CULTURE, 38, 18),</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # ── Retail, food &amp; lodging ─────────────────────────────────────────────</span>
+<span class="d-add">+    # The floor zooms here are deep on purpose: these are the labels that tell</span>
+<span class="d-add">+    # you which block you&#x27;re on, not which neighborhood, and they only earn</span>
+<span class="d-add">+    # their space once the heat is already resolved to individual streets.</span>
+<span class="d-add">+    (&quot;shop&quot;, &quot;mall&quot;): (CAT_RETAIL, 72, 15),</span>
+<span class="d-add">+    (&quot;shop&quot;, &quot;department_store&quot;): (CAT_RETAIL, 66, 16),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;marketplace&quot;): (CAT_RETAIL, 62, 16),</span>
+<span class="d-add">+    (&quot;shop&quot;, &quot;supermarket&quot;): (CAT_RETAIL, 58, 17),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;hotel&quot;): (CAT_RETAIL, 56, 17),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;pharmacy&quot;): (CAT_RETAIL, 38, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;bank&quot;): (CAT_RETAIL, 34, 18),</span>
+<span class="d-add">+    (&quot;shop&quot;, &quot;books&quot;): (CAT_RETAIL, 32, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;restaurant&quot;): (CAT_RETAIL, 30, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;cafe&quot;): (CAT_RETAIL, 30, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;bar&quot;): (CAT_RETAIL, 30, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;pub&quot;): (CAT_RETAIL, 30, 18),</span>
+<span class="d-add">+    (&quot;shop&quot;, &quot;bakery&quot;): (CAT_RETAIL, 28, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;fast_food&quot;): (CAT_RETAIL, 22, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;ice_cream&quot;): (CAT_RETAIL, 22, 18),</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Tag keys worth consulting, in priority order — the first one that resolves to</span>
+<span class="d-add">+# a KINDS entry wins. Ordered so a feature tagged both `tourism=hotel` and</span>
+<span class="d-add">+# `amenity=restaurant` lands on the more specific/important of the two.</span>
+<span class="d-add">+TAG_KEYS = (&quot;aeroway&quot;, &quot;railway&quot;, &quot;public_transport&quot;, &quot;leisure&quot;, &quot;tourism&quot;,</span>
+<span class="d-add">+            &quot;historic&quot;, &quot;amenity&quot;, &quot;shop&quot;, &quot;office&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+# A place the wider world has heard of outranks its generic peers, which is what</span>
+<span class="d-add">+# lifts Katz&#x27;s above the deli next door without a hand-maintained landmark list.</span>
+<span class="d-add">+WIKI_RANK_BONUS = 25</span>
+<span class="d-add">+</span>
+<span class="d-add">+# A subway stop is tagged `railway=station` exactly like Grand Central, but NYC</span>
+<span class="d-add">+# has 470-odd of them and most are named after the street above (&quot;5th Avenue&quot;,</span>
+<span class="d-add">+# &quot;72nd Street&quot;). At mainline rank they carpeted the city-scale view, and a blue</span>
+<span class="d-add">+# &quot;5th Avenue&quot; sitting beside the basemap&#x27;s own &quot;5th Avenue&quot; street label reads</span>
+<span class="d-add">+# as a rendering bug rather than a station. Demoted to a neighborhood-scale</span>
+<span class="d-add">+# label, which is the zoom at which knowing your nearest stop actually helps.</span>
+<span class="d-add">+SUBWAY_STATION = (CAT_TRANSIT, 64, 15)</span>
+<span class="d-add">+SUBWAY_STATION_VALUES = {&quot;subway&quot;, &quot;light_rail&quot;, &quot;monorail&quot;}</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+class Poi:</span>
+<span class="d-add">+    __slots__ = (&quot;lat&quot;, &quot;lon&quot;, &quot;name&quot;, &quot;cat&quot;, &quot;rank&quot;, &quot;floor&quot;, &quot;minz&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def __init__(self, lat, lon, name, cat, rank, floor):</span>
+<span class="d-add">+        self.lat = lat</span>
+<span class="d-add">+        self.lon = lon</span>
+<span class="d-add">+        self.name = name</span>
+<span class="d-add">+        self.cat = cat</span>
+<span class="d-add">+        self.rank = rank</span>
+<span class="d-add">+        self.floor = floor</span>
+<span class="d-add">+        self.minz = 0</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def classify(tags) -&gt; tuple[str, int, int] | None:</span>
+<span class="d-add">+    &quot;&quot;&quot;(category, rank, floor zoom) for a feature&#x27;s tags, or None to drop it.&quot;&quot;&quot;</span>
+<span class="d-add">+    for key in TAG_KEYS:</span>
+<span class="d-add">+        value = tags.get(key)</span>
+<span class="d-add">+        if value is None:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        entry = KINDS.get((key, value))</span>
+<span class="d-add">+        if entry is None:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        if key == &quot;railway&quot; and value == &quot;station&quot; and \</span>
+<span class="d-add">+                tags.get(&quot;station&quot;) in SUBWAY_STATION_VALUES:</span>
+<span class="d-add">+            # Returned as-is: nearly every NYC subway stop carries a wikidata</span>
+<span class="d-add">+            # tag, so letting the notability bonus apply here would hand back</span>
+<span class="d-add">+            # the mainline rank the demotion just took away.</span>
+<span class="d-add">+            return SUBWAY_STATION</span>
+<span class="d-add">+        cat, rank, floor = entry</span>
+<span class="d-add">+        if &quot;wikidata&quot; in tags or &quot;wikipedia&quot; in tags:</span>
+<span class="d-add">+            rank += WIKI_RANK_BONUS</span>
+<span class="d-add">+        return cat, rank, floor</span>
+<span class="d-add">+    return None</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def normalize_name(name: str) -&gt; str:</span>
+<span class="d-add">+    &quot;&quot;&quot;Fold a name for dedup: case, accents and punctuation don&#x27;t distinguish</span>
+<span class="d-add">+    two mappings of the same station.&quot;&quot;&quot;</span>
+<span class="d-add">+    folded = unicodedata.normalize(&quot;NFKD&quot;, name).encode(&quot;ascii&quot;, &quot;ignore&quot;).decode()</span>
+<span class="d-add">+    return &quot;&quot;.join(ch for ch in folded.lower() if ch.isalnum())</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+class PoiCollector(osmium.SimpleHandler):</span>
+<span class="d-add">+    &quot;&quot;&quot;Collects allowlisted named POIs. Nodes use their own location; closed</span>
+<span class="d-add">+    ways use the mean of their nodes, which is close enough for a label anchor</span>
+<span class="d-add">+    on a park or campus. Multipolygon relations are skipped — assembling areas</span>
+<span class="d-add">+    costs a second full pass over a 500MB extract, and in practice the features</span>
+<span class="d-add">+    that matter are mapped as ways.&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def __init__(self, bbox):</span>
+<span class="d-add">+        super().__init__()</span>
+<span class="d-add">+        self.south, self.west, self.north, self.east = bbox</span>
+<span class="d-add">+        self.pois: list[Poi] = []</span>
+<span class="d-add">+        self.skipped_unnamed = 0</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def _add(self, tags, lat, lon):</span>
+<span class="d-add">+        if not (self.south &lt;= lat &lt;= self.north and self.west &lt;= lon &lt;= self.east):</span>
+<span class="d-add">+            return</span>
+<span class="d-add">+        name = tags.get(&quot;name&quot;)</span>
+<span class="d-add">+        if not name or len(name) &gt; 60:</span>
+<span class="d-add">+            return</span>
+<span class="d-add">+        entry = classify(tags)</span>
+<span class="d-add">+        if entry is None:</span>
+<span class="d-add">+            return</span>
+<span class="d-add">+        cat, rank, floor = entry</span>
+<span class="d-add">+        self.pois.append(Poi(lat, lon, name, cat, rank, floor))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def node(self, n):</span>
+<span class="d-add">+        if not n.tags:</span>
+<span class="d-add">+            return</span>
+<span class="d-add">+        self._add(n.tags, n.location.lat, n.location.lon)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def way(self, w):</span>
+<span class="d-add">+        if not w.tags or len(w.nodes) &lt; 2:</span>
+<span class="d-add">+            return</span>
+<span class="d-add">+        if classify(w.tags) is None:</span>
+<span class="d-add">+            return</span>
+<span class="d-add">+        lat = lon = 0.0</span>
+<span class="d-add">+        count = 0</span>
+<span class="d-add">+        for node in w.nodes:</span>
+<span class="d-add">+            if not node.location.valid():</span>
+<span class="d-add">+                continue</span>
+<span class="d-add">+            lat += node.location.lat</span>
+<span class="d-add">+            lon += node.location.lon</span>
+<span class="d-add">+            count += 1</span>
+<span class="d-add">+        if count:</span>
+<span class="d-add">+            self._add(w.tags, lat / count, lon / count)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def dedup(pois: list[Poi]) -&gt; list[Poi]:</span>
+<span class="d-add">+    &quot;&quot;&quot;Drop same-named POIs within DEDUP_METERS of a higher-ranked twin.&quot;&quot;&quot;</span>
+<span class="d-add">+    # Highest rank first so the survivor of each cluster is the best-ranked one.</span>
+<span class="d-add">+    pois.sort(key=lambda p: (-p.rank, p.name, p.lat, p.lon))</span>
+<span class="d-add">+    # Cell size ~ the dedup radius, so a twin is in this cell or one adjacent.</span>
+<span class="d-add">+    cell_deg = DEDUP_METERS / 111_320.0</span>
+<span class="d-add">+    kept: list[Poi] = []</span>
+<span class="d-add">+    index: dict[tuple[str, int, int], list[Poi]] = {}</span>
+<span class="d-add">+    for poi in pois:</span>
+<span class="d-add">+        key_name = normalize_name(poi.name)</span>
+<span class="d-add">+        cy, cx = int(poi.lat / cell_deg), int(poi.lon / cell_deg)</span>
+<span class="d-add">+        clash = False</span>
+<span class="d-add">+        for dy in (-1, 0, 1):</span>
+<span class="d-add">+            for dx in (-1, 0, 1):</span>
+<span class="d-add">+                for other in index.get((key_name, cy + dy, cx + dx), ()):</span>
+<span class="d-add">+                    if haversine_m(poi.lat, poi.lon, other.lat, other.lon) &lt; DEDUP_METERS:</span>
+<span class="d-add">+                        clash = True</span>
+<span class="d-add">+                        break</span>
+<span class="d-add">+                if clash:</span>
+<span class="d-add">+                    break</span>
+<span class="d-add">+            if clash:</span>
+<span class="d-add">+                break</span>
+<span class="d-add">+        if clash:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        index.setdefault((key_name, cy, cx), []).append(poi)</span>
+<span class="d-add">+        kept.append(poi)</span>
+<span class="d-add">+    return kept</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def haversine_m(lat1, lon1, lat2, lon2) -&gt; float:</span>
+<span class="d-add">+    dlat = math.radians(lat2 - lat1)</span>
+<span class="d-add">+    dlon = math.radians(lon2 - lon1)</span>
+<span class="d-add">+    a = (math.sin(dlat / 2) ** 2</span>
+<span class="d-add">+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))</span>
+<span class="d-add">+         * math.sin(dlon / 2) ** 2)</span>
+<span class="d-add">+    return 6_371_000 * 2 * math.asin(math.sqrt(a))</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def assign_zooms(pois: list[Poi]) -&gt; None:</span>
+<span class="d-add">+    &quot;&quot;&quot;Set each POI&#x27;s `minz` by grid thinning — see the module docstring.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    At every zoom, POIs already placed re-claim their cell before any newcomer</span>
+<span class="d-add">+    is considered. Without that, a z17 winner could land on the exact spot of a</span>
+<span class="d-add">+    z14 landmark and the two would fight for the same pixels forever.</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    pois.sort(key=lambda p: (-p.rank, p.name, p.lat, p.lon))</span>
+<span class="d-add">+    placed: list[Poi] = []</span>
+<span class="d-add">+    for zoom in range(MIN_LABEL_ZOOM, MAX_LABEL_ZOOM + 1):</span>
+<span class="d-add">+        grid_zoom = zoom + GRID_OFFSET</span>
+<span class="d-add">+        occupied = {_cell(p, grid_zoom) for p in placed}</span>
+<span class="d-add">+        for poi in pois:</span>
+<span class="d-add">+            if poi.minz or poi.floor &gt; zoom:</span>
+<span class="d-add">+                continue</span>
+<span class="d-add">+            cell = _cell(poi, grid_zoom)</span>
+<span class="d-add">+            if cell in occupied:</span>
+<span class="d-add">+                continue</span>
+<span class="d-add">+            occupied.add(cell)</span>
+<span class="d-add">+            poi.minz = zoom</span>
+<span class="d-add">+            placed.append(poi)</span>
+<span class="d-add">+    # Anything never placed (its cell was busy at every zoom) still deserves to</span>
+<span class="d-add">+    # exist at the deepest zoom rather than vanish from the map entirely.</span>
+<span class="d-add">+    for poi in pois:</span>
+<span class="d-add">+        if not poi.minz:</span>
+<span class="d-add">+            poi.minz = MAX_LABEL_ZOOM</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _cell(poi: Poi, zoom: int) -&gt; tuple[int, int]:</span>
+<span class="d-add">+    tile = mercantile.tile(poi.lon, poi.lat, zoom)</span>
+<span class="d-add">+    return tile.x, tile.y</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def build_city_place_labels(city: City, output_path: str | None = None) -&gt; str:</span>
+<span class="d-add">+    &quot;&quot;&quot;Build one city&#x27;s places.pmtiles. Returns the output path.&quot;&quot;&quot;</span>
+<span class="d-add">+    output_path = output_path or _output_path_for(city)</span>
+<span class="d-add">+    pbf_path = os.path.join(city.data_dir, &quot;source.osm.pbf&quot;)</span>
+<span class="d-add">+    if not os.path.exists(pbf_path):</span>
+<span class="d-add">+        raise FileNotFoundError(f&quot;no source.osm.pbf for {city.id} at {pbf_path}&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    logger.info(f&quot;[{city.id}] reading POIs from {pbf_path}&quot;)</span>
+<span class="d-add">+    collector = PoiCollector(city.bbox)</span>
+<span class="d-add">+    # locations=True back-fills node coordinates onto ways so closed ways get a</span>
+<span class="d-add">+    # centroid; it is what makes parks and campuses labellable.</span>
+<span class="d-add">+    collector.apply_file(pbf_path, locations=True, idx=&quot;flex_mem&quot;)</span>
+<span class="d-add">+    pois = collector.pois</span>
+<span class="d-add">+    logger.info(f&quot;[{city.id}] {len(pois)} allowlisted named POIs in bbox&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    pois = dedup(pois)</span>
+<span class="d-add">+    logger.info(f&quot;[{city.id}] {len(pois)} after same-name dedup&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    assign_zooms(pois)</span>
+<span class="d-add">+    by_zoom: dict[int, int] = {}</span>
+<span class="d-add">+    for poi in pois:</span>
+<span class="d-add">+        by_zoom[poi.minz] = by_zoom.get(poi.minz, 0) + 1</span>
+<span class="d-add">+    logger.info(f&quot;[{city.id}] labels per reveal zoom: &quot;</span>
+<span class="d-add">+                + &quot;, &quot;.join(f&quot;z{z}={by_zoom[z]}&quot; for z in sorted(by_zoom)))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    tiles = _collect_tiles(pois)</span>
+<span class="d-add">+    logger.info(f&quot;[{city.id}] encoding {len(tiles)} tiles&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    os.makedirs(os.path.dirname(output_path), exist_ok=True)</span>
+<span class="d-add">+    tmp_path = output_path + &quot;.tmp&quot;</span>
+<span class="d-add">+    south, west, north, east = city.bbox</span>
+<span class="d-add">+    with open(tmp_path, &quot;wb&quot;) as f:</span>
+<span class="d-add">+        writer = Writer(f)</span>
+<span class="d-add">+        for (z, x, y), features in sorted(tiles.items()):</span>
+<span class="d-add">+            bounds = mercantile.bounds(mercantile.Tile(x, y, z))</span>
+<span class="d-add">+            quantize = (bounds.west, bounds.south, bounds.east, bounds.north)</span>
+<span class="d-add">+            data = mapbox_vector_tile.encode(</span>
+<span class="d-add">+                [{&quot;name&quot;: &quot;places&quot;, &quot;features&quot;: features}],</span>
+<span class="d-add">+                quantize_bounds=quantize,</span>
+<span class="d-add">+            )</span>
+<span class="d-add">+            writer.write_tile(zxy_to_tileid(z, x, y), data)</span>
+<span class="d-add">+        writer.finalize(</span>
+<span class="d-add">+            header={</span>
+<span class="d-add">+                &quot;tile_type&quot;: TileType.MVT,</span>
+<span class="d-add">+                &quot;tile_compression&quot;: Compression.NONE,</span>
+<span class="d-add">+                &quot;min_zoom&quot;: MIN_TILE_ZOOM,</span>
+<span class="d-add">+                &quot;max_zoom&quot;: MAX_TILE_ZOOM,</span>
+<span class="d-add">+                &quot;min_lon_e7&quot;: int(west * 1e7),</span>
+<span class="d-add">+                &quot;min_lat_e7&quot;: int(south * 1e7),</span>
+<span class="d-add">+                &quot;max_lon_e7&quot;: int(east * 1e7),</span>
+<span class="d-add">+                &quot;max_lat_e7&quot;: int(north * 1e7),</span>
+<span class="d-add">+            },</span>
+<span class="d-add">+            metadata={</span>
+<span class="d-add">+                &quot;name&quot;: f&quot;city-edit-places-{city.id}&quot;,</span>
+<span class="d-add">+                &quot;description&quot;: f&quot;Named places and businesses for {city.name}&quot;,</span>
+<span class="d-add">+                &quot;format&quot;: &quot;pbf&quot;,</span>
+<span class="d-add">+                &quot;type&quot;: &quot;overlay&quot;,</span>
+<span class="d-add">+                &quot;minzoom&quot;: str(MIN_TILE_ZOOM),</span>
+<span class="d-add">+                &quot;maxzoom&quot;: str(MAX_TILE_ZOOM),</span>
+<span class="d-add">+                &quot;bounds&quot;: &quot;,&quot;.join(str(b) for b in (west, south, east, north)),</span>
+<span class="d-add">+                &quot;vector_layers&quot;: json.dumps([{</span>
+<span class="d-add">+                    &quot;id&quot;: &quot;places&quot;,</span>
+<span class="d-add">+                    &quot;fields&quot;: {&quot;name&quot;: &quot;String&quot;, &quot;cat&quot;: &quot;String&quot;, &quot;minz&quot;: &quot;Number&quot;},</span>
+<span class="d-add">+                }]),</span>
+<span class="d-add">+            },</span>
+<span class="d-add">+        )</span>
+<span class="d-add">+</span>
+<span class="d-add">+    os.replace(tmp_path, output_path)</span>
+<span class="d-add">+    size_mb = os.path.getsize(output_path) / 1024 / 1024</span>
+<span class="d-add">+    logger.info(f&quot;[{city.id}] place labels built: {output_path} ({size_mb:.1f} MB)&quot;)</span>
+<span class="d-add">+    return output_path</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _collect_tiles(pois: list[Poi]) -&gt; dict[tuple[int, int, int], list[dict]]:</span>
+<span class="d-add">+    &quot;&quot;&quot;Bucket POIs into MVT tiles, one point feature each.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    A point label is never clipped by a tile edge — MapLibre draws glyphs that</span>
+<span class="d-add">+    overflow the tile its anchor sits in — so each POI goes into exactly ONE</span>
+<span class="d-add">+    tile per zoom and no buffer is needed. Stable feature ids let MapLibre&#x27;s</span>
+<span class="d-add">+    cross-tile index recognise the same label across adjacent tiles instead of</span>
+<span class="d-add">+    drawing it twice.</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    tiles: dict[tuple[int, int, int], list[dict]] = {}</span>
+<span class="d-add">+    for index, poi in enumerate(pois):</span>
+<span class="d-add">+        for zoom in range(MIN_TILE_ZOOM, MAX_TILE_ZOOM + 1):</span>
+<span class="d-add">+            # A tile at MapLibre zoom Z is on screen at Leaflet zoom Z+1. The</span>
+<span class="d-add">+            # top tile is overzoomed for everything deeper, so it carries the</span>
+<span class="d-add">+            # whole set.</span>
+<span class="d-add">+            if zoom &lt; MAX_TILE_ZOOM and poi.minz &gt; zoom + 1:</span>
+<span class="d-add">+                continue</span>
+<span class="d-add">+            tile = mercantile.tile(poi.lon, poi.lat, zoom)</span>
+<span class="d-add">+            tiles.setdefault((zoom, tile.x, tile.y), []).append({</span>
+<span class="d-add">+                &quot;geometry&quot;: {&quot;type&quot;: &quot;Point&quot;, &quot;coordinates&quot;: [poi.lon, poi.lat]},</span>
+<span class="d-add">+                &quot;properties&quot;: {&quot;name&quot;: poi.name, &quot;cat&quot;: poi.cat, &quot;minz&quot;: poi.minz},</span>
+<span class="d-add">+                &quot;id&quot;: index,</span>
+<span class="d-add">+            })</span>
+<span class="d-add">+    return tiles</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _output_path_for(city: City) -&gt; str:</span>
+<span class="d-add">+    return os.path.join(city.data_dir, &quot;places.pmtiles&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _is_up_to_date(city: City, output_path: str) -&gt; bool:</span>
+<span class="d-add">+    pbf_path = os.path.join(city.data_dir, &quot;source.osm.pbf&quot;)</span>
+<span class="d-add">+    if not os.path.exists(output_path) or not os.path.exists(pbf_path):</span>
+<span class="d-add">+        return False</span>
+<span class="d-add">+    return os.path.getmtime(output_path) &gt;= os.path.getmtime(pbf_path)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def main():</span>
+<span class="d-add">+    parser = argparse.ArgumentParser(description=&quot;Build per-city place-label PMTiles&quot;)</span>
+<span class="d-add">+    parser.add_argument(&quot;--city&quot;, help=&quot;City id to build (default: nyc unless --all)&quot;)</span>
+<span class="d-add">+    parser.add_argument(&quot;--all&quot;, action=&quot;store_true&quot;, help=&quot;Build every registered city&quot;)</span>
+<span class="d-add">+    parser.add_argument(&quot;--force&quot;, action=&quot;store_true&quot;, help=&quot;Rebuild even if up to date&quot;)</span>
+<span class="d-add">+    parser.add_argument(&quot;-o&quot;, &quot;--output&quot;, help=&quot;Explicit output path (single city only)&quot;)</span>
+<span class="d-add">+    args = parser.parse_args()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if args.all:</span>
+<span class="d-add">+        targets = list(CITIES.values())</span>
+<span class="d-add">+    else:</span>
+<span class="d-add">+        city = get_city(args.city or &quot;nyc&quot;)</span>
+<span class="d-add">+        if city is None:</span>
+<span class="d-add">+            logger.error(f&quot;Unknown city &#x27;{args.city}&#x27;. Known: {list(CITIES)}&quot;)</span>
+<span class="d-add">+            sys.exit(1)</span>
+<span class="d-add">+        targets = [city]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if args.output and len(targets) != 1:</span>
+<span class="d-add">+        logger.error(&quot;--output can only be used when building a single city&quot;)</span>
+<span class="d-add">+        sys.exit(1)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    for city in targets:</span>
+<span class="d-add">+        out = args.output or _output_path_for(city)</span>
+<span class="d-add">+        if not args.force and _is_up_to_date(city, out):</span>
+<span class="d-add">+            logger.info(f&quot;[{city.id}] place labels up to date, skipping (--force to rebuild)&quot;)</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            build_city_place_labels(city, out)</span>
+<span class="d-add">+        except Exception as e:</span>
+<span class="d-add">+            logger.error(f&quot;[{city.id}] place-label build failed: {e}&quot;)</span>
+<span class="d-add">+            if not args.all:</span>
+<span class="d-add">+                sys.exit(1)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+if __name__ == &quot;__main__&quot;:</span>
+<span class="d-add">+    main()</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/cities.py</span>
+            <span class="stat"><span class="d-add">+13</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Server · city registry</span>
+        <span class="ctx-sum">The curated list of supported cities and the artifacts each one advertises to the client</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">cities.py</span>
+        <span class="ctx-sum">~280 LOC — blocks-header cache, the City dataclass, the CITIES registry</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">_blocks_header_info / _env_osrm_host</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">City.to_public</span><span class="ol-sum">+placesVersion in the payload</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">City._block_tiles / _blocks_version</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">City._places_version</span><span class="ol-sum">new — mtime of places.pmtiles, or None</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">CITIES registry</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>_places_version mirrors _blocks_version exactly — a cheap stat, no graph load</li><li>It does double duty: the ?v= cache-buster AND the &#x27;does this city have labels?&#x27; flag</li><li>None is the important case: cities built before the artifact existed report nothing and the client adds no layer, instead of requesting an archive that 404s on every pan</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/cities.py b/server/cities.py</span>
+<span class="d-meta">index 37c1e70..d6a655a 100644</span>
+<span class="d-meta">--- a/server/cities.py</span>
+<span class="d-meta">+++ b/server/cities.py</span>
+<span class="d-hunk">@@ -97,6 +97,11 @@ class City:</span>
+<span class="d-ctx">             # z/x/y block-tile source (browser/CDN-cacheable, unlike the</span>
+<span class="d-ctx">             # pmtiles range requests). ?v= busts every cache on re-bake.</span>
+<span class="d-ctx">             &quot;blockTiles&quot;: self._block_tiles(blocks_version),</span>
+<span class="d-add">+            # Place/business labels (build_place_labels.py). Doubles as the</span>
+<span class="d-add">+            # &quot;does this city have them?&quot; flag — cities built before the</span>
+<span class="d-add">+            # labels existed report None and the client adds no label layer,</span>
+<span class="d-add">+            # rather than requesting an archive that 404s on every pan.</span>
+<span class="d-add">+            &quot;placesVersion&quot;: self._places_version(),</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     def _block_tiles(self, blocks_version: int | None) -&gt; dict | None:</span>
+<span class="d-hunk">@@ -132,6 +137,14 @@ class City:</span>
+<span class="d-ctx">         except OSError:</span>
+<span class="d-ctx">             return None</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    def _places_version(self) -&gt; int | None:</span>
+<span class="d-add">+        &quot;&quot;&quot;mtime of this city&#x27;s places.pmtiles, or None when absent.&quot;&quot;&quot;</span>
+<span class="d-add">+        path = os.path.join(os.path.dirname(__file__), self.data_dir, &quot;places.pmtiles&quot;)</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            return int(os.stat(path).st_mtime)</span>
+<span class="d-add">+        except OSError:</span>
+<span class="d-add">+            return None</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # ── Registry ─────────────────────────────────────────────────────────────────</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/tests/unit/test_place_labels.py</span>
+            <span class="stat"><span class="d-add">+131</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Server · tests</span>
+        <span class="ctx-sum">Pure unit coverage (no Redis/Postgres) for the curation rules that decide what the label layer shows</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">test_place_labels.py</span>
+        <span class="ctx-sum">~130 LOC — 25 tests across classify, normalize_name, dedup, assign_zooms</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">TestClassify</span><span class="ol-sum">new — allowlist, noise rejection, notability, the subway demotion, tag priority</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">TestNormalizeName</span><span class="ol-sum">new — accent/case/punctuation folding</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">TestDedup</span><span class="ol-sum">new — station complexes collapse, distant namesakes survive</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">TestAssignZooms</span><span class="ol-sum">new — floors respected, rank wins cells, nothing vanishes</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The noise-rejection test is parameterized over the actual top offenders in the NYC extract, so a bad allowlist entry fails loudly instead of quietly restoring 15,000 platforms</li><li>test_subway_demotion_survives_a_wikidata_tag pins the exact ordering bug that made the demotion a no-op</li><li>test_every_poi_gets_a_reveal_zoom guards the fallback: a POI whose cell is taken at every zoom must still end up somewhere rather than silently leaving the tileset</li><li>Green-space tags are asserted as DROPPED — the duplicate-label regression has a test now</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/tests/unit/test_place_labels.py b/server/tests/unit/test_place_labels.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..1424190</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/tests/unit/test_place_labels.py</span>
+<span class="d-hunk">@@ -0,0 +1,131 @@</span>
+<span class="d-add">+&quot;&quot;&quot;Curation rules for the place-label tileset (build_place_labels.py).</span>
+<span class="d-add">+</span>
+<span class="d-add">+These cover the two things that decide whether the label layer reads as a map</span>
+<span class="d-add">+or as a directory dump: WHICH features survive the allowlist, and WHEN each one</span>
+<span class="d-add">+is allowed to appear. Both are easy to regress silently — a bad allowlist entry</span>
+<span class="d-add">+just quietly puts 15,000 subway platforms back on the map.</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import pytest</span>
+<span class="d-add">+</span>
+<span class="d-add">+from build_place_labels import (</span>
+<span class="d-add">+    MAX_LABEL_ZOOM,</span>
+<span class="d-add">+    Poi,</span>
+<span class="d-add">+    assign_zooms,</span>
+<span class="d-add">+    classify,</span>
+<span class="d-add">+    dedup,</span>
+<span class="d-add">+    normalize_name,</span>
+<span class="d-add">+)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+class TestClassify:</span>
+<span class="d-add">+    def test_allowlisted_kinds_are_kept_with_their_tier(self):</span>
+<span class="d-add">+        assert classify({&quot;amenity&quot;: &quot;library&quot;}) == (&quot;civic&quot;, 68, 15)</span>
+<span class="d-add">+        assert classify({&quot;leisure&quot;: &quot;stadium&quot;}) == (&quot;culture&quot;, 88, 13)</span>
+<span class="d-add">+        assert classify({&quot;amenity&quot;: &quot;restaurant&quot;}) == (&quot;retail&quot;, 30, 18)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    @pytest.mark.parametrize(&quot;tags&quot;, [</span>
+<span class="d-add">+        # The five most common named POI tags in the NYC extract; four are noise.</span>
+<span class="d-add">+        {&quot;public_transport&quot;: &quot;platform&quot;},</span>
+<span class="d-add">+        {&quot;railway&quot;: &quot;rail&quot;},</span>
+<span class="d-add">+        {&quot;railway&quot;: &quot;abandoned&quot;},</span>
+<span class="d-add">+        {&quot;leisure&quot;: &quot;pitch&quot;},</span>
+<span class="d-add">+        # Green space is the basemap raster&#x27;s job — labelling it here too</span>
+<span class="d-add">+        # printed every park name twice, once in each cartography.</span>
+<span class="d-add">+        {&quot;leisure&quot;: &quot;park&quot;},</span>
+<span class="d-add">+        {&quot;leisure&quot;: &quot;garden&quot;},</span>
+<span class="d-add">+        {&quot;leisure&quot;: &quot;playground&quot;},</span>
+<span class="d-add">+        {&quot;amenity&quot;: &quot;parking&quot;},</span>
+<span class="d-add">+        {&quot;shop&quot;: &quot;hairdresser&quot;},</span>
+<span class="d-add">+        {&quot;building&quot;: &quot;yes&quot;},</span>
+<span class="d-add">+        {},</span>
+<span class="d-add">+    ])</span>
+<span class="d-add">+    def test_noise_tags_are_dropped(self, tags):</span>
+<span class="d-add">+        assert classify(tags) is None</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_wiki_tag_promotes_a_notable_business(self):</span>
+<span class="d-add">+        plain = classify({&quot;amenity&quot;: &quot;restaurant&quot;})</span>
+<span class="d-add">+        notable = classify({&quot;amenity&quot;: &quot;restaurant&quot;, &quot;wikidata&quot;: &quot;Q1067278&quot;})</span>
+<span class="d-add">+        assert notable[1] &gt; plain[1]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_subway_stop_is_demoted_below_a_mainline_terminal(self):</span>
+<span class="d-add">+        mainline = classify({&quot;railway&quot;: &quot;station&quot;, &quot;name&quot;: &quot;Grand Central&quot;})</span>
+<span class="d-add">+        subway = classify({&quot;railway&quot;: &quot;station&quot;, &quot;station&quot;: &quot;subway&quot;})</span>
+<span class="d-add">+        # Same OSM tag, very different cartographic weight.</span>
+<span class="d-add">+        assert subway[1] &lt; mainline[1]</span>
+<span class="d-add">+        assert subway[2] &gt; mainline[2]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_subway_demotion_survives_a_wikidata_tag(self):</span>
+<span class="d-add">+        # Nearly every NYC subway stop has one; if the notability bonus applied</span>
+<span class="d-add">+        # here it would hand back exactly the rank the demotion removed.</span>
+<span class="d-add">+        assert classify({&quot;railway&quot;: &quot;station&quot;, &quot;station&quot;: &quot;subway&quot;,</span>
+<span class="d-add">+                         &quot;wikidata&quot;: &quot;Q1234&quot;}) == classify(</span>
+<span class="d-add">+            {&quot;railway&quot;: &quot;station&quot;, &quot;station&quot;: &quot;subway&quot;})</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_more_specific_tag_wins_when_a_feature_carries_several(self):</span>
+<span class="d-add">+        # A hotel with a restaurant in it is a hotel: `tourism` is consulted</span>
+<span class="d-add">+        # before `amenity`.</span>
+<span class="d-add">+        assert classify({&quot;tourism&quot;: &quot;hotel&quot;, &quot;amenity&quot;: &quot;restaurant&quot;})[0:2] \</span>
+<span class="d-add">+            == (&quot;retail&quot;, 56)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+class TestNormalizeName:</span>
+<span class="d-add">+    def test_folds_case_accents_and_punctuation(self):</span>
+<span class="d-add">+        assert normalize_name(&quot;Joe&#x27;s Café&quot;) == normalize_name(&quot;JOES CAFE&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_keeps_distinct_names_distinct(self):</span>
+<span class="d-add">+        assert normalize_name(&quot;14 St&quot;) != normalize_name(&quot;14 Ave&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+class TestDedup:</span>
+<span class="d-add">+    def test_collapses_a_station_mapped_once_per_line(self):</span>
+<span class="d-add">+        # One NYC complex, five `railway=station` nodes within a block.</span>
+<span class="d-add">+        pois = [Poi(40.7370 + i * 0.0002, -73.9900, &quot;14 St&quot;, &quot;transit&quot;, 64, 15)</span>
+<span class="d-add">+                for i in range(5)]</span>
+<span class="d-add">+        assert len(dedup(pois)) == 1</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_keeps_the_highest_ranked_of_a_cluster(self):</span>
+<span class="d-add">+        pois = [</span>
+<span class="d-add">+            Poi(40.7370, -73.9900, &quot;14 St&quot;, &quot;transit&quot;, 64, 15),</span>
+<span class="d-add">+            Poi(40.7371, -73.9900, &quot;14 St&quot;, &quot;transit&quot;, 90, 13),</span>
+<span class="d-add">+        ]</span>
+<span class="d-add">+        kept = dedup(pois)</span>
+<span class="d-add">+        assert len(kept) == 1</span>
+<span class="d-add">+        assert kept[0].rank == 90</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_same_name_far_apart_is_two_real_places(self):</span>
+<span class="d-add">+        # Every borough has a &quot;Post Office&quot;; they are not duplicates.</span>
+<span class="d-add">+        pois = [</span>
+<span class="d-add">+            Poi(40.7370, -73.9900, &quot;Post Office&quot;, &quot;civic&quot;, 52, 17),</span>
+<span class="d-add">+            Poi(40.6800, -73.9500, &quot;Post Office&quot;, &quot;civic&quot;, 52, 17),</span>
+<span class="d-add">+        ]</span>
+<span class="d-add">+        assert len(dedup(pois)) == 2</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+class TestAssignZooms:</span>
+<span class="d-add">+    def test_never_reveals_a_poi_before_its_floor(self):</span>
+<span class="d-add">+        pois = [Poi(40.75 + i * 0.05, -73.9 - i * 0.05, f&quot;P{i}&quot;,</span>
+<span class="d-add">+                    &quot;retail&quot;, 30, 18) for i in range(4)]</span>
+<span class="d-add">+        assign_zooms(pois)</span>
+<span class="d-add">+        assert all(p.minz &gt;= 18 for p in pois)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_highest_ranked_wins_a_contested_cell(self):</span>
+<span class="d-add">+        # Two POIs on top of each other: only one can hold the spot first.</span>
+<span class="d-add">+        big = Poi(40.7500, -73.9900, &quot;Museum&quot;, &quot;culture&quot;, 85, 13)</span>
+<span class="d-add">+        small = Poi(40.7500, -73.9901, &quot;Deli&quot;, &quot;retail&quot;, 30, 13)</span>
+<span class="d-add">+        assign_zooms([small, big])</span>
+<span class="d-add">+        assert big.minz &lt; small.minz</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_spread_out_pois_all_reveal_at_their_floor(self):</span>
+<span class="d-add">+        pois = [Poi(40.5 + i * 0.1, -74.0 + i * 0.1, f&quot;Venue{i}&quot;,</span>
+<span class="d-add">+                    &quot;culture&quot;, 88, 13) for i in range(4)]</span>
+<span class="d-add">+        assign_zooms(pois)</span>
+<span class="d-add">+        assert all(p.minz == 13 for p in pois)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_every_poi_gets_a_reveal_zoom(self):</span>
+<span class="d-add">+        # Even a POI whose cell is taken at every single zoom must end up</span>
+<span class="d-add">+        # visible somewhere rather than silently vanishing from the tileset.</span>
+<span class="d-add">+        pois = [Poi(40.75, -73.99, f&quot;Stacked{i}&quot;, &quot;retail&quot;, 30, 18)</span>
+<span class="d-add">+                for i in range(30)]</span>
+<span class="d-add">+        assign_zooms(pois)</span>
+<span class="d-add">+        assert all(1 &lt;= p.minz &lt;= MAX_LABEL_ZOOM for p in pois)</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

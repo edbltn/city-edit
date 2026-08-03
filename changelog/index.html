@@ -29,6 +29,25 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-03-place-labels.html">
+    <div class="date">2026-08-03</div>
+    <h2>Putting names back on the map — streets, places and businesses</h2>
+    <p>The basemap was deliberately label-free so nothing competed with the vote heat, and the cost
+    was a map that couldn't tell Canarsie from Corona. Names are back in two tiers. Streets,
+    neighborhoods and water come from CARTO's labels-only raster, drawn <em>above</em> the heat —
+    the split basemap is the whole trick, since a labelled basemap would bury every street name
+    under a translucent hot block. Businesses and civic landmarks come from our own OSM extract,
+    because CARTO's tiles carry none at any zoom. That half is all curation: the five commonest
+    named POI tags in NYC are subway platforms (15,688, one per track), restaurants, named rail
+    segments (10,675), places of worship and <em>abandoned track</em> — so an allowlist cuts 210,003
+    features to 34,349, and a grid-thinning pass sets each label's reveal zoom so the density cap is
+    geometric and holds in Midtown and Canarsie alike. Three things only showed up by looking:
+    quarter-tile cells read as a directory (~50 labels), subway stops share Grand Central's tag and
+    carpeted the low zooms as fake street labels, and parks — the one thing CARTO <em>does</em>
+    label — printed twice in two fonts. Labels are colored by category in Red Hat Mono, which meant
+    self-hosting SDF glyphs and retiring a live dependency on MapLibre's demo server.</p>
+  </a>
+
   <a class="entry" href="./2026-08-03-sacramento-city-and-proposals.html">
     <div class="date">2026-08-03</div>
     <h2>Sacramento — a new city, and its official proposals on the map</h2>

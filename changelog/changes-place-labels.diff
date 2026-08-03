@@ -1,0 +1,1258 @@
+diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+index 745e97a..47f5e72 100644
+--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
++++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+@@ -11,7 +11,12 @@ import maplibregl from "maplibre-gl";
+ import { Protocol } from "pmtiles";
+ import { CONFIG, type BlockTilesConfig } from "../../config";
+ import { dlog, dwarn, debugState } from "../../utils/debugLog";
+-import { maplibreRasterTiles, heatTip, type MapStyle } from "../../mapStyles";
++import {
++  maplibreRasterTiles,
++  maplibreLabelTiles,
++  heatTip,
++  type MapStyle,
++} from "../../mapStyles";
+ import { hottestBlockId } from "./hottestBlock";
+ 
+ // Register PMTiles protocol once at module level
+@@ -166,6 +171,7 @@ function buildStyle(
+   blockTilesUrl: string,
+   blockTiles: BlockTilesConfig | null,
+   tiles: string[],
++  labelTiles: string[],
+   mapStyle: MapStyle,
+ ): maplibregl.StyleSpecification {
+   // z/x/y endpoint when the city advertises one: discrete tile URLs are
+@@ -205,6 +211,16 @@ function buildStyle(
+         attribution:
+           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+       },
++      // The text half of the same CARTO cartography, as transparent PNGs. Same
++      // tile scheme and maxzoom as carto-base, so the two are pixel-locked and
++      // scale together through Leaflet's zoom-animation ride — the labels can
++      // never drift off the streets they name.
++      "carto-labels": {
++        type: "raster",
++        tiles: labelTiles,
++        tileSize: 256,
++        maxzoom: 19,
++      },
+       // Block polygons from PMTiles (one per street segment / merged foot path).
+       // block_id is the NATIVE feature id (tippecanoe --use-attribute-for-id
+       // moves the attribute onto the id and out of properties) — do NOT set
+@@ -275,6 +291,18 @@ function buildStyle(
+           ],
+         },
+       },
++      // Place names — LAST, so they sit above the heat and the selection wash.
++      // Underneath them a name would be swallowed by a hot block's fill; on top
++      // it stays readable at every heat level, which is the whole point of
++      // splitting CARTO's basemap into nolabels + only_labels. Held below full
++      // opacity so orientation text supports the heat rather than competing
++      // with it.
++      {
++        id: "carto-labels",
++        type: "raster",
++        source: "carto-labels",
++        paint: { "raster-opacity": mapStyle.labelOpacity },
++      },
+     ],
+     glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+   };
+@@ -309,6 +337,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+           CONFIG.blockTilesUrl,
+           CONFIG.blockTiles,
+           maplibreRasterTiles(mapStyle),
++          maplibreLabelTiles(mapStyle),
+           mapStyle,
+         ),
+         center: [CONFIG.initialView.lon, CONFIG.initialView.lat],
+diff --git a/client-react/src/components/MapView/MapView.tsx b/client-react/src/components/MapView/MapView.tsx
+index 8475e98..1df58c3 100644
+--- a/client-react/src/components/MapView/MapView.tsx
++++ b/client-react/src/components/MapView/MapView.tsx
+@@ -755,10 +755,28 @@ export function MapView() {
+           subdomains={["a", "b", "c", "d"]}
+           maxZoom={CONFIG.maxZoom}
+           maxNativeZoom={19}
++          zIndex={1}
+           attribution={mapStyle.tileAttribution}
+         />
+       )}
+ 
++      {/* Place names for the fallback. MapLibre draws its own labels layer, so
++          this is gated on the same !maplibreActive as the base tiles above —
++          otherwise a WebGL browser would stack two label sets. zIndex keeps it
++          over the base raster; both live in the tile pane, below every
++          interactive overlay. */}
++      {!maplibreActive && (
++        <TileLayer
++          key={`${mapStyle.id}-labels`}
++          url={mapStyle.labelTileUrl}
++          subdomains={["a", "b", "c", "d"]}
++          maxZoom={CONFIG.maxZoom}
++          maxNativeZoom={19}
++          opacity={mapStyle.labelOpacity}
++          zIndex={2}
++        />
++      )}
++
+       {/* Zoom control in bottom right */}
+       <ZoomControl />
+ 
+diff --git a/client-react/src/mapStyles.ts b/client-react/src/mapStyles.ts
+index 966c0ad..4a3fedd 100644
+--- a/client-react/src/mapStyles.ts
++++ b/client-react/src/mapStyles.ts
+@@ -40,6 +40,15 @@ export interface MapStyle {
+   tileAttribution: string;
+   tileMaxZoom: number;
+ 
++  // The labels half of the same CARTO cartography, as a transparent overlay.
++  // Drawn ABOVE the vote heat — see labelOpacity.
++  labelTileUrl: string;
++  // How loudly the labels speak. Heat is the product and labels are orientation
++  // furniture, so they're deliberately held back below full strength. The light
++  // basemap's slate text is much heavier on paper than the dark basemap's grey
++  // on near-black, so it's pulled down further.
++  labelOpacity: number;
++
+   // Heatmap rendering.
+   heat: HeatRamp;
+   heatBlend: "screen" | "multiply";         // canvas element mix-blend-mode
+@@ -56,6 +65,33 @@ const TILE_DARK =
+ const TILE_LIGHT =
+   "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png";
+ 
++// Labels-only companions to the two basemaps above: the SAME CARTO cartography
++// split into its text half, served as transparent PNGs. Keeping the basemap
++// label-free and re-adding the text as a separate layer is what lets the labels
++// sit on top of the vote heat instead of underneath it — a street name buried
++// under a translucent hot block is unreadable, and it's the heat that has to
++// stay the loudest thing on the map.
++//
++// Coverage (verified against CARTO's own tiles): street names, neighborhood and
++// borough names, water, parks and a handful of named landmarks. NOT businesses
++// — those come from the separate POI layer built off our own OSM extract.
++const TILE_DARK_LABELS =
++  "https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png";
++const TILE_LIGHT_LABELS =
++  "https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png";
++
++// Dark basemaps get the labels at FULL strength. CARTO's dark label tiles are
++// light grey with a black halo baked in — dialling them back sounds tasteful in
++// isolation, but on a busy map (Williamsburg on nyc-bikes) the heat blocks are
++// saturated blue/green and anything under ~1.0 washes the street names out
++// completely. There is no halo knob on a raster overlay, so opacity is the only
++// contrast control and it has to stay pinned.
++const LABEL_OPACITY_DARK = 1.0;
++// Light basemaps can afford restraint: the slate text is already high-contrast
++// on near-white paper, and these styles blend heat by MULTIPLY, so a hot block
++// darkens the paper *around* the text rather than lighting up behind it.
++const LABEL_OPACITY_LIGHT = 0.75;
++
+ // Dark base + warm yellow-brown orange. Shared by walkways and the neutral
+ // default so user maps get a sensible look out of the box.
+ const DARK_WARM: Omit<MapStyle, "id"> = {
+@@ -66,6 +102,8 @@ const DARK_WARM: Omit<MapStyle, "id"> = {
+   tileUrl: TILE_DARK,
+   tileAttribution: CARTO_ATTRIBUTION,
+   tileMaxZoom: 21,
++  labelTileUrl: TILE_DARK_LABELS,
++  labelOpacity: LABEL_OPACITY_DARK,
+   // Hue runs purple → red-orange → amber → gold so intensity reads as a color
+   // shift, not just brightness. Peak is gold (not near-white) to keep glow tame.
+   // Negative arm dives through indigo to icy blue — the opposite temperature.
+@@ -93,6 +131,8 @@ function darkStyle(id: string, accent: string, heat: HeatRamp): MapStyle {
+     tileUrl: TILE_DARK,
+     tileAttribution: CARTO_ATTRIBUTION,
+     tileMaxZoom: 21,
++    labelTileUrl: TILE_DARK_LABELS,
++    labelOpacity: LABEL_OPACITY_DARK,
+     heat,
+     heatBlend: "screen",
+     heatComposite: "lighter",
+@@ -112,6 +152,8 @@ function lightStyle(id: string, accent: string, heat: HeatRamp): MapStyle {
+     tileUrl: TILE_LIGHT,
+     tileAttribution: CARTO_ATTRIBUTION,
+     tileMaxZoom: 21,
++    labelTileUrl: TILE_LIGHT_LABELS,
++    labelOpacity: LABEL_OPACITY_LIGHT,
+     heat,
+     heatBlend: "multiply",
+     heatComposite: "source-over",
+@@ -234,8 +276,17 @@ export function getMapStyle(id: string): MapStyle {
+  * MapLibre's raster source expects (it has no {s}/{r} placeholder support).
+  */
+ export function maplibreRasterTiles(style: MapStyle): string[] {
++  return expandTileTemplate(style.tileUrl);
++}
++
++/** Same expansion for the labels-only overlay tiles. */
++export function maplibreLabelTiles(style: MapStyle): string[] {
++  return expandTileTemplate(style.labelTileUrl);
++}
++
++function expandTileTemplate(template: string): string[] {
+   return ["a", "b", "c", "d"].map((s) =>
+-    style.tileUrl.replace("{s}", s).replace("{r}", "@2x"),
++    template.replace("{s}", s).replace("{r}", "@2x"),
+   );
+ }
+ 
+diff --git a/Dockerfile b/Dockerfile
+index 1cc89e8..9b60ee7 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -31,6 +31,8 @@ COPY server/*.py ./
+ COPY server/data/ ./data/
+ 
+ # Build routing graphs during image build (bakes per-city graphs into image).
++# build_place_labels.py runs INSIDE this RUN, before the `rm -f` — it reads
++# source.osm.pbf, which the same command deletes to keep the image small.
+ # Separate processes so each city's osmnx memory is freed before the next.
+ # build_graph also emits walk_graph_arrays.npz per city — the ONLY graph
+ # artifact the runtime loads (the pkl is build-time-only input for block
+@@ -45,6 +47,7 @@ RUN mkdir -p osm_data && \
+     python refresh_osm.py --region dc --force && \
+     python refresh_osm.py --region philly --force && \
+     python refresh_osm.py --region sacramento --force && \
++    python build_place_labels.py --all && \
+     rm -f osm_data/*/source.osm.pbf
+ 
+ COPY --from=client-builder /app/dist /var/www/html/
+diff --git a/Makefile b/Makefile
+index aac543b..7373e78 100644
+--- a/Makefile
++++ b/Makefile
+@@ -87,6 +87,7 @@ graphs:
+ # background network matches prod's content. Skips tiles already newer than their graph.
+ tiles: graphs
+ 	cd server && $(PY) build_pmtiles.py --all --profile dev
++	cd server && $(PY) build_place_labels.py --all
+ 
+ # The hybrid dev loop: ensure graphs + tiles exist, start the Docker backing
+ # services, then run flask + the Vite client on the host. Ctrl-C stops flask
+diff --git a/client-react/package.json b/client-react/package.json
+index 457baf2..840dbab 100644
+--- a/client-react/package.json
++++ b/client-react/package.json
+@@ -8,7 +8,8 @@
+     "build": "tsc -b && vite build",
+     "lint": "eslint .",
+     "preview": "vite preview",
+-    "test": "vitest run"
++    "test": "vitest run",
++    "build:glyphs": "node scripts/build_glyphs.js"
+   },
+   "dependencies": {
+     "@types/leaflet": "^1.9.21",
+@@ -30,6 +31,7 @@
+     "eslint": "^9.39.1",
+     "eslint-plugin-react-hooks": "^7.0.1",
+     "eslint-plugin-react-refresh": "^0.4.24",
++    "fontnik": "^0.7.7",
+     "globals": "^16.5.0",
+     "typescript": "~5.9.3",
+     "typescript-eslint": "^8.46.4",
+diff --git a/client-react/scripts/build_glyphs.js b/client-react/scripts/build_glyphs.js
+new file mode 100644
+index 0000000..6629501
+--- /dev/null
++++ b/client-react/scripts/build_glyphs.js
+@@ -0,0 +1,71 @@
++#!/usr/bin/env node
++/**
++ * Generate the SDF glyph ranges MapLibre needs to draw the place-label layer.
++ *
++ * MapLibre cannot render a `text-field` from a webfont — it needs signed-
++ * distance-field glyphs served as protobuf ranges. The style used to point at
++ * demotiles.maplibre.org, which is MapLibre's DEMO server and not something to
++ * put in front of real traffic, so we bake our own from the same Red Hat Mono
++ * the rest of the UI uses and serve them as static assets.
++ *
++ * Only Latin ranges are generated. Non-Latin names (Chinatown's Chinese shop
++ * names, for one) are handled at runtime by MapLibre's `localIdeographFontFamily`,
++ * which draws CJK from a system font instead of from SDF glyphs — Red Hat Mono
++ * has no CJK coverage, so without that those labels would render as nothing.
++ *
++ *   npm run build:glyphs        # from client-react/
++ */
++
++import fs from "node:fs";
++import path from "node:path";
++import { fileURLToPath } from "node:url";
++import fontnik from "fontnik";
++
++const __dirname = path.dirname(fileURLToPath(import.meta.url));
++
++const FONT_URL =
++  "https://github.com/google/fonts/raw/main/ofl/redhatmono/RedHatMono%5Bwght%5D.ttf";
++const FONTSTACK = "Red Hat Mono Regular";
++
++// Basic Latin + Latin-1 Supplement + Latin Extended-A/B cover US place names
++// including accented ones; General Punctuation carries the curly quotes and
++// dashes that show up in business names ("Joe's" is often U+2019, not U+0027).
++const RANGES = [
++  [0, 255],
++  [256, 511],
++  [512, 767],
++  [8192, 8447],
++];
++
++async function main() {
++  const fontPath = process.argv[2];
++  const outDir = path.resolve(__dirname, "..", "public", "fonts", FONTSTACK);
++
++  let font;
++  if (fontPath) {
++    font = fs.readFileSync(fontPath);
++  } else {
++    process.stdout.write(`downloading ${FONT_URL}\n`);
++    const res = await fetch(FONT_URL);
++    if (!res.ok) throw new Error(`font download failed: ${res.status}`);
++    font = Buffer.from(await res.arrayBuffer());
++  }
++
++  fs.mkdirSync(outDir, { recursive: true });
++  for (const [start, end] of RANGES) {
++    const buffer = await new Promise((resolve, reject) => {
++      fontnik.range({ font, start, end }, (err, data) =>
++        err ? reject(err) : resolve(data),
++      );
++    });
++    const outPath = path.join(outDir, `${start}-${end}.pbf`);
++    fs.writeFileSync(outPath, buffer);
++    process.stdout.write(`  ${start}-${end}.pbf  ${buffer.length} bytes\n`);
++  }
++  process.stdout.write(`glyphs written to ${outDir}\n`);
++}
++
++main().catch((err) => {
++  process.stderr.write(`${err.stack}\n`);
++  process.exit(1);
++});
+diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+index 47f5e72..bbaab32 100644
+--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
++++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+@@ -15,6 +15,7 @@ import {
+   maplibreRasterTiles,
+   maplibreLabelTiles,
+   heatTip,
++  POI_COLORS,
+   type MapStyle,
+ } from "../../mapStyles";
+ import { hottestBlockId } from "./hottestBlock";
+@@ -166,6 +167,83 @@ function rebindBlockTiles(map: maplibregl.Map): void {
+   dlog("maplibre", "blocks source rebound to z/x/y template", template);
+ }
+ 
++/** The font stack baked by `npm run build:glyphs` and served from /fonts. */
++const PLACE_LABEL_FONT = "Red Hat Mono Regular";
++
++/**
++ * Add the place/business label layer, if the active city ships one.
++ *
++ * Done on the map's `load` event rather than in buildStyle because the GL map
++ * is created at mount while CONFIG.placeTilesUrl only resolves once the map
++ * config lands from the network — reading it here means we never add a source
++ * for a city that has no labels, instead of adding one that 404s on every pan.
++ *
++ * The layer is added LAST, so it sits above the basemap's own CARTO label
++ * raster as well as the heat. The two label systems can't collide-avoid each
++ * other (one is baked pixels, the other live symbols), which is the accepted
++ * cost of keeping CARTO's street-name cartography; POIs anchor inside blocks
++ * while street names run along centerlines, so they mostly stay out of each
++ * other's way.
++ */
++function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
++  const url = CONFIG.placeTilesUrl;
++  if (!url) {
++    dlog("maplibre", "no place-label tiles for this city — skipping layer");
++    return;
++  }
++  if (map.getSource("places")) return;
++
++  map.addSource("places", { type: "vector", url: `pmtiles://${url}` });
++
++  const palette = POI_COLORS[mapStyle.basemap];
++  const colorByCategory = [
++    "match", ["get", "cat"],
++    ...Object.entries(palette).flatMap(([cat, color]) => [cat, color]),
++    palette.retail, // a category this client build doesn't know yet
++  ] as unknown as maplibregl.ExpressionSpecification;
++
++  map.addLayer({
++    id: "place-labels",
++    type: "symbol",
++    source: "places",
++    "source-layer": "places",
++    // `minz` is a LEAFLET zoom (the units used by CONFIG.maxZoom, map URLs and
++    // the builder); MapLibre drives its camera one level lower, hence the +1.
++    filter: ["<=", ["get", "minz"], ["+", ["zoom"], 1]],
++    layout: {
++      "text-field": ["get", "name"],
++      "text-font": [PLACE_LABEL_FONT],
++      // Mono is wide, so this runs a little smaller than a sans would.
++      "text-size": ["interpolate", ["linear"], ["zoom"], 11, 9.5, 15, 10.5, 18, 12],
++      // Wrap width is in characters, and mono means characters are uniformly
++      // wide — 9 turned "New York Institute of Technology" into a three-line
++      // clump. 11 keeps most names to two lines without widening the footprint
++      // enough to start losing collisions.
++      "text-max-width": 11,
++      "text-line-height": 1.1,
++      "text-letter-spacing": 0.01,
++      // Keeps labels from crowding each other into an unreadable clump — the
++      // last line of defence after the builder's grid thinning.
++      "text-padding": 6,
++      // Lower sorts first and wins placement. `minz` IS the importance
++      // ranking: the builder reveals a POI at the earliest zoom its rank can
++      // claim, so an early-revealing landmark outranks a late-revealing deli
++      // without shipping a separate rank property.
++      "symbol-sort-key": ["get", "minz"],
++    },
++    paint: {
++      "text-color": colorByCategory,
++      // Halo in the basemap's own paper/ink so a label stays readable over a
++      // saturated heat block — the contrast control the raster label overlay
++      // above it doesn't get to have.
++      "text-halo-color": mapStyle.base,
++      "text-halo-width": 1.5,
++      "text-halo-blur": 0.3,
++    },
++  });
++  dlog("maplibre", "place labels added", url);
++}
++
+ function buildStyle(
+   _graphTilesUrl: string,
+   blockTilesUrl: string,
+@@ -304,7 +382,11 @@ function buildStyle(
+         paint: { "raster-opacity": mapStyle.labelOpacity },
+       },
+     ],
+-    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
++    // Self-hosted SDF glyphs (client-react/public/fonts, baked by
++    // `npm run build:glyphs`). This used to point at demotiles.maplibre.org —
++    // fine while nothing drew text, but the place labels below make it a
++    // load-bearing dependency on MapLibre's DEMO server.
++    glyphs: "/fonts/{fontstack}/{range}.pbf",
+   };
+ }
+ 
+@@ -344,6 +426,11 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+         zoom: CONFIG.initialView.zoom - LEAFLET_TO_MAPLIBRE_ZOOM,
+         interactive: false,
+         attributionControl: false,
++        // Red Hat Mono has no CJK coverage, and baking those ranges as SDF
++        // glyphs would be megabytes. This draws CJK/kana/hangul from a system
++        // font at runtime instead — without it every Chinatown shop name would
++        // render as nothing at all.
++        localIdeographFontFamily: "sans-serif",
+       });
+ 
+       map.on("error", (e) => {
+@@ -357,6 +444,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+         debugState("maplibreLoaded", true);
+         onReady?.(true);
+         rebindBlockTiles(map);
++        addPlaceLabels(map, mapStyle);
+       });
+       debugState("maplibreLoaded", false);
+ 
+diff --git a/client-react/src/config.ts b/client-react/src/config.ts
+index 02bbc2e..0d1215c 100644
+--- a/client-react/src/config.ts
++++ b/client-react/src/config.ts
+@@ -86,6 +86,11 @@ export const CONFIG = {
+   // applyCityConfig(); while null, MapLibre falls back to blockTilesUrl.
+   blockTiles: null as BlockTilesConfig | null,
+ 
++  // Place/business label tiles. Null until applyCityConfig() sees the city
++  // advertise a placesVersion — cities without the artifact get no label
++  // layer at all rather than a source that 404s.
++  placeTilesUrl: null as string | null,
++
+   // Leaflet behaviors
+   preferCanvas: true,
+ 
+@@ -130,6 +135,9 @@ export interface CityConfig {
+   /** z/x/y block-tile source; null/absent when the city ships no block
+    *  artifacts (or the server predates the endpoint). */
+   blockTiles?: BlockTilesConfig | null;
++  /** Cache-buster for places.pmtiles (server: file mtime); null/absent when
++   *  the city ships no place-label artifact. */
++  placesVersion?: number | null;
+ }
+ 
+ /**
+@@ -138,8 +146,8 @@ export interface CityConfig {
+  * read the active city's values. Pan limits get generous padding around the bbox.
+  */
+ export function applyCityConfig(city: CityConfig): void {
+-  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath, blocksVersion, blockTiles } =
+-    city;
++  const { bounds, center, defaultZoom, minZoom, maxZoom, tilesPath, blocksVersion, blockTiles,
++    placesVersion } = city;
+   CONFIG.initialView = { lat: center.lat, lon: center.lon, zoom: defaultZoom };
+   CONFIG.mappedBounds = { sw: { ...bounds.sw }, ne: { ...bounds.ne } };
+   CONFIG.nycBounds = {
+@@ -155,6 +163,14 @@ export function applyCityConfig(city: CityConfig): void {
+     const blocksPath = tilesPath.replace("graph.pmtiles", "blocks.pmtiles")
+       + (blocksVersion ? `?v=${blocksVersion}` : "");
+     CONFIG.blockTilesUrl = isLocalDev ? `${devApiBase}${blocksPath}` : blocksPath;
++    // Same ?v= discipline as the blocks archive: rebuilt labels must never be
++    // read through week-old cached byte ranges of the previous build.
++    const placesPath = placesVersion
++      ? tilesPath.replace("graph.pmtiles", "places.pmtiles") + `?v=${placesVersion}`
++      : null;
++    CONFIG.placeTilesUrl = placesPath
++      ? (isLocalDev ? `${devApiBase}${placesPath}` : placesPath)
++      : null;
+   }
+   // z/x/y tile template — same devHost rule as the other API URLs (absolute to
+   // Flask :5001 in dev, relative behind nginx in prod).
+diff --git a/client-react/src/mapStyles.ts b/client-react/src/mapStyles.ts
+index 4a3fedd..3de03be 100644
+--- a/client-react/src/mapStyles.ts
++++ b/client-react/src/mapStyles.ts
+@@ -266,6 +266,35 @@ export const SELECTABLE_MAP_STYLES: { id: string; label: string }[] = [
+   { id: "plum", label: "Culture (purple)" },
+ ];
+ 
++/**
++ * Place-label text colors, keyed by the `cat` property each POI carries from
++ * build_place_labels.py. One palette per basemap rather than one per style:
++ * color coding only pays off if it's learnable, and re-hueing the categories
++ * for each of the eight map styles would mean re-learning them on every map.
++ *
++ * Retail is deliberately the most neutral of the four. It is by far the largest
++ * category, so tinting every deli and bank would turn the deep zooms into
++ * confetti — the color is there to make transit and civic anchors findable at a
++ * glance, not to decorate.
++ *
++ * There is no green here: parks and squares are labelled by the CARTO raster
++ * underneath, in its own green, and the builder drops them for that reason.
++ */
++export const POI_COLORS: Record<Basemap, Record<string, string>> = {
++  dark: {
++    transit: "#7FB2FF",
++    civic: "#E3BE79",
++    culture: "#C49BDE",
++    retail: "#BFBAB2",
++  },
++  light: {
++    transit: "#2C5FB4",
++    civic: "#8F5E12",
++    culture: "#743C93",
++    retail: "#5A554D",
++  },
++};
++
+ /** Resolve a style id to its MapStyle, falling back to the default. */
+ export function getMapStyle(id: string): MapStyle {
+   return MAP_STYLES[id] ?? DEFAULT_MAP_STYLE;
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 853494e..b1db0b8 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -76,6 +76,8 @@ services:
+         python refresh_osm.py --all 2>&1
+         echo 'Building per-city PMTiles (dev profile)...'
+         python build_pmtiles.py --all --profile dev 2>&1
++        echo 'Building per-city place labels...'
++        python build_place_labels.py --all 2>&1
+         echo 'Initial graph + tile build complete'
+ 
+         # Weekly refresh loop
+@@ -87,6 +89,7 @@ services:
+             echo 'Starting weekly OSM refresh...'
+             python refresh_osm.py --all --force 2>&1
+             python build_pmtiles.py --all --profile dev --force 2>&1
++            python build_place_labels.py --all --force 2>&1
+             # Sleep for 1 hour to avoid running again
+             sleep 3600
+           fi
+diff --git a/server/build_place_labels.py b/server/build_place_labels.py
+new file mode 100644
+index 0000000..ff0f265
+--- /dev/null
++++ b/server/build_place_labels.py
+@@ -0,0 +1,507 @@
++"""
++Build per-city place-label PMTiles (business and landmark names) from the OSM
++PBF each city already ships.
++
++The basemap's CARTO label tiles carry streets, neighborhoods and water — but no
++businesses or civic landmarks at any zoom. This builder fills that gap from
++`osm_data/<city>/source.osm.pbf`, the same extract the walk graph and OSRM are
++built from, so a label and the street it sits on always come from one snapshot.
++
++Output: osm_data/<city>/places.pmtiles, served by the existing
++/api/tiles/<city>/*.pmtiles route (nginx caches it like the other archives).
++
++    python build_place_labels.py --all
++    python build_place_labels.py --city nyc --force
++
++## Why a curated allowlist
++
++Dumping every named OSM feature is what makes a label layer feel broken. The
++five most common named POI tags in the NYC extract are, in order:
++
++    15688  public_transport=platform     every subway platform, one per track
++    14825  amenity=restaurant
++    10675  railway=rail                  named track segments, dozens per line
++     8613  amenity=place_of_worship
++     4950  railway=abandoned             track that no longer exists
++
++Four of those five are noise. KINDS below is an explicit allowlist — anything
++not in it is dropped, so new junk tags can never leak in.
++
++## Why labels appear when they do
++
++Every kind gets a `rank` (who wins a collision) and a floor zoom. The zoom a
++label ACTUALLY appears at is then computed by grid thinning (see
++`assign_zooms`): at each zoom the map is divided into cells and only the
++highest-ranked unplaced POI in a cell earns that zoom. Labels already placed
++re-claim their cell first, so zooming in adds detail between existing labels
++instead of piling text on top of it. This is what keeps a dense commercial
++strip from turning into a wall of text — the cap is geometric, so it holds for
++Midtown and for Canarsie alike without any per-neighborhood tuning.
++
++## Zoom units
++
++`minz` on each feature is a LEAFLET zoom, matching CONFIG.maxZoom, map URLs and
++every other zoom number in this codebase. MapLibre drives its camera one level
++lower (512px vs 256px tile convention), so the client filter compares against
++`zoom + 1`. Tile z/x/y addresses below are MapLibre/mercantile zooms.
++"""
++
++import argparse
++import json
++import logging
++import math
++import os
++import sys
++import unicodedata
++
++import mapbox_vector_tile
++import mercantile
++import osmium
++from pmtiles.tile import zxy_to_tileid, TileType, Compression
++from pmtiles.writer import Writer
++
++from cities import CITIES, City, get_city
++
++logging.basicConfig(level=logging.INFO)
++logger = logging.getLogger(__name__)
++
++# Tile zoom band (mercantile/MapLibre zooms). The client overzooms past the top
++# of the band, so the maxzoom tile carries every label regardless of its minz.
++MIN_TILE_ZOOM = 11
++MAX_TILE_ZOOM = 15
++
++# Leaflet zoom band the thinning runs over. 11 is roughly "whole city on
++# screen"; 21 is CONFIG.maxZoom. Running all the way to the app's real maximum
++# matters: every POI the grid never places falls back to the last zoom, so a
++# ceiling of 19 dumped 20k labels — 60% of the set — into one ungoverned band.
++MIN_LABEL_ZOOM = 11
++MAX_LABEL_ZOOM = 21
++
++# Thinning cell size, as tile-zoom levels below the label zoom. 0 means one cell
++# per tile — about 256 CSS px on screen — so a 1568x774 viewport admits roughly
++# 18 newly-revealed labels per zoom level, plus the handful inherited from
++# coarser zooms. At 1 (quarter-tile cells) the city-scale view came out at ~50
++# labels and read as a directory, not a map.
++GRID_OFFSET = 0
++
++# Two same-named POIs closer than this are the same place mapped twice (NYC
++# subway complexes carry a `railway=station` node per line, so "14 St" alone
++# appears five times within a block). Keep the highest-ranked one.
++DEDUP_METERS = 400.0
++
++# Categories drive label COLOR in the client (see POI_COLORS in mapStyles.ts).
++# Deliberately few: colors have to be learnable at a glance, and every extra hue
++# is one more thing competing with the vote heat.
++#
++# There is no green-space category, and that is a division of labor, not an
++# oversight. The basemap's CARTO label raster already draws parks, gardens and
++# squares in green caps, and it is drawn UNDER this layer — so labelling them
++# here too printed "Grand Street Garden" twice, once in each cartography, which
++# is exactly the kind of thing that reads as a broken map. Green space belongs
++# to the basemap; buildings and businesses belong here. Verified against CARTO's
++# own tiles: it labels no stadium, hospital or university, so everything below
++# is genuinely unclaimed.
++CAT_TRANSIT = "transit"
++CAT_CIVIC = "civic"
++CAT_CULTURE = "culture"
++CAT_RETAIL = "retail"
++
++# (osm_key, osm_value) -> (category, rank, floor zoom in LEAFLET zoom units).
++# rank breaks collisions: higher wins the cell and the pixel.
++KINDS: dict[tuple[str, str], tuple[str, int, int]] = {
++    # ── Transit ────────────────────────────────────────────────────────────
++    # Stations only. Platforms and stop positions are per-track duplicates of a
++    # station that is already labelled, and named track segments are not places.
++    ("aeroway", "aerodrome"): (CAT_TRANSIT, 98, 11),
++    # Mainline terminals and commuter-rail stops: Penn, Grand Central, the LIRR
++    # and Metro-North. Genuinely city-scale landmarks.
++    ("railway", "station"): (CAT_TRANSIT, 90, 13),
++    ("railway", "halt"): (CAT_TRANSIT, 70, 15),
++    ("amenity", "ferry_terminal"): (CAT_TRANSIT, 85, 14),
++    ("amenity", "bus_station"): (CAT_TRANSIT, 80, 14),
++    ("public_transport", "station"): (CAT_TRANSIT, 74, 14),
++
++    # ── Venues ─────────────────────────────────────────────────────────────
++    # What's left of `leisure` once green space goes to the basemap: these are
++    # buildings you go into, not open space, so they carry a venue color rather
++    # than a park one.
++    ("leisure", "stadium"): (CAT_CULTURE, 88, 13),
++    ("leisure", "sports_centre"): (CAT_RETAIL, 58, 16),
++    ("leisure", "fitness_centre"): (CAT_RETAIL, 45, 17),
++
++    # ── Civic & education ──────────────────────────────────────────────────
++    ("amenity", "university"): (CAT_CIVIC, 92, 13),
++    ("amenity", "college"): (CAT_CIVIC, 80, 14),
++    ("amenity", "hospital"): (CAT_CIVIC, 84, 14),
++    ("amenity", "townhall"): (CAT_CIVIC, 76, 15),
++    ("amenity", "courthouse"): (CAT_CIVIC, 72, 15),
++    ("amenity", "library"): (CAT_CIVIC, 68, 15),
++    ("amenity", "community_centre"): (CAT_CIVIC, 56, 16),
++    ("amenity", "school"): (CAT_CIVIC, 54, 16),
++    ("amenity", "place_of_worship"): (CAT_CIVIC, 48, 16),
++    ("amenity", "post_office"): (CAT_CIVIC, 52, 17),
++    ("amenity", "fire_station"): (CAT_CIVIC, 50, 17),
++    ("amenity", "police"): (CAT_CIVIC, 50, 17),
++    ("office", "government"): (CAT_CIVIC, 44, 17),
++
++    # ── Culture ────────────────────────────────────────────────────────────
++    ("tourism", "zoo"): (CAT_CULTURE, 90, 13),
++    ("tourism", "aquarium"): (CAT_CULTURE, 90, 13),
++    ("tourism", "theme_park"): (CAT_CULTURE, 88, 13),
++    ("tourism", "museum"): (CAT_CULTURE, 85, 14),
++    ("tourism", "attraction"): (CAT_CULTURE, 80, 14),
++    ("amenity", "theatre"): (CAT_CULTURE, 70, 15),
++    ("tourism", "gallery"): (CAT_CULTURE, 58, 16),
++    ("amenity", "cinema"): (CAT_CULTURE, 60, 16),
++    ("amenity", "arts_centre"): (CAT_CULTURE, 60, 16),
++    ("historic", "monument"): (CAT_CULTURE, 62, 16),
++    ("historic", "memorial"): (CAT_CULTURE, 44, 17),
++    ("tourism", "artwork"): (CAT_CULTURE, 38, 18),
++
++    # ── Retail, food & lodging ─────────────────────────────────────────────
++    # The floor zooms here are deep on purpose: these are the labels that tell
++    # you which block you're on, not which neighborhood, and they only earn
++    # their space once the heat is already resolved to individual streets.
++    ("shop", "mall"): (CAT_RETAIL, 72, 15),
++    ("shop", "department_store"): (CAT_RETAIL, 66, 16),
++    ("amenity", "marketplace"): (CAT_RETAIL, 62, 16),
++    ("shop", "supermarket"): (CAT_RETAIL, 58, 17),
++    ("tourism", "hotel"): (CAT_RETAIL, 56, 17),
++    ("amenity", "pharmacy"): (CAT_RETAIL, 38, 18),
++    ("amenity", "bank"): (CAT_RETAIL, 34, 18),
++    ("shop", "books"): (CAT_RETAIL, 32, 18),
++    ("amenity", "restaurant"): (CAT_RETAIL, 30, 18),
++    ("amenity", "cafe"): (CAT_RETAIL, 30, 18),
++    ("amenity", "bar"): (CAT_RETAIL, 30, 18),
++    ("amenity", "pub"): (CAT_RETAIL, 30, 18),
++    ("shop", "bakery"): (CAT_RETAIL, 28, 18),
++    ("amenity", "fast_food"): (CAT_RETAIL, 22, 18),
++    ("amenity", "ice_cream"): (CAT_RETAIL, 22, 18),
++}
++
++# Tag keys worth consulting, in priority order — the first one that resolves to
++# a KINDS entry wins. Ordered so a feature tagged both `tourism=hotel` and
++# `amenity=restaurant` lands on the more specific/important of the two.
++TAG_KEYS = ("aeroway", "railway", "public_transport", "leisure", "tourism",
++            "historic", "amenity", "shop", "office")
++
++# A place the wider world has heard of outranks its generic peers, which is what
++# lifts Katz's above the deli next door without a hand-maintained landmark list.
++WIKI_RANK_BONUS = 25
++
++# A subway stop is tagged `railway=station` exactly like Grand Central, but NYC
++# has 470-odd of them and most are named after the street above ("5th Avenue",
++# "72nd Street"). At mainline rank they carpeted the city-scale view, and a blue
++# "5th Avenue" sitting beside the basemap's own "5th Avenue" street label reads
++# as a rendering bug rather than a station. Demoted to a neighborhood-scale
++# label, which is the zoom at which knowing your nearest stop actually helps.
++SUBWAY_STATION = (CAT_TRANSIT, 64, 15)
++SUBWAY_STATION_VALUES = {"subway", "light_rail", "monorail"}
++
++
++class Poi:
++    __slots__ = ("lat", "lon", "name", "cat", "rank", "floor", "minz")
++
++    def __init__(self, lat, lon, name, cat, rank, floor):
++        self.lat = lat
++        self.lon = lon
++        self.name = name
++        self.cat = cat
++        self.rank = rank
++        self.floor = floor
++        self.minz = 0
++
++
++def classify(tags) -> tuple[str, int, int] | None:
++    """(category, rank, floor zoom) for a feature's tags, or None to drop it."""
++    for key in TAG_KEYS:
++        value = tags.get(key)
++        if value is None:
++            continue
++        entry = KINDS.get((key, value))
++        if entry is None:
++            continue
++        if key == "railway" and value == "station" and \
++                tags.get("station") in SUBWAY_STATION_VALUES:
++            # Returned as-is: nearly every NYC subway stop carries a wikidata
++            # tag, so letting the notability bonus apply here would hand back
++            # the mainline rank the demotion just took away.
++            return SUBWAY_STATION
++        cat, rank, floor = entry
++        if "wikidata" in tags or "wikipedia" in tags:
++            rank += WIKI_RANK_BONUS
++        return cat, rank, floor
++    return None
++
++
++def normalize_name(name: str) -> str:
++    """Fold a name for dedup: case, accents and punctuation don't distinguish
++    two mappings of the same station."""
++    folded = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
++    return "".join(ch for ch in folded.lower() if ch.isalnum())
++
++
++class PoiCollector(osmium.SimpleHandler):
++    """Collects allowlisted named POIs. Nodes use their own location; closed
++    ways use the mean of their nodes, which is close enough for a label anchor
++    on a park or campus. Multipolygon relations are skipped — assembling areas
++    costs a second full pass over a 500MB extract, and in practice the features
++    that matter are mapped as ways."""
++
++    def __init__(self, bbox):
++        super().__init__()
++        self.south, self.west, self.north, self.east = bbox
++        self.pois: list[Poi] = []
++        self.skipped_unnamed = 0
++
++    def _add(self, tags, lat, lon):
++        if not (self.south <= lat <= self.north and self.west <= lon <= self.east):
++            return
++        name = tags.get("name")
++        if not name or len(name) > 60:
++            return
++        entry = classify(tags)
++        if entry is None:
++            return
++        cat, rank, floor = entry
++        self.pois.append(Poi(lat, lon, name, cat, rank, floor))
++
++    def node(self, n):
++        if not n.tags:
++            return
++        self._add(n.tags, n.location.lat, n.location.lon)
++
++    def way(self, w):
++        if not w.tags or len(w.nodes) < 2:
++            return
++        if classify(w.tags) is None:
++            return
++        lat = lon = 0.0
++        count = 0
++        for node in w.nodes:
++            if not node.location.valid():
++                continue
++            lat += node.location.lat
++            lon += node.location.lon
++            count += 1
++        if count:
++            self._add(w.tags, lat / count, lon / count)
++
++
++def dedup(pois: list[Poi]) -> list[Poi]:
++    """Drop same-named POIs within DEDUP_METERS of a higher-ranked twin."""
++    # Highest rank first so the survivor of each cluster is the best-ranked one.
++    pois.sort(key=lambda p: (-p.rank, p.name, p.lat, p.lon))
++    # Cell size ~ the dedup radius, so a twin is in this cell or one adjacent.
++    cell_deg = DEDUP_METERS / 111_320.0
++    kept: list[Poi] = []
++    index: dict[tuple[str, int, int], list[Poi]] = {}
++    for poi in pois:
++        key_name = normalize_name(poi.name)
++        cy, cx = int(poi.lat / cell_deg), int(poi.lon / cell_deg)
++        clash = False
++        for dy in (-1, 0, 1):
++            for dx in (-1, 0, 1):
++                for other in index.get((key_name, cy + dy, cx + dx), ()):
++                    if haversine_m(poi.lat, poi.lon, other.lat, other.lon) < DEDUP_METERS:
++                        clash = True
++                        break
++                if clash:
++                    break
++            if clash:
++                break
++        if clash:
++            continue
++        index.setdefault((key_name, cy, cx), []).append(poi)
++        kept.append(poi)
++    return kept
++
++
++def haversine_m(lat1, lon1, lat2, lon2) -> float:
++    dlat = math.radians(lat2 - lat1)
++    dlon = math.radians(lon2 - lon1)
++    a = (math.sin(dlat / 2) ** 2
++         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
++         * math.sin(dlon / 2) ** 2)
++    return 6_371_000 * 2 * math.asin(math.sqrt(a))
++
++
++def assign_zooms(pois: list[Poi]) -> None:
++    """Set each POI's `minz` by grid thinning — see the module docstring.
++
++    At every zoom, POIs already placed re-claim their cell before any newcomer
++    is considered. Without that, a z17 winner could land on the exact spot of a
++    z14 landmark and the two would fight for the same pixels forever.
++    """
++    pois.sort(key=lambda p: (-p.rank, p.name, p.lat, p.lon))
++    placed: list[Poi] = []
++    for zoom in range(MIN_LABEL_ZOOM, MAX_LABEL_ZOOM + 1):
++        grid_zoom = zoom + GRID_OFFSET
++        occupied = {_cell(p, grid_zoom) for p in placed}
++        for poi in pois:
++            if poi.minz or poi.floor > zoom:
++                continue
++            cell = _cell(poi, grid_zoom)
++            if cell in occupied:
++                continue
++            occupied.add(cell)
++            poi.minz = zoom
++            placed.append(poi)
++    # Anything never placed (its cell was busy at every zoom) still deserves to
++    # exist at the deepest zoom rather than vanish from the map entirely.
++    for poi in pois:
++        if not poi.minz:
++            poi.minz = MAX_LABEL_ZOOM
++
++
++def _cell(poi: Poi, zoom: int) -> tuple[int, int]:
++    tile = mercantile.tile(poi.lon, poi.lat, zoom)
++    return tile.x, tile.y
++
++
++def build_city_place_labels(city: City, output_path: str | None = None) -> str:
++    """Build one city's places.pmtiles. Returns the output path."""
++    output_path = output_path or _output_path_for(city)
++    pbf_path = os.path.join(city.data_dir, "source.osm.pbf")
++    if not os.path.exists(pbf_path):
++        raise FileNotFoundError(f"no source.osm.pbf for {city.id} at {pbf_path}")
++
++    logger.info(f"[{city.id}] reading POIs from {pbf_path}")
++    collector = PoiCollector(city.bbox)
++    # locations=True back-fills node coordinates onto ways so closed ways get a
++    # centroid; it is what makes parks and campuses labellable.
++    collector.apply_file(pbf_path, locations=True, idx="flex_mem")
++    pois = collector.pois
++    logger.info(f"[{city.id}] {len(pois)} allowlisted named POIs in bbox")
++
++    pois = dedup(pois)
++    logger.info(f"[{city.id}] {len(pois)} after same-name dedup")
++
++    assign_zooms(pois)
++    by_zoom: dict[int, int] = {}
++    for poi in pois:
++        by_zoom[poi.minz] = by_zoom.get(poi.minz, 0) + 1
++    logger.info(f"[{city.id}] labels per reveal zoom: "
++                + ", ".join(f"z{z}={by_zoom[z]}" for z in sorted(by_zoom)))
++
++    tiles = _collect_tiles(pois)
++    logger.info(f"[{city.id}] encoding {len(tiles)} tiles")
++
++    os.makedirs(os.path.dirname(output_path), exist_ok=True)
++    tmp_path = output_path + ".tmp"
++    south, west, north, east = city.bbox
++    with open(tmp_path, "wb") as f:
++        writer = Writer(f)
++        for (z, x, y), features in sorted(tiles.items()):
++            bounds = mercantile.bounds(mercantile.Tile(x, y, z))
++            quantize = (bounds.west, bounds.south, bounds.east, bounds.north)
++            data = mapbox_vector_tile.encode(
++                [{"name": "places", "features": features}],
++                quantize_bounds=quantize,
++            )
++            writer.write_tile(zxy_to_tileid(z, x, y), data)
++        writer.finalize(
++            header={
++                "tile_type": TileType.MVT,
++                "tile_compression": Compression.NONE,
++                "min_zoom": MIN_TILE_ZOOM,
++                "max_zoom": MAX_TILE_ZOOM,
++                "min_lon_e7": int(west * 1e7),
++                "min_lat_e7": int(south * 1e7),
++                "max_lon_e7": int(east * 1e7),
++                "max_lat_e7": int(north * 1e7),
++            },
++            metadata={
++                "name": f"city-edit-places-{city.id}",
++                "description": f"Named places and businesses for {city.name}",
++                "format": "pbf",
++                "type": "overlay",
++                "minzoom": str(MIN_TILE_ZOOM),
++                "maxzoom": str(MAX_TILE_ZOOM),
++                "bounds": ",".join(str(b) for b in (west, south, east, north)),
++                "vector_layers": json.dumps([{
++                    "id": "places",
++                    "fields": {"name": "String", "cat": "String", "minz": "Number"},
++                }]),
++            },
++        )
++
++    os.replace(tmp_path, output_path)
++    size_mb = os.path.getsize(output_path) / 1024 / 1024
++    logger.info(f"[{city.id}] place labels built: {output_path} ({size_mb:.1f} MB)")
++    return output_path
++
++
++def _collect_tiles(pois: list[Poi]) -> dict[tuple[int, int, int], list[dict]]:
++    """Bucket POIs into MVT tiles, one point feature each.
++
++    A point label is never clipped by a tile edge — MapLibre draws glyphs that
++    overflow the tile its anchor sits in — so each POI goes into exactly ONE
++    tile per zoom and no buffer is needed. Stable feature ids let MapLibre's
++    cross-tile index recognise the same label across adjacent tiles instead of
++    drawing it twice.
++    """
++    tiles: dict[tuple[int, int, int], list[dict]] = {}
++    for index, poi in enumerate(pois):
++        for zoom in range(MIN_TILE_ZOOM, MAX_TILE_ZOOM + 1):
++            # A tile at MapLibre zoom Z is on screen at Leaflet zoom Z+1. The
++            # top tile is overzoomed for everything deeper, so it carries the
++            # whole set.
++            if zoom < MAX_TILE_ZOOM and poi.minz > zoom + 1:
++                continue
++            tile = mercantile.tile(poi.lon, poi.lat, zoom)
++            tiles.setdefault((zoom, tile.x, tile.y), []).append({
++                "geometry": {"type": "Point", "coordinates": [poi.lon, poi.lat]},
++                "properties": {"name": poi.name, "cat": poi.cat, "minz": poi.minz},
++                "id": index,
++            })
++    return tiles
++
++
++def _output_path_for(city: City) -> str:
++    return os.path.join(city.data_dir, "places.pmtiles")
++
++
++def _is_up_to_date(city: City, output_path: str) -> bool:
++    pbf_path = os.path.join(city.data_dir, "source.osm.pbf")
++    if not os.path.exists(output_path) or not os.path.exists(pbf_path):
++        return False
++    return os.path.getmtime(output_path) >= os.path.getmtime(pbf_path)
++
++
++def main():
++    parser = argparse.ArgumentParser(description="Build per-city place-label PMTiles")
++    parser.add_argument("--city", help="City id to build (default: nyc unless --all)")
++    parser.add_argument("--all", action="store_true", help="Build every registered city")
++    parser.add_argument("--force", action="store_true", help="Rebuild even if up to date")
++    parser.add_argument("-o", "--output", help="Explicit output path (single city only)")
++    args = parser.parse_args()
++
++    if args.all:
++        targets = list(CITIES.values())
++    else:
++        city = get_city(args.city or "nyc")
++        if city is None:
++            logger.error(f"Unknown city '{args.city}'. Known: {list(CITIES)}")
++            sys.exit(1)
++        targets = [city]
++
++    if args.output and len(targets) != 1:
++        logger.error("--output can only be used when building a single city")
++        sys.exit(1)
++
++    for city in targets:
++        out = args.output or _output_path_for(city)
++        if not args.force and _is_up_to_date(city, out):
++            logger.info(f"[{city.id}] place labels up to date, skipping (--force to rebuild)")
++            continue
++        try:
++            build_city_place_labels(city, out)
++        except Exception as e:
++            logger.error(f"[{city.id}] place-label build failed: {e}")
++            if not args.all:
++                sys.exit(1)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/server/cities.py b/server/cities.py
+index 37c1e70..d6a655a 100644
+--- a/server/cities.py
++++ b/server/cities.py
+@@ -97,6 +97,11 @@ class City:
+             # z/x/y block-tile source (browser/CDN-cacheable, unlike the
+             # pmtiles range requests). ?v= busts every cache on re-bake.
+             "blockTiles": self._block_tiles(blocks_version),
++            # Place/business labels (build_place_labels.py). Doubles as the
++            # "does this city have them?" flag — cities built before the
++            # labels existed report None and the client adds no label layer,
++            # rather than requesting an archive that 404s on every pan.
++            "placesVersion": self._places_version(),
+         }
+ 
+     def _block_tiles(self, blocks_version: int | None) -> dict | None:
+@@ -132,6 +137,14 @@ class City:
+         except OSError:
+             return None
+ 
++    def _places_version(self) -> int | None:
++        """mtime of this city's places.pmtiles, or None when absent."""
++        path = os.path.join(os.path.dirname(__file__), self.data_dir, "places.pmtiles")
++        try:
++            return int(os.stat(path).st_mtime)
++        except OSError:
++            return None
++
+ 
+ # ── Registry ─────────────────────────────────────────────────────────────────
+ 
+diff --git a/server/tests/unit/test_place_labels.py b/server/tests/unit/test_place_labels.py
+new file mode 100644
+index 0000000..1424190
+--- /dev/null
++++ b/server/tests/unit/test_place_labels.py
+@@ -0,0 +1,131 @@
++"""Curation rules for the place-label tileset (build_place_labels.py).
++
++These cover the two things that decide whether the label layer reads as a map
++or as a directory dump: WHICH features survive the allowlist, and WHEN each one
++is allowed to appear. Both are easy to regress silently — a bad allowlist entry
++just quietly puts 15,000 subway platforms back on the map.
++"""
++
++import pytest
++
++from build_place_labels import (
++    MAX_LABEL_ZOOM,
++    Poi,
++    assign_zooms,
++    classify,
++    dedup,
++    normalize_name,
++)
++
++
++class TestClassify:
++    def test_allowlisted_kinds_are_kept_with_their_tier(self):
++        assert classify({"amenity": "library"}) == ("civic", 68, 15)
++        assert classify({"leisure": "stadium"}) == ("culture", 88, 13)
++        assert classify({"amenity": "restaurant"}) == ("retail", 30, 18)
++
++    @pytest.mark.parametrize("tags", [
++        # The five most common named POI tags in the NYC extract; four are noise.
++        {"public_transport": "platform"},
++        {"railway": "rail"},
++        {"railway": "abandoned"},
++        {"leisure": "pitch"},
++        # Green space is the basemap raster's job — labelling it here too
++        # printed every park name twice, once in each cartography.
++        {"leisure": "park"},
++        {"leisure": "garden"},
++        {"leisure": "playground"},
++        {"amenity": "parking"},
++        {"shop": "hairdresser"},
++        {"building": "yes"},
++        {},
++    ])
++    def test_noise_tags_are_dropped(self, tags):
++        assert classify(tags) is None
++
++    def test_wiki_tag_promotes_a_notable_business(self):
++        plain = classify({"amenity": "restaurant"})
++        notable = classify({"amenity": "restaurant", "wikidata": "Q1067278"})
++        assert notable[1] > plain[1]
++
++    def test_subway_stop_is_demoted_below_a_mainline_terminal(self):
++        mainline = classify({"railway": "station", "name": "Grand Central"})
++        subway = classify({"railway": "station", "station": "subway"})
++        # Same OSM tag, very different cartographic weight.
++        assert subway[1] < mainline[1]
++        assert subway[2] > mainline[2]
++
++    def test_subway_demotion_survives_a_wikidata_tag(self):
++        # Nearly every NYC subway stop has one; if the notability bonus applied
++        # here it would hand back exactly the rank the demotion removed.
++        assert classify({"railway": "station", "station": "subway",
++                         "wikidata": "Q1234"}) == classify(
++            {"railway": "station", "station": "subway"})
++
++    def test_more_specific_tag_wins_when_a_feature_carries_several(self):
++        # A hotel with a restaurant in it is a hotel: `tourism` is consulted
++        # before `amenity`.
++        assert classify({"tourism": "hotel", "amenity": "restaurant"})[0:2] \
++            == ("retail", 56)
++
++
++class TestNormalizeName:
++    def test_folds_case_accents_and_punctuation(self):
++        assert normalize_name("Joe's Café") == normalize_name("JOES CAFE")
++
++    def test_keeps_distinct_names_distinct(self):
++        assert normalize_name("14 St") != normalize_name("14 Ave")
++
++
++class TestDedup:
++    def test_collapses_a_station_mapped_once_per_line(self):
++        # One NYC complex, five `railway=station` nodes within a block.
++        pois = [Poi(40.7370 + i * 0.0002, -73.9900, "14 St", "transit", 64, 15)
++                for i in range(5)]
++        assert len(dedup(pois)) == 1
++
++    def test_keeps_the_highest_ranked_of_a_cluster(self):
++        pois = [
++            Poi(40.7370, -73.9900, "14 St", "transit", 64, 15),
++            Poi(40.7371, -73.9900, "14 St", "transit", 90, 13),
++        ]
++        kept = dedup(pois)
++        assert len(kept) == 1
++        assert kept[0].rank == 90
++
++    def test_same_name_far_apart_is_two_real_places(self):
++        # Every borough has a "Post Office"; they are not duplicates.
++        pois = [
++            Poi(40.7370, -73.9900, "Post Office", "civic", 52, 17),
++            Poi(40.6800, -73.9500, "Post Office", "civic", 52, 17),
++        ]
++        assert len(dedup(pois)) == 2
++
++
++class TestAssignZooms:
++    def test_never_reveals_a_poi_before_its_floor(self):
++        pois = [Poi(40.75 + i * 0.05, -73.9 - i * 0.05, f"P{i}",
++                    "retail", 30, 18) for i in range(4)]
++        assign_zooms(pois)
++        assert all(p.minz >= 18 for p in pois)
++
++    def test_highest_ranked_wins_a_contested_cell(self):
++        # Two POIs on top of each other: only one can hold the spot first.
++        big = Poi(40.7500, -73.9900, "Museum", "culture", 85, 13)
++        small = Poi(40.7500, -73.9901, "Deli", "retail", 30, 13)
++        assign_zooms([small, big])
++        assert big.minz < small.minz
++
++    def test_spread_out_pois_all_reveal_at_their_floor(self):
++        pois = [Poi(40.5 + i * 0.1, -74.0 + i * 0.1, f"Venue{i}",
++                    "culture", 88, 13) for i in range(4)]
++        assign_zooms(pois)
++        assert all(p.minz == 13 for p in pois)
++
++    def test_every_poi_gets_a_reveal_zoom(self):
++        # Even a POI whose cell is taken at every single zoom must end up
++        # visible somewhere rather than silently vanishing from the tileset.
++        pois = [Poi(40.75, -73.99, f"Stacked{i}", "retail", 30, 18)
++                for i in range(30)]
++        assign_zooms(pois)
++        assert all(1 <= p.minz <= MAX_LABEL_ZOOM for p in pois)
