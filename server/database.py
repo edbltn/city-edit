@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from typing import Optional
 
 import psycopg2
-from psycopg2.extras import Json, execute_values
+from psycopg2.extras import execute_values
 from psycopg2.pool import ThreadedConnectionPool
 
 # Under the gevent worker, plain psycopg2 blocks the event-loop hub for the
@@ -272,13 +272,21 @@ def init_db():
             cursor.execute(
                 "ALTER TABLE maps ADD COLUMN IF NOT EXISTS top_proposal_min_net INT"
             )
-            # Per-map location links for vote types: {label: [{"url", "title"?}]}.
-            # Each url is an in-app deep link (/m/<slug>?w=…&vt=…) shown as a
-            # numbered [#1] [#2] anchor beside the vote-type label in proposal
-            # cards — pilot: official NYC DOT proposal locations on nyc-proposals.
-            cursor.execute(
-                "ALTER TABLE maps ADD COLUMN IF NOT EXISTS vote_type_links JSONB"
-            )
+            # Where an imported vote came from. One row per synthetic voter of an
+            # import batch (device_id = the hash /api/vote stored on its rows),
+            # pointing at the document the proposal was scraped from — e.g. a
+            # nycdotprojects.info project page behind a nyc-proposals vote. Keyed
+            # by device_id, NOT edge ids, so a graph rebuild (which shifts edge
+            # ids and resnaps votes) can't strand the attribution.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vote_sources (
+                    map_slug TEXT NOT NULL,
+                    device_id VARCHAR(16) NOT NULL,
+                    url TEXT NOT NULL,
+                    title TEXT,
+                    PRIMARY KEY (map_slug, device_id)
+                )
+            """)
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_maps_city ON maps(city_id)
             """)
@@ -1008,7 +1016,7 @@ def _map_row_to_dict(row) -> dict:
     """Shape a maps JOIN vote_type_lists row into the public map dict."""
     (slug, name, subtitle, city_id, allow_suggestions, has_passcode,
      subdomain, list_vote_types, custom_vote_types, vote_count, symbol, style,
-     network, top_proposal_min_net, vote_type_links) = row
+     network, top_proposal_min_net) = row
     vote_types = custom_vote_types or list_vote_types or []
     # The proposer-chosen visual style wins; presets keep their subdomain style;
     # everything else falls back to the neutral default. The vote namespace
@@ -1035,8 +1043,6 @@ def _map_row_to_dict(row) -> dict:
         # Only present when the row overrides the client's default floor.
         **({"topProposalMinNet": top_proposal_min_net}
            if top_proposal_min_net is not None else {}),
-        # Only present when the map has per-vote-type location links.
-        **({"voteTypeLinks": vote_type_links} if vote_type_links else {}),
     }
 
 
@@ -1050,7 +1056,7 @@ _MAP_COLUMNS = """
            (m.passcode_hash IS NOT NULL) AS has_passcode,
            m.subdomain, vtl.vote_types, m.custom_vote_types,
            {vote_count} AS vote_count, m.symbol, m.style, m.network,
-           m.top_proposal_min_net, m.vote_type_links
+           m.top_proposal_min_net
     FROM maps m
     LEFT JOIN vote_type_lists vtl ON vtl.id = m.vote_type_list_id
 """
@@ -1144,39 +1150,70 @@ def set_map_subdomain(slug: str, subdomain: Optional[str]) -> tuple[bool, str]:
         return False, str(e)
 
 
-def set_map_vote_type_links(slug: str, links: Optional[dict]) -> tuple[bool, str]:
-    """Replace a map's per-vote-type location links ({label: [{"url","title"?}]}).
+def set_vote_sources(slug: str, sources: list[dict]) -> tuple[bool, str]:
+    """Replace a map's imported-vote source registry.
 
-    `links=None`/{} clears the column. The whole mapping is replaced atomically —
-    callers send the full desired state, not a delta. Returns (ok, message).
+    Each entry is {"device_id", "url", "title"?} — device_id being the hashed
+    voter id the import's casts carry on their edge_votes rows. The whole
+    registry for the map is replaced atomically (callers send the full desired
+    state); an empty list clears it. Returns (ok, message).
     """
     if not DATABASE_URL:
         return False, "database unavailable"
-    payload = links or None
-    if payload is not None:
-        if not isinstance(payload, dict):
-            return False, "links must be an object of {label: [{url, title?}]}"
-        for label, entries in payload.items():
-            if not label or not isinstance(entries, list):
-                return False, f"invalid entries for label '{label}'"
-            for e in entries:
-                if not isinstance(e, dict) or not isinstance(e.get("url"), str) \
-                        or not e["url"]:
-                    return False, f"invalid link entry under '{label}'"
+    rows = []
+    for s in sources or []:
+        device_id, url = s.get("device_id"), s.get("url")
+        if not device_id or not isinstance(url, str) or not url:
+            return False, f"invalid source entry: {s!r}"
+        rows.append((slug, str(device_id)[:16], url, s.get("title") or None))
+    try:
+        with get_cursor() as cursor:
+            cursor.execute("DELETE FROM vote_sources WHERE map_slug = %s", (slug,))
+            if rows:
+                execute_values(
+                    cursor,
+                    "INSERT INTO vote_sources (map_slug, device_id, url, title) "
+                    "VALUES %s ON CONFLICT (map_slug, device_id) DO UPDATE "
+                    "SET url = EXCLUDED.url, title = EXCLUDED.title",
+                    rows,
+                )
+        return True, f"registered {len(rows)} sources"
+    except Exception as e:
+        logger.error(f"[DB] set_vote_sources failed: {e}")
+        return False, str(e)
+
+
+def fetch_vote_sources_for_edges(
+    map_slug: str, edge_ids: list[int]
+) -> list[tuple[str, str, Optional[str], int]]:
+    """Where the votes ON these edges came from, as (label, url, title, edges).
+
+    Joins the live votes to the source registry, so a card shows the actual
+    proposals that produced the votes under it — not every proposal of the same
+    type elsewhere in the city. `edges` is how many of the queried edges that
+    source voted on, so the dominant proposal for a block sorts first. Only
+    upvotes count: a cancelled/countered import shouldn't cite its source.
+    """
+    if not DATABASE_URL or not edge_ids:
+        return []
     try:
         with get_cursor() as cursor:
             cursor.execute(
-                "UPDATE maps SET vote_type_links = %s WHERE slug = %s",
-                (Json(payload) if payload is not None else None, slug),
+                """SELECT vt.label, vs.url, vs.title, COUNT(DISTINCT ev.edge_id)
+                     FROM edge_votes ev
+                     JOIN vote_sources vs
+                       ON vs.map_slug = ev.map_slug AND vs.device_id = ev.device_id
+                     JOIN vote_types vt ON vt.id = ev.vote_type_id
+                    WHERE ev.map_slug = %s AND ev.edge_id = ANY(%s)
+                      AND ev.direction > 0
+                    GROUP BY vt.label, vs.url, vs.title
+                    ORDER BY COUNT(DISTINCT ev.edge_id) DESC, vs.url""",
+                (map_slug, list(edge_ids)),
             )
-            if cursor.rowcount == 0:
-                return False, f"no map with slug '{slug}'"
-        n = sum(len(v) for v in (payload or {}).values())
-        return True, ("cleared" if payload is None
-                      else f"set {n} links across {len(payload)} vote types")
+            return [(r[0], r[1], r[2], int(r[3])) for r in cursor.fetchall() if r[0]]
     except Exception as e:
-        logger.error(f"[DB] set_map_vote_type_links failed: {e}")
-        return False, str(e)
+        logger.error(f"[DB] fetch_vote_sources_for_edges failed: {e}")
+        return []
 
 
 def slug_available(slug: str) -> bool:

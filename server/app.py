@@ -44,7 +44,8 @@ from database import (
     seed_presets, backfill_vote_type_kinds, normalize_point_type,
     list_maps, get_map, get_map_by_subdomain, slug_available, get_map_redirect,
     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,
-    set_map_vote_type_links, promote_vote_types, fetch_voted_vote_type_labels,
+    set_vote_sources, fetch_vote_sources_for_edges,
+    promote_vote_types, fetch_voted_vote_type_labels,
     DATABASE_URL,
 )
 
@@ -2350,27 +2351,64 @@ def admin_set_subdomain(slug):
     return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
 
 
-@app.route("/api/admin/maps/<slug>/vote-type-links", methods=["POST", "DELETE"])
-def admin_set_vote_type_links(slug):
-    """Replace (POST {links: {label: [{url, title?}]}}) or clear (DELETE) a
-    map's per-vote-type location links, rendered as [#1] [#2] anchors beside
-    vote-type labels in proposal cards.
+@app.route("/api/admin/maps/<slug>/vote-sources", methods=["POST", "DELETE"])
+def admin_set_vote_sources(slug):
+    """Register (POST) or clear (DELETE) where a map's imported votes came from.
 
-    Requires the X-Admin-Token header to match ADMIN_TOKEN. POST replaces the
-    whole mapping — send the full desired state.
+    Body: {sources: [{voter_id, url, title?}]} — the SAME voter_id the import
+    cast with, hashed here exactly as /api/vote hashes it, so the registry keys
+    match the stored rows. Replaces the whole registry for the map.
+
+    Requires the X-Admin-Token header to match ADMIN_TOKEN.
     """
     if not _admin_authorized():
         return jsonify({"error": "Unauthorized"}), 403
     if request.method == "DELETE":
-        ok, msg = set_map_vote_type_links(slug, None)
+        ok, msg = set_vote_sources(slug, [])
     else:
-        links = (request.get_json(silent=True) or {}).get("links")
-        if not isinstance(links, dict) or not links:
-            return jsonify({"error": "links object is required"}), 400
-        ok, msg = set_map_vote_type_links(slug, links)
-    if ok:
-        invalidate_map_cache(slug)
+        sources = (request.get_json(silent=True) or {}).get("sources")
+        if not isinstance(sources, list) or not sources:
+            return jsonify({"error": "sources list is required"}), 400
+        resolved = []
+        for s in sources:
+            if not isinstance(s, dict) or not s.get("voter_id"):
+                return jsonify({"error": f"missing voter_id in {s!r}"}), 400
+            resolved.append({
+                "device_id": hashlib.sha256(
+                    str(s["voter_id"]).encode()).hexdigest()[:16],
+                "url": s.get("url"),
+                "title": s.get("title"),
+            })
+        ok, msg = set_vote_sources(slug, resolved)
     return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
+
+
+@app.route("/api/vote-sources", methods=["POST"])
+def vote_sources():
+    """Source documents behind the votes on a selection's edges.
+
+    Body: { map, edge_ids: [int] } → { sources: {label: [{url, title}]} }, the
+    proposals whose imported votes actually landed on those edges (see
+    fetch_vote_sources_for_edges). Empty for maps with no source registry.
+    POST for the same reason as /api/route-votes: block-edge unions are large.
+    """
+    data = request.get_json(silent=True) or {}
+    rmap = resolve_map(data.get("map"))
+    if _locked(rmap):
+        return _locked_response()
+
+    raw = data.get("edge_ids")
+    if not isinstance(raw, list):
+        return jsonify({"error": "edge_ids must be a list of integers"}), 400
+    try:
+        edge_ids = [int(e) for e in raw[:ROUTE_VOTES_EDGE_CAP]]
+    except (TypeError, ValueError):
+        return jsonify({"error": "edge_ids must be a list of integers"}), 400
+
+    by_label: dict[str, list[dict]] = {}
+    for label, url, title, _n in fetch_vote_sources_for_edges(rmap.slug, edge_ids):
+        by_label.setdefault(label, []).append({"url": url, "title": title or ""})
+    return jsonify({"sources": by_label})
 
 
 @app.route("/api/admin/maps/<slug>/promote-vote-types", methods=["POST"])

@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-Install per-vote-type proposal links on a map from a plan JSONL.
+Register where a map's imported votes came from, so the app can cite them.
 
-Reads the plan produced by `import_to_map.py plan` and builds, for each vote
-type, the list of real proposals of that type — each linking to its SOURCE
-document (the project's page on nycdotprojects.info, the same pages the votes
-were imported from) and carrying the proposal's coordinates. Installs the whole
-mapping via the admin API (maps.vote_type_links); the client shows the three
-NEAREST proposals to whatever the card is anchored on, as [a] [b] [c] beside
-the vote-type label.
+Reads the plan produced by `import_to_map.py plan` and registers, for every
+proposal it cast, the page it was scraped from (its nycdotprojects.info project
+URL) against the SAME synthetic voter the cast used. The app then resolves a
+selection's edges → the proposals whose votes are actually on them
+(/api/vote-sources), and each vote-type row in a proposal card links to its own
+source page — not to every proposal of that type elsewhere in the city.
 
-    python3 set_vote_type_links.py --plan plan.jsonl \
+    python3 set_vote_sources.py --plan plan.jsonl \
         --base http://localhost:5001 --map nyc-proposals \
         --token $ADMIN_TOKEN [--dry-run]
 
-Idempotent: the mapping is replaced wholesale on every run.
+Idempotent: the map's registry is replaced wholesale on every run. Keyed by
+voter id (not edge ids), so a graph rebuild + resnap can't strand attribution.
 """
 import argparse
 import json
@@ -22,22 +22,8 @@ import os
 import sys
 import urllib.request
 
-
-def link_for(entry: dict) -> dict | None:
-    """{url, title, lat, lng} for a cast plan entry, or None if it wasn't cast.
-
-    Corridors are anchored at their midpoint so proximity ranking doesn't favor
-    whichever end happened to be geocoded first.
-    """
-    if entry.get("cast") == "route":
-        (slat, slng), (elat, elng) = entry["start"], entry["end"]
-        lat, lng = (slat + elat) / 2, (slng + elng) / 2
-    elif entry.get("cast") == "point":
-        lat, lng = entry["point"]
-    else:
-        return None
-    return {"url": entry["url"], "title": entry["title"],
-            "lat": round(lat, 6), "lng": round(lng, 6)}
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from import_to_map import voter_id  # noqa: E402  (the same hash the casts used)
 
 
 def main():
@@ -49,32 +35,27 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    links: dict[str, list[dict]] = {}
-    seen: set[tuple[str, str]] = set()
+    sources, seen = [], set()
     with open(args.plan) as f:
         for line in f:
             entry = json.loads(line)
-            lnk = link_for(entry)
-            if not lnk or (entry["vote_type"], lnk["url"]) in seen:
+            # Only entries that actually cast have rows to attribute.
+            if entry.get("cast") not in ("route", "point") or entry["url"] in seen:
                 continue
-            seen.add((entry["vote_type"], lnk["url"]))
-            links.setdefault(entry["vote_type"], []).append(lnk)
+            seen.add(entry["url"])
+            sources.append({"voter_id": voter_id(entry["url"]),
+                            "url": entry["url"], "title": entry["title"]})
+            print(f"  {entry['vote_type']:<28} {entry['title'][:44]:<44} {entry['url']}")
 
-    total = sum(len(v) for v in links.values())
-    for label, ls in sorted(links.items(), key=lambda kv: -len(kv[1])):
-        print(f"  {label}: {len(ls)}")
-        for lnk in ls:
-            print(f"    {lnk['lat']:.4f},{lnk['lng']:.4f}  {lnk['title'][:52]:<52} {lnk['url']}")
-    print(f"{total} proposals across {len(links)} vote types "
-          f"(the client shows the 3 nearest per card)")
+    print(f"{len(sources)} proposals to register on '{args.slug}'")
     if args.dry_run:
         return
     if not args.token:
         sys.exit("--token (or ADMIN_TOKEN) required")
 
     req = urllib.request.Request(
-        f"{args.base}/api/admin/maps/{args.slug}/vote-type-links",
-        data=json.dumps({"links": links}).encode(),
+        f"{args.base}/api/admin/maps/{args.slug}/vote-sources",
+        data=json.dumps({"sources": sources}).encode(),
         headers={"Content-Type": "application/json", "X-Admin-Token": args.token},
         method="POST",
     )
