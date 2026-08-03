@@ -377,14 +377,28 @@ def main():
     def corr_geom(c):
         """(centrelines, sample points) for corridor c, in the metric frame.
         The sample points densify the centrelines to HUG_SAMPLE_M so a single
-        long straight edge cannot hide its own middle from a distance probe."""
+        long straight edge cannot hide its own middle from a distance probe.
+
+        ZERO-LENGTH members are kept out of the centrelines and contributed as
+        bare sample points instead: they have no extent to run alongside
+        anything, and segmentize refuses them outright — GEOS collapses their
+        two identical endpoints to a one-point sequence and throws
+        "point array must contain 0 or >1 elements". Older graph vintages carry
+        a few (two distinct node ids sharing coordinates), and one such member
+        used to take the whole bake down.
+        """
         geom = lines_cache.get(c)
         if geom is None:
-            lines = shapely.multilinestrings(
-                [list(ln.coords) for ln in edge_lines(corridors[c])])
-            pts = shapely.points(shapely.get_coordinates(
-                shapely.segmentize(lines, HUG_SAMPLE_M)))
-            lines_cache[c] = geom = (lines, pts)
+            segs = [list(ln.coords) for ln in edge_lines(corridors[c])]
+            spans = [s for s in segs if s[0] != s[1]]
+            lines = shapely.multilinestrings(spans) if spans else LineString()
+            sample = (shapely.get_coordinates(
+                shapely.segmentize(lines, HUG_SAMPLE_M)) if spans
+                else np.empty((0, 2)))
+            degenerate = [s[0] for s in segs if s[0] == s[1]]
+            if degenerate:
+                sample = np.vstack([sample, np.asarray(degenerate)])
+            lines_cache[c] = geom = (lines, shapely.points(sample))
         return geom
 
     def member_lines(c):
@@ -393,11 +407,13 @@ def main():
     def strays(c, anchor):
         """Farthest any point of corridor c gets from the anchor's centrelines
         (a directed Hausdorff distance) — small only when c runs alongside the
-        anchor for its whole length."""
+        anchor for its whole length. Infinite when either side has nothing to
+        measure, so a degenerate corridor never merges into anything."""
         pts = corr_geom(c)[1]
-        if len(pts) == 0:
+        target = member_lines(anchor)
+        if len(pts) == 0 or target.is_empty:
             return math.inf
-        return float(shapely.distance(pts, member_lines(anchor)).max())
+        return float(shapely.distance(pts, target).max())
 
     # ── 3. Degeneracy + equivalence fixpoint ────────────────────────────────
     # Four rules iterate to convergence — each strictly shrinks the corridor
