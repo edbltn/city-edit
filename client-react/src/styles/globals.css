@@ -2037,20 +2037,27 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
    second — n of the selection's N blocks hold at least one vote of this type.
    Deliberately quiet next to the vote control: it's context, not the control.
 
-   One shared width, right-aligned, used by BOTH the values and the column
-   header above them — so the header sits exactly over its column and the
-   fractions keep a common right edge however wide "9/12" vs "45/47" run. */
+   One FIXED-width column, contents centred — the same rule the VOTERS caption
+   follows over the vote control. Both header labels then sit on their column's
+   centre line. (Right-aligning the values instead reads as misalignment: a
+   right-aligned "BLOCKS" is wider than "45/47", so it overhangs to the left
+   and its centre lands ~11px off the numbers' centre while VOTERS sits dead
+   centre over its own column — two different rules in one header row.)
+
+   The width is fixed rather than a min-width so a long label can never widen
+   the header's column and shove its mirrored vote control out of line with
+   the rows below; the header simply overflows, symmetrically, into the gap. */
 .graph-proposal-rows.has-coverage {
-  --cover-col: 40px;
+  --cover-col: 44px;
 }
 
 .graph-proposal-row-cover {
-  flex: 0 0 auto;
-  min-width: var(--cover-col, 40px);
+  flex: 0 0 var(--cover-col, 44px);
+  width: var(--cover-col, 44px);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
-  text-align: right;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -2094,6 +2101,14 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .graph-proposal-head .graph-proposal-row-cover {
   letter-spacing: 0.08em;
   color: inherit;
+  /* A label wider than its column (e.g. "SEGMENTS") spills evenly into the
+     gaps rather than widening the column — the column's width is what keeps
+     the mirrored control below in line with the rows.
+     No optical correction for the trailing letter-space here: BOTH captions
+     are centred and share the same tracking, so both sit a half-space left of
+     true centre by the same amount. Correcting one alone would put them back
+     out of step with each other, which is the thing you actually see. */
+  overflow: visible;
 }
 
 /* The header's vote-group is a structural MIRROR of the real control: three
@@ -2428,11 +2443,12 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
     --vote-pad-x: 5px;
   }
 
-  /* The header word ("blocks") no longer has to fit on a phone — the column
-     narrows to what the fraction needs, and the header ellipsizes rather than
-     pushing the vote control off the card. */
+  /* The column narrows to what the fraction needs; the header keeps spilling
+     evenly past it rather than widening it (see the desktop rule) — on a phone
+     that overhang is what stops "SEGMENTS" from shoving the vote control off
+     the card. */
   .graph-proposal-rows.has-coverage {
-    --cover-col: 34px;
+    --cover-col: 38px;
   }
 
   .graph-proposal-head {
@@ -2441,9 +2457,7 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
   }
 
   .graph-proposal-head .graph-proposal-row-cover {
-    overflow: hidden;
     letter-spacing: 0.04em;
-    text-overflow: ellipsis;
   }
 
   /* Track the phone-sized vote cells, so the mirror still matches. */
