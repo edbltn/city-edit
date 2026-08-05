@@ -1974,13 +1974,20 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   align-items: center;
   gap: 12px;
   line-height: 1.4;
-  /* Location links, when present, wrap onto their own full-width line. */
-  flex-wrap: wrap;
-  row-gap: 2px;
 }
 
+/* The label COLUMN holds the badge, the type name and its source links. It is
+   the flexible column, so it absorbs whatever the fixed coverage/vote columns
+   leave — and only the name inside it ellipsizes. */
 .graph-proposal-row-label {
   flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.graph-proposal-row-label-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2000,8 +2007,12 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  margin-right: 5px;
-  vertical-align: 1px;
+  /* A flex item of the label column now, not an inline box: it holds no text,
+     so it has no baseline to align on — centre it explicitly instead of the
+     old vertical-align nudge, which a flex context ignores. The label's own
+     5px gap replaces the former margin-right. */
+  align-self: center;
+  flex: 0 0 auto;
 }
 
 .graph-proposal-row-top-square,
@@ -2135,18 +2146,21 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 }
 
-/* Lettered links ([a] [b] [c]) to the real proposals behind a vote type
-   (maps.vote_type_links) — a full-width line under the label so they never
-   squeeze the label or the vote control. Deliberately small and quiet: a
-   footnote on the row, not a second control. */
+/* Lettered links ([a] [b] [c]) to the real proposals behind a vote type — set
+   immediately after the type name, on the same line, the way a footnote marker
+   follows the words it annotates. Deliberately small and quiet: a footnote on
+   the row, not a second control.
+
+   flex: 0 0 auto (never shrink, never wrap): the markers are only a few
+   characters, and a truncated "[a" would be unreadable — when the row is tight
+   it is the type NAME that ellipsizes, since that still reads. */
 .graph-proposal-row-links {
-  flex: 1 0 100%;
+  flex: 0 0 auto;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0 6px;
-  margin-top: -1px;
+  gap: 0 5px;
   font-size: 10px;
   line-height: 1.3;
+  white-space: nowrap;
 }
 
 .graph-proposal-row-link {

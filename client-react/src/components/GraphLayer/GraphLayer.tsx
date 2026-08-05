@@ -4886,7 +4886,36 @@ function ProposalCard({
                             )}
                           </span>
                         )}
-                        {row.label}
+                        <span className="graph-proposal-row-label-text">
+                          {row.label}
+                        </span>
+                        {/* Source links ride WITH the label, inside its column,
+                            so they read as a footnote on the vote type rather
+                            than a stray line under the row. The label text is
+                            what ellipsizes when the row is tight — the links
+                            keep their intrinsic width. */}
+                        {links.length > 0 && (
+                          <span
+                            className="graph-proposal-row-links"
+                            aria-label={`${row.label} sources`}
+                          >
+                            {links.map((lnk, i) => (
+                              <a
+                                key={lnk.url}
+                                className="graph-proposal-row-link"
+                                href={lnk.url}
+                                // The source document lives outside the app, so
+                                // never navigate the map away from under someone.
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={lnk.title || lnk.url}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                [{String.fromCharCode(97 + i)}]
+                              </a>
+                            ))}
+                          </span>
+                        )}
                       </span>
                       {showCoverage && (
                         <CoverageCell
@@ -4908,28 +4937,6 @@ function ProposalCard({
                         </span>
                         {tally(row, 1)}
                       </span>
-                      {links.length > 0 && (
-                        <span
-                          className="graph-proposal-row-links"
-                          aria-label={`${row.label} sources`}
-                        >
-                          {links.map((lnk, i) => (
-                            <a
-                              key={lnk.url}
-                              className="graph-proposal-row-link"
-                              href={lnk.url}
-                              // The source document lives outside the app, so
-                              // never navigate the map away from under someone.
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              title={lnk.title || lnk.url}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              [{String.fromCharCode(97 + i)}]
-                            </a>
-                          ))}
-                        </span>
-                      )}
                     </div>
                   );
                 })}
