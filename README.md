@@ -180,3 +180,36 @@ gcloud run services logs read desire-path-mapper \
 > service is `desire-path-mapper`). Those are real resource IDs — don't expect
 > them to say "cityedit".
 </content>
+
+## License
+
+City Edit is free software, licensed under the
+**[GNU Affero General Public License v3.0](LICENSE)**.
+
+    Copyright (C) 2026 City Edit contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Affero General Public License as published
+    by the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Affero General Public License for more details.
+
+    You should have received a copy of the GNU Affero General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+The AGPL's network clause (section 13) applies: if you run a modified City Edit
+as a public service, you must offer its users the corresponding source.
+
+### Third-party data and dependencies
+
+Map data is © [OpenStreetMap](https://www.openstreetmap.org/copyright)
+contributors, available under the
+[Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/) —
+a separate licence from this codebase, which continues to govern the OSM
+derivatives here (`server/osm_data/`, the built graphs, and the block tiles).
+Basemap tiles come from [CARTO](https://carto.com/attributions). Bundled
+dependencies keep their own licences (Leaflet, MapLibre GL, and OSRM are BSD).
