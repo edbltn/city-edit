@@ -164,13 +164,16 @@ SECTIONS = [
         "id": "color",
         "tag": "LEGEND",
         "title": "Four colors, one palette per basemap",
-        "symptom": "An undifferentiated wall of names is only marginally better than no names — you cannot scan it for the thing you actually want (the nearest station, the school on the corner).",
+        "symptom": "An undifferentiated wall of names is only marginally better than no names — you cannot scan it for the thing you actually want (the nearest station, the school on the corner). But colour it at full strength and the labels start competing with the very thing the map exists to show.",
         "cause": [
             "Colour coding only pays off if it is learnable, and re-hueing categories per map style would mean re-learning them on every one of the eight styles",
             "The heat ramp already owns each style's accent hue, so a loud label palette competes with the product",
         ],
         "fixes": [
             "Four categories — <strong>transit</strong>, <strong>civic</strong>, <strong>culture</strong>, <strong>retail</strong> — in one palette per basemap (dark / light), not per style",
+            "<strong>Nothing is painted at full strength.</strong> The hues live in <code>POI_HUES</code> and <code>POI_COLORS</code> derives from them by mixing 58% toward a per-basemap neutral grey. At full saturation a screenful of blue, amber and violet names competed with the heat and the proposal pins instead of sitting underneath them; the coding survives the mute (a station is still visibly not a school) while the layer's weight drops well below the pins'. Keeping the vivid values as the source of truth leaves one number to turn, <code>POI_MUTE</code>, rather than eight hexes to re-pick",
+            "The rest recedes with it: text 9.5–12px → 8.6–10.5px, icons 13px → 11px base (~8–10px on screen), icon opacity 0.9 → 0.72, halo 1.5 → 1.2 — at ~9px type a 1.5 halo had started reading as a bold weight rather than as separation from the basemap",
+            "A side effect worth having: muted labels sit at about the same visual weight as CARTO's own street names underneath, so the two cartographies read as one quiet base layer instead of two competing ones",
             "Retail is deliberately the most neutral of the four: it is by far the largest category, and tinting every deli and bank would turn the deep zooms into confetti",
             "Green is absent by design — parks are labelled by the CARTO raster underneath, in its own green, which makes five readable classes on screen from four of our own",
             "Halos are painted in the basemap's own paper/ink token, which is the contrast control the raster overlay above it does not get to have",

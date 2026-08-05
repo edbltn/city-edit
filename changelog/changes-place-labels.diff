@@ -2164,3 +2164,149 @@ index 1424190..91a4fdc 100644
                  for i in range(30)]
          assign_zooms(pois)
          assert all(1 <= p.minz <= MAX_LABEL_ZOOM for p in pois)
+diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+index 22f16c3..a52cb52 100644
+--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
++++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+@@ -222,7 +222,7 @@ async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise<
+       // and keeps the mark, so a dense strip thins into icons instead of either
+       // vanishing or turning into a wall of names.
+       "icon-image": placeIconExpression,
+-      "icon-size": ["interpolate", ["linear"], ["zoom"], 11, 0.8, 15, 0.92, 18, 1],
++      "icon-size": ["interpolate", ["linear"], ["zoom"], 11, 0.72, 15, 0.84, 18, 0.94],
+       "icon-anchor": "center",
+       "icon-padding": 2,
+       "text-optional": true,
+@@ -230,8 +230,10 @@ async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise<
+       "text-offset": [0, 0.62],
+       "text-field": ["get", "name"],
+       "text-font": [PLACE_LABEL_FONT],
+-      // Mono is wide, so this runs a little smaller than a sans would.
+-      "text-size": ["interpolate", ["linear"], ["zoom"], 11, 9.5, 15, 10.5, 18, 12],
++      // Mono is wide, so this runs smaller than a sans would — and smaller
++      // again than legibility alone would ask for, because this layer has to
++      // stay quieter than the vote heat and the top-proposal pins above it.
++      "text-size": ["interpolate", ["linear"], ["zoom"], 11, 8.6, 15, 9.4, 18, 10.5],
+       // Wrap width is in characters, and mono means characters are uniformly
+       // wide — 9 turned "New York Institute of Technology" into a three-line
+       // clump. 11 keeps most names to two lines without widening the footprint
+@@ -254,11 +256,13 @@ async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise<
+       // saturated heat block — the contrast control the raster label overlay
+       // above it doesn't get to have.
+       "text-halo-color": mapStyle.base,
+-      "text-halo-width": 1.5,
++      // Scaled down with the type: at 1.5 against ~9px text the halo starts to
++      // read as a bold weight rather than as separation from the basemap.
++      "text-halo-width": 1.2,
+       "text-halo-blur": 0.3,
+-      // Icons are already baked in their category colour; the slight knock-down
+-      // keeps them reading as annotation rather than as another pin.
+-      "icon-opacity": 0.9,
++      // Icons are already baked in their (muted) category colour; this takes
++      // them down again so a mark reads as annotation and never as a pin.
++      "icon-opacity": 0.72,
+     },
+   });
+   dlog("maplibre", "place labels added", url);
+diff --git a/client-react/src/components/MapLibreBackground/placeIcons.ts b/client-react/src/components/MapLibreBackground/placeIcons.ts
+index e2cd924..070886b 100644
+--- a/client-react/src/components/MapLibreBackground/placeIcons.ts
++++ b/client-react/src/components/MapLibreBackground/placeIcons.ts
+@@ -1,7 +1,7 @@
+ /**
+  * Little line icons for the place-label layer.
+  *
+- * These are drawn at ~13 CSS px, which is the constraint behind every decision
++ * These are drawn at ~8-10 CSS px, which is the constraint behind every decision
+  * here. Each glyph is built on a 16×16 grid with a 1.5 stroke — the same
+  * thin-line language as the vote-type icons in public/icons (32-grid, 1.2
+  * stroke), scaled so the strokes hold together at a third of the size. Anything
+@@ -23,9 +23,10 @@ import maplibregl from "maplibre-gl";
+ import { POI_COLORS, type Basemap } from "../../mapStyles";
+ import { dlog, dwarn } from "../../utils/debugLog";
+ 
+-/** Rendered size in CSS pixels. Small enough to read as an annotation on the
+- *  map rather than as a pin competing with the proposal markers. */
+-const ICON_PX = 13;
++/** Rendered size in CSS pixels, before the layer's zoom-dependent icon-size
++ *  (so a mark is ~8-10px on screen). Small enough to read as an annotation on
++ *  the map and never as a pin competing with the top-proposal markers. */
++const ICON_PX = 11;
+ 
+ /** Every glyph's category (which is what colours it) and its SVG body. Paths
+  *  are stroked unless they opt into `fill` — see toSvg. */
+diff --git a/client-react/src/mapStyles.ts b/client-react/src/mapStyles.ts
+index 3de03be..04adefc 100644
+--- a/client-react/src/mapStyles.ts
++++ b/client-react/src/mapStyles.ts
+@@ -280,7 +280,7 @@ export const SELECTABLE_MAP_STYLES: { id: string; label: string }[] = [
+  * There is no green here: parks and squares are labelled by the CARTO raster
+  * underneath, in its own green, and the builder drops them for that reason.
+  */
+-export const POI_COLORS: Record<Basemap, Record<string, string>> = {
++const POI_HUES: Record<Basemap, Record<string, string>> = {
+   dark: {
+     transit: "#7FB2FF",
+     civic: "#E3BE79",
+@@ -295,6 +295,37 @@ export const POI_COLORS: Record<Basemap, Record<string, string>> = {
+   },
+ };
+ 
++/**
++ * The neutral each palette is pulled toward, and how far.
++ *
++ * The hues above are what the categories "are"; nothing on the map is painted
++ * at that strength. Place labels are CONTEXT — the thing that has to pop is the
++ * heat and the top-proposal pins, and at full saturation a screenful of blue,
++ * amber and violet labels competed with them for attention instead of sitting
++ * underneath. Pulling every category most of the way to a neutral grey keeps
++ * the coding legible (you can still tell a station from a school at a glance)
++ * while dropping the layer's visual weight well below the pins'.
++ *
++ * Raise POI_MUTE toward 1 to recede further; drop it toward 0 to get the vivid
++ * palette back.
++ */
++const POI_NEUTRAL: Record<Basemap, string> = { dark: "#93908A", light: "#736F68" };
++const POI_MUTE = 0.58;
++
++/** Category label colors as actually painted — the hues, held back. */
++export const POI_COLORS: Record<Basemap, Record<string, string>> =
++  Object.fromEntries(
++    (Object.keys(POI_HUES) as Basemap[]).map((basemap) => [
++      basemap,
++      Object.fromEntries(
++        Object.entries(POI_HUES[basemap]).map(([cat, hue]) => [
++          cat,
++          rgbToCss(mixRgb(parseColor(hue), parseColor(POI_NEUTRAL[basemap]), POI_MUTE)),
++        ]),
++      ),
++    ]),
++  ) as Record<Basemap, Record<string, string>>;
++
+ /** Resolve a style id to its MapStyle, falling back to the default. */
+ export function getMapStyle(id: string): MapStyle {
+   return MAP_STYLES[id] ?? DEFAULT_MAP_STYLE;
+@@ -369,6 +400,10 @@ function parseColor(s: string): [number, number, number] {
+   return parseRgb(s);
+ }
+ 
++function rgbToCss([r, g, b]: [number, number, number]): string {
++  return `rgb(${r}, ${g}, ${b})`;
++}
++
+ function mixRgb(
+   a: [number, number, number],
+   b: [number, number, number],
+diff --git a/server/build_place_labels.py b/server/build_place_labels.py
+index 7ff060d..8cf472b 100644
+--- a/server/build_place_labels.py
++++ b/server/build_place_labels.py
+@@ -120,7 +120,7 @@ CAT_RETAIL = "retail"
+ # `icon` names one of the glyphs in client-react/.../placeIcons.ts and ships as
+ # the feature's `kind` property. It is coarser than the OSM tag on purpose: a
+ # pub and a bar get the same glass, a college and a university the same building.
+-# At 13 CSS px an icon has room for one idea, and a set with 40 near-identical
++# At under 10 CSS px an icon has room for one idea, and a set with 40 near-identical
+ # marks is harder to read than one with 20 distinct ones.
+ #
+ # `rank` breaks collisions: higher wins the grid cell and the pixel.

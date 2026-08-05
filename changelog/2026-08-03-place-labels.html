@@ -233,12 +233,15 @@
       <div class="tag">LEGEND</div>
       <h2>Four colors, one palette per basemap</h2>
       <h3>Symptom</h3>
-      <p>An undifferentiated wall of names is only marginally better than no names — you cannot scan it for the thing you actually want (the nearest station, the school on the corner).</p>
+      <p>An undifferentiated wall of names is only marginally better than no names — you cannot scan it for the thing you actually want (the nearest station, the school on the corner). But colour it at full strength and the labels start competing with the very thing the map exists to show.</p>
       <h3>Root cause</h3>
       <ul><li>Colour coding only pays off if it is learnable, and re-hueing categories per map style would mean re-learning them on every one of the eight styles</li>
 <li>The heat ramp already owns each style's accent hue, so a loud label palette competes with the product</li></ul>
       <h3>What changed</h3>
       <ul><li>Four categories — <strong>transit</strong>, <strong>civic</strong>, <strong>culture</strong>, <strong>retail</strong> — in one palette per basemap (dark / light), not per style</li>
+<li><strong>Nothing is painted at full strength.</strong> The hues live in <code>POI_HUES</code> and <code>POI_COLORS</code> derives from them by mixing 58% toward a per-basemap neutral grey. At full saturation a screenful of blue, amber and violet names competed with the heat and the proposal pins instead of sitting underneath them; the coding survives the mute (a station is still visibly not a school) while the layer's weight drops well below the pins'. Keeping the vivid values as the source of truth leaves one number to turn, <code>POI_MUTE</code>, rather than eight hexes to re-pick</li>
+<li>The rest recedes with it: text 9.5–12px → 8.6–10.5px, icons 13px → 11px base (~8–10px on screen), icon opacity 0.9 → 0.72, halo 1.5 → 1.2 — at ~9px type a 1.5 halo had started reading as a bold weight rather than as separation from the basemap</li>
+<li>A side effect worth having: muted labels sit at about the same visual weight as CARTO's own street names underneath, so the two cartographies read as one quiet base layer instead of two competing ones</li>
 <li>Retail is deliberately the most neutral of the four: it is by far the largest category, and tinting every deli and bank would turn the deep zooms into confetti</li>
 <li>Green is absent by design — parks are labelled by the CARTO raster underneath, in its own green, which makes five readable classes on screen from four of our own</li>
 <li>Halos are painted in the basemap's own paper/ink token, which is the contrast control the raster overlay above it does not get to have</li></ul>
@@ -3053,6 +3056,284 @@
 <span class="d-ctx">                 for i in range(30)]</span>
 <span class="d-ctx">         assign_zooms(pois)</span>
 <span class="d-ctx">         assert all(1 &lt;= p.minz &lt;= MAX_LABEL_ZOOM for p in pois)</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+            <span class="stat"><span class="d-add">+11</span> / <span class="d-del">-7</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GL background</span>
+        <span class="ctx-sum">The MapLibre layer stack behind Leaflet: basemap raster, block-heat fills driven by feature-state, and now the two label tiers</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapLibreBackground.tsx</span>
+        <span class="ctx-sum">~700 LOC — block paint expressions, style builder, camera sync, feature-state heat apply</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports / zoom-offset constant</span><span class="ol-sum">+POI_COLORS, +maplibreLabelTiles</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">BlockVotes / BlockSelect events + hit-test bridge</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">blockFillPaint / blockLinePaint</span><span class="ol-sum">unchanged — the heat ramp expressions</span></li><li class="dim"><span class="ol-label">rebindBlockTiles</span><span class="ol-sum">unchanged — z/x/y swap on load</span></li><li class="changed"><span class="ol-label">PLACE_LABEL_FONT / addPlaceLabels</span><span class="ol-sum">new — the POI symbol layer, added on `load`</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">buildStyle</span><span class="ol-sum">+labels raster source &amp; layer, +self-hosted glyphs URL</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Map constructor</span><span class="ol-sum">+localIdeographFontFamily</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">`load` handler</span><span class="ol-sum">+addPlaceLabels call</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">camera sync / zoom-animation ride</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">feature-state heat + selection apply</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>carto-labels is declared LAST in layers[] — above block-heat and block-select — because a street name under a translucent hot block is unreadable</li><li>It shares carto-base&#x27;s tile scheme and maxzoom, so the two are pixel-locked and ride Leaflet&#x27;s zoom animation together; labels can never drift off the streets they name</li><li>addPlaceLabels runs on the map&#x27;s `load` event, not inside buildStyle: the GL map is constructed at mount but CONFIG.placeTilesUrl only resolves once the map config lands from the network</li><li>filter compares minz against [&#x27;+&#x27;, [&#x27;zoom&#x27;], 1] — minz is a LEAFLET zoom (the units of CONFIG.maxZoom and every map URL), and MapLibre drives its camera one level lower</li><li>symbol-sort-key is minz itself: the builder reveals a POI at the earliest zoom its rank can claim, so minz IS the importance ranking and no separate rank property has to ship</li><li>text-max-width 11, not 9 — mono characters are uniformly wide and 9 turned &#x27;New York Institute of Technology&#x27; into a three-line clump</li><li>text-halo-color is the style&#x27;s own base token, which is what keeps a label readable over a saturated heat block</li><li>glyphs moved off demotiles.maplibre.org — fine while nothing drew text, a real dependency the moment this layer exists</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index 22f16c3..a52cb52 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -222,7 +222,7 @@ async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise&lt;</span>
+<span class="d-ctx">       // and keeps the mark, so a dense strip thins into icons instead of either</span>
+<span class="d-ctx">       // vanishing or turning into a wall of names.</span>
+<span class="d-ctx">       &quot;icon-image&quot;: placeIconExpression,</span>
+<span class="d-del">-      &quot;icon-size&quot;: [&quot;interpolate&quot;, [&quot;linear&quot;], [&quot;zoom&quot;], 11, 0.8, 15, 0.92, 18, 1],</span>
+<span class="d-add">+      &quot;icon-size&quot;: [&quot;interpolate&quot;, [&quot;linear&quot;], [&quot;zoom&quot;], 11, 0.72, 15, 0.84, 18, 0.94],</span>
+<span class="d-ctx">       &quot;icon-anchor&quot;: &quot;center&quot;,</span>
+<span class="d-ctx">       &quot;icon-padding&quot;: 2,</span>
+<span class="d-ctx">       &quot;text-optional&quot;: true,</span>
+<span class="d-hunk">@@ -230,8 +230,10 @@ async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise&lt;</span>
+<span class="d-ctx">       &quot;text-offset&quot;: [0, 0.62],</span>
+<span class="d-ctx">       &quot;text-field&quot;: [&quot;get&quot;, &quot;name&quot;],</span>
+<span class="d-ctx">       &quot;text-font&quot;: [PLACE_LABEL_FONT],</span>
+<span class="d-del">-      // Mono is wide, so this runs a little smaller than a sans would.</span>
+<span class="d-del">-      &quot;text-size&quot;: [&quot;interpolate&quot;, [&quot;linear&quot;], [&quot;zoom&quot;], 11, 9.5, 15, 10.5, 18, 12],</span>
+<span class="d-add">+      // Mono is wide, so this runs smaller than a sans would — and smaller</span>
+<span class="d-add">+      // again than legibility alone would ask for, because this layer has to</span>
+<span class="d-add">+      // stay quieter than the vote heat and the top-proposal pins above it.</span>
+<span class="d-add">+      &quot;text-size&quot;: [&quot;interpolate&quot;, [&quot;linear&quot;], [&quot;zoom&quot;], 11, 8.6, 15, 9.4, 18, 10.5],</span>
+<span class="d-ctx">       // Wrap width is in characters, and mono means characters are uniformly</span>
+<span class="d-ctx">       // wide — 9 turned &quot;New York Institute of Technology&quot; into a three-line</span>
+<span class="d-ctx">       // clump. 11 keeps most names to two lines without widening the footprint</span>
+<span class="d-hunk">@@ -254,11 +256,13 @@ async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise&lt;</span>
+<span class="d-ctx">       // saturated heat block — the contrast control the raster label overlay</span>
+<span class="d-ctx">       // above it doesn&#x27;t get to have.</span>
+<span class="d-ctx">       &quot;text-halo-color&quot;: mapStyle.base,</span>
+<span class="d-del">-      &quot;text-halo-width&quot;: 1.5,</span>
+<span class="d-add">+      // Scaled down with the type: at 1.5 against ~9px text the halo starts to</span>
+<span class="d-add">+      // read as a bold weight rather than as separation from the basemap.</span>
+<span class="d-add">+      &quot;text-halo-width&quot;: 1.2,</span>
+<span class="d-ctx">       &quot;text-halo-blur&quot;: 0.3,</span>
+<span class="d-del">-      // Icons are already baked in their category colour; the slight knock-down</span>
+<span class="d-del">-      // keeps them reading as annotation rather than as another pin.</span>
+<span class="d-del">-      &quot;icon-opacity&quot;: 0.9,</span>
+<span class="d-add">+      // Icons are already baked in their (muted) category colour; this takes</span>
+<span class="d-add">+      // them down again so a mark reads as annotation and never as a pin.</span>
+<span class="d-add">+      &quot;icon-opacity&quot;: 0.72,</span>
+<span class="d-ctx">     },</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx">   dlog(&quot;maplibre&quot;, &quot;place labels added&quot;, url);</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/placeIcons.ts</span>
+            <span class="stat"><span class="d-add">+5</span> / <span class="d-del">-4</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · place-label icons</span>
+        <span class="ctx-sum">The 27-glyph mark set drawn beside each place name, rasterised at mount and coloured per category</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">placeIcons.ts</span>
+        <span class="ctx-sum">~290 LOC — the ICONS table, SVG→ImageData rasterisation, map registration</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header / ICON_PX / IconDef</span><span class="ol-sum">new — the 13px constraint every decision follows from</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ICONS: transit (5)</span><span class="ol-sum">new — subway, rail, ferry, bus, airport</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ICONS: civic (7)</span><span class="ol-sum">new — school, library, hospital, government, worship, emergency, post</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ICONS: culture (6)</span><span class="ol-sum">new — museum, theatre, cinema, stadium, attraction, monument</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ICONS: retail (9)</span><span class="ol-sum">new — restaurant, cafe, bar, shop, market, hotel, pharmacy, bank, sports</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">toSvg / rasterize</span><span class="ol-sum">new — colour injection, data-URI decode to ImageData</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">registerPlaceIcons</span><span class="ol-sum">new — awaits every glyph before the layer is added</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">placeIconExpression / PLACE_ICON_NAMES</span><span class="ol-sum">new — icon-image, plus the drift-test export</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>13 CSS px is the whole constraint: anything past three or four primitives turns to mush, which is why the set is coarser than the OSM tags feeding it</li><li>addImage rather than a sprite sheet — glyphs are baked in the ACTIVE basemap&#x27;s palette, so a colour change needs no asset regeneration and there is no second pipeline to drift from mapStyles.ts</li><li>registerPlaceIcons is awaited BEFORE addLayer, so MapLibre never renders a frame asking for an image that isn&#x27;t there yet</li><li>The subway mark is the load-bearing one: it is what lets a stop named &#x27;5th Avenue&#x27; sit beside the basemap&#x27;s &#x27;5th Avenue&#x27; street label without reading as a bug — and therefore what let the stops&#x27; rank go back up</li><li>stadium was two concentric ellipses (an eye), pharmacy a compact capsule (a no-entry sign), theatre stage curtains (a Greek letter) — all three only showed up on a contact sheet at actual size</li><li>A `poi-dot` fallback plus a coalesce keeps an older client against a newer tileset quiet instead of storming the console with missing-image warnings</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/placeIcons.ts b/client-react/src/components/MapLibreBackground/placeIcons.ts</span>
+<span class="d-meta">index e2cd924..070886b 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/placeIcons.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/placeIcons.ts</span>
+<span class="d-hunk">@@ -1,7 +1,7 @@</span>
+<span class="d-ctx"> /**</span>
+<span class="d-ctx">  * Little line icons for the place-label layer.</span>
+<span class="d-ctx">  *</span>
+<span class="d-del">- * These are drawn at ~13 CSS px, which is the constraint behind every decision</span>
+<span class="d-add">+ * These are drawn at ~8-10 CSS px, which is the constraint behind every decision</span>
+<span class="d-ctx">  * here. Each glyph is built on a 16×16 grid with a 1.5 stroke — the same</span>
+<span class="d-ctx">  * thin-line language as the vote-type icons in public/icons (32-grid, 1.2</span>
+<span class="d-ctx">  * stroke), scaled so the strokes hold together at a third of the size. Anything</span>
+<span class="d-hunk">@@ -23,9 +23,10 @@ import maplibregl from &quot;maplibre-gl&quot;;</span>
+<span class="d-ctx"> import { POI_COLORS, type Basemap } from &quot;../../mapStyles&quot;;</span>
+<span class="d-ctx"> import { dlog, dwarn } from &quot;../../utils/debugLog&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/** Rendered size in CSS pixels. Small enough to read as an annotation on the</span>
+<span class="d-del">- *  map rather than as a pin competing with the proposal markers. */</span>
+<span class="d-del">-const ICON_PX = 13;</span>
+<span class="d-add">+/** Rendered size in CSS pixels, before the layer&#x27;s zoom-dependent icon-size</span>
+<span class="d-add">+ *  (so a mark is ~8-10px on screen). Small enough to read as an annotation on</span>
+<span class="d-add">+ *  the map and never as a pin competing with the top-proposal markers. */</span>
+<span class="d-add">+const ICON_PX = 11;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** Every glyph&#x27;s category (which is what colours it) and its SVG body. Paths</span>
+<span class="d-ctx">  *  are stroked unless they opt into `fill` — see toSvg. */</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/mapStyles.ts</span>
+            <span class="stat"><span class="d-add">+36</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · map identity</span>
+        <span class="ctx-sum">The visual identity of a map: two-color representation, basemap tiles, heat ramp, and now the label overlay + POI palette</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">mapStyles.ts</span>
+        <span class="ctx-sum">~410 LOC — MapStyle interface, tile constants, the eight styles, ramp sampling helpers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Basemap / HeatRamp types</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">MapStyle interface</span><span class="ol-sum">+2 fields — labelTileUrl, labelOpacity</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">TILE_DARK / TILE_LIGHT</span><span class="ol-sum">unchanged — the nolabels basemaps</span></li><li class="changed"><span class="ol-label">TILE_*_LABELS + LABEL_OPACITY_*</span><span class="ol-sum">new — the labels-only companions and their strength</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">DARK_WARM / darkStyle / lightStyle</span><span class="ol-sum">+2 lines each — wire the label tiles into every style</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">MAP_STYLES (8 styles)</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">POI_COLORS</span><span class="ol-sum">new — the four label categories, one palette per basemap</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">maplibreRasterTiles / maplibreLabelTiles</span><span class="ol-sum">refactored onto a shared expandTileTemplate</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">heatTip / heatGradientCss / ramp sampling</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>labelOpacity is per-basemap because the two label rasters are not equally loud: CARTO&#x27;s dark labels are light grey on near-black, its light ones near-black slate on paper</li><li>Dark stays at 1.0 — a raster overlay has no halo, so opacity is the ONLY contrast control, and under 1.0 the street names vanish over saturated heat blocks</li><li>Light can afford 0.75 because those styles blend heat by multiply, darkening the paper around the text rather than lighting up behind it</li><li>POI_COLORS is keyed by basemap, NOT by style id — colour coding is only worth having if it survives switching maps</li><li>No green category: parks come from the CARTO raster underneath, in its own green, so adding one here printed every park name twice</li><li>Retail is the most neutral hue on purpose — it is the biggest category and a tinted deli on every corner is confetti</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/mapStyles.ts b/client-react/src/mapStyles.ts</span>
+<span class="d-meta">index 3de03be..04adefc 100644</span>
+<span class="d-meta">--- a/client-react/src/mapStyles.ts</span>
+<span class="d-meta">+++ b/client-react/src/mapStyles.ts</span>
+<span class="d-hunk">@@ -280,7 +280,7 @@ export const SELECTABLE_MAP_STYLES: { id: string; label: string }[] = [</span>
+<span class="d-ctx">  * There is no green here: parks and squares are labelled by the CARTO raster</span>
+<span class="d-ctx">  * underneath, in its own green, and the builder drops them for that reason.</span>
+<span class="d-ctx">  */</span>
+<span class="d-del">-export const POI_COLORS: Record&lt;Basemap, Record&lt;string, string&gt;&gt; = {</span>
+<span class="d-add">+const POI_HUES: Record&lt;Basemap, Record&lt;string, string&gt;&gt; = {</span>
+<span class="d-ctx">   dark: {</span>
+<span class="d-ctx">     transit: &quot;#7FB2FF&quot;,</span>
+<span class="d-ctx">     civic: &quot;#E3BE79&quot;,</span>
+<span class="d-hunk">@@ -295,6 +295,37 @@ export const POI_COLORS: Record&lt;Basemap, Record&lt;string, string&gt;&gt; = {</span>
+<span class="d-ctx">   },</span>
+<span class="d-ctx"> };</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * The neutral each palette is pulled toward, and how far.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * The hues above are what the categories &quot;are&quot;; nothing on the map is painted</span>
+<span class="d-add">+ * at that strength. Place labels are CONTEXT — the thing that has to pop is the</span>
+<span class="d-add">+ * heat and the top-proposal pins, and at full saturation a screenful of blue,</span>
+<span class="d-add">+ * amber and violet labels competed with them for attention instead of sitting</span>
+<span class="d-add">+ * underneath. Pulling every category most of the way to a neutral grey keeps</span>
+<span class="d-add">+ * the coding legible (you can still tell a station from a school at a glance)</span>
+<span class="d-add">+ * while dropping the layer&#x27;s visual weight well below the pins&#x27;.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Raise POI_MUTE toward 1 to recede further; drop it toward 0 to get the vivid</span>
+<span class="d-add">+ * palette back.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+const POI_NEUTRAL: Record&lt;Basemap, string&gt; = { dark: &quot;#93908A&quot;, light: &quot;#736F68&quot; };</span>
+<span class="d-add">+const POI_MUTE = 0.58;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Category label colors as actually painted — the hues, held back. */</span>
+<span class="d-add">+export const POI_COLORS: Record&lt;Basemap, Record&lt;string, string&gt;&gt; =</span>
+<span class="d-add">+  Object.fromEntries(</span>
+<span class="d-add">+    (Object.keys(POI_HUES) as Basemap[]).map((basemap) =&gt; [</span>
+<span class="d-add">+      basemap,</span>
+<span class="d-add">+      Object.fromEntries(</span>
+<span class="d-add">+        Object.entries(POI_HUES[basemap]).map(([cat, hue]) =&gt; [</span>
+<span class="d-add">+          cat,</span>
+<span class="d-add">+          rgbToCss(mixRgb(parseColor(hue), parseColor(POI_NEUTRAL[basemap]), POI_MUTE)),</span>
+<span class="d-add">+        ]),</span>
+<span class="d-add">+      ),</span>
+<span class="d-add">+    ]),</span>
+<span class="d-add">+  ) as Record&lt;Basemap, Record&lt;string, string&gt;&gt;;</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /** Resolve a style id to its MapStyle, falling back to the default. */</span>
+<span class="d-ctx"> export function getMapStyle(id: string): MapStyle {</span>
+<span class="d-ctx">   return MAP_STYLES[id] ?? DEFAULT_MAP_STYLE;</span>
+<span class="d-hunk">@@ -369,6 +400,10 @@ function parseColor(s: string): [number, number, number] {</span>
+<span class="d-ctx">   return parseRgb(s);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+function rgbToCss([r, g, b]: [number, number, number]): string {</span>
+<span class="d-add">+  return `rgb(${r}, ${g}, ${b})`;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> function mixRgb(</span>
+<span class="d-ctx">   a: [number, number, number],</span>
+<span class="d-ctx">   b: [number, number, number],</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/build_place_labels.py</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Server · label tile builder</span>
+        <span class="ctx-sum">New sibling of build_pmtiles.py: turns a city&#x27;s OSM extract into the place/business label tileset the client draws</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_place_labels.py</span>
+        <span class="ctx-sum">~400 LOC — allowlist, classification, dedup, grid thinning, MVT/PMTiles encode</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module docstring</span><span class="ol-sum">new — why an allowlist, why grid thinning, the zoom-unit convention</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">zoom + thinning constants</span><span class="ol-sum">new — tile band, label band, GRID_OFFSET, DEDUP_METERS</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CAT_* categories</span><span class="ol-sum">new — transit / civic / culture / retail (no green, by design)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">KINDS allowlist</span><span class="ol-sum">new — (osm key, value) → category, rank, floor zoom</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">SUBWAY_STATION override</span><span class="ol-sum">new — the demotion for stops sharing Grand Central&#x27;s tag</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">classify / normalize_name</span><span class="ol-sum">new — tag priority, notability bonus, name folding</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">PoiCollector (osmium handler)</span><span class="ol-sum">new — nodes + closed-way centroids inside the city bbox</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dedup</span><span class="ol-sum">new — same-name cluster collapse within 400m</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">assign_zooms</span><span class="ol-sum">new — the grid-thinning pass that sets each label&#x27;s reveal zoom</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">build_city_place_labels / _collect_tiles</span><span class="ol-sum">new — bucket to tiles, encode, atomic replace</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main (CLI)</span><span class="ol-sum">new — --city / --all / --force, mtime freshness</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The allowlist is the whole design: 210,003 named features in the NYC extract become 34,349. The four noisiest tags — platforms, named rail segments, abandoned track, pitches — are not places at all</li><li>rank breaks collisions; floor is the earliest zoom a kind may EVER appear; assign_zooms decides the zoom it actually does</li><li>assign_zooms lets already-placed labels re-claim their cell before newcomers, so zooming in adds detail BETWEEN existing labels instead of stacking on top of them</li><li>GRID_OFFSET=0 (one cell per tile, ~256 CSS px). At 1 the city view came out at ~50 labels and read as a directory</li><li>MAX_LABEL_ZOOM=21 matches CONFIG.maxZoom: every unplaced POI falls back to the last zoom, and a ceiling of 19 dumped 60% of the set into one ungoverned band</li><li>SUBWAY_STATION returns before the wikidata bonus — nearly every NYC stop has one and would otherwise claim back the rank the demotion just removed</li><li>Point labels are never clipped by a tile edge (MapLibre draws glyphs that overflow the tile holding their anchor), so each POI goes into exactly ONE tile per zoom and no buffer is needed</li><li>Stable feature ids let MapLibre&#x27;s cross-tile index recognise the same label across adjacent tiles instead of drawing it twice</li><li>Multipolygon relations are skipped: assembling areas costs a second full pass over a 500MB extract, and the features that matter are mapped as ways</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/build_place_labels.py b/server/build_place_labels.py</span>
+<span class="d-meta">index 7ff060d..8cf472b 100644</span>
+<span class="d-meta">--- a/server/build_place_labels.py</span>
+<span class="d-meta">+++ b/server/build_place_labels.py</span>
+<span class="d-hunk">@@ -120,7 +120,7 @@ CAT_RETAIL = &quot;retail&quot;</span>
+<span class="d-ctx"> # `icon` names one of the glyphs in client-react/.../placeIcons.ts and ships as</span>
+<span class="d-ctx"> # the feature&#x27;s `kind` property. It is coarser than the OSM tag on purpose: a</span>
+<span class="d-ctx"> # pub and a bar get the same glass, a college and a university the same building.</span>
+<span class="d-del">-# At 13 CSS px an icon has room for one idea, and a set with 40 near-identical</span>
+<span class="d-add">+# At under 10 CSS px an icon has room for one idea, and a set with 40 near-identical</span>
+<span class="d-ctx"> # marks is harder to read than one with 20 distinct ones.</span>
+<span class="d-ctx"> #</span>
+<span class="d-ctx"> # `rank` breaks collisions: higher wins the grid cell and the pixel.</span></pre>
         </details>
         
   </section>
