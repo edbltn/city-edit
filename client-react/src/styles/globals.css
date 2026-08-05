@@ -445,7 +445,14 @@ body {
   opacity: 0;
   visibility: hidden;
   transform: translateY(-4px);
-  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+  /* `visibility` is stepped, not eased — keep it out of the timed part of the
+     transition. Opening, it must flip to `visible` in the same style recalc as
+     the `.active` class: a timed `visibility 0.15s` leaves the dropdown computed
+     `hidden` when the open effect runs, and a hidden element silently refuses
+     focus() — which is why typing straight after pressing Mode went nowhere.
+     Closing (below) it's delayed by the fade so the menu doesn't pop away
+     before it has finished fading out. */
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0s linear 0.15s;
   overflow: hidden;
   z-index: var(--z-dropdown);
 }
@@ -454,6 +461,7 @@ body {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0s;
   z-index: 9999 !important;
 }
 
