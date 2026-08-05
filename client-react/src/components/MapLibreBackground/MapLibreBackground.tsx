@@ -20,6 +20,7 @@ import {
 } from "../../mapStyles";
 import { hottestBlockId } from "./hottestBlock";
 import { registerPlaceIcons, placeIconExpression } from "./placeIcons";
+import { PLACE_LABEL_TEXT_SIZE } from "./placeLabelStyle";
 
 // Register PMTiles protocol once at module level
 const protocol = new Protocol();
@@ -230,10 +231,10 @@ async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise<
       "text-offset": [0, 0.62],
       "text-field": ["get", "name"],
       "text-font": [PLACE_LABEL_FONT],
-      // Mono is wide, so this runs smaller than a sans would — and smaller
-      // again than legibility alone would ask for, because this layer has to
-      // stay quieter than the vote heat and the top-proposal pins above it.
-      "text-size": ["interpolate", ["linear"], ["zoom"], 11, 8.6, 15, 9.4, 18, 10.5],
+      // Ramped by zoom, with subway stops a point larger. Defined and tested in
+      // placeLabelStyle.ts — the shape is load-bearing (one zoom curve only) in
+      // a way that fails silently, so it gets a guard.
+      "text-size": PLACE_LABEL_TEXT_SIZE,
       // Wrap width is in characters, and mono means characters are uniformly
       // wide — 9 turned "New York Institute of Technology" into a three-line
       // clump. 11 keeps most names to two lines without widening the footprint
