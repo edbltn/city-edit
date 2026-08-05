@@ -34,6 +34,13 @@ monitoring/
 # including per-city subdirs (server/osm_data/<city>/walk_graph.pkl).
 server/osm_data/
 
+# Graph sets pulled OUT of .arrays-staging/ because their city is already baked
+# into the image (staging one would overwrite the image's own pickle and shift
+# that city's edge ids). Kept on disk to stay reversible, but nothing should
+# ever upload them — .arrays-staging/ itself is NOT ignored, since the arrays
+# overlay needs whatever city is legitimately staged there.
+.arrays-staging-parked/
+
 # Raw Lyft ride imports (one-off import_lyft.py source data, ~191M) — never
 # needed in the image, don't upload to Cloud Build.
 server/lyft_data/
