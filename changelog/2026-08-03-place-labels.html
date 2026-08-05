@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Putting names back on the map: streets, places and businesses — 2026-08-03</title>
+<title>Putting names back on the map: streets, places and businesses — 2026-08-03 → 08-05</title>
 <style>
   :root {
     --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
@@ -94,13 +94,15 @@
   <header class="masthead">
     <div class="kicker">City Edit · Change log</div>
     <h1>Putting names back on the map: streets, places and businesses</h1>
-    <div class="dateline">2026-08-03 · branch <code>main</code></div>
+    <div class="dateline">2026-08-03 → 08-05 · branch <code>main</code></div>
   </header>
 
   <nav class="toc"><a href="#streets">The map knew where you were, but wouldn't say</a>
 <a href="#poi">Business names had to come from somewhere else</a>
 <a href="#curation">Four ways the labels wanted to feel broken</a>
 <a href="#type">Drawing text meant owning the font</a>
+<a href="#stops">The subway stops that disappeared</a>
+<a href="#icons">27 little marks, and why they let the ranking go back up</a>
 <a href="#color">Four colors, one palette per basemap</a>
 <a href="#build">Built where the PBFs still exist</a>
     <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
@@ -159,7 +161,7 @@
       <h3>What changed</h3>
       <ul><li>An explicit <strong>allowlist</strong> cuts 210,003 named features to 34,349. Anything not named in it is dropped, so a new junk tag can never leak in</li>
 <li><strong>Grid thinning</strong> decides the zoom each label appears at: at every zoom the map is divided into cells and only the highest-ranked unplaced POI in a cell earns that zoom, with already-placed labels re-claiming their cell first. The density cap is geometric, so it holds everywhere without per-neighborhood tuning. Quarter-tile cells gave ~50 labels on the city view; full-tile cells give ~18</li>
-<li>Subway stops are <strong>demoted</strong> to a neighborhood-scale label, and the demotion deliberately skips the wikidata notability bonus — nearly every stop carries one and would have claimed back exactly the rank the demotion removed</li>
+<li>Subway stops get their own entry so 496 street-named labels stay off the city-scale view, and it deliberately skips the wikidata notability bonus — nearly every stop carries one and would otherwise land straight back among the mainline terminals. Getting the <em>weight</em> of that entry right then took a second correction in the opposite direction; see <a href="#stops">The subway stops that disappeared</a></li>
 <li><strong>Green space belongs to the basemap.</strong> Parks, gardens and squares are dropped from the allowlist entirely; this layer owns buildings and businesses. Verified the division is clean: CARTO labels no stadium, hospital or university</li>
 <li>The thinning runs to zoom 21 (<code>CONFIG.maxZoom</code>), not 19. Every POI the grid never places falls back to the last zoom, and a ceiling of 19 dumped 20k labels — 60% of the set — into one ungoverned band</li></ul>
       <h3>Files touched</h3>
@@ -184,6 +186,46 @@
       <ul class="files"><li>client-react/scripts/build_glyphs.js</li>
 <li>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</li>
 <li>client-react/package.json</li></ul>
+    </section>
+    
+
+    <section class="card" id="stops">
+      <div class="tag">REGRESSION</div>
+      <h2>The subway stops that disappeared</h2>
+      <h3>Symptom</h3>
+      <p>Six subway stations ring the East Village. At z16 the map showed one, and none appeared anywhere until z17–19.</p>
+      <h3>Root cause</h3>
+      <ul><li>496 of the 561 stations in the NYC bbox are <code>station=subway</code>, sharing Grand Central's <code>railway=station</code> tag. They were given their own entry to keep 496 street-named labels off the city-scale view — but that entry set rank <strong>and</strong> floor together, and rank 64 is near the BOTTOM of everything eligible at z15</li>
+<li>So every grid cell went to a museum, hospital or university first. The stops were in the tileset the whole time; they just never won a cell</li>
+<li>Worse, the shared grid is the wrong budget for them in principle. One museum per cell is plenty — museums are individually optional. Stations are read as a <em>set</em>, and showing one of six is not a sixth as useful, it is close to useless</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Split the two concerns the single rank was carrying: prominence goes back <strong>up</strong> (rank 86 — a stop should win its cell whenever it is eligible) and the <em>zoom</em> holds them back instead (floor 14, never city scale)</li>
+<li>Transit thins on its own grid, one level finer than everything else. The grid zoom is part of the cell key, so stations now compete only against other stations and never against a nearby deli</li>
+<li>All six East Village stops now show at z16, and the city-wide z14 band grew from 157 labels to 420 as the stations surface</li>
+<li>Two tests pin the regression from both directions: a stop must outrank every kind that once buried it, and it must not be displaced by a co-located museum — while two stops on one corner must still compete</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/build_place_labels.py</li>
+<li>server/tests/unit/test_place_labels.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="icons">
+      <div class="tag">ICONS</div>
+      <h2>27 little marks, and why they let the ranking go back up</h2>
+      <h3>Symptom</h3>
+      <p>A column of names in four colors still reads as a list. And the original reason for demoting the subway stops was real: a blue &quot;5th Avenue&quot; sitting beside the basemap's own &quot;5th Avenue&quot; street label reads as a rendering bug.</p>
+      <h3>Root cause</h3>
+      <ul><li>Color alone carries about two bits. It can say <em>which family</em> a label belongs to, but not what the place is, and it cannot distinguish a station from a street name that happens to share its text</li>
+<li>MapLibre draws icons from a sprite sheet, which would mean a second asset pipeline to keep in sync with the palette in <code>mapStyles.ts</code></li></ul>
+      <h3>What changed</h3>
+      <ul><li>27 glyphs on a 16px grid at 1.5 stroke — the vote-type icons' thin-line language (32-grid, 1.2 stroke) scaled so the strokes hold together at 13 CSS px</li>
+<li>Rasterised at mount and registered with <code>map.addImage</code> instead of shipped as a sprite, so each glyph is baked in its category's color for the ACTIVE basemap and there is no sprite to regenerate when a palette changes</li>
+<li><code>text-optional</code> makes the layer degrade well: where a block is too busy for both, MapLibre keeps the mark and drops the name, so a dense strip thins into icons rather than into nothing</li>
+<li>The set is deliberately coarser than the OSM tags feeding it — a pub and a bar share a glass, a college and a university a mortarboard. At 13px a set of 40 near-identical marks is harder to read than one of 20 distinct ones</li>
+<li>Three glyphs were redrawn after seeing them at size: two concentric ellipses read as an <em>eye</em> rather than a stadium, a compact capsule as <em>no entry</em> rather than a pharmacy, and stage curtains as a <em>Greek letter</em> rather than a theatre</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/MapLibreBackground/placeIcons.ts</li>
+<li>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</li></ul>
     </section>
     
 
@@ -1971,6 +2013,1046 @@
 <span class="d-add">+                for i in range(30)]</span>
 <span class="d-add">+        assign_zooms(pois)</span>
 <span class="d-add">+        assert all(1 &lt;= p.minz &lt;= MAX_LABEL_ZOOM for p in pois)</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+            <span class="stat"><span class="d-add">+22</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GL background</span>
+        <span class="ctx-sum">The MapLibre layer stack behind Leaflet: basemap raster, block-heat fills driven by feature-state, and now the two label tiers</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapLibreBackground.tsx</span>
+        <span class="ctx-sum">~700 LOC — block paint expressions, style builder, camera sync, feature-state heat apply</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports / zoom-offset constant</span><span class="ol-sum">+POI_COLORS, +maplibreLabelTiles</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">BlockVotes / BlockSelect events + hit-test bridge</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">blockFillPaint / blockLinePaint</span><span class="ol-sum">unchanged — the heat ramp expressions</span></li><li class="dim"><span class="ol-label">rebindBlockTiles</span><span class="ol-sum">unchanged — z/x/y swap on load</span></li><li class="changed"><span class="ol-label">PLACE_LABEL_FONT / addPlaceLabels</span><span class="ol-sum">new — the POI symbol layer, added on `load`</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">buildStyle</span><span class="ol-sum">+labels raster source &amp; layer, +self-hosted glyphs URL</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Map constructor</span><span class="ol-sum">+localIdeographFontFamily</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">`load` handler</span><span class="ol-sum">+addPlaceLabels call</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">camera sync / zoom-animation ride</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">feature-state heat + selection apply</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>carto-labels is declared LAST in layers[] — above block-heat and block-select — because a street name under a translucent hot block is unreadable</li><li>It shares carto-base&#x27;s tile scheme and maxzoom, so the two are pixel-locked and ride Leaflet&#x27;s zoom animation together; labels can never drift off the streets they name</li><li>addPlaceLabels runs on the map&#x27;s `load` event, not inside buildStyle: the GL map is constructed at mount but CONFIG.placeTilesUrl only resolves once the map config lands from the network</li><li>filter compares minz against [&#x27;+&#x27;, [&#x27;zoom&#x27;], 1] — minz is a LEAFLET zoom (the units of CONFIG.maxZoom and every map URL), and MapLibre drives its camera one level lower</li><li>symbol-sort-key is minz itself: the builder reveals a POI at the earliest zoom its rank can claim, so minz IS the importance ranking and no separate rank property has to ship</li><li>text-max-width 11, not 9 — mono characters are uniformly wide and 9 turned &#x27;New York Institute of Technology&#x27; into a three-line clump</li><li>text-halo-color is the style&#x27;s own base token, which is what keeps a label readable over a saturated heat block</li><li>glyphs moved off demotiles.maplibre.org — fine while nothing drew text, a real dependency the moment this layer exists</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index bbaab32..22f16c3 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -19,6 +19,7 @@ import {</span>
+<span class="d-ctx">   type MapStyle,</span>
+<span class="d-ctx"> } from &quot;../../mapStyles&quot;;</span>
+<span class="d-ctx"> import { hottestBlockId } from &quot;./hottestBlock&quot;;</span>
+<span class="d-add">+import { registerPlaceIcons, placeIconExpression } from &quot;./placeIcons&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> // Register PMTiles protocol once at module level</span>
+<span class="d-ctx"> const protocol = new Protocol();</span>
+<span class="d-hunk">@@ -185,7 +186,7 @@ const PLACE_LABEL_FONT = &quot;Red Hat Mono Regular&quot;;</span>
+<span class="d-ctx">  * while street names run along centerlines, so they mostly stay out of each</span>
+<span class="d-ctx">  * other&#x27;s way.</span>
+<span class="d-ctx">  */</span>
+<span class="d-del">-function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {</span>
+<span class="d-add">+async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise&lt;void&gt; {</span>
+<span class="d-ctx">   const url = CONFIG.placeTilesUrl;</span>
+<span class="d-ctx">   if (!url) {</span>
+<span class="d-ctx">     dlog(&quot;maplibre&quot;, &quot;no place-label tiles for this city — skipping layer&quot;);</span>
+<span class="d-hunk">@@ -195,6 +196,11 @@ function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   map.addSource(&quot;places&quot;, { type: &quot;vector&quot;, url: `pmtiles://${url}` });</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // Icons are rasterised before the layer is added, so MapLibre never renders a</span>
+<span class="d-add">+  // frame asking for an image that doesn&#x27;t exist yet.</span>
+<span class="d-add">+  await registerPlaceIcons(map, mapStyle.basemap);</span>
+<span class="d-add">+  if (!map.getSource(&quot;places&quot;)) return; // style torn down while we rasterised</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   const palette = POI_COLORS[mapStyle.basemap];</span>
+<span class="d-ctx">   const colorByCategory = [</span>
+<span class="d-ctx">     &quot;match&quot;, [&quot;get&quot;, &quot;cat&quot;],</span>
+<span class="d-hunk">@@ -211,6 +217,17 @@ function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {</span>
+<span class="d-ctx">     // the builder); MapLibre drives its camera one level lower, hence the +1.</span>
+<span class="d-ctx">     filter: [&quot;&lt;=&quot;, [&quot;get&quot;, &quot;minz&quot;], [&quot;+&quot;, [&quot;zoom&quot;], 1]],</span>
+<span class="d-ctx">     layout: {</span>
+<span class="d-add">+      // Icon above, name below. `text-optional` is what makes this degrade</span>
+<span class="d-add">+      // gracefully: where a block is too busy for both, MapLibre drops the text</span>
+<span class="d-add">+      // and keeps the mark, so a dense strip thins into icons instead of either</span>
+<span class="d-add">+      // vanishing or turning into a wall of names.</span>
+<span class="d-add">+      &quot;icon-image&quot;: placeIconExpression,</span>
+<span class="d-add">+      &quot;icon-size&quot;: [&quot;interpolate&quot;, [&quot;linear&quot;], [&quot;zoom&quot;], 11, 0.8, 15, 0.92, 18, 1],</span>
+<span class="d-add">+      &quot;icon-anchor&quot;: &quot;center&quot;,</span>
+<span class="d-add">+      &quot;icon-padding&quot;: 2,</span>
+<span class="d-add">+      &quot;text-optional&quot;: true,</span>
+<span class="d-add">+      &quot;text-anchor&quot;: &quot;top&quot;,</span>
+<span class="d-add">+      &quot;text-offset&quot;: [0, 0.62],</span>
+<span class="d-ctx">       &quot;text-field&quot;: [&quot;get&quot;, &quot;name&quot;],</span>
+<span class="d-ctx">       &quot;text-font&quot;: [PLACE_LABEL_FONT],</span>
+<span class="d-ctx">       // Mono is wide, so this runs a little smaller than a sans would.</span>
+<span class="d-hunk">@@ -239,6 +256,9 @@ function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {</span>
+<span class="d-ctx">       &quot;text-halo-color&quot;: mapStyle.base,</span>
+<span class="d-ctx">       &quot;text-halo-width&quot;: 1.5,</span>
+<span class="d-ctx">       &quot;text-halo-blur&quot;: 0.3,</span>
+<span class="d-add">+      // Icons are already baked in their category colour; the slight knock-down</span>
+<span class="d-add">+      // keeps them reading as annotation rather than as another pin.</span>
+<span class="d-add">+      &quot;icon-opacity&quot;: 0.9,</span>
+<span class="d-ctx">     },</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx">   dlog(&quot;maplibre&quot;, &quot;place labels added&quot;, url);</span>
+<span class="d-hunk">@@ -444,7 +464,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">         debugState(&quot;maplibreLoaded&quot;, true);</span>
+<span class="d-ctx">         onReady?.(true);</span>
+<span class="d-ctx">         rebindBlockTiles(map);</span>
+<span class="d-del">-        addPlaceLabels(map, mapStyle);</span>
+<span class="d-add">+        void addPlaceLabels(map, mapStyle);</span>
+<span class="d-ctx">       });</span>
+<span class="d-ctx">       debugState(&quot;maplibreLoaded&quot;, false);</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/placeIcons.ts</span>
+            <span class="stat"><span class="d-add">+309</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · place-label icons</span>
+        <span class="ctx-sum">The 27-glyph mark set drawn beside each place name, rasterised at mount and coloured per category</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">placeIcons.ts</span>
+        <span class="ctx-sum">~290 LOC — the ICONS table, SVG→ImageData rasterisation, map registration</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header / ICON_PX / IconDef</span><span class="ol-sum">new — the 13px constraint every decision follows from</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ICONS: transit (5)</span><span class="ol-sum">new — subway, rail, ferry, bus, airport</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ICONS: civic (7)</span><span class="ol-sum">new — school, library, hospital, government, worship, emergency, post</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ICONS: culture (6)</span><span class="ol-sum">new — museum, theatre, cinema, stadium, attraction, monument</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ICONS: retail (9)</span><span class="ol-sum">new — restaurant, cafe, bar, shop, market, hotel, pharmacy, bank, sports</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">toSvg / rasterize</span><span class="ol-sum">new — colour injection, data-URI decode to ImageData</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">registerPlaceIcons</span><span class="ol-sum">new — awaits every glyph before the layer is added</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">placeIconExpression / PLACE_ICON_NAMES</span><span class="ol-sum">new — icon-image, plus the drift-test export</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>13 CSS px is the whole constraint: anything past three or four primitives turns to mush, which is why the set is coarser than the OSM tags feeding it</li><li>addImage rather than a sprite sheet — glyphs are baked in the ACTIVE basemap&#x27;s palette, so a colour change needs no asset regeneration and there is no second pipeline to drift from mapStyles.ts</li><li>registerPlaceIcons is awaited BEFORE addLayer, so MapLibre never renders a frame asking for an image that isn&#x27;t there yet</li><li>The subway mark is the load-bearing one: it is what lets a stop named &#x27;5th Avenue&#x27; sit beside the basemap&#x27;s &#x27;5th Avenue&#x27; street label without reading as a bug — and therefore what let the stops&#x27; rank go back up</li><li>stadium was two concentric ellipses (an eye), pharmacy a compact capsule (a no-entry sign), theatre stage curtains (a Greek letter) — all three only showed up on a contact sheet at actual size</li><li>A `poi-dot` fallback plus a coalesce keeps an older client against a newer tileset quiet instead of storming the console with missing-image warnings</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/placeIcons.ts b/client-react/src/components/MapLibreBackground/placeIcons.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..e2cd924</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/placeIcons.ts</span>
+<span class="d-hunk">@@ -0,0 +1,309 @@</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Little line icons for the place-label layer.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * These are drawn at ~13 CSS px, which is the constraint behind every decision</span>
+<span class="d-add">+ * here. Each glyph is built on a 16×16 grid with a 1.5 stroke — the same</span>
+<span class="d-add">+ * thin-line language as the vote-type icons in public/icons (32-grid, 1.2</span>
+<span class="d-add">+ * stroke), scaled so the strokes hold together at a third of the size. Anything</span>
+<span class="d-add">+ * with more than three or four primitives turns to mush at this scale, so the</span>
+<span class="d-add">+ * set is deliberately coarser than the OSM tags feeding it: a pub and a bar</span>
+<span class="d-add">+ * share a glass, a college and a university share a mortarboard.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Icons are rasterised at mount and registered with `map.addImage`, rather than</span>
+<span class="d-add">+ * shipped as a sprite sheet. That keeps them themeable — each glyph is baked in</span>
+<span class="d-add">+ * its category&#x27;s colour for the ACTIVE basemap, so there is no sprite to</span>
+<span class="d-add">+ * regenerate when a palette changes and no second asset pipeline to keep in</span>
+<span class="d-add">+ * sync with mapStyles.ts.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * `kind` values must match the icon slugs in server/build_place_labels.py&#x27;s</span>
+<span class="d-add">+ * KINDS table; tests/unit/test_place_labels.py asserts the two stay in step.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+</span>
+<span class="d-add">+import maplibregl from &quot;maplibre-gl&quot;;</span>
+<span class="d-add">+import { POI_COLORS, type Basemap } from &quot;../../mapStyles&quot;;</span>
+<span class="d-add">+import { dlog, dwarn } from &quot;../../utils/debugLog&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Rendered size in CSS pixels. Small enough to read as an annotation on the</span>
+<span class="d-add">+ *  map rather than as a pin competing with the proposal markers. */</span>
+<span class="d-add">+const ICON_PX = 13;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Every glyph&#x27;s category (which is what colours it) and its SVG body. Paths</span>
+<span class="d-add">+ *  are stroked unless they opt into `fill` — see toSvg. */</span>
+<span class="d-add">+interface IconDef {</span>
+<span class="d-add">+  cat: keyof typeof POI_COLORS.dark;</span>
+<span class="d-add">+  body: string;</span>
+<span class="d-add">+  /** Fill the shape instead of stroking it (used where an outline would be</span>
+<span class="d-add">+   *  too fine to survive rasterisation, e.g. the aircraft). */</span>
+<span class="d-add">+  filled?: boolean;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+const ICONS: Record&lt;string, IconDef&gt; = {</span>
+<span class="d-add">+  // ── Transit ───────────────────────────────────────────────────────────────</span>
+<span class="d-add">+  // A metro car read head-on: body, window band, two lamps. This is the one</span>
+<span class="d-add">+  // glyph that has to be unmistakable — 496 of NYC&#x27;s stations are named after</span>
+<span class="d-add">+  // the street above them, so without a mark &quot;5th Avenue&quot; in transit blue is</span>
+<span class="d-add">+  // indistinguishable from the basemap&#x27;s own &quot;5th Avenue&quot; street label.</span>
+<span class="d-add">+  subway: {</span>
+<span class="d-add">+    cat: &quot;transit&quot;,</span>
+<span class="d-add">+    body: `&lt;rect x=&quot;4&quot; y=&quot;2.4&quot; width=&quot;8&quot; height=&quot;11.2&quot; rx=&quot;2.4&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;5.2&quot; y1=&quot;7.2&quot; x2=&quot;10.8&quot; y2=&quot;7.2&quot;/&gt;</span>
+<span class="d-add">+           &lt;circle cx=&quot;6.4&quot; cy=&quot;10.6&quot; r=&quot;0.9&quot; fill=&quot;currentColor&quot; stroke=&quot;none&quot;/&gt;</span>
+<span class="d-add">+           &lt;circle cx=&quot;9.6&quot; cy=&quot;10.6&quot; r=&quot;0.9&quot; fill=&quot;currentColor&quot; stroke=&quot;none&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  // Track rather than a train, so it never reads as a second subway mark.</span>
+<span class="d-add">+  rail: {</span>
+<span class="d-add">+    cat: &quot;transit&quot;,</span>
+<span class="d-add">+    body: `&lt;line x1=&quot;5.8&quot; y1=&quot;2&quot; x2=&quot;5.8&quot; y2=&quot;14&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;10.2&quot; y1=&quot;2&quot; x2=&quot;10.2&quot; y2=&quot;14&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;3.8&quot; y1=&quot;4.6&quot; x2=&quot;12.2&quot; y2=&quot;4.6&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;3.8&quot; y1=&quot;8&quot; x2=&quot;12.2&quot; y2=&quot;8&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;3.8&quot; y1=&quot;11.4&quot; x2=&quot;12.2&quot; y2=&quot;11.4&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  ferry: {</span>
+<span class="d-add">+    cat: &quot;transit&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M2.6 10.2 C4 13.4, 12 13.4, 13.4 10.2 Z&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;8&quot; y1=&quot;10.2&quot; x2=&quot;8&quot; y2=&quot;3&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M8 3.4 L12 5.4 L8 7&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  bus: {</span>
+<span class="d-add">+    cat: &quot;transit&quot;,</span>
+<span class="d-add">+    body: `&lt;rect x=&quot;3&quot; y=&quot;2.6&quot; width=&quot;10&quot; height=&quot;9&quot; rx=&quot;2&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;4.2&quot; y1=&quot;7&quot; x2=&quot;11.8&quot; y2=&quot;7&quot;/&gt;</span>
+<span class="d-add">+           &lt;circle cx=&quot;5.4&quot; cy=&quot;13.2&quot; r=&quot;1.1&quot;/&gt;</span>
+<span class="d-add">+           &lt;circle cx=&quot;10.6&quot; cy=&quot;13.2&quot; r=&quot;1.1&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  airport: {</span>
+<span class="d-add">+    cat: &quot;transit&quot;,</span>
+<span class="d-add">+    filled: true,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M8 1.6 C8.75 1.6 9.1 2.5 9.1 3.6 L9.1 6.5 L14.3 9.7 L14.3 11.2</span>
+<span class="d-add">+                    L9.1 9.7 L9.1 12.3 L10.8 13.6 L10.8 14.4 L8 13.6 L5.2 14.4</span>
+<span class="d-add">+                    L5.2 13.6 L6.9 12.3 L6.9 9.7 L1.7 11.2 L1.7 9.7 L6.9 6.5</span>
+<span class="d-add">+                    L6.9 3.6 C6.9 2.5 7.25 1.6 8 1.6 Z&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // ── Civic ─────────────────────────────────────────────────────────────────</span>
+<span class="d-add">+  school: {</span>
+<span class="d-add">+    cat: &quot;civic&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M1.6 6 L8 3 L14.4 6 L8 9 Z&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M4.6 7.4 L4.6 11 C4.6 12.6, 11.4 12.6, 11.4 11 L11.4 7.4&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  library: {</span>
+<span class="d-add">+    cat: &quot;civic&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M8 4.6 C6.5 3.3, 4 3.3, 2 4.1 L2 11.9 C4 11.1, 6.5 11.1, 8 12.4</span>
+<span class="d-add">+                    C9.5 11.1, 12 11.1, 14 11.9 L14 4.1 C12 3.3, 9.5 3.3, 8 4.6 Z&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;8&quot; y1=&quot;4.6&quot; x2=&quot;8&quot; y2=&quot;12.4&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  // Just the cross. Anything more at this size loses the one thing that makes</span>
+<span class="d-add">+  // it instantly legible.</span>
+<span class="d-add">+  hospital: {</span>
+<span class="d-add">+    cat: &quot;civic&quot;,</span>
+<span class="d-add">+    body: `&lt;line x1=&quot;8&quot; y1=&quot;3.4&quot; x2=&quot;8&quot; y2=&quot;12.6&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;3.4&quot; y1=&quot;8&quot; x2=&quot;12.6&quot; y2=&quot;8&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  government: {</span>
+<span class="d-add">+    cat: &quot;civic&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M2 6 L8 2.6 L14 6&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;3.4&quot; y1=&quot;6.6&quot; x2=&quot;3.4&quot; y2=&quot;12&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;6.5&quot; y1=&quot;6.6&quot; x2=&quot;6.5&quot; y2=&quot;12&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;9.5&quot; y1=&quot;6.6&quot; x2=&quot;9.5&quot; y2=&quot;12&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;12.6&quot; y1=&quot;6.6&quot; x2=&quot;12.6&quot; y2=&quot;12&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;1.8&quot; y1=&quot;13.2&quot; x2=&quot;14.2&quot; y2=&quot;13.2&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  // Deliberately non-denominational: a pitched hall with an arched door and a</span>
+<span class="d-add">+  // finial, which reads as a place of worship without picking one.</span>
+<span class="d-add">+  worship: {</span>
+<span class="d-add">+    cat: &quot;civic&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M4 13.4 L4 7 L8 3.6 L12 7 L12 13.4&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;8&quot; y1=&quot;3.6&quot; x2=&quot;8&quot; y2=&quot;1.8&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M6.7 13.4 L6.7 10.4 C6.7 9.2, 9.3 9.2, 9.3 10.4 L9.3 13.4&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  emergency: {</span>
+<span class="d-add">+    cat: &quot;civic&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M8 1.8 L13.2 3.9 L13.2 8.1 C13.2 11.2, 10.8 13.5, 8 14.2</span>
+<span class="d-add">+                    C5.2 13.5, 2.8 11.2, 2.8 8.1 L2.8 3.9 Z&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  post: {</span>
+<span class="d-add">+    cat: &quot;civic&quot;,</span>
+<span class="d-add">+    body: `&lt;rect x=&quot;2&quot; y=&quot;4&quot; width=&quot;12&quot; height=&quot;8&quot; rx=&quot;1.3&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M2.5 4.7 L8 8.8 L13.5 4.7&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // ── Culture ───────────────────────────────────────────────────────────────</span>
+<span class="d-add">+  museum: {</span>
+<span class="d-add">+    cat: &quot;culture&quot;,</span>
+<span class="d-add">+    body: `&lt;rect x=&quot;2&quot; y=&quot;3&quot; width=&quot;12&quot; height=&quot;10&quot; rx=&quot;1.3&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M3.6 11 L6.6 7.6 L8.9 10 L10.6 8.3 L12.4 11&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  // A ticket stub. Drawn as stage curtains — a rail with two sweeps and a</span>
+<span class="d-add">+  // centre split — it came out looking like a Greek letter.</span>
+<span class="d-add">+  theatre: {</span>
+<span class="d-add">+    cat: &quot;culture&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M1.8 5.2 L14.2 5.2 L14.2 7 C13.1 7, 13.1 9, 14.2 9 L14.2 10.8</span>
+<span class="d-add">+                    L1.8 10.8 L1.8 9 C2.9 9, 2.9 7, 1.8 7 Z&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;8&quot; y1=&quot;6.6&quot; x2=&quot;8&quot; y2=&quot;9.4&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  cinema: {</span>
+<span class="d-add">+    cat: &quot;culture&quot;,</span>
+<span class="d-add">+    body: `&lt;rect x=&quot;2&quot; y=&quot;3.4&quot; width=&quot;12&quot; height=&quot;9.2&quot; rx=&quot;1.5&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M6.7 6.2 L10.5 8 L6.7 9.8 Z&quot; fill=&quot;currentColor&quot; stroke=&quot;none&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  // A pitch from above, not a bowl in plan: two concentric ellipses read</span>
+<span class="d-add">+  // unmistakably as an eye.</span>
+<span class="d-add">+  stadium: {</span>
+<span class="d-add">+    cat: &quot;culture&quot;,</span>
+<span class="d-add">+    body: `&lt;rect x=&quot;1.6&quot; y=&quot;3.8&quot; width=&quot;12.8&quot; height=&quot;8.4&quot; rx=&quot;1.2&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;8&quot; y1=&quot;3.8&quot; x2=&quot;8&quot; y2=&quot;12.2&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M1.6 6.4 L3.7 6.4 L3.7 9.6 L1.6 9.6&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M14.4 6.4 L12.3 6.4 L12.3 9.6 L14.4 9.6&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  attraction: {</span>
+<span class="d-add">+    cat: &quot;culture&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M8 1.9 L9.85 6 L14.3 6.5 L11 9.55 L11.9 14 L8 11.8</span>
+<span class="d-add">+                    L4.1 14 L5 9.55 L1.7 6.5 L6.15 6 Z&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  monument: {</span>
+<span class="d-add">+    cat: &quot;culture&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M8 1.8 L10.1 5.6 L10.1 11.6 L5.9 11.6 L5.9 5.6 Z&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;4&quot; y1=&quot;13.3&quot; x2=&quot;12&quot; y2=&quot;13.3&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // ── Retail, food &amp; lodging ────────────────────────────────────────────────</span>
+<span class="d-add">+  restaurant: {</span>
+<span class="d-add">+    cat: &quot;retail&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M3.9 2.4 L3.9 5.6 C3.9 6.8, 7.1 6.8, 7.1 5.6 L7.1 2.4&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;5.5&quot; y1=&quot;6.4&quot; x2=&quot;5.5&quot; y2=&quot;13.6&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M11.2 2.4 C12.7 4, 12.7 7.2, 11.2 8.4 L11.2 13.6&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  cafe: {</span>
+<span class="d-add">+    cat: &quot;retail&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M3 6.2 L3 10.4 C3 12.2, 4.4 13.4, 6.2 13.4 L8.8 13.4</span>
+<span class="d-add">+                    C10.6 13.4, 12 12.2, 12 10.4 L12 6.2 Z&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M12 7.6 C13.9 7.6, 13.9 10.4, 12 10.4&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M6.1 4.2 C6.1 3.2, 7.1 3.2, 7.1 2.2&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M8.9 4.2 C8.9 3.2, 9.9 3.2, 9.9 2.2&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  bar: {</span>
+<span class="d-add">+    cat: &quot;retail&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M3 3.4 L13 3.4 L8 9.2 Z&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;8&quot; y1=&quot;9.2&quot; x2=&quot;8&quot; y2=&quot;13.2&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;5.5&quot; y1=&quot;13.2&quot; x2=&quot;10.5&quot; y2=&quot;13.2&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  shop: {</span>
+<span class="d-add">+    cat: &quot;retail&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M3.3 5.6 L12.7 5.6 L11.9 13.5 L4.1 13.5 Z&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M6 5.6 L6 4 C6 2.6, 10 2.6, 10 4 L10 5.6&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  // A stall awning, so it never reads as a second shopping bag.</span>
+<span class="d-add">+  market: {</span>
+<span class="d-add">+    cat: &quot;retail&quot;,</span>
+<span class="d-add">+    body: `&lt;path d=&quot;M1.8 6.4 L3.3 3 L12.7 3 L14.2 6.4 Z&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M3.1 6.4 L3.1 13.3 L12.9 13.3 L12.9 6.4&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  hotel: {</span>
+<span class="d-add">+    cat: &quot;retail&quot;,</span>
+<span class="d-add">+    body: `&lt;line x1=&quot;2&quot; y1=&quot;5.4&quot; x2=&quot;2&quot; y2=&quot;13&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M2 9 C2 7.5, 3.4 6.7, 5 6.7 L12 6.7 C13.4 6.7, 14 7.7, 14 9 L14 13&quot;/&gt;</span>
+<span class="d-add">+           &lt;line x1=&quot;2&quot; y1=&quot;10.6&quot; x2=&quot;14&quot; y2=&quot;10.6&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  // An elongated capsule, not a squarish one: drawn compact it came out as a</span>
+<span class="d-add">+  // circle with a diagonal through it, which is the international &quot;no entry&quot;.</span>
+<span class="d-add">+  pharmacy: {</span>
+<span class="d-add">+    cat: &quot;retail&quot;,</span>
+<span class="d-add">+    body: `&lt;g transform=&quot;rotate(-45 8 8)&quot;&gt;</span>
+<span class="d-add">+             &lt;rect x=&quot;1.6&quot; y=&quot;5.6&quot; width=&quot;12.8&quot; height=&quot;4.8&quot; rx=&quot;2.4&quot;/&gt;</span>
+<span class="d-add">+             &lt;line x1=&quot;8&quot; y1=&quot;5.6&quot; x2=&quot;8&quot; y2=&quot;10.4&quot;/&gt;</span>
+<span class="d-add">+           &lt;/g&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  bank: {</span>
+<span class="d-add">+    cat: &quot;retail&quot;,</span>
+<span class="d-add">+    body: `&lt;ellipse cx=&quot;8&quot; cy=&quot;4.6&quot; rx=&quot;5&quot; ry=&quot;2&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M3 4.6 L3 11.4 C3 12.5, 5.2 13.4, 8 13.4 C10.8 13.4, 13 12.5, 13 11.4 L13 4.6&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M3 8 C3 9.1, 5.2 10, 8 10 C10.8 10, 13 9.1, 13 8&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  sports: {</span>
+<span class="d-add">+    cat: &quot;retail&quot;,</span>
+<span class="d-add">+    body: `&lt;circle cx=&quot;8&quot; cy=&quot;8&quot; r=&quot;5.6&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M2.9 5.7 C6 7.2, 10 7.2, 13.1 5.7&quot;/&gt;</span>
+<span class="d-add">+           &lt;path d=&quot;M3.4 11.2 C6 9.7, 10 9.7, 12.6 11.2&quot;/&gt;`,</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+};</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Drawn when a tile carries a `kind` this build doesn&#x27;t know — an older client</span>
+<span class="d-add">+ *  against a newer tileset. A quiet dot beats MapLibre&#x27;s missing-image warning</span>
+<span class="d-add">+ *  storm and a label with nothing anchoring it. */</span>
+<span class="d-add">+const FALLBACK_ICON = &quot;poi-dot&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+function toSvg(def: IconDef, color: string): string {</span>
+<span class="d-add">+  const paint = def.filled</span>
+<span class="d-add">+    ? `fill=&quot;${color}&quot; stroke=&quot;none&quot;`</span>
+<span class="d-add">+    : `fill=&quot;none&quot; stroke=&quot;${color}&quot; stroke-width=&quot;1.5&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;`;</span>
+<span class="d-add">+  // currentColor in a body (used for the few solid accents inside outlined</span>
+<span class="d-add">+  // glyphs) resolves against the wrapper&#x27;s color property.</span>
+<span class="d-add">+  return `&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 16 16&quot; width=&quot;16&quot; height=&quot;16&quot; color=&quot;${color}&quot; ${paint}&gt;${def.body}&lt;/svg&gt;`;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+async function rasterize(svg: string, sizePx: number, ratio: number): Promise&lt;ImageData&gt; {</span>
+<span class="d-add">+  const px = Math.round(sizePx * ratio);</span>
+<span class="d-add">+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;</span>
+<span class="d-add">+  const img = new Image(px, px);</span>
+<span class="d-add">+  img.src = url;</span>
+<span class="d-add">+  await img.decode();</span>
+<span class="d-add">+  const canvas = document.createElement(&quot;canvas&quot;);</span>
+<span class="d-add">+  canvas.width = px;</span>
+<span class="d-add">+  canvas.height = px;</span>
+<span class="d-add">+  const ctx = canvas.getContext(&quot;2d&quot;);</span>
+<span class="d-add">+  if (!ctx) throw new Error(&quot;2d context unavailable&quot;);</span>
+<span class="d-add">+  ctx.drawImage(img, 0, 0, px, px);</span>
+<span class="d-add">+  return ctx.getImageData(0, 0, px, px);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Rasterise every glyph in the active basemap&#x27;s palette and register it with</span>
+<span class="d-add">+ * the map. Resolves once all images are available, so the caller can add the</span>
+<span class="d-add">+ * symbol layer without MapLibre ever asking for an image that isn&#x27;t there yet.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export async function registerPlaceIcons(</span>
+<span class="d-add">+  map: maplibregl.Map,</span>
+<span class="d-add">+  basemap: Basemap,</span>
+<span class="d-add">+): Promise&lt;void&gt; {</span>
+<span class="d-add">+  const palette = POI_COLORS[basemap];</span>
+<span class="d-add">+  // Rasterise at 2× regardless of the display&#x27;s DPR: the images are cached on</span>
+<span class="d-add">+  // the map for the session, and a crisp icon on a 1× screen costs 4 tiny</span>
+<span class="d-add">+  // canvases&#x27; worth of memory.</span>
+<span class="d-add">+  const ratio = 2;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const entries = Object.entries(ICONS);</span>
+<span class="d-add">+  await Promise.all(</span>
+<span class="d-add">+    entries.map(async ([name, def]) =&gt; {</span>
+<span class="d-add">+      if (map.hasImage(name)) return;</span>
+<span class="d-add">+      try {</span>
+<span class="d-add">+        const data = await rasterize(toSvg(def, palette[def.cat]), ICON_PX, ratio);</span>
+<span class="d-add">+        map.addImage(name, data, { pixelRatio: ratio });</span>
+<span class="d-add">+      } catch (err) {</span>
+<span class="d-add">+        dwarn(&quot;maplibre&quot;, `place icon &quot;${name}&quot; failed to rasterize`, err);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }),</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+</span>
+<span class="d-add">+  if (!map.hasImage(FALLBACK_ICON)) {</span>
+<span class="d-add">+    try {</span>
+<span class="d-add">+      const dot = `&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 16 16&quot; width=&quot;16&quot; height=&quot;16&quot;&gt;</span>
+<span class="d-add">+        &lt;circle cx=&quot;8&quot; cy=&quot;8&quot; r=&quot;2.2&quot; fill=&quot;${palette.retail}&quot;/&gt;&lt;/svg&gt;`;</span>
+<span class="d-add">+      map.addImage(FALLBACK_ICON, await rasterize(dot, ICON_PX, ratio), { pixelRatio: ratio });</span>
+<span class="d-add">+    } catch (err) {</span>
+<span class="d-add">+      dwarn(&quot;maplibre&quot;, &quot;place icon fallback failed to rasterize&quot;, err);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  dlog(&quot;maplibre&quot;, `place icons registered: ${entries.length} + fallback`);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** `icon-image` expression: the feature&#x27;s kind, or the dot when unknown. */</span>
+<span class="d-add">+export const placeIconExpression: maplibregl.ExpressionSpecification = [</span>
+<span class="d-add">+  &quot;coalesce&quot;,</span>
+<span class="d-add">+  [&quot;image&quot;, [&quot;get&quot;, &quot;kind&quot;]],</span>
+<span class="d-add">+  [&quot;image&quot;, FALLBACK_ICON],</span>
+<span class="d-add">+];</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Exported for the drift test between this set and the builder&#x27;s KINDS table. */</span>
+<span class="d-add">+export const PLACE_ICON_NAMES = Object.keys(ICONS);</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/build_place_labels.py</span>
+            <span class="stat"><span class="d-add">+116</span> / <span class="d-del">-77</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Server · label tile builder</span>
+        <span class="ctx-sum">New sibling of build_pmtiles.py: turns a city&#x27;s OSM extract into the place/business label tileset the client draws</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_place_labels.py</span>
+        <span class="ctx-sum">~400 LOC — allowlist, classification, dedup, grid thinning, MVT/PMTiles encode</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module docstring</span><span class="ol-sum">new — why an allowlist, why grid thinning, the zoom-unit convention</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">zoom + thinning constants</span><span class="ol-sum">new — tile band, label band, GRID_OFFSET, DEDUP_METERS</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CAT_* categories</span><span class="ol-sum">new — transit / civic / culture / retail (no green, by design)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">KINDS allowlist</span><span class="ol-sum">new — (osm key, value) → category, rank, floor zoom</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">SUBWAY_STATION override</span><span class="ol-sum">new — the demotion for stops sharing Grand Central&#x27;s tag</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">classify / normalize_name</span><span class="ol-sum">new — tag priority, notability bonus, name folding</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">PoiCollector (osmium handler)</span><span class="ol-sum">new — nodes + closed-way centroids inside the city bbox</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dedup</span><span class="ol-sum">new — same-name cluster collapse within 400m</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">assign_zooms</span><span class="ol-sum">new — the grid-thinning pass that sets each label&#x27;s reveal zoom</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">build_city_place_labels / _collect_tiles</span><span class="ol-sum">new — bucket to tiles, encode, atomic replace</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main (CLI)</span><span class="ol-sum">new — --city / --all / --force, mtime freshness</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The allowlist is the whole design: 210,003 named features in the NYC extract become 34,349. The four noisiest tags — platforms, named rail segments, abandoned track, pitches — are not places at all</li><li>rank breaks collisions; floor is the earliest zoom a kind may EVER appear; assign_zooms decides the zoom it actually does</li><li>assign_zooms lets already-placed labels re-claim their cell before newcomers, so zooming in adds detail BETWEEN existing labels instead of stacking on top of them</li><li>GRID_OFFSET=0 (one cell per tile, ~256 CSS px). At 1 the city view came out at ~50 labels and read as a directory</li><li>MAX_LABEL_ZOOM=21 matches CONFIG.maxZoom: every unplaced POI falls back to the last zoom, and a ceiling of 19 dumped 60% of the set into one ungoverned band</li><li>SUBWAY_STATION returns before the wikidata bonus — nearly every NYC stop has one and would otherwise claim back the rank the demotion just removed</li><li>Point labels are never clipped by a tile edge (MapLibre draws glyphs that overflow the tile holding their anchor), so each POI goes into exactly ONE tile per zoom and no buffer is needed</li><li>Stable feature ids let MapLibre&#x27;s cross-tile index recognise the same label across adjacent tiles instead of drawing it twice</li><li>Multipolygon relations are skipped: assembling areas costs a second full pass over a 500MB extract, and the features that matter are mapped as ways</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/build_place_labels.py b/server/build_place_labels.py</span>
+<span class="d-meta">index ff0f265..7ff060d 100644</span>
+<span class="d-meta">--- a/server/build_place_labels.py</span>
+<span class="d-meta">+++ b/server/build_place_labels.py</span>
+<span class="d-hunk">@@ -84,6 +84,15 @@ MAX_LABEL_ZOOM = 21</span>
+<span class="d-ctx"> # labels and read as a directory, not a map.</span>
+<span class="d-ctx"> GRID_OFFSET = 0</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# Transit thins on a grid one level finer (quarter-tile cells, ~128 CSS px).</span>
+<span class="d-add">+# A shared grid is the right budget for POIs that are individually optional —</span>
+<span class="d-add">+# one museum per cell is plenty — but stations are the map&#x27;s orientation</span>
+<span class="d-add">+# backbone and they are read as a SET: showing one of the East Village&#x27;s six</span>
+<span class="d-add">+# subway stops is not a sixth as useful as showing all six, it is close to</span>
+<span class="d-add">+# useless. Because the grid zoom is part of the cell key, this also means</span>
+<span class="d-add">+# stations compete only against other stations, never against a nearby deli.</span>
+<span class="d-add">+TRANSIT_GRID_BONUS = 1</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> # Two same-named POIs closer than this are the same place mapped twice (NYC</span>
+<span class="d-ctx"> # subway complexes carry a `railway=station` node per line, so &quot;14 St&quot; alone</span>
+<span class="d-ctx"> # appears five times within a block). Keep the highest-ranked one.</span>
+<span class="d-hunk">@@ -106,77 +115,84 @@ CAT_CIVIC = &quot;civic&quot;</span>
+<span class="d-ctx"> CAT_CULTURE = &quot;culture&quot;</span>
+<span class="d-ctx"> CAT_RETAIL = &quot;retail&quot;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# (osm_key, osm_value) -&gt; (category, rank, floor zoom in LEAFLET zoom units).</span>
+<span class="d-del">-# rank breaks collisions: higher wins the cell and the pixel.</span>
+<span class="d-del">-KINDS: dict[tuple[str, str], tuple[str, int, int]] = {</span>
+<span class="d-add">+# (osm_key, osm_value) -&gt; (category, icon, rank, floor zoom in LEAFLET zooms).</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# `icon` names one of the glyphs in client-react/.../placeIcons.ts and ships as</span>
+<span class="d-add">+# the feature&#x27;s `kind` property. It is coarser than the OSM tag on purpose: a</span>
+<span class="d-add">+# pub and a bar get the same glass, a college and a university the same building.</span>
+<span class="d-add">+# At 13 CSS px an icon has room for one idea, and a set with 40 near-identical</span>
+<span class="d-add">+# marks is harder to read than one with 20 distinct ones.</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# `rank` breaks collisions: higher wins the grid cell and the pixel.</span>
+<span class="d-add">+KINDS: dict[tuple[str, str], tuple[str, str, int, int]] = {</span>
+<span class="d-ctx">     # ── Transit ────────────────────────────────────────────────────────────</span>
+<span class="d-ctx">     # Stations only. Platforms and stop positions are per-track duplicates of a</span>
+<span class="d-ctx">     # station that is already labelled, and named track segments are not places.</span>
+<span class="d-del">-    (&quot;aeroway&quot;, &quot;aerodrome&quot;): (CAT_TRANSIT, 98, 11),</span>
+<span class="d-add">+    (&quot;aeroway&quot;, &quot;aerodrome&quot;): (CAT_TRANSIT, &quot;airport&quot;, 98, 11),</span>
+<span class="d-ctx">     # Mainline terminals and commuter-rail stops: Penn, Grand Central, the LIRR</span>
+<span class="d-ctx">     # and Metro-North. Genuinely city-scale landmarks.</span>
+<span class="d-del">-    (&quot;railway&quot;, &quot;station&quot;): (CAT_TRANSIT, 90, 13),</span>
+<span class="d-del">-    (&quot;railway&quot;, &quot;halt&quot;): (CAT_TRANSIT, 70, 15),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;ferry_terminal&quot;): (CAT_TRANSIT, 85, 14),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;bus_station&quot;): (CAT_TRANSIT, 80, 14),</span>
+<span class="d-del">-    (&quot;public_transport&quot;, &quot;station&quot;): (CAT_TRANSIT, 74, 14),</span>
+<span class="d-add">+    (&quot;railway&quot;, &quot;station&quot;): (CAT_TRANSIT, &quot;rail&quot;, 90, 13),</span>
+<span class="d-add">+    (&quot;railway&quot;, &quot;halt&quot;): (CAT_TRANSIT, &quot;rail&quot;, 70, 15),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;ferry_terminal&quot;): (CAT_TRANSIT, &quot;ferry&quot;, 85, 14),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;bus_station&quot;): (CAT_TRANSIT, &quot;bus&quot;, 80, 14),</span>
+<span class="d-add">+    (&quot;public_transport&quot;, &quot;station&quot;): (CAT_TRANSIT, &quot;rail&quot;, 74, 14),</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # ── Venues ─────────────────────────────────────────────────────────────</span>
+<span class="d-ctx">     # What&#x27;s left of `leisure` once green space goes to the basemap: these are</span>
+<span class="d-ctx">     # buildings you go into, not open space, so they carry a venue color rather</span>
+<span class="d-ctx">     # than a park one.</span>
+<span class="d-del">-    (&quot;leisure&quot;, &quot;stadium&quot;): (CAT_CULTURE, 88, 13),</span>
+<span class="d-del">-    (&quot;leisure&quot;, &quot;sports_centre&quot;): (CAT_RETAIL, 58, 16),</span>
+<span class="d-del">-    (&quot;leisure&quot;, &quot;fitness_centre&quot;): (CAT_RETAIL, 45, 17),</span>
+<span class="d-add">+    (&quot;leisure&quot;, &quot;stadium&quot;): (CAT_CULTURE, &quot;stadium&quot;, 88, 13),</span>
+<span class="d-add">+    (&quot;leisure&quot;, &quot;sports_centre&quot;): (CAT_RETAIL, &quot;sports&quot;, 58, 16),</span>
+<span class="d-add">+    (&quot;leisure&quot;, &quot;fitness_centre&quot;): (CAT_RETAIL, &quot;sports&quot;, 45, 17),</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # ── Civic &amp; education ──────────────────────────────────────────────────</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;university&quot;): (CAT_CIVIC, 92, 13),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;college&quot;): (CAT_CIVIC, 80, 14),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;hospital&quot;): (CAT_CIVIC, 84, 14),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;townhall&quot;): (CAT_CIVIC, 76, 15),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;courthouse&quot;): (CAT_CIVIC, 72, 15),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;library&quot;): (CAT_CIVIC, 68, 15),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;community_centre&quot;): (CAT_CIVIC, 56, 16),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;school&quot;): (CAT_CIVIC, 54, 16),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;place_of_worship&quot;): (CAT_CIVIC, 48, 16),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;post_office&quot;): (CAT_CIVIC, 52, 17),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;fire_station&quot;): (CAT_CIVIC, 50, 17),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;police&quot;): (CAT_CIVIC, 50, 17),</span>
+<span class="d-del">-    (&quot;office&quot;, &quot;government&quot;): (CAT_CIVIC, 44, 17),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;university&quot;): (CAT_CIVIC, &quot;school&quot;, 92, 13),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;college&quot;): (CAT_CIVIC, &quot;school&quot;, 80, 14),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;hospital&quot;): (CAT_CIVIC, &quot;hospital&quot;, 84, 14),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;townhall&quot;): (CAT_CIVIC, &quot;government&quot;, 76, 15),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;courthouse&quot;): (CAT_CIVIC, &quot;government&quot;, 72, 15),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;library&quot;): (CAT_CIVIC, &quot;library&quot;, 68, 15),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;community_centre&quot;): (CAT_CIVIC, &quot;government&quot;, 56, 16),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;school&quot;): (CAT_CIVIC, &quot;school&quot;, 54, 16),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;place_of_worship&quot;): (CAT_CIVIC, &quot;worship&quot;, 48, 16),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;post_office&quot;): (CAT_CIVIC, &quot;post&quot;, 52, 17),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;fire_station&quot;): (CAT_CIVIC, &quot;emergency&quot;, 50, 17),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;police&quot;): (CAT_CIVIC, &quot;emergency&quot;, 50, 17),</span>
+<span class="d-add">+    (&quot;office&quot;, &quot;government&quot;): (CAT_CIVIC, &quot;government&quot;, 44, 17),</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # ── Culture ────────────────────────────────────────────────────────────</span>
+<span class="d-del">-    (&quot;tourism&quot;, &quot;zoo&quot;): (CAT_CULTURE, 90, 13),</span>
+<span class="d-del">-    (&quot;tourism&quot;, &quot;aquarium&quot;): (CAT_CULTURE, 90, 13),</span>
+<span class="d-del">-    (&quot;tourism&quot;, &quot;theme_park&quot;): (CAT_CULTURE, 88, 13),</span>
+<span class="d-del">-    (&quot;tourism&quot;, &quot;museum&quot;): (CAT_CULTURE, 85, 14),</span>
+<span class="d-del">-    (&quot;tourism&quot;, &quot;attraction&quot;): (CAT_CULTURE, 80, 14),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;theatre&quot;): (CAT_CULTURE, 70, 15),</span>
+<span class="d-del">-    (&quot;tourism&quot;, &quot;gallery&quot;): (CAT_CULTURE, 58, 16),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;cinema&quot;): (CAT_CULTURE, 60, 16),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;arts_centre&quot;): (CAT_CULTURE, 60, 16),</span>
+<span class="d-del">-    (&quot;historic&quot;, &quot;monument&quot;): (CAT_CULTURE, 62, 16),</span>
+<span class="d-del">-    (&quot;historic&quot;, &quot;memorial&quot;): (CAT_CULTURE, 44, 17),</span>
+<span class="d-del">-    (&quot;tourism&quot;, &quot;artwork&quot;): (CAT_CULTURE, 38, 18),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;zoo&quot;): (CAT_CULTURE, &quot;attraction&quot;, 90, 13),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;aquarium&quot;): (CAT_CULTURE, &quot;attraction&quot;, 90, 13),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;theme_park&quot;): (CAT_CULTURE, &quot;attraction&quot;, 88, 13),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;museum&quot;): (CAT_CULTURE, &quot;museum&quot;, 85, 14),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;attraction&quot;): (CAT_CULTURE, &quot;attraction&quot;, 80, 14),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;theatre&quot;): (CAT_CULTURE, &quot;theatre&quot;, 70, 15),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;gallery&quot;): (CAT_CULTURE, &quot;museum&quot;, 58, 16),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;cinema&quot;): (CAT_CULTURE, &quot;cinema&quot;, 60, 16),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;arts_centre&quot;): (CAT_CULTURE, &quot;theatre&quot;, 60, 16),</span>
+<span class="d-add">+    (&quot;historic&quot;, &quot;monument&quot;): (CAT_CULTURE, &quot;monument&quot;, 62, 16),</span>
+<span class="d-add">+    (&quot;historic&quot;, &quot;memorial&quot;): (CAT_CULTURE, &quot;monument&quot;, 44, 17),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;artwork&quot;): (CAT_CULTURE, &quot;monument&quot;, 38, 18),</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # ── Retail, food &amp; lodging ─────────────────────────────────────────────</span>
+<span class="d-ctx">     # The floor zooms here are deep on purpose: these are the labels that tell</span>
+<span class="d-ctx">     # you which block you&#x27;re on, not which neighborhood, and they only earn</span>
+<span class="d-ctx">     # their space once the heat is already resolved to individual streets.</span>
+<span class="d-del">-    (&quot;shop&quot;, &quot;mall&quot;): (CAT_RETAIL, 72, 15),</span>
+<span class="d-del">-    (&quot;shop&quot;, &quot;department_store&quot;): (CAT_RETAIL, 66, 16),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;marketplace&quot;): (CAT_RETAIL, 62, 16),</span>
+<span class="d-del">-    (&quot;shop&quot;, &quot;supermarket&quot;): (CAT_RETAIL, 58, 17),</span>
+<span class="d-del">-    (&quot;tourism&quot;, &quot;hotel&quot;): (CAT_RETAIL, 56, 17),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;pharmacy&quot;): (CAT_RETAIL, 38, 18),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;bank&quot;): (CAT_RETAIL, 34, 18),</span>
+<span class="d-del">-    (&quot;shop&quot;, &quot;books&quot;): (CAT_RETAIL, 32, 18),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;restaurant&quot;): (CAT_RETAIL, 30, 18),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;cafe&quot;): (CAT_RETAIL, 30, 18),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;bar&quot;): (CAT_RETAIL, 30, 18),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;pub&quot;): (CAT_RETAIL, 30, 18),</span>
+<span class="d-del">-    (&quot;shop&quot;, &quot;bakery&quot;): (CAT_RETAIL, 28, 18),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;fast_food&quot;): (CAT_RETAIL, 22, 18),</span>
+<span class="d-del">-    (&quot;amenity&quot;, &quot;ice_cream&quot;): (CAT_RETAIL, 22, 18),</span>
+<span class="d-add">+    (&quot;shop&quot;, &quot;mall&quot;): (CAT_RETAIL, &quot;shop&quot;, 72, 15),</span>
+<span class="d-add">+    (&quot;shop&quot;, &quot;department_store&quot;): (CAT_RETAIL, &quot;shop&quot;, 66, 16),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;marketplace&quot;): (CAT_RETAIL, &quot;market&quot;, 62, 16),</span>
+<span class="d-add">+    (&quot;shop&quot;, &quot;supermarket&quot;): (CAT_RETAIL, &quot;market&quot;, 58, 17),</span>
+<span class="d-add">+    (&quot;tourism&quot;, &quot;hotel&quot;): (CAT_RETAIL, &quot;hotel&quot;, 56, 17),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;pharmacy&quot;): (CAT_RETAIL, &quot;pharmacy&quot;, 38, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;bank&quot;): (CAT_RETAIL, &quot;bank&quot;, 34, 18),</span>
+<span class="d-add">+    (&quot;shop&quot;, &quot;books&quot;): (CAT_RETAIL, &quot;shop&quot;, 32, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;restaurant&quot;): (CAT_RETAIL, &quot;restaurant&quot;, 30, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;cafe&quot;): (CAT_RETAIL, &quot;cafe&quot;, 30, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;bar&quot;): (CAT_RETAIL, &quot;bar&quot;, 30, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;pub&quot;): (CAT_RETAIL, &quot;bar&quot;, 30, 18),</span>
+<span class="d-add">+    (&quot;shop&quot;, &quot;bakery&quot;): (CAT_RETAIL, &quot;cafe&quot;, 28, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;fast_food&quot;): (CAT_RETAIL, &quot;restaurant&quot;, 22, 18),</span>
+<span class="d-add">+    (&quot;amenity&quot;, &quot;ice_cream&quot;): (CAT_RETAIL, &quot;cafe&quot;, 22, 18),</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # Tag keys worth consulting, in priority order — the first one that resolves to</span>
+<span class="d-hunk">@@ -189,31 +205,44 @@ TAG_KEYS = (&quot;aeroway&quot;, &quot;railway&quot;, &quot;public_transport&quot;, &quot;leisure&quot;, &quot;tourism&quot;,</span>
+<span class="d-ctx"> # lifts Katz&#x27;s above the deli next door without a hand-maintained landmark list.</span>
+<span class="d-ctx"> WIKI_RANK_BONUS = 25</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-# A subway stop is tagged `railway=station` exactly like Grand Central, but NYC</span>
+<span class="d-del">-# has 470-odd of them and most are named after the street above (&quot;5th Avenue&quot;,</span>
+<span class="d-del">-# &quot;72nd Street&quot;). At mainline rank they carpeted the city-scale view, and a blue</span>
+<span class="d-del">-# &quot;5th Avenue&quot; sitting beside the basemap&#x27;s own &quot;5th Avenue&quot; street label reads</span>
+<span class="d-del">-# as a rendering bug rather than a station. Demoted to a neighborhood-scale</span>
+<span class="d-del">-# label, which is the zoom at which knowing your nearest stop actually helps.</span>
+<span class="d-del">-SUBWAY_STATION = (CAT_TRANSIT, 64, 15)</span>
+<span class="d-add">+# A subway stop is tagged `railway=station` exactly like Grand Central (496 of</span>
+<span class="d-add">+# the 561 stations in the NYC bbox are `station=subway`), so it needs its own</span>
+<span class="d-add">+# entry — but getting that entry right took two goes in opposite directions.</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# At mainline rank/floor the 496 stops carpeted the city-scale view, and since</span>
+<span class="d-add">+# most are named after the street above them (&quot;5th Avenue&quot;, &quot;72nd Street&quot;) a</span>
+<span class="d-add">+# blue &quot;5th Avenue&quot; beside the basemap&#x27;s own &quot;5th Avenue&quot; street label read as a</span>
+<span class="d-add">+# rendering bug rather than a station. Demoting them to rank 64 overcorrected</span>
+<span class="d-add">+# badly: 64 is near the BOTTOM of everything eligible at z15, so every cell went</span>
+<span class="d-add">+# to a museum, hospital or university first and the stops did not surface until</span>
+<span class="d-add">+# z17-19 — for practical purposes they had vanished from the map.</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# What actually separates the two cases is not prominence, it is zoom: a stop is</span>
+<span class="d-add">+# the single most useful orientation label in New York *once you are at</span>
+<span class="d-add">+# neighborhood scale*, and noise above it. So: a high rank (it should win its</span>
+<span class="d-add">+# cell whenever it is eligible) behind a floor of 14 (never eligible at</span>
+<span class="d-add">+# city scale). The icon does the rest of the work the demotion was reaching for</span>
+<span class="d-add">+# — a subway mark is unmistakably not a street label.</span>
+<span class="d-add">+SUBWAY_STATION = (CAT_TRANSIT, &quot;subway&quot;, 86, 14)</span>
+<span class="d-ctx"> SUBWAY_STATION_VALUES = {&quot;subway&quot;, &quot;light_rail&quot;, &quot;monorail&quot;}</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> class Poi:</span>
+<span class="d-del">-    __slots__ = (&quot;lat&quot;, &quot;lon&quot;, &quot;name&quot;, &quot;cat&quot;, &quot;rank&quot;, &quot;floor&quot;, &quot;minz&quot;)</span>
+<span class="d-add">+    __slots__ = (&quot;lat&quot;, &quot;lon&quot;, &quot;name&quot;, &quot;cat&quot;, &quot;icon&quot;, &quot;rank&quot;, &quot;floor&quot;, &quot;minz&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    def __init__(self, lat, lon, name, cat, rank, floor):</span>
+<span class="d-add">+    def __init__(self, lat, lon, name, cat, icon, rank, floor):</span>
+<span class="d-ctx">         self.lat = lat</span>
+<span class="d-ctx">         self.lon = lon</span>
+<span class="d-ctx">         self.name = name</span>
+<span class="d-ctx">         self.cat = cat</span>
+<span class="d-add">+        self.icon = icon</span>
+<span class="d-ctx">         self.rank = rank</span>
+<span class="d-ctx">         self.floor = floor</span>
+<span class="d-ctx">         self.minz = 0</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-def classify(tags) -&gt; tuple[str, int, int] | None:</span>
+<span class="d-del">-    &quot;&quot;&quot;(category, rank, floor zoom) for a feature&#x27;s tags, or None to drop it.&quot;&quot;&quot;</span>
+<span class="d-add">+def classify(tags) -&gt; tuple[str, str, int, int] | None:</span>
+<span class="d-add">+    &quot;&quot;&quot;(category, icon, rank, floor zoom) for a feature&#x27;s tags, or None to drop.&quot;&quot;&quot;</span>
+<span class="d-ctx">     for key in TAG_KEYS:</span>
+<span class="d-ctx">         value = tags.get(key)</span>
+<span class="d-ctx">         if value is None:</span>
+<span class="d-hunk">@@ -224,13 +253,13 @@ def classify(tags) -&gt; tuple[str, int, int] | None:</span>
+<span class="d-ctx">         if key == &quot;railway&quot; and value == &quot;station&quot; and \</span>
+<span class="d-ctx">                 tags.get(&quot;station&quot;) in SUBWAY_STATION_VALUES:</span>
+<span class="d-ctx">             # Returned as-is: nearly every NYC subway stop carries a wikidata</span>
+<span class="d-del">-            # tag, so letting the notability bonus apply here would hand back</span>
+<span class="d-del">-            # the mainline rank the demotion just took away.</span>
+<span class="d-add">+            # tag, so letting the notability bonus apply would push all 496 back</span>
+<span class="d-add">+            # above the mainline terminals this entry exists to separate.</span>
+<span class="d-ctx">             return SUBWAY_STATION</span>
+<span class="d-del">-        cat, rank, floor = entry</span>
+<span class="d-add">+        cat, icon, rank, floor = entry</span>
+<span class="d-ctx">         if &quot;wikidata&quot; in tags or &quot;wikipedia&quot; in tags:</span>
+<span class="d-ctx">             rank += WIKI_RANK_BONUS</span>
+<span class="d-del">-        return cat, rank, floor</span>
+<span class="d-add">+        return cat, icon, rank, floor</span>
+<span class="d-ctx">     return None</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -263,8 +292,8 @@ class PoiCollector(osmium.SimpleHandler):</span>
+<span class="d-ctx">         entry = classify(tags)</span>
+<span class="d-ctx">         if entry is None:</span>
+<span class="d-ctx">             return</span>
+<span class="d-del">-        cat, rank, floor = entry</span>
+<span class="d-del">-        self.pois.append(Poi(lat, lon, name, cat, rank, floor))</span>
+<span class="d-add">+        cat, icon, rank, floor = entry</span>
+<span class="d-add">+        self.pois.append(Poi(lat, lon, name, cat, icon, rank, floor))</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     def node(self, n):</span>
+<span class="d-ctx">         if not n.tags:</span>
+<span class="d-hunk">@@ -336,12 +365,11 @@ def assign_zooms(pois: list[Poi]) -&gt; None:</span>
+<span class="d-ctx">     pois.sort(key=lambda p: (-p.rank, p.name, p.lat, p.lon))</span>
+<span class="d-ctx">     placed: list[Poi] = []</span>
+<span class="d-ctx">     for zoom in range(MIN_LABEL_ZOOM, MAX_LABEL_ZOOM + 1):</span>
+<span class="d-del">-        grid_zoom = zoom + GRID_OFFSET</span>
+<span class="d-del">-        occupied = {_cell(p, grid_zoom) for p in placed}</span>
+<span class="d-add">+        occupied = {_cell(p, zoom) for p in placed}</span>
+<span class="d-ctx">         for poi in pois:</span>
+<span class="d-ctx">             if poi.minz or poi.floor &gt; zoom:</span>
+<span class="d-ctx">                 continue</span>
+<span class="d-del">-            cell = _cell(poi, grid_zoom)</span>
+<span class="d-add">+            cell = _cell(poi, zoom)</span>
+<span class="d-ctx">             if cell in occupied:</span>
+<span class="d-ctx">                 continue</span>
+<span class="d-ctx">             occupied.add(cell)</span>
+<span class="d-hunk">@@ -354,9 +382,18 @@ def assign_zooms(pois: list[Poi]) -&gt; None:</span>
+<span class="d-ctx">             poi.minz = MAX_LABEL_ZOOM</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-del">-def _cell(poi: Poi, zoom: int) -&gt; tuple[int, int]:</span>
+<span class="d-del">-    tile = mercantile.tile(poi.lon, poi.lat, zoom)</span>
+<span class="d-del">-    return tile.x, tile.y</span>
+<span class="d-add">+def _cell(poi: Poi, label_zoom: int) -&gt; tuple[int, int, int]:</span>
+<span class="d-add">+    &quot;&quot;&quot;The grid cell a POI claims at a given label zoom.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    The grid zoom is part of the key on purpose: transit uses a finer grid</span>
+<span class="d-add">+    (TRANSIT_GRID_BONUS), so its cells can never collide with another</span>
+<span class="d-add">+    category&#x27;s and stations compete only against other stations.</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    grid_zoom = label_zoom + GRID_OFFSET</span>
+<span class="d-add">+    if poi.cat == CAT_TRANSIT:</span>
+<span class="d-add">+        grid_zoom += TRANSIT_GRID_BONUS</span>
+<span class="d-add">+    tile = mercantile.tile(poi.lon, poi.lat, grid_zoom)</span>
+<span class="d-add">+    return grid_zoom, tile.x, tile.y</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def build_city_place_labels(city: City, output_path: str | None = None) -&gt; str:</span>
+<span class="d-hunk">@@ -421,7 +458,8 @@ def build_city_place_labels(city: City, output_path: str | None = None) -&gt; str:</span>
+<span class="d-ctx">                 &quot;bounds&quot;: &quot;,&quot;.join(str(b) for b in (west, south, east, north)),</span>
+<span class="d-ctx">                 &quot;vector_layers&quot;: json.dumps([{</span>
+<span class="d-ctx">                     &quot;id&quot;: &quot;places&quot;,</span>
+<span class="d-del">-                    &quot;fields&quot;: {&quot;name&quot;: &quot;String&quot;, &quot;cat&quot;: &quot;String&quot;, &quot;minz&quot;: &quot;Number&quot;},</span>
+<span class="d-add">+                    &quot;fields&quot;: {&quot;name&quot;: &quot;String&quot;, &quot;cat&quot;: &quot;String&quot;,</span>
+<span class="d-add">+                               &quot;kind&quot;: &quot;String&quot;, &quot;minz&quot;: &quot;Number&quot;},</span>
+<span class="d-ctx">                 }]),</span>
+<span class="d-ctx">             },</span>
+<span class="d-ctx">         )</span>
+<span class="d-hunk">@@ -452,7 +490,8 @@ def _collect_tiles(pois: list[Poi]) -&gt; dict[tuple[int, int, int], list[dict]]:</span>
+<span class="d-ctx">             tile = mercantile.tile(poi.lon, poi.lat, zoom)</span>
+<span class="d-ctx">             tiles.setdefault((zoom, tile.x, tile.y), []).append({</span>
+<span class="d-ctx">                 &quot;geometry&quot;: {&quot;type&quot;: &quot;Point&quot;, &quot;coordinates&quot;: [poi.lon, poi.lat]},</span>
+<span class="d-del">-                &quot;properties&quot;: {&quot;name&quot;: poi.name, &quot;cat&quot;: poi.cat, &quot;minz&quot;: poi.minz},</span>
+<span class="d-add">+                &quot;properties&quot;: {&quot;name&quot;: poi.name, &quot;cat&quot;: poi.cat,</span>
+<span class="d-add">+                               &quot;kind&quot;: poi.icon, &quot;minz&quot;: poi.minz},</span>
+<span class="d-ctx">                 &quot;id&quot;: index,</span>
+<span class="d-ctx">             })</span>
+<span class="d-ctx">     return tiles</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/tests/unit/test_place_labels.py</span>
+            <span class="stat"><span class="d-add">+111</span> / <span class="d-del">-33</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Server · tests</span>
+        <span class="ctx-sum">Pure unit coverage (no Redis/Postgres) for the curation rules that decide what the label layer shows</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">test_place_labels.py</span>
+        <span class="ctx-sum">~130 LOC — 25 tests across classify, normalize_name, dedup, assign_zooms</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">TestClassify</span><span class="ol-sum">new — allowlist, noise rejection, notability, the subway demotion, tag priority</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">TestNormalizeName</span><span class="ol-sum">new — accent/case/punctuation folding</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">TestDedup</span><span class="ol-sum">new — station complexes collapse, distant namesakes survive</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">TestAssignZooms</span><span class="ol-sum">new — floors respected, rank wins cells, nothing vanishes</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The noise-rejection test is parameterized over the actual top offenders in the NYC extract, so a bad allowlist entry fails loudly instead of quietly restoring 15,000 platforms</li><li>test_subway_demotion_survives_a_wikidata_tag pins the exact ordering bug that made the demotion a no-op</li><li>test_every_poi_gets_a_reveal_zoom guards the fallback: a POI whose cell is taken at every zoom must still end up somewhere rather than silently leaving the tileset</li><li>Green-space tags are asserted as DROPPED — the duplicate-label regression has a test now</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/tests/unit/test_place_labels.py b/server/tests/unit/test_place_labels.py</span>
+<span class="d-meta">index 1424190..91a4fdc 100644</span>
+<span class="d-meta">--- a/server/tests/unit/test_place_labels.py</span>
+<span class="d-meta">+++ b/server/tests/unit/test_place_labels.py</span>
+<span class="d-hunk">@@ -1,15 +1,22 @@</span>
+<span class="d-ctx"> &quot;&quot;&quot;Curation rules for the place-label tileset (build_place_labels.py).</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-These cover the two things that decide whether the label layer reads as a map</span>
+<span class="d-del">-or as a directory dump: WHICH features survive the allowlist, and WHEN each one</span>
+<span class="d-del">-is allowed to appear. Both are easy to regress silently — a bad allowlist entry</span>
+<span class="d-del">-just quietly puts 15,000 subway platforms back on the map.</span>
+<span class="d-add">+These cover the things that decide whether the label layer reads as a map or as</span>
+<span class="d-add">+a directory dump: WHICH features survive the allowlist, WHEN each one is allowed</span>
+<span class="d-add">+to appear, and whether every kind still has an icon to draw. All easy to regress</span>
+<span class="d-add">+silently — a bad allowlist entry just quietly puts 15,000 subway platforms back</span>
+<span class="d-add">+on the map, and a rank tweak can make a whole category disappear without</span>
+<span class="d-add">+erroring anywhere.</span>
+<span class="d-ctx"> &quot;&quot;&quot;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+import pathlib</span>
+<span class="d-add">+import re</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> import pytest</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> from build_place_labels import (</span>
+<span class="d-add">+    KINDS,</span>
+<span class="d-ctx">     MAX_LABEL_ZOOM,</span>
+<span class="d-add">+    SUBWAY_STATION,</span>
+<span class="d-ctx">     Poi,</span>
+<span class="d-ctx">     assign_zooms,</span>
+<span class="d-ctx">     classify,</span>
+<span class="d-hunk">@@ -17,12 +24,15 @@ from build_place_labels import (</span>
+<span class="d-ctx">     normalize_name,</span>
+<span class="d-ctx"> )</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# classify() returns (category, icon, rank, floor).</span>
+<span class="d-add">+CAT, ICON, RANK, FLOOR = 0, 1, 2, 3</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> class TestClassify:</span>
+<span class="d-ctx">     def test_allowlisted_kinds_are_kept_with_their_tier(self):</span>
+<span class="d-del">-        assert classify({&quot;amenity&quot;: &quot;library&quot;}) == (&quot;civic&quot;, 68, 15)</span>
+<span class="d-del">-        assert classify({&quot;leisure&quot;: &quot;stadium&quot;}) == (&quot;culture&quot;, 88, 13)</span>
+<span class="d-del">-        assert classify({&quot;amenity&quot;: &quot;restaurant&quot;}) == (&quot;retail&quot;, 30, 18)</span>
+<span class="d-add">+        assert classify({&quot;amenity&quot;: &quot;library&quot;}) == (&quot;civic&quot;, &quot;library&quot;, 68, 15)</span>
+<span class="d-add">+        assert classify({&quot;leisure&quot;: &quot;stadium&quot;}) == (&quot;culture&quot;, &quot;stadium&quot;, 88, 13)</span>
+<span class="d-add">+        assert classify({&quot;amenity&quot;: &quot;restaurant&quot;}) == (&quot;retail&quot;, &quot;restaurant&quot;, 30, 18)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     @pytest.mark.parametrize(&quot;tags&quot;, [</span>
+<span class="d-ctx">         # The five most common named POI tags in the NYC extract; four are noise.</span>
+<span class="d-hunk">@@ -46,27 +56,68 @@ class TestClassify:</span>
+<span class="d-ctx">     def test_wiki_tag_promotes_a_notable_business(self):</span>
+<span class="d-ctx">         plain = classify({&quot;amenity&quot;: &quot;restaurant&quot;})</span>
+<span class="d-ctx">         notable = classify({&quot;amenity&quot;: &quot;restaurant&quot;, &quot;wikidata&quot;: &quot;Q1067278&quot;})</span>
+<span class="d-del">-        assert notable[1] &gt; plain[1]</span>
+<span class="d-add">+        assert notable[RANK] &gt; plain[RANK]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_more_specific_tag_wins_when_a_feature_carries_several(self):</span>
+<span class="d-add">+        # A hotel with a restaurant in it is a hotel: `tourism` is consulted</span>
+<span class="d-add">+        # before `amenity`.</span>
+<span class="d-add">+        result = classify({&quot;tourism&quot;: &quot;hotel&quot;, &quot;amenity&quot;: &quot;restaurant&quot;})</span>
+<span class="d-add">+        assert (result[CAT], result[ICON]) == (&quot;retail&quot;, &quot;hotel&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    def test_subway_stop_is_demoted_below_a_mainline_terminal(self):</span>
+<span class="d-del">-        mainline = classify({&quot;railway&quot;: &quot;station&quot;, &quot;name&quot;: &quot;Grand Central&quot;})</span>
+<span class="d-add">+class TestSubwayStations:</span>
+<span class="d-add">+    &quot;&quot;&quot;496 of the 561 stations in the NYC bbox are `station=subway`, sharing</span>
+<span class="d-add">+    Grand Central&#x27;s `railway=station` tag. Getting their weight right needed two</span>
+<span class="d-add">+    corrections in opposite directions, so both are pinned here.&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_demoted_below_a_mainline_terminal(self):</span>
+<span class="d-add">+        mainline = classify({&quot;railway&quot;: &quot;station&quot;})</span>
+<span class="d-ctx">         subway = classify({&quot;railway&quot;: &quot;station&quot;, &quot;station&quot;: &quot;subway&quot;})</span>
+<span class="d-del">-        # Same OSM tag, very different cartographic weight.</span>
+<span class="d-del">-        assert subway[1] &lt; mainline[1]</span>
+<span class="d-del">-        assert subway[2] &gt; mainline[2]</span>
+<span class="d-add">+        assert subway[RANK] &lt; mainline[RANK]</span>
+<span class="d-add">+        assert subway[FLOOR] &gt; mainline[FLOOR]</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    def test_subway_demotion_survives_a_wikidata_tag(self):</span>
+<span class="d-del">-        # Nearly every NYC subway stop has one; if the notability bonus applied</span>
+<span class="d-del">-        # here it would hand back exactly the rank the demotion removed.</span>
+<span class="d-add">+    def test_demotion_survives_a_wikidata_tag(self):</span>
+<span class="d-add">+        # Nearly every NYC stop has one; if the notability bonus applied here it</span>
+<span class="d-add">+        # would push all 496 back above the terminals this entry separates them</span>
+<span class="d-add">+        # from.</span>
+<span class="d-ctx">         assert classify({&quot;railway&quot;: &quot;station&quot;, &quot;station&quot;: &quot;subway&quot;,</span>
+<span class="d-del">-                         &quot;wikidata&quot;: &quot;Q1234&quot;}) == classify(</span>
+<span class="d-del">-            {&quot;railway&quot;: &quot;station&quot;, &quot;station&quot;: &quot;subway&quot;})</span>
+<span class="d-add">+                         &quot;wikidata&quot;: &quot;Q1234&quot;}) == SUBWAY_STATION</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    def test_more_specific_tag_wins_when_a_feature_carries_several(self):</span>
+<span class="d-del">-        # A hotel with a restaurant in it is a hotel: `tourism` is consulted</span>
+<span class="d-del">-        # before `amenity`.</span>
+<span class="d-del">-        assert classify({&quot;tourism&quot;: &quot;hotel&quot;, &quot;amenity&quot;: &quot;restaurant&quot;})[0:2] \</span>
+<span class="d-del">-            == (&quot;retail&quot;, 56)</span>
+<span class="d-add">+    def test_stays_out_of_the_city_scale_view(self):</span>
+<span class="d-add">+        # At floor 13 the 496 stops carpeted the city view, and since most are</span>
+<span class="d-add">+        # named after the street above them they read as duplicate street labels.</span>
+<span class="d-add">+        assert SUBWAY_STATION[FLOOR] &gt;= 14</span>
+<span class="d-add">+</span>
+<span class="d-add">+    @pytest.mark.parametrize(&quot;competitor&quot;, [</span>
+<span class="d-add">+        {&quot;amenity&quot;: &quot;hospital&quot;}, {&quot;tourism&quot;: &quot;museum&quot;}, {&quot;amenity&quot;: &quot;library&quot;},</span>
+<span class="d-add">+        {&quot;amenity&quot;: &quot;theatre&quot;}, {&quot;tourism&quot;: &quot;hotel&quot;}, {&quot;amenity&quot;: &quot;college&quot;},</span>
+<span class="d-add">+        {&quot;shop&quot;: &quot;mall&quot;}, {&quot;amenity&quot;: &quot;townhall&quot;},</span>
+<span class="d-add">+    ])</span>
+<span class="d-add">+    def test_outranks_the_kinds_that_once_buried_it(self, competitor):</span>
+<span class="d-add">+        # Regression: demoting to rank 64 put stops near the BOTTOM of</span>
+<span class="d-add">+        # everything eligible at z15, so every grid cell went to a museum or a</span>
+<span class="d-add">+        # hospital first and stops did not surface until z17-19 — for practical</span>
+<span class="d-add">+        # purposes they had vanished. A stop must win its cell once eligible.</span>
+<span class="d-add">+        assert SUBWAY_STATION[RANK] &gt; classify(competitor)[RANK]</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_gets_its_own_icon(self):</span>
+<span class="d-add">+        # The mark is what lets a stop named &quot;5th Avenue&quot; sit beside the</span>
+<span class="d-add">+        # basemap&#x27;s &quot;5th Avenue&quot; street label without reading as a bug.</span>
+<span class="d-add">+        assert SUBWAY_STATION[ICON] == &quot;subway&quot;</span>
+<span class="d-add">+        assert classify({&quot;railway&quot;: &quot;station&quot;})[ICON] != &quot;subway&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+class TestIconCoverage:</span>
+<span class="d-add">+    def test_every_kind_has_a_glyph_in_the_client(self):</span>
+<span class="d-add">+        # The tileset ships `kind` as a bare string; a slug with no matching</span>
+<span class="d-add">+        # glyph renders as the fallback dot with no error anywhere.</span>
+<span class="d-add">+        src = (pathlib.Path(__file__).parents[2].parent / &quot;client-react&quot; / &quot;src&quot;</span>
+<span class="d-add">+               / &quot;components&quot; / &quot;MapLibreBackground&quot; / &quot;placeIcons.ts&quot;).read_text()</span>
+<span class="d-add">+        # Top-level keys of the ICONS record, e.g. &quot;  subway: {&quot;.</span>
+<span class="d-add">+        available = set(re.findall(r&quot;^  (\w+): \{$&quot;, src, re.M))</span>
+<span class="d-add">+        assert available, &quot;could not parse icon names out of placeIcons.ts&quot;</span>
+<span class="d-add">+        used = {entry[ICON] for entry in KINDS.values()} | {SUBWAY_STATION[ICON]}</span>
+<span class="d-add">+        assert used &lt;= available, f&quot;kinds with no glyph: {sorted(used - available)}&quot;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> class TestNormalizeName:</span>
+<span class="d-hunk">@@ -80,14 +131,14 @@ class TestNormalizeName:</span>
+<span class="d-ctx"> class TestDedup:</span>
+<span class="d-ctx">     def test_collapses_a_station_mapped_once_per_line(self):</span>
+<span class="d-ctx">         # One NYC complex, five `railway=station` nodes within a block.</span>
+<span class="d-del">-        pois = [Poi(40.7370 + i * 0.0002, -73.9900, &quot;14 St&quot;, &quot;transit&quot;, 64, 15)</span>
+<span class="d-add">+        pois = [Poi(40.7370 + i * 0.0002, -73.9900, &quot;14 St&quot;, &quot;transit&quot;, &quot;subway&quot;, 86, 14)</span>
+<span class="d-ctx">                 for i in range(5)]</span>
+<span class="d-ctx">         assert len(dedup(pois)) == 1</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     def test_keeps_the_highest_ranked_of_a_cluster(self):</span>
+<span class="d-ctx">         pois = [</span>
+<span class="d-del">-            Poi(40.7370, -73.9900, &quot;14 St&quot;, &quot;transit&quot;, 64, 15),</span>
+<span class="d-del">-            Poi(40.7371, -73.9900, &quot;14 St&quot;, &quot;transit&quot;, 90, 13),</span>
+<span class="d-add">+            Poi(40.7370, -73.9900, &quot;14 St&quot;, &quot;transit&quot;, &quot;subway&quot;, 86, 14),</span>
+<span class="d-add">+            Poi(40.7371, -73.9900, &quot;14 St&quot;, &quot;transit&quot;, &quot;rail&quot;, 90, 13),</span>
+<span class="d-ctx">         ]</span>
+<span class="d-ctx">         kept = dedup(pois)</span>
+<span class="d-ctx">         assert len(kept) == 1</span>
+<span class="d-hunk">@@ -96,8 +147,8 @@ class TestDedup:</span>
+<span class="d-ctx">     def test_same_name_far_apart_is_two_real_places(self):</span>
+<span class="d-ctx">         # Every borough has a &quot;Post Office&quot;; they are not duplicates.</span>
+<span class="d-ctx">         pois = [</span>
+<span class="d-del">-            Poi(40.7370, -73.9900, &quot;Post Office&quot;, &quot;civic&quot;, 52, 17),</span>
+<span class="d-del">-            Poi(40.6800, -73.9500, &quot;Post Office&quot;, &quot;civic&quot;, 52, 17),</span>
+<span class="d-add">+            Poi(40.7370, -73.9900, &quot;Post Office&quot;, &quot;civic&quot;, &quot;post&quot;, 52, 17),</span>
+<span class="d-add">+            Poi(40.6800, -73.9500, &quot;Post Office&quot;, &quot;civic&quot;, &quot;post&quot;, 52, 17),</span>
+<span class="d-ctx">         ]</span>
+<span class="d-ctx">         assert len(dedup(pois)) == 2</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -105,27 +156,54 @@ class TestDedup:</span>
+<span class="d-ctx"> class TestAssignZooms:</span>
+<span class="d-ctx">     def test_never_reveals_a_poi_before_its_floor(self):</span>
+<span class="d-ctx">         pois = [Poi(40.75 + i * 0.05, -73.9 - i * 0.05, f&quot;P{i}&quot;,</span>
+<span class="d-del">-                    &quot;retail&quot;, 30, 18) for i in range(4)]</span>
+<span class="d-add">+                    &quot;retail&quot;, &quot;restaurant&quot;, 30, 18) for i in range(4)]</span>
+<span class="d-ctx">         assign_zooms(pois)</span>
+<span class="d-ctx">         assert all(p.minz &gt;= 18 for p in pois)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     def test_highest_ranked_wins_a_contested_cell(self):</span>
+<span class="d-ctx">         # Two POIs on top of each other: only one can hold the spot first.</span>
+<span class="d-del">-        big = Poi(40.7500, -73.9900, &quot;Museum&quot;, &quot;culture&quot;, 85, 13)</span>
+<span class="d-del">-        small = Poi(40.7500, -73.9901, &quot;Deli&quot;, &quot;retail&quot;, 30, 13)</span>
+<span class="d-add">+        big = Poi(40.7500, -73.9900, &quot;Museum&quot;, &quot;culture&quot;, &quot;museum&quot;, 85, 13)</span>
+<span class="d-add">+        small = Poi(40.7500, -73.9901, &quot;Deli&quot;, &quot;retail&quot;, &quot;restaurant&quot;, 30, 13)</span>
+<span class="d-ctx">         assign_zooms([small, big])</span>
+<span class="d-ctx">         assert big.minz &lt; small.minz</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    def test_a_stop_is_never_displaced_by_another_category(self):</span>
+<span class="d-add">+        # Transit thins on its own finer grid, so a co-located museum cannot</span>
+<span class="d-add">+        # cost a station its reveal zoom. This is the end-to-end form of the</span>
+<span class="d-add">+        # &quot;stations vanished&quot; regression: on the shared grid the six stops</span>
+<span class="d-add">+        # around the East Village lost their cells to whatever else was nearby.</span>
+<span class="d-add">+        stop = Poi(40.7500, -73.9900, &quot;14 St&quot;, &quot;transit&quot;, &quot;subway&quot;, 86, 14)</span>
+<span class="d-add">+        museum = Poi(40.7500, -73.9901, &quot;Museum&quot;, &quot;culture&quot;, &quot;museum&quot;, 85, 14)</span>
+<span class="d-add">+        assign_zooms([museum, stop])</span>
+<span class="d-add">+        assert stop.minz == 14</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_stops_still_compete_with_each_other(self):</span>
+<span class="d-add">+        # The finer grid is a bigger budget, not an exemption — two stations on</span>
+<span class="d-add">+        # the same corner must not both claim the same zoom.</span>
+<span class="d-add">+        a = Poi(40.7500, -73.9900, &quot;A&quot;, &quot;transit&quot;, &quot;subway&quot;, 86, 14)</span>
+<span class="d-add">+        b = Poi(40.75001, -73.99001, &quot;B&quot;, &quot;transit&quot;, &quot;subway&quot;, 86, 14)</span>
+<span class="d-add">+        assign_zooms([a, b])</span>
+<span class="d-add">+        assert a.minz != b.minz</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def test_nearby_stops_survive_where_a_shared_grid_would_drop_them(self):</span>
+<span class="d-add">+        # Four stops ~500m apart, the East Village spacing. On the shared</span>
+<span class="d-add">+        # 256px-cell grid at z16 they land in one or two cells; on transit&#x27;s</span>
+<span class="d-add">+        # finer grid each gets its own.</span>
+<span class="d-add">+        stops = [Poi(40.7300 + i * 0.0045, -73.9880, f&quot;Stop {i}&quot;,</span>
+<span class="d-add">+                     &quot;transit&quot;, &quot;subway&quot;, 86, 14) for i in range(4)]</span>
+<span class="d-add">+        assign_zooms(stops)</span>
+<span class="d-add">+        assert max(p.minz for p in stops) &lt;= 16</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     def test_spread_out_pois_all_reveal_at_their_floor(self):</span>
+<span class="d-ctx">         pois = [Poi(40.5 + i * 0.1, -74.0 + i * 0.1, f&quot;Venue{i}&quot;,</span>
+<span class="d-del">-                    &quot;culture&quot;, 88, 13) for i in range(4)]</span>
+<span class="d-add">+                    &quot;culture&quot;, &quot;stadium&quot;, 88, 13) for i in range(4)]</span>
+<span class="d-ctx">         assign_zooms(pois)</span>
+<span class="d-ctx">         assert all(p.minz == 13 for p in pois)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     def test_every_poi_gets_a_reveal_zoom(self):</span>
+<span class="d-ctx">         # Even a POI whose cell is taken at every single zoom must end up</span>
+<span class="d-ctx">         # visible somewhere rather than silently vanishing from the tileset.</span>
+<span class="d-del">-        pois = [Poi(40.75, -73.99, f&quot;Stacked{i}&quot;, &quot;retail&quot;, 30, 18)</span>
+<span class="d-add">+        pois = [Poi(40.75, -73.99, f&quot;Stacked{i}&quot;, &quot;retail&quot;, &quot;restaurant&quot;, 30, 18)</span>
+<span class="d-ctx">                 for i in range(30)]</span>
+<span class="d-ctx">         assign_zooms(pois)</span>
+<span class="d-ctx">         assert all(1 &lt;= p.minz &lt;= MAX_LABEL_ZOOM for p in pois)</span></pre>
         </details>
         
   </section>

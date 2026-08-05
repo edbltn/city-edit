@@ -45,7 +45,15 @@
     quarter-tile cells read as a directory (~50 labels), subway stops share Grand Central's tag and
     carpeted the low zooms as fake street labels, and parks — the one thing CARTO <em>does</em>
     label — printed twice in two fonts. Labels are colored by category in Red Hat Mono, which meant
-    self-hosting SDF glyphs and retiring a live dependency on MapLibre's demo server.</p>
+    self-hosting SDF glyphs and retiring a live dependency on MapLibre's demo server. Then a second
+    round: the fix for those carpeting subway stops had overcorrected so hard the stops effectively
+    <em>vanished</em> — rank 64 sits near the bottom of everything eligible at z15, so every grid
+    cell went to a museum or hospital first and six East Village stations rendered as one. Splitting
+    prominence from zoom (rank back up to 86, held behind a floor of 14) and giving transit its own
+    finer thinning grid — stations are read as a set, so one of six is not a sixth as useful — put
+    all six back. And 27 category icons now sit above the names, which is what made the higher rank
+    safe: a subway mark settles instantly what a blue &quot;5th&nbsp;Avenue&quot; beside the
+    basemap's own &quot;5th&nbsp;Avenue&quot; never could.</p>
   </a>
 
   <a class="entry" href="./2026-08-03-sacramento-city-and-proposals.html">

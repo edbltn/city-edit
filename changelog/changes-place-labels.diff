@@ -1256,3 +1256,911 @@ index 0000000..1424190
 +                for i in range(30)]
 +        assign_zooms(pois)
 +        assert all(1 <= p.minz <= MAX_LABEL_ZOOM for p in pois)
+diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+index bbaab32..22f16c3 100644
+--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
++++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+@@ -19,6 +19,7 @@ import {
+   type MapStyle,
+ } from "../../mapStyles";
+ import { hottestBlockId } from "./hottestBlock";
++import { registerPlaceIcons, placeIconExpression } from "./placeIcons";
+ 
+ // Register PMTiles protocol once at module level
+ const protocol = new Protocol();
+@@ -185,7 +186,7 @@ const PLACE_LABEL_FONT = "Red Hat Mono Regular";
+  * while street names run along centerlines, so they mostly stay out of each
+  * other's way.
+  */
+-function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
++async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise<void> {
+   const url = CONFIG.placeTilesUrl;
+   if (!url) {
+     dlog("maplibre", "no place-label tiles for this city — skipping layer");
+@@ -195,6 +196,11 @@ function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
+ 
+   map.addSource("places", { type: "vector", url: `pmtiles://${url}` });
+ 
++  // Icons are rasterised before the layer is added, so MapLibre never renders a
++  // frame asking for an image that doesn't exist yet.
++  await registerPlaceIcons(map, mapStyle.basemap);
++  if (!map.getSource("places")) return; // style torn down while we rasterised
++
+   const palette = POI_COLORS[mapStyle.basemap];
+   const colorByCategory = [
+     "match", ["get", "cat"],
+@@ -211,6 +217,17 @@ function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
+     // the builder); MapLibre drives its camera one level lower, hence the +1.
+     filter: ["<=", ["get", "minz"], ["+", ["zoom"], 1]],
+     layout: {
++      // Icon above, name below. `text-optional` is what makes this degrade
++      // gracefully: where a block is too busy for both, MapLibre drops the text
++      // and keeps the mark, so a dense strip thins into icons instead of either
++      // vanishing or turning into a wall of names.
++      "icon-image": placeIconExpression,
++      "icon-size": ["interpolate", ["linear"], ["zoom"], 11, 0.8, 15, 0.92, 18, 1],
++      "icon-anchor": "center",
++      "icon-padding": 2,
++      "text-optional": true,
++      "text-anchor": "top",
++      "text-offset": [0, 0.62],
+       "text-field": ["get", "name"],
+       "text-font": [PLACE_LABEL_FONT],
+       // Mono is wide, so this runs a little smaller than a sans would.
+@@ -239,6 +256,9 @@ function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
+       "text-halo-color": mapStyle.base,
+       "text-halo-width": 1.5,
+       "text-halo-blur": 0.3,
++      // Icons are already baked in their category colour; the slight knock-down
++      // keeps them reading as annotation rather than as another pin.
++      "icon-opacity": 0.9,
+     },
+   });
+   dlog("maplibre", "place labels added", url);
+@@ -444,7 +464,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+         debugState("maplibreLoaded", true);
+         onReady?.(true);
+         rebindBlockTiles(map);
+-        addPlaceLabels(map, mapStyle);
++        void addPlaceLabels(map, mapStyle);
+       });
+       debugState("maplibreLoaded", false);
+ 
+diff --git a/client-react/src/components/MapLibreBackground/placeIcons.ts b/client-react/src/components/MapLibreBackground/placeIcons.ts
+new file mode 100644
+index 0000000..e2cd924
+--- /dev/null
++++ b/client-react/src/components/MapLibreBackground/placeIcons.ts
+@@ -0,0 +1,309 @@
++/**
++ * Little line icons for the place-label layer.
++ *
++ * These are drawn at ~13 CSS px, which is the constraint behind every decision
++ * here. Each glyph is built on a 16×16 grid with a 1.5 stroke — the same
++ * thin-line language as the vote-type icons in public/icons (32-grid, 1.2
++ * stroke), scaled so the strokes hold together at a third of the size. Anything
++ * with more than three or four primitives turns to mush at this scale, so the
++ * set is deliberately coarser than the OSM tags feeding it: a pub and a bar
++ * share a glass, a college and a university share a mortarboard.
++ *
++ * Icons are rasterised at mount and registered with `map.addImage`, rather than
++ * shipped as a sprite sheet. That keeps them themeable — each glyph is baked in
++ * its category's colour for the ACTIVE basemap, so there is no sprite to
++ * regenerate when a palette changes and no second asset pipeline to keep in
++ * sync with mapStyles.ts.
++ *
++ * `kind` values must match the icon slugs in server/build_place_labels.py's
++ * KINDS table; tests/unit/test_place_labels.py asserts the two stay in step.
++ */
++
++import maplibregl from "maplibre-gl";
++import { POI_COLORS, type Basemap } from "../../mapStyles";
++import { dlog, dwarn } from "../../utils/debugLog";
++
++/** Rendered size in CSS pixels. Small enough to read as an annotation on the
++ *  map rather than as a pin competing with the proposal markers. */
++const ICON_PX = 13;
++
++/** Every glyph's category (which is what colours it) and its SVG body. Paths
++ *  are stroked unless they opt into `fill` — see toSvg. */
++interface IconDef {
++  cat: keyof typeof POI_COLORS.dark;
++  body: string;
++  /** Fill the shape instead of stroking it (used where an outline would be
++   *  too fine to survive rasterisation, e.g. the aircraft). */
++  filled?: boolean;
++}
++
++const ICONS: Record<string, IconDef> = {
++  // ── Transit ───────────────────────────────────────────────────────────────
++  // A metro car read head-on: body, window band, two lamps. This is the one
++  // glyph that has to be unmistakable — 496 of NYC's stations are named after
++  // the street above them, so without a mark "5th Avenue" in transit blue is
++  // indistinguishable from the basemap's own "5th Avenue" street label.
++  subway: {
++    cat: "transit",
++    body: `<rect x="4" y="2.4" width="8" height="11.2" rx="2.4"/>
++           <line x1="5.2" y1="7.2" x2="10.8" y2="7.2"/>
++           <circle cx="6.4" cy="10.6" r="0.9" fill="currentColor" stroke="none"/>
++           <circle cx="9.6" cy="10.6" r="0.9" fill="currentColor" stroke="none"/>`,
++  },
++  // Track rather than a train, so it never reads as a second subway mark.
++  rail: {
++    cat: "transit",
++    body: `<line x1="5.8" y1="2" x2="5.8" y2="14"/>
++           <line x1="10.2" y1="2" x2="10.2" y2="14"/>
++           <line x1="3.8" y1="4.6" x2="12.2" y2="4.6"/>
++           <line x1="3.8" y1="8" x2="12.2" y2="8"/>
++           <line x1="3.8" y1="11.4" x2="12.2" y2="11.4"/>`,
++  },
++  ferry: {
++    cat: "transit",
++    body: `<path d="M2.6 10.2 C4 13.4, 12 13.4, 13.4 10.2 Z"/>
++           <line x1="8" y1="10.2" x2="8" y2="3"/>
++           <path d="M8 3.4 L12 5.4 L8 7"/>`,
++  },
++  bus: {
++    cat: "transit",
++    body: `<rect x="3" y="2.6" width="10" height="9" rx="2"/>
++           <line x1="4.2" y1="7" x2="11.8" y2="7"/>
++           <circle cx="5.4" cy="13.2" r="1.1"/>
++           <circle cx="10.6" cy="13.2" r="1.1"/>`,
++  },
++  airport: {
++    cat: "transit",
++    filled: true,
++    body: `<path d="M8 1.6 C8.75 1.6 9.1 2.5 9.1 3.6 L9.1 6.5 L14.3 9.7 L14.3 11.2
++                    L9.1 9.7 L9.1 12.3 L10.8 13.6 L10.8 14.4 L8 13.6 L5.2 14.4
++                    L5.2 13.6 L6.9 12.3 L6.9 9.7 L1.7 11.2 L1.7 9.7 L6.9 6.5
++                    L6.9 3.6 C6.9 2.5 7.25 1.6 8 1.6 Z"/>`,
++  },
++
++  // ── Civic ─────────────────────────────────────────────────────────────────
++  school: {
++    cat: "civic",
++    body: `<path d="M1.6 6 L8 3 L14.4 6 L8 9 Z"/>
++           <path d="M4.6 7.4 L4.6 11 C4.6 12.6, 11.4 12.6, 11.4 11 L11.4 7.4"/>`,
++  },
++  library: {
++    cat: "civic",
++    body: `<path d="M8 4.6 C6.5 3.3, 4 3.3, 2 4.1 L2 11.9 C4 11.1, 6.5 11.1, 8 12.4
++                    C9.5 11.1, 12 11.1, 14 11.9 L14 4.1 C12 3.3, 9.5 3.3, 8 4.6 Z"/>
++           <line x1="8" y1="4.6" x2="8" y2="12.4"/>`,
++  },
++  // Just the cross. Anything more at this size loses the one thing that makes
++  // it instantly legible.
++  hospital: {
++    cat: "civic",
++    body: `<line x1="8" y1="3.4" x2="8" y2="12.6"/>
++           <line x1="3.4" y1="8" x2="12.6" y2="8"/>`,
++  },
++  government: {
++    cat: "civic",
++    body: `<path d="M2 6 L8 2.6 L14 6"/>
++           <line x1="3.4" y1="6.6" x2="3.4" y2="12"/>
++           <line x1="6.5" y1="6.6" x2="6.5" y2="12"/>
++           <line x1="9.5" y1="6.6" x2="9.5" y2="12"/>
++           <line x1="12.6" y1="6.6" x2="12.6" y2="12"/>
++           <line x1="1.8" y1="13.2" x2="14.2" y2="13.2"/>`,
++  },
++  // Deliberately non-denominational: a pitched hall with an arched door and a
++  // finial, which reads as a place of worship without picking one.
++  worship: {
++    cat: "civic",
++    body: `<path d="M4 13.4 L4 7 L8 3.6 L12 7 L12 13.4"/>
++           <line x1="8" y1="3.6" x2="8" y2="1.8"/>
++           <path d="M6.7 13.4 L6.7 10.4 C6.7 9.2, 9.3 9.2, 9.3 10.4 L9.3 13.4"/>`,
++  },
++  emergency: {
++    cat: "civic",
++    body: `<path d="M8 1.8 L13.2 3.9 L13.2 8.1 C13.2 11.2, 10.8 13.5, 8 14.2
++                    C5.2 13.5, 2.8 11.2, 2.8 8.1 L2.8 3.9 Z"/>`,
++  },
++  post: {
++    cat: "civic",
++    body: `<rect x="2" y="4" width="12" height="8" rx="1.3"/>
++           <path d="M2.5 4.7 L8 8.8 L13.5 4.7"/>`,
++  },
++
++  // ── Culture ───────────────────────────────────────────────────────────────
++  museum: {
++    cat: "culture",
++    body: `<rect x="2" y="3" width="12" height="10" rx="1.3"/>
++           <path d="M3.6 11 L6.6 7.6 L8.9 10 L10.6 8.3 L12.4 11"/>`,
++  },
++  // A ticket stub. Drawn as stage curtains — a rail with two sweeps and a
++  // centre split — it came out looking like a Greek letter.
++  theatre: {
++    cat: "culture",
++    body: `<path d="M1.8 5.2 L14.2 5.2 L14.2 7 C13.1 7, 13.1 9, 14.2 9 L14.2 10.8
++                    L1.8 10.8 L1.8 9 C2.9 9, 2.9 7, 1.8 7 Z"/>
++           <line x1="8" y1="6.6" x2="8" y2="9.4"/>`,
++  },
++  cinema: {
++    cat: "culture",
++    body: `<rect x="2" y="3.4" width="12" height="9.2" rx="1.5"/>
++           <path d="M6.7 6.2 L10.5 8 L6.7 9.8 Z" fill="currentColor" stroke="none"/>`,
++  },
++  // A pitch from above, not a bowl in plan: two concentric ellipses read
++  // unmistakably as an eye.
++  stadium: {
++    cat: "culture",
++    body: `<rect x="1.6" y="3.8" width="12.8" height="8.4" rx="1.2"/>
++           <line x1="8" y1="3.8" x2="8" y2="12.2"/>
++           <path d="M1.6 6.4 L3.7 6.4 L3.7 9.6 L1.6 9.6"/>
++           <path d="M14.4 6.4 L12.3 6.4 L12.3 9.6 L14.4 9.6"/>`,
++  },
++  attraction: {
++    cat: "culture",
++    body: `<path d="M8 1.9 L9.85 6 L14.3 6.5 L11 9.55 L11.9 14 L8 11.8
++                    L4.1 14 L5 9.55 L1.7 6.5 L6.15 6 Z"/>`,
++  },
++  monument: {
++    cat: "culture",
++    body: `<path d="M8 1.8 L10.1 5.6 L10.1 11.6 L5.9 11.6 L5.9 5.6 Z"/>
++           <line x1="4" y1="13.3" x2="12" y2="13.3"/>`,
++  },
++
++  // ── Retail, food & lodging ────────────────────────────────────────────────
++  restaurant: {
++    cat: "retail",
++    body: `<path d="M3.9 2.4 L3.9 5.6 C3.9 6.8, 7.1 6.8, 7.1 5.6 L7.1 2.4"/>
++           <line x1="5.5" y1="6.4" x2="5.5" y2="13.6"/>
++           <path d="M11.2 2.4 C12.7 4, 12.7 7.2, 11.2 8.4 L11.2 13.6"/>`,
++  },
++  cafe: {
++    cat: "retail",
++    body: `<path d="M3 6.2 L3 10.4 C3 12.2, 4.4 13.4, 6.2 13.4 L8.8 13.4
++                    C10.6 13.4, 12 12.2, 12 10.4 L12 6.2 Z"/>
++           <path d="M12 7.6 C13.9 7.6, 13.9 10.4, 12 10.4"/>
++           <path d="M6.1 4.2 C6.1 3.2, 7.1 3.2, 7.1 2.2"/>
++           <path d="M8.9 4.2 C8.9 3.2, 9.9 3.2, 9.9 2.2"/>`,
++  },
++  bar: {
++    cat: "retail",
++    body: `<path d="M3 3.4 L13 3.4 L8 9.2 Z"/>
++           <line x1="8" y1="9.2" x2="8" y2="13.2"/>
++           <line x1="5.5" y1="13.2" x2="10.5" y2="13.2"/>`,
++  },
++  shop: {
++    cat: "retail",
++    body: `<path d="M3.3 5.6 L12.7 5.6 L11.9 13.5 L4.1 13.5 Z"/>
++           <path d="M6 5.6 L6 4 C6 2.6, 10 2.6, 10 4 L10 5.6"/>`,
++  },
++  // A stall awning, so it never reads as a second shopping bag.
++  market: {
++    cat: "retail",
++    body: `<path d="M1.8 6.4 L3.3 3 L12.7 3 L14.2 6.4 Z"/>
++           <path d="M3.1 6.4 L3.1 13.3 L12.9 13.3 L12.9 6.4"/>`,
++  },
++  hotel: {
++    cat: "retail",
++    body: `<line x1="2" y1="5.4" x2="2" y2="13"/>
++           <path d="M2 9 C2 7.5, 3.4 6.7, 5 6.7 L12 6.7 C13.4 6.7, 14 7.7, 14 9 L14 13"/>
++           <line x1="2" y1="10.6" x2="14" y2="10.6"/>`,
++  },
++  // An elongated capsule, not a squarish one: drawn compact it came out as a
++  // circle with a diagonal through it, which is the international "no entry".
++  pharmacy: {
++    cat: "retail",
++    body: `<g transform="rotate(-45 8 8)">
++             <rect x="1.6" y="5.6" width="12.8" height="4.8" rx="2.4"/>
++             <line x1="8" y1="5.6" x2="8" y2="10.4"/>
++           </g>`,
++  },
++  bank: {
++    cat: "retail",
++    body: `<ellipse cx="8" cy="4.6" rx="5" ry="2"/>
++           <path d="M3 4.6 L3 11.4 C3 12.5, 5.2 13.4, 8 13.4 C10.8 13.4, 13 12.5, 13 11.4 L13 4.6"/>
++           <path d="M3 8 C3 9.1, 5.2 10, 8 10 C10.8 10, 13 9.1, 13 8"/>`,
++  },
++  sports: {
++    cat: "retail",
++    body: `<circle cx="8" cy="8" r="5.6"/>
++           <path d="M2.9 5.7 C6 7.2, 10 7.2, 13.1 5.7"/>
++           <path d="M3.4 11.2 C6 9.7, 10 9.7, 12.6 11.2"/>`,
++  },
++};
++
++/** Drawn when a tile carries a `kind` this build doesn't know — an older client
++ *  against a newer tileset. A quiet dot beats MapLibre's missing-image warning
++ *  storm and a label with nothing anchoring it. */
++const FALLBACK_ICON = "poi-dot";
++
++function toSvg(def: IconDef, color: string): string {
++  const paint = def.filled
++    ? `fill="${color}" stroke="none"`
++    : `fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"`;
++  // currentColor in a body (used for the few solid accents inside outlined
++  // glyphs) resolves against the wrapper's color property.
++  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" color="${color}" ${paint}>${def.body}</svg>`;
++}
++
++async function rasterize(svg: string, sizePx: number, ratio: number): Promise<ImageData> {
++  const px = Math.round(sizePx * ratio);
++  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
++  const img = new Image(px, px);
++  img.src = url;
++  await img.decode();
++  const canvas = document.createElement("canvas");
++  canvas.width = px;
++  canvas.height = px;
++  const ctx = canvas.getContext("2d");
++  if (!ctx) throw new Error("2d context unavailable");
++  ctx.drawImage(img, 0, 0, px, px);
++  return ctx.getImageData(0, 0, px, px);
++}
++
++/**
++ * Rasterise every glyph in the active basemap's palette and register it with
++ * the map. Resolves once all images are available, so the caller can add the
++ * symbol layer without MapLibre ever asking for an image that isn't there yet.
++ */
++export async function registerPlaceIcons(
++  map: maplibregl.Map,
++  basemap: Basemap,
++): Promise<void> {
++  const palette = POI_COLORS[basemap];
++  // Rasterise at 2× regardless of the display's DPR: the images are cached on
++  // the map for the session, and a crisp icon on a 1× screen costs 4 tiny
++  // canvases' worth of memory.
++  const ratio = 2;
++
++  const entries = Object.entries(ICONS);
++  await Promise.all(
++    entries.map(async ([name, def]) => {
++      if (map.hasImage(name)) return;
++      try {
++        const data = await rasterize(toSvg(def, palette[def.cat]), ICON_PX, ratio);
++        map.addImage(name, data, { pixelRatio: ratio });
++      } catch (err) {
++        dwarn("maplibre", `place icon "${name}" failed to rasterize`, err);
++      }
++    }),
++  );
++
++  if (!map.hasImage(FALLBACK_ICON)) {
++    try {
++      const dot = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
++        <circle cx="8" cy="8" r="2.2" fill="${palette.retail}"/></svg>`;
++      map.addImage(FALLBACK_ICON, await rasterize(dot, ICON_PX, ratio), { pixelRatio: ratio });
++    } catch (err) {
++      dwarn("maplibre", "place icon fallback failed to rasterize", err);
++    }
++  }
++
++  dlog("maplibre", `place icons registered: ${entries.length} + fallback`);
++}
++
++/** `icon-image` expression: the feature's kind, or the dot when unknown. */
++export const placeIconExpression: maplibregl.ExpressionSpecification = [
++  "coalesce",
++  ["image", ["get", "kind"]],
++  ["image", FALLBACK_ICON],
++];
++
++/** Exported for the drift test between this set and the builder's KINDS table. */
++export const PLACE_ICON_NAMES = Object.keys(ICONS);
+diff --git a/server/build_place_labels.py b/server/build_place_labels.py
+index ff0f265..7ff060d 100644
+--- a/server/build_place_labels.py
++++ b/server/build_place_labels.py
+@@ -84,6 +84,15 @@ MAX_LABEL_ZOOM = 21
+ # labels and read as a directory, not a map.
+ GRID_OFFSET = 0
+ 
++# Transit thins on a grid one level finer (quarter-tile cells, ~128 CSS px).
++# A shared grid is the right budget for POIs that are individually optional —
++# one museum per cell is plenty — but stations are the map's orientation
++# backbone and they are read as a SET: showing one of the East Village's six
++# subway stops is not a sixth as useful as showing all six, it is close to
++# useless. Because the grid zoom is part of the cell key, this also means
++# stations compete only against other stations, never against a nearby deli.
++TRANSIT_GRID_BONUS = 1
++
+ # Two same-named POIs closer than this are the same place mapped twice (NYC
+ # subway complexes carry a `railway=station` node per line, so "14 St" alone
+ # appears five times within a block). Keep the highest-ranked one.
+@@ -106,77 +115,84 @@ CAT_CIVIC = "civic"
+ CAT_CULTURE = "culture"
+ CAT_RETAIL = "retail"
+ 
+-# (osm_key, osm_value) -> (category, rank, floor zoom in LEAFLET zoom units).
+-# rank breaks collisions: higher wins the cell and the pixel.
+-KINDS: dict[tuple[str, str], tuple[str, int, int]] = {
++# (osm_key, osm_value) -> (category, icon, rank, floor zoom in LEAFLET zooms).
++#
++# `icon` names one of the glyphs in client-react/.../placeIcons.ts and ships as
++# the feature's `kind` property. It is coarser than the OSM tag on purpose: a
++# pub and a bar get the same glass, a college and a university the same building.
++# At 13 CSS px an icon has room for one idea, and a set with 40 near-identical
++# marks is harder to read than one with 20 distinct ones.
++#
++# `rank` breaks collisions: higher wins the grid cell and the pixel.
++KINDS: dict[tuple[str, str], tuple[str, str, int, int]] = {
+     # ── Transit ────────────────────────────────────────────────────────────
+     # Stations only. Platforms and stop positions are per-track duplicates of a
+     # station that is already labelled, and named track segments are not places.
+-    ("aeroway", "aerodrome"): (CAT_TRANSIT, 98, 11),
++    ("aeroway", "aerodrome"): (CAT_TRANSIT, "airport", 98, 11),
+     # Mainline terminals and commuter-rail stops: Penn, Grand Central, the LIRR
+     # and Metro-North. Genuinely city-scale landmarks.
+-    ("railway", "station"): (CAT_TRANSIT, 90, 13),
+-    ("railway", "halt"): (CAT_TRANSIT, 70, 15),
+-    ("amenity", "ferry_terminal"): (CAT_TRANSIT, 85, 14),
+-    ("amenity", "bus_station"): (CAT_TRANSIT, 80, 14),
+-    ("public_transport", "station"): (CAT_TRANSIT, 74, 14),
++    ("railway", "station"): (CAT_TRANSIT, "rail", 90, 13),
++    ("railway", "halt"): (CAT_TRANSIT, "rail", 70, 15),
++    ("amenity", "ferry_terminal"): (CAT_TRANSIT, "ferry", 85, 14),
++    ("amenity", "bus_station"): (CAT_TRANSIT, "bus", 80, 14),
++    ("public_transport", "station"): (CAT_TRANSIT, "rail", 74, 14),
+ 
+     # ── Venues ─────────────────────────────────────────────────────────────
+     # What's left of `leisure` once green space goes to the basemap: these are
+     # buildings you go into, not open space, so they carry a venue color rather
+     # than a park one.
+-    ("leisure", "stadium"): (CAT_CULTURE, 88, 13),
+-    ("leisure", "sports_centre"): (CAT_RETAIL, 58, 16),
+-    ("leisure", "fitness_centre"): (CAT_RETAIL, 45, 17),
++    ("leisure", "stadium"): (CAT_CULTURE, "stadium", 88, 13),
++    ("leisure", "sports_centre"): (CAT_RETAIL, "sports", 58, 16),
++    ("leisure", "fitness_centre"): (CAT_RETAIL, "sports", 45, 17),
+ 
+     # ── Civic & education ──────────────────────────────────────────────────
+-    ("amenity", "university"): (CAT_CIVIC, 92, 13),
+-    ("amenity", "college"): (CAT_CIVIC, 80, 14),
+-    ("amenity", "hospital"): (CAT_CIVIC, 84, 14),
+-    ("amenity", "townhall"): (CAT_CIVIC, 76, 15),
+-    ("amenity", "courthouse"): (CAT_CIVIC, 72, 15),
+-    ("amenity", "library"): (CAT_CIVIC, 68, 15),
+-    ("amenity", "community_centre"): (CAT_CIVIC, 56, 16),
+-    ("amenity", "school"): (CAT_CIVIC, 54, 16),
+-    ("amenity", "place_of_worship"): (CAT_CIVIC, 48, 16),
+-    ("amenity", "post_office"): (CAT_CIVIC, 52, 17),
+-    ("amenity", "fire_station"): (CAT_CIVIC, 50, 17),
+-    ("amenity", "police"): (CAT_CIVIC, 50, 17),
+-    ("office", "government"): (CAT_CIVIC, 44, 17),
++    ("amenity", "university"): (CAT_CIVIC, "school", 92, 13),
++    ("amenity", "college"): (CAT_CIVIC, "school", 80, 14),
++    ("amenity", "hospital"): (CAT_CIVIC, "hospital", 84, 14),
++    ("amenity", "townhall"): (CAT_CIVIC, "government", 76, 15),
++    ("amenity", "courthouse"): (CAT_CIVIC, "government", 72, 15),
++    ("amenity", "library"): (CAT_CIVIC, "library", 68, 15),
++    ("amenity", "community_centre"): (CAT_CIVIC, "government", 56, 16),
++    ("amenity", "school"): (CAT_CIVIC, "school", 54, 16),
++    ("amenity", "place_of_worship"): (CAT_CIVIC, "worship", 48, 16),
++    ("amenity", "post_office"): (CAT_CIVIC, "post", 52, 17),
++    ("amenity", "fire_station"): (CAT_CIVIC, "emergency", 50, 17),
++    ("amenity", "police"): (CAT_CIVIC, "emergency", 50, 17),
++    ("office", "government"): (CAT_CIVIC, "government", 44, 17),
+ 
+     # ── Culture ────────────────────────────────────────────────────────────
+-    ("tourism", "zoo"): (CAT_CULTURE, 90, 13),
+-    ("tourism", "aquarium"): (CAT_CULTURE, 90, 13),
+-    ("tourism", "theme_park"): (CAT_CULTURE, 88, 13),
+-    ("tourism", "museum"): (CAT_CULTURE, 85, 14),
+-    ("tourism", "attraction"): (CAT_CULTURE, 80, 14),
+-    ("amenity", "theatre"): (CAT_CULTURE, 70, 15),
+-    ("tourism", "gallery"): (CAT_CULTURE, 58, 16),
+-    ("amenity", "cinema"): (CAT_CULTURE, 60, 16),
+-    ("amenity", "arts_centre"): (CAT_CULTURE, 60, 16),
+-    ("historic", "monument"): (CAT_CULTURE, 62, 16),
+-    ("historic", "memorial"): (CAT_CULTURE, 44, 17),
+-    ("tourism", "artwork"): (CAT_CULTURE, 38, 18),
++    ("tourism", "zoo"): (CAT_CULTURE, "attraction", 90, 13),
++    ("tourism", "aquarium"): (CAT_CULTURE, "attraction", 90, 13),
++    ("tourism", "theme_park"): (CAT_CULTURE, "attraction", 88, 13),
++    ("tourism", "museum"): (CAT_CULTURE, "museum", 85, 14),
++    ("tourism", "attraction"): (CAT_CULTURE, "attraction", 80, 14),
++    ("amenity", "theatre"): (CAT_CULTURE, "theatre", 70, 15),
++    ("tourism", "gallery"): (CAT_CULTURE, "museum", 58, 16),
++    ("amenity", "cinema"): (CAT_CULTURE, "cinema", 60, 16),
++    ("amenity", "arts_centre"): (CAT_CULTURE, "theatre", 60, 16),
++    ("historic", "monument"): (CAT_CULTURE, "monument", 62, 16),
++    ("historic", "memorial"): (CAT_CULTURE, "monument", 44, 17),
++    ("tourism", "artwork"): (CAT_CULTURE, "monument", 38, 18),
+ 
+     # ── Retail, food & lodging ─────────────────────────────────────────────
+     # The floor zooms here are deep on purpose: these are the labels that tell
+     # you which block you're on, not which neighborhood, and they only earn
+     # their space once the heat is already resolved to individual streets.
+-    ("shop", "mall"): (CAT_RETAIL, 72, 15),
+-    ("shop", "department_store"): (CAT_RETAIL, 66, 16),
+-    ("amenity", "marketplace"): (CAT_RETAIL, 62, 16),
+-    ("shop", "supermarket"): (CAT_RETAIL, 58, 17),
+-    ("tourism", "hotel"): (CAT_RETAIL, 56, 17),
+-    ("amenity", "pharmacy"): (CAT_RETAIL, 38, 18),
+-    ("amenity", "bank"): (CAT_RETAIL, 34, 18),
+-    ("shop", "books"): (CAT_RETAIL, 32, 18),
+-    ("amenity", "restaurant"): (CAT_RETAIL, 30, 18),
+-    ("amenity", "cafe"): (CAT_RETAIL, 30, 18),
+-    ("amenity", "bar"): (CAT_RETAIL, 30, 18),
+-    ("amenity", "pub"): (CAT_RETAIL, 30, 18),
+-    ("shop", "bakery"): (CAT_RETAIL, 28, 18),
+-    ("amenity", "fast_food"): (CAT_RETAIL, 22, 18),
+-    ("amenity", "ice_cream"): (CAT_RETAIL, 22, 18),
++    ("shop", "mall"): (CAT_RETAIL, "shop", 72, 15),
++    ("shop", "department_store"): (CAT_RETAIL, "shop", 66, 16),
++    ("amenity", "marketplace"): (CAT_RETAIL, "market", 62, 16),
++    ("shop", "supermarket"): (CAT_RETAIL, "market", 58, 17),
++    ("tourism", "hotel"): (CAT_RETAIL, "hotel", 56, 17),
++    ("amenity", "pharmacy"): (CAT_RETAIL, "pharmacy", 38, 18),
++    ("amenity", "bank"): (CAT_RETAIL, "bank", 34, 18),
++    ("shop", "books"): (CAT_RETAIL, "shop", 32, 18),
++    ("amenity", "restaurant"): (CAT_RETAIL, "restaurant", 30, 18),
++    ("amenity", "cafe"): (CAT_RETAIL, "cafe", 30, 18),
++    ("amenity", "bar"): (CAT_RETAIL, "bar", 30, 18),
++    ("amenity", "pub"): (CAT_RETAIL, "bar", 30, 18),
++    ("shop", "bakery"): (CAT_RETAIL, "cafe", 28, 18),
++    ("amenity", "fast_food"): (CAT_RETAIL, "restaurant", 22, 18),
++    ("amenity", "ice_cream"): (CAT_RETAIL, "cafe", 22, 18),
+ }
+ 
+ # Tag keys worth consulting, in priority order — the first one that resolves to
+@@ -189,31 +205,44 @@ TAG_KEYS = ("aeroway", "railway", "public_transport", "leisure", "tourism",
+ # lifts Katz's above the deli next door without a hand-maintained landmark list.
+ WIKI_RANK_BONUS = 25
+ 
+-# A subway stop is tagged `railway=station` exactly like Grand Central, but NYC
+-# has 470-odd of them and most are named after the street above ("5th Avenue",
+-# "72nd Street"). At mainline rank they carpeted the city-scale view, and a blue
+-# "5th Avenue" sitting beside the basemap's own "5th Avenue" street label reads
+-# as a rendering bug rather than a station. Demoted to a neighborhood-scale
+-# label, which is the zoom at which knowing your nearest stop actually helps.
+-SUBWAY_STATION = (CAT_TRANSIT, 64, 15)
++# A subway stop is tagged `railway=station` exactly like Grand Central (496 of
++# the 561 stations in the NYC bbox are `station=subway`), so it needs its own
++# entry — but getting that entry right took two goes in opposite directions.
++#
++# At mainline rank/floor the 496 stops carpeted the city-scale view, and since
++# most are named after the street above them ("5th Avenue", "72nd Street") a
++# blue "5th Avenue" beside the basemap's own "5th Avenue" street label read as a
++# rendering bug rather than a station. Demoting them to rank 64 overcorrected
++# badly: 64 is near the BOTTOM of everything eligible at z15, so every cell went
++# to a museum, hospital or university first and the stops did not surface until
++# z17-19 — for practical purposes they had vanished from the map.
++#
++# What actually separates the two cases is not prominence, it is zoom: a stop is
++# the single most useful orientation label in New York *once you are at
++# neighborhood scale*, and noise above it. So: a high rank (it should win its
++# cell whenever it is eligible) behind a floor of 14 (never eligible at
++# city scale). The icon does the rest of the work the demotion was reaching for
++# — a subway mark is unmistakably not a street label.
++SUBWAY_STATION = (CAT_TRANSIT, "subway", 86, 14)
+ SUBWAY_STATION_VALUES = {"subway", "light_rail", "monorail"}
+ 
+ 
+ class Poi:
+-    __slots__ = ("lat", "lon", "name", "cat", "rank", "floor", "minz")
++    __slots__ = ("lat", "lon", "name", "cat", "icon", "rank", "floor", "minz")
+ 
+-    def __init__(self, lat, lon, name, cat, rank, floor):
++    def __init__(self, lat, lon, name, cat, icon, rank, floor):
+         self.lat = lat
+         self.lon = lon
+         self.name = name
+         self.cat = cat
++        self.icon = icon
+         self.rank = rank
+         self.floor = floor
+         self.minz = 0
+ 
+ 
+-def classify(tags) -> tuple[str, int, int] | None:
+-    """(category, rank, floor zoom) for a feature's tags, or None to drop it."""
++def classify(tags) -> tuple[str, str, int, int] | None:
++    """(category, icon, rank, floor zoom) for a feature's tags, or None to drop."""
+     for key in TAG_KEYS:
+         value = tags.get(key)
+         if value is None:
+@@ -224,13 +253,13 @@ def classify(tags) -> tuple[str, int, int] | None:
+         if key == "railway" and value == "station" and \
+                 tags.get("station") in SUBWAY_STATION_VALUES:
+             # Returned as-is: nearly every NYC subway stop carries a wikidata
+-            # tag, so letting the notability bonus apply here would hand back
+-            # the mainline rank the demotion just took away.
++            # tag, so letting the notability bonus apply would push all 496 back
++            # above the mainline terminals this entry exists to separate.
+             return SUBWAY_STATION
+-        cat, rank, floor = entry
++        cat, icon, rank, floor = entry
+         if "wikidata" in tags or "wikipedia" in tags:
+             rank += WIKI_RANK_BONUS
+-        return cat, rank, floor
++        return cat, icon, rank, floor
+     return None
+ 
+ 
+@@ -263,8 +292,8 @@ class PoiCollector(osmium.SimpleHandler):
+         entry = classify(tags)
+         if entry is None:
+             return
+-        cat, rank, floor = entry
+-        self.pois.append(Poi(lat, lon, name, cat, rank, floor))
++        cat, icon, rank, floor = entry
++        self.pois.append(Poi(lat, lon, name, cat, icon, rank, floor))
+ 
+     def node(self, n):
+         if not n.tags:
+@@ -336,12 +365,11 @@ def assign_zooms(pois: list[Poi]) -> None:
+     pois.sort(key=lambda p: (-p.rank, p.name, p.lat, p.lon))
+     placed: list[Poi] = []
+     for zoom in range(MIN_LABEL_ZOOM, MAX_LABEL_ZOOM + 1):
+-        grid_zoom = zoom + GRID_OFFSET
+-        occupied = {_cell(p, grid_zoom) for p in placed}
++        occupied = {_cell(p, zoom) for p in placed}
+         for poi in pois:
+             if poi.minz or poi.floor > zoom:
+                 continue
+-            cell = _cell(poi, grid_zoom)
++            cell = _cell(poi, zoom)
+             if cell in occupied:
+                 continue
+             occupied.add(cell)
+@@ -354,9 +382,18 @@ def assign_zooms(pois: list[Poi]) -> None:
+             poi.minz = MAX_LABEL_ZOOM
+ 
+ 
+-def _cell(poi: Poi, zoom: int) -> tuple[int, int]:
+-    tile = mercantile.tile(poi.lon, poi.lat, zoom)
+-    return tile.x, tile.y
++def _cell(poi: Poi, label_zoom: int) -> tuple[int, int, int]:
++    """The grid cell a POI claims at a given label zoom.
++
++    The grid zoom is part of the key on purpose: transit uses a finer grid
++    (TRANSIT_GRID_BONUS), so its cells can never collide with another
++    category's and stations compete only against other stations.
++    """
++    grid_zoom = label_zoom + GRID_OFFSET
++    if poi.cat == CAT_TRANSIT:
++        grid_zoom += TRANSIT_GRID_BONUS
++    tile = mercantile.tile(poi.lon, poi.lat, grid_zoom)
++    return grid_zoom, tile.x, tile.y
+ 
+ 
+ def build_city_place_labels(city: City, output_path: str | None = None) -> str:
+@@ -421,7 +458,8 @@ def build_city_place_labels(city: City, output_path: str | None = None) -> str:
+                 "bounds": ",".join(str(b) for b in (west, south, east, north)),
+                 "vector_layers": json.dumps([{
+                     "id": "places",
+-                    "fields": {"name": "String", "cat": "String", "minz": "Number"},
++                    "fields": {"name": "String", "cat": "String",
++                               "kind": "String", "minz": "Number"},
+                 }]),
+             },
+         )
+@@ -452,7 +490,8 @@ def _collect_tiles(pois: list[Poi]) -> dict[tuple[int, int, int], list[dict]]:
+             tile = mercantile.tile(poi.lon, poi.lat, zoom)
+             tiles.setdefault((zoom, tile.x, tile.y), []).append({
+                 "geometry": {"type": "Point", "coordinates": [poi.lon, poi.lat]},
+-                "properties": {"name": poi.name, "cat": poi.cat, "minz": poi.minz},
++                "properties": {"name": poi.name, "cat": poi.cat,
++                               "kind": poi.icon, "minz": poi.minz},
+                 "id": index,
+             })
+     return tiles
+diff --git a/server/tests/unit/test_place_labels.py b/server/tests/unit/test_place_labels.py
+index 1424190..91a4fdc 100644
+--- a/server/tests/unit/test_place_labels.py
++++ b/server/tests/unit/test_place_labels.py
+@@ -1,15 +1,22 @@
+ """Curation rules for the place-label tileset (build_place_labels.py).
+ 
+-These cover the two things that decide whether the label layer reads as a map
+-or as a directory dump: WHICH features survive the allowlist, and WHEN each one
+-is allowed to appear. Both are easy to regress silently — a bad allowlist entry
+-just quietly puts 15,000 subway platforms back on the map.
++These cover the things that decide whether the label layer reads as a map or as
++a directory dump: WHICH features survive the allowlist, WHEN each one is allowed
++to appear, and whether every kind still has an icon to draw. All easy to regress
++silently — a bad allowlist entry just quietly puts 15,000 subway platforms back
++on the map, and a rank tweak can make a whole category disappear without
++erroring anywhere.
+ """
+ 
++import pathlib
++import re
++
+ import pytest
+ 
+ from build_place_labels import (
++    KINDS,
+     MAX_LABEL_ZOOM,
++    SUBWAY_STATION,
+     Poi,
+     assign_zooms,
+     classify,
+@@ -17,12 +24,15 @@ from build_place_labels import (
+     normalize_name,
+ )
+ 
++# classify() returns (category, icon, rank, floor).
++CAT, ICON, RANK, FLOOR = 0, 1, 2, 3
++
+ 
+ class TestClassify:
+     def test_allowlisted_kinds_are_kept_with_their_tier(self):
+-        assert classify({"amenity": "library"}) == ("civic", 68, 15)
+-        assert classify({"leisure": "stadium"}) == ("culture", 88, 13)
+-        assert classify({"amenity": "restaurant"}) == ("retail", 30, 18)
++        assert classify({"amenity": "library"}) == ("civic", "library", 68, 15)
++        assert classify({"leisure": "stadium"}) == ("culture", "stadium", 88, 13)
++        assert classify({"amenity": "restaurant"}) == ("retail", "restaurant", 30, 18)
+ 
+     @pytest.mark.parametrize("tags", [
+         # The five most common named POI tags in the NYC extract; four are noise.
+@@ -46,27 +56,68 @@ class TestClassify:
+     def test_wiki_tag_promotes_a_notable_business(self):
+         plain = classify({"amenity": "restaurant"})
+         notable = classify({"amenity": "restaurant", "wikidata": "Q1067278"})
+-        assert notable[1] > plain[1]
++        assert notable[RANK] > plain[RANK]
++
++    def test_more_specific_tag_wins_when_a_feature_carries_several(self):
++        # A hotel with a restaurant in it is a hotel: `tourism` is consulted
++        # before `amenity`.
++        result = classify({"tourism": "hotel", "amenity": "restaurant"})
++        assert (result[CAT], result[ICON]) == ("retail", "hotel")
++
+ 
+-    def test_subway_stop_is_demoted_below_a_mainline_terminal(self):
+-        mainline = classify({"railway": "station", "name": "Grand Central"})
++class TestSubwayStations:
++    """496 of the 561 stations in the NYC bbox are `station=subway`, sharing
++    Grand Central's `railway=station` tag. Getting their weight right needed two
++    corrections in opposite directions, so both are pinned here."""
++
++    def test_demoted_below_a_mainline_terminal(self):
++        mainline = classify({"railway": "station"})
+         subway = classify({"railway": "station", "station": "subway"})
+-        # Same OSM tag, very different cartographic weight.
+-        assert subway[1] < mainline[1]
+-        assert subway[2] > mainline[2]
++        assert subway[RANK] < mainline[RANK]
++        assert subway[FLOOR] > mainline[FLOOR]
+ 
+-    def test_subway_demotion_survives_a_wikidata_tag(self):
+-        # Nearly every NYC subway stop has one; if the notability bonus applied
+-        # here it would hand back exactly the rank the demotion removed.
++    def test_demotion_survives_a_wikidata_tag(self):
++        # Nearly every NYC stop has one; if the notability bonus applied here it
++        # would push all 496 back above the terminals this entry separates them
++        # from.
+         assert classify({"railway": "station", "station": "subway",
+-                         "wikidata": "Q1234"}) == classify(
+-            {"railway": "station", "station": "subway"})
++                         "wikidata": "Q1234"}) == SUBWAY_STATION
+ 
+-    def test_more_specific_tag_wins_when_a_feature_carries_several(self):
+-        # A hotel with a restaurant in it is a hotel: `tourism` is consulted
+-        # before `amenity`.
+-        assert classify({"tourism": "hotel", "amenity": "restaurant"})[0:2] \
+-            == ("retail", 56)
++    def test_stays_out_of_the_city_scale_view(self):
++        # At floor 13 the 496 stops carpeted the city view, and since most are
++        # named after the street above them they read as duplicate street labels.
++        assert SUBWAY_STATION[FLOOR] >= 14
++
++    @pytest.mark.parametrize("competitor", [
++        {"amenity": "hospital"}, {"tourism": "museum"}, {"amenity": "library"},
++        {"amenity": "theatre"}, {"tourism": "hotel"}, {"amenity": "college"},
++        {"shop": "mall"}, {"amenity": "townhall"},
++    ])
++    def test_outranks_the_kinds_that_once_buried_it(self, competitor):
++        # Regression: demoting to rank 64 put stops near the BOTTOM of
++        # everything eligible at z15, so every grid cell went to a museum or a
++        # hospital first and stops did not surface until z17-19 — for practical
++        # purposes they had vanished. A stop must win its cell once eligible.
++        assert SUBWAY_STATION[RANK] > classify(competitor)[RANK]
++
++    def test_gets_its_own_icon(self):
++        # The mark is what lets a stop named "5th Avenue" sit beside the
++        # basemap's "5th Avenue" street label without reading as a bug.
++        assert SUBWAY_STATION[ICON] == "subway"
++        assert classify({"railway": "station"})[ICON] != "subway"
++
++
++class TestIconCoverage:
++    def test_every_kind_has_a_glyph_in_the_client(self):
++        # The tileset ships `kind` as a bare string; a slug with no matching
++        # glyph renders as the fallback dot with no error anywhere.
++        src = (pathlib.Path(__file__).parents[2].parent / "client-react" / "src"
++               / "components" / "MapLibreBackground" / "placeIcons.ts").read_text()
++        # Top-level keys of the ICONS record, e.g. "  subway: {".
++        available = set(re.findall(r"^  (\w+): \{$", src, re.M))
++        assert available, "could not parse icon names out of placeIcons.ts"
++        used = {entry[ICON] for entry in KINDS.values()} | {SUBWAY_STATION[ICON]}
++        assert used <= available, f"kinds with no glyph: {sorted(used - available)}"
+ 
+ 
+ class TestNormalizeName:
+@@ -80,14 +131,14 @@ class TestNormalizeName:
+ class TestDedup:
+     def test_collapses_a_station_mapped_once_per_line(self):
+         # One NYC complex, five `railway=station` nodes within a block.
+-        pois = [Poi(40.7370 + i * 0.0002, -73.9900, "14 St", "transit", 64, 15)
++        pois = [Poi(40.7370 + i * 0.0002, -73.9900, "14 St", "transit", "subway", 86, 14)
+                 for i in range(5)]
+         assert len(dedup(pois)) == 1
+ 
+     def test_keeps_the_highest_ranked_of_a_cluster(self):
+         pois = [
+-            Poi(40.7370, -73.9900, "14 St", "transit", 64, 15),
+-            Poi(40.7371, -73.9900, "14 St", "transit", 90, 13),
++            Poi(40.7370, -73.9900, "14 St", "transit", "subway", 86, 14),
++            Poi(40.7371, -73.9900, "14 St", "transit", "rail", 90, 13),
+         ]
+         kept = dedup(pois)
+         assert len(kept) == 1
+@@ -96,8 +147,8 @@ class TestDedup:
+     def test_same_name_far_apart_is_two_real_places(self):
+         # Every borough has a "Post Office"; they are not duplicates.
+         pois = [
+-            Poi(40.7370, -73.9900, "Post Office", "civic", 52, 17),
+-            Poi(40.6800, -73.9500, "Post Office", "civic", 52, 17),
++            Poi(40.7370, -73.9900, "Post Office", "civic", "post", 52, 17),
++            Poi(40.6800, -73.9500, "Post Office", "civic", "post", 52, 17),
+         ]
+         assert len(dedup(pois)) == 2
+ 
+@@ -105,27 +156,54 @@ class TestDedup:
+ class TestAssignZooms:
+     def test_never_reveals_a_poi_before_its_floor(self):
+         pois = [Poi(40.75 + i * 0.05, -73.9 - i * 0.05, f"P{i}",
+-                    "retail", 30, 18) for i in range(4)]
++                    "retail", "restaurant", 30, 18) for i in range(4)]
+         assign_zooms(pois)
+         assert all(p.minz >= 18 for p in pois)
+ 
+     def test_highest_ranked_wins_a_contested_cell(self):
+         # Two POIs on top of each other: only one can hold the spot first.
+-        big = Poi(40.7500, -73.9900, "Museum", "culture", 85, 13)
+-        small = Poi(40.7500, -73.9901, "Deli", "retail", 30, 13)
++        big = Poi(40.7500, -73.9900, "Museum", "culture", "museum", 85, 13)
++        small = Poi(40.7500, -73.9901, "Deli", "retail", "restaurant", 30, 13)
+         assign_zooms([small, big])
+         assert big.minz < small.minz
+ 
++    def test_a_stop_is_never_displaced_by_another_category(self):
++        # Transit thins on its own finer grid, so a co-located museum cannot
++        # cost a station its reveal zoom. This is the end-to-end form of the
++        # "stations vanished" regression: on the shared grid the six stops
++        # around the East Village lost their cells to whatever else was nearby.
++        stop = Poi(40.7500, -73.9900, "14 St", "transit", "subway", 86, 14)
++        museum = Poi(40.7500, -73.9901, "Museum", "culture", "museum", 85, 14)
++        assign_zooms([museum, stop])
++        assert stop.minz == 14
++
++    def test_stops_still_compete_with_each_other(self):
++        # The finer grid is a bigger budget, not an exemption — two stations on
++        # the same corner must not both claim the same zoom.
++        a = Poi(40.7500, -73.9900, "A", "transit", "subway", 86, 14)
++        b = Poi(40.75001, -73.99001, "B", "transit", "subway", 86, 14)
++        assign_zooms([a, b])
++        assert a.minz != b.minz
++
++    def test_nearby_stops_survive_where_a_shared_grid_would_drop_them(self):
++        # Four stops ~500m apart, the East Village spacing. On the shared
++        # 256px-cell grid at z16 they land in one or two cells; on transit's
++        # finer grid each gets its own.
++        stops = [Poi(40.7300 + i * 0.0045, -73.9880, f"Stop {i}",
++                     "transit", "subway", 86, 14) for i in range(4)]
++        assign_zooms(stops)
++        assert max(p.minz for p in stops) <= 16
++
+     def test_spread_out_pois_all_reveal_at_their_floor(self):
+         pois = [Poi(40.5 + i * 0.1, -74.0 + i * 0.1, f"Venue{i}",
+-                    "culture", 88, 13) for i in range(4)]
++                    "culture", "stadium", 88, 13) for i in range(4)]
+         assign_zooms(pois)
+         assert all(p.minz == 13 for p in pois)
+ 
+     def test_every_poi_gets_a_reveal_zoom(self):
+         # Even a POI whose cell is taken at every single zoom must end up
+         # visible somewhere rather than silently vanishing from the tileset.
+-        pois = [Poi(40.75, -73.99, f"Stacked{i}", "retail", 30, 18)
++        pois = [Poi(40.75, -73.99, f"Stacked{i}", "retail", "restaurant", 30, 18)
+                 for i in range(30)]
+         assign_zooms(pois)
+         assert all(1 <= p.minz <= MAX_LABEL_ZOOM for p in pois)

@@ -12,7 +12,7 @@ HERE = os.path.dirname(__file__)
 DIFF_PATH = os.path.join(HERE, "changes-place-labels.diff")
 OUT_PATH = os.path.join(HERE, "2026-08-03-place-labels.html")
 
-DATE = "2026-08-03"
+DATE = "2026-08-03 → 08-05"
 TITLE = "Putting names back on the map: streets, places and businesses"
 
 
@@ -102,7 +102,7 @@ SECTIONS = [
         "fixes": [
             "An explicit <strong>allowlist</strong> cuts 210,003 named features to 34,349. Anything not named in it is dropped, so a new junk tag can never leak in",
             "<strong>Grid thinning</strong> decides the zoom each label appears at: at every zoom the map is divided into cells and only the highest-ranked unplaced POI in a cell earns that zoom, with already-placed labels re-claiming their cell first. The density cap is geometric, so it holds everywhere without per-neighborhood tuning. Quarter-tile cells gave ~50 labels on the city view; full-tile cells give ~18",
-            "Subway stops are <strong>demoted</strong> to a neighborhood-scale label, and the demotion deliberately skips the wikidata notability bonus — nearly every stop carries one and would have claimed back exactly the rank the demotion removed",
+            "Subway stops get their own entry so 496 street-named labels stay off the city-scale view, and it deliberately skips the wikidata notability bonus — nearly every stop carries one and would otherwise land straight back among the mainline terminals. Getting the <em>weight</em> of that entry right then took a second correction in the opposite direction; see <a href=\"#stops\">The subway stops that disappeared</a>",
             "<strong>Green space belongs to the basemap.</strong> Parks, gardens and squares are dropped from the allowlist entirely; this layer owns buildings and businesses. Verified the division is clean: CARTO labels no stadium, hospital or university",
             "The thinning runs to zoom 21 (<code>CONFIG.maxZoom</code>), not 19. Every POI the grid never places falls back to the last zoom, and a ceiling of 19 dumped 20k labels — 60% of the set — into one ungoverned band",
         ],
@@ -123,6 +123,42 @@ SECTIONS = [
             "CJK is handled by MapLibre's <code>localIdeographFontFamily</code>, which draws those ranges from a system font at runtime — without it every Chinatown shop name would render as nothing at all",
         ],
         "files": ["client-react/scripts/build_glyphs.js", "client-react/src/components/MapLibreBackground/MapLibreBackground.tsx", "client-react/package.json"],
+    },
+    {
+        "id": "stops",
+        "tag": "REGRESSION",
+        "title": "The subway stops that disappeared",
+        "symptom": "Six subway stations ring the East Village. At z16 the map showed one, and none appeared anywhere until z17–19.",
+        "cause": [
+            "496 of the 561 stations in the NYC bbox are <code>station=subway</code>, sharing Grand Central's <code>railway=station</code> tag. They were given their own entry to keep 496 street-named labels off the city-scale view — but that entry set rank <strong>and</strong> floor together, and rank 64 is near the BOTTOM of everything eligible at z15",
+            "So every grid cell went to a museum, hospital or university first. The stops were in the tileset the whole time; they just never won a cell",
+            "Worse, the shared grid is the wrong budget for them in principle. One museum per cell is plenty — museums are individually optional. Stations are read as a <em>set</em>, and showing one of six is not a sixth as useful, it is close to useless",
+        ],
+        "fixes": [
+            "Split the two concerns the single rank was carrying: prominence goes back <strong>up</strong> (rank 86 — a stop should win its cell whenever it is eligible) and the <em>zoom</em> holds them back instead (floor 14, never city scale)",
+            "Transit thins on its own grid, one level finer than everything else. The grid zoom is part of the cell key, so stations now compete only against other stations and never against a nearby deli",
+            "All six East Village stops now show at z16, and the city-wide z14 band grew from 157 labels to 420 as the stations surface",
+            "Two tests pin the regression from both directions: a stop must outrank every kind that once buried it, and it must not be displaced by a co-located museum — while two stops on one corner must still compete",
+        ],
+        "files": ["server/build_place_labels.py", "server/tests/unit/test_place_labels.py"],
+    },
+    {
+        "id": "icons",
+        "tag": "ICONS",
+        "title": "27 little marks, and why they let the ranking go back up",
+        "symptom": "A column of names in four colors still reads as a list. And the original reason for demoting the subway stops was real: a blue &quot;5th Avenue&quot; sitting beside the basemap's own &quot;5th Avenue&quot; street label reads as a rendering bug.",
+        "cause": [
+            "Color alone carries about two bits. It can say <em>which family</em> a label belongs to, but not what the place is, and it cannot distinguish a station from a street name that happens to share its text",
+            "MapLibre draws icons from a sprite sheet, which would mean a second asset pipeline to keep in sync with the palette in <code>mapStyles.ts</code>",
+        ],
+        "fixes": [
+            "27 glyphs on a 16px grid at 1.5 stroke — the vote-type icons' thin-line language (32-grid, 1.2 stroke) scaled so the strokes hold together at 13 CSS px",
+            "Rasterised at mount and registered with <code>map.addImage</code> instead of shipped as a sprite, so each glyph is baked in its category's color for the ACTIVE basemap and there is no sprite to regenerate when a palette changes",
+            "<code>text-optional</code> makes the layer degrade well: where a block is too busy for both, MapLibre keeps the mark and drops the name, so a dense strip thins into icons rather than into nothing",
+            "The set is deliberately coarser than the OSM tags feeding it — a pub and a bar share a glass, a college and a university a mortarboard. At 13px a set of 40 near-identical marks is harder to read than one of 20 distinct ones",
+            "Three glyphs were redrawn after seeing them at size: two concentric ellipses read as an <em>eye</em> rather than a stadium, a compact capsule as <em>no entry</em> rather than a pharmacy, and stage curtains as a <em>Greek letter</em> rather than a theatre",
+        ],
+        "files": ["client-react/src/components/MapLibreBackground/placeIcons.ts", "client-react/src/components/MapLibreBackground/MapLibreBackground.tsx"],
     },
     {
         "id": "color",
@@ -362,6 +398,29 @@ FILE_CONTEXT = {
             "test_subway_demotion_survives_a_wikidata_tag pins the exact ordering bug that made the demotion a no-op",
             "test_every_poi_gets_a_reveal_zoom guards the fallback: a POI whose cell is taken at every zoom must still end up somewhere rather than silently leaving the tileset",
             "Green-space tags are asserted as DROPPED — the duplicate-label regression has a test now",
+        ],
+    },
+    "client-react/src/components/MapLibreBackground/placeIcons.ts": {
+        "on": ["React / Leaflet client"],
+        "module": ("Client · place-label icons", "The 27-glyph mark set drawn beside each place name, rasterised at mount and coloured per category"),
+        "file": ("placeIcons.ts", "~290 LOC — the ICONS table, SVG→ImageData rasterisation, map registration"),
+        "outline": [
+            ("header / ICON_PX / IconDef", "new — the 13px constraint every decision follows from", True),
+            ("ICONS: transit (5)", "new — subway, rail, ferry, bus, airport", True),
+            ("ICONS: civic (7)", "new — school, library, hospital, government, worship, emergency, post", True),
+            ("ICONS: culture (6)", "new — museum, theatre, cinema, stadium, attraction, monument", True),
+            ("ICONS: retail (9)", "new — restaurant, cafe, bar, shop, market, hotel, pharmacy, bank, sports", True),
+            ("toSvg / rasterize", "new — colour injection, data-URI decode to ImageData", True),
+            ("registerPlaceIcons", "new — awaits every glyph before the layer is added", True),
+            ("placeIconExpression / PLACE_ICON_NAMES", "new — icon-image, plus the drift-test export", True),
+        ],
+        "blocks": [
+            "13 CSS px is the whole constraint: anything past three or four primitives turns to mush, which is why the set is coarser than the OSM tags feeding it",
+            "addImage rather than a sprite sheet — glyphs are baked in the ACTIVE basemap's palette, so a colour change needs no asset regeneration and there is no second pipeline to drift from mapStyles.ts",
+            "registerPlaceIcons is awaited BEFORE addLayer, so MapLibre never renders a frame asking for an image that isn't there yet",
+            "The subway mark is the load-bearing one: it is what lets a stop named '5th Avenue' sit beside the basemap's '5th Avenue' street label without reading as a bug — and therefore what let the stops' rank go back up",
+            "stadium was two concentric ellipses (an eye), pharmacy a compact capsule (a no-entry sign), theatre stage curtains (a Greek letter) — all three only showed up on a contact sheet at actual size",
+            "A `poi-dot` fallback plus a coalesce keeps an older client against a newer tileset quiet instead of storming the console with missing-image warnings",
         ],
     },
     "client-react/scripts/build_glyphs.js": {
