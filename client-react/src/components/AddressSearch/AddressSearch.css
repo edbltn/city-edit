@@ -29,8 +29,10 @@
   min-width: 320px;
 }
 
+/* The matched substring of the query. Themed token, not #fff: on the light
+   basemap white text on the near-white dropdown vanished entirely. */
 .address-search .autocomplete-item strong {
-  color: #fff;
+  color: var(--ink-strong);
   font-weight: 600;
 }
 
