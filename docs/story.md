@@ -12,9 +12,9 @@ and almost every hard problem in between was the same problem in a new costume:
 
 ---
 
-## The four concepts, and why they exist
+## The five concepts, and why they exist
 
-Before the timeline, the four ideas the app is actually made of. Each one was
+Before the timeline, the five ideas the app is actually made of. Each one was
 arrived at by failing at the alternative first.
 
 ### 1. A vote is on a piece of street, and it has a type
@@ -31,7 +31,85 @@ reporting where people go and started recording what they want. Everything
 downstream — proposals, legends, the modal, the imports — is only possible because
 a vote carries an argument, not just a location.
 
-### 2. Blocks: votes are *stored* on edges but *mean* something on blocks
+### 2. Waypoints: one ordered list of coordinates is the whole interface
+
+If the vote tuple is what the app *stores*, the waypoint list is how a human
+*says* it — and it turned out to be the most load-bearing abstraction in the
+client. The rule, arrived at on 2026-06-06 after five months of not having it:
+
+> **An ordered list of waypoints is the single source of truth for the selection.
+> `start` = `waypoints[0]`, `end` = `waypoints[n−1]`, mids = the rest. Everything
+> else is derived.**
+
+"Everything else" is a longer list than it sounds: which UI phase you're in
+(`empty` / `point` / `route` / `route-mids`), whether you're placing a point or a
+route, which vote type the Cast button will actually use, what the modal
+summarizes, and what the URL says. None of it is stored. Drop a second waypoint
+and the app is in route mode — not because anything set a mode flag, but because
+`waypoints.length === 2`.
+
+Three properties make it work:
+
+- **A waypoint is a coordinate, not an edge id.** Same reasoning as the lat/lon
+  migration anchors on votes: coordinates survive a graph rebuild, edge ids don't.
+  (`voteEdgeId` exists as optional runtime sugar — to pin a vote to the *exact*
+  edge when you picked a specific proposal rather than a bare point — but it's
+  never what identity depends on.)
+- **The URL is the serialization, and it's the whole serialization.**
+  `?w=lat,lng;lat,lng;…&vt=<label>`. That one line is why every poster, QR code,
+  deep link, and shared proposal in the app is just a URL — the selection model was
+  made serializable *before* anything needed to share it.
+- **Every mutation is a pure array edit.** `setStart` / `setEnd` / `insertMid` /
+  `updateAt` / `removeAt` live in one reducer with no async in it, so the genuinely
+  gnarly part — "first is start, last is end, the middle rebalances" — collapses
+  into plain array operations that are exhaustively unit-testable.
+
+**The mechanism nobody expects: waypoints route *through* proposals.** Dropping a
+waypoint onto a route-based proposal's diamond doesn't just place a point near it
+— it stamps a `forcedCorridor` flag on that waypoint, and the segment *leaving*
+that waypoint is then routed through the proposal's corridor **verbatim** instead
+of by shortest path. The resolution chain is live proposal → snapshot of its edge
+chain (taken at threading time, so the geometry survives the proposal being
+reshaped or retired by later votes) → OSRM fallback. It round-trips through the
+URL as a `,f<proposalId>` token on the coordinate.
+
+And it has **break rules**, which is the part that took the care: the flag
+annotates a *segment*, not a point, so any edit that invalidates that segment
+clears it — moving either end, or inserting a mid between them. Otherwise you'd
+get a route claiming to follow a corridor it no longer touches.
+
+**Where it lands.** On 2026-07-30 the abstraction closed a loop nobody planned:
+route proposals started being *defined* in terms of waypoints. Corridor growth
+pins at most 3 **ghost waypoints** where the path stops being a shortest path, so
+every proposal is expressible as ≤ 5 waypoints — 2 anchors + 3 ghosts. That
+constraint is what lets a shared proposal URL still route back into the corridor
+*after the proposal itself has retired*, and it simultaneously bounds how
+roundabout a corridor is allowed to get. Two heuristics (straightness-splitting,
+budget-window trimming) were deleted because this one constraint subsumed both.
+
+So the waypoint is the app's universal currency: **the input gesture, the URL
+payload, the vote's target, and the compression format for a proposal — all the
+same object.**
+
+<details>
+<summary>How it was built, chronologically</summary>
+
+| Date | Change | Why |
+|---|---|---|
+| 01-25 | Unified ghost-pin handling | First React client; the "pin that isn't placed yet" gets one owner instead of three |
+| 02-18 | Client-side geometry splitting for on-route insertion | Inserting a mid always missed cache and hit the server. Now: within 100 m of the route, split the geometry locally; only off-route drags call the server |
+| 03-20 | Path-drag to insert waypoints on graph edges; graph snap for start/end | Waypoints become *graph-aware* rather than free coordinates |
+| 04-28 | Ghost pin follows the raw cursor (stops snapping to nearest node); explicit `activeTool` | Snapping the *cursor* was fighting the user; snapping happens at hit-test time instead. Flatbush index makes hover O(log n) on a 313K-edge graph |
+| 06-05 | **Time-based** tap/drag convention (`TAP_MAX_MS = 300`), shared by marker and path | A pixel threshold meant marker and path felt different. One timer, one feel. Dragging the polyline through a proposal pulls out a ghost mid + dotted trail |
+| 06-06 | **The canonical model** — ordered waypoints as sole truth, `?w=` URL, pure reducer, in-app back/forward | 46 unit tests; start/end/mids/phase/vote-type all become derived |
+| 06-07 | Commit history on a macrotask, not `requestAnimationFrame` | rAF is paint-driven — it never fires in a background tab or headless run, so history silently died there |
+| 07-08 | Node/edge parity: one `resolveDragSnap`, hover and click resolve identically, segment ends belong to their nodes | Hover highlighted one thing, clicking selected another. Now there are no dead zones |
+| 07-08 | `forcedCorridor` threading + break rules + `,f<id>` URL token | Selections can follow a proposal's actual path, not OSRM's opinion of it |
+| 07-30 | Ghost waypoints *inside* proposal growth (≤ 5 total) | Proposals become shareable and re-routable as waypoints — the loop closes |
+
+</details>
+
+### 3. Blocks: votes are *stored* on edges but *mean* something on blocks
 
 The graph is right for storage and wrong for meaning. A street between two
 intersections is 6–20 OSM edges (roadway centerline, both sidewalks, crossing
@@ -58,7 +136,7 @@ same-type votes across every block the selection touches, then writes your new
 direction onto only the edges you actually selected. You can't accidentally be on
 both sides of the same street.
 
-### 3. Route proposals: aggregate votes back up into a corridor
+### 4. Route proposals: aggregate votes back up into a corridor
 
 Point-level support answers "where." It doesn't answer "what should we build,"
 because infrastructure is linear — a bike lane is a corridor, not a pin. So the
@@ -81,7 +159,7 @@ computed on the client, never stored. Two people looking at the same map see
 identical proposals with identical ids — no server round-trip, no persistence, no
 randomness.
 
-### 4. Heat is a signed argument, not a traffic count
+### 5. Heat is a signed argument, not a traffic count
 
 The heatmap's meaning was rewritten three times, and the ending is the point.
 
@@ -180,11 +258,11 @@ Philadelphia; the legacy segment/hex vote tables were dropped for good on 06-17.
 
 Two smaller decisions with long tails:
 
-- **2026-06-06 — the URL is the selection.** One ordered `Selection` is the source
-  of truth; start/end/mids/vote-type are all derived from it, and it round-trips
-  through `?w=coords&vt=`. In-app back/forward works. Every proposal, poster, and
-  QR code that came later is just a URL — because the selection model was made
-  serializable first.
+- **2026-06-06 — the URL is the selection.** The canonical waypoint model lands
+  (concept 2 above): one ordered `Selection`, everything else derived, the whole
+  thing serialized as `?w=coords&vt=`. Every proposal, poster, and QR code that
+  came later is just a URL — because the selection model was made serializable
+  first.
 - **2026-06-14 — the crash that forced defense-in-depth.** A stale IndexedDB cache
   crashed mobile Safari on load. The fix wasn't one fix: the server stamps topology
   dimensions onto vote payloads, the client validates lengths and headers, and an
@@ -315,9 +393,10 @@ Five things this codebase learned the hard way. These are the reusable claims.
    blocks are three answers to one question. The app works now because storage
    (edges), meaning (blocks) and argument (corridors) are separate layers instead
    of one compromise.
-2. **Derive rather than store.** Route proposals, node heat, and button state are
-   all computed from state that already exists. Nothing to migrate, nothing to
-   desync, and the same inputs give the same answer on every device.
+2. **Derive rather than store.** Route proposals, node heat, button state, and the
+   entire selection UI are computed from state that already exists — the waypoint
+   list doesn't record which mode you're in, it *implies* it. Nothing to migrate,
+   nothing to desync, and the same inputs give the same answer on every device.
 3. **Generate from membership, not by matching.** Deciding what belongs where
    *first*, then generating geometry from that decision, makes coverage and
    disjointness hold by construction. Six weeks of block bugs are all violations of
@@ -342,7 +421,11 @@ Phrasings that are accurate and land:
 - "Votes are stored on street segments but *counted* on blocks, because a street
   between two intersections is one place to a person and twenty edges to OpenStreetMap."
 - "Every proposal on the map is reproducible as a route you can share, walk, and
-  argue with."
+  argue with — at most five waypoints, always."
+- "The whole interface is one ordered list of coordinates. Which mode you're in,
+  what you're voting on, what the URL says — all of it is derived from that list."
+- "You can drop a pin *onto* a proposal and your route will follow it — not the
+  fastest way between its endpoints, the way the proposal actually goes."
 - "NYC DOT's official plans and a resident's tap are the same data type. That's the
   point."
 - "We deleted the community-detection engine and got better proposals — because
@@ -359,12 +442,16 @@ Phrasings that are accurate and land:
 | Cold map load | ~9s → ~2.5s (2026-07-23) |
 | Vote throughput | saturated at ~9/s → mitigated (2026-07-09) |
 | Mobile crash cause | ~497 MB of boxed JS numbers → typed arrays |
-| Route proposal reproducibility | ≤ 5 waypoints, always |
+| Route proposal reproducibility | ≤ 5 waypoints, always (2 anchors + 3 ghosts) |
+| Selection model | 1 ordered list, ~46 unit tests, serialized in one URL param |
+| Tap vs. drag | time-based, `TAP_MAX_MS = 300`, shared by marker and path |
 | Change-log reports | 56 HTML reports in `changelog/` |
 
 ## Where to verify any of this
 
 - `docs/three-layer-model.md` — the governing spec (graph / blocks / proposals)
+- `client-react/src/selection/` — the waypoint model: `types.ts` (the contract),
+  `reducer.ts` (pure transitions + break rules), `serialize.ts` (the URL format)
 - `docs/voting-architecture.md` — vote identity, the 53-bit codec, migration anchors
 - `docs/archive/README.md` — what was superseded, and by what
 - `changelog/index.html` — 56 dated reports with the actual diffs
