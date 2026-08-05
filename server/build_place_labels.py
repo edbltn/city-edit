@@ -84,6 +84,15 @@ MAX_LABEL_ZOOM = 21
 # labels and read as a directory, not a map.
 GRID_OFFSET = 0
 
+# Transit thins on a grid one level finer (quarter-tile cells, ~128 CSS px).
+# A shared grid is the right budget for POIs that are individually optional —
+# one museum per cell is plenty — but stations are the map's orientation
+# backbone and they are read as a SET: showing one of the East Village's six
+# subway stops is not a sixth as useful as showing all six, it is close to
+# useless. Because the grid zoom is part of the cell key, this also means
+# stations compete only against other stations, never against a nearby deli.
+TRANSIT_GRID_BONUS = 1
+
 # Two same-named POIs closer than this are the same place mapped twice (NYC
 # subway complexes carry a `railway=station` node per line, so "14 St" alone
 # appears five times within a block). Keep the highest-ranked one.
@@ -106,77 +115,84 @@ CAT_CIVIC = "civic"
 CAT_CULTURE = "culture"
 CAT_RETAIL = "retail"
 
-# (osm_key, osm_value) -> (category, rank, floor zoom in LEAFLET zoom units).
-# rank breaks collisions: higher wins the cell and the pixel.
-KINDS: dict[tuple[str, str], tuple[str, int, int]] = {
+# (osm_key, osm_value) -> (category, icon, rank, floor zoom in LEAFLET zooms).
+#
+# `icon` names one of the glyphs in client-react/.../placeIcons.ts and ships as
+# the feature's `kind` property. It is coarser than the OSM tag on purpose: a
+# pub and a bar get the same glass, a college and a university the same building.
+# At 13 CSS px an icon has room for one idea, and a set with 40 near-identical
+# marks is harder to read than one with 20 distinct ones.
+#
+# `rank` breaks collisions: higher wins the grid cell and the pixel.
+KINDS: dict[tuple[str, str], tuple[str, str, int, int]] = {
     # ── Transit ────────────────────────────────────────────────────────────
     # Stations only. Platforms and stop positions are per-track duplicates of a
     # station that is already labelled, and named track segments are not places.
-    ("aeroway", "aerodrome"): (CAT_TRANSIT, 98, 11),
+    ("aeroway", "aerodrome"): (CAT_TRANSIT, "airport", 98, 11),
     # Mainline terminals and commuter-rail stops: Penn, Grand Central, the LIRR
     # and Metro-North. Genuinely city-scale landmarks.
-    ("railway", "station"): (CAT_TRANSIT, 90, 13),
-    ("railway", "halt"): (CAT_TRANSIT, 70, 15),
-    ("amenity", "ferry_terminal"): (CAT_TRANSIT, 85, 14),
-    ("amenity", "bus_station"): (CAT_TRANSIT, 80, 14),
-    ("public_transport", "station"): (CAT_TRANSIT, 74, 14),
+    ("railway", "station"): (CAT_TRANSIT, "rail", 90, 13),
+    ("railway", "halt"): (CAT_TRANSIT, "rail", 70, 15),
+    ("amenity", "ferry_terminal"): (CAT_TRANSIT, "ferry", 85, 14),
+    ("amenity", "bus_station"): (CAT_TRANSIT, "bus", 80, 14),
+    ("public_transport", "station"): (CAT_TRANSIT, "rail", 74, 14),
 
     # ── Venues ─────────────────────────────────────────────────────────────
     # What's left of `leisure` once green space goes to the basemap: these are
     # buildings you go into, not open space, so they carry a venue color rather
     # than a park one.
-    ("leisure", "stadium"): (CAT_CULTURE, 88, 13),
-    ("leisure", "sports_centre"): (CAT_RETAIL, 58, 16),
-    ("leisure", "fitness_centre"): (CAT_RETAIL, 45, 17),
+    ("leisure", "stadium"): (CAT_CULTURE, "stadium", 88, 13),
+    ("leisure", "sports_centre"): (CAT_RETAIL, "sports", 58, 16),
+    ("leisure", "fitness_centre"): (CAT_RETAIL, "sports", 45, 17),
 
     # ── Civic & education ──────────────────────────────────────────────────
-    ("amenity", "university"): (CAT_CIVIC, 92, 13),
-    ("amenity", "college"): (CAT_CIVIC, 80, 14),
-    ("amenity", "hospital"): (CAT_CIVIC, 84, 14),
-    ("amenity", "townhall"): (CAT_CIVIC, 76, 15),
-    ("amenity", "courthouse"): (CAT_CIVIC, 72, 15),
-    ("amenity", "library"): (CAT_CIVIC, 68, 15),
-    ("amenity", "community_centre"): (CAT_CIVIC, 56, 16),
-    ("amenity", "school"): (CAT_CIVIC, 54, 16),
-    ("amenity", "place_of_worship"): (CAT_CIVIC, 48, 16),
-    ("amenity", "post_office"): (CAT_CIVIC, 52, 17),
-    ("amenity", "fire_station"): (CAT_CIVIC, 50, 17),
-    ("amenity", "police"): (CAT_CIVIC, 50, 17),
-    ("office", "government"): (CAT_CIVIC, 44, 17),
+    ("amenity", "university"): (CAT_CIVIC, "school", 92, 13),
+    ("amenity", "college"): (CAT_CIVIC, "school", 80, 14),
+    ("amenity", "hospital"): (CAT_CIVIC, "hospital", 84, 14),
+    ("amenity", "townhall"): (CAT_CIVIC, "government", 76, 15),
+    ("amenity", "courthouse"): (CAT_CIVIC, "government", 72, 15),
+    ("amenity", "library"): (CAT_CIVIC, "library", 68, 15),
+    ("amenity", "community_centre"): (CAT_CIVIC, "government", 56, 16),
+    ("amenity", "school"): (CAT_CIVIC, "school", 54, 16),
+    ("amenity", "place_of_worship"): (CAT_CIVIC, "worship", 48, 16),
+    ("amenity", "post_office"): (CAT_CIVIC, "post", 52, 17),
+    ("amenity", "fire_station"): (CAT_CIVIC, "emergency", 50, 17),
+    ("amenity", "police"): (CAT_CIVIC, "emergency", 50, 17),
+    ("office", "government"): (CAT_CIVIC, "government", 44, 17),
 
     # ── Culture ────────────────────────────────────────────────────────────
-    ("tourism", "zoo"): (CAT_CULTURE, 90, 13),
-    ("tourism", "aquarium"): (CAT_CULTURE, 90, 13),
-    ("tourism", "theme_park"): (CAT_CULTURE, 88, 13),
-    ("tourism", "museum"): (CAT_CULTURE, 85, 14),
-    ("tourism", "attraction"): (CAT_CULTURE, 80, 14),
-    ("amenity", "theatre"): (CAT_CULTURE, 70, 15),
-    ("tourism", "gallery"): (CAT_CULTURE, 58, 16),
-    ("amenity", "cinema"): (CAT_CULTURE, 60, 16),
-    ("amenity", "arts_centre"): (CAT_CULTURE, 60, 16),
-    ("historic", "monument"): (CAT_CULTURE, 62, 16),
-    ("historic", "memorial"): (CAT_CULTURE, 44, 17),
-    ("tourism", "artwork"): (CAT_CULTURE, 38, 18),
+    ("tourism", "zoo"): (CAT_CULTURE, "attraction", 90, 13),
+    ("tourism", "aquarium"): (CAT_CULTURE, "attraction", 90, 13),
+    ("tourism", "theme_park"): (CAT_CULTURE, "attraction", 88, 13),
+    ("tourism", "museum"): (CAT_CULTURE, "museum", 85, 14),
+    ("tourism", "attraction"): (CAT_CULTURE, "attraction", 80, 14),
+    ("amenity", "theatre"): (CAT_CULTURE, "theatre", 70, 15),
+    ("tourism", "gallery"): (CAT_CULTURE, "museum", 58, 16),
+    ("amenity", "cinema"): (CAT_CULTURE, "cinema", 60, 16),
+    ("amenity", "arts_centre"): (CAT_CULTURE, "theatre", 60, 16),
+    ("historic", "monument"): (CAT_CULTURE, "monument", 62, 16),
+    ("historic", "memorial"): (CAT_CULTURE, "monument", 44, 17),
+    ("tourism", "artwork"): (CAT_CULTURE, "monument", 38, 18),
 
     # ── Retail, food & lodging ─────────────────────────────────────────────
     # The floor zooms here are deep on purpose: these are the labels that tell
     # you which block you're on, not which neighborhood, and they only earn
     # their space once the heat is already resolved to individual streets.
-    ("shop", "mall"): (CAT_RETAIL, 72, 15),
-    ("shop", "department_store"): (CAT_RETAIL, 66, 16),
-    ("amenity", "marketplace"): (CAT_RETAIL, 62, 16),
-    ("shop", "supermarket"): (CAT_RETAIL, 58, 17),
-    ("tourism", "hotel"): (CAT_RETAIL, 56, 17),
-    ("amenity", "pharmacy"): (CAT_RETAIL, 38, 18),
-    ("amenity", "bank"): (CAT_RETAIL, 34, 18),
-    ("shop", "books"): (CAT_RETAIL, 32, 18),
-    ("amenity", "restaurant"): (CAT_RETAIL, 30, 18),
-    ("amenity", "cafe"): (CAT_RETAIL, 30, 18),
-    ("amenity", "bar"): (CAT_RETAIL, 30, 18),
-    ("amenity", "pub"): (CAT_RETAIL, 30, 18),
-    ("shop", "bakery"): (CAT_RETAIL, 28, 18),
-    ("amenity", "fast_food"): (CAT_RETAIL, 22, 18),
-    ("amenity", "ice_cream"): (CAT_RETAIL, 22, 18),
+    ("shop", "mall"): (CAT_RETAIL, "shop", 72, 15),
+    ("shop", "department_store"): (CAT_RETAIL, "shop", 66, 16),
+    ("amenity", "marketplace"): (CAT_RETAIL, "market", 62, 16),
+    ("shop", "supermarket"): (CAT_RETAIL, "market", 58, 17),
+    ("tourism", "hotel"): (CAT_RETAIL, "hotel", 56, 17),
+    ("amenity", "pharmacy"): (CAT_RETAIL, "pharmacy", 38, 18),
+    ("amenity", "bank"): (CAT_RETAIL, "bank", 34, 18),
+    ("shop", "books"): (CAT_RETAIL, "shop", 32, 18),
+    ("amenity", "restaurant"): (CAT_RETAIL, "restaurant", 30, 18),
+    ("amenity", "cafe"): (CAT_RETAIL, "cafe", 30, 18),
+    ("amenity", "bar"): (CAT_RETAIL, "bar", 30, 18),
+    ("amenity", "pub"): (CAT_RETAIL, "bar", 30, 18),
+    ("shop", "bakery"): (CAT_RETAIL, "cafe", 28, 18),
+    ("amenity", "fast_food"): (CAT_RETAIL, "restaurant", 22, 18),
+    ("amenity", "ice_cream"): (CAT_RETAIL, "cafe", 22, 18),
 }
 
 # Tag keys worth consulting, in priority order — the first one that resolves to
@@ -189,31 +205,44 @@ TAG_KEYS = ("aeroway", "railway", "public_transport", "leisure", "tourism",
 # lifts Katz's above the deli next door without a hand-maintained landmark list.
 WIKI_RANK_BONUS = 25
 
-# A subway stop is tagged `railway=station` exactly like Grand Central, but NYC
-# has 470-odd of them and most are named after the street above ("5th Avenue",
-# "72nd Street"). At mainline rank they carpeted the city-scale view, and a blue
-# "5th Avenue" sitting beside the basemap's own "5th Avenue" street label reads
-# as a rendering bug rather than a station. Demoted to a neighborhood-scale
-# label, which is the zoom at which knowing your nearest stop actually helps.
-SUBWAY_STATION = (CAT_TRANSIT, 64, 15)
+# A subway stop is tagged `railway=station` exactly like Grand Central (496 of
+# the 561 stations in the NYC bbox are `station=subway`), so it needs its own
+# entry — but getting that entry right took two goes in opposite directions.
+#
+# At mainline rank/floor the 496 stops carpeted the city-scale view, and since
+# most are named after the street above them ("5th Avenue", "72nd Street") a
+# blue "5th Avenue" beside the basemap's own "5th Avenue" street label read as a
+# rendering bug rather than a station. Demoting them to rank 64 overcorrected
+# badly: 64 is near the BOTTOM of everything eligible at z15, so every cell went
+# to a museum, hospital or university first and the stops did not surface until
+# z17-19 — for practical purposes they had vanished from the map.
+#
+# What actually separates the two cases is not prominence, it is zoom: a stop is
+# the single most useful orientation label in New York *once you are at
+# neighborhood scale*, and noise above it. So: a high rank (it should win its
+# cell whenever it is eligible) behind a floor of 14 (never eligible at
+# city scale). The icon does the rest of the work the demotion was reaching for
+# — a subway mark is unmistakably not a street label.
+SUBWAY_STATION = (CAT_TRANSIT, "subway", 86, 14)
 SUBWAY_STATION_VALUES = {"subway", "light_rail", "monorail"}
 
 
 class Poi:
-    __slots__ = ("lat", "lon", "name", "cat", "rank", "floor", "minz")
+    __slots__ = ("lat", "lon", "name", "cat", "icon", "rank", "floor", "minz")
 
-    def __init__(self, lat, lon, name, cat, rank, floor):
+    def __init__(self, lat, lon, name, cat, icon, rank, floor):
         self.lat = lat
         self.lon = lon
         self.name = name
         self.cat = cat
+        self.icon = icon
         self.rank = rank
         self.floor = floor
         self.minz = 0
 
 
-def classify(tags) -> tuple[str, int, int] | None:
-    """(category, rank, floor zoom) for a feature's tags, or None to drop it."""
+def classify(tags) -> tuple[str, str, int, int] | None:
+    """(category, icon, rank, floor zoom) for a feature's tags, or None to drop."""
     for key in TAG_KEYS:
         value = tags.get(key)
         if value is None:
@@ -224,13 +253,13 @@ def classify(tags) -> tuple[str, int, int] | None:
         if key == "railway" and value == "station" and \
                 tags.get("station") in SUBWAY_STATION_VALUES:
             # Returned as-is: nearly every NYC subway stop carries a wikidata
-            # tag, so letting the notability bonus apply here would hand back
-            # the mainline rank the demotion just took away.
+            # tag, so letting the notability bonus apply would push all 496 back
+            # above the mainline terminals this entry exists to separate.
             return SUBWAY_STATION
-        cat, rank, floor = entry
+        cat, icon, rank, floor = entry
         if "wikidata" in tags or "wikipedia" in tags:
             rank += WIKI_RANK_BONUS
-        return cat, rank, floor
+        return cat, icon, rank, floor
     return None
 
 
@@ -263,8 +292,8 @@ class PoiCollector(osmium.SimpleHandler):
         entry = classify(tags)
         if entry is None:
             return
-        cat, rank, floor = entry
-        self.pois.append(Poi(lat, lon, name, cat, rank, floor))
+        cat, icon, rank, floor = entry
+        self.pois.append(Poi(lat, lon, name, cat, icon, rank, floor))
 
     def node(self, n):
         if not n.tags:
@@ -336,12 +365,11 @@ def assign_zooms(pois: list[Poi]) -> None:
     pois.sort(key=lambda p: (-p.rank, p.name, p.lat, p.lon))
     placed: list[Poi] = []
     for zoom in range(MIN_LABEL_ZOOM, MAX_LABEL_ZOOM + 1):
-        grid_zoom = zoom + GRID_OFFSET
-        occupied = {_cell(p, grid_zoom) for p in placed}
+        occupied = {_cell(p, zoom) for p in placed}
         for poi in pois:
             if poi.minz or poi.floor > zoom:
                 continue
-            cell = _cell(poi, grid_zoom)
+            cell = _cell(poi, zoom)
             if cell in occupied:
                 continue
             occupied.add(cell)
@@ -354,9 +382,18 @@ def assign_zooms(pois: list[Poi]) -> None:
             poi.minz = MAX_LABEL_ZOOM
 
 
-def _cell(poi: Poi, zoom: int) -> tuple[int, int]:
-    tile = mercantile.tile(poi.lon, poi.lat, zoom)
-    return tile.x, tile.y
+def _cell(poi: Poi, label_zoom: int) -> tuple[int, int, int]:
+    """The grid cell a POI claims at a given label zoom.
+
+    The grid zoom is part of the key on purpose: transit uses a finer grid
+    (TRANSIT_GRID_BONUS), so its cells can never collide with another
+    category's and stations compete only against other stations.
+    """
+    grid_zoom = label_zoom + GRID_OFFSET
+    if poi.cat == CAT_TRANSIT:
+        grid_zoom += TRANSIT_GRID_BONUS
+    tile = mercantile.tile(poi.lon, poi.lat, grid_zoom)
+    return grid_zoom, tile.x, tile.y
 
 
 def build_city_place_labels(city: City, output_path: str | None = None) -> str:
@@ -421,7 +458,8 @@ def build_city_place_labels(city: City, output_path: str | None = None) -> str:
                 "bounds": ",".join(str(b) for b in (west, south, east, north)),
                 "vector_layers": json.dumps([{
                     "id": "places",
-                    "fields": {"name": "String", "cat": "String", "minz": "Number"},
+                    "fields": {"name": "String", "cat": "String",
+                               "kind": "String", "minz": "Number"},
                 }]),
             },
         )
@@ -452,7 +490,8 @@ def _collect_tiles(pois: list[Poi]) -> dict[tuple[int, int, int], list[dict]]:
             tile = mercantile.tile(poi.lon, poi.lat, zoom)
             tiles.setdefault((zoom, tile.x, tile.y), []).append({
                 "geometry": {"type": "Point", "coordinates": [poi.lon, poi.lat]},
-                "properties": {"name": poi.name, "cat": poi.cat, "minz": poi.minz},
+                "properties": {"name": poi.name, "cat": poi.cat,
+                               "kind": poi.icon, "minz": poi.minz},
                 "id": index,
             })
     return tiles

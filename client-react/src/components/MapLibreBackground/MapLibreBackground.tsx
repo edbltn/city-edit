@@ -19,6 +19,7 @@ import {
   type MapStyle,
 } from "../../mapStyles";
 import { hottestBlockId } from "./hottestBlock";
+import { registerPlaceIcons, placeIconExpression } from "./placeIcons";
 
 // Register PMTiles protocol once at module level
 const protocol = new Protocol();
@@ -185,7 +186,7 @@ const PLACE_LABEL_FONT = "Red Hat Mono Regular";
  * while street names run along centerlines, so they mostly stay out of each
  * other's way.
  */
-function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
+async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise<void> {
   const url = CONFIG.placeTilesUrl;
   if (!url) {
     dlog("maplibre", "no place-label tiles for this city — skipping layer");
@@ -194,6 +195,11 @@ function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
   if (map.getSource("places")) return;
 
   map.addSource("places", { type: "vector", url: `pmtiles://${url}` });
+
+  // Icons are rasterised before the layer is added, so MapLibre never renders a
+  // frame asking for an image that doesn't exist yet.
+  await registerPlaceIcons(map, mapStyle.basemap);
+  if (!map.getSource("places")) return; // style torn down while we rasterised
 
   const palette = POI_COLORS[mapStyle.basemap];
   const colorByCategory = [
@@ -211,6 +217,17 @@ function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
     // the builder); MapLibre drives its camera one level lower, hence the +1.
     filter: ["<=", ["get", "minz"], ["+", ["zoom"], 1]],
     layout: {
+      // Icon above, name below. `text-optional` is what makes this degrade
+      // gracefully: where a block is too busy for both, MapLibre drops the text
+      // and keeps the mark, so a dense strip thins into icons instead of either
+      // vanishing or turning into a wall of names.
+      "icon-image": placeIconExpression,
+      "icon-size": ["interpolate", ["linear"], ["zoom"], 11, 0.8, 15, 0.92, 18, 1],
+      "icon-anchor": "center",
+      "icon-padding": 2,
+      "text-optional": true,
+      "text-anchor": "top",
+      "text-offset": [0, 0.62],
       "text-field": ["get", "name"],
       "text-font": [PLACE_LABEL_FONT],
       // Mono is wide, so this runs a little smaller than a sans would.
@@ -239,6 +256,9 @@ function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
       "text-halo-color": mapStyle.base,
       "text-halo-width": 1.5,
       "text-halo-blur": 0.3,
+      // Icons are already baked in their category colour; the slight knock-down
+      // keeps them reading as annotation rather than as another pin.
+      "icon-opacity": 0.9,
     },
   });
   dlog("maplibre", "place labels added", url);
@@ -444,7 +464,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         debugState("maplibreLoaded", true);
         onReady?.(true);
         rebindBlockTiles(map);
-        addPlaceLabels(map, mapStyle);
+        void addPlaceLabels(map, mapStyle);
       });
       debugState("maplibreLoaded", false);
 
