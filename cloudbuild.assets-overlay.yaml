@@ -1,0 +1,31 @@
+# Static-assets-only deploy: overlay client-react/public/icons/ onto the CURRENT
+# app image. No client rebuild, no server code, no nginx config — see
+# Dockerfile.assets-overlay for when to prefer this over cloudbuild.overlay.yaml
+# (which rebuilds the client and therefore ships every source change in the tree).
+#
+#   gcloud builds submit --config=cloudbuild.assets-overlay.yaml \
+#     --substitutions=_BASE_IMAGE=<registry>/app@sha256:<serving-digest> \
+#     --project=google-mpf-ywspom2sxeey
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'BASE_IMAGE=${_BASE_IMAGE}'
+      - '-f'
+      - 'Dockerfile.assets-overlay'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest']
+
+timeout: '1800s'
+
+substitutions:
+  _REGION: us-central1
+  _BASE_IMAGE: ''
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'

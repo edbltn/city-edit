@@ -1,0 +1,24 @@
+# Static-ASSETS-ONLY overlay — drops updated files from client-react/public/
+# onto the CURRENT app image and nothing else: no client rebuild, no server
+# code, no nginx config.
+#
+# Why this exists separately from Dockerfile.overlay: that one rebuilds the
+# client from the working tree, so it ships every committed (and uncommitted)
+# source change along for the ride. When the only thing that changed is a file
+# Vite would have copied verbatim — an icon, a preview PNG, robots.txt — this
+# overlay ships exactly that file and leaves the served JS/CSS bundles bit-for-
+# bit identical to what is already running. Verify that: prod's index.html
+# asset hash must NOT move across this deploy.
+#
+# Vite copies client-react/public/* to the dist root, which the image serves
+# from /var/www/html — so public/icons/x.svg is served at /icons/x.svg.
+#
+#   gcloud builds submit --config=cloudbuild.assets-overlay.yaml \
+#     --substitutions=_BASE_IMAGE=<registry>/app@sha256:<serving-digest> \
+#     --project=google-mpf-ywspom2sxeey
+
+ARG BASE_IMAGE
+
+FROM ${BASE_IMAGE}
+
+COPY client-react/public/icons/ /var/www/html/icons/
