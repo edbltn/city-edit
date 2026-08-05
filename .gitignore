@@ -94,3 +94,4 @@ exports/
 # Local scratch artifacts (generated / one-off, never commit)
 terraform/tfplan-donate
 changelog/changes.diff
+.places-staging/

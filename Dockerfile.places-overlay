@@ -1,0 +1,32 @@
+# Place-label ARTIFACTS-ONLY overlay.
+#
+# Overlays per-city places.pmtiles (staged in .places-staging/<city>/) onto the
+# CURRENT serving image and changes nothing else: no server code, no client
+# build, no nginx config.
+#
+# Why these can be staged from a local build, unlike the block artifacts:
+# places.pmtiles carries no edge ids and no topology stamp — every feature is
+# just a lat/lon, a name, a category and a reveal zoom, read straight out of
+# source.osm.pbf. There is nothing for it to be out of step WITH, so it does not
+# have to be baked against the base image's graphs the way edge_blocks does.
+# (The regular Dockerfile builds these inside the graph RUN, before the `rm -f`
+# that deletes the PBFs; this overlay exists so shipping them does not require a
+# full graph rebuild — which would shift every edge id and force a vote resnap.)
+#
+# The client degrades cleanly if this overlay is skipped: cities.py reports
+# placesVersion=null when the file is absent and the client adds no label layer
+# at all. So code-first-then-artifacts is a safe order; the POI layer simply
+# switches on when this lands.
+#
+# BASE_IMAGE must be the exact digest-pinned image currently serving prod.
+#
+#   gcloud builds submit --config=cloudbuild.places-overlay.yaml \
+#     --substitutions=_BASE_IMAGE=<registry>/app@sha256:<serving-digest> \
+#     --project=google-mpf-ywspom2sxeey
+
+ARG BASE_IMAGE
+
+FROM ${BASE_IMAGE}
+WORKDIR /app
+
+COPY .places-staging/ ./osm_data/

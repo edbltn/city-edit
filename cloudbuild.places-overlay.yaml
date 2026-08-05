@@ -1,0 +1,36 @@
+# Place-label ARTIFACTS-ONLY overlay deploy: per-city places.pmtiles
+# (.places-staging/<city>/) onto the CURRENT app image and nothing else — no
+# server code, no client build, no nginx config. See Dockerfile.places-overlay.
+#
+# Chain this AFTER cloudbuild.overlay.yaml when shipping the label feature for
+# the first time: the code overlay teaches the server to advertise
+# placesVersion and the client to draw the layer, this one supplies the tiles
+# it reads. Either order is safe — a missing archive reports placesVersion=null
+# and the client adds no layer — but the feature is only visible once both land.
+#
+#   gcloud builds submit --config=cloudbuild.places-overlay.yaml \
+#     --substitutions=_BASE_IMAGE=<registry>/app@sha256:<code-overlay-digest> \
+#     --project=google-mpf-ywspom2sxeey
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'BASE_IMAGE=${_BASE_IMAGE}'
+      - '-f'
+      - 'Dockerfile.places-overlay'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest']
+
+timeout: '1800s'
+
+substitutions:
+  _REGION: us-central1
+  _BASE_IMAGE: ''
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/desire-path-mapper/app:latest'
