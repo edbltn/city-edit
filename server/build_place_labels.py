@@ -120,7 +120,7 @@ CAT_RETAIL = "retail"
 # `icon` names one of the glyphs in client-react/.../placeIcons.ts and ships as
 # the feature's `kind` property. It is coarser than the OSM tag on purpose: a
 # pub and a bar get the same glass, a college and a university the same building.
-# At 13 CSS px an icon has room for one idea, and a set with 40 near-identical
+# At under 10 CSS px an icon has room for one idea, and a set with 40 near-identical
 # marks is harder to read than one with 20 distinct ones.
 #
 # `rank` breaks collisions: higher wins the grid cell and the pixel.

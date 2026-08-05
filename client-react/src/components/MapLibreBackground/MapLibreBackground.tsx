@@ -222,7 +222,7 @@ async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise<
       // and keeps the mark, so a dense strip thins into icons instead of either
       // vanishing or turning into a wall of names.
       "icon-image": placeIconExpression,
-      "icon-size": ["interpolate", ["linear"], ["zoom"], 11, 0.8, 15, 0.92, 18, 1],
+      "icon-size": ["interpolate", ["linear"], ["zoom"], 11, 0.72, 15, 0.84, 18, 0.94],
       "icon-anchor": "center",
       "icon-padding": 2,
       "text-optional": true,
@@ -230,8 +230,10 @@ async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise<
       "text-offset": [0, 0.62],
       "text-field": ["get", "name"],
       "text-font": [PLACE_LABEL_FONT],
-      // Mono is wide, so this runs a little smaller than a sans would.
-      "text-size": ["interpolate", ["linear"], ["zoom"], 11, 9.5, 15, 10.5, 18, 12],
+      // Mono is wide, so this runs smaller than a sans would — and smaller
+      // again than legibility alone would ask for, because this layer has to
+      // stay quieter than the vote heat and the top-proposal pins above it.
+      "text-size": ["interpolate", ["linear"], ["zoom"], 11, 8.6, 15, 9.4, 18, 10.5],
       // Wrap width is in characters, and mono means characters are uniformly
       // wide — 9 turned "New York Institute of Technology" into a three-line
       // clump. 11 keeps most names to two lines without widening the footprint
@@ -254,11 +256,13 @@ async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise<
       // saturated heat block — the contrast control the raster label overlay
       // above it doesn't get to have.
       "text-halo-color": mapStyle.base,
-      "text-halo-width": 1.5,
+      // Scaled down with the type: at 1.5 against ~9px text the halo starts to
+      // read as a bold weight rather than as separation from the basemap.
+      "text-halo-width": 1.2,
       "text-halo-blur": 0.3,
-      // Icons are already baked in their category colour; the slight knock-down
-      // keeps them reading as annotation rather than as another pin.
-      "icon-opacity": 0.9,
+      // Icons are already baked in their (muted) category colour; this takes
+      // them down again so a mark reads as annotation and never as a pin.
+      "icon-opacity": 0.72,
     },
   });
   dlog("maplibre", "place labels added", url);

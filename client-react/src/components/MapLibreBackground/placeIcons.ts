@@ -1,7 +1,7 @@
 /**
  * Little line icons for the place-label layer.
  *
- * These are drawn at ~13 CSS px, which is the constraint behind every decision
+ * These are drawn at ~8-10 CSS px, which is the constraint behind every decision
  * here. Each glyph is built on a 16×16 grid with a 1.5 stroke — the same
  * thin-line language as the vote-type icons in public/icons (32-grid, 1.2
  * stroke), scaled so the strokes hold together at a third of the size. Anything
@@ -23,9 +23,10 @@ import maplibregl from "maplibre-gl";
 import { POI_COLORS, type Basemap } from "../../mapStyles";
 import { dlog, dwarn } from "../../utils/debugLog";
 
-/** Rendered size in CSS pixels. Small enough to read as an annotation on the
- *  map rather than as a pin competing with the proposal markers. */
-const ICON_PX = 13;
+/** Rendered size in CSS pixels, before the layer's zoom-dependent icon-size
+ *  (so a mark is ~8-10px on screen). Small enough to read as an annotation on
+ *  the map and never as a pin competing with the top-proposal markers. */
+const ICON_PX = 11;
 
 /** Every glyph's category (which is what colours it) and its SVG body. Paths
  *  are stroked unless they opt into `fill` — see toSvg. */

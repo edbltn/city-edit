@@ -280,7 +280,7 @@ export const SELECTABLE_MAP_STYLES: { id: string; label: string }[] = [
  * There is no green here: parks and squares are labelled by the CARTO raster
  * underneath, in its own green, and the builder drops them for that reason.
  */
-export const POI_COLORS: Record<Basemap, Record<string, string>> = {
+const POI_HUES: Record<Basemap, Record<string, string>> = {
   dark: {
     transit: "#7FB2FF",
     civic: "#E3BE79",
@@ -294,6 +294,37 @@ export const POI_COLORS: Record<Basemap, Record<string, string>> = {
     retail: "#5A554D",
   },
 };
+
+/**
+ * The neutral each palette is pulled toward, and how far.
+ *
+ * The hues above are what the categories "are"; nothing on the map is painted
+ * at that strength. Place labels are CONTEXT — the thing that has to pop is the
+ * heat and the top-proposal pins, and at full saturation a screenful of blue,
+ * amber and violet labels competed with them for attention instead of sitting
+ * underneath. Pulling every category most of the way to a neutral grey keeps
+ * the coding legible (you can still tell a station from a school at a glance)
+ * while dropping the layer's visual weight well below the pins'.
+ *
+ * Raise POI_MUTE toward 1 to recede further; drop it toward 0 to get the vivid
+ * palette back.
+ */
+const POI_NEUTRAL: Record<Basemap, string> = { dark: "#93908A", light: "#736F68" };
+const POI_MUTE = 0.58;
+
+/** Category label colors as actually painted — the hues, held back. */
+export const POI_COLORS: Record<Basemap, Record<string, string>> =
+  Object.fromEntries(
+    (Object.keys(POI_HUES) as Basemap[]).map((basemap) => [
+      basemap,
+      Object.fromEntries(
+        Object.entries(POI_HUES[basemap]).map(([cat, hue]) => [
+          cat,
+          rgbToCss(mixRgb(parseColor(hue), parseColor(POI_NEUTRAL[basemap]), POI_MUTE)),
+        ]),
+      ),
+    ]),
+  ) as Record<Basemap, Record<string, string>>;
 
 /** Resolve a style id to its MapStyle, falling back to the default. */
 export function getMapStyle(id: string): MapStyle {
@@ -367,6 +398,10 @@ function parseColor(s: string): [number, number, number] {
     return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
   }
   return parseRgb(s);
+}
+
+function rgbToCss([r, g, b]: [number, number, number]): string {
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 function mixRgb(
