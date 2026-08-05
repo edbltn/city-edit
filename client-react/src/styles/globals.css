@@ -2046,7 +2046,11 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 
    The width is fixed rather than a min-width so a long label can never widen
    the header's column and shove its mirrored vote control out of line with
-   the rows below; the header simply overflows, symmetrically, into the gap. */
+   the rows below; the header simply overflows, symmetrically, into the gap.
+
+   Centring the column is only half of it: the fraction inside must also be a
+   constant width, or centring floats short numerators inward and the shared
+   "/N" goes ragged row to row. See -cover-num below. */
 .graph-proposal-rows.has-coverage {
   --cover-col: 44px;
 }
@@ -2062,8 +2066,16 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 /* Only the numerator is news — the denominator restates the card's own block
-   count, identically on every row. */
+   count, identically on every row.
+
+   Right-aligned inside a width the cell sets from the denominator's digit
+   count (see CoverageCell): the digits grow leftwards from the slash, so the
+   slash and the "/251" after it land on the same x on every row. Centring the
+   column alone is not enough — it centres a string whose width changes with
+   the numerator, which is exactly the raggedness you see. */
 .graph-proposal-row-cover-num {
+  display: inline-block;
+  text-align: right;
   color: var(--ink);
 }
 

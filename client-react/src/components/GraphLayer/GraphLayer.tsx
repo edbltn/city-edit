@@ -4552,7 +4552,16 @@ function CoverageCell({
       title={description[0].toUpperCase() + description.slice(1)}
       aria-label={description}
     >
-      <span className="graph-proposal-row-cover-num">{voted}</span>
+      {/* Pad the numerator to the denominator's digit count so every row's
+          fraction is the same width. Without this the column is centred but
+          the fractions are not: "1/251" is two characters narrower than
+          "251/251", so it floats inward and the "/251" that is identical on
+          every row visibly fails to line up. voted <= total always, so the
+          denominator's width is the widest the numerator can ever need. */}
+      <span
+        className="graph-proposal-row-cover-num"
+        style={{ minWidth: `${String(total).length}ch` }}
+      >{voted}</span>
       <span className="graph-proposal-row-cover-den">/{total}</span>
     </span>
   );
