@@ -2263,6 +2263,28 @@ def graph_votes():
     # previous block set must not serve even inside the debounce window.
     bstamp = rmap.graph.blocks_stamp()
 
+    def _stamp_revs(resp, served_rev: int):
+        """Tell the client WHICH revision the body it just got describes, and
+        which one is live.
+
+        The debounce + stale-while-revalidate paths below deliberately serve a
+        snapshot that is one or more revisions behind: a live session
+        reconciles forward from WS deltas, so staleness is invisible there. A
+        PAGE LOAD has no deltas to reconcile from — it paints exactly what this
+        response says — so a reader who just voted and hit refresh saw their
+        own vote missing (or an unvote still standing) with nothing to correct
+        it. These headers let the client notice it is behind and schedule one
+        refetch once the background rebuild has had time to land."""
+        resp.headers["X-Vote-Rev"] = str(served_rev)
+        resp.headers["X-Vote-Rev-Current"] = str(rev)
+        # Custom headers aren't CORS-safelisted; local dev reads the API
+        # cross-origin (:3000 → :5001), where an unexposed header is simply
+        # invisible to fetch() (same trap as the tiles Content-Range above).
+        resp.headers["Access-Control-Expose-Headers"] = (
+            "X-Vote-Rev, X-Vote-Rev-Current, ETag"
+        )
+        return resp
+
     entry = _vote_cache_peek(cache_key)
     if entry is not None and entry.get("bstamp") != bstamp:
         entry = None
@@ -2312,7 +2334,10 @@ def graph_votes():
         resp.headers["ETag"] = etag
         resp.headers["Cache-Control"] = "public, max-age=5"
         resp.headers["Vary"] = "Accept-Encoding"
-        return resp
+        # A 304 confirms the client's cached body — which is the SERVED entry,
+        # so it can be behind exactly like a 200 is. Stamp it too, or a
+        # revalidating client never learns it's stale.
+        return _stamp_revs(resp, entry["rev"])
 
     if sparse_fmt:
         served = entry["sp_gz"] if wants_gzip else entry["sp_body"]
@@ -2324,7 +2349,7 @@ def graph_votes():
     resp.headers["Vary"] = "Accept-Encoding"
     resp.headers["Cache-Control"] = "public, max-age=5"
     resp.headers["ETag"] = etag
-    return resp
+    return _stamp_revs(resp, entry["rev"])
 
 
 # ── Admin ──────────────────────────────────────────────────────────────────

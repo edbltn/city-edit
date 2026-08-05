@@ -2006,6 +2006,138 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   transform: rotate(45deg) scale(0.9);
 }
 
+/* ── Coverage column ──────────────────────────────────────────────────────
+   A route card carries two different numbers that a single tally can never
+   separate: how many PEOPLE want something, and how much of the route they
+   want it on. The vote control answers the first; this column answers the
+   second — n of the selection's N blocks hold at least one vote of this type.
+   Deliberately quiet next to the vote control: it's context, not the control.
+
+   The width is shared with the column header above it, so the two align; it
+   also sets the length of the meter, which is why it's roomier than "9/12"
+   strictly needs. */
+.graph-proposal-rows.has-coverage {
+  --cover-col: 52px;
+}
+
+.graph-proposal-row-cover {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: var(--cover-col, 52px);
+  padding-bottom: 5px; /* room for the meter on the row's baseline */
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Only the numerator is news — the denominator restates the card's own block
+   count, identically on every row. */
+.graph-proposal-row-cover-num {
+  color: var(--ink);
+}
+
+.graph-proposal-row-cover-den {
+  color: color-mix(in srgb, var(--ink) 45%, transparent);
+}
+
+/* End-to-end coverage: the whole fraction reads solid, matching the full meter. */
+.graph-proposal-row-cover.is-full .graph-proposal-row-cover-den {
+  color: color-mix(in srgb, var(--ink) 70%, transparent);
+}
+
+/* Hairline track + ink fill — the same two-tone vocabulary as the card's
+   dividers, so the meter reads as part of the rule work rather than a widget. */
+.graph-proposal-row-cover-bar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--hairline);
+}
+
+.graph-proposal-row-cover-bar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(var(--cover, 0) * 100%);
+  background: color-mix(in srgb, var(--ink) 65%, transparent);
+}
+
+/* Column headers, in the card's own micro-label voice (same size, tracking,
+   and weight as the header eyebrow). Present only on multi-block cards — the
+   one place the two numbers could be confused for each other. */
+.graph-proposal-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 2px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--ink) 45%, transparent);
+}
+
+.graph-proposal-head-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.graph-proposal-head .graph-proposal-row-cover {
+  padding-bottom: 0;
+  color: inherit;
+}
+
+/* The header's vote-group is a structural MIRROR of the real control: three
+   empty cells sized by the same custom properties (and the same phone
+   overrides), with the caption laid over them. Hand-computing the width here
+   would silently drift the moment either changes. */
+.graph-vote.is-head {
+  position: relative;
+  border-color: transparent;
+  color: inherit;
+}
+
+.graph-vote.is-head .graph-vote-net {
+  border-left-color: transparent;
+  border-right-color: transparent;
+}
+
+.graph-proposal-head-caption {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.08em;
+}
+
+/* Awaiting the distinct-voter answer. The counts stay blank rather than
+   falling back to the per-block sums, which count one route voter once per
+   block — showing a number that is wrong for 300ms and then silently changes
+   is worse than showing that it hasn't arrived. */
+.graph-vote.is-pending .graph-vote-count,
+.graph-vote.is-pending .graph-vote-net {
+  color: color-mix(in srgb, var(--ink) 30%, transparent);
+  animation: vote-pending 1.4s ease-in-out infinite;
+}
+
+@keyframes vote-pending {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.9; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-vote.is-pending .graph-vote-count,
+  .graph-vote.is-pending .graph-vote-net {
+    animation: none;
+  }
+}
+
 /* Lettered links ([a] [b] [c]) to the real proposals behind a vote type
    (maps.vote_type_links) — a full-width line under the label so they never
    squeeze the label or the vote control. Deliberately small and quiet: a
@@ -2051,6 +2183,11 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   align-items: center;
   justify-content: center;
   gap: 3px;
+  /* The interactive card's cells are <button>s (border-box by UA default) and
+     every other card's are <span>s (content-box), so the SAME min-width used
+     to produce columns 16px wider on hover cards than on the pinned one. Pin
+     the model here: the min-widths below are the cells' FULL widths. */
+  box-sizing: border-box;
   padding: 3px 8px;
   border: 0;
   background: none;
@@ -2272,6 +2409,24 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
 
   .graph-vote-cell {
     min-width: calc(26px + (var(--vote-cell-chars, 1) - 1) * 1ch);
+  }
+
+  /* The header word ("blocks") no longer has to fit on a phone — the column
+     narrows to what the fraction and its meter need, and the header ellipsizes
+     rather than pushing the vote control off the card. */
+  .graph-proposal-rows.has-coverage {
+    --cover-col: 40px;
+  }
+
+  .graph-proposal-head {
+    gap: 8px;
+    font-size: 9px;
+    letter-spacing: 0.04em;
+  }
+
+  .graph-proposal-head .graph-proposal-row-cover {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { materializeBlocks, selectionVoteRows } from "./blockSelection";
+import { materializeBlocks, selectionVoteRows, selectionCoverage } from "./blockSelection";
 import { buildBlockIndex, type GraphTopology } from "../components/GraphLayer/graphTopology";
 
 // 4 nodes in a square; edges: e0(0-1)→block 0, e1(1-2)→block 0, e2(2-3)→block 1,
@@ -93,5 +93,68 @@ describe("selectionVoteRows", () => {
       { label: "Bike lane", up: 2, down: 0 },
       { label: "Crosswalk", up: 1, down: 0 },
     ]);
+  });
+});
+
+describe("selectionCoverage", () => {
+  const blockVoteTypes: [number, number, number][][] = [
+    [[0, 3, 1], [1, 1, 0]], // block 0: Bike lane 3↑1↓, Bench 1↑
+    [[0, 2, 0]],            // block 1: Bike lane 2↑
+  ];
+  const withVotes = () => ({
+    ...topoWithBlocks(),
+    block_vote_types: blockVoteTypes,
+    block_vote_type_legend: ["Bike lane", "Bench"],
+    edge_vote_types: [[], [], [], [[0, 1, 0]]] as [number, number, number][][],
+    vote_type_legend: ["Crosswalk"],
+  });
+
+  it("counts a type once per block, however many of its edges are selected", () => {
+    // e0 and e1 are both block 0 — coverage is 1 block, not 2 edges.
+    const cov = selectionCoverage(withVotes(), [0, 1]);
+    expect(cov.total).toBe(1);
+    expect(cov.byLabel.get("Bike lane")).toBe(1);
+    expect(cov.byLabel.get("Bench")).toBe(1);
+  });
+
+  it("reports partial reach across a multi-block selection", () => {
+    // Both blocks carry Bike lane; only block 0 carries Bench.
+    const cov = selectionCoverage(withVotes(), [0, 2]);
+    expect(cov.total).toBe(2);
+    expect(cov.byLabel.get("Bike lane")).toBe(2);
+    expect(cov.byLabel.get("Bench")).toBe(1);
+  });
+
+  it("counts unmapped edges as their own unit, off their edge breakdown", () => {
+    const cov = selectionCoverage(withVotes(), [2, 3]);
+    expect(cov.total).toBe(2); // block 1 + the singleton for e3
+    expect(cov.byLabel.get("Bike lane")).toBe(1);
+    expect(cov.byLabel.get("Crosswalk")).toBe(1);
+  });
+
+  it("omits a type whose votes cancelled out — nobody's vote stands there", () => {
+    const data = {
+      ...topoWithBlocks(),
+      block_vote_types: [[[0, 0, 0]], [[0, 2, 0]]] as [number, number, number][][],
+      block_vote_type_legend: ["Bike lane"],
+    };
+    const cov = selectionCoverage(data, [0, 2]);
+    expect(cov.total).toBe(2);
+    expect(cov.byLabel.get("Bike lane")).toBe(1);
+  });
+
+  it("falls back to per-segment coverage without a block layer", () => {
+    const data = {
+      ...topoWithoutBlocks(),
+      edge_vote_types: [
+        [[0, 1, 0]], [], [[0, 0, 2]], [[1, 1, 0]],
+      ] as [number, number, number][][],
+      vote_type_legend: ["Bike lane", "Bench"],
+    };
+    const cov = selectionCoverage(data, [0, 1, 2, 3, 3]);
+    expect(cov.total).toBe(4); // deduped: e3 twice is one segment
+    // Downvotes count as coverage too — the type is under discussion there.
+    expect(cov.byLabel.get("Bike lane")).toBe(2);
+    expect(cov.byLabel.get("Bench")).toBe(1);
   });
 });

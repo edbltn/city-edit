@@ -148,6 +148,15 @@ export const MY_VOTES_EDGE_CAP = 500;
 export const ROUTE_VOTES_EDGE_CAP = 4000;
 export const ROUTE_VOTES_DEBOUNCE_MS = 350;
 
+// /api/graph-votes can serve a snapshot older than the live revision (its
+// debounce + stale-while-revalidate paths) and says so in a header. A live
+// session doesn't care — WS deltas carry it forward — but a page load paints
+// what it got, so it re-asks once the server's background rebuild has had time
+// to finish. Bounded: a busy map is ALWAYS a revision or two behind, and an
+// unbounded retry there would be a refetch loop of the largest body we serve.
+export const STALE_VOTES_RETRY_MS = 2000;
+export const STALE_VOTES_MAX_RETRIES = 2;
+
 // Index builds yield to the main thread between batches so the multi-second
 // NYC build doesn't jank the tile/heat animations happening at exactly this
 // moment of the load. Until an index exists, hitTest simply returns no result

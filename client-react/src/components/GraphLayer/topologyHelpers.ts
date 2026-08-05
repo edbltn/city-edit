@@ -81,3 +81,28 @@ export function votesMatchTopology(
   }
   return true;
 }
+
+/**
+ * True when /api/graph-votes served a snapshot OLDER than the live revision.
+ *
+ * The endpoint does this on purpose: under sustained voting the revision bumps
+ * on every cast, so it serves the last complete snapshot (debounced, or stale
+ * while a background rebuild runs) rather than rebuilding the full arrays per
+ * vote. A live session never notices — it reconciles forward from WebSocket
+ * deltas, which carry authoritative counts. A PAGE LOAD has no deltas to
+ * reconcile from: it paints the body it was handed, full stop. So the caster
+ * who reloads right after voting sees their own cast missing, with nothing in
+ * the session to correct it. The server stamps both revisions on the response
+ * so we can tell, and come back for the rebuilt body.
+ *
+ * False whenever the headers are absent (an older server, or a response whose
+ * custom headers the browser won't expose) — never guess staleness.
+ */
+export function servedRevIsStale(response: { headers: Headers }): boolean {
+  const servedRaw = response.headers.get("X-Vote-Rev");
+  const currentRaw = response.headers.get("X-Vote-Rev-Current");
+  if (servedRaw == null || currentRaw == null) return false;
+  const served = Number(servedRaw);
+  const current = Number(currentRaw);
+  return Number.isFinite(served) && Number.isFinite(current) && current > served;
+}

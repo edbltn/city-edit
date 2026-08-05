@@ -54,8 +54,8 @@ import {
   adjShortest,
 } from "./graphTopology";
 import {
-  materializeBlocks, selectionVoteRows,
-  ROUTE_VOTES_CACHE_MAX, routeVotesKey,
+  materializeBlocks, selectionVoteRows, selectionCoverage,
+  type SelectionCoverage,
 } from "../../utils/blockSelection";
 import { iconForLabel, iconSrc, mapStyleForTheme, pointTypeForLabel } from "../../themes";
 import { buildHeatRampStops, buildPinRampStops, sampleHeatRamp, HEAT_PEAK_POS } from "../../mapStyles";
@@ -90,12 +90,17 @@ import {
   decodeVoteTypes, TOP_PROPOSAL_LIMIT, CLUSTER_RADIUS_PX, SPREAD_CELL_PX,
   SPREAD_DURATION_MS, SPREAD_ANIM_MS, PROPOSALS_REFRESH_INTERVAL_MS,
   scheduleIdleSlice, MID_DRAG_THRESHOLD_SQ, MID_DRAG_TRAIL_STYLE,
-  MY_VOTES_EDGE_CAP, ROUTE_VOTES_EDGE_CAP, ROUTE_VOTES_DEBOUNCE_MS,
+  MY_VOTES_EDGE_CAP, ROUTE_VOTES_EDGE_CAP,
+  STALE_VOTES_RETRY_MS, STALE_VOTES_MAX_RETRIES,
   buildNodeIndex, buildEdgeIndex,
   hitTest, blockFiltersAt, adjShortestInBlock, projectOntoEdge,
 } from "./spatialLookup";
-import { targetLatLng, rbtpDisplayPos, spreadKeyEdge, spreadKeyRoute, votesMatchTopology } from "./topologyHelpers";
+import {
+  targetLatLng, rbtpDisplayPos, spreadKeyEdge, spreadKeyRoute,
+  votesMatchTopology, servedRevIsStale,
+} from "./topologyHelpers";
 import { useVoteSources, type SourcesByLabel } from "./voteSources";
+import { useRouteVoteRows, ROUTE_VOTES_HOVER_DELAY_MS } from "./routeVoteRows";
 
 // ---------------------------------------------------------------------------
 // Top-proposal indicator marker
@@ -1526,6 +1531,34 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     };
   }, []);
 
+  // Re-ask for a snapshot the server told us was behind the live revision,
+  // once its background rebuild has had time to land (servedRevIsStale). A
+  // live session doesn't need this — WS deltas carry it forward — but a page
+  // load paints exactly the body it was handed, which is how a just-cast vote
+  // could vanish on reload. Bounded per mount: a busy map is ALWAYS a revision
+  // or two behind, and an unbounded retry there is a refetch loop of the
+  // largest body we serve.
+  const staleVotesRetriesRef = useRef(0);
+  const staleVotesTimerRef = useRef<number | null>(null);
+  const scheduleStaleVotesRefetch = useCallback(() => {
+    if (staleVotesRetriesRef.current >= STALE_VOTES_MAX_RETRIES) return;
+    if (staleVotesTimerRef.current != null) return; // one pending retry is enough
+    staleVotesRetriesRef.current += 1;
+    dlog("votes", "served a rev-stale snapshot — refetching in "
+      + `${STALE_VOTES_RETRY_MS}ms (attempt ${staleVotesRetriesRef.current}`
+      + `/${STALE_VOTES_MAX_RETRIES})`);
+    staleVotesTimerRef.current = window.setTimeout(() => {
+      staleVotesTimerRef.current = null;
+      fetchVotesRef.current();
+    }, STALE_VOTES_RETRY_MS);
+  }, []);
+  useEffect(() => () => {
+    if (staleVotesTimerRef.current != null) {
+      window.clearTimeout(staleVotesTimerRef.current);
+      staleVotesTimerRef.current = null;
+    }
+  }, []);
+
   // Full vote fetch — used on initial load and revision-gap recovery.
   const fetchVotes = useCallback(async () => {
     if (!topologyRef.current) return;
@@ -1533,6 +1566,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       const url = `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}&format=sparse`;
       const response = await fetch(url, { cache: "no-store", headers: passcodeHeaders() });
       if (!response.ok) throw new Error(`Vote fetch failed: ${response.status}`);
+      const servedStale = servedRevIsStale(response);
       const voteRaw = await response.json();
       const voteData = isSparseVotes(voteRaw) ? decodeSparseVotes(voteRaw) : voteRaw;
       // If the graph was rebuilt mid-session, these votes no longer line up with
@@ -1577,10 +1611,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
       refreshHeatmapDisplayRef.current();
       requestProposalsRecomputeRef.current();
+      if (servedStale) scheduleStaleVotesRefetch();
     } catch (error) {
       derror("votes", "failed to fetch graph votes:", error);
     }
-  }, [themeMode, broadcastBlockVotes]);
+  }, [themeMode, broadcastBlockVotes, scheduleStaleVotesRefetch]);
 
   const fetchVotesRef = useRef(fetchVotes);
   useEffect(() => { fetchVotesRef.current = fetchVotes; }, [fetchVotes]);
@@ -1626,11 +1661,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       //    fetches. The early block-heat paint (in step 1) and step 3 both
       //    consume it; the noop catches only silence the unhandled-rejection
       //    warning when topology fails first.
+      //    cache: "no-store" (as the refetch path already does) because
+      //    /api/graph-votes is served with max-age=5. Without it, reloading
+      //    within five seconds of casting replays the pre-vote body straight
+      //    from the disk cache and the vote you just made is missing —
+      //    the request never even reaches the server.
+      let staleAtLoad = false;
       const votesFetchPromise = fetch(
         `${CONFIG.apiUrl}/graph-votes?map=${getMapSlug()}&mode=${encodeURIComponent(themeMode)}&format=sparse`,
-        { headers: passcodeHeaders() },
+        { cache: "no-store", headers: passcodeHeaders() },
       ).then((r) => {
         if (!r.ok) throw new Error(`Vote fetch failed: ${r.status}`);
+        staleAtLoad = servedRevIsStale(r);
         return r.json();
       });
       votesFetchPromise.catch(() => {});
@@ -1922,12 +1964,21 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         refreshHeatmapDisplayRef.current();
         setHeatmapLoaded();
         requestProposalsRecomputeRef.current();
+        // The server told us this snapshot is behind the live revision (its
+        // stale-while-revalidate path). A LIVE session reconciles forward from
+        // WS deltas, so that staleness is invisible there — but a page load
+        // has no deltas to reconcile from and paints exactly what it got. That
+        // is why casting a vote, reloading, and finding it missing (or an
+        // unvote still standing) was reproducible. Come back for the rebuilt
+        // body once it's had time to land.
+        if (staleAtLoad) scheduleStaleVotesRefetch();
       } catch (error) {
         derror("votes", "failed to fetch graph votes:", error);
       }
     })();
     return () => { cancelled = true; };
-  }, [applyDeltaToGraphData, setHeatmapLoaded, broadcastBlockVotes]);
+  }, [applyDeltaToGraphData, setHeatmapLoaded, broadcastBlockVotes,
+      scheduleStaleVotesRefetch]);
 
   // Recompute proposals when the vote namespace (theme mode) switches. On
   // first mount topology isn't loaded yet so this no-ops; the post-vote call in
@@ -3135,45 +3186,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     return voteRowsForEdges(pathEdgeIds);
   }, [pathEdgeIds, voteRowsForEdges, graphVoteVersion, votesVersion, isHeatmapLoading]);
 
-  // Session cache of resolved /api/route-votes rows (distinct-voter counts),
-  // keyed by the selection's edge-set signature. Lets a reopened selection —
-  // and the hover card of a proposal the user already opened — render server
-  // truth immediately instead of flashing the inflated per-block stand-ins.
-  const routeVotesCacheRef = useRef<Map<string, VoteTypeRow[]>>(new Map());
-
-  // Rows for the HOVERED diamond's corridor (its block-edge union): the
-  // session's resolved distinct-voter rows when the corridor has been opened
-  // before (same signature the route card caches under, so hover and card
-  // agree), else the local block-grain sums. Same safety net as the PBTP hover
-  // card: a live top proposal never reads "No votes yet" even if the breakdown
-  // momentarily decodes empty.
-  const hoverRbtpRows = useMemo<VoteTypeRow[]>(() => {
-    void graphVoteVersion;
-    void votesVersion;
-    if (!hoverRbtp) return [];
-    const rows =
-      routeVotesCacheRef.current.get(
-        routeVotesKey(getMapSlug(), hoverRbtp.blockEdgeIds.slice(0, ROUTE_VOTES_EDGE_CAP)))
-      ?? voteRowsForEdges(hoverRbtp.blockEdgeIds);
-    return rows.length ? rows : [{ label: hoverRbtp.label, up: hoverRbtp.score, down: 0 }];
-  }, [hoverRbtp, voteRowsForEdges, graphVoteVersion, votesVersion]);
-
-  // Server-truth rows for the route card: DISTINCT devices per (vote type,
-  // direction) across the selection's block edges (/api/route-votes). A route
-  // cast fans ONE device's vote onto every edge of every block it covers, so the
-  // local per-block sums above count the same person once per block — these
-  // rows count them once, period. Local rows stand in only for a selection this
-  // session has never resolved (or if the fetch never lands — no DB in some dev
-  // setups). The first fetch for an unseen selection fires immediately — the
-  // stand-in OVERCOUNTS, so truth should replace it as fast as one round-trip
-  // allows; refetches on vote signals (own casts via votesVersion, everyone
-  // else's via the graphVoteVersion delta bump) keep the debounce that
-  // coalesces bursts into one request.
+  // The union of a selection's touched-block edges — the set both the
+  // distinct-voter lookup and the source lookup key on, capped so a merged
+  // foot-component block (thousands of edges) can't unbound the request.
   const routeEdgeUnion = useMemo(() => {
     if (!routeBlocks || routeBlocks.length === 0) return null;
-    // Union of the touched blocks' edges, capped to keep the request bounded
-    // (a merged foot-component block can hold thousands of edges; past the cap
-    // the count degrades gracefully toward the per-block numbers).
     const edgeIds: number[] = [];
     const seen = new Set<number>();
     for (const block of routeBlocks) {
@@ -3187,57 +3204,58 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       }
       if (edgeIds.length >= ROUTE_VOTES_EDGE_CAP) break;
     }
-    return { edgeIds, key: routeVotesKey(getMapSlug(), edgeIds) };
+    return edgeIds;
   }, [routeBlocks]);
-  const routeEdgeUnionRef = useRef(routeEdgeUnion);
-  routeEdgeUnionRef.current = routeEdgeUnion;
 
-  const [routeVotesFetched, setRouteVotesFetched] =
-    useState<{ key: string; rows: VoteTypeRow[] } | null>(null);
-  const routeVotesFetchKey = routeEdgeUnion ? routeEdgeUnion.key : null;
-  useEffect(() => {
-    const union = routeEdgeUnionRef.current;
-    if (!union) return;
-    const { edgeIds, key } = union;
-    let cancelled = false;
-    const delay = routeVotesCacheRef.current.has(key) ? ROUTE_VOTES_DEBOUNCE_MS : 0;
-    const timer = window.setTimeout(() => {
-      fetch(`${CONFIG.apiUrl}/route-votes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...passcodeHeaders() },
-        body: JSON.stringify({ map: getMapSlug(), edge_ids: edgeIds }),
-      })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => {
-          if (cancelled || !j?.rows) return;
-          const rows = j.rows as VoteTypeRow[];
-          const cache = routeVotesCacheRef.current;
-          cache.delete(key);
-          cache.set(key, rows);
-          // Bounded, insertion-ordered → dropping the first key evicts the
-          // least-recently-resolved entry.
-          while (cache.size > ROUTE_VOTES_CACHE_MAX) {
-            cache.delete(cache.keys().next().value as string);
-          }
-          setRouteVotesFetched({ key, rows });
-        })
-        .catch(() => {});
-    }, delay);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [routeVotesFetchKey, votesVersion, graphVoteVersion]);
+  // DISTINCT-voter rows (one person = one vote however many blocks their cast
+  // fanned across) for the route card and for the hovered diamond's corridor.
+  // Both go through the same cache, so the two cards can never disagree about
+  // the same corridor. `null` = not resolved yet → the card renders the vote
+  // columns as pending rather than substituting the per-block sums, which
+  // count one route voter once per block (the "wrong count at first" bug).
+  const routeVotesRefetchToken = votesVersion + graphVoteVersion;
+  const { rows: routeUniqueRows } = useRouteVoteRows(routeEdgeUnion, {
+    refetchToken: routeVotesRefetchToken,
+  });
+  const { rows: hoverRbtpUniqueRows } = useRouteVoteRows(hoverRbtp?.blockEdgeIds ?? null, {
+    refetchToken: routeVotesRefetchToken,
+    firstDelayMs: ROUTE_VOTES_HOVER_DELAY_MS,
+  });
 
-  // Rows the card renders: the live fetch result for THIS selection, else the
-  // session cache, else null (→ the local stand-in). Key-matched, so one
-  // selection's server rows can never appear on another selection's card while
-  // its own fetch is in flight.
-  const routeUniqueRows = routeEdgeUnion
-    ? (routeVotesFetched?.key === routeEdgeUnion.key
-        ? routeVotesFetched.rows
-        : routeVotesCacheRef.current.get(routeEdgeUnion.key) ?? null)
-    : null;
+  // What the hovered diamond's card renders. The LABELS (and their coverage)
+  // are local and exact, so the card is never empty while the voter counts
+  // resolve; only the counts wait. The single-row fallback is the old safety
+  // net: a live top proposal must never read "No votes yet" just because its
+  // breakdown momentarily decoded empty.
+  const hoverRbtpRows = useMemo<VoteTypeRow[]>(() => {
+    void graphVoteVersion;
+    void votesVersion;
+    if (!hoverRbtp) return [];
+    if (hoverRbtpUniqueRows) return hoverRbtpUniqueRows;
+    const local = voteRowsForEdges(hoverRbtp.blockEdgeIds);
+    return local.length ? local : [{ label: hoverRbtp.label, up: 0, down: 0 }];
+  }, [hoverRbtp, hoverRbtpUniqueRows, voteRowsForEdges, graphVoteVersion, votesVersion]);
+
+  // Per-vote-type reach across the selection: how many of its blocks actually
+  // hold each type. Local and exact, so it renders instantly — the counterpart
+  // to the voter counts above, which need a round trip. Together they answer
+  // the two different questions a route card gets asked ("how many people?"
+  // and "how much of this route?") that one number could never separate.
+  const routeCoverage = useMemo(() => {
+    void graphVoteVersion;
+    void votesVersion;
+    const d = graphDataRef.current;
+    if (!d || !pathEdgeIds || pathEdgeIds.length === 0) return null;
+    return selectionCoverage(d, pathEdgeIds);
+  }, [pathEdgeIds, graphVoteVersion, votesVersion, isHeatmapLoading]);
+
+  const hoverRbtpCoverage = useMemo(() => {
+    void graphVoteVersion;
+    void votesVersion;
+    const d = graphDataRef.current;
+    if (!d || !hoverRbtp) return null;
+    return selectionCoverage(d, hoverRbtp.blockEdgeIds);
+  }, [hoverRbtp, graphVoteVersion, votesVersion]);
 
   // The pinned card's touched blocks, hoisted so the ± controls and the source
   // lookup below key on the SAME edge set (docs §4.1).
@@ -3256,7 +3274,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     [pinnedBlocks],
   );
   const pinnedSources = useVoteSources(pinnedSourceEdges);
-  const routeSources = useVoteSources(routeEdgeUnion?.edgeIds ?? null);
+  const routeSources = useVoteSources(routeEdgeUnion);
 
   // The RBTP the current selection stands for, if any — it becomes the card's
   // header, so selecting a diamond (or manually tracing its corridor) titles
@@ -4240,6 +4258,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           metaText={`Covers ${hoverRbtp.blocks.length} ${hasBlocksRef.current ? "block" : "segment"}${hoverRbtp.blocks.length !== 1 ? "s" : ""}`}
           rows={hoverRbtpRows}
           topKinds={hoverRbtpTopKinds}
+          coverage={hoverRbtpCoverage}
+          coverageUnit={hasBlocksRef.current ? "block" : "segment"}
+          votersPending={!hoverRbtpUniqueRows}
           voteTypes={theme.suggestions}
           getAvoidRects={getHoverAvoidRects}
           avoidKey={`${pinnedScreenPos?.x},${pinnedScreenPos?.y};${routeCardPos?.x},${routeCardPos?.y}`}
@@ -4279,8 +4300,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           // those what they are.
           metaText={`Selects ${routeBlocks.length} ${hasBlocksRef.current ? "block" : "segment"}${routeBlocks.length !== 1 ? "s" : ""}`}
           // Distinct-voter rows once the server answers (one person = one vote
-          // however many blocks their cast fanned across); local sums meanwhile.
+          // however many blocks their cast fanned across). Until then the local
+          // rows supply the LABELS (and their coverage renders exactly), but
+          // their counts stay hidden — per-block sums count one route voter
+          // once per block, and a number that silently changes under you is
+          // worse than one that visibly hasn't landed.
           rows={routeUniqueRows ?? routeVoteRows}
+          coverage={routeCoverage}
+          coverageUnit={hasBlocksRef.current ? "block" : "segment"}
+          votersPending={!routeUniqueRows}
           topKinds={routeTopKinds}
           interactive
           elevated
@@ -4394,6 +4422,20 @@ interface ProposalCardProps {
    *  fully contained in the selection / both). Derived by the host from the
    *  live winners + routeProposals — see topKindsFor. */
   topKinds?: TopKindMap;
+  /** How far each vote type REACHES across a multi-block selection (see
+   *  selectionCoverage). Adds an "n/N blocks" column, because the voter counts
+   *  alone can't distinguish 36 people asking for a bike lane on one corner
+   *  from 36 asking for it along the whole corridor. Rendered only when the
+   *  selection spans more than one unit — on a single block every row would
+   *  read 1/1. */
+  coverage?: SelectionCoverage | null;
+  /** What the coverage denominator counts — "block" on maps with a block
+   *  layer, "segment" on maps without one (matching the meta line). */
+  coverageUnit?: "block" | "segment";
+  /** The −/net/+ counts are DISTINCT VOTERS and haven't been resolved yet.
+   *  Renders the columns as awaiting rather than showing the local per-block
+   *  sums, which count one route voter once per block. */
+  votersPending?: boolean;
   interactive?: boolean;
   /** Lifts the card one z tier above sibling cards (route summary vs transient
    *  hover). Portals mount at different times, so DOM order can't order them. */
@@ -4456,8 +4498,42 @@ type AvoidRect = { left: number; top: number; right: number; bottom: number };
  *  orders them by how much of the selection each proposal covers. */
 const MAX_ROW_LINKS = 3;
 
+/** Stands in for a voter count still resolving. A figure dash (not a hyphen)
+ *  so it sits at digit width and the columns don't shift when the number
+ *  lands. */
+const PENDING_GLYPH = "‒";
+
+/** The n/N reach of one vote type across a selection, with a hairline meter
+ *  under it. The numerator carries full ink and the denominator recedes: the
+ *  denominator is the same on every row (it's the card's block count, restated
+ *  from the meta line), so only the numerator is news. */
+function CoverageCell({
+  voted, total, unit,
+}: { voted: number; total: number; unit: "block" | "segment" }) {
+  const full = voted >= total;
+  // The visual column header is aria-hidden (it's a layout mirror), so the
+  // cell has to carry its own meaning for anyone not reading the columns.
+  const description =
+    `voted on ${voted} of ${total} ${unit}${total !== 1 ? "s" : ""} in this selection`;
+  return (
+    <span
+      className={`graph-proposal-row-cover${full ? " is-full" : ""}`}
+      title={description[0].toUpperCase() + description.slice(1)}
+      aria-label={description}
+    >
+      <span className="graph-proposal-row-cover-num">{voted}</span>
+      <span className="graph-proposal-row-cover-den">/{total}</span>
+      <span
+        className="graph-proposal-row-cover-bar"
+        style={{ "--cover": total > 0 ? voted / total : 0 } as CSSProperties}
+      />
+    </span>
+  );
+}
+
 function ProposalCard({
   winner, eyebrow = "Top Proposal", screenX, screenY, name, metaText = null, rows, topKinds,
+  coverage = null, coverageUnit = "block", votersPending = false,
   interactive = false, elevated = false, getAvoidRects, avoidKey, edgeId = null, blocks = null, mode = "", shareUrl = null, streetViewLatLng = null, voteTypes, sources, onVote, onRemove, removeLabel = "Remove this point", onHoverChange, registerEl,
 }: ProposalCardProps) {
   const [copied, setCopied] = useState(false);
@@ -4574,6 +4650,10 @@ function ProposalCard({
     });
   };
 
+  // Coverage shows only where it says something: a selection spanning more
+  // than one block. On a single block every row would read 1/1.
+  const showCoverage = !!coverage && coverage.total > 1;
+
   const tally = (row: VoteTypeRow, dir: VoteDirection) => {
     const sign = dir === -1 ? "−" : "+";
     const count = dir === -1 ? row.down : row.up;
@@ -4581,7 +4661,7 @@ function ProposalCard({
     const inner = (
       <>
         <span className="graph-vote-sign">{sign}</span>
-        <span className="graph-vote-count">{count}</span>
+        <span className="graph-vote-count">{votersPending ? PENDING_GLYPH : count}</span>
       </>
     );
     if (!interactive) {
@@ -4721,7 +4801,35 @@ function ProposalCard({
                   : "No votes yet")}
             </div>
             {rows.length > 0 && (
-              <div className="graph-proposal-rows" style={voteColumnWidths(rows)}>
+              <div
+                className={`graph-proposal-rows${showCoverage ? " has-coverage" : ""}`}
+                // Size the columns from the numbers actually shown. While the
+                // voter counts are pending the rows still carry local sums —
+                // sizing to those would set the columns wide, then snap them
+                // narrower when the (smaller) real counts land.
+                style={voteColumnWidths(votersPending ? [] : rows)}
+              >
+                {/* Column headers. Only a multi-block card gets them, and only
+                    because it now carries two different numbers — reach and
+                    people — that a bare tally can't tell apart. The vote-group
+                    mirror is invisible cells rather than a hand-computed width:
+                    its columns are sized by the very same CSS custom
+                    properties (and shrink on phones), so the caption stays
+                    centred over the net column no matter what. */}
+                {showCoverage && (
+                  <div className="graph-proposal-head" aria-hidden="true">
+                    <span className="graph-proposal-head-label" />
+                    <span className="graph-proposal-row-cover">
+                      {coverageUnit === "block" ? "blocks" : "segments"}
+                    </span>
+                    <span className="graph-vote is-head">
+                      <span className="graph-vote-cell">&nbsp;</span>
+                      <span className="graph-vote-net">&nbsp;</span>
+                      <span className="graph-vote-cell">&nbsp;</span>
+                      <span className="graph-proposal-head-caption">voters</span>
+                    </span>
+                  </div>
+                )}
                 {rows.map((row) => {
                   // Top-proposal badge: mirrors the map pin shapes (square =
                   // point proposal, diamond = route corridor) so the row reads
@@ -4753,9 +4861,24 @@ function ProposalCard({
                         )}
                         {row.label}
                       </span>
-                      <span className="graph-vote" role="group" aria-label={`${row.label} votes`}>
+                      {showCoverage && (
+                        <CoverageCell
+                          voted={coverage!.byLabel.get(row.label) ?? 0}
+                          total={coverage!.total}
+                          unit={coverageUnit}
+                        />
+                      )}
+                      <span
+                        className={`graph-vote${votersPending ? " is-pending" : ""}`}
+                        role="group"
+                        aria-label={votersPending
+                          ? `${row.label} voter counts loading`
+                          : `${row.label} voters`}
+                      >
                         {tally(row, -1)}
-                        <span className="graph-vote-net" title="net votes (up − down)">{row.up - row.down}</span>
+                        <span className="graph-vote-net" title="net voters (for − against)">
+                          {votersPending ? PENDING_GLYPH : row.up - row.down}
+                        </span>
                         {tally(row, 1)}
                       </span>
                       {links.length > 0 && (

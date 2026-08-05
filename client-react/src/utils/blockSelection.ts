@@ -110,3 +110,73 @@ export function selectionVoteRows(
     .map(([label, { up, down }]) => ({ label, up, down }))
     .sort((a, b) => (b.up - b.down) - (a.up - a.down));
 }
+
+/**
+ * How much of a selection each vote type actually covers.
+ *
+ * The vote tallies on a route card answer "how many PEOPLE", which says
+ * nothing about REACH: 36 voters concentrated on one corner of a 12-block
+ * corridor and 36 spread along all of it render identically. This is the
+ * other axis — for each vote type, how many of the selection's touched blocks
+ * hold at least one vote of that type (either direction).
+ *
+ * Counted at the same grain the card's meta line reports ("Covers 12 blocks"),
+ * so `total` is that number and every `byLabel` value reads against it.
+ * Unlike selectionVoteRows this never returns null: maps without a block layer
+ * fall back to singleton per-edge blocks, where the count is simply "how many
+ * of the selected segments carry this type". Purely local — no round trip.
+ */
+export interface SelectionCoverage {
+  /** Blocks (or, without a block layer, segments) the selection touches. */
+  total: number;
+  /** Label → how many of those hold ≥1 vote of that type. */
+  byLabel: Map<string, number>;
+}
+
+export function selectionCoverage(
+  data: GraphTopology & {
+    block_vote_types?: [number, number, number][][];
+    block_vote_type_legend?: string[];
+    edge_vote_types?: [number, number, number][][];
+    vote_type_legend?: string[];
+  },
+  edgeIds: ArrayLike<number>,
+): SelectionCoverage {
+  const byLabel = new Map<string, number>();
+  // One unit (block or segment) counts ONCE per label, however many of its
+  // edges or how many votes carry that type.
+  const seenHere = new Set<string>();
+  const countUnit = (
+    pairs: [number, number, number][] | undefined,
+    legend: string[] | undefined,
+  ) => {
+    seenHere.clear();
+    for (const [li, up, down] of pairs ?? []) {
+      const label = legend?.[li];
+      // A [li, 0, 0] triple is a type whose up/down cancelled out — present in
+      // the breakdown, but nobody's vote stands here.
+      if (!label || (up ?? 0) + (down ?? 0) === 0) continue;
+      if (seenHere.has(label)) continue;
+      seenHere.add(label);
+      byLabel.set(label, (byLabel.get(label) ?? 0) + 1);
+    }
+  };
+
+  // Same regime split as selectionVoteRows, so coverage and counts always
+  // describe the same units.
+  if (data.edgeBlockId && data.block_vote_types) {
+    const keys = touchedBlockKeys(data, edgeIds);
+    for (const key of keys) {
+      if (key >= 0) countUnit(data.block_vote_types[key], data.block_vote_type_legend);
+      else countUnit(data.edge_vote_types?.[-key - 2], data.vote_type_legend);
+    }
+    return { total: keys.length, byLabel };
+  }
+
+  const edges = new Set<number>();
+  for (let i = 0; i < edgeIds.length; i++) edges.add(edgeIds[i]);
+  for (const edgeId of edges) {
+    countUnit(data.edge_vote_types?.[edgeId], data.vote_type_legend);
+  }
+  return { total: edges.size, byLabel };
+}
