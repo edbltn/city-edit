@@ -89,6 +89,7 @@ import {
   type HoverTarget, type ResolvedSelection, type VoteTypeRow,
   decodeVoteTypes, TOP_PROPOSAL_LIMIT, CLUSTER_RADIUS_PX, SPREAD_CELL_PX,
   SPREAD_DURATION_MS, SPREAD_ANIM_MS, PROPOSALS_REFRESH_INTERVAL_MS,
+  PROPOSALS_OWN_CAST_DELAY_MS,
   scheduleIdleSlice, MID_DRAG_THRESHOLD_SQ, MID_DRAG_TRAIL_STYLE,
   MY_VOTES_EDGE_CAP, ROUTE_VOTES_EDGE_CAP,
   STALE_VOTES_RETRY_MS, STALE_VOTES_MAX_RETRIES,
@@ -1489,16 +1490,21 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // requestIdleCallback so it never lands mid-gesture. Used for the "must be
   // fresh" moments (initial load, full refetch, mode switch) and by the dirty
   // sweep below; per-vote paths only set proposalsDirtyRef.
+  // `urgent` shortens how long the scan may sit waiting for an idle window
+  // before the browser is forced to run it. Background refreshes can afford to
+  // wait for genuine idle (4s); a recompute the user is watching for — their
+  // own cast — cannot, since that wait lands entirely on top of the job's own
+  // ~1s and reads as the app being slow to respond to the press.
   const proposalsIdleRef = useRef<number | null>(null);
-  const requestProposalsRecompute = useCallback(() => {
+  const requestProposalsRecompute = useCallback((urgent = false) => {
     if (proposalsIdleRef.current != null) return;
     const run = () => {
       proposalsIdleRef.current = null;
       recomputeAllProposals();
     };
     proposalsIdleRef.current = typeof requestIdleCallback === "function"
-      ? requestIdleCallback(run, { timeout: 4000 })
-      : (window.setTimeout(run, 200) as unknown as number);
+      ? requestIdleCallback(run, { timeout: urgent ? 150 : 4000 })
+      : (window.setTimeout(run, urgent ? 0 : 200) as unknown as number);
   }, [recomputeAllProposals]);
   const requestProposalsRecomputeRef = useRef(requestProposalsRecompute);
   useEffect(() => { requestProposalsRecomputeRef.current = requestProposalsRecompute; }, [requestProposalsRecompute]);
@@ -1509,6 +1515,24 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // up to a minute; the heatmap and count readouts stay live (they don't go
   // through this path).
   const proposalsDirtyRef = useRef(false);
+
+  // Your OWN cast doesn't wait for that sweep. See PROPOSALS_OWN_CAST_DELAY_MS:
+  // the minute cadence is there to absorb everyone ELSE's votes, but the whole
+  // point of pressing + is to find out whether the corridor gets promoted, and
+  // up to a minute of nothing reads as the press having done nothing. Still
+  // dirty-marks first, so if this timer is cancelled (unmount, a tab hidden
+  // before it fires) the sweep remains the backstop and nothing is lost.
+  const ownCastTimerRef = useRef<number | null>(null);
+  const scheduleOwnCastRecompute = useCallback(() => {
+    proposalsDirtyRef.current = true;
+    if (ownCastTimerRef.current != null) window.clearTimeout(ownCastTimerRef.current);
+    ownCastTimerRef.current = window.setTimeout(() => {
+      ownCastTimerRef.current = null;
+      proposalsDirtyRef.current = false;
+      requestProposalsRecomputeRef.current(true); // urgent — you're waiting on it
+    }, PROPOSALS_OWN_CAST_DELAY_MS);
+  }, []);
+
   useEffect(() => {
     const flush = () => {
       if (!proposalsDirtyRef.current || document.hidden) return;
@@ -1524,6 +1548,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         if (typeof cancelIdleCallback === "function") cancelIdleCallback(proposalsIdleRef.current);
         else window.clearTimeout(proposalsIdleRef.current);
         proposalsIdleRef.current = null;
+      }
+      if (ownCastTimerRef.current != null) {
+        window.clearTimeout(ownCastTimerRef.current);
+        ownCastTimerRef.current = null;
       }
       // Abandon any in-flight sliced route-proposal job — its next slice
       // would setState on an unmounted component.
@@ -2057,14 +2085,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       const legendLenBefore = data.vote_type_legend?.length ?? 0;
       applyMyVoteChange(data, adj, detail.edgeIds, detail.label, detail.prevDir, detail.newDir);
       refreshHeatmapDisplayRef.current();
-      // Same rule as the WS-delta path: dirty-mark for the batched sweep,
-      // prompt (idle) refresh only if this cast introduced a new legend entry.
+      // Unlike the WS-delta path (which dirty-marks for the minute sweep),
+      // THIS is the local user's own press — the one vote whose effect on the
+      // proposal lists they are actively waiting to see. A new legend entry
+      // still recomputes at once; everything else goes through the short
+      // own-cast debounce rather than the minute sweep.
       if ((data.vote_type_legend?.length ?? 0) !== legendLenBefore) requestProposalsRecomputeRef.current();
-      else proposalsDirtyRef.current = true;
+      else scheduleOwnCastRecompute();
     };
     window.addEventListener("optimistic-vote", handler);
     return () => window.removeEventListener("optimistic-vote", handler);
-  }, [themeMode]);
+  }, [themeMode, scheduleOwnCastRecompute]);
 
   // Draw hover and pinned highlights on separate canvas
   const redrawHoverHighlight = useCallback(() => {
@@ -4503,10 +4534,10 @@ const MAX_ROW_LINKS = 3;
  *  lands. */
 const PENDING_GLYPH = "‒";
 
-/** The n/N reach of one vote type across a selection, with a hairline meter
- *  under it. The numerator carries full ink and the denominator recedes: the
- *  denominator is the same on every row (it's the card's block count, restated
- *  from the meta line), so only the numerator is news. */
+/** The n/N reach of one vote type across a selection. The numerator carries
+ *  full ink and the denominator recedes: the denominator is the same on every
+ *  row (it's the card's block count, restated from the meta line), so only the
+ *  numerator is news. */
 function CoverageCell({
   voted, total, unit,
 }: { voted: number; total: number; unit: "block" | "segment" }) {
@@ -4523,10 +4554,6 @@ function CoverageCell({
     >
       <span className="graph-proposal-row-cover-num">{voted}</span>
       <span className="graph-proposal-row-cover-den">/{total}</span>
-      <span
-        className="graph-proposal-row-cover-bar"
-        style={{ "--cover": total > 0 ? voted / total : 0 } as CSSProperties}
-      />
     </span>
   );
 }

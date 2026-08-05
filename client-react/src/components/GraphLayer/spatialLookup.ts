@@ -112,6 +112,19 @@ export const SPREAD_ANIM_MS = 280;   // keep in sync with the CSS transition
 // run per vote — it froze the app for seconds on every cast.
 export const PROPOSALS_REFRESH_INTERVAL_MS = 60_000;
 
+// ...with ONE exception: your own cast. The minute cadence exists because
+// OTHER people's votes arrive at arbitrary rates and each recompute is heavy —
+// but you pressed the button, and the corridor you just voted on is precisely
+// what you're waiting to see promoted. Waiting up to a minute to find out
+// whether your vote did anything reads as the app ignoring you. So an own-cast
+// schedules a prompt recompute instead, debounced by this much so a run of
+// +/- presses (or one route cast fanning across many blocks) still collapses
+// into a single pass. Kept short because it is pure dead time stacked on top
+// of the recompute's own ~1s: one route cast dispatches its optimistic events
+// synchronously, so they coalesce whatever the value, and this really only has
+// to outlast a human double-tap.
+export const PROPOSALS_OWN_CAST_DELAY_MS = 400;
+
 // requestIdleCallback with a setTimeout fallback (Safari) — schedules the next
 // slice of the route-proposal job so heavy vote types never monopolize a frame.
 export function scheduleIdleSlice(cb: (deadline?: IdleDeadline) => void): void {

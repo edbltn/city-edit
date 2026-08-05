@@ -2021,18 +2021,16 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
    second — n of the selection's N blocks hold at least one vote of this type.
    Deliberately quiet next to the vote control: it's context, not the control.
 
-   The width is shared with the column header above it, so the two align; it
-   also sets the length of the meter, which is why it's roomier than "9/12"
-   strictly needs. */
+   One shared width, right-aligned, used by BOTH the values and the column
+   header above them — so the header sits exactly over its column and the
+   fractions keep a common right edge however wide "9/12" vs "45/47" run. */
 .graph-proposal-rows.has-coverage {
-  --cover-col: 52px;
+  --cover-col: 40px;
 }
 
 .graph-proposal-row-cover {
-  position: relative;
   flex: 0 0 auto;
-  min-width: var(--cover-col, 52px);
-  padding-bottom: 5px; /* room for the meter on the row's baseline */
+  min-width: var(--cover-col, 40px);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
@@ -2050,30 +2048,9 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   color: color-mix(in srgb, var(--ink) 45%, transparent);
 }
 
-/* End-to-end coverage: the whole fraction reads solid, matching the full meter. */
+/* End-to-end coverage: the whole fraction reads solid. */
 .graph-proposal-row-cover.is-full .graph-proposal-row-cover-den {
   color: color-mix(in srgb, var(--ink) 70%, transparent);
-}
-
-/* Hairline track + ink fill — the same two-tone vocabulary as the card's
-   dividers, so the meter reads as part of the rule work rather than a widget. */
-.graph-proposal-row-cover-bar {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 2px;
-  background: var(--hairline);
-}
-
-.graph-proposal-row-cover-bar::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: calc(var(--cover, 0) * 100%);
-  background: color-mix(in srgb, var(--ink) 65%, transparent);
 }
 
 /* Column headers, in the card's own micro-label voice (same size, tracking,
@@ -2083,9 +2060,8 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   display: flex;
   align-items: flex-end;
   gap: 12px;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   font-size: 10px;
-  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--ink) 45%, transparent);
 }
@@ -2095,8 +2071,12 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   min-width: 0;
 }
 
+/* The header's own text is tracked out; the MIRROR cells below must not be —
+   letter-spacing on an empty mirror cell still widens it (0.8px per cell was
+   enough to walk the caption off the column it labels). Tracking therefore
+   lives on the caption spans, never on the structure. */
 .graph-proposal-head .graph-proposal-row-cover {
-  padding-bottom: 0;
+  letter-spacing: 0.08em;
   color: inherit;
 }
 
@@ -2108,6 +2088,9 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   position: relative;
   border-color: transparent;
   color: inherit;
+  /* Must match the real control's metrics exactly or the mirror is a lie. */
+  font-size: 11px;
+  letter-spacing: normal;
 }
 
 .graph-vote.is-head .graph-vote-net {
@@ -2121,6 +2104,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 10px;
   letter-spacing: 0.08em;
 }
 
@@ -2183,6 +2167,10 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   font-size: 11px;
   line-height: 1;
   white-space: nowrap;
+  /* Cell padding as a token, because the min-widths below have to add it back
+     in to be real floors (see .graph-vote-net). Phones override just this. */
+  --vote-pad-x: 8px;
+  --vote-gap: 3px;
 }
 
 .graph-vote-cell,
@@ -2190,13 +2178,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: var(--vote-gap, 3px);
   /* The interactive card's cells are <button>s (border-box by UA default) and
      every other card's are <span>s (content-box), so the SAME min-width used
      to produce columns 16px wider on hover cards than on the pinned one. Pin
      the model here: the min-widths below are the cells' FULL widths. */
   box-sizing: border-box;
-  padding: 3px 8px;
+  padding: 3px var(--vote-pad-x, 8px);
   border: 0;
   background: none;
   font: inherit;
@@ -2205,20 +2193,32 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 /* Net score is the anchor: full-strength ink, framed by hairline dividers.
-   Width grows 1ch per extra character beyond the first; --vote-net-chars is set
-   on .graph-proposal-rows to the widest net value (incl. sign) across all rows,
-   so every row's net column shares one width and the dividers line up. */
+   --vote-net-chars is set on .graph-proposal-rows to the widest net (incl. its
+   sign) across ALL rows, so every row's net column shares one width and the
+   dividers line up.
+
+   The floor must cover the cell's FULL box — both paddings plus every
+   character — or it isn't a floor at all: the old `18px + (chars-1)ch` sat
+   below the rendered content in every case, so width came from each row's own
+   digits and a row reading "-101" ran ~5px wider than its "+29" neighbors,
+   dragging its whole vote control (and now the column header) out of line.
+   The +2px absorbs a minus sign that isn't exactly 1ch. */
 .graph-vote-net {
-  min-width: calc(18px + (var(--vote-net-chars, 1) - 1) * 1ch);
+  min-width: calc(
+    var(--vote-pad-x, 8px) * 2 + 2px + var(--vote-net-chars, 1) * 1ch
+  );
   border-left: 1px solid var(--hairline);
   border-right: 1px solid var(--hairline);
 }
 
-/* Directional counts read quieter than the net until hovered/cast. Width grows
-   with --vote-cell-chars (widest up/down count across all rows) on the same
-   shared basis, keeping the −/+ columns aligned when any row hits two digits. */
+/* Directional counts read quieter than the net until hovered/cast. Same
+   full-box floor as the net, with room for the sign glyph and the gap that
+   separates it from the count: padding + sign + gap + the widest count. */
 .graph-vote-cell {
-  min-width: calc(34px + (var(--vote-cell-chars, 1) - 1) * 1ch);
+  min-width: calc(
+    var(--vote-pad-x, 8px) * 2 + var(--vote-gap, 3px) + 2px
+    + (var(--vote-cell-chars, 1) + 1) * 1ch
+  );
   color: color-mix(in srgb, var(--ink) 62%, transparent);
 }
 
@@ -2402,39 +2402,39 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
     font-size: 10px;
   }
 
+  /* Only the padding token changes — both min-width formulas derive from it,
+     so the columns stay true floors at phone size too. */
   .graph-vote {
     font-size: 10px;
-  }
-
-  .graph-vote-cell,
-  .graph-vote-net {
-    padding: 3px 5px;
-  }
-
-  .graph-vote-net {
-    min-width: calc(14px + (var(--vote-net-chars, 1) - 1) * 1ch);
-  }
-
-  .graph-vote-cell {
-    min-width: calc(26px + (var(--vote-cell-chars, 1) - 1) * 1ch);
+    --vote-pad-x: 5px;
   }
 
   /* The header word ("blocks") no longer has to fit on a phone — the column
-     narrows to what the fraction and its meter need, and the header ellipsizes
-     rather than pushing the vote control off the card. */
+     narrows to what the fraction needs, and the header ellipsizes rather than
+     pushing the vote control off the card. */
   .graph-proposal-rows.has-coverage {
-    --cover-col: 40px;
+    --cover-col: 34px;
   }
 
   .graph-proposal-head {
     gap: 8px;
     font-size: 9px;
-    letter-spacing: 0.04em;
   }
 
   .graph-proposal-head .graph-proposal-row-cover {
     overflow: hidden;
+    letter-spacing: 0.04em;
     text-overflow: ellipsis;
+  }
+
+  /* Track the phone-sized vote cells, so the mirror still matches. */
+  .graph-vote.is-head {
+    font-size: 10px;
+  }
+
+  .graph-proposal-head-caption {
+    font-size: 9px;
+    letter-spacing: 0.04em;
   }
 }
 
