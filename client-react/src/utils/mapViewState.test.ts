@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { computeInitialMapView } from "./mapViewState";
+import { describe, it, expect, vi } from "vitest";
+import type L from "leaflet";
+import { computeInitialMapView, fitPoints, setMapInstance } from "./mapViewState";
 import { CONFIG } from "../config";
 
 const view = (search: string) => computeInitialMapView(new URLSearchParams(search));
@@ -53,5 +54,37 @@ describe("computeInitialMapView", () => {
   it("waypoints with forced-corridor tokens still center", () => {
     const v = view("w=40.700000,-74.000000,fabc123;40.720000,-73.980000");
     expect(v.lat).toBeCloseTo(40.71, 6);
+  });
+});
+
+describe("fitPoints", () => {
+  const stubMap = () => {
+    const map = { panTo: vi.fn(), fitBounds: vi.fn() };
+    setMapInstance(map as unknown as L.Map);
+    return map;
+  };
+
+  it("pans (no zoom change) for a single point", () => {
+    const map = stubMap();
+    fitPoints([{ lat: 40.7, lng: -74 }, null]);
+    expect(map.panTo).toHaveBeenCalledWith([40.7, -74]);
+    expect(map.fitBounds).not.toHaveBeenCalled();
+  });
+
+  it("fits both ends of a route", () => {
+    const map = stubMap();
+    fitPoints([{ lat: 40.7, lng: -74 }, { lat: 40.72, lng: -73.98 }]);
+    expect(map.panTo).not.toHaveBeenCalled();
+    expect(map.fitBounds).toHaveBeenCalledWith(
+      [[40.7, -74], [40.72, -73.98]],
+      expect.objectContaining({ maxZoom: 17 })
+    );
+  });
+
+  it("does nothing with no points", () => {
+    const map = stubMap();
+    fitPoints([null, undefined]);
+    expect(map.panTo).not.toHaveBeenCalled();
+    expect(map.fitBounds).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,7 @@ import { memo, useState, useCallback } from "react";
 import { useRoute, useTheme, useHeatmap } from "../../context";
 import { landingHref } from "../../themes";
 import { getCurrentMap } from "../../map/runtime";
-import { panTo } from "../../utils/mapViewState";
+import { fitPoints } from "../../utils/mapViewState";
 import { HowItWorksModal } from "../HowItWorksModal";
 import { ModeSwitcher } from "../ModeSwitcher";
 import { VoteTypeSelector } from "../VoteTypeSelector";
@@ -72,9 +72,13 @@ export const TopBar = memo(function TopBar() {
         setActiveTool("start");
       }
       setTypingField(null);
-      panTo(coords);
+      // Frame the whole route: with both ends placed, zooming to the point just
+      // set would push the other one off screen.
+      fitPoints(
+        field === "start" ? [coords, end.coords] : [start.coords, coords]
+      );
     },
-    [setStartPoint, setEndPoint, setActiveTool]
+    [setStartPoint, setEndPoint, setActiveTool, start.coords, end.coords]
   );
 
   const handleTypingClose = useCallback(() => {
