@@ -1,0 +1,2568 @@
+diff --git a/data/.gitignore b/data/.gitignore
+index 3eb9792..c551818 100644
+--- a/data/.gitignore
++++ b/data/.gitignore
+@@ -2,3 +2,4 @@ raw/
+ posters/work/
+ posters/out/
+ posters/reference/page-*.png
++posters/wait/
+diff --git a/data/posters/templates/longest_wait.html b/data/posters/templates/longest_wait.html
+new file mode 100644
+index 0000000..607182e
+--- /dev/null
++++ b/data/posters/templates/longest_wait.html
+@@ -0,0 +1,503 @@
++<!DOCTYPE html>
++<html>
++<head>
++<meta charset="utf-8">
++<style>
++  @import url('https://fonts.googleapis.com/css2?family=Red+Hat+Mono:wght@300;400;500;600;700&display=swap');
++
++  /* ==========================================================================
++     City Edit — longest-wait poster
++     8.5 x 11in at 100 dpi (850 x 1134), meant to come off an office laser
++     printer without emptying it. Every choice here is also an ink choice:
++     the paper stays white, the hero figure is an outline rather than a fill,
++     and the one large field of colour is a 45-degree hatch at roughly an
++     eighth coverage. The only solid ink on the page is type, the QR, and the
++     few seconds of WALK the signal actually gives you.
++     ========================================================================== */
++
++  :root {
++    --ink: #111111;
++    --ink-2: #55534e;
++    --ink-3: #8d8a82;
++    --rule: #cfccc4;
++    --red: #dc343b;      /* --color-end in the app: the stop half of the pair */
++    --cyan: #00c4d4;     /* --color-start: the sliver you are actually given */
++
++    --m: 58px;           /* page margin */
++    --spine: 34px;       /* left strip holding the rotated survey line */
++  }
++
++  * { box-sizing: border-box; }
++
++  html, body { margin: 0; padding: 0; }
++
++  body {
++    position: relative;
++    width: 850px;
++    height: 1134px;
++    overflow: hidden;
++    background: #fff;
++    color: var(--ink);
++    font-family: 'Red Hat Mono', ui-monospace, Menlo, monospace;
++    font-variant-numeric: tabular-nums;
++    -webkit-font-smoothing: antialiased;
++  }
++
++  /* The plane everything is plotted on. 1px dots on an 18px pitch is about a
++     third of one percent coverage — atmosphere for free. */
++  .grid {
++    position: absolute;
++    inset: 0;
++    background-image: radial-gradient(circle, #d8d5cc 0.7px, transparent 0.8px);
++    background-size: 18px 18px;
++    background-position: 4px 4px;
++  }
++
++  /* Print-shop registration ticks. */
++  .reg { position: absolute; width: 13px; height: 13px; }
++  .reg::before, .reg::after { content: ""; position: absolute; background: var(--ink-3); }
++  .reg::before { left: 0; top: 6px; width: 13px; height: 1px; }
++  .reg::after { top: 0; left: 6px; width: 1px; height: 13px; }
++  .reg.tl { top: 22px; left: 22px; }
++  .reg.tr { top: 22px; right: 22px; }
++  .reg.bl { bottom: 22px; left: 22px; }
++  .reg.br { bottom: 22px; right: 22px; }
++
++  .page {
++    position: absolute;
++    inset: 0;
++    padding: 44px var(--m) 38px calc(var(--m) + var(--spine));
++    display: flex;
++    flex-direction: column;
++  }
++
++  /* --- left spine ------------------------------------------------------- */
++  .spine {
++    position: absolute;
++    left: var(--m);
++    top: 44px;
++    bottom: 38px;
++    width: var(--spine);
++    border-left: 1px solid var(--rule);
++  }
++  .spine span {
++    position: absolute;
++    bottom: 0;
++    left: 11px;
++    transform-origin: 0 0;
++    transform: rotate(-90deg);
++    white-space: nowrap;
++    font-size: 9.5px;
++    font-weight: 500;
++    letter-spacing: 0.32em;
++    text-transform: uppercase;
++    color: var(--ink-3);
++  }
++
++  /* --- header ----------------------------------------------------------- */
++  .head {
++    display: flex;
++    align-items: flex-end;
++    justify-content: space-between;
++    padding-bottom: 9px;
++    border-bottom: 1.5px solid var(--ink);
++  }
++  .head .who {
++    font-size: 11px;
++    font-weight: 600;
++    letter-spacing: 0.26em;
++    text-transform: uppercase;
++  }
++  .head .rank {
++    font-size: 11px;
++    font-weight: 600;
++    letter-spacing: 0.2em;
++    padding: 3px 9px 2px;
++    border: 1.5px solid var(--red);
++    color: var(--red);
++  }
++
++  /* --- the claim -------------------------------------------------------- */
++  /* Deliberately small. From across the street you should read the figure and
++     the street name; the claim is for the person who has already stopped. */
++  #claim {
++    margin: 18px 0 0;
++    font-size: 12.5px;
++    font-weight: 600;
++    line-height: 1.7;
++    letter-spacing: 0.19em;
++    text-transform: uppercase;
++    color: var(--ink-2);
++  }
++  #claim b { color: var(--red); font-weight: 700; }
++
++  /* --- hero figure ------------------------------------------------------ */
++  /* An outline, not a fill: the same presence for a twentieth of the toner.
++     The stroke stays at 3px so a 300 dpi laser still holds it. */
++  .hero { display: flex; align-items: flex-start; gap: 24px; margin-top: 6px; }
++  #figure {
++    font-size: 196px;
++    font-weight: 700;
++    line-height: 0.88;
++    letter-spacing: -0.05em;
++    color: transparent;
++    -webkit-text-stroke: 3px var(--ink);
++  }
++  .unit {
++    margin-top: 30px;
++    padding-top: 12px;
++    border-top: 2px solid var(--red);
++    font-size: 11.5px;
++    font-weight: 600;
++    line-height: 1.7;
++    letter-spacing: 0.18em;
++    text-transform: uppercase;
++    color: var(--ink-2);
++    max-width: 175px;
++  }
++
++  /* --- place ------------------------------------------------------------ */
++  .place { margin-top: 18px; }
++  #street {
++    font-size: 42px;
++    font-weight: 700;
++    line-height: 1.02;
++    letter-spacing: -0.025em;
++    text-transform: uppercase;
++  }
++  #cross {
++    margin-top: 8px;
++    font-size: 16px;
++    font-weight: 400;
++    letter-spacing: 0.02em;
++    color: var(--ink-2);
++  }
++  #cross em { font-style: normal; color: var(--ink-3); }
++
++  /* --- the diagram ------------------------------------------------------ */
++  .diagram { margin-top: 22px; }
++  .diagram-head {
++    display: flex;
++    justify-content: space-between;
++    align-items: baseline;
++    gap: 16px;
++    padding-bottom: 7px;
++    border-bottom: 1px solid var(--rule);
++    font-size: 10.5px;
++    font-weight: 600;
++    letter-spacing: 0.17em;
++    text-transform: uppercase;
++    color: var(--ink-2);
++  }
++  .key { color: var(--ink-3); letter-spacing: 0.1em; white-space: nowrap; }
++  .key i {
++    display: inline-block;
++    width: 9px; height: 9px;
++    margin: 0 4px 0 13px;
++    vertical-align: -1px;
++    font-style: normal;
++    border: 1px solid var(--ink-3);
++  }
++  .key .k-walk { background: var(--cyan); border-color: var(--cyan); }
++  .key .k-flash {
++    border-color: var(--cyan);
++    background: repeating-linear-gradient(45deg, transparent 0 2px, var(--cyan) 2px 3px);
++  }
++  .key .k-stop {
++    border-color: var(--red);
++    background: repeating-linear-gradient(45deg, transparent 0 3px, var(--red) 3px 4px);
++  }
++
++  /* Plan view and time chart share one row per carriageway, so a band of
++     asphalt sits exactly beside the seconds it costs to get over it. */
++  .chart {
++    display: grid;
++    grid-template-columns: 100px 1fr;
++    column-gap: 16px;
++    margin-top: 15px;
++    align-items: start;
++  }
++  .plan { display: block; }
++  .bars { display: flex; flex-direction: column; }
++
++  .bar {
++    position: relative;
++    border: 1px solid var(--ink);
++    background: repeating-linear-gradient(45deg,
++      transparent 0 6px, var(--red) 6px 7px);
++  }
++  .seg { position: absolute; top: 0; bottom: 0; }
++  .seg.walk { background: var(--cyan); }
++  /* White underneath, or the red hatch behind shows through and the two
++     screens moire into mud. */
++  .seg.flash {
++    background:
++      repeating-linear-gradient(45deg, transparent 0 4px, var(--cyan) 4px 5px),
++      #ffffff;
++    border-right: 1px solid var(--cyan);
++  }
++  .bar .lab {
++    position: absolute;
++    right: 7px; top: 50%;
++    transform: translateY(-50%);
++    font-size: 10px;
++    font-weight: 600;
++    letter-spacing: 0.12em;
++    color: var(--ink-2);
++    background: #fff;
++    padding: 1px 5px;
++    border: 1px solid var(--rule);
++    z-index: 2;
++  }
++
++  .axis {
++    grid-column: 2;
++    position: relative;
++    height: 20px;
++    margin-top: 7px;
++    border-top: 1px solid var(--ink);
++  }
++  .axis span {
++    position: absolute;
++    top: 5px;
++    font-size: 9.5px;
++    font-weight: 500;
++    letter-spacing: 0.07em;
++    color: var(--ink-2);
++    transform: translateX(-50%);
++  }
++  .axis span::before {
++    content: "";
++    position: absolute;
++    left: 50%; top: -6px;
++    width: 1px; height: 5px;
++    background: var(--ink);
++  }
++  .axis span.first { transform: none; }
++  .axis span.first::before { left: 0; }
++  .axis span.last { transform: translateX(-100%); }
++  .axis span.last::before { left: auto; right: 0; }
++
++  #plan-note {
++    grid-column: 1;
++    margin-top: 8px;
++    font-size: 9px;
++    font-weight: 500;
++    line-height: 1.5;
++    letter-spacing: 0.05em;
++    text-transform: uppercase;
++    color: var(--ink-3);
++  }
++
++  /* --- site notes ------------------------------------------------------- */
++  /* Facts about this specific signal, in the app's own chip idiom. They also
++     keep the page from opening a hole under a one-stage crossing, whose
++     diagram is a quarter the height of a boulevard's. */
++  #notes {
++    display: flex;
++    flex-wrap: wrap;
++    gap: 8px;
++    margin-top: 20px;
++  }
++  #notes span {
++    padding: 4px 9px 3px;
++    border: 1px solid var(--rule);
++    font-size: 9.5px;
++    font-weight: 600;
++    letter-spacing: 0.15em;
++    text-transform: uppercase;
++    color: var(--ink-2);
++    white-space: nowrap;
++  }
++  #notes span.warn { border-color: var(--red); color: var(--red); }
++
++  /* --- stats ------------------------------------------------------------ */
++  .stats {
++    display: grid;
++    grid-template-columns: repeat(3, 1fr);
++    margin-top: 24px;
++    border-top: 1.5px solid var(--ink);
++  }
++  .stats div { padding: 12px 14px 0 0; }
++  .stats div + div { border-left: 1px solid var(--rule); padding-left: 20px; }
++  .stats .n {
++    font-size: 29px;
++    font-weight: 700;
++    line-height: 1;
++    letter-spacing: -0.03em;
++  }
++  .stats .k {
++    margin-top: 8px;
++    font-size: 9.5px;
++    font-weight: 500;
++    line-height: 1.5;
++    letter-spacing: 0.13em;
++    text-transform: uppercase;
++    color: var(--ink-2);
++  }
++
++  /* --- the compounding line --------------------------------------------- */
++  /* A daily figure is easy to shrug off. The same figure over a working year
++     is not, so the poster says it out loud once. */
++  #yearline {
++    margin-top: 20px;
++    padding: 14px 0 0;
++    border-top: 1px solid var(--rule);
++    font-size: 18.5px;
++    font-weight: 400;
++    line-height: 1.42;
++    letter-spacing: -0.005em;
++  }
++  #yearline b { font-weight: 700; }
++
++  /* --- call to action --------------------------------------------------- */
++  .cta {
++    display: flex;
++    align-items: flex-end;
++    justify-content: space-between;
++    gap: 24px;
++    margin-top: auto;
++    padding-top: 18px;
++  }
++  .cta .say { flex: 1; min-width: 0; }
++  .here { flex: none; text-align: center; }
++  .here svg { display: block; }
++  .here .cap {
++    margin-top: 7px;
++    font-size: 9px;
++    font-weight: 600;
++    letter-spacing: 0.19em;
++    text-transform: uppercase;
++    color: var(--ink-2);
++  }
++  .cta .big {
++    font-size: 26px;
++    font-weight: 700;
++    line-height: 1.14;
++    letter-spacing: -0.02em;
++  }
++  .cta .big u {
++    text-decoration: none;
++    box-shadow: inset 0 -0.26em 0 rgba(0, 196, 212, 0.4);
++  }
++  .cta .sub {
++    margin-top: 11px;
++    font-size: 12.5px;
++    font-weight: 400;
++    line-height: 1.55;
++    color: var(--ink-2);
++  }
++  .qr { text-align: center; flex: none; }
++  .qr img { display: block; width: 142px; height: 142px; }
++  .qr .scan {
++    margin-top: 7px;
++    font-size: 9px;
++    font-weight: 600;
++    letter-spacing: 0.19em;
++    text-transform: uppercase;
++    color: var(--ink-2);
++  }
++
++  /* --- footer ----------------------------------------------------------- */
++  .foot {
++    display: flex;
++    align-items: center;
++    justify-content: space-between;
++    margin-top: 20px;
++    padding-top: 9px;
++    border-top: 1px solid var(--rule);
++    font-size: 9px;
++    font-weight: 500;
++    letter-spacing: 0.12em;
++    color: var(--ink-3);
++  }
++  .wordmark { display: flex; align-items: center; gap: 8px; }
++  .wordmark b {
++    display: inline-block;
++    border: 1.3px solid var(--ink-2);
++    padding: 0 2.5px;
++    margin-right: 1.5px;
++    font-size: 9px;
++    font-weight: 700;
++    line-height: 13px;
++    color: var(--ink-2);
++  }
++  .wordmark .gap { display: inline-block; width: 5px; }
++</style>
++</head>
++<body>
++  <div class="grid"></div>
++  <div class="reg tl"></div><div class="reg tr"></div>
++  <div class="reg bl"></div><div class="reg br"></div>
++
++  <div class="spine"><span id="spineline">Pedestrian wait survey — New York City — 2026</span></div>
++
++  <div class="page">
++    <div class="head">
++      <div class="who">City&nbsp;Edit&nbsp;/&nbsp;Crossings</div>
++      <div class="rank" id="rank">No. 07</div>
++    </div>
++
++    <div id="claim">The <b>7th longest wait</b> of any crossing in New York City</div>
++
++    <div class="hero">
++      <div id="figure">2:09</div>
++      <div class="unit" id="unit">Average wait to cross,<br>every single time</div>
++    </div>
++
++    <div class="place">
++      <div id="street">Queens Boulevard</div>
++      <div id="cross"><em>at</em> 71st Road &middot; Forest Hills, Queens</div>
++    </div>
++
++    <div class="diagram">
++      <div class="diagram-head">
++        <span id="diagram-title">Four crossings &middot; a 120-second cycle each</span>
++        <span class="key"><i class="k-walk"></i>Walk<i class="k-flash"></i>Countdown<i class="k-stop"></i>Wait</span>
++      </div>
++      <div class="chart" id="chart">
++        <svg class="plan" width="96" height="138" viewBox="0 0 96 138"></svg>
++        <div class="bars"></div>
++        <div id="plan-note">50 m of road<br>3 islands</div>
++        <div class="axis"><span class="first">0s</span></div>
++      </div>
++    </div>
++
++    <div id="notes"><span>120 s cycle</span></div>
++
++    <div class="stats" id="stats">
++      <div><div class="n">14,472</div><div class="k">People cross<br>here each day</div></div>
++      <div><div class="n">7 sec</div><div class="k">Of every 120 you<br>may start walking</div></div>
++      <div><div class="n">283 hrs</div><div class="k">Of their time, lost<br>here every weekday</div></div>
++    </div>
++
++    <div id="yearline">Standing at this one corner adds up to
++      <b>39 full-time jobs&rsquo; worth</b> of doing nothing, every year.</div>
++
++    <div class="cta">
++      <div class="here">
++        <span id="locator"></span>
++        <div class="cap">You are here</div>
++      </div>
++      <div class="say">
++        <div class="big" id="ask">This corner is <u>editable</u>.</div>
++        <div class="sub" id="sub">Scan to open this exact crossing on City Edit
++          and say what should change — a shorter cycle, a head start, a wider
++          island.</div>
++      </div>
++      <div class="qr">
++        <img id="qr" src="qr.png" alt="">
++        <div class="scan">Scan&nbsp;me</div>
++      </div>
++    </div>
++
++    <div class="foot">
++      <span id="code">A1</span>
++      <span class="wordmark">
++        <span><b>C</b><b>I</b><b>T</b><b>Y</b><span class="gap"></span><b>E</b><b>D</b><b>I</b><b>T</b></span>
++        <span>cityedit.org</span>
++      </span>
++    </div>
++  </div>
++</body>
++</html>
+diff --git a/scripts/build_wait_packet.py b/scripts/build_wait_packet.py
+new file mode 100644
+index 0000000..605e30d
+--- /dev/null
++++ b/scripts/build_wait_packet.py
+@@ -0,0 +1,437 @@
++#!/usr/bin/env python3
++"""
++Assemble the longest-wait poster packet: a cover sheet stating what the
++numbers are and are not, a placement checklist with a tick box per poster, a
++citywide placement map, then every poster — one PDF you can print and carry.
++
++Called by generate_wait_posters.py; also runnable on its own against an
++existing manifest:
++
++    python scripts/build_wait_packet.py
++"""
++
++import csv
++import html
++import json
++import math
++import subprocess
++from collections import defaultdict
++from pathlib import Path
++
++REPO = Path(__file__).resolve().parent.parent
++OUT = REPO / "data" / "posters" / "wait"
++FIT = REPO / "data" / "analysis" / "wait_model_fit.json"
++NTA_GEOJSON = REPO / "data" / "raw" / "nta2020.geojson"
++RENDER = REPO / "scripts" / "render_poster.sh"
++
++W, H = 850, 1134
++
++CAMPAIGN_TITLE = {
++    "longest_wait": "Longest waits",
++    "time_lost": "Most time lost",
++    "borough_no1": "Borough worst",
++    "nabe_no1": "Neighbourhood worst",
++}
++CAMPAIGN_COLOUR = {
++    "longest_wait": "#dc343b",
++    "time_lost": "#111111",
++    "borough_no1": "#1c7ed6",
++    "nabe_no1": "#2f9e44",
++}
++ORDER = ["longest_wait", "time_lost", "borough_no1", "nabe_no1"]
++
++SHEET_CSS = """
++<meta charset="utf-8">
++<style>
++  @import url('https://fonts.googleapis.com/css2?family=Red+Hat+Mono:wght@300;400;500;600;700&display=swap');
++  :root {
++    --ink: #111111; --ink-2: #55534e; --ink-3: #8d8a82;
++    --rule: #cfccc4; --red: #dc343b; --cyan: #00c4d4;
++  }
++  * { box-sizing: border-box; }
++  html, body { margin: 0; padding: 0; }
++  body {
++    position: relative; width: 850px; height: 1134px; overflow: hidden;
++    background: #fff; color: var(--ink);
++    font-family: 'Red Hat Mono', ui-monospace, Menlo, monospace;
++    font-variant-numeric: tabular-nums;
++    padding: 46px 58px 40px;
++    -webkit-font-smoothing: antialiased;
++  }
++  .grid {
++    position: absolute; inset: 0; z-index: -1;
++    background-image: radial-gradient(circle, #d8d5cc 0.7px, transparent 0.8px);
++    background-size: 18px 18px; background-position: 4px 4px;
++  }
++  .head {
++    display: flex; align-items: flex-end; justify-content: space-between;
++    padding-bottom: 9px; border-bottom: 1.5px solid var(--ink);
++    font-size: 11px; font-weight: 600; letter-spacing: 0.26em;
++    text-transform: uppercase;
++  }
++  h1 {
++    margin: 24px 0 6px; font-size: 34px; font-weight: 700;
++    letter-spacing: -0.03em; line-height: 1.06;
++  }
++  .sub {
++    font-size: 13px; font-weight: 400; line-height: 1.55; color: var(--ink-2);
++    max-width: 640px;
++  }
++  .foot {
++    position: absolute; left: 58px; right: 58px; bottom: 34px;
++    display: flex; align-items: center; justify-content: space-between;
++    padding-top: 9px; border-top: 1px solid var(--rule);
++    font-size: 9px; font-weight: 500; letter-spacing: 0.12em; color: var(--ink-3);
++  }
++  .wordmark { display: flex; align-items: center; gap: 8px; }
++  .wordmark b {
++    display: inline-block; border: 1.3px solid var(--ink-2); padding: 0 2.5px;
++    margin-right: 1.5px; font-size: 9px; font-weight: 700; line-height: 13px;
++    color: var(--ink-2);
++  }
++  .wordmark .gap { display: inline-block; width: 5px; }
++</style>
++"""
++
++
++def wordmark():
++    return ('<span class="wordmark"><span>'
++            + "".join(f"<b>{c}</b>" for c in "CITY")
++            + '<span class="gap"></span>'
++            + "".join(f"<b>{c}</b>" for c in "EDIT")
++            + '</span><span>cityedit.org</span></span>')
++
++
++def render(doc, stem, scale):
++    hp, pp = OUT / f"{stem}.html", OUT / f"{stem}.png"
++    hp.write_text(doc)
++    subprocess.run([str(RENDER), str(hp), str(pp), str(W), str(H), str(scale)],
++                   check=True, capture_output=True)
++    return pp
++
++
++# ------------------------------------------------------------------- cover
++
++COVER_CSS = """
++<style>
++  .lede {
++    margin: 22px 0 0; font-size: 19px; font-weight: 400; line-height: 1.45;
++    letter-spacing: -0.005em; max-width: 660px;
++  }
++  .lede b { font-weight: 700; }
++  .totals {
++    display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
++    margin: 26px 0 0; border-top: 1.5px solid var(--ink);
++  }
++  .totals div { padding: 12px 14px 14px 0; }
++  .totals div + div { border-left: 1px solid var(--rule); padding-left: 20px; }
++  .totals .n { font-size: 31px; font-weight: 700; letter-spacing: -0.03em; }
++  .totals .k {
++    margin-top: 8px; font-size: 9.5px; font-weight: 500; line-height: 1.5;
++    letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-2);
++  }
++  h2 {
++    margin: 28px 0 11px; font-size: 11px; font-weight: 600;
++    letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-2);
++    padding-bottom: 7px; border-bottom: 1px solid var(--rule);
++  }
++  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
++  .cols p {
++    margin: 0 0 12px; font-size: 11.5px; font-weight: 400; line-height: 1.58;
++    color: var(--ink-2);
++  }
++  .cols p b { color: var(--ink); font-weight: 600; }
++  .src {
++    margin: 0; font-size: 10.5px; line-height: 1.65; color: var(--ink-2);
++    list-style: none; padding: 0;
++  }
++  .src li { padding-left: 15px; text-indent: -15px; }
++  .src span { color: var(--ink-3); }
++</style>
++"""
++
++
++def cover_sheet(manifest, scale):
++    fit = json.loads(FIT.read_text())
++    v = fit["volume_model"]
++    total = fit["citywide_lost_hours_per_weekday"]
++    boroughs = len({m["borough"] for m in manifest})
++
++    doc = SHEET_CSS + COVER_CSS + f"""
++<div class="grid"></div>
++<div class="head"><span>City&nbsp;Edit&nbsp;/&nbsp;Crossings</span>
++  <span>Packet&nbsp;02</span></div>
++<h1>The longest waits<br>in New York City</h1>
++<p class="lede">Every signalised corner in the five boroughs, scored by how
++long a pedestrian stands there and how many pedestrians are standing there to
++do it. <b>{len(manifest)} posters</b>, across {boroughs} boroughs, each with a
++QR that opens that exact crossing on City Edit.</p>
++
++<div class="totals">
++  <div><div class="n">{fit['intersections']:,}</div>
++    <div class="k">Signalised crossings<br>scored citywide</div></div>
++  <div><div class="n">{total:,}</div>
++    <div class="k">Person-hours a weekday<br>spent waiting to cross</div></div>
++  <div><div class="n">{total * 250 / 1800:,.0f}</div>
++    <div class="k">Full-time jobs&rsquo; worth<br>of that, every year</div></div>
++</div>
++
++<h2>What the two numbers are</h2>
++<div class="cols">
++  <div>
++    <p><b>The wait is modelled, not measured.</b> No agency publishes New York's
++    signal timing, so each crossing's wait is estimated from signal
++    engineering: a 60, 90 or 120-second cycle picked from the road hierarchy;
++    a green split apportioned between the two streets by lanes and class; and
++    the standard uniform-arrival result for a fixed-time signal,
++    d&nbsp;=&nbsp;(C&nbsp;&minus;&nbsp;g)&sup2;&nbsp;/&nbsp;2C.</p>
++    <p>Divided boulevards are the reason the top of this list looks the way it
++    does. Where a street reaches the crossing as several separate
++    carriageways, the pedestrian waits on each island in turn, and every extra
++    island costs another full expected wait.</p>
++  </div>
++  <div>
++    <p><b>The crowd is modelled too.</b> DOT counts pedestrians at 114 places;
++    95 of them are street corners. A log-linear fit on those 95 —
++    distance-decayed subway entries plus DOT's own Pedestrian Mobility Plan
++    demand class — predicts a corner's volume with a leave-one-out
++    R&sup2;&nbsp;of&nbsp;{v['loo_r2']:.2f}, or roughly a third either way.</p>
++    <p><b>Where it is weakest:</b> the count programme samples retail
++    corridors, so the fit extrapolates worst on quiet streets; and subway
++    access carries most of the signal, so volumes are least trustworthy far
++    from the network — much of Staten Island and eastern Queens. Treat the
++    ranking as a way to start the argument, not to settle it.</p>
++  </div>
++</div>
++
++<h2>Built from</h2>
++<ul class="src">
++  <li>NYC DOT &mdash; Bi-Annual Pedestrian Counts <span>(cqsj-cfgu)</span></li>
++  <li>NYC DOT &mdash; Pedestrian Mobility Plan Pedestrian Demand <span>(fwpa-qxaf)</span></li>
++  <li>NYC DOT &mdash; Exclusive Pedestrian Signal locations <span>(8kuj-2n3u)</span></li>
++  <li>NYC DOT &mdash; Leading Pedestrian Interval signals <span>(xc4v-ntf4)</span></li>
++  <li>MTA &mdash; Subway Hourly Ridership, May 2026 <span>(5wq4-mkjj)</span></li>
++  <li>OpenStreetMap &mdash; signals, carriageways, lanes and street names</li>
++</ul>
++
++<div class="foot"><span>Rebuild: scripts/build_wait_rankings.py &rarr;
++  scripts/generate_wait_posters.py</span>{wordmark()}</div>
++"""
++    return render(doc, "cover", scale)
++
++
++# --------------------------------------------------------------- checklist
++
++CHECKLIST_CSS = """
++<style>
++  .cols { display: flex; gap: 26px; margin-top: 18px; }
++  .col { flex: 1; min-width: 0; }
++  table { border-collapse: collapse; width: 100%; }
++  th {
++    text-align: left; font-size: 9px; font-weight: 600; text-transform: uppercase;
++    letter-spacing: 0.14em; color: var(--ink-3); padding: 0 4px 5px;
++    border-bottom: 1.5px solid var(--ink);
++  }
++  th.r, td.r { text-align: right; }
++  td {
++    padding: 4.5px 4px; border-bottom: 1px solid #e9e7e0; font-size: 10.5px;
++    vertical-align: top;
++  }
++  .box {
++    width: 12px; height: 12px; border: 1.5px solid var(--ink);
++    display: inline-block; vertical-align: -1px;
++  }
++  .code { font-weight: 700; letter-spacing: 0.1em; }
++  .where { display: block; font-size: 8.5px; color: var(--ink-3); margin-top: 2px; }
++  .dot {
++    display: inline-block; width: 7px; height: 7px; margin-right: 5px;
++    vertical-align: 0;
++  }
++  .wait { font-weight: 600; }
++  .pageno { position: absolute; right: 58px; bottom: 52px; font-size: 10px;
++            color: var(--ink-3); }
++  .notes { margin-top: 26px; padding-top: 13px; border-top: 1.5px solid var(--ink);
++           max-width: 620px; }
++  .notes h3 {
++    margin: 0 0 8px; font-size: 10px; font-weight: 600; letter-spacing: 0.22em;
++    text-transform: uppercase; color: var(--ink-2);
++  }
++  .notes p {
++    margin: 0 0 7px; font-size: 11.5px; line-height: 1.55; color: var(--ink-2);
++  }
++</style>
++"""
++
++ROWS_PER_COL = 18
++
++
++def checklist_pages(manifest, scale):
++    per_page = ROWS_PER_COL * 2
++    pages = [manifest[i:i + per_page] for i in range(0, len(manifest), per_page)]
++    out = []
++
++    def table(ms):
++        body = "".join(
++            f'<tr><td><span class="box"></span></td>'
++            f'<td class="code">{m["code"]}</td>'
++            f'<td><span class="dot" style="background:'
++            f'{CAMPAIGN_COLOUR[m["campaign"]]}"></span>'
++            f'{html.escape(m["major"])}<span class="where">at '
++            f'{html.escape(m["minor"])} &middot; {html.escape(m["borough"])}</span></td>'
++            f'<td class="r wait">{int(m["wait_s"]) // 60}:'
++            f'{int(m["wait_s"]) % 60:02d}</td></tr>'
++            for m in ms)
++        return ('<table><tr><th></th><th>Code</th><th>Crossing</th>'
++                f'<th class="r">Wait</th></tr>{body}</table>')
++
++    for i, rows in enumerate(pages):
++        cols = f'<div class="col">{table(rows[:ROWS_PER_COL])}</div>'
++        if rows[ROWS_PER_COL:]:
++            cols += f'<div class="col">{table(rows[ROWS_PER_COL:])}</div>'
++        legend = " &nbsp; ".join(
++            f'<span class="dot" style="background:{CAMPAIGN_COLOUR[c]}"></span>'
++            f'{CAMPAIGN_TITLE[c]}'
++            for c in ORDER if c in {m["campaign"] for m in manifest})
++        doc = SHEET_CSS + CHECKLIST_CSS + f"""
++<div class="grid"></div>
++<div class="head"><span>City&nbsp;Edit&nbsp;/&nbsp;Crossings</span>
++  <span>Placement&nbsp;checklist</span></div>
++<h1>Where these go</h1>
++<p class="sub">Each poster carries its code in the bottom-left corner. Hang it
++in sight of the crossing it names, tick it off here, and the QR will bring
++whoever reads it to that exact spot on the map.<br>
++<span style="font-size:11px;color:var(--ink-3)">{legend}</span></p>
++<div class="cols">{cols}</div>
++<div class="notes">
++  <h3>Before you go</h3>
++  <p>Hang it at eye level, facing the crossing it names, where somebody
++  already standing still can read it — the whole point is that they have
++  ninety seconds to spare.</p>
++  <p>Don't cover signage, signal heads or anyone else's notice. Lamp posts and
++  utility boxes take tape; bus shelters and subway entrances are MTA property.</p>
++  <p>Paper posters are weather, not architecture. Expect to re-hang.</p>
++</div>
++<div class="pageno">Checklist {i + 1} / {len(pages)}</div>
++<div class="foot"><span>Wait is the modelled average, one crossing of the
++  main street</span>{wordmark()}</div>
++"""
++        out.append(render(doc, f"checklist_{i + 1}", scale))
++    return out
++
++
++# -------------------------------------------------------------- placement map
++
++def map_page(manifest, scale):
++    if not NTA_GEOJSON.exists():
++        print(f"!! map page skipped: {NTA_GEOJSON} missing")
++        return None
++    g = json.load(open(NTA_GEOJSON))
++    rings = []
++    for f in g["features"]:
++        geom = f["geometry"]
++        polys = (geom["coordinates"] if geom["type"] == "MultiPolygon"
++                 else [geom["coordinates"]])
++        for poly in polys:
++            rings.append(poly[0])
++
++    top, pad = 150, 58
++    map_h = H - top - 130
++    lons = [c[0] for r in rings for c in r]
++    lats = [c[1] for r in rings for c in r]
++    lon0, lon1, lat0, lat1 = min(lons), max(lons), min(lats), max(lats)
++    coslat = math.cos(math.radians((lat0 + lat1) / 2))
++    k = min((W - 2 * pad) / ((lon1 - lon0) * coslat), map_h / (lat1 - lat0))
++    ox = (W - (lon1 - lon0) * coslat * k) / 2
++    oy = top + (map_h - (lat1 - lat0) * k) / 2
++
++    def xy(lon, lat):
++        return ox + (lon - lon0) * coslat * k, oy + (lat1 - lat) * k
++
++    paths = []
++    for ring in rings:
++        step = max(1, len(ring) // 110)
++        pts = ring[::step]
++        if len(pts) < 3:
++            continue
++        d = "M" + "L".join(f"{x:.1f},{y:.1f}"
++                           for x, y in (xy(lo, la) for lo, la in pts)) + "Z"
++        paths.append(f"<path d='{d}' fill='#f0eee7' stroke='#ffffff' "
++                     f"stroke-width='0.7'/>")
++
++    # Downtown and Midtown stack half a dozen corners inside a few hundred
++    # metres, so labels get nudged clear of each other and tied back to their
++    # dot with a leader line.
++    placed, dots = [], []
++    for m in sorted(manifest, key=lambda m: (-float(m["lat"]), float(m["lon"]))):
++        x, y = xy(float(m["lon"]), float(m["lat"]))
++        lx, ly = x + 6, y + 3
++        while any(abs(lx - px) < 26 and abs(ly - py) < 9 for px, py in placed):
++            ly += 9.5
++        placed.append((lx, ly))
++        c = CAMPAIGN_COLOUR[m["campaign"]]
++        leader = ("" if ly - y < 6 else
++                  f"<line x1='{x:.1f}' y1='{y:.1f}' x2='{lx - 1:.1f}' "
++                  f"y2='{ly - 2.5:.1f}' stroke='{c}' stroke-width='0.6'/>")
++        dots.append(
++            f"{leader}<circle cx='{x:.1f}' cy='{y:.1f}' r='3.6' fill='{c}' "
++            f"stroke='#ffffff' stroke-width='1.2'/>"
++            f"<text x='{lx:.1f}' y='{ly:.1f}' style=\"font:600 7px "
++            f"'Red Hat Mono',monospace;fill:#111;paint-order:stroke;"
++            f"stroke:#fff;stroke-width:2.4px\">{m['code']}</text>")
++
++    legend = "".join(
++        f"<span style='display:inline-flex;align-items:center;gap:6px;"
++        f"margin-right:20px'><span style='width:9px;height:9px;"
++        f"background:{CAMPAIGN_COLOUR[c]};display:inline-block'></span>"
++        f"{CAMPAIGN_TITLE[c]}</span>"
++        for c in ORDER if c in {m["campaign"] for m in manifest})
++
++    doc = SHEET_CSS + f"""
++<div class="grid"></div>
++<div class="head"><span>City&nbsp;Edit&nbsp;/&nbsp;Crossings</span>
++  <span>Placement&nbsp;map</span></div>
++<h1>{len(manifest)} corners</h1>
++<p class="sub">One dot per poster. Codes match the checklist and the mark in
++each poster's bottom-left corner.</p>
++<svg width="{W}" height="{H}" viewBox="0 0 {W} {H}"
++     style="position:absolute;left:0;top:0;z-index:-1">
++  {''.join(paths)}{''.join(dots)}
++</svg>
++<div style="position:absolute;left:58px;bottom:74px;font-size:10.5px;
++     color:var(--ink-2)">{legend}</div>
++<div class="foot"><span></span>{wordmark()}</div>
++"""
++    return render(doc, "map_page", scale)
++
++
++# ------------------------------------------------------------------- packet
++
++def build_packet(manifest, scale=2):
++    from PIL import Image
++
++    sheets = [cover_sheet(manifest, scale)]
++    sheets += checklist_pages(manifest, scale)
++    mp = map_page(manifest, scale)
++    if mp:
++        sheets.append(mp)
++
++    pages = [Image.open(p).convert("RGB") for p in sheets]
++    pages += [Image.open(REPO / m["png"]).convert("RGB") for m in manifest]
++    pdf = OUT / "wait-poster-book.pdf"
++    pages[0].save(pdf, save_all=True, append_images=pages[1:],
++                  resolution=int(72 * scale), quality=88)
++    print(f"packet: {pdf} ({len(pages)} pages — {len(sheets)} front matter "
++          f"+ {len(manifest)} posters)")
++    return pdf
++
++
++def main():
++    rows = list(csv.DictReader(open(OUT / "manifest.csv")))
++    for r in rows:
++        for k in ("lat", "lon", "wait_s", "peds_day", "lost_hours_day"):
++            r[k] = float(r[k])
++    build_packet(rows)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/build_wait_rankings.py b/scripts/build_wait_rankings.py
+new file mode 100644
+index 0000000..56c11d7
+--- /dev/null
++++ b/scripts/build_wait_rankings.py
+@@ -0,0 +1,693 @@
++#!/usr/bin/env python3
++"""
++Rank NYC's signalised intersections by how much human time they burn: how
++long a pedestrian waits to cross, multiplied by how many pedestrians are
++actually there to wait.
++
++    lost person-hours / weekday  =  Σ  crossers · average wait
++
++Two models feed it, both built only from public data.
++
++WAIT — no agency publishes NYC signal timing, so the wait is *estimated* from
++signal engineering, not observed:
++
++  · Cycle length C from the road hierarchy at the corner. NYC DOT runs 60 /
++    90 / 120-second cycles, longest on the widest arterials.
++  · Green split. A pedestrian crossing street A walks parallel to street B and
++    goes when B goes, so A's crossing gets B's share of the green. Share is
++    apportioned by lanes × class, clamped to [0.30, 0.62] — a side street
++    never gets nothing, an arterial never gets everything.
++  · Average wait for random arrival at a fixed-time signal (the standard
++    uniform-arrival result):        d = (C − g)² / (2C)
++  · Staged crossings. Boulevards with medians and service roads appear in OSM
++    as several signalised nodes 20-50 m apart; each extra node is another
++    island to wait on, and (absent pedestrian-favourable offsets) each costs
++    another d in expectation.
++  · Exclusive pedestrian phases (Barnes Dance) stop all traffic, so the walk
++    interval is sized to the crossing and nothing more — safer, and a longer
++    wait. Modelled from the DOT's own location list.
++  · Where a crossing is too wide to clear in the green the model computed and
++    there is no median to stop on, the green is raised to the MUTCD 3.5 ft/s
++    requirement instead — DOT must give the time, so the model must too.
++
++VOLUME — a log-linear model fitted on the 95 street corners where DOT actually
++counts pedestrians (its 114 sites less the river crossings and the greenway,
++which are not street corners), from two citywide predictors:
++
++  · subway entries near the corner (MTA, distance-decayed)
++  · the DOT Pedestrian Mobility Plan demand class of each street
++
++Leave-one-out R² ≈ 0.71, so the model gets a corner's volume right to roughly
++a third either way. Two caveats it cannot fix: DOT counts retail corridors,
++so the fit is trained where the busy corners are and extrapolates worst on
++quiet streets; and subway access carries most of the signal, so volume is
++least trustworthy far from the subway network — much of Staten Island and
++eastern Queens.
++
++Both models are estimates. The ranking they produce is a way to start an
++argument about which corners waste the most of the city's time, not a
++measurement of it.
++
++Usage:
++  python scripts/build_wait_rankings.py                 # writes the CSVs
++  python scripts/build_wait_rankings.py --inspect "Queens Boulevard"
++"""
++
++import argparse
++import csv
++import gzip
++import json
++import math
++import re
++from collections import defaultdict
++from pathlib import Path
++
++REPO = Path(__file__).resolve().parent.parent
++RAW = REPO / "data" / "raw"
++WAIT = RAW / "wait"
++OUT = REPO / "data" / "analysis"
++
++M_PER_DEG_LAT = 111_320.0
++M_PER_DEG_LON = 84_400.0  # at NYC's latitude
++
++# ---------------------------------------------------------------- wait model
++
++# How much of a signal's capacity a street commands, per lane. A trunk lane
++# gets more green than a residential lane carrying the same count.
++CLASS_WEIGHT = {
++    "motorway": 1.7, "trunk": 1.6, "primary": 1.5, "secondary": 1.35,
++    "tertiary": 1.2, "unclassified": 1.05, "residential": 1.0,
++    "living_street": 0.8,
++}
++BIG_CLASSES = {"motorway", "trunk", "primary", "secondary"}
++
++LANE_M = 3.05          # travel lane width
++PARKING_M = 2.4        # curb lane, one per side
++MEDIAN_M = 6.0         # island between carriageways
++WALK_SPEED = 1.07      # 3.5 ft/s, the MUTCD design pedestrian
++WALK_INTERVAL = 7.0    # the WALK indication before the countdown starts
++LOST_TIME = 4.0        # yellow + all-red eaten out of each phase
++SPLIT_MIN, SPLIT_MAX = 0.30, 0.62
++CLUSTER_M = 45.0       # signalised nodes this close are one intersection
++MAX_STAGES = 4
++
++# Pedestrians walking past a corner along street B who actually cross street
++# A. Not all of them — some turn the corner or enter a door mid-block.
++THROUGH_SHARE = 0.65
++
++# The count programme samples 7-9 AM and 4-7 PM. Those five hours are about
++# 46% of a 7 AM - 7 PM weekday in an urban pedestrian profile, so the reported
++# volume is a 12-hour weekday day, not a 24-hour one.
++COUNT_HOURS_SHARE = 0.46
++
++
++def norm_street(name):
++    """Canonical form for matching OSM names against DOT's. Suffixes expand
++    only in final position ('ST NICHOLAS AVE' keeps its saint), directions
++    only in leading position, and ordinals lose their th/st/nd/rd."""
++    s = re.sub(r"[^A-Z0-9 ]", " ", (name or "").upper())
++    toks = s.split()
++    if not toks:
++        return ""
++    lead = {"E": "EAST", "W": "WEST", "N": "NORTH", "S": "SOUTH"}
++    tail = {
++        "ST": "STREET", "STR": "STREET", "AVE": "AVENUE", "AV": "AVENUE",
++        "RD": "ROAD", "BLVD": "BOULEVARD", "BLV": "BOULEVARD",
++        "PKWY": "PARKWAY", "PKY": "PARKWAY", "PWY": "PARKWAY",
++        "PL": "PLACE", "DR": "DRIVE", "LN": "LANE", "CT": "COURT",
++        "TER": "TERRACE", "TERR": "TERRACE", "SQ": "SQUARE",
++        "TPKE": "TURNPIKE", "TPK": "TURNPIKE", "EXPY": "EXPRESSWAY",
++        "EXPWY": "EXPRESSWAY", "HWY": "HIGHWAY", "BRG": "BRIDGE",
++        "CIR": "CIRCLE", "PLZ": "PLAZA", "WY": "WAY",
++    }
++    if toks[0] in lead:
++        toks[0] = lead[toks[0]]
++    if toks[-1] in tail:
++        toks[-1] = tail[toks[-1]]
++    toks = [re.sub(r"^(\d+)(ST|ND|RD|TH)$", r"\1", t) for t in toks]
++    return " ".join(toks)
++
++
++def cycle_length(cls, lanes):
++    """NYC DOT runs 60 / 90 / 120-second cycles; the widest arterials get the
++    longest ones so their green can serve the traffic. `lanes` is the whole
++    cross-section — a boulevard's service roads count."""
++    if lanes >= 8 or (cls in ("motorway", "trunk") and lanes >= 6):
++        return 120.0
++    if cls in BIG_CLASSES:
++        return 90.0
++    return 60.0
++
++
++def street_weight(s):
++    return s["lanes"] * CLASS_WEIGHT[s["cls"]]
++
++
++def crossing_width(street):
++    """Kerb-to-kerb metres across the whole street: every travel lane, a parked
++    car's width at the two outer kerbs, and an island between carriageways."""
++    stages = street.get("stages", 1)
++    return street["lanes"] * LANE_M + 2 * PARKING_M + (stages - 1) * MEDIAN_M
++
++
++def crossing_wait(crossed, along, barnes):
++    """Average seconds a pedestrian spends standing before crossing `crossed`,
++    walking along `along`. Returns (wait_s, cycle_s, green_s)."""
++    stages = crossed.get("stages", 1)
++    C = cycle_length(crossed["cls"], crossed["lanes"])
++
++    w_cross, w_along = street_weight(crossed), street_weight(along)
++    split = min(SPLIT_MAX, max(SPLIT_MIN, w_along / (w_cross + w_along)))
++    g = C * split - LOST_TIME
++
++    stage_m = crossing_width(crossed) / stages
++    needed = stage_m / WALK_SPEED + WALK_INTERVAL
++
++    if barnes:
++        # All traffic stops, so the walk interval is exactly what the crossing
++        # needs and no more — the rest of the cycle belongs to cars.
++        g = needed
++    elif stages == 1 and needed > g:
++        # No island to break the crossing on, so DOT has to lengthen the
++        # pedestrian phase to the 3.5 ft/s requirement.
++        g = needed
++
++    g = max(5.0, min(g, C - LOST_TIME))
++    per_stage = (C - g) ** 2 / (2 * C)
++    return stages * per_stage, C, g
++
++
++# ------------------------------------------------------------- spatial index
++
++class Grid:
++    """Uniform lat/lon bucket index for radius queries."""
++
++    def __init__(self, cell_m=200.0):
++        self.cell = cell_m
++        self.dlat = cell_m / M_PER_DEG_LAT
++        self.dlon = cell_m / M_PER_DEG_LON
++        self.buckets = defaultdict(list)
++
++    def key(self, lat, lon):
++        return int(lat / self.dlat), int(lon / self.dlon)
++
++    def add(self, lat, lon, payload):
++        self.buckets[self.key(lat, lon)].append((lat, lon, payload))
++
++    def near(self, lat, lon, radius_m):
++        ci, cj = self.key(lat, lon)
++        span_i = int(radius_m / self.cell) + 1
++        span_j = int(radius_m / self.cell) + 1
++        for di in range(-span_i, span_i + 1):
++            for dj in range(-span_j, span_j + 1):
++                for la, lo, p in self.buckets.get((ci + di, cj + dj), ()):
++                    d = math.hypot((la - lat) * M_PER_DEG_LAT,
++                                   (lo - lon) * M_PER_DEG_LON)
++                    if d <= radius_m:
++                        yield d, p
++
++
++# ------------------------------------------------------------------- loading
++
++def load_osm():
++    with gzip.open(WAIT / "osm_intersections.json.gz", "rt") as f:
++        return json.load(f)
++
++
++def load_nta():
++    from shapely.geometry import shape
++    from shapely.strtree import STRtree
++    g = json.load(open(RAW / "nta2020.geojson"))
++    polys = [shape(f["geometry"]) for f in g["features"]]
++    props = [(f["properties"]["ntaname"], f["properties"]["boroname"])
++             for f in g["features"]]
++    return STRtree(polys), polys, props
++
++
++def load_demand_index():
++    """Grid of Pedestrian Mobility Plan segment vertices -> (norm name, rank).
++    Rank is DOT's 1 (Global, busiest) .. 5 (Baseline)."""
++    g = json.loads((WAIT / "ped_demand.geojson").read_text())
++    grid = Grid(120.0)
++    for f in g["features"]:
++        p = f["properties"]
++        try:
++            rank = int(float(p["rank"]))
++        except (KeyError, TypeError, ValueError):
++            continue
++        name = norm_street(p.get("street"))
++        geom = f["geometry"]
++        if not geom:
++            continue
++        lines = (geom["coordinates"] if geom["type"] == "MultiLineString"
++                 else [geom["coordinates"]])
++        for line in lines:
++            # Vertices are dense; every third is plenty for a 60 m query.
++            for lon, lat in line[::3] or line[:1]:
++                grid.add(lat, lon, (name, rank))
++    return grid
++
++
++def load_subway():
++    grid = Grid(400.0)
++    for s in json.loads((WAIT / "subway_daily.json").read_text()):
++        grid.add(s["lat"], s["lon"], s["daily_entries"])
++    return grid
++
++
++def load_poi(pois):
++    grid = Grid(200.0)
++    for lat, lon in pois:
++        grid.add(lat, lon, 1)
++    return grid
++
++
++def load_point_flags(fname, key_geom="the_geom"):
++    grid = Grid(120.0)
++    for r in json.loads((WAIT / fname).read_text()):
++        geom = r.get(key_geom)
++        if not geom or not geom.get("coordinates"):
++            continue
++        lon, lat = geom["coordinates"][:2]
++        grid.add(lat, lon, True)
++    return grid
++
++
++# ----------------------------------------------------------- volume features
++
++SUBWAY_DECAY_M = 300.0
++SUBWAY_RADIUS_M = 900.0
++POI_RADIUS_M = 200.0
++
++
++def subway_access(grid, lat, lon):
++    """Distance-decayed daily subway entries around a point, doubled because
++    every entry is matched by an exit somewhere and both walk on a street."""
++    total = 0.0
++    for d, entries in grid.near(lat, lon, SUBWAY_RADIUS_M):
++        total += entries * math.exp(-d / SUBWAY_DECAY_M)
++    return 2.0 * total
++
++
++def poi_count(grid, lat, lon):
++    return sum(1 for _ in grid.near(lat, lon, POI_RADIUS_M))
++
++
++DEMAND_SCORE = {1: 5.0, 2: 4.0, 3: 3.0, 4: 2.0, 5: 1.0}
++
++
++def demand_for(grid, lat, lon, name):
++    """DOT demand score for a named street at a point: prefer a segment whose
++    name matches, fall back to the busiest segment at the corner."""
++    want = norm_street(name)
++    best_named, best_any = None, None
++    for d, (nm, rank) in grid.near(lat, lon, 70.0):
++        if best_any is None or rank < best_any:
++            best_any = rank
++        if want and nm == want and (best_named is None or rank < best_named):
++            best_named = rank
++    rank = best_named if best_named is not None else best_any
++    return DEMAND_SCORE.get(rank, 1.5)
++
++
++# --------------------------------------------------------------- calibration
++
++COUNT_SURVEYS = [("may25_am", "may25_pm"), ("oct25_am", "oct25_pm"),
++                 ("may26_am", "may26_pm")]
++
++# 14 of the 114 count sites are river crossings and the Hudson River Greenway.
++# They are counting a very different thing — a walk or ride with no
++# alternative for a mile in either direction — and the model is only ever
++# asked about street corners, so they are not part of the training set.
++NOT_A_STREET = re.compile(
++    r"bridge|greenway|path|boardwalk|ferry|promenade", re.I)
++
++
++def observed_volume(row):
++    """12-hour weekday pedestrians at a count site, from the AM (7-9) and PM
++    (4-7) weekday screenlines. The Saturday midday column is a different day
++    and is deliberately left out."""
++    vals = []
++    for am, pm in COUNT_SURVEYS:
++        try:
++            v = float(row[am]) + float(row[pm])
++        except (KeyError, TypeError, ValueError):
++            continue
++        if v > 0:
++            vals.append(v)
++    if not vals:
++        return None
++    return (sum(vals) / len(vals)) / COUNT_HOURS_SHARE
++
++
++def design_matrix(sites):
++    """log V = b0 + b1·log1p(subway/1e3) + b2·demand.
++
++    POI density was tested as a third predictor and dropped: it correlates
++    0.55 with subway access, adds 0.001 to out-of-sample R², and takes a
++    *negative* coefficient once subway access is in — an artefact of
++    collinearity, not a finding about shops. Both surviving terms are
++    positive and mean what they say."""
++    import numpy as np
++    return np.array([[1.0, math.log1p(s["subway"] / 1e3), s["demand"]]
++                     for s in sites])
++
++
++def fit_volume_model(sites):
++    import numpy as np
++    X = design_matrix(sites)
++    y = np.array([math.log(s["observed"]) for s in sites])
++    beta, *_ = np.linalg.lstsq(X, y, rcond=None)
++    pred = X @ beta
++    ss_res = float(((y - pred) ** 2).sum())
++    ss_tot = float(((y - y.mean()) ** 2).sum())
++    r2 = 1 - ss_res / ss_tot
++    # Spearman without scipy: correlation of ranks.
++    def ranks(a):
++        order = np.argsort(a)
++        r = np.empty(len(a))
++        r[order] = np.arange(len(a))
++        return r
++    ry, rp = ranks(y), ranks(pred)
++    rho = float(np.corrcoef(ry, rp)[0, 1])
++    resid = float(np.sqrt(ss_res / len(y)))
++    return beta, {"r2": r2, "spearman": rho, "log_rmse": resid, "n": len(y)}
++
++
++def leave_one_out_r2(sites):
++    """Honest out-of-sample score: refit without each site and predict it. The
++    in-sample R² of a four-parameter fit on ~100 points flatters itself."""
++    import numpy as np
++    X = design_matrix(sites)
++    y = np.array([math.log(s["observed"]) for s in sites])
++    pred = np.empty(len(sites))
++    for i in range(len(sites)):
++        keep = np.ones(len(sites), bool)
++        keep[i] = False
++        b, *_ = np.linalg.lstsq(X[keep], y[keep], rcond=None)
++        pred[i] = X[i] @ b
++    return float(1 - ((y - pred) ** 2).sum() / ((y - y.mean()) ** 2).sum())
++
++
++def predict_volume(beta, subway, demand):
++    return math.exp(beta[0] + beta[1] * math.log1p(subway / 1e3)
++                    + beta[2] * demand)
++
++
++# ---------------------------------------------------------------- clustering
++
++def cluster_signals(nodes):
++    """Union-find over signalised junction nodes within CLUSTER_M. A boulevard
++    crossing shows up in OSM as several nodes in a row; they are one
++    intersection with several stages, not several intersections."""
++    parent = list(range(len(nodes)))
++
++    def find(i):
++        while parent[i] != i:
++            parent[i] = parent[parent[i]]
++            i = parent[i]
++        return i
++
++    def union(a, b):
++        ra, rb = find(a), find(b)
++        if ra != rb:
++            parent[rb] = ra
++
++    grid = Grid(CLUSTER_M)
++    for i, n in enumerate(nodes):
++        grid.add(n["lat"], n["lon"], i)
++    for i, n in enumerate(nodes):
++        for _, j in grid.near(n["lat"], n["lon"], CLUSTER_M):
++            if j != i:
++                union(i, j)
++
++    groups = defaultdict(list)
++    for i in range(len(nodes)):
++        groups[find(i)].append(i)
++    return list(groups.values())
++
++
++CLASS_ORDER = list(CLASS_WEIGHT)
++
++
++def merge_streets(members):
++    """Union the streets across a cluster's nodes and split each into its
++    *carriageways*.
++
++    This is the crux of the whole model. OSM splits a street into many ways,
++    for tagging reasons as much as for medians, so counting ways or counting
++    nodes both overstate how divided a street is. What separates the two cases
++    is topology: the ways of one undivided street chain together through shared
++    nodes, while a boulevard's carriageways never touch each other here. So
++    group each street's ways into connected components — one component is one
++    carriageway, one thing to walk across before the next island.
++
++    Returns per street: its class, its carriageways (each with the node it
++    meets and its lane count), and total lanes across all of them."""
++    by_name = {}
++    for i, n in enumerate(members):
++        for s in n["streets"]:
++            key = norm_street(s["name"]) or f"~{s['cls']}"
++            cur = by_name.get(key)
++            if cur is None:
++                cur = by_name[key] = {
++                    "name": s["name"], "cls": s["cls"],
++                    "named": not key.startswith("~"), "ways": [],
++                }
++            if CLASS_ORDER.index(s["cls"]) < CLASS_ORDER.index(cur["cls"]):
++                cur["cls"] = s["cls"]
++            cur["ways"].append({"ids": set(s["w"]), "node": i,
++                                "lanes": s["lanes"]})
++
++    for st in by_name.values():
++        st["carriageways"] = connected_carriageways(st["ways"])
++        st["lanes"] = sum(c["lanes"] for c in st["carriageways"])
++    return list(by_name.values())
++
++
++def connected_carriageways(ways):
++    """Union ways that share an OSM way id into carriageways. Each carriageway
++    reports the cluster nodes it touches and its widest lane count."""
++    parent = list(range(len(ways)))
++
++    def find(i):
++        while parent[i] != i:
++            parent[i] = parent[parent[i]]
++            i = parent[i]
++        return i
++
++    seen = {}
++    for i, w in enumerate(ways):
++        for wid in w["ids"]:
++            j = seen.setdefault(wid, i)
++            ra, rb = find(i), find(j)
++            if ra != rb:
++                parent[rb] = ra
++
++    groups = defaultdict(list)
++    for i in range(len(ways)):
++        groups[find(i)].append(i)
++    return [{"nodes": {ways[i]["node"] for i in g},
++             "lanes": max(ways[i]["lanes"] for i in g)}
++            for g in groups.values()]
++
++
++def crossing_stages(crossed, along):
++    """The carriageways of `crossed` a pedestrian walking along `along` has to
++    get over — the ones that meet a node `along` also reaches. Carriageways
++    further up the street are its neighbouring corners, not islands in this
++    crossing; counting them is what once turned the West Village's cluster of
++    ordinary corners into a fake four-stage boulevard."""
++    reach = set().union(*(c["nodes"] for c in along["carriageways"]))
++    hit = [c for c in crossed["carriageways"] if c["nodes"] & reach]
++    return hit or crossed["carriageways"][:1]
++
++
++# --------------------------------------------------------------------- build
++
++def build(args):
++    import numpy as np  # noqa: F401  (fit_volume_model needs it)
++
++    print("loading OSM extract…")
++    osm = load_osm()
++    signals = [j for j in osm["junctions"] if j["signal"]]
++    print(f"  {len(signals):,} signalised junction nodes")
++
++    print("loading NTA polygons…")
++    tree, polys, props = load_nta()
++    from shapely.geometry import Point
++
++    print("loading pedestrian demand (127k segments)…")
++    demand_grid = load_demand_index()
++    print("loading subway + POI + signal-treatment layers…")
++    subway_grid = load_subway()
++    poi_grid = load_poi(osm["pois"])
++    barnes_grid = load_point_flags("barnes_dance.json")
++    lpi_grid = load_point_flags("lpi.json")
++
++    # -- calibrate the volume model on the DOT count sites -------------------
++    print("calibrating volume model on DOT count sites…")
++    sites, skipped = [], 0
++    for row in json.loads((WAIT / "ped_counts.json").read_text()):
++        geom = row.get("the_geom")
++        if not geom:
++            continue
++        obs = observed_volume(row)
++        if not obs:
++            continue
++        where = " ".join(str(row.get(k, "")) for k in
++                         ("street_nam", "from_stree", "to_street"))
++        if NOT_A_STREET.search(where):
++            skipped += 1
++            continue
++        lon, lat = geom["coordinates"][:2]
++        sites.append({
++            "name": row.get("street_nam", ""), "lat": lat, "lon": lon,
++            "observed": obs,
++            "subway": subway_access(subway_grid, lat, lon),
++            "poi": poi_count(poi_grid, lat, lon),
++            "demand": demand_for(demand_grid, lat, lon, row.get("street_nam")),
++        })
++    beta, fit = fit_volume_model(sites)
++    fit["loo_r2"] = leave_one_out_r2(sites)
++    print(f"  n={fit['n']} (+{skipped} bridge/greenway sites held out)  "
++          f"R²={fit['r2']:.3f}  leave-one-out R²={fit['loo_r2']:.3f}  "
++          f"Spearman={fit['spearman']:.3f}  log-RMSE={fit['log_rmse']:.3f}")
++    print(f"  log V = {beta[0]:.3f} + {beta[1]:.3f}·log1p(subway/1k) "
++          f"+ {beta[2]:.3f}·demand")
++
++    # -- assemble intersections ---------------------------------------------
++    print("clustering signalised nodes into intersections…")
++    clusters = cluster_signals(signals)
++    print(f"  {len(clusters):,} intersections from {len(signals):,} nodes")
++
++    rows = []
++    for members_idx in clusters:
++        members = [signals[i] for i in members_idx]
++        lat = sum(m["lat"] for m in members) / len(members)
++        lon = sum(m["lon"] for m in members) / len(members)
++
++        hits = tree.query(Point(lon, lat))
++        nta = boro = ""
++        for j in hits:
++            if polys[j].contains(Point(lon, lat)):
++                nta, boro = props[j]
++                break
++        if not nta:
++            continue  # outside the five boroughs
++
++        streets = merge_streets(members)
++        named = [s for s in streets if s["named"]]
++        if len(named) < 2:
++            continue
++        named.sort(key=street_weight, reverse=True)
++        major, minor = named[0], named[1]
++
++        # A staged crossing walks over every carriageway of the major street,
++        # so its width is the sum of them, not the widest one.
++        hit = crossing_stages(major, minor)[:MAX_STAGES]
++        major = dict(major, stages=len(hit),
++                     lanes=sum(c["lanes"] for c in hit))
++        minor = dict(minor, stages=len(crossing_stages(minor, major)[:MAX_STAGES]))
++
++        barnes = any(True for _ in barnes_grid.near(lat, lon, 60.0))
++        lpi = any(True for _ in lpi_grid.near(lat, lon, 60.0))
++
++        wait_major, C, g_major = crossing_wait(major, minor, barnes)
++        wait_minor, _, _ = crossing_wait(minor, major, barnes)
++
++        subway = subway_access(subway_grid, lat, lon)
++        poi = poi_count(poi_grid, lat, lon)
++        vol_major = predict_volume(
++            beta, subway, demand_for(demand_grid, lat, lon, major["name"]))
++        vol_minor = predict_volume(
++            beta, subway, demand_for(demand_grid, lat, lon, minor["name"]))
++
++        # People crossing the major street are the ones walking along the
++        # minor one, and vice versa.
++        cross_major = vol_minor * THROUGH_SHARE
++        cross_minor = vol_major * THROUGH_SHARE
++        lost_h = (cross_major * wait_major + cross_minor * wait_minor) / 3600.0
++
++        rows.append({
++            "lat": round(lat, 6), "lon": round(lon, 6),
++            "name": f"{major['name']} / {minor['name']}",
++            "major": major["name"], "minor": minor["name"],
++            "nta": nta, "borough": boro,
++            "nodes": len(members), "stages": major["stages"],
++            "major_cls": major["cls"], "major_lanes": round(major["lanes"], 1),
++            "minor_cls": minor["cls"], "minor_lanes": round(minor["lanes"], 1),
++            "cycle_s": round(C), "green_s": round(g_major, 1),
++            "cross_m": round(crossing_width(major), 1),
++            "wait_major_s": round(wait_major, 1),
++            "wait_minor_s": round(wait_minor, 1),
++            "barnes": int(barnes), "lpi": int(lpi),
++            "subway_access": round(subway),
++            "poi_200m": poi,
++            "peds_cross_major": round(cross_major),
++            "peds_cross_minor": round(cross_minor),
++            "peds_day": round(cross_major + cross_minor),
++            "lost_hours_day": round(lost_h, 1),
++        })
++
++    rows.sort(key=lambda r: -r["lost_hours_day"])
++    for i, r in enumerate(rows, 1):
++        r["rank_lost"] = i
++    by_wait = sorted(rows, key=lambda r: -r["wait_major_s"])
++    for i, r in enumerate(by_wait, 1):
++        r["rank_wait"] = i
++
++    OUT.mkdir(parents=True, exist_ok=True)
++    master = OUT / "wait_intersections.csv"
++    with open(master, "w", newline="") as f:
++        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
++        w.writeheader()
++        w.writerows(rows)
++    print(f"\nwrote {master} ({len(rows):,} intersections)")
++
++    (OUT / "wait_model_fit.json").write_text(json.dumps({
++        "volume_model": {"beta": list(beta), **fit,
++                         "form": "log V = b0 + b1*log1p(subway/1e3) "
++                                 "+ b2*demand"},
++        "count_sites": len(sites),
++        "intersections": len(rows),
++        "citywide_lost_hours_per_weekday": round(
++            sum(r["lost_hours_day"] for r in rows)),
++    }, indent=2))
++
++    print(f"\ncitywide: {sum(r['lost_hours_day'] for r in rows):,.0f} "
++          f"person-hours per weekday spent waiting to cross\n")
++    print(f"{'#':>3}  {'lost h/day':>10} {'wait':>6} {'peds/day':>9}  name")
++    for r in rows[:25]:
++        print(f"{r['rank_lost']:>3}  {r['lost_hours_day']:>10.1f} "
++              f"{r['wait_major_s']:>5.0f}s {r['peds_day']:>9,}  "
++              f"{r['name']} ({r['borough']})")
++    print(f"\nlongest estimated waits:")
++    for r in by_wait[:15]:
++        print(f"  {r['wait_major_s']:>5.0f}s  {r['stages']}-stage  "
++              f"{r['name']} ({r['borough']})")
++
++
++def inspect(args):
++    rows = list(csv.DictReader(open(OUT / "wait_intersections.csv")))
++    q = args.inspect.lower()
++    hits = [r for r in rows if q in r["name"].lower()][:20]
++    for r in hits:
++        print(f"#{r['rank_lost']:>5} lost={r['lost_hours_day']:>7}h  "
++              f"wait={r['wait_major_s']:>5}s ({r['stages']} stage, "
++              f"C={r['cycle_s']}s g={r['green_s']}s, {r['cross_m']}m)  "
++              f"peds={r['peds_day']:>8}  {r['name']}")
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--inspect", help="print model internals for matching names")
++    args = ap.parse_args()
++    if args.inspect:
++        inspect(args)
++    else:
++        build(args)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/extract_osm_intersections.py b/scripts/extract_osm_intersections.py
+new file mode 100644
+index 0000000..3c947ec
+--- /dev/null
++++ b/scripts/extract_osm_intersections.py
+@@ -0,0 +1,207 @@
++#!/usr/bin/env python3
++"""
++Extract everything the wait-time model needs from the NYC OSM extract:
++signalised junctions, the streets meeting at them, and the POI field around
++them.
++
++Two passes over the PBF (nodes are written before ways, so way membership
++can't be known while the nodes stream by):
++  pass 1  ways  -> drivable street geometry + tags, and which node ids matter
++  pass 2  nodes -> locations for those ids, signal/crossing tags, POI points
++
++Output: data/raw/wait/osm_intersections.json.gz
++  junctions: [{id, lat, lon, signal, streets:[{name, highway, lanes, oneway}], ...}]
++  pois:      [[lat, lon], ...]        (shop/amenity/office/tourism points)
++  crossings: [[lat, lon, signalised]] (highway=crossing nodes)
++
++Usage: python scripts/extract_osm_intersections.py [--pbf …] [--out …]
++"""
++
++import argparse
++import gzip
++import json
++from collections import defaultdict
++from pathlib import Path
++
++import osmium
++
++REPO = Path(__file__).resolve().parent.parent
++DEFAULT_PBF = REPO / "server" / "osm_data" / "nyc" / "source.osm.pbf"
++DEFAULT_OUT = REPO / "data" / "raw" / "wait" / "osm_intersections.json.gz"
++
++# Street classes a pedestrian has to wait to cross. Ordered worst-first; the
++# index doubles as the "how big is this road" rank used by the green-split
++# model.
++ROAD_CLASSES = [
++    "motorway", "trunk", "primary", "secondary", "tertiary",
++    "unclassified", "residential", "living_street",
++]
++LINK_OF = {f"{c}_link": c for c in ROAD_CLASSES}
++
++# Points that mean "people have a reason to be here". Values are excluded
++# where the tag is essentially street furniture rather than a destination.
++POI_KEYS = ("shop", "office", "tourism")
++POI_AMENITIES_SKIP = {
++    "bench", "waste_basket", "bicycle_parking", "parking", "parking_space",
++    "drinking_water", "shelter", "recycling", "post_box", "telephone",
++    "clock", "fountain", "hunting_stand", "grit_bin", "parking_entrance",
++    "charging_station", "car_sharing", "bicycle_repair_station",
++}
++
++
++def road_class(tags):
++    hw = tags.get("highway")
++    if hw in ROAD_CLASSES:
++        return hw
++    return LINK_OF.get(hw)
++
++
++def parse_lanes(tags, cls):
++    """Total through lanes across the carriageway, tags first then a
++    class-typical default. NYC OSM tags `lanes` on most arterials and almost
++    no residential streets."""
++    for key in ("lanes",):
++        v = tags.get(key)
++        if v:
++            try:
++                return max(1.0, min(12.0, float(v.split(";")[0])))
++            except ValueError:
++                pass
++    return {
++        "motorway": 6.0, "trunk": 5.0, "primary": 4.0, "secondary": 3.0,
++        "tertiary": 2.0, "unclassified": 2.0, "residential": 2.0,
++        "living_street": 1.0,
++    }[cls]
++
++
++class WayPass(osmium.SimpleHandler):
++    """Pass 1: drivable ways only. Records each way's tags plus its node list,
++    and counts how many ways touch each node so pass 2 knows which node
++    locations to keep."""
++
++    def __init__(self):
++        super().__init__()
++        self.ways = []
++        self.node_ways = defaultdict(list)  # node id -> way indices
++
++    def way(self, w):
++        cls = road_class(w.tags)
++        if cls is None:
++            return
++        if w.tags.get("area") == "yes":
++            return
++        refs = [n.ref for n in w.nodes]
++        if len(refs) < 2:
++            return
++        idx = len(self.ways)
++        self.ways.append({
++            "name": (w.tags.get("name") or "").strip(),
++            "cls": cls,
++            "lanes": parse_lanes(w.tags, cls),
++            "oneway": w.tags.get("oneway") in ("yes", "-1", "true", "1"),
++            "n": len(refs),
++        })
++        for r in refs:
++            self.node_ways[r].append(idx)
++
++
++class NodePass(osmium.SimpleHandler):
++    """Pass 2: locations for the node ids pass 1 flagged, plus signal and
++    crossing tags, plus every POI point in the extract."""
++
++    def __init__(self, wanted):
++        super().__init__()
++        self.wanted = wanted
++        self.loc = {}
++        self.signals = set()
++        self.crossings = []   # (lat, lon, signalised)
++        self.pois = []        # (lat, lon)
++        self.button = set()
++
++    def node(self, n):
++        tags = n.tags
++        hw = tags.get("highway")
++        lat, lon = n.location.lat, n.location.lon
++
++        if hw == "crossing" or tags.get("crossing"):
++            sig = (tags.get("crossing") in ("traffic_signals", "signals")
++                   or tags.get("crossing:signals") == "yes"
++                   or hw == "traffic_signals")
++            self.crossings.append((round(lat, 6), round(lon, 6), bool(sig)))
++            if tags.get("button_operated") == "yes":
++                self.button.add(n.id)
++
++        if n.id in self.wanted:
++            self.loc[n.id] = (round(lat, 6), round(lon, 6))
++            if hw in ("traffic_signals", "traffic_signals;crossing"):
++                self.signals.add(n.id)
++
++        if any(k in tags for k in POI_KEYS) or (
++                "amenity" in tags and tags.get("amenity") not in POI_AMENITIES_SKIP):
++            self.pois.append((round(lat, 5), round(lon, 5)))
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--pbf", type=Path, default=DEFAULT_PBF)
++    ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
++    args = ap.parse_args()
++
++    print(f"pass 1/2  ways   {args.pbf}")
++    wp = WayPass()
++    wp.apply_file(str(args.pbf))
++    print(f"  {len(wp.ways):,} drivable ways, {len(wp.node_ways):,} nodes touched")
++
++    # A junction is any node where two or more distinct ways meet. Ways split
++    # for tagging reasons meet end-to-end too, so require at least two
++    # DIFFERENT street names (or a genuinely unnamed way) before calling it an
++    # intersection — done after locations land, in pass 3.
++    wanted = {nid for nid, ws in wp.node_ways.items() if len(ws) >= 2}
++    print(f"  {len(wanted):,} candidate junction nodes")
++
++    print("pass 2/2  nodes")
++    np_ = NodePass(wanted)
++    np_.apply_file(str(args.pbf))
++    print(f"  {len(np_.loc):,} located, {len(np_.signals):,} tagged traffic_signals, "
++          f"{len(np_.crossings):,} crossings, {len(np_.pois):,} POIs")
++
++    junctions = []
++    for nid in wanted:
++        if nid not in np_.loc:
++            continue
++        streets = {}
++        for wi in wp.node_ways[nid]:
++            w = wp.ways[wi]
++            key = w["name"] or f"~{w['cls']}"
++            s = streets.get(key)
++            if s is None:
++                streets[key] = s = {"name": w["name"], "cls": w["cls"],
++                                    "lanes": w["lanes"], "oneway": w["oneway"],
++                                    "w": []}
++            elif ROAD_CLASSES.index(w["cls"]) < ROAD_CLASSES.index(s["cls"]):
++                s["cls"], s["oneway"] = w["cls"], w["oneway"]
++            s["lanes"] = max(s["lanes"], w["lanes"])
++            # Way ids let the model tell a divided boulevard's separate
++            # carriageways from one street simply split for tagging: the
++            # latter's ways chain through shared nodes, the former's don't.
++            s["w"].append(wi)
++        if len(streets) < 2:
++            continue
++        lat, lon = np_.loc[nid]
++        junctions.append({
++            "id": nid, "lat": lat, "lon": lon,
++            "signal": nid in np_.signals,
++            "streets": list(streets.values()),
++        })
++    print(f"  {len(junctions):,} junctions with 2+ distinct streets "
++          f"({sum(j['signal'] for j in junctions):,} signalised)")
++
++    args.out.parent.mkdir(parents=True, exist_ok=True)
++    with gzip.open(args.out, "wt") as f:
++        json.dump({"junctions": junctions, "pois": np_.pois,
++                   "crossings": np_.crossings}, f)
++    print(f"-> {args.out} ({args.out.stat().st_size / 1e6:.1f} MB)")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/fetch_wait_data.py b/scripts/fetch_wait_data.py
+new file mode 100644
+index 0000000..2f104ff
+--- /dev/null
++++ b/scripts/fetch_wait_data.py
+@@ -0,0 +1,105 @@
++#!/usr/bin/env python3
++"""
++Download the open datasets behind the longest-wait intersection ranking.
++
++Everything lands in data/raw/wait/ and is cached — re-running only fetches
++what's missing (pass --force to refresh).
++
++Sources (all public, no keys):
++  ped_demand.geojson   NYC DOT Pedestrian Mobility Plan "Pedestrian Demand"
++                       (fwpa-qxaf) — every street segment citywide scored 1-5
++                       for pedestrian need. Our citywide volume backbone.
++  ped_counts.json      NYC DOT Bi-Annual Pedestrian Counts (cqsj-cfgu) — real
++                       screenline counts at 114 locations. Calibration truth.
++  barnes_dance.json    Exclusive Pedestrian Signal locations (8kuj-2n3u) — an
++                       all-stop ped phase means a longer wait for a shorter,
++                       safer crossing.
++  lpi.json             VZV Leading Pedestrian Interval signals (xc4v-ntf4).
++  subway_ridership.json  MTA subway entries per station complex, summed over a
++                       recent month (5wq4-mkjj) — the strongest citywide proxy
++                       for where pedestrians actually are.
++"""
++
++import argparse
++import json
++import urllib.parse
++import urllib.request
++from pathlib import Path
++
++REPO = Path(__file__).resolve().parent.parent
++OUT = REPO / "data" / "raw" / "wait"
++
++NYC = "https://data.cityofnewyork.us/resource"
++NYS = "https://data.ny.gov/resource"
++
++# Month summed for the subway proxy. A single recent month smooths weekday /
++# weekend and one-off service changes without dragging in seasonal drift.
++RIDERSHIP_START = "2026-05-01T00:00:00"
++RIDERSHIP_END = "2026-06-01T00:00:00"
++RIDERSHIP_DAYS = 31
++
++SIMPLE = {
++    "ped_counts.json": f"{NYC}/cqsj-cfgu.json?$limit=5000",
++    "barnes_dance.json": f"{NYC}/8kuj-2n3u.json?$limit=5000",
++    "lpi.json": f"{NYC}/xc4v-ntf4.json?$limit=50000",
++    "ped_demand.geojson": f"{NYC}/fwpa-qxaf.geojson?$limit=200000",
++}
++
++
++def fetch(url: str, dest: Path) -> None:
++    print(f"  GET {url[:110]}…")
++    with urllib.request.urlopen(url, timeout=600) as r:
++        dest.write_bytes(r.read())
++    print(f"  -> {dest.name} ({dest.stat().st_size / 1e6:.1f} MB)")
++
++
++def subway_url() -> str:
++    q = {
++        "$select": "station_complex_id,station_complex,borough,latitude,longitude,"
++                   "sum(ridership) as riders",
++        "$where": f"transit_timestamp >= '{RIDERSHIP_START}' "
++                  f"AND transit_timestamp < '{RIDERSHIP_END}'",
++        "$group": "station_complex_id,station_complex,borough,latitude,longitude",
++        "$limit": "5000",
++    }
++    return f"{NYS}/5wq4-mkjj.json?" + urllib.parse.urlencode(q)
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--force", action="store_true", help="re-download cached files")
++    args = ap.parse_args()
++
++    OUT.mkdir(parents=True, exist_ok=True)
++    targets = dict(SIMPLE)
++    targets["subway_ridership.json"] = subway_url()
++
++    for name, url in targets.items():
++        dest = OUT / name
++        if dest.exists() and not args.force:
++            print(f"cached {name} ({dest.stat().st_size / 1e6:.1f} MB)")
++            continue
++        print(f"fetching {name}")
++        fetch(url, dest)
++
++    # Normalise the subway month into daily entries so downstream code never
++    # has to remember the window.
++    raw = json.loads((OUT / "subway_ridership.json").read_text())
++    daily = [
++        {
++            "station": r["station_complex"],
++            "borough": r.get("borough", ""),
++            "lat": float(r["latitude"]),
++            "lon": float(r["longitude"]),
++            "daily_entries": float(r["riders"]) / RIDERSHIP_DAYS,
++        }
++        for r in raw
++        if r.get("latitude") and r.get("longitude")
++    ]
++    (OUT / "subway_daily.json").write_text(json.dumps(daily, indent=1))
++    total = sum(d["daily_entries"] for d in daily)
++    print(f"\n{len(daily)} station complexes, {total:,.0f} entries/day citywide")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/generate_wait_posters.py b/scripts/generate_wait_posters.py
+new file mode 100644
+index 0000000..47ecb86
+--- /dev/null
++++ b/scripts/generate_wait_posters.py
+@@ -0,0 +1,578 @@
++#!/usr/bin/env python3
++"""
++Build the "longest wait" poster packet: one poster per intersection, each
++carrying a QR that opens that exact crossing on City Edit with "Fix signal
++timing" already selected, plus a placement checklist, a placement map and an
++assembled PDF.
++
++Input:   data/analysis/wait_intersections.csv  (build_wait_rankings.py)
++Template: data/posters/templates/longest_wait.html
++Output:  data/posters/wait/…  and  data/posters/wait/wait-poster-book.pdf
++
++Campaigns — each intersection is claimed once, in this order:
++
++  longest_wait   the longest estimated waits in the city, among corners busy
++                 enough that the wait is actually being served to people
++  time_lost      the corners where wait x crowd burns the most human time
++  borough_no1    the worst in each of the five boroughs, so the packet is not
++                 four dozen posters about Manhattan
++  nabe_no1       the worst in each of N neighbourhoods, for spread
++
++Usage:
++  python scripts/generate_wait_posters.py
++  python scripts/generate_wait_posters.py --campaign longest_wait --limit 5
++"""
++
++import argparse
++import csv
++import html
++import json
++import math
++import re
++import subprocess
++from collections import defaultdict
++from pathlib import Path
++from urllib.parse import quote_plus
++
++import qrcode
++
++REPO = Path(__file__).resolve().parent.parent
++MASTER = REPO / "data" / "analysis" / "wait_intersections.csv"
++FIT = REPO / "data" / "analysis" / "wait_model_fit.json"
++TEMPLATE = REPO / "data" / "posters" / "templates" / "longest_wait.html"
++NTA_GEOJSON = REPO / "data" / "raw" / "nta2020.geojson"
++OUT = REPO / "data" / "posters" / "wait"
++RENDER = REPO / "scripts" / "render_poster.sh"
++
++BASE_URL = "https://cityedit.org/m/nyc-proposals"
++QR_VOTE_TYPE = "Fix signal timing"
++QR_SRC = "qr-wait"
++
++# A corner has to actually serve people before "the longest wait in New York"
++# means anything. Below this the wait is real but nobody is standing in it.
++MIN_PEDS_FOR_WAIT_CLAIM = 4000
++
++WEEKDAYS_PER_YEAR = 250
++FULL_TIME_YEAR_HOURS = 1800.0   # a 35-hour week with holidays
++
++NUMERIC = ("lat", "lon", "wait_major_s", "wait_minor_s", "peds_day",
++           "peds_cross_major", "peds_cross_minor", "lost_hours_day",
++           "cycle_s", "green_s", "cross_m", "major_lanes", "minor_lanes")
++INTS = ("stages", "nodes", "rank_lost", "rank_wait", "barnes", "lpi")
++
++
++def load_rows():
++    rows = list(csv.DictReader(open(MASTER)))
++    for r in rows:
++        for k in NUMERIC:
++            r[k] = float(r[k])
++        for k in INTS:
++            r[k] = int(r[k])
++    return rows
++
++
++def slug(name):
++    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:60]
++
++
++def mmss(seconds):
++    s = int(round(seconds))
++    return f"{s // 60}:{s % 60:02d}"
++
++
++def fill(doc, slot_id, content):
++    """Replace the inner HTML of the element carrying id=slot_id.
++
++    Scans for the matching close tag rather than the first one — the chart and
++    stats slots hold nested divs, and a non-greedy regex would close them at
++    the first child and silently shred the layout."""
++    open_re = re.compile(r'<(\w+)[^>]*\bid="' + re.escape(slot_id) + r'"[^>]*>')
++    m = open_re.search(doc)
++    if not m:
++        raise KeyError(f"template has no slot #{slot_id}")
++    tag = m.group(1)
++    depth, pos = 1, m.end()
++    step = re.compile(rf'<(/?){tag}\b[^>]*>')
++    while depth:
++        s = step.search(doc, pos)
++        if not s:
++            raise ValueError(f"slot #{slot_id} is never closed")
++        depth += -1 if s.group(1) else 1
++        pos = s.end()
++        close_start = s.start()
++    return doc[:m.end()] + content + doc[close_start:]
++
++
++def set_src(doc, slot_id, value):
++    return re.sub(r'(<img[^>]*\bid="' + slot_id + r'"[^>]*\bsrc=")[^"]*(")',
++                  lambda m: m.group(1) + value + m.group(2), doc, count=1)
++
++
++# ------------------------------------------------------------ the crossing
++
++# The signal diagram is the argument the poster is making, so it is drawn from
++# the same numbers the ranking used: the cycle, the green the model gives this
++# crossing, and how many carriageways stand between the two kerbs.
++BAR_H = {1: 96, 2: 56, 3: 40, 4: 30}     # keep the block near a constant height
++BAR_GAP = {1: 0, 2: 18, 3: 14, 4: 12}
++
++
++def crossing_chart(r):
++    """Plan view and timing chart, sharing one row per carriageway."""
++    stages = max(1, min(4, r["stages"]))
++    h, gap = BAR_H[stages], BAR_GAP[stages]
++    total = stages * h + (stages - 1) * gap
++    cycle = r["cycle_s"]
++    green = r["green_s"]
++    # The WALK indication is the only part of the cycle you may *start* on;
++    # the rest of the green is the countdown, for finishing.
++    walk = min(7.0, green)
++    flash = max(0.0, green - walk)
++    walk_pct = 100.0 * walk / cycle
++    flash_pct = 100.0 * flash / cycle
++
++    bars = []
++    for i in range(stages):
++        lab = f'<span class="lab">{i + 1}</span>' if stages > 1 else ""
++        bars.append(
++            f'<div class="bar" style="height:{h}px">'
++            f'<span class="seg walk" style="left:0;width:{walk_pct:.2f}%"></span>'
++            f'<span class="seg flash" style="left:{walk_pct:.2f}%;'
++            f'width:{flash_pct:.2f}%"></span>{lab}</div>')
++    bars_html = f'<div class="bars" style="gap:{gap}px">{"".join(bars)}</div>'
++
++    # Plan view: each carriageway as a band whose width is its share of the
++    # road, the pedestrian's path straight down the middle, a dot on each
++    # island. Lane counts are not stored per carriageway, so the bands share
++    # the road evenly except that a wider street gets wider bands.
++    w = 100
++    per = r["major_lanes"] / stages
++    band_w = max(52.0, min(92.0, 40 + per * 12))
++    parts = [f'<svg class="plan" width="{w}" height="{total}" '
++             f'viewBox="0 0 {w} {total}">']
++    for i in range(stages):
++        y = i * (h + gap)
++        x = (w - band_w) / 2
++        parts.append(
++            f'<rect x="{x:.1f}" y="{y}" width="{band_w:.1f}" height="{h}" '
++            f'fill="#edebe4" stroke="#8d8a82" stroke-width="1"/>'
++            f'<line x1="{x + 4:.1f}" y1="{y + h / 2:.1f}" '
++            f'x2="{x + band_w - 4:.1f}" y2="{y + h / 2:.1f}" '
++            f'stroke="#ffffff" stroke-width="1.5" stroke-dasharray="5 5"/>')
++    parts.append(
++        f'<line x1="{w / 2}" y1="0" x2="{w / 2}" y2="{total}" '
++        f'stroke="#dc343b" stroke-width="1.5" stroke-dasharray="4 4"/>')
++    for i in range(stages - 1):
++        cy = (i + 1) * (h + gap) - gap / 2
++        parts.append(f'<circle cx="{w / 2}" cy="{cy:.1f}" r="3.6" fill="#ffffff" '
++                     f'stroke="#dc343b" stroke-width="1.5"/>')
++    parts.append("</svg>")
++
++    ticks = []
++    step = 30 if cycle >= 90 else 15
++    n = int(cycle // step)
++    for k in range(n + 1):
++        t = k * step
++        pct = 100.0 * t / cycle
++        cls = "first" if k == 0 else ("last" if k == n else "")
++        ticks.append(f'<span class="{cls}" style="left:{pct:.1f}%">{t:g}s</span>')
++    axis = f'<div class="axis">{"".join(ticks)}</div>'
++
++    islands = stages - 1
++    note = (f'{r["cross_m"]:.0f} m of road'
++            + (f'<br>{islands} island{"s" if islands != 1 else ""}'
++               if islands else '<br>no island'))
++    return ("".join(parts) + bars_html
++            + f'<div id="plan-note">{note}</div>' + axis)
++
++
++def site_notes(r):
++    """Facts about this particular signal, stated plainly. The red ones are
++    the ones a passer-by can ask the city to change."""
++    chips = [f'{r["cycle_s"]:.0f} s cycle']
++    if r["stages"] > 1:
++        chips.append(f'{r["stages"]}-stage crossing')
++    chips.append(f'{r["cross_m"]:.0f} m kerb to kerb')
++    if r["barnes"]:
++        chips.append("Exclusive pedestrian phase")
++    warn = []
++    if not r["lpi"]:
++        warn.append("No leading pedestrian interval")
++    if r["cycle_s"] >= 120:
++        warn.append("Longest cycle the city runs")
++    return "".join(f"<span>{c}</span>" for c in chips) + \
++           "".join(f'<span class="warn">{c}</span>' for c in warn)
++
++
++def diagram_title(r):
++    stages = max(1, min(4, r["stages"]))
++    words = {1: "One crossing", 2: "Two crossings", 3: "Three crossings",
++             4: "Four crossings"}[stages]
++    each = " each" if stages > 1 else ""
++    return f'{words} &middot; a {r["cycle_s"]:.0f}-second cycle{each}'
++
++
++# ------------------------------------------------------------- locator map
++
++_CITY_PATH = None
++
++
++def city_path(size):
++    """One simplified silhouette of the five boroughs, projected once and
++    reused by every poster; only the dot moves."""
++    global _CITY_PATH
++    if _CITY_PATH and _CITY_PATH[0] == size:
++        return _CITY_PATH[1], _CITY_PATH[2]
++
++    g = json.load(open(NTA_GEOJSON))
++    rings = []
++    for f in g["features"]:
++        geom = f["geometry"]
++        polys = (geom["coordinates"] if geom["type"] == "MultiPolygon"
++                 else [geom["coordinates"]])
++        for poly in polys:
++            rings.append(poly[0])
++    lons = [c[0] for r in rings for c in r]
++    lats = [c[1] for r in rings for c in r]
++    lon0, lon1, lat0, lat1 = min(lons), max(lons), min(lats), max(lats)
++    coslat = math.cos(math.radians((lat0 + lat1) / 2))
++    pad = 4
++    k = min((size - 2 * pad) / ((lon1 - lon0) * coslat),
++            (size - 2 * pad) / (lat1 - lat0))
++    ox = (size - (lon1 - lon0) * coslat * k) / 2
++    oy = (size - (lat1 - lat0) * k) / 2
++
++    def xy(lon, lat):
++        return ox + (lon - lon0) * coslat * k, oy + (lat1 - lat) * k
++
++    paths = []
++    for ring in rings:
++        step = max(1, len(ring) // 60)
++        pts = ring[::step]
++        if len(pts) < 3:
++            continue
++        d = "M" + "L".join(f"{x:.1f},{y:.1f}"
++                           for x, y in (xy(lo, la) for lo, la in pts)) + "Z"
++        paths.append(d)
++    _CITY_PATH = (size, paths, xy)
++    return paths, xy
++
++
++def locator(r, size=168):
++    paths, xy = city_path(size)
++    x, y = xy(r["lon"], r["lat"])
++    body = "".join(f'<path d="{d}" fill="#e4e0d7" stroke="none"/>'
++                   for d in paths)
++    cross = (f'<line x1="{x:.1f}" y1="0" x2="{x:.1f}" y2="{size}" '
++             f'stroke="#dc343b" stroke-width="0.7" stroke-dasharray="3 3"/>'
++             f'<line x1="0" y1="{y:.1f}" x2="{size}" y2="{y:.1f}" '
++             f'stroke="#dc343b" stroke-width="0.7" stroke-dasharray="3 3"/>'
++             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5" fill="#dc343b"/>'
++             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="9" fill="none" '
++             f'stroke="#dc343b" stroke-width="1.2"/>')
++    return (f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}">'
++            f'{body}{cross}</svg>')
++
++
++# ---------------------------------------------------------------- campaigns
++
++NTA_DISPLAY = {
++    "Midtown South-Flatiron-Union Square": "Midtown South",
++    "Midtown-Times Square": "Midtown",
++    "Chelsea-Hudson Yards": "Chelsea",
++    "Upper East Side-Lenox Hill-Roosevelt Island": "Lenox Hill",
++    "Upper West Side-Manhattan Valley": "Manhattan Valley",
++    "Bedford-Stuyvesant (East)": "Bed-Stuy",
++    "Bedford-Stuyvesant (West)": "Bed-Stuy",
++    "Astoria (North)-Ditmars-Steinway": "Ditmars",
++    "Murray Hill-Kips Bay": "Kips Bay",
++    "University Heights (North)-Fordham": "Fordham",
++    "Mott Haven-Port Morris": "Mott Haven",
++    "Concourse-Concourse Village": "Concourse",
++    "East New York-New Lots": "East New York",
++    "Hamilton Heights-Sugar Hill": "Hamilton Heights",
++    "Sunnyside Yards (North)": "Sunnyside",
++    "Financial District-Battery Park City": "the Financial District",
++    "SoHo-Little Italy-Hudson Square": "SoHo",
++    "Greenwich Village": "the Village",
++    "West Village": "the West Village",
++    "East Village": "the East Village",
++    "Lower East Side": "the Lower East Side",
++    "Upper West Side (Central)": "the Upper West Side",
++    "Upper East Side-Carnegie Hill": "Carnegie Hill",
++}
++THE_NABES = {"Upper West Side", "Upper East Side", "Lower East Side",
++             "East Village", "West Village", "Financial District", "Rockaways"}
++
++
++def nabe(nta):
++    name = NTA_DISPLAY.get(nta) or re.sub(r"\s*\([^)]*\)", "", nta).strip()
++    return ("the " + name) if name in THE_NABES else name
++
++
++ORDINAL = {1: "1st", 2: "2nd", 3: "3rd"}
++
++
++def ordinal(n):
++    return ORDINAL.get(n, f"{n}th")
++
++
++def hero_wait(r):
++    return {
++        "figure": mmss(r["wait_major_s"]),
++        "unit": "Average wait to cross,<br>every single time",
++    }
++
++
++def hero_hours(r):
++    return {
++        "figure": f'{r["lost_hours_day"]:,.0f}',
++        "unit": "Hours of this city's day,<br>spent standing at<br>one corner",
++    }
++
++
++CAMPAIGNS = {
++    # No ordinal claim here. The wait model saturates at its four-stage
++    # ceiling, so a dozen boulevard crossings score identically and "the 3rd
++    # longest wait in New York" would be a coin toss dressed as a fact. The
++    # set is real; the order inside it is not.
++    "longest_wait": {
++        "title": "Longest wait citywide",
++        "default_n": 10,
++        "claim": "rank",
++        "caps": {"major": 2},
++        "chip": lambda r, n: "Longest&nbsp;waits",
++        "select": lambda rows: [r for r in sorted(rows, key=lambda r: -r["wait_major_s"])
++                                if r["peds_day"] >= MIN_PEDS_FOR_WAIT_CLAIM],
++        "hero": hero_wait,
++        # No count either: the corridor cap means these are drawn from the
++        # top tier, not the literal top ten.
++        "headline": lambda r, n:
++            "One of the <b>longest waits</b> of any crossing in New York City",
++    },
++    # Person-hours is continuous and unties cleanly, so this one does claim a
++    # rank.
++    "time_lost": {
++        "title": "Most time burnt citywide",
++        "default_n": 10,
++        "claim": "rank",
++        "chip": lambda r, n: f"No.&nbsp;{n:02d}",
++        "caps": {"major": 2},
++        "select": lambda rows: sorted(rows, key=lambda r: -r["lost_hours_day"]),
++        "hero": hero_hours,
++        "headline": lambda r, n: (
++            "The <b>biggest waste</b> of pedestrian time in New York City"
++            if n == 1 else
++            f"The <b>{ordinal(n)} biggest waste</b> of pedestrian time "
++            f"in New York City"),
++    },
++    "borough_no1": {
++        "title": "Worst in the borough",
++        "default_n": 5,
++        "claim": "unique",
++        "chip": lambda r, n: html.escape(r["borough"]).replace(" ", "&nbsp;"),
++        "select": None,
++        "hero": hero_hours,
++        "headline": lambda r, n: (
++            f"The <b>single biggest waste</b> of pedestrian time in "
++            f"{r['borough']}"),
++    },
++    "nabe_no1": {
++        "title": "Worst in the neighbourhood",
++        "default_n": 14,
++        "claim": "unique",
++        "chip": lambda r, n: html.escape(nabe(r["nta"])).replace(" ", "&nbsp;"),
++        "caps": {"major": 1, "borough": 4},
++        "select": None,
++        "hero": hero_wait,
++        "headline": lambda r, n: f"The <b>longest wait</b> in {nabe(r['nta'])}",
++    },
++}
++ORDER = ["longest_wait", "time_lost", "borough_no1", "nabe_no1"]
++
++
++def borough_targets(rows):
++    best = {}
++    for r in rows:
++        cur = best.get(r["borough"])
++        if cur is None or r["lost_hours_day"] > cur["lost_hours_day"]:
++            best[r["borough"]] = r
++    return sorted(best.values(), key=lambda r: -r["lost_hours_day"])
++
++
++def nabe_targets(rows, n):
++    """The longest wait in each neighbourhood, but only where enough people
++    meet it — otherwise this campaign posts to empty sidewalks."""
++    best = {}
++    for r in rows:
++        if not r["nta"] or r["peds_day"] < 2500:
++            continue
++        key = nabe(r["nta"])
++        cur = best.get(key)
++        if cur is None or r["wait_major_s"] > cur["wait_major_s"]:
++            best[key] = r
++    return sorted(best.values(), key=lambda r: -r["lost_hours_day"])[:n]
++
++
++# ------------------------------------------------------------------ posters
++
++def code_allocator():
++    n = 0
++
++    def nxt():
++        nonlocal n
++        code = f"{chr(65 + n // 9)}{n % 9 + 1}"
++        n += 1
++        return code
++    return nxt
++
++
++def stat_cells(r):
++    cycle = int(r["cycle_s"])
++    walk = min(7, int(r["green_s"]))
++    years = r["lost_hours_day"] * WEEKDAYS_PER_YEAR / FULL_TIME_YEAR_HOURS
++    return (
++        f'<div><div class="n">{r["peds_day"]:,.0f}</div>'
++        f'<div class="k">People cross<br>here each day</div></div>'
++        f'<div><div class="n">{walk} sec</div>'
++        f'<div class="k">Of every {cycle} you<br>may start walking</div></div>'
++        f'<div><div class="n">{r["lost_hours_day"]:,.0f} hrs</div>'
++        f'<div class="k">Of their time, lost<br>here every weekday</div></div>'
++    ), years
++
++
++def year_line(r, years):
++    """The number that makes a daily figure land: a weekday habit, compounded
++    over a working year."""
++    return (
++        f'Standing at this one corner adds up to <b>{years:,.0f} full-time '
++        f'jobs&rsquo; worth</b> of doing nothing, every year.')
++
++
++def build_poster(tpl, r, camp, rank, code, outdir, tag, scale, base_url, src):
++    url = (f'{base_url}?w={r["lat"]:.6f},{r["lon"]:.6f}'
++           f'&vt={quote_plus(QR_VOTE_TYPE)}&src={src}')
++    qr_png = outdir / f"{tag}_qr.png"
++    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,
++                       border=1, box_size=12)
++    qr.add_data(url)
++    qr.make(fit=True)
++    qr.make_image(fill_color="black", back_color="white").save(qr_png)
++
++    hero = camp["hero"](r)
++    stats, years = stat_cells(r)
++    doc = tpl
++    doc = fill(doc, "rank", camp["chip"](r, rank))
++    doc = fill(doc, "claim", camp["headline"](r, rank))
++    doc = fill(doc, "figure", hero["figure"])
++    doc = fill(doc, "unit", hero["unit"])
++    doc = fill(doc, "street", html.escape(r["major"]))
++    doc = fill(doc, "cross", f'<em>at</em> {html.escape(r["minor"])} '
++                             f'&middot; {html.escape(nabe(r["nta"]))}, '
++                             f'{html.escape(r["borough"])}')
++    doc = fill(doc, "diagram-title", diagram_title(r))
++    doc = fill(doc, "chart", crossing_chart(r))
++    doc = fill(doc, "notes", site_notes(r))
++    doc = fill(doc, "stats", stats)
++    doc = fill(doc, "yearline", year_line(r, years))
++    doc = fill(doc, "locator", locator(r))
++    doc = fill(doc, "code", code)
++    doc = set_src(doc, "qr", qr_png.name)
++
++    html_path = outdir / f"{tag}.html"
++    png_path = outdir / f"{tag}.png"
++    html_path.write_text(doc)
++    subprocess.run([str(RENDER), str(html_path), str(png_path),
++                    "850", "1134", str(scale)], check=True, capture_output=True)
++    return url, png_path
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--campaign", choices=list(CAMPAIGNS), action="append")
++    ap.add_argument("--limit", type=int)
++    ap.add_argument("--scale", type=int, default=2)
++    ap.add_argument("--base-url", default=BASE_URL)
++    ap.add_argument("--src", default=QR_SRC)
++    ap.add_argument("--pdf", action="store_true", default=True)
++    ap.add_argument("--no-pdf", dest="pdf", action="store_false")
++    args = ap.parse_args()
++
++    rows = load_rows()
++    tpl = TEMPLATE.read_text()
++    OUT.mkdir(parents=True, exist_ok=True)
++    manifest = []
++    next_code = code_allocator()
++    used = set()
++
++    for name in [c for c in ORDER if not args.campaign or c in args.campaign]:
++        camp = CAMPAIGNS[name]
++        n = args.limit or camp["default_n"]
++        if name == "borough_no1":
++            cands = borough_targets(rows)
++        elif name == "nabe_no1":
++            cands = nabe_targets(rows, n * 3)
++        else:
++            cands = camp["select"](rows)
++
++        # Left alone, "the longest waits in New York" is nine posters about
++        # Queens Boulevard — true, and a bad campaign. The caps spread the
++        # same claim across the corridors and boroughs that share it.
++        caps = camp.get("caps", {})
++        per_major, per_boro = defaultdict(int), defaultdict(int)
++        targets = []
++        for rank, r in enumerate(cands, start=1):
++            if len(targets) >= n:
++                break
++            key = (r["lat"], r["lon"])
++            if key in used:
++                # A "#N" claim can't be handed to a runner-up, and a "worst in
++                # X" claim can't either — both campaigns just skip.
++                print(f"   {name}: already claimed, dropped {r['name']}")
++                continue
++            if per_major[r["major"]] >= caps.get("major", 99):
++                continue
++            if per_boro[r["borough"]] >= caps.get("borough", 99):
++                continue
++            per_major[r["major"]] += 1
++            per_boro[r["borough"]] += 1
++            targets.append((r, rank if camp["claim"] == "rank" else len(targets) + 1))
++
++        outdir = OUT / name
++        outdir.mkdir(parents=True, exist_ok=True)
++        for r, rank in targets:
++            used.add((r["lat"], r["lon"]))
++            code = next_code()
++            tag = f"{rank:02d}_{slug(r['name'])}"
++            url, png = build_poster(tpl, r, camp, rank, code, outdir, tag,
++                                    args.scale, args.base_url, args.src)
++            manifest.append({
++                "code": code, "campaign": name, "rank": rank,
++                "name": r["name"], "major": r["major"], "minor": r["minor"],
++                "nta": r["nta"], "borough": r["borough"],
++                "lat": r["lat"], "lon": r["lon"],
++                "wait_s": r["wait_major_s"], "peds_day": r["peds_day"],
++                "lost_hours_day": r["lost_hours_day"], "stages": r["stages"],
++                "url": url, "png": str(png.relative_to(REPO)),
++            })
++            print(f"{code}: {r['name']} — {mmss(r['wait_major_s'])} wait, "
++                  f"{r['lost_hours_day']:,.0f} h/day lost")
++
++    if not manifest:
++        print("nothing selected")
++        return
++    with open(OUT / "manifest.csv", "w", newline="") as f:
++        w = csv.DictWriter(f, fieldnames=list(manifest[0].keys()))
++        w.writeheader()
++        w.writerows(manifest)
++    print(f"\n{len(manifest)} posters -> {OUT}")
++
++    if args.pdf:
++        from build_wait_packet import build_packet
++        build_packet(manifest, args.scale)
++
++
++if __name__ == "__main__":
++    import sys
++    sys.path.insert(0, str(Path(__file__).resolve().parent))
++    main()
