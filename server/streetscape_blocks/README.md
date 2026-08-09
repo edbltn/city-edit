@@ -45,6 +45,37 @@ next to the graph (`osm_data/<city>/edge_blocks_<network>.npy/.json`,
 `blocks.pmtiles`); the bake stamps the graph's `topology_etag`, so rebuilding
 the graph invalidates the mapping and the script must re-run.
 
+## The tile bake carries EVERY block to EVERY served zoom
+
+`blocks.pmtiles` is not a decorative layer — it is the heatmap's geometry,
+addressed by feature id (`--use-attribute-for-id=block_id`; the client sets
+`heat`/`selected` feature-state per id and reads no properties at all). So a
+block tippecanoe thins out of a tile simply cannot be lit, and tippecanoe
+thins in proportion to **density** — it eats downtown first, which is exactly
+where the votes are. Until 2026-08-09 the bake shipped that: Manhattan carried
+61% of its blocks at z12, 24% at z11 and 17% at z10 (leaflet 13 / 12 / 11), so
+zooming out to the city view blanked the heat over the core while the sparse
+outskirts stayed lit.
+
+What keeps it honest now:
+
+- `--include=block_id` — the six display attributes (`seg_id`, `road_class`,
+  `road_name`, `area_m2`, `n_edges`, `n_nodes`/`node_id`) never reach a tile.
+  Nothing reads them, and they were most of every low-zoom tile's bytes.
+- `--no-tiny-polygon-reduction` — sub-pixel blocks stay themselves instead of
+  being accumulated into a shared "tiny polygon" square, which silently merges
+  away their ids.
+- `--maximum-tile-bytes=1500000` — only the handful of city-wide z9–z11 tiles
+  come near it; z12 and up stay under 450KB.
+- **no** `--coalesce-densest-as-needed` — coalescing merges same-attribute
+  features and keeps ONE id. With the attributes gone every feature looks
+  identical to it, so it would eat the layer.
+- `verify_blocks_tiles.py` runs on the temp archive before the atomic rename
+  and fails the bake if any zoom from z10 up carries under 95% of the blocks.
+
+Net effect on NYC: z10–z13 all ≥99.9% complete, and the archive got ~20%
+*smaller* — the dead attributes cost more than the recovered geometry.
+
 ## Evaluation against ground truth
 
 `compare_blocks.py` scores procedural output against Brook's NYC planimetric

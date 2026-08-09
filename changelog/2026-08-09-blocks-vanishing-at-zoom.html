@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The heatmap blocks that vanished when you zoomed out — 2026-08-09</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>The heatmap blocks that vanished when you zoomed out</h1>
+    <div class="dateline">2026-08-09 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#symptom">The heat is complete at z14, and mostly gone at z12</a>
+<a href="#flags">Stop paying for attributes nobody reads, then stop dropping</a>
+<a href="#gate">The bake now checks itself</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Three fixes to Top Proposals: a pin now takes real support (&gt;100 net votes, both point and route families); every modal badges the vote types that are CURRENT top proposals for what it shows (square = point, diamond = route fully inside the selection); and route corridors are now grown ROUTING-CONSISTENTLY — an extension either keeps the segment a shortest path or pins a ghost waypoint (max 3), and the whole waypoint chain lands in the URL, so a shared top-proposal link keeps routing into its corridor long after the proposal itself has churned away.</p>
+
+  
+    <section class="card" id="symptom">
+      <div class="tag">THE BUG</div>
+      <h2>The heat is complete at z14, and mostly gone at z12</h2>
+      <h3>Symptom</h3>
+      <p>Zooming out past the default view drops most of the heatmap blocks — and it drops them worst over the densest part of the city, so Manhattan empties out while Brooklyn and Queens stay lit.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>blocks.pmtiles</code> is not a decorative basemap layer: it is the heatmap's geometry, addressed by <strong>feature id</strong>. <code>--use-attribute-for-id=block_id</code> makes <code>block_id</code> the native id, and the client paints purely from <code>setFeatureState</code> on that id — it reads no tile property at all. A block that is not <em>in</em> the tile therefore cannot be lit, no matter how many votes it has</li>
+<li>tippecanoe fits each tile into a byte budget (500KB by default) by <strong>dropping features in proportion to density</strong> (<code>--drop-densest-as-needed</code>). That is the right instinct for labels and POIs and exactly the wrong one here: density is a proxy for where the votes are</li>
+<li>The archive is complete from z13 up, so the default landing view (leaflet 14 = MapLibre z13) is perfect and the defect is invisible. It appears only when you zoom OUT: leaflet 13 → 61% of NYC's blocks, leaflet 12 → 24%, leaflet 11 → 17%</li>
+<li>It is also non-monotonic, which is what makes it read as &quot;some zoom levels&quot;: dropping is decided per TILE, so whether a given zoom looks fine depends on how the city falls across that zoom's tile grid. On SF the run went 56% at z9, 46% at z10, 39% at z11, then back to 70% at z12</li>
+<li>Nothing ever counted. The bake reported blocks built, not blocks that survived into tiles, so a 15-point drop or an 80-point drop looked identical from the terminal</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Measured, not inferred: for one 1.1km box in Midtown the app renders <strong>586 blocks / 95 of them lit at leaflet 17</strong>, and <strong>135 blocks / 8 lit at leaflet 12</strong> — 92% of the heat gone, on a fresh load at that zoom</li>
+<li>The &quot;fresh load&quot; part matters: MapLibre keeps already-loaded tiles when you zoom out, so zooming out inside a session looks fine and hides the bug. Reproducing it needs the map to OPEN at the wide zoom (a scratch <code>?dbgzoom=</code> hook), not to arrive there by zooming</li>
+<li>Ruled out at the top end: at leaflet 19/20/21 the source overzooms its z16 tiles and every block is still there, so nothing is wrong above the default view</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/streetscape_blocks/build_city_blocks.sh</li></ul>
+    </section>
+    
+
+    <section class="card" id="flags">
+      <div class="tag">THE FIX</div>
+      <h2>Stop paying for attributes nobody reads, then stop dropping</h2>
+      <h3>Symptom</h3>
+      <p>—</p>
+      <h3>Root cause</h3>
+      <ul><li>The tiles carried seven display attributes per block — <code>seg_id</code>, <code>road_class</code>, <code>road_name</code>, <code>area_m2</code>, <code>n_edges</code>, <code>n_nodes</code>, <code>node_id</code>. A grep of the client for any of them finds only unrelated vote-payload fields: <strong>nothing reads a block tile property</strong>. At 15,000 features in a wide tile they were most of its bytes</li>
+<li><code>--no-tiny-polygon-reduction</code> is the second half: below ~z11 tippecanoe accumulates sub-pixel polygons into one shared &quot;tiny polygon&quot; square, which silently merges their ids away. That is a density-preserving trick for cartography and an id-destroying one for a layer keyed by id</li>
+<li><code>--coalesce-densest-as-needed</code> was in the command and had never fired. With the attributes stripped every feature looks identical to it, and coalescing merges same-attribute features while keeping ONE id — it would have gone from dormant to devastating</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>--include=block_id</code> — the only attribute that survives, and <code>--use-attribute-for-id</code> then moves it onto the native id and out of properties (verified: sample feature comes back as <code>id 18871, props {}</code>)</li>
+<li><code>--no-tiny-polygon-reduction</code> — sub-pixel blocks stay themselves</li>
+<li><code>--maximum-tile-bytes=1500000</code> — up from the 500KB default. Only the handful of city-wide z9–z11 tiles come near it; z12 and up stay under 450KB, so this changes nothing at any zoom people work at</li>
+<li>Dropped <code>--coalesce-densest-as-needed</code>; kept <code>--drop-densest-as-needed</code> as the last-resort backstop so a pathological tile still cannot blow up unboundedly</li>
+<li><code>-Z8</code> — the client never asks below it (leaflet zoom = MapLibre zoom + 1, and the lowest <code>min_zoom</code> in cities.py is 10, so ml z9 is the widest tile ever fetched). That drops ~3MB of world-view tiles per city that nothing has ever requested</li>
+<li><strong>Geometry at working zooms is untouched</strong>: comparing a z13 and a z14 tile before/after, the mean area delta per block is 0.00 tile units and the vertex count moves by +0.12 — the new archive only ADDS features</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/streetscape_blocks/build_city_blocks.sh</li></ul>
+    </section>
+    
+
+    <section class="card" id="gate">
+      <div class="tag">REGRESSION GATE</div>
+      <h2>The bake now checks itself</h2>
+      <h3>Symptom</h3>
+      <p>This shipped for months because a thinned low zoom looks exactly like a healthy one from the build log.</p>
+      <h3>Root cause</h3>
+      <ul><li>The failure is quiet by construction: tippecanoe reports what it wrote, the server serves whatever is in the archive, and the client happily paints the subset it is given</li>
+<li>The one number that would have caught it — distinct feature ids per zoom vs blocks built — was never computed anywhere</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>verify_blocks_tiles.py</code> scans the fresh archive and prints distinct blocks per zoom against the count the builder just wrote, labelling every row with BOTH the MapLibre zoom and the Leaflet zoom you would reproduce it at</li>
+<li>It fails the bake if any zoom from z10 up carries under 95% of the blocks. The widest zoom (below z10) is reported but tolerated — a whole metro at 1px genuinely cannot fit inside one tile budget, and thinning there is cosmetic</li>
+<li>It runs on the TEMP archive, before the atomic rename, so a bad bake can never replace a good one</li>
+<li>Only z8–z13 are decoded: the high zooms are never in doubt (their tiles are a fraction of the budget) and reading NYC's 4,600 maxzoom tiles would add minutes for no information</li>
+<li>Pointed at the CURRENT shipped NYC archive it exits 1 and names z10, z11, z12 — i.e. it reproduces the bug report from the artifact alone</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/streetscape_blocks/verify_blocks_tiles.py</li>
+<li>server/streetscape_blocks/README.md</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Reproduced in the running app, not just in the archive: a fixed 1.1km box in Midtown holds <strong>95 lit blocks at leaflet 17</strong> and <strong>8 at leaflet 12</strong> on a fresh load — with the same feature-state applied in both cases (6,296 lit blocks map-wide either way).</li>
+<li>The reproduction needed care: MapLibre retains loaded tiles across a zoom-out, so the naive test (zoom in, then out, then count) reports the healthy high-zoom set at every zoom and shows nothing wrong. The map has to OPEN at the wide zoom.</li>
+<li>Two dev servers ran side by side — a concurrent session was hot-reloading GraphLayer.tsx into a crash loop, so the measurements were taken against an isolated Vite on :3100 from a clean HEAD worktree (with its own hardlinked node_modules, so its dep-optimize cache could not thrash the other session's).</li>
+<li>Re-baked NYC for real and measured the same box again on a fresh load at leaflet 12: <strong>585 blocks / 95 lit</strong>, i.e. identical to the leaflet-17 reference (586 / 95). Before the change it was 135 / 8.</li>
+<li>Archive-level before/after on the shipped NYC block set (287,352 blocks): <strong>z10 17.3% → 99.9%, z11 23.7% → 100.0%, z12 60.9% → 100.0%</strong>, z13+ 100% throughout.</li>
+<li>The re-bake is provably the SAME block set, not a new one: the builder was re-run into scratch directories and reproduced the shipped mapping exactly — same topology_etag, same n_blocks (287,352), same blocks_sha256, and an edge→block array that compares equal element for element. So only the tiles changed; no vote, no edge id and no mapping moved.</li>
+<li>Independently confirmed on a second city (SF, where the shipped archive is baked from the geojson on disk): <strong>z10 45.6% → 99.9%, z11 38.6% → 100%, z12 69.8% → 100%</strong>.</li>
+<li>The archive got <strong>smaller</strong>, not bigger: NYC 23.9MB → 18.8MB of tile bytes despite carrying every block at every served zoom. The dead attributes cost more than the recovered geometry.</li>
+<li>Largest single tile is now 1,389KB (z10) and 450KB at z12 — the raised ceiling binds only on the city-wide tiles it was raised for.</li>
+<li>Ruled out the top of the range explicitly: at leaflet 19/20/21 the source cache holds z16 tiles overzoomed and every block renders, so the defect is entirely below the default view.</li>
+<li>The high-zoom geometry is bit-for-bit comparable: mean per-block area delta 0.00 tile units at z13 and −0.03 at z14 (extent 4096), i.e. the shapes users click did not move.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-walkways</code> and zoom OUT to leaflet 12–13 (two or three steps below the default). Manhattan should stay as densely lit as Brooklyn — before this change it went nearly black while the outer boroughs kept their heat.</li>
+<li>Reload AT the wide zoom rather than zooming out to it, or MapLibre's retained tiles will show you the healthy high-zoom set and hide any regression.</li>
+<li>Re-run a bake and read its last block: <code>./server/streetscape_blocks/build_city_blocks.sh &lt;city&gt;</code> now ends with a per-zoom table and <code>[verify] OK</code>; it should refuse to install an archive that drops blocks at z10+.</li>
+<li>Point the verifier at an old archive to see the failure mode it guards: <code>server/env/bin/python server/streetscape_blocks/verify_blocks_tiles.py &lt;old&gt;.pmtiles --expect &lt;n_blocks&gt;</code> exits 1 and names z10/z11/z12.</li>
+<li>Click a block at leaflet 17–18 and confirm selection and the proposal card still work — the feature ids are unchanged, so this should be indistinguishable, and it is the thing that would break if they were not.</li>
+<li>Before shipping to prod, remember the artifacts route: blocks ride the <code>cloudbuild.blocks-overlay.yaml</code> path and must be baked against the SERVING image's graphs, not local ones, or the edge ids shift.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">server/streetscape_blocks/README.md</span>
+            <span class="stat"><span class="d-add">+31</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Blocks · Layer-2 docs</span>
+        <span class="ctx-sum">The block pipeline&#x27;s own README: generators, the one-command city add, evaluation against ground truth</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">README.md</span>
+        <span class="ctx-sum">~90 lines — generators, adding a city, the pipeline walk-through, evaluation</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">intro / generator table</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">Adding a city (one command)</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">pipeline walk-through</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">The tile bake carries EVERY block to EVERY served zoom</span><span class="ol-sum">new — the invariant, the flags that hold it, the numbers</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Evaluation against ground truth</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>States the invariant in one line: the tile layer is the heatmap&#x27;s geometry, addressed by feature id, so a dropped block cannot be lit</li><li>Records the actual failure with numbers (Manhattan 61/24/17% at z12/z11/z10) so the next reader recognises it instead of rediscovering it</li><li>Lists each flag with the specific failure it prevents, including the two that are about IDs rather than bytes</li><li>Notes the counter-intuitive result worth remembering: the complete archive is ~20% SMALLER than the thinned one</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/README.md b/server/streetscape_blocks/README.md</span>
+<span class="d-meta">index 8204cc7..9aa1f69 100644</span>
+<span class="d-meta">--- a/server/streetscape_blocks/README.md</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/README.md</span>
+<span class="d-hunk">@@ -45,6 +45,37 @@ next to the graph (`osm_data/&lt;city&gt;/edge_blocks_&lt;network&gt;.npy/.json`,</span>
+<span class="d-ctx"> `blocks.pmtiles`); the bake stamps the graph&#x27;s `topology_etag`, so rebuilding</span>
+<span class="d-ctx"> the graph invalidates the mapping and the script must re-run.</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+## The tile bake carries EVERY block to EVERY served zoom</span>
+<span class="d-add">+</span>
+<span class="d-add">+`blocks.pmtiles` is not a decorative layer — it is the heatmap&#x27;s geometry,</span>
+<span class="d-add">+addressed by feature id (`--use-attribute-for-id=block_id`; the client sets</span>
+<span class="d-add">+`heat`/`selected` feature-state per id and reads no properties at all). So a</span>
+<span class="d-add">+block tippecanoe thins out of a tile simply cannot be lit, and tippecanoe</span>
+<span class="d-add">+thins in proportion to **density** — it eats downtown first, which is exactly</span>
+<span class="d-add">+where the votes are. Until 2026-08-09 the bake shipped that: Manhattan carried</span>
+<span class="d-add">+61% of its blocks at z12, 24% at z11 and 17% at z10 (leaflet 13 / 12 / 11), so</span>
+<span class="d-add">+zooming out to the city view blanked the heat over the core while the sparse</span>
+<span class="d-add">+outskirts stayed lit.</span>
+<span class="d-add">+</span>
+<span class="d-add">+What keeps it honest now:</span>
+<span class="d-add">+</span>
+<span class="d-add">+- `--include=block_id` — the six display attributes (`seg_id`, `road_class`,</span>
+<span class="d-add">+  `road_name`, `area_m2`, `n_edges`, `n_nodes`/`node_id`) never reach a tile.</span>
+<span class="d-add">+  Nothing reads them, and they were most of every low-zoom tile&#x27;s bytes.</span>
+<span class="d-add">+- `--no-tiny-polygon-reduction` — sub-pixel blocks stay themselves instead of</span>
+<span class="d-add">+  being accumulated into a shared &quot;tiny polygon&quot; square, which silently merges</span>
+<span class="d-add">+  away their ids.</span>
+<span class="d-add">+- `--maximum-tile-bytes=1500000` — only the handful of city-wide z9–z11 tiles</span>
+<span class="d-add">+  come near it; z12 and up stay under 450KB.</span>
+<span class="d-add">+- **no** `--coalesce-densest-as-needed` — coalescing merges same-attribute</span>
+<span class="d-add">+  features and keeps ONE id. With the attributes gone every feature looks</span>
+<span class="d-add">+  identical to it, so it would eat the layer.</span>
+<span class="d-add">+- `verify_blocks_tiles.py` runs on the temp archive before the atomic rename</span>
+<span class="d-add">+  and fails the bake if any zoom from z10 up carries under 95% of the blocks.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Net effect on NYC: z10–z13 all ≥99.9% complete, and the archive got ~20%</span>
+<span class="d-add">+*smaller* — the dead attributes cost more than the recovered geometry.</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> ## Evaluation against ground truth</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> `compare_blocks.py` scores procedural output against Brook&#x27;s NYC planimetric</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/streetscape_blocks/build_city_blocks.sh</span>
+            <span class="stat"><span class="d-add">+49</span> / <span class="d-del">-3</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Blocks · Layer-2 bake</span>
+        <span class="ctx-sum">Turns a city&#x27;s walk graph into block polygons plus the edge→block mapping, then bakes the polygons into the blocks.pmtiles the map actually draws</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">build_city_blocks.sh</span>
+        <span class="ctx-sum">~100 lines — venv/data-dir resolution, the graph-first builder, the tippecanoe bake</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">header / pipeline docs</span><span class="ol-sum">unchanged — the two-step contract and when to re-run</span></li><li class="dim"><span class="ol-label">CITY / NETWORK / DATA_DIR resolution</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">[1/2] build_blocks_graph_first.py</span><span class="ol-sum">unchanged — grouping → polygons → baked mapping</span></li><li class="changed"><span class="ol-label">[2/2] tippecanoe bake</span><span class="ol-sum">rewritten flags + a long comment on why every block must survive</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">post-bake verification</span><span class="ol-sum">new — gate the temp archive before the atomic rename</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">atomic rename / DONE listing</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>--include=block_id drops the seven display attributes; the client reads NOTHING but the feature id and its feature-state, and those strings were most of every low-zoom tile</li><li>--no-tiny-polygon-reduction stops sub-pixel blocks being accumulated into a shared square that merges their ids away at z≤10</li><li>--maximum-tile-bytes=1500000 (from 500KB): only the city-wide z9–z11 tiles come near it, z12+ stay under 450KB</li><li>--coalesce-densest-as-needed REMOVED — it merges same-attribute features and keeps one id; dormant before, lethal once the attributes are gone</li><li>--drop-densest-as-needed kept deliberately, as the backstop against an unbounded pathological tile</li><li>-Z8 trims the world-view zooms nothing fetches; the comment states the invariant (lowest city min_zoom is 10 → ml z9) so lowering a min_zoom below 9 is a known edit here</li><li>N_BLOCKS is read back from the mapping the builder just wrote, so the gate compares tiles against THIS bake, not a remembered number</li><li>Verification runs on blocks.tmp.pmtiles — a failed check leaves the previous good archive in place</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/build_city_blocks.sh b/server/streetscape_blocks/build_city_blocks.sh</span>
+<span class="d-meta">index b08d56f..0811da1 100755</span>
+<span class="d-meta">--- a/server/streetscape_blocks/build_city_blocks.sh</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/build_city_blocks.sh</span>
+<span class="d-hunk">@@ -43,6 +43,33 @@ if command -v tippecanoe &gt;/dev/null 2&gt;&amp;1; then</span>
+<span class="d-ctx">   # --use-attribute-for-id: block_id becomes the NATIVE feature id (required by</span>
+<span class="d-ctx">   # the client&#x27;s setFeatureState heat/selection; MapLibre reads native ids, no</span>
+<span class="d-ctx">   # promoteId). Matches how the existing nyc blocks.pmtiles was built.</span>
+<span class="d-add">+  #</span>
+<span class="d-add">+  # EVERY BLOCK MUST SURVIVE TO EVERY ZOOM. This layer is a heatmap keyed by</span>
+<span class="d-add">+  # feature id: a block tippecanoe thins out of a tile can&#x27;t be lit, and the</span>
+<span class="d-add">+  # thinning is density-proportional, so it eats the densest neighbourhoods —</span>
+<span class="d-add">+  # exactly where the votes are — while sparse outskirts stay lit. Manhattan</span>
+<span class="d-add">+  # used to lose 45% of its blocks at z12 and 88% at z10 (leaflet 13 / 11), so</span>
+<span class="d-add">+  # zooming out to the city view blanked the heat over the core. Hence:</span>
+<span class="d-add">+  #   --include=block_id       drop the six display attributes (seg_id,</span>
+<span class="d-add">+  #                            road_class, road_name, area_m2, n_edges,</span>
+<span class="d-add">+  #                            n_nodes/node_id) — the client reads NOTHING but</span>
+<span class="d-add">+  #                            the feature id and its feature-state, and those</span>
+<span class="d-add">+  #                            strings were most of every low-zoom tile.</span>
+<span class="d-add">+  #   --no-tiny-polygon-reduction  keep sub-pixel blocks as themselves instead</span>
+<span class="d-add">+  #                            of accumulating them into a shared &quot;tiny</span>
+<span class="d-add">+  #                            polygon&quot; square, which silently merges away</span>
+<span class="d-add">+  #                            their ids at z≤10.</span>
+<span class="d-add">+  #   --maximum-tile-bytes     1.5MB, up from the 500KB default: only the</span>
+<span class="d-add">+  #                            handful of city-wide z9–z11 tiles come near it</span>
+<span class="d-add">+  #                            (z12+ stay under 450KB), and dropping features</span>
+<span class="d-add">+  #                            there is precisely the bug.</span>
+<span class="d-add">+  #   (no --coalesce-densest-as-needed) — coalescing merges same-attribute</span>
+<span class="d-add">+  #                            features and keeps ONE id, destroying the rest.</span>
+<span class="d-add">+  #                            It never fired before; with the attributes gone</span>
+<span class="d-add">+  #                            every feature would look identical to it.</span>
+<span class="d-add">+  # --drop-densest-as-needed stays as the last-resort backstop so a</span>
+<span class="d-add">+  # pathological tile can&#x27;t blow the archive up unboundedly.</span>
+<span class="d-add">+  #</span>
+<span class="d-ctx">   # Bake to a temp file + atomic rename: the archive is read IN PLACE by the</span>
+<span class="d-ctx">   # running server (mmap&#x27;d pmtiles reader + /api/tile/), and tippecanoe -o</span>
+<span class="d-ctx">   # writes a SQLite journal at the target path mid-bake — readers must never</span>
+<span class="d-hunk">@@ -50,10 +77,29 @@ if command -v tippecanoe &gt;/dev/null 2&gt;&amp;1; then</span>
+<span class="d-ctx">   # The temp name MUST end in .pmtiles: tippecanoe picks its output format</span>
+<span class="d-ctx">   # from the extension, so &quot;blocks.pmtiles.tmp&quot; silently wrote an mbtiles</span>
+<span class="d-ctx">   # (SQLite) archive that the server&#x27;s PMTiles reader can&#x27;t open.</span>
+<span class="d-del">-  tippecanoe -o &quot;$DATA_DIR/blocks.tmp.pmtiles&quot; -zg --drop-densest-as-needed \</span>
+<span class="d-del">-    --extend-zooms-if-still-dropping --coalesce-densest-as-needed \</span>
+<span class="d-del">-    --use-attribute-for-id=block_id \</span>
+<span class="d-add">+  # -Z8: the client never asks below it. Leaflet zoom = MapLibre zoom + 1 and</span>
+<span class="d-add">+  # the lowest min_zoom any city declares (cities.py) is 10, so ml z9 is the</span>
+<span class="d-add">+  # widest tile ever requested — z8 leaves a level of margin. Everything below</span>
+<span class="d-add">+  # was ~3MB of world-view tiles per city that nothing has ever fetched.</span>
+<span class="d-add">+  # LOWERING A CITY&#x27;S min_zoom BELOW 9 MEANS LOWERING THIS TOO, or the blocks</span>
+<span class="d-add">+  # vanish at that zoom (MapLibre draws nothing below a source&#x27;s minzoom).</span>
+<span class="d-add">+  tippecanoe -o &quot;$DATA_DIR/blocks.tmp.pmtiles&quot; -zg -Z8 --drop-densest-as-needed \</span>
+<span class="d-add">+    --extend-zooms-if-still-dropping \</span>
+<span class="d-add">+    --use-attribute-for-id=block_id --include=block_id \</span>
+<span class="d-add">+    --no-tiny-polygon-reduction --maximum-tile-bytes=1500000 \</span>
+<span class="d-ctx">     -l blocks --force &quot;$FINAL_FILE&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  # Gate the fresh archive BEFORE it goes live: a thinned low zoom is a</span>
+<span class="d-add">+  # heatmap with holes, and the old bake shipped one for months because</span>
+<span class="d-add">+  # nothing ever counted. Verified on the temp file so a bad bake never</span>
+<span class="d-add">+  # replaces a good archive.</span>
+<span class="d-add">+  N_BLOCKS=&quot;$(srv_py -c &quot;</span>
+<span class="d-add">+import json</span>
+<span class="d-add">+print(json.load(open(&#x27;$DATA_DIR/edge_blocks_${NETWORK}.json&#x27;))[&#x27;n_blocks&#x27;])</span>
+<span class="d-add">+&quot;)&quot;</span>
+<span class="d-add">+  srv_py streetscape_blocks/verify_blocks_tiles.py \</span>
+<span class="d-add">+    &quot;$DATA_DIR/blocks.tmp.pmtiles&quot; --expect &quot;$N_BLOCKS&quot;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   mv -f &quot;$DATA_DIR/blocks.tmp.pmtiles&quot; &quot;$DATA_DIR/blocks.pmtiles&quot;</span>
+<span class="d-ctx"> else</span>
+<span class="d-ctx">   echo &quot;tippecanoe not found — skipping PMTiles (install: brew install tippecanoe)&quot;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/streetscape_blocks/verify_blocks_tiles.py</span>
+            <span class="stat"><span class="d-add">+107</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Blocks · Layer-2 bake</span>
+        <span class="ctx-sum">New post-bake gate: counts what actually survived into the tiles, per zoom, and fails the bake when the heatmap would have holes</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">verify_blocks_tiles.py</span>
+        <span class="ctx-sum">~110 LOC — module docstring, thresholds, scan(), main()</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">docstring</span><span class="ol-sum">new — why a thinned tile is a data loss here, not a cartographic nicety</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">DEFAULT_MIN_COMPLETE_ZOOM / DEFAULT_THRESHOLD</span><span class="ol-sum">new — z10 and 95%</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">MAX_SCANNED_ZOOM</span><span class="ol-sum">new — stop at z13; high zooms are never in doubt and cost minutes</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">scan()</span><span class="ol-sum">new — distinct ids, tile count and largest tile per zoom</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">main()</span><span class="ol-sum">new — per-zoom table, tolerated-vs-failing verdict, exit code</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Compares distinct feature ids per zoom against the builder&#x27;s own n_blocks — the number that would have caught this on day one</li><li>Every row prints the Leaflet zoom next to the MapLibre one, because every zoom in the UI, the URL and cities.py is a Leaflet zoom</li><li>Zooms below z10 are reported but tolerated: a whole metro at 1px cannot hold every block in one tile budget, and the thinning there is cosmetic</li><li>Only z8–z13 are decoded — reading NYC&#x27;s 4,600 maxzoom tiles would add minutes to confirm what the byte budget already guarantees</li><li>The failure message names the three flags that control it, so the next person hits the fix rather than the symptom</li><li>sys.stdout.flush() before the stderr verdict, or the shell interleaves the failure above its own table</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/streetscape_blocks/verify_blocks_tiles.py b/server/streetscape_blocks/verify_blocks_tiles.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..f24a063</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/streetscape_blocks/verify_blocks_tiles.py</span>
+<span class="d-hunk">@@ -0,0 +1,107 @@</span>
+<span class="d-add">+#!/usr/bin/env python3</span>
+<span class="d-add">+&quot;&quot;&quot;Post-bake gate: did every block survive into the low-zoom tiles?</span>
+<span class="d-add">+</span>
+<span class="d-add">+blocks.pmtiles is not a decorative basemap layer — it is the heatmap&#x27;s</span>
+<span class="d-add">+geometry, addressed by feature id. A block tippecanoe thins out of a tile</span>
+<span class="d-add">+cannot be lit by `setFeatureState`, and tippecanoe thins in proportion to</span>
+<span class="d-add">+DENSITY, so the blocks it drops are the downtown ones, i.e. exactly where the</span>
+<span class="d-add">+votes are. That failure is invisible at the default view (the tiles are</span>
+<span class="d-add">+complete from z13 up) and only shows when you zoom out to the city, which is</span>
+<span class="d-add">+how it survived unnoticed: Manhattan was losing 45% of its blocks at z12 and</span>
+<span class="d-add">+83% at z11.</span>
+<span class="d-add">+</span>
+<span class="d-add">+So the bake now checks itself. Distinct feature ids per zoom, compared with</span>
+<span class="d-add">+the block count the builder just wrote, over the zooms the client actually</span>
+<span class="d-add">+requests (leaflet zoom = MapLibre zoom + 1, and the lowest min_zoom in</span>
+<span class="d-add">+cities.py is 10, so ml z9 is the widest tile ever fetched). The widest zoom</span>
+<span class="d-add">+gets a warning rather than a failure — a whole metro at 1px cannot hold every</span>
+<span class="d-add">+block inside one tile budget, and there the thinning is cosmetic.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    python verify_blocks_tiles.py &lt;archive.pmtiles&gt; --expect &lt;n_blocks&gt;</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import argparse</span>
+<span class="d-add">+import collections</span>
+<span class="d-add">+import gzip</span>
+<span class="d-add">+import math</span>
+<span class="d-add">+import sys</span>
+<span class="d-add">+</span>
+<span class="d-add">+import mapbox_vector_tile as mvt</span>
+<span class="d-add">+from pmtiles.reader import MmapSource, Reader, all_tiles</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Zooms at or above this must be essentially complete; below it (the widest</span>
+<span class="d-add">+# view the client can reach) a shortfall is reported but tolerated.</span>
+<span class="d-add">+DEFAULT_MIN_COMPLETE_ZOOM = 10</span>
+<span class="d-add">+DEFAULT_THRESHOLD = 0.95</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Scanning every zoom would decode the whole archive (minutes for NYC&#x27;s 4,600</span>
+<span class="d-add">+# maxzoom tiles) to confirm what is never in doubt: the high zooms hold</span>
+<span class="d-add">+# everything, because their tiles are a fraction of the size budget. Only the</span>
+<span class="d-add">+# wide zooms can drop, so only they are read.</span>
+<span class="d-add">+MAX_SCANNED_ZOOM = 13</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def scan(path: str) -&gt; tuple[dict[int, set], dict[int, int], dict[int, int]]:</span>
+<span class="d-add">+    &quot;&quot;&quot;(ids, tile count, max tile bytes) per zoom, for the low zooms only.&quot;&quot;&quot;</span>
+<span class="d-add">+    src = MmapSource(open(path, &quot;rb&quot;))</span>
+<span class="d-add">+    ids: dict[int, set] = collections.defaultdict(set)</span>
+<span class="d-add">+    tiles: collections.Counter = collections.Counter()</span>
+<span class="d-add">+    biggest: collections.Counter = collections.Counter()</span>
+<span class="d-add">+    for (z, x, y), data in all_tiles(src):</span>
+<span class="d-add">+        if z &gt; MAX_SCANNED_ZOOM or not data:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        tiles[z] += 1</span>
+<span class="d-add">+        biggest[z] = max(biggest[z], len(data))</span>
+<span class="d-add">+        raw = gzip.decompress(data) if data[:2] == b&quot;\x1f\x8b&quot; else data</span>
+<span class="d-add">+        for layer in mvt.decode(raw).values():</span>
+<span class="d-add">+            for feature in layer[&quot;features&quot;]:</span>
+<span class="d-add">+                ids[z].add(feature.get(&quot;id&quot;))</span>
+<span class="d-add">+    return ids, tiles, biggest</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def main() -&gt; int:</span>
+<span class="d-add">+    ap = argparse.ArgumentParser()</span>
+<span class="d-add">+    ap.add_argument(&quot;archive&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--expect&quot;, type=int, required=True,</span>
+<span class="d-add">+                    help=&quot;block count from the builder (edge_blocks_&lt;net&gt;.json n_blocks)&quot;)</span>
+<span class="d-add">+    ap.add_argument(&quot;--min-complete-zoom&quot;, type=int, default=DEFAULT_MIN_COMPLETE_ZOOM)</span>
+<span class="d-add">+    ap.add_argument(&quot;--threshold&quot;, type=float, default=DEFAULT_THRESHOLD)</span>
+<span class="d-add">+    args = ap.parse_args()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    header = Reader(MmapSource(open(args.archive, &quot;rb&quot;))).header()</span>
+<span class="d-add">+    ids, tiles, biggest = scan(args.archive)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    print(f&quot;[verify] {args.archive} zooms {header[&#x27;min_zoom&#x27;]}-{header[&#x27;max_zoom&#x27;]}, &quot;</span>
+<span class="d-add">+          f&quot;{args.expect} blocks expected&quot;)</span>
+<span class="d-add">+    failures = []</span>
+<span class="d-add">+    for z in sorted(ids):</span>
+<span class="d-add">+        share = len(ids[z]) / args.expect if args.expect else 0.0</span>
+<span class="d-add">+        # Leaflet is one zoom ahead of MapLibre (256 vs 512px tiles), and every</span>
+<span class="d-add">+        # zoom in the UI, the URL and cities.py is a Leaflet zoom — print both</span>
+<span class="d-add">+        # so a shortfall here names the zoom you would reproduce it at.</span>
+<span class="d-add">+        line = (f&quot;[verify]   z{z:&lt;2d} (leaflet {z + 1:&lt;2d}): {len(ids[z]):7d} blocks &quot;</span>
+<span class="d-add">+                f&quot;({share * 100:5.1f}%)  {tiles[z]:5d} tiles, largest &quot;</span>
+<span class="d-add">+                f&quot;{math.ceil(biggest[z] / 1024)}KB&quot;)</span>
+<span class="d-add">+        if share &gt;= args.threshold:</span>
+<span class="d-add">+            print(line)</span>
+<span class="d-add">+        elif z &lt; args.min_complete_zoom:</span>
+<span class="d-add">+            print(f&quot;{line}  — thinned (widest view, tolerated)&quot;)</span>
+<span class="d-add">+        else:</span>
+<span class="d-add">+            print(f&quot;{line}  — TOO FEW&quot;)</span>
+<span class="d-add">+            failures.append(z)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    if failures:</span>
+<span class="d-add">+        sys.stdout.flush()  # or the stderr verdict lands above its own table</span>
+<span class="d-add">+        zooms = &quot;, &quot;.join(f&quot;z{z}&quot; for z in failures)</span>
+<span class="d-add">+        print(f&quot;[verify] FAILED: {zooms} dropped more than &quot;</span>
+<span class="d-add">+              f&quot;{(1 - args.threshold) * 100:.0f}% of the blocks. The heatmap will &quot;</span>
+<span class="d-add">+              f&quot;have holes there — see the tippecanoe flags in build_city_blocks.sh &quot;</span>
+<span class="d-add">+              f&quot;(--include=block_id, --no-tiny-polygon-reduction, &quot;</span>
+<span class="d-add">+              f&quot;--maximum-tile-bytes).&quot;, file=sys.stderr)</span>
+<span class="d-add">+        return 1</span>
+<span class="d-add">+    print(&quot;[verify] OK — every served zoom carries the block set&quot;)</span>
+<span class="d-add">+    return 0</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+if __name__ == &quot;__main__&quot;:</span>
+<span class="d-add">+    sys.exit(main())</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

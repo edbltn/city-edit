@@ -29,6 +29,23 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-09-blocks-vanishing-at-zoom.html">
+    <div class="date">2026-08-09</div>
+    <h2>The heatmap blocks that vanished when you zoomed out</h2>
+    <p>Zoom out two steps from the default view and most of the heat disappeared — worst of all over
+    Manhattan, while Brooklyn stayed lit. The block layer is not decoration: it is the heatmap's
+    geometry, addressed by <strong>feature id</strong>, so a block tippecanoe thins out of a tile
+    cannot be lit no matter how many votes it has — and tippecanoe thins in proportion to
+    <em>density</em>, which is a proxy for where the votes are. NYC was carrying 61% of its blocks at
+    leaflet 13, 24% at leaflet 12 and 17% at leaflet 11. The fix costs nothing anyone can see: the
+    tiles were mostly seven display attributes that <em>no code reads</em>, so dropping them
+    (<code>--include=block_id</code>), keeping sub-pixel blocks as themselves
+    (<code>--no-tiny-polygon-reduction</code>) and raising the per-tile ceiling makes every served
+    zoom complete — in an archive that is <strong>20% smaller</strong> than the thinned one. And
+    because this hid for months behind a perfect default view, the bake now counts blocks-per-zoom
+    and refuses to install an archive with holes.</p>
+  </a>
+
   <a class="entry" href="./2026-08-09-vote-type-filter.html">
     <div class="date">2026-08-09</div>
     <h2>The vote-type dropdown becomes the map's legend</h2>
