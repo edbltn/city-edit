@@ -4,6 +4,7 @@ import {
   proposalShapeClass,
   routeBlockEdges,
   isRouteCovered,
+  routeCoverageRatio,
   expandSelectionToUndirected,
   dropPointsCoveredByRoutes,
   chooseAnchorOrder,
@@ -125,18 +126,38 @@ describe("routeBlockEdges (hover highlight + vote set)", () => {
   });
 });
 
+describe("routeCoverageRatio", () => {
+  const blocks = [[0, 5], [1], [2]];
+
+  it("counts blocks holding at least one selected edge", () => {
+    expect(routeCoverageRatio(blocks, [5, 1, 2])).toBe(1);   // 5 covers block 0
+    expect(routeCoverageRatio(blocks, [0, 1])).toBeCloseTo(2 / 3);
+    expect(routeCoverageRatio(blocks, [])).toBe(0);
+  });
+
+  it("is 0 for a corridor with no blocks (never accidentally 'covered')", () => {
+    expect(routeCoverageRatio([], [1, 2, 3])).toBe(0);
+  });
+});
+
 describe("isRouteCovered (auto-select)", () => {
   const blocks = [[0, 5], [1], [2]];
 
-  it("fires only when every block has at least one selected edge", () => {
-    expect(isRouteCovered(blocks, [5, 1, 2])).toBe(true); // one per block (5 covers block 0)
-    expect(isRouteCovered(blocks, [0, 1])).toBe(false);   // block [2] uncovered
+  it("fires on a substantial share of the blocks, not only on all of them", () => {
+    expect(isRouteCovered(blocks, [5, 1, 2])).toBe(true);  // 3/3
+    expect(isRouteCovered(blocks, [0, 1])).toBe(true);     // 2/3 ≥ 0.6 — ran along most of it
+    expect(isRouteCovered(blocks, [0])).toBe(false);       // 1/3 — merely brushed it
     expect(isRouteCovered(blocks, [])).toBe(false);
   });
 
-  it("clears coverage when a block drops out of the selection", () => {
+  it("takes an explicit ratio for callers that want the strict rule", () => {
+    expect(isRouteCovered(blocks, [0, 1], 1)).toBe(false);
+    expect(isRouteCovered(blocks, [0, 1, 2], 1)).toBe(true);
+  });
+
+  it("clears coverage when enough blocks drop out of the selection", () => {
     expect(isRouteCovered(blocks, new Set([0, 1, 2]))).toBe(true);
-    expect(isRouteCovered(blocks, new Set([0, 1]))).toBe(false);
+    expect(isRouteCovered(blocks, new Set([1]))).toBe(false);
   });
 });
 

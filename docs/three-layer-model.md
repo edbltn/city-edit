@@ -134,11 +134,15 @@ mapped edges into them geometrically, which left unmapped edges — heatmap gaps
    are **1-based**: MVT can't represent a native feature id of 0 (tippecanoe
    drops it), which would detach block 0's heat/selection feature-state.
 
-The old pipeline (`build_blocks_generic.py` → `build_node_blocks.py` →
-`build_foot_blocks.py` → `build_edge_blocks.py` → `merge_degenerate_blocks.py`)
-and its planimetric evaluation harness (`compare_blocks.py`, `COMPARISON.md`)
-remain in the repo for reference but are no longer run by
-`build_city_blocks.sh`.
+The old multi-stage pipeline (a centreline-buffer generator, then separate node,
+foot, edge-bake and merge passes) and its planimetric evaluation harness have
+been **removed** — `build_blocks_graph_first.py` replaced all of them. The
+numbers that harness produced, and the `HALF_WIDTH` values they justified, are
+recorded in [`server/streetscape_blocks/README.md`](../server/streetscape_blocks/README.md).
+
+> **Full algorithm:** [algorithms/01-block-identification.md](algorithms/01-block-identification.md)
+> — the junction clustering, the merge fixpoint, every tuning knob, and the
+> failure that produced each rule.
 
 Generation runs **when a city's graph is built** (alongside
 `refresh_osm.py` / the graph-builder image) and the artifacts are baked next to
@@ -279,12 +283,21 @@ proposal → blocks is a well-defined projection.
 ### 3.3 Selection behavior
 
 - An RBTP renders **selected** when either:
-  1. **Coverage** — the current selection covers **all of its blocks** (≥ 1
-     selected edge in every block), exactly like PBTPs render selected when
-     their block is covered. `isRouteCovered` is the shared predicate, with the
-     selection **expanded to direction twins** first
+  1. **Coverage** — the current selection covers at least
+     `ROUTE_SELECTED_MIN_COVERAGE` (0.6) of its blocks (≥ 1 selected edge in a
+     covered block), the same rule that makes a PBTP render selected when its
+     one block is covered. `isRouteCovered` is the shared predicate — the
+     diamond's ring, the route card's header, and the card's "top proposal" row
+     badge all ask it, so they cannot disagree about what the selection stands
+     for. The selection is **expanded to direction twins** first
      (`expandSelectionToUndirected`) — a routed path often traverses the twin
      of the edge a corridor's block recorded.
+
+     The threshold is not 1.0 because full coverage almost never survives the
+     ends: a route that runs along a corridor starts and stops mid-corridor, or
+     OSRM clips a junction block at a turn. Requiring all-of-it left the diamond
+     dark while the point pins on that very path lit up — a point has one block,
+     so any overlap already *is* full coverage for it.
   2. **Explicit tap** — it is the RBTP the user tapped (GraphLayer's
      `selectedRbtpId`) and **both of its anchors are still waypoints** of the
      current route. Editing an anchor away or clearing the route deselects it.
@@ -295,6 +308,15 @@ proposal → blocks is a well-defined projection.
   especially on maps without block artifacts (singleton blocks). Routing the
   leg through the proposal's stored `edgeIds` verbatim remains an open
   follow-up.
+- A **PBTP** renders **selected** when the selection touches its **block** —
+  GraphLayer's `onSelectedBlockSet`, the same block union `topKindsFor` badges
+  in the card. Matching the winner's own edge against the routed path
+  (`onPathEdgeSet`, direction twins forgiven) is a strictly narrower test and
+  is kept for one thing only: deciding whether the pin goes **click-through**,
+  which is safe only where a route polyline really lies underneath it. A
+  junction block holds dozens of stub edges and a route crosses two, so the
+  path test alone missed nearly every intersection proposal a route ran through
+  — the card badged it while its pin stayed dark.
 
 ## 4. Vote semantics — block-scoped clear-then-cast
 
@@ -355,7 +377,7 @@ block index), then reconciles from the response / delta.
 | Concern | File |
 |---|---|
 | Layer-1 storage, identity, migration | `server/database.py`, `server/vote_store.py`, [voting-architecture.md](voting-architecture.md) |
-| Block generation + eval | `server/streetscape_blocks/` (`build_blocks_generic.py`, `build_foot_blocks.py`, `build_edge_blocks.py`, `compare_blocks.py`, `eval/`) |
+| Block generation | `server/streetscape_blocks/build_blocks_graph_first.py` (+ `scan_overlaps.py`, `scan_contiguity.py`, `verify_blocks_tiles.py` auditors) — algorithm: [algorithms/01-block-identification.md](algorithms/01-block-identification.md) |
 | Block load + mapping | `server/graph_registry.py` (`edge_block_id`, `block_to_edges`) |
 | Block vote dedup + serving | `server/block_votes.py`, `/api/graph-votes` in `server/app.py` |
 | Block-scoped write semantics | `/api/vote` in `server/app.py` |

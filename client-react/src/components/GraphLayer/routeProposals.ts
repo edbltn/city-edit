@@ -1,3 +1,4 @@
+// Algorithm doc: docs/algorithms/03-route-proposals.md
 // ==========================================================================
 // Route-based top proposals (RBTPs) — client side
 // ==========================================================================
@@ -143,13 +144,49 @@ export function routeBlockEdges(p: RouteProposal): number[] {
 }
 
 // --------------------------------------------------------------------------
-// Auto-select coverage (block-grained) — mirrors server is_route_covered.
+// Auto-select coverage (block-grained).
 // --------------------------------------------------------------------------
-/** True iff the selection covers EVERY block (≥1 of each block's edges). */
-export function isRouteCovered(blocks: number[][], selectedEdges: Iterable<number>): boolean {
+/**
+ * Share of a corridor's blocks the selection reaches (≥ 1 selected edge in the
+ * block). 0 for a corridor with no blocks.
+ */
+export function routeCoverageRatio(
+  blocks: number[][],
+  selectedEdges: Iterable<number>
+): number {
   const sel = selectedEdges instanceof Set ? selectedEdges : new Set(selectedEdges);
+  if (blocks.length === 0) return 0;
+  let covered = 0;
+  for (const block of blocks) if (block.some((e) => sel.has(e))) covered++;
+  return covered / blocks.length;
+}
+
+/**
+ * A corridor reads SELECTED once the selection covers at least this share of
+ * its blocks. NOT 1.0: a selection that runs along most of a corridor plainly
+ * "is" that corridor to the person who traced it, yet full coverage almost
+ * never survives the ends — the route starts and stops mid-corridor, or OSRM
+ * clips a junction block at a turn. Requiring all-of-it left a diamond dark
+ * while the point pins on the very same path lit up (they only have one block
+ * to cover, so any overlap IS full coverage for them). Raise it toward 1 and
+ * corridors go dark again on near-misses; drop it much below a half and a
+ * selection that merely brushes a long corridor starts claiming it.
+ */
+export const ROUTE_SELECTED_MIN_COVERAGE = 0.6;
+
+/**
+ * True iff the selection covers at least `minRatio` of the route's blocks —
+ * the shared predicate behind the diamond's selected ring, the route-summary
+ * card's header, and the card's "top proposal" row badge, so those three can
+ * never disagree about what the selection stands for.
+ */
+export function isRouteCovered(
+  blocks: number[][],
+  selectedEdges: Iterable<number>,
+  minRatio = ROUTE_SELECTED_MIN_COVERAGE
+): boolean {
   if (blocks.length === 0) return false;
-  return blocks.every((block) => block.some((e) => sel.has(e)));
+  return routeCoverageRatio(blocks, selectedEdges) >= minRatio;
 }
 
 /**

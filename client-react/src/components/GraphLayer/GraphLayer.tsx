@@ -36,6 +36,7 @@ import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, TOP_PROPOSAL_MIN_NET, type VoteTypeWinner } from "./topProposals";
 import {
   createRouteProposalJob, corridorFromEdgeIds, corridorSliceBetween, routeBlockEdges, isRouteCovered,
+  routeCoverageRatio, ROUTE_SELECTED_MIN_COVERAGE,
   expandSelectionToUndirected,
   type RouteProposal,
 } from "./routeProposals";
@@ -972,7 +973,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // them is still draggable — dragging there spawns a real mid. Recomputed
   // reactively from winners + the path, so a vote that promotes/demotes a
   // proposal adds/removes its highlight.
+  //
+  // TWO GRAINS, deliberately (see the effect below):
+  //   onPathEdgeSet        — the winner's own edge is ON the routed path
+  //                          (direction twins forgiven). Drives click-through:
+  //                          only here is there really a polyline underneath to
+  //                          hand the gesture to.
+  //   onSelectedBlockSet   — the winner sits on a BLOCK the selection touches.
+  //                          Drives the selected ring, and nothing else. Blocks
+  //                          are the interaction grain everywhere else (votes,
+  //                          the card's rows, its "top proposal" badges), so
+  //                          this is the set that makes the pin agree with the
+  //                          modal.
   const [onPathEdgeSet, setOnPathEdgeSet] = useState<Set<number>>(() => new Set());
+  const [onSelectedBlockSet, setOnSelectedBlockSet] = useState<Set<number>>(() => new Set());
   const startLat = startPoint?.lat ?? null;
   const startLng = startPoint?.lng ?? null;
   const endLat = endPoint?.lat ?? null;
@@ -1078,15 +1092,28 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   }, [getWaypointAvoidRects]);
 
   // Highlight (but do NOT add as waypoints) the top proposals the current route
-  // PASSES THROUGH. Matched by UNDIRECTED node-pair, not raw edge index: a two-way
-  // street stores each direction as its own edge, and the route often traverses
-  // the twin of the vote winner's edge (an exact edge-id intersection misses it).
+  // runs through. Two sets, at the two grains described above:
+  //
+  //   ON THE PATH — matched by UNDIRECTED node-pair, not raw edge index: a
+  //     two-way street stores each direction as its own edge, and the route often
+  //     traverses the twin of the vote winner's edge (an exact edge-id
+  //     intersection misses it). These stay click-through so the path beneath is
+  //     still draggable (dragging there spawns a real mid).
+  //   ON A SELECTED BLOCK — the winner's edge is any edge of a block the
+  //     selection touches, exactly the set `topKindsFor` badges as a "point" top
+  //     proposal in the card. A junction block holds dozens of stub edges and a
+  //     route crosses two of them, so the path test above misses ~every
+  //     intersection proposal the route plainly runs through: the card badged it
+  //     while its pin stayed dark. This set is the pin's half of that agreement.
+  //
   // Reactive to winners + the path, so a vote promoting/demoting a proposal
-  // adds/removes its highlight. Waypoint proposals (start/end/mid) are excluded —
-  // those are styled by `role`. These stay click-through so the path beneath is
-  // still draggable (dragging there spawns a real mid).
+  // adds/removes its highlight. Waypoint proposals (start/end/mid) are excluded
+  // from both — those are styled by `role`.
   useEffect(() => {
-    const clear = () => setOnPathEdgeSet((prev) => (prev.size ? new Set() : prev));
+    const clear = () => {
+      setOnPathEdgeSet((prev) => (prev.size ? new Set() : prev));
+      setOnSelectedBlockSet((prev) => (prev.size ? new Set() : prev));
+    };
     if (isStationNetwork || isHeatmapLoading) { clear(); return; }
     if (startLat === null || endLat === null) { clear(); return; }
     if (!pathEdgeIds || pathEdgeIds.length === 0 || winners.length === 0) { clear(); return; }
@@ -1098,17 +1125,24 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     for (const ei of pathEdgeIds) {
       if (ei < g.nEdges) pathPairs.add(pairKey(edgeFrom(g, ei), edgeTo(g, ei)));
     }
-    const next = new Set<number>();
+    // Same block union the card's rows and badges are computed over.
+    const blockEdges = new Set<number>();
+    for (const block of materializeBlocks(g, blockIndexRef.current, pathEdgeIds)) {
+      for (let i = 0; i < block.length; i++) blockEdges.add(block[i]);
+    }
+    const nextPath = new Set<number>();
+    const nextBlock = new Set<number>();
     for (const w of winners) {
       // Skip proposals that ARE waypoints — `role` styles those.
       if (w.edgeIdx === startEdgeIdx || w.edgeIdx === endEdgeIdx || midEdgeSet.has(w.edgeIdx)) continue;
       if (w.edgeIdx >= g.nEdges) continue;
-      if (pathPairs.has(pairKey(edgeFrom(g, w.edgeIdx), edgeTo(g, w.edgeIdx)))) next.add(w.edgeIdx);
+      if (pathPairs.has(pairKey(edgeFrom(g, w.edgeIdx), edgeTo(g, w.edgeIdx)))) nextPath.add(w.edgeIdx);
+      if (blockEdges.has(w.edgeIdx)) nextBlock.add(w.edgeIdx);
     }
-    setOnPathEdgeSet((prev) => {
-      if (prev.size === next.size && [...next].every((x) => prev.has(x))) return prev;
-      return next;
-    });
+    const sameSet = (prev: Set<number>, next: Set<number>) =>
+      prev.size === next.size && [...next].every((x) => prev.has(x));
+    setOnPathEdgeSet((prev) => (sameSet(prev, nextPath) ? prev : nextPath));
+    setOnSelectedBlockSet((prev) => (sameSet(prev, nextBlock) ? prev : nextBlock));
   }, [startLat, startLng, endLat, endLng, pathEdgeIds, winners, startEdgeIdx, endEdgeIdx, midEdgeSet, isStationNetwork, isHeatmapLoading]);
 
   // Pixel hit-test: is a screen point over a top-proposal ICON? Tests the icon's
@@ -3439,14 +3473,25 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // header, so selecting a diamond (or manually tracing its corridor) titles
   // the summary with that proposal. Mirrors the diamonds' own selected rule:
   // block coverage (twin-expanded) first, else the explicitly-tapped RBTP
-  // whose anchors are still waypoints.
+  // whose anchors are still waypoints. Coverage is a THRESHOLD, not all-or-
+  // nothing (ROUTE_SELECTED_MIN_COVERAGE), so several corridors can qualify at
+  // once — the best-covered one wins the header rather than whichever ranked
+  // first.
   const coveredRouteProposal = useMemo(() => {
     void isHeatmapLoading;
     const topo = topologyRef.current;
     if (!topo || !pathEdgeIds || pathEdgeIds.length === 0 || routeProposals.length === 0) return null;
     const sel = expandSelectionToUndirected(
       topo, pathEdgeIds, routeProposals.flatMap((p) => p.blockEdgeIds));
-    const byCoverage = routeProposals.find((p) => isRouteCovered(p.blocks, sel)) ?? null;
+    let byCoverage: RouteProposal | null = null;
+    let bestRatio = 0;
+    for (const p of routeProposals) {
+      const ratio = routeCoverageRatio(p.blocks, sel);
+      if (ratio >= ROUTE_SELECTED_MIN_COVERAGE && ratio > bestRatio) {
+        bestRatio = ratio;
+        byCoverage = p;
+      }
+    }
     if (byCoverage) return byCoverage;
     const tapped = routeProposals.find((p) => p.id === selectedRbtpId) ?? null;
     return tapped && anchorsAreWaypoints(tapped) ? tapped : null;
@@ -3472,10 +3517,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // batched proposal sweep).
   //   - "point": a PBTP winner sits on one of the card's blocks (the same
   //     block-grain the rows sum over, so the badge marks a row whose count
-  //     includes that winner's votes).
-  //   - "route": an RBTP whose corridor is FULLY contained in the selection
-  //     (every block covered, direction twins forgiven) — a selection that
-  //     merely brushes a corridor doesn't badge it.
+  //     includes that winner's votes). Same set that rings the pin — see
+  //     onSelectedBlockSet.
+  //   - "route": an RBTP whose corridor is MOSTLY inside the selection
+  //     (≥ ROUTE_SELECTED_MIN_COVERAGE of its blocks, direction twins
+  //     forgiven) — a selection that merely brushes a corridor doesn't badge
+  //     it. Same predicate that lights the diamond.
   // -------------------------------------------------------------------------
   const topKindsFor = useCallback(
     (edgeIds: readonly number[] | null | undefined, includeRoutes: boolean): TopKindMap => {
@@ -3862,13 +3909,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       // A fanned-out icon (spread override) sits off the path at its grid cell, so
       // it can't be click-through — it must take its own click to be pickable.
       const onPath = role === null && onPathEdgeSet.has(w.edgeIdx);
+      // Selected-but-not-under-the-path: the proposal sits on a block the
+      // selection covers (the card's grain) without the routed polyline running
+      // over its own edge — typically an intersection proposal on a junction
+      // block the route crosses. It reads selected, but stays INTERACTIVE:
+      // there's no path under it to hand a click to, so passthrough would only
+      // make it dead to the pointer.
+      const onSelectedBlock = role === null && !onPath && onSelectedBlockSet.has(w.edgeIdx);
       const passthrough = (role !== null || onPath) && !isStationNetwork && !override;
       const tint: "start" | "end" | null =
         role === "start" ? "start" : role === "end" ? "end" : null;
-      // White/black ring: a mid waypoint's pin, an on-path proposal, the drag's
-      // drop-target affordance, or the pinned selection. (Same `is-selected`.)
+      // White/black ring: a mid waypoint's pin, a proposal the selection runs
+      // through (on its path or on one of its blocks), the drag's drop-target
+      // affordance, or the pinned selection. (Same `is-selected`.)
       const isSelected =
-        role === "mid" || onPath || w.edgeIdx === dropTargetEdgeIdx || w.edgeIdx === selectedEdgeIdx;
+        role === "mid" || onPath || onSelectedBlock
+        || w.edgeIdx === dropTargetEdgeIdx || w.edgeIdx === selectedEdgeIdx;
       const isSpread = !!override;
       // A matched waypoint (start/end/mid) in route mode carries a remove [×]
       // badge baked into its icon — pinned to the corner, so it scales and fans
@@ -4042,7 +4098,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // clusterEngine carries the placed squares (winners/stations) and re-runs
     // once topology+votes arrive, so stations appear even with zero votes.
   }, [clusterEngine, currentZoom, map, spread, collapseSpread, clearSpreadTimer, armSpreadTimer,
-      selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,
+      selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, onSelectedBlockSet,
+      dropTargetEdgeIdx,
       isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, mapStyle.basemap, isStationNetwork, canHover]);
 
   // Cast a directional vote on a single proposal (edge, vote type) through the
@@ -4168,8 +4225,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // selects it FLAT OUT (the corridor replaces the route — start/end at its
   // anchors; only a drag-DROP threads it into an existing route). A diamond
   // reads selected when either
-  //   (a) the live route covers every one of its blocks (the auto-select rule,
-  //       twin-expanded), or
+  //   (a) the live route covers MOST of its blocks (the auto-select rule,
+  //       twin-expanded, ≥ ROUTE_SELECTED_MIN_COVERAGE — running along a
+  //       corridor without quite reaching both ends still counts, which is how
+  //       the point pins on that same path already behave), or
   //   (b) it's the explicitly-tapped RBTP and both anchors are still waypoints
   //       — see selectedRbtpId; OSRM's leg between the anchors rarely re-traces
   //       the corridor, so (a) alone left a tapped diamond looking unselected.
@@ -5036,7 +5095,7 @@ function ProposalCard({
                             title={topKind === "point"
                               ? "Top proposal on this block"
                               : topKind === "route"
-                                ? "Top route proposal — fully inside this selection"
+                                ? "Top route proposal — mostly inside this selection"
                                 : "Top proposal here — point and route"}
                           >
                             {(topKind === "point" || topKind === "both") && (
