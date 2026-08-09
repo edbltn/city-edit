@@ -1,0 +1,1203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A blog link, and a header with room for it — 2026-08-09</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>A blog link, and a header with room for it</h1>
+    <div class="dateline">2026-08-09 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#clutter">Five links wanted the same row</a>
+<a href="#icons">Drawn to the app's grid, not imported</a>
+<a href="#hierarchy">Sizing by how much each thing matters</a>
+<a href="#overflow">The desktop header had a hard 1353px floor</a>
+<a href="#landing">One nav instead of two</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">A blog link, and a header that had room for it. The map header’s four meta buttons — Feedback, About, Donate and a stray How it Works — collapse into a <code>NavRail</code>: two enclosed segments of icon buttons, things to <em>read</em> then things to <em>do</em>, shared with the landing page. The glyphs are drawn to the app’s own grid (square caps, mitered joins, every mark built from a rectangle) rather than imported, and everything goes icon-only except Donate, which keeps its word and the map’s accent. The controls people actually came for are untouched. The right-hand column drops <strong>395px → 294px</strong>, which exposed and then closed a pre-existing overflow: the desktop layout had a hard ~1353px floor, because the legend was <code>flex-shrink: 0</code> and could never let its address ellipsise.</p>
+
+  
+    <section class="card" id="clutter">
+      <div class="tag">THE PROBLEM</div>
+      <h2>Five links wanted the same row</h2>
+      <h3>Symptom</h3>
+      <p>The map header carried Feedback, About and Donate as full-width text buttons, with How it Works sitting a row below among the vote controls. The blog had to go somewhere, and a fourth label in that row was not an option — the meta links were already as loud as the controls people come to the map to use.</p>
+      <h3>Root cause</h3>
+      <ul><li>Every one of them was a <code>.btn-header</code>: same size, same weight, same border as each other AND as the Clear button next to the vote controls. Nothing in the bar said which things were the map and which were the website</li>
+<li>How it Works was in <code>.actions-group</code> — the row-2 cell that otherwise acts on the current selection — purely to stop that row collapsing to zero height before a selection existed</li>
+<li>Together they set the header's right-hand column at <strong>395px</strong>, which the legend then had to fit alongside</li></ul>
+      <h3>What changed</h3>
+      <ul><li>One shared <code>NavRail</code>: two enclosed segments of icon buttons — <strong>How it Works · Blog · About</strong> | <strong>Feedback · Donate</strong></li>
+<li>Grouping is carried by <em>enclosure</em>, not by a divider or a heading: the first box is things to read, the second is things to do. How it Works belongs in the first, so it moves out of the selection row</li>
+<li>That row now legitimately stays empty until there is a selection — the fixed <code>grid-template-rows</code> was always what held it open, not the button</li>
+<li>Right-hand column: <strong>395px → 294px</strong></li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/NavRail/NavRail.tsx</li>
+<li>client-react/src/components/TopBar/TopBar.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="icons">
+      <div class="tag">THE ICON SET</div>
+      <h2>Drawn to the app's grid, not imported</h2>
+      <h3>Symptom</h3>
+      <p>Icon-only buttons need icons, and the obvious move — pull in Lucide or Feather — would have put rounded caps and 2px strokes on a 24px grid next to a monospace, zero-radius, hairline interface.</p>
+      <h3>Root cause</h3>
+      <ul><li>The app already has a drawing language: <code>CheckIcon</code> is explicitly square-capped and mitered “unlike the rounded unicode ✓”, and the logo is letters set in a crossword grid of squares</li>
+<li>A pack's icons are internally consistent with each other, which is exactly what makes them read as a foreign body — they are consistent with the wrong thing</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Five glyphs on one skeleton: a 24 grid, 1.75px strokes, <code>square</code> caps, <code>miter</code> joins, and every mark built from a rectangle on that grid</li>
+<li><code>?</code> and <code>i</code> are set in the logo's lettered box, so the two informational marks read as a pair; the article and the speech bubble are the same rectangle carrying different contents</li>
+<li>The heart is the one curve in the set — which is what makes Donate the glyph the eye lands on first</li>
+<li>The article's image block is <em>filled</em> rather than stroked: at the 15–18px these render at, a 6×5 stroked box is all outline and silts up into a grey smudge</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/NavRail/icons.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="hierarchy">
+      <div class="tag">HIERARCHY</div>
+      <h2>Sizing by how much each thing matters</h2>
+      <h3>Symptom</h3>
+      <p>Decluttering by shrinking everything equally just makes a smaller undifferentiated row. The bar needed to say what it is for.</p>
+      <h3>Root cause</h3>
+      <ul><li>The controls that do the work — the Map and Vote selectors, the Cast −/+ buttons — were the same visual weight as a link to an external website</li>
+<li>Donate is the one meta item with something to ask for, and it was one of three identical siblings</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The working controls are <strong>untouched</strong>: full <code>--control-height</code>, full labels, and Cast keeps its 44px buttons</li>
+<li>Everything in the rail goes icon-only — <em>except</em> Donate, which keeps its word and the active map's accent fill, so one item in the quiet half still reads first</li>
+<li>Below 1080px Donate sheds its label too and joins the grid of squares; the width that frees goes to the Map/Vote selectors, which is where it is worth spending</li>
+<li>Clear deliberately keeps its text: a bare <code>×</code> sitting beside <code>−</code> and <code>+</code> reads as an operator</li>
+<li>Tooltips are hover-only (<code>@media (hover: hover)</code>) so a tap never leaves one stuck open; <code>aria-label</code> carries the name regardless</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/NavRail/NavRail.css</li></ul>
+    </section>
+    
+
+    <section class="card" id="overflow">
+      <div class="tag">BUG FOUND EN ROUTE</div>
+      <h2>The desktop header had a hard 1353px floor</h2>
+      <h3>Symptom</h3>
+      <p>Measuring the new rail at 1300px showed the topbar overflowing its viewport by 53px, with Donate clipped at the edge. It was not the rail: the same measurement against the pre-change markup put the floor at ~1454px.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>.topbar-legend</code> was <code>flex-shrink: 0</code>, and it holds the widest thing in the bar — a 250px address slot</li>
+<li>So the desktop layout could never be narrower than legend + selectors + links. Every window between the 1080px breakpoint and ~1353px scrolled sideways</li>
+<li>The truncation machinery already existed and was already commented at length — it was just scoped to the ≤1080 block, so above the breakpoint the address could never ellipsise</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>flex-shrink: 0</code> → <code>min-width: 0</code> on the legend, and <code>.legend-item-coords { min-width: 0 }</code> promoted out of the ≤1080 block so it holds at every width</li>
+<li>The address now ellipsises above 1080 exactly as it already did below it</li>
+<li>The rail is pinned with <code>justify-self: end</code> so its right edge stays flush with the legend's whichever of the rail / Cast+Clear happens to be wider — they currently tie almost exactly, and relying on that tie would be luck</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/styles/globals.css</li>
+<li>client-react/src/components/TopBar/TopBar.css</li></ul>
+    </section>
+    
+
+    <section class="card" id="landing">
+      <div class="tag">LANDING PAGE</div>
+      <h2>One nav instead of two</h2>
+      <h3>Symptom</h3>
+      <p>The landing page had About / Feedback / Donate as footer links. Adding Blog there would have made four links at the bottom of a page whose entire job is picking a map.</p>
+      <h3>Root cause</h3>
+      <ul><li>A footer is where links go when there is nowhere better, and on this page there was somewhere better — the header is mostly empty space either side of a centred logo</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The same rail, pinned top-right of the header; the footer drops to the copyright line alone</li>
+<li>Below 720px it unpins and returns to the column under the tagline — in the corner it would clip the logo's top-left square at that width</li>
+<li>It is <em>last</em> in the DOM for that reason: pinned, position is cosmetic, but in the column source order is the visual order, and so the focus order</li>
+<li>No How it Works here — that glyph describes this map's controls and has nothing to say on the picker, so it is dropped rather than shown inert</li>
+<li>Donate keeps its label at every width on this page: the 1080px rule exists because the <em>map</em> header is fighting for room, and this page is not</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/Landing/Landing.tsx</li>
+<li>client-react/src/components/Landing/Landing.css</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Measured, not eyeballed: at <strong>320 / 360 / 390 / 430 / 560 / 768 / 900 / 1024 / 1100 / 1200 / 1300 / 1440px</strong> the document's <code>scrollWidth</code> equals the viewport at every step — <strong>no horizontal overflow at any width</strong>.</li>
+<li>The rail's right edge and the legend's right edge come out <strong>identical at every one of those widths</strong> (e.g. both 370 at 390px, both 1280 at 1300px).</li>
+<li>The 101px saving is a measurement, not an estimate: the pre-change markup was rebuilt in the live DOM and measured at <strong>395px</strong> for the old column against <strong>294px</strong> for the rail.</li>
+<li><code>.topbar</code> does still report internal overflow below 768px — traced to the <em>closed</em> <code>.mode-dropdown</code> panel, which is pre-existing, absolutely positioned, and does not reach the document.</li>
+<li>Driven in the running app: hovering a glyph shows its tooltip (<em>How it works</em>, <em>Blog</em>), and clicking the <code>?</code> opens the How it Works modal from its new home in the rail.</li>
+<li>Link attributes read back from the DOM — all four anchors carry <code>target=_blank</code>, <code>rel="noopener noreferrer"</code> and an <code>aria-label</code>, with Blog resolving to <code>https://sphericalharmonics.substack.com/</code>.</li>
+<li>Responsive behavior was verified in <strong>iframes</strong> rather than by resizing the window — the window would not resize, and short iframes silently triggered the <code>(max-height: 500px)</code> landscape query, which collapses the legend and made an early reading look broken. Frames were then sized past 500px tall.</li>
+<li>The landing rail was checked at 1000px (pinned top-right) and 390px (in-column under the tagline).</li>
+<li><code>npx tsc -b</code> clean and <code>npm run build</code> succeeds — Vite dev never type-checks, so this is the only thing between an edit and a broken client build.</li>
+<li>Committed as a <strong>partial stage</strong>: another session is mid-flight in <code>TopBar.tsx</code> (the Vote → Proposals selector change), so only this workstream's hunks were staged and <code>git show :…TopBar.tsx</code> was read back to confirm their edit was neither committed nor lost from the working tree.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-walkways</code> — expect two small boxes of icons at the top right: <strong>[?] [▤] [i]</strong> then <strong>[▭] [♡ Donate]</strong>, with Donate in the map's accent.</li>
+<li>Hover each glyph and confirm the tooltip names it; click <code>[?]</code> and confirm the How it Works modal still opens.</li>
+<li>Click the newspaper glyph and confirm it opens <code>sphericalharmonics.substack.com</code> in a new tab.</li>
+<li>Drag the window narrow and back — watch the Donate label drop away around 1080px and the start/end address ellipsise instead of the bar running off the right edge. <strong>Nothing should scroll sideways at any width.</strong></li>
+<li>Place a start and end and confirm the Cast −/+ and Clear controls appear on the row below, unchanged in size.</li>
+<li>Open <code>http://localhost:3000/?landing=1</code> — rail top-right, and the footer now shows only the copyright line. Narrow past 720px and confirm it moves to under “Redraw your city.”</li>
+<li>On a phone, check the icon buttons are comfortable to hit — they are 32px wide at ≤1080 and 29px at ≤400, which is the one judgement call here worth a second opinion.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/components/Landing/Landing.css</span>
+            <span class="stat"><span class="d-add">+28</span> / <span class="d-del">-10</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · Landing</span>
+        <span class="ctx-sum">The picker&#x27;s stylesheet — header, search, card grid, footer, and the 720px single-column step</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Landing.css</span>
+        <span class="ctx-sum">~360 lines</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">.landing-header</span><span class="ol-sum">+ position: relative, so the rail can pin to it</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.landing-nav</span><span class="ol-sum">new — pinned top-right</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.landing-nav .nav-btn-donate / -label</span><span class="ol-sum">new — Donate keeps its word at every width here</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">.landing-search / cards / skeleton</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">.landing-footer-link</span><span class="ol-sum">REMOVED — no footer links left to style</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">≤720 block</span><span class="ol-sum">+ .landing-nav returns to the column flow</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Pinned in the corner it stays out of the logo/tagline axis, which is what the header is actually for</li><li>Below 720 it unpins: the logo grows to fill the width and the corner would clip its top-left square</li><li>The Donate-label override is scoped to .landing-nav (0-2-0) so it outranks the rail&#x27;s own ≤1080 rule without touching the map header</li><li>The 1080 rule exists because the MAP header is short of room; this page never is</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/Landing/Landing.css b/client-react/src/components/Landing/Landing.css</span>
+<span class="d-meta">index f71a7d5..6375e52 100644</span>
+<span class="d-meta">--- a/client-react/src/components/Landing/Landing.css</span>
+<span class="d-meta">+++ b/client-react/src/components/Landing/Landing.css</span>
+<span class="d-hunk">@@ -15,6 +15,7 @@</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> .landing-header {</span>
+<span class="d-add">+  position: relative;</span>
+<span class="d-ctx">   display: flex;</span>
+<span class="d-ctx">   flex-direction: column;</span>
+<span class="d-ctx">   align-items: center;</span>
+<span class="d-hunk">@@ -24,6 +25,27 @@</span>
+<span class="d-ctx">   border-bottom: 1px solid var(--hairline);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/* Pinned to the corner rather than sitting in the column flow: the header&#x27;s job</span>
+<span class="d-add">+   is the logo + tagline, and the meta links should stay out of that axis. The</span>
+<span class="d-add">+   top padding above is what keeps it clear of the logo. */</span>
+<span class="d-add">+.landing-nav {</span>
+<span class="d-add">+  position: absolute;</span>
+<span class="d-add">+  top: var(--space-4);</span>
+<span class="d-add">+  right: var(--space-5);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* Donate keeps its word here at every width. The rail drops the label below</span>
+<span class="d-add">+   1080px because the *map* header is fighting for room at that size — this page</span>
+<span class="d-add">+   isn&#x27;t, and Donate is the one thing on it worth asking for outright. */</span>
+<span class="d-add">+.landing-nav .nav-btn-donate {</span>
+<span class="d-add">+  width: auto;</span>
+<span class="d-add">+  padding: 0 var(--space-3);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.landing-nav .nav-btn-label {</span>
+<span class="d-add">+  display: inline;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> .landing-logo-link {</span>
+<span class="d-ctx">   display: block;</span>
+<span class="d-ctx">   line-height: 0;</span>
+<span class="d-hunk">@@ -305,21 +327,17 @@</span>
+<span class="d-ctx">   opacity: 0.5;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-.landing-footer-link {</span>
+<span class="d-del">-  color: var(--ink);</span>
+<span class="d-del">-  text-decoration: none;</span>
+<span class="d-del">-  border-bottom: 1px solid var(--hairline);</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-.landing-footer-link:hover {</span>
+<span class="d-del">-  border-bottom-color: var(--ink);</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-ctx"> @media (max-width: 720px) {</span>
+<span class="d-ctx">   .landing-header {</span>
+<span class="d-ctx">     padding: 40px var(--space-4) var(--space-4);</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  /* Unpinned: at this width the corner would clip the logo&#x27;s top-left corner.</span>
+<span class="d-add">+     Back in the column it centres under the tagline, clear of everything. */</span>
+<span class="d-add">+  .landing-nav {</span>
+<span class="d-add">+    position: static;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   .landing-logo {</span>
+<span class="d-ctx">     height: 112px;</span>
+<span class="d-ctx">   }</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/Landing/Landing.tsx</span>
+            <span class="stat"><span class="d-add">+7</span> / <span class="d-del">-9</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · Landing</span>
+        <span class="ctx-sum">The map picker at cityedit.org: the logo header, the search field, the card grid and the footer</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Landing.tsx</span>
+        <span class="ctx-sum">~230 LOC — this change adds the rail and shortens the footer</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports</span><span class="ol-sum">+1 — NavRail</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">toCard / fallbackCards / skeletons</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">placeholder-clipping measurement</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">landing-header (logo + tagline)</span><span class="ol-sum">+ NavRail, placed LAST in the DOM</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">toolbar / search</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">card grid</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">landing-footer</span><span class="ol-sum">the three duplicate links removed; copyright stays</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>NavRail is last in the header&#x27;s DOM on purpose — pinned it does not matter, in-column it makes source order the visual and focus order</li><li>No onHowItWorks passed: the glyph describes a map&#x27;s controls and there is no map here</li><li>The footer loses About/Feedback/Donate rather than gaining Blog — four links at the bottom of a picker page is the clutter, not the cure</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/Landing/Landing.tsx b/client-react/src/components/Landing/Landing.tsx</span>
+<span class="d-meta">index 3847b1c..fae9c10 100644</span>
+<span class="d-meta">--- a/client-react/src/components/Landing/Landing.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/Landing/Landing.tsx</span>
+<span class="d-hunk">@@ -4,6 +4,7 @@ import {</span>
+<span class="d-ctx"> } from &quot;../../themes&quot;;</span>
+<span class="d-ctx"> import { CONFIG } from &quot;../../config&quot;;</span>
+<span class="d-ctx"> import { ProposeMapModal } from &quot;../ProposeMap/ProposeMapModal&quot;;</span>
+<span class="d-add">+import { NavRail } from &quot;../NavRail&quot;;</span>
+<span class="d-ctx"> import { Logo } from &quot;../Logo&quot;;</span>
+<span class="d-ctx"> import &quot;./Landing.css&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -148,6 +149,10 @@ export function Landing() {</span>
+<span class="d-ctx">           &lt;Logo className=&quot;landing-logo&quot; /&gt;</span>
+<span class="d-ctx">         &lt;/a&gt;</span>
+<span class="d-ctx">         &lt;p className=&quot;landing-tagline&quot;&gt;Redraw your city.&lt;/p&gt;</span>
+<span class="d-add">+        {/* Last in the DOM on purpose: it&#x27;s pinned to the corner on wide screens</span>
+<span class="d-add">+            (position is cosmetic there), but drops back into the column below</span>
+<span class="d-add">+            the tagline on narrow ones — where source order is the visual order. */}</span>
+<span class="d-add">+        &lt;NavRail className=&quot;landing-nav&quot; /&gt;</span>
+<span class="d-ctx">       &lt;/header&gt;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       &lt;div className=&quot;landing-toolbar&quot;&gt;</span>
+<span class="d-hunk">@@ -213,17 +218,10 @@ export function Landing() {</span>
+<span class="d-ctx">             ))}</span>
+<span class="d-ctx">       &lt;/main&gt;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+      {/* Blog/About/Feedback/Donate all live in the header rail now — repeating</span>
+<span class="d-add">+          them here just doubled the nav on a page whose job is picking a map. */}</span>
+<span class="d-ctx">       &lt;footer className=&quot;landing-footer&quot;&gt;</span>
+<span class="d-ctx">         &lt;span&gt;© {year} City Edit. All rights reserved.&lt;/span&gt;</span>
+<span class="d-del">-        &lt;a href=&quot;https://sphericalharmonics.org/&quot; className=&quot;landing-footer-link&quot;&gt;</span>
+<span class="d-del">-          About</span>
+<span class="d-del">-        &lt;/a&gt;</span>
+<span class="d-del">-        &lt;a href=&quot;https://feedback.cityedit.org&quot; className=&quot;landing-footer-link&quot;&gt;</span>
+<span class="d-del">-          Feedback</span>
+<span class="d-del">-        &lt;/a&gt;</span>
+<span class="d-del">-        &lt;a href=&quot;https://donate.cityedit.org&quot; className=&quot;landing-footer-link&quot;&gt;</span>
+<span class="d-del">-          Donate</span>
+<span class="d-del">-        &lt;/a&gt;</span>
+<span class="d-ctx">       &lt;/footer&gt;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       {proposeOpen &amp;&amp; &lt;ProposeMapModal onClose={() =&gt; setProposeOpen(false)} /&gt;}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/NavRail/NavRail.css</span>
+            <span class="stat"><span class="d-add">+176</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · NavRail</span>
+        <span class="ctx-sum">The rail&#x27;s own stylesheet — sizing, the two-segment enclosure, the tooltip, and the responsive steps</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">NavRail.css</span>
+        <span class="ctx-sum">~170 lines — layout, Donate&#x27;s accent variant, tooltips, two breakpoints</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">.nav-rail (--nav-btn-size / --nav-icon-size)</span><span class="ol-sum">new — local knobs so a breakpoint moves both together</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.nav-group</span><span class="ol-sum">new — the enclosure that carries the semantic grouping</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.nav-btn + dividers + hover/active/focus</span><span class="ol-sum">new — the square icon button</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.nav-btn-donate</span><span class="ol-sum">new — accent fill, label, wider box</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">tooltips under @media (hover: hover)</span><span class="ol-sum">new — instant reveal; last one anchors right</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">prefers-reduced-motion</span><span class="ol-sum">new — transitions off</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">≤1080 / ≤400 steps</span><span class="ol-sum">new — Donate sheds its label; buttons tighten</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>--nav-btn-size is control-height MINUS the group&#x27;s 1px border, which is what keeps the buttons exactly square at every breakpoint</li><li>Enclosure does the grouping: one border around each set, a gap between them, no divider rule or heading needed</li><li>Tooltips are gated on (hover: hover) so a tap on touch never leaves one open with nothing to dismiss it</li><li>The last group&#x27;s last tooltip anchors to its own right edge — the rail sits hard against the header&#x27;s edge and it would otherwise overflow</li><li>Below 1080 the buttons go slightly narrower than tall on purpose: the width goes back to the Map/Vote selectors</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/NavRail/NavRail.css b/client-react/src/components/NavRail/NavRail.css</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..87c160b</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/NavRail/NavRail.css</span>
+<span class="d-hunk">@@ -0,0 +1,176 @@</span>
+<span class="d-add">+/* Meta nav rail — two enclosed segments of icon buttons (read | act).</span>
+<span class="d-add">+   Shared by the map topbar and the landing header. */</span>
+<span class="d-add">+</span>
+<span class="d-add">+.nav-rail {</span>
+<span class="d-add">+  /* Squares: the group&#x27;s 1px border eats into the row height, so subtracting it</span>
+<span class="d-add">+     from the width keeps every button exactly square at every breakpoint. */</span>
+<span class="d-add">+  --nav-btn-size: calc(var(--control-height) - 2px);</span>
+<span class="d-add">+  --nav-icon-size: 18px;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  display: flex;</span>
+<span class="d-add">+  align-items: stretch;</span>
+<span class="d-add">+  gap: var(--space-2);</span>
+<span class="d-add">+  height: var(--control-height);</span>
+<span class="d-add">+  flex-shrink: 0;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* Enclosure is the grouping cue: buttons inside one box are one semantic set,</span>
+<span class="d-add">+   and the gap between boxes separates &quot;read&quot; from &quot;act&quot;. */</span>
+<span class="d-add">+.nav-group {</span>
+<span class="d-add">+  display: flex;</span>
+<span class="d-add">+  align-items: stretch;</span>
+<span class="d-add">+  height: 100%;</span>
+<span class="d-add">+  box-sizing: border-box;</span>
+<span class="d-add">+  border: 1px solid var(--hairline);</span>
+<span class="d-add">+  background: var(--paper);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.nav-btn {</span>
+<span class="d-add">+  position: relative;</span>
+<span class="d-add">+  display: flex;</span>
+<span class="d-add">+  align-items: center;</span>
+<span class="d-add">+  justify-content: center;</span>
+<span class="d-add">+  gap: var(--space-2);</span>
+<span class="d-add">+  width: var(--nav-btn-size);</span>
+<span class="d-add">+  padding: 0;</span>
+<span class="d-add">+  border: 0;</span>
+<span class="d-add">+  background: none;</span>
+<span class="d-add">+  font-family: var(--font-main);</span>
+<span class="d-add">+  font-size: var(--control-font-size);</span>
+<span class="d-add">+  font-weight: 400;</span>
+<span class="d-add">+  color: var(--ink);</span>
+<span class="d-add">+  text-decoration: none;</span>
+<span class="d-add">+  cursor: pointer;</span>
+<span class="d-add">+  transition: background 0.12s ease, color 0.12s ease;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.nav-btn + .nav-btn {</span>
+<span class="d-add">+  border-left: 1px solid var(--hairline);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.nav-btn svg {</span>
+<span class="d-add">+  display: block;</span>
+<span class="d-add">+  width: var(--nav-icon-size);</span>
+<span class="d-add">+  height: var(--nav-icon-size);</span>
+<span class="d-add">+  flex-shrink: 0;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.nav-btn:hover {</span>
+<span class="d-add">+  background: var(--hover-bg);</span>
+<span class="d-add">+  color: var(--ink-strong);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.nav-btn:active {</span>
+<span class="d-add">+  background: var(--hover-bg-strong);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.nav-btn:focus-visible {</span>
+<span class="d-add">+  outline: 1px solid var(--ink-strong);</span>
+<span class="d-add">+  outline-offset: -3px;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* Donate is the only labelled item: it carries the active map&#x27;s accent so it&#x27;s</span>
+<span class="d-add">+   the one thing in this otherwise-quiet rail that pulls the eye. Every theme</span>
+<span class="d-add">+   accent is bright enough that --on-accent (near-black) keeps contrast. */</span>
+<span class="d-add">+.nav-btn-donate {</span>
+<span class="d-add">+  width: auto;</span>
+<span class="d-add">+  padding: 0 var(--space-3);</span>
+<span class="d-add">+  background: var(--accent);</span>
+<span class="d-add">+  color: var(--on-accent);</span>
+<span class="d-add">+  font-weight: 600;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.nav-btn-donate:hover {</span>
+<span class="d-add">+  background: var(--accent);</span>
+<span class="d-add">+  color: var(--on-accent);</span>
+<span class="d-add">+  filter: brightness(1.12);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.nav-btn-donate:active {</span>
+<span class="d-add">+  background: var(--accent);</span>
+<span class="d-add">+  filter: brightness(0.94);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.nav-btn-label {</span>
+<span class="d-add">+  white-space: nowrap;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* Tooltips — icon-only buttons need their name on hover. Same instant-reveal</span>
+<span class="d-add">+   pattern as .landing-search-tip (the native `title` waits ~500ms). Hover-only</span>
+<span class="d-add">+   media so a tap on touch doesn&#x27;t leave one stuck open; the aria-label carries</span>
+<span class="d-add">+   the name for assistive tech either way. */</span>
+<span class="d-add">+@media (hover: hover) {</span>
+<span class="d-add">+  .nav-btn::after {</span>
+<span class="d-add">+    content: attr(data-tip);</span>
+<span class="d-add">+    position: absolute;</span>
+<span class="d-add">+    top: calc(100% + 7px);</span>
+<span class="d-add">+    left: 50%;</span>
+<span class="d-add">+    z-index: var(--z-dropdown);</span>
+<span class="d-add">+    padding: 3px 7px;</span>
+<span class="d-add">+    font-family: var(--font-main);</span>
+<span class="d-add">+    font-size: var(--font-size-2xs);</span>
+<span class="d-add">+    font-weight: 400;</span>
+<span class="d-add">+    line-height: 1.3;</span>
+<span class="d-add">+    color: var(--ink);</span>
+<span class="d-add">+    background: var(--paper);</span>
+<span class="d-add">+    border: 1px solid var(--ink);</span>
+<span class="d-add">+    white-space: nowrap;</span>
+<span class="d-add">+    pointer-events: none;</span>
+<span class="d-add">+    opacity: 0;</span>
+<span class="d-add">+    transform: translate(-50%, -2px);</span>
+<span class="d-add">+    transition: opacity 0.12s ease, transform 0.12s ease;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  .nav-btn:hover::after,</span>
+<span class="d-add">+  .nav-btn:focus-visible::after {</span>
+<span class="d-add">+    opacity: 1;</span>
+<span class="d-add">+    transform: translate(-50%, 0);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  /* The rail sits hard against the right edge of the topbar, so the last</span>
+<span class="d-add">+     tooltip anchors to its own right edge instead of overflowing the viewport. */</span>
+<span class="d-add">+  .nav-group:last-child .nav-btn:last-child::after {</span>
+<span class="d-add">+    left: auto;</span>
+<span class="d-add">+    right: 0;</span>
+<span class="d-add">+    transform: translate(0, -2px);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  .nav-group:last-child .nav-btn:last-child:hover::after,</span>
+<span class="d-add">+  .nav-group:last-child .nav-btn:last-child:focus-visible::after {</span>
+<span class="d-add">+    transform: translate(0, 0);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+@media (prefers-reduced-motion: reduce) {</span>
+<span class="d-add">+  .nav-btn,</span>
+<span class="d-add">+  .nav-btn::after {</span>
+<span class="d-add">+    transition: none;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* Narrow: Donate sheds its label and joins the grid of squares. The buttons go</span>
+<span class="d-add">+   slightly narrower than tall here — the rail is secondary chrome, and the</span>
+<span class="d-add">+   width it gives back goes to the Mode/Vote selectors, which are the controls</span>
+<span class="d-add">+   people actually came to use. */</span>
+<span class="d-add">+@media (max-width: 1080px) {</span>
+<span class="d-add">+  .nav-rail {</span>
+<span class="d-add">+    --nav-btn-size: 32px;</span>
+<span class="d-add">+    --nav-icon-size: 16px;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  .nav-btn-donate {</span>
+<span class="d-add">+    width: var(--nav-btn-size);</span>
+<span class="d-add">+    padding: 0;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  .nav-btn-label {</span>
+<span class="d-add">+    display: none;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+@media (max-width: 400px) {</span>
+<span class="d-add">+  .nav-rail {</span>
+<span class="d-add">+    --nav-btn-size: 29px;</span>
+<span class="d-add">+    --nav-icon-size: 15px;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/NavRail/NavRail.tsx</span>
+            <span class="stat"><span class="d-add">+94</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · NavRail</span>
+        <span class="ctx-sum">New shared component: the secondary/meta nav carried by both the map header and the landing header, so these links have one definition instead of two</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">NavRail.tsx</span>
+        <span class="ctx-sum">~95 LOC — four destination constants and one component of two enclosed groups</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">BLOG_URL / ABOUT_URL / FEEDBACK_URL / DONATE_URL</span><span class="ol-sum">new — the four destinations, exported</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">NavRailProps</span><span class="ol-sum">new — optional onHowItWorks, optional className</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">group 1: How it Works · Blog · About</span><span class="ol-sum">new — things to read</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">group 2: Feedback · Donate</span><span class="ol-sum">new — things to do</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>onHowItWorks is OPTIONAL: the glyph is about this map&#x27;s controls, so the landing page omits it rather than rendering it inert</li><li>The button is a &lt;button&gt; and the rest are &lt;a&gt; — one opens a modal, four leave the site; they only look alike</li><li>Every icon-only control carries an aria-label AND a data-tip: the first is the accessible name, the second is the hover tooltip</li><li>target=_blank + rel=noopener noreferrer on all four — none of them should navigate the map away from a selection</li><li>Donate is the only one with a label element, which is what the CSS keys its wider box off</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/NavRail/NavRail.tsx b/client-react/src/components/NavRail/NavRail.tsx</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..7d7aa11</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/NavRail/NavRail.tsx</span>
+<span class="d-hunk">@@ -0,0 +1,94 @@</span>
+<span class="d-add">+import { IconQuestion, IconArticle, IconInfo, IconBubble, IconHeart } from &quot;./icons&quot;;</span>
+<span class="d-add">+import &quot;./NavRail.css&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+export const BLOG_URL = &quot;https://sphericalharmonics.substack.com/&quot;;</span>
+<span class="d-add">+export const ABOUT_URL = &quot;https://sphericalharmonics.org/&quot;;</span>
+<span class="d-add">+export const FEEDBACK_URL = &quot;https://feedback.cityedit.org&quot;;</span>
+<span class="d-add">+export const DONATE_URL = &quot;https://donate.cityedit.org&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+interface NavRailProps {</span>
+<span class="d-add">+  /**</span>
+<span class="d-add">+   * Opens the How-it-Works modal. Only the map header passes this — the glyph</span>
+<span class="d-add">+   * is about *this map&#x27;s* controls, so it has nothing to say on the landing</span>
+<span class="d-add">+   * page and is dropped there rather than shown inert.</span>
+<span class="d-add">+   */</span>
+<span class="d-add">+  onHowItWorks?: () =&gt; void;</span>
+<span class="d-add">+  className?: string;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Secondary/meta nav — How it Works · Blog · About | Feedback · Donate.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Shared by the map topbar and the landing header so there&#x27;s one place these</span>
+<span class="d-add">+ * links live. Two enclosed segments carry the semantics: the first group is</span>
+<span class="d-add">+ * things to *read*, the second is things to *do*. Everything is icon-only</span>
+<span class="d-add">+ * except Donate, which keeps its label and the map&#x27;s accent fill — this rail</span>
+<span class="d-add">+ * is deliberately the quiet half of the header, and Donate is the one item in</span>
+<span class="d-add">+ * it worth spending attention on.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function NavRail({ onHowItWorks, className }: NavRailProps) {</span>
+<span class="d-add">+  return (</span>
+<span class="d-add">+    &lt;nav className={`nav-rail${className ? ` ${className}` : &quot;&quot;}`} aria-label=&quot;Site links&quot;&gt;</span>
+<span class="d-add">+      &lt;div className=&quot;nav-group&quot;&gt;</span>
+<span class="d-add">+        {onHowItWorks &amp;&amp; (</span>
+<span class="d-add">+          &lt;button</span>
+<span class="d-add">+            type=&quot;button&quot;</span>
+<span class="d-add">+            className=&quot;nav-btn&quot;</span>
+<span class="d-add">+            onClick={onHowItWorks}</span>
+<span class="d-add">+            aria-label=&quot;How it works&quot;</span>
+<span class="d-add">+            data-tip=&quot;How it works&quot;</span>
+<span class="d-add">+          &gt;</span>
+<span class="d-add">+            &lt;IconQuestion /&gt;</span>
+<span class="d-add">+          &lt;/button&gt;</span>
+<span class="d-add">+        )}</span>
+<span class="d-add">+</span>
+<span class="d-add">+        &lt;a</span>
+<span class="d-add">+          className=&quot;nav-btn&quot;</span>
+<span class="d-add">+          href={BLOG_URL}</span>
+<span class="d-add">+          target=&quot;_blank&quot;</span>
+<span class="d-add">+          rel=&quot;noopener noreferrer&quot;</span>
+<span class="d-add">+          aria-label=&quot;Blog&quot;</span>
+<span class="d-add">+          data-tip=&quot;Blog&quot;</span>
+<span class="d-add">+        &gt;</span>
+<span class="d-add">+          &lt;IconArticle /&gt;</span>
+<span class="d-add">+        &lt;/a&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+        &lt;a</span>
+<span class="d-add">+          className=&quot;nav-btn&quot;</span>
+<span class="d-add">+          href={ABOUT_URL}</span>
+<span class="d-add">+          target=&quot;_blank&quot;</span>
+<span class="d-add">+          rel=&quot;noopener noreferrer&quot;</span>
+<span class="d-add">+          aria-label=&quot;About&quot;</span>
+<span class="d-add">+          data-tip=&quot;About&quot;</span>
+<span class="d-add">+        &gt;</span>
+<span class="d-add">+          &lt;IconInfo /&gt;</span>
+<span class="d-add">+        &lt;/a&gt;</span>
+<span class="d-add">+      &lt;/div&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+      &lt;div className=&quot;nav-group&quot;&gt;</span>
+<span class="d-add">+        &lt;a</span>
+<span class="d-add">+          className=&quot;nav-btn&quot;</span>
+<span class="d-add">+          href={FEEDBACK_URL}</span>
+<span class="d-add">+          target=&quot;_blank&quot;</span>
+<span class="d-add">+          rel=&quot;noopener noreferrer&quot;</span>
+<span class="d-add">+          aria-label=&quot;Feedback&quot;</span>
+<span class="d-add">+          data-tip=&quot;Feedback&quot;</span>
+<span class="d-add">+        &gt;</span>
+<span class="d-add">+          &lt;IconBubble /&gt;</span>
+<span class="d-add">+        &lt;/a&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+        &lt;a</span>
+<span class="d-add">+          className=&quot;nav-btn nav-btn-donate&quot;</span>
+<span class="d-add">+          href={DONATE_URL}</span>
+<span class="d-add">+          target=&quot;_blank&quot;</span>
+<span class="d-add">+          rel=&quot;noopener noreferrer&quot;</span>
+<span class="d-add">+          aria-label=&quot;Donate&quot;</span>
+<span class="d-add">+          data-tip=&quot;Donate&quot;</span>
+<span class="d-add">+        &gt;</span>
+<span class="d-add">+          &lt;IconHeart /&gt;</span>
+<span class="d-add">+          &lt;span className=&quot;nav-btn-label&quot;&gt;Donate&lt;/span&gt;</span>
+<span class="d-add">+        &lt;/a&gt;</span>
+<span class="d-add">+      &lt;/div&gt;</span>
+<span class="d-add">+    &lt;/nav&gt;</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/NavRail/icons.tsx</span>
+            <span class="stat"><span class="d-add">+87</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · NavRail</span>
+        <span class="ctx-sum">The glyph set for the rail — drawn here rather than pulled from an icon package</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">icons.tsx</span>
+        <span class="ctx-sum">~90 LOC — one shared `base` prop object and five glyphs</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header comment</span><span class="ol-sum">new — records the skeleton the set is drawn to, and why an off-the-shelf pack was rejected</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">base props</span><span class="ol-sum">new — 24 grid, 1.75 stroke, square caps, miter joins, currentColor, aria-hidden</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">IconQuestion / IconInfo</span><span class="ol-sum">new — ? and i set in the logo&#x27;s lettered box</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">IconArticle</span><span class="ol-sum">new — Blog: filled image block + two column rules + one full measure</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">IconBubble</span><span class="ol-sum">new — Feedback: a square bubble with a mitered tail</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">IconHeart</span><span class="ol-sum">new — Donate: the one curve in the set</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>square caps + miter joins are the whole point — they are what match CheckIcon and the crossword logo; rounded is what makes a pack look imported</li><li>? and i share an identical 17×17 box so the two info marks read as a deliberate pair, not two unrelated glyphs</li><li>The article&#x27;s image block is filled, not stroked: a stroked 6×5 box at 18px is all outline and reads as a smudge</li><li>The heart breaks the rectangle rule on purpose — it is the accent item and should not blend into its neighbours</li><li>aria-hidden throughout: the accessible name lives on the surrounding button, never doubled here</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/NavRail/icons.tsx b/client-react/src/components/NavRail/icons.tsx</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..b66d4eb</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/NavRail/icons.tsx</span>
+<span class="d-hunk">@@ -0,0 +1,87 @@</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Nav glyph set — the icons for the secondary/meta nav rail.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Drawn to one skeleton so the five marks read as a family: a 24×24 grid,</span>
+<span class="d-add">+ * 1.75px strokes, `square` caps and `miter` joins (no rounded corners), and</span>
+<span class="d-add">+ * every glyph built from a rectangle on that grid. That&#x27;s the same drafting</span>
+<span class="d-add">+ * language as CheckIcon and the crossword-grid logo — an off-the-shelf icon</span>
+<span class="d-add">+ * pack (rounded caps, 2px strokes) reads as a foreign body next to them.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * The heart is the deliberate exception: it&#x27;s the only curve-led mark in the</span>
+<span class="d-add">+ * set, which is what makes Donate the one glyph that catches the eye.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * All inherit color via currentColor and are aria-hidden — the surrounding</span>
+<span class="d-add">+ * button carries the accessible name.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+</span>
+<span class="d-add">+interface IconProps {</span>
+<span class="d-add">+  className?: string;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+const base = {</span>
+<span class="d-add">+  viewBox: &quot;0 0 24 24&quot;,</span>
+<span class="d-add">+  fill: &quot;none&quot;,</span>
+<span class="d-add">+  stroke: &quot;currentColor&quot;,</span>
+<span class="d-add">+  strokeWidth: 1.75,</span>
+<span class="d-add">+  strokeLinecap: &quot;square&quot;,</span>
+<span class="d-add">+  strokeLinejoin: &quot;miter&quot;,</span>
+<span class="d-add">+  &quot;aria-hidden&quot;: true,</span>
+<span class="d-add">+  focusable: false,</span>
+<span class="d-add">+} as const;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** How it Works — a &quot;?&quot; set in the logo&#x27;s lettered box. */</span>
+<span class="d-add">+export function IconQuestion({ className }: IconProps) {</span>
+<span class="d-add">+  return (</span>
+<span class="d-add">+    &lt;svg {...base} className={className}&gt;</span>
+<span class="d-add">+      &lt;rect x=&quot;3.5&quot; y=&quot;3.5&quot; width=&quot;17&quot; height=&quot;17&quot; /&gt;</span>
+<span class="d-add">+      &lt;path d=&quot;M9.4 9.6 A2.6 2.6 0 1 1 12 12.2 L12 13.7&quot; /&gt;</span>
+<span class="d-add">+      &lt;rect x=&quot;11.1&quot; y=&quot;15.9&quot; width=&quot;1.8&quot; height=&quot;1.8&quot; fill=&quot;currentColor&quot; stroke=&quot;none&quot; /&gt;</span>
+<span class="d-add">+    &lt;/svg&gt;</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** About — an &quot;i&quot; in the matching box, so the two info marks read as a pair. */</span>
+<span class="d-add">+export function IconInfo({ className }: IconProps) {</span>
+<span class="d-add">+  return (</span>
+<span class="d-add">+    &lt;svg {...base} className={className}&gt;</span>
+<span class="d-add">+      &lt;rect x=&quot;3.5&quot; y=&quot;3.5&quot; width=&quot;17&quot; height=&quot;17&quot; /&gt;</span>
+<span class="d-add">+      &lt;rect x=&quot;11.1&quot; y=&quot;6.5&quot; width=&quot;1.8&quot; height=&quot;1.8&quot; fill=&quot;currentColor&quot; stroke=&quot;none&quot; /&gt;</span>
+<span class="d-add">+      &lt;path d=&quot;M12 10.6 L12 17.4&quot; /&gt;</span>
+<span class="d-add">+    &lt;/svg&gt;</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Blog — a laid-out article: image block, two column rules, one full measure.</span>
+<span class="d-add">+ * The image block is filled rather than stroked: at the 15–18px this renders</span>
+<span class="d-add">+ * at, a 6×5 stroked box is all outline and silts up into a grey smudge.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function IconArticle({ className }: IconProps) {</span>
+<span class="d-add">+  return (</span>
+<span class="d-add">+    &lt;svg {...base} className={className}&gt;</span>
+<span class="d-add">+      &lt;rect x=&quot;2.5&quot; y=&quot;4.5&quot; width=&quot;19&quot; height=&quot;15&quot; /&gt;</span>
+<span class="d-add">+      &lt;rect x=&quot;5.5&quot; y=&quot;7.6&quot; width=&quot;6.4&quot; height=&quot;5.2&quot; fill=&quot;currentColor&quot; stroke=&quot;none&quot; /&gt;</span>
+<span class="d-add">+      &lt;path d=&quot;M15.1 8.5 L18.6 8.5&quot; /&gt;</span>
+<span class="d-add">+      &lt;path d=&quot;M15.1 11.9 L18.6 11.9&quot; /&gt;</span>
+<span class="d-add">+      &lt;path d=&quot;M5.5 16.3 L18.6 16.3&quot; /&gt;</span>
+<span class="d-add">+    &lt;/svg&gt;</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Feedback — a square speech bubble; the tail is mitered, not rounded. */</span>
+<span class="d-add">+export function IconBubble({ className }: IconProps) {</span>
+<span class="d-add">+  return (</span>
+<span class="d-add">+    &lt;svg {...base} className={className}&gt;</span>
+<span class="d-add">+      &lt;path d=&quot;M3 4.5 L21 4.5 L21 15.5 L11 15.5 L7 19.5 L7 15.5 L3 15.5 Z&quot; /&gt;</span>
+<span class="d-add">+    &lt;/svg&gt;</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Donate — the one curve in the set, so it reads first. */</span>
+<span class="d-add">+export function IconHeart({ className }: IconProps) {</span>
+<span class="d-add">+  return (</span>
+<span class="d-add">+    &lt;svg {...base} className={className}&gt;</span>
+<span class="d-add">+      &lt;path d=&quot;M12 20.4 L4.4 12.8 A5 5 0 0 1 12 7.5 A5 5 0 0 1 19.6 12.8 Z&quot; /&gt;</span>
+<span class="d-add">+    &lt;/svg&gt;</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/NavRail/index.ts</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · NavRail</span>
+        <span class="ctx-sum">Barrel export, matching every other component folder in the client</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">index.ts</span>
+        <span class="ctx-sum">1 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">export { NavRail }</span><span class="ol-sum">new</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Matches the folder convention so the import reads ../NavRail like its neighbours</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/NavRail/index.ts b/client-react/src/components/NavRail/index.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..5fd8be5</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/NavRail/index.ts</span>
+<span class="d-hunk">@@ -0,0 +1 @@</span>
+<span class="d-add">+export { NavRail } from &quot;./NavRail&quot;;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/TopBar/TopBar.css</span>
+            <span class="stat"><span class="d-add">+6</span> / <span class="d-del">-25</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · TopBar</span>
+        <span class="ctx-sum">The header&#x27;s own stylesheet — logo sizing, the mobile banner, and the placement of the header&#x27;s grid cells</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">TopBar.css</span>
+        <span class="ctx-sum">~80 lines after this change</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">.logo-container / .logo-img / basemap invert</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">.logo-mobile-banner</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">.header-btn-group</span><span class="ol-sum">REMOVED — the three-link wrapper is gone</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.btn-donate</span><span class="ol-sum">REMOVED — superseded by .nav-btn-donate</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.topbar-actions &gt; .nav-rail</span><span class="ol-sum">new — justify-self: end</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">route-field pulse</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>justify-self: end pins the rail to its grid column&#x27;s right edge, so its edge lines up with the legend&#x27;s and with Clear&#x27;s</li><li>Without it the alignment depends on the rail happening to be the wider of the two cells — which it currently is, by a few px</li><li>The old .btn-donate hardcoded #111 for its text; .nav-btn-donate reads --on-accent so it follows the theme</li><li>Scoped to .topbar-actions &gt; so the landing page&#x27;s copy of the rail is unaffected</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/TopBar/TopBar.css b/client-react/src/components/TopBar/TopBar.css</span>
+<span class="d-meta">index a51dd9e..552e11f 100644</span>
+<span class="d-meta">--- a/client-react/src/components/TopBar/TopBar.css</span>
+<span class="d-meta">+++ b/client-react/src/components/TopBar/TopBar.css</span>
+<span class="d-hunk">@@ -58,31 +58,12 @@</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/* Feedback + About + Donate share one .topbar-actions grid cell */</span>
+<span class="d-del">-.header-btn-group {</span>
+<span class="d-del">-  display: flex;</span>
+<span class="d-del">-  align-items: stretch;</span>
+<span class="d-del">-  gap: var(--space-2);</span>
+<span class="d-del">-  min-width: 0;</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-.header-btn-group .btn-header {</span>
+<span class="d-del">-  flex: 1;</span>
+<span class="d-del">-  text-decoration: none;</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-/* Donate carries the active map&#x27;s accent so it pops against its neighbours.</span>
+<span class="d-del">-   Every theme accent is bright enough that near-black text keeps contrast. */</span>
+<span class="d-del">-.btn-donate {</span>
+<span class="d-del">-  background: var(--accent);</span>
+<span class="d-del">-  border-color: var(--accent);</span>
+<span class="d-del">-  color: #111;</span>
+<span class="d-del">-  font-weight: 600;</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-del">-.btn-donate:hover:not(:disabled) {</span>
+<span class="d-del">-  background: var(--accent);</span>
+<span class="d-del">-  filter: brightness(1.12);</span>
+<span class="d-add">+/* The rail shares its grid column with the Cast/Clear group below it, and the</span>
+<span class="d-add">+   column is as wide as whichever is wider. Pinning the rail to the column&#x27;s end</span>
+<span class="d-add">+   keeps its right edge flush with the legend&#x27;s and with Clear&#x27;s, whichever way</span>
+<span class="d-add">+   that comparison happens to fall (it currently ties almost exactly). */</span>
+<span class="d-add">+.topbar-actions &gt; .nav-rail {</span>
+<span class="d-add">+  justify-self: end;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /* Loading state pulse animation for route fields */</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/TopBar/TopBar.tsx</span>
+            <span class="stat"><span class="d-add">+9</span> / <span class="d-del">-36</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · TopBar</span>
+        <span class="ctx-sum">The map header: logo, the start/end legend, the Map + Vote selectors, the cast controls, and the meta links</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">TopBar.tsx</span>
+        <span class="ctx-sum">~295 LOC — this change replaces one grid cell and empties another</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports</span><span class="ol-sum">+1 — NavRail</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">route/selection state + handlers</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">logo + mobile banner</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">topbar-legend (start / selection / end / votes)</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">mode-switcher-group</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">header-btn-group (Feedback · About · Donate)</span><span class="ol-sum">REMOVED — replaced by &lt;NavRail&gt;</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">vote-switcher-group</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">actions-group: How it Works button</span><span class="ol-sum">REMOVED — moved into the rail</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">actions-group: calculating / cast / clear</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">HowItWorksModal</span><span class="ol-sum">unchanged — still owned here, opened by the rail</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The 2×2 grid keeps exactly four children — the landscape query flattens it to `auto auto auto auto`, so the count is load-bearing</li><li>The rail is one child, which is why the three links needed a wrapper before and no longer do</li><li>How it Works moves cell: it is information, not an action on the selection, and row 2 is the selection&#x27;s row</li><li>The modal state stays in TopBar; the rail only receives the opener, so it has no idea what it is opening</li><li>Row 2&#x27;s right cell is now empty until there is a selection — grid-template-rows was always what held its height</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/TopBar/TopBar.tsx b/client-react/src/components/TopBar/TopBar.tsx</span>
+<span class="d-meta">index 1b0e473..c2f28d4 100644</span>
+<span class="d-meta">--- a/client-react/src/components/TopBar/TopBar.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/TopBar/TopBar.tsx</span>
+<span class="d-hunk">@@ -7,6 +7,7 @@ import { HowItWorksModal } from &quot;../HowItWorksModal&quot;;</span>
+<span class="d-ctx"> import { ModeSwitcher } from &quot;../ModeSwitcher&quot;;</span>
+<span class="d-ctx"> import { VoteTypeSelector } from &quot;../VoteTypeSelector&quot;;</span>
+<span class="d-ctx"> import { AddressSearch } from &quot;../AddressSearch&quot;;</span>
+<span class="d-add">+import { NavRail } from &quot;../NavRail&quot;;</span>
+<span class="d-ctx"> import { Logo } from &quot;../Logo&quot;;</span>
+<span class="d-ctx"> import type { LatLng } from &quot;../../types&quot;;</span>
+<span class="d-ctx"> import &quot;./TopBar.css&quot;;</span>
+<span class="d-hunk">@@ -223,49 +224,21 @@ export const TopBar = memo(function TopBar() {</span>
+<span class="d-ctx">           &lt;/div&gt;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">           {/* One grid cell: .topbar-actions is a strict 2×2 grid (4-across in</span>
+<span class="d-del">-              landscape), so the three links share a wrapper to keep 4 children. */}</span>
+<span class="d-del">-          &lt;div className=&quot;header-btn-group&quot;&gt;</span>
+<span class="d-del">-            &lt;a</span>
+<span class="d-del">-              className=&quot;btn-header&quot;</span>
+<span class="d-del">-              href=&quot;https://feedback.cityedit.org&quot;</span>
+<span class="d-del">-              target=&quot;_blank&quot;</span>
+<span class="d-del">-              rel=&quot;noopener noreferrer&quot;</span>
+<span class="d-del">-            &gt;</span>
+<span class="d-del">-              Feedback</span>
+<span class="d-del">-            &lt;/a&gt;</span>
+<span class="d-del">-</span>
+<span class="d-del">-            &lt;a</span>
+<span class="d-del">-              className=&quot;btn-header&quot;</span>
+<span class="d-del">-              href=&quot;https://sphericalharmonics.org&quot;</span>
+<span class="d-del">-              target=&quot;_blank&quot;</span>
+<span class="d-del">-              rel=&quot;noopener noreferrer&quot;</span>
+<span class="d-del">-            &gt;</span>
+<span class="d-del">-              About</span>
+<span class="d-del">-            &lt;/a&gt;</span>
+<span class="d-del">-</span>
+<span class="d-del">-            &lt;a</span>
+<span class="d-del">-              className=&quot;btn-header btn-donate&quot;</span>
+<span class="d-del">-              href=&quot;https://donate.cityedit.org&quot;</span>
+<span class="d-del">-              target=&quot;_blank&quot;</span>
+<span class="d-del">-              rel=&quot;noopener noreferrer&quot;</span>
+<span class="d-del">-            &gt;</span>
+<span class="d-del">-              Donate</span>
+<span class="d-del">-            &lt;/a&gt;</span>
+<span class="d-del">-          &lt;/div&gt;</span>
+<span class="d-add">+              landscape), so all the meta links share the one rail. How-it-Works</span>
+<span class="d-add">+              lives here too — it&#x27;s something to read, not an action on the</span>
+<span class="d-add">+              current selection, which is what the second row is for. */}</span>
+<span class="d-add">+          &lt;NavRail onHowItWorks={() =&gt; setShowHowItWorks(true)} /&gt;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">           &lt;div className={`vote-switcher-group ${(canVote || (start.coords &amp;&amp; end.coords)) ? &quot;&quot; : &quot;hidden-reserve&quot;}`}&gt;</span>
+<span class="d-ctx">             &lt;span className=&quot;mode-prefix-label&quot;&gt;Vote:&lt;/span&gt;</span>
+<span class="d-ctx">             &lt;VoteTypeSelector /&gt;</span>
+<span class="d-ctx">           &lt;/div&gt;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+          {/* Row 2, right cell: acts on the current selection only, so it is</span>
+<span class="d-add">+              empty until there is one. How-it-Works used to sit here purely to</span>
+<span class="d-add">+              keep the row from collapsing — the fixed grid-template-rows does</span>
+<span class="d-add">+              that on its own. */}</span>
+<span class="d-ctx">           &lt;div className=&quot;actions-group&quot;&gt;</span>
+<span class="d-del">-            &lt;button</span>
+<span class="d-del">-              className=&quot;btn-header&quot;</span>
+<span class="d-del">-              onClick={() =&gt; setShowHowItWorks(true)}</span>
+<span class="d-del">-            &gt;</span>
+<span class="d-del">-              How it Works</span>
+<span class="d-del">-            &lt;/button&gt;</span>
+<span class="d-del">-</span>
+<span class="d-ctx">             &lt;div className={`calculating-indicator ${isLoading &amp;&amp; start.coords &amp;&amp; end.coords ? &quot;active&quot; : &quot;&quot;}`}&gt;</span>
+<span class="d-ctx">               &lt;div className=&quot;spinner&quot;&gt;&lt;/div&gt;</span>
+<span class="d-ctx">               &lt;span&gt;Calculating...&lt;/span&gt;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/styles/globals.css</span>
+            <span class="stat"><span class="d-add">+19</span> / <span class="d-del">-6</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · global styles</span>
+        <span class="ctx-sum">The single stylesheet: design tokens, the themeable palette, the topbar grids, map controls, markers and the proposal cards</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">globals.css</span>
+        <span class="ctx-sum">~2,530 lines — this change touches the legend&#x27;s flex behavior and two comments</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">design tokens + palette</span><span class="ol-sum">unchanged — --control-height / --accent are what the rail reads</span></li><li class="dim"><span class="ol-label">.topbar / .topbar-content</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">.topbar-legend flex-shrink</span><span class="ol-sum">CHANGED — flex-shrink:0 → min-width:0, removing the desktop width floor</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.legend-item-coords</span><span class="ol-sum">new at base scope — promoted out of the ≤1080 block</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.topbar-actions header comment</span><span class="ol-sum">updated to name the rail</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">.btn-header / .cast-group / .btn-cast</span><span class="ol-sum">unchanged — the working controls keep their size</span></li><li class="changed"><span class="ol-label">≤1080 block&#x27;s Cast/Clear comment</span><span class="ol-sum">updated — How-it-Works no longer holds the row open</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>flex-shrink:0 on the legend set a hard ~1353px minimum for the whole desktop header — every window between 1080 and that figure scrolled sideways</li><li>min-width:0 lets the 250px address slot give way, so the address ellipsises above 1080 exactly as it already did below</li><li>.legend-item-coords needs its OWN min-width:0 — as a flex container its automatic minimum is the whole nowrap address, which would re-impose the width the legend just gave up</li><li>That rule already existed inside the ≤1080 block; it is promoted rather than duplicated</li><li>The two comment edits keep the file honest: both described the old How-it-Works placement as load-bearing, and it no longer is</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
+<span class="d-meta">index 3c97a5f..29f675b 100644</span>
+<span class="d-meta">--- a/client-react/src/styles/globals.css</span>
+<span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
+<span class="d-hunk">@@ -280,13 +280,26 @@ body {</span>
+<span class="d-ctx">   gap: 0;</span>
+<span class="d-ctx">   font-size: var(--control-font-size);</span>
+<span class="d-ctx">   color: var(--ink);</span>
+<span class="d-del">-  flex-shrink: 0;</span>
+<span class="d-add">+  /* Shrinkable, not fixed: the legend holds the widest thing in the bar (a</span>
+<span class="d-add">+     250px address slot), and pinning it meant the desktop layout had a hard</span>
+<span class="d-add">+     ~1353px minimum — so every window between the 1080px breakpoint and that</span>
+<span class="d-add">+     figure overflowed sideways. Letting it give way lets the address ellipsise</span>
+<span class="d-add">+     instead, exactly as it already does below 1080. */</span>
+<span class="d-add">+  min-width: 0;</span>
+<span class="d-ctx">   align-self: stretch;</span>
+<span class="d-ctx">   border: 1px solid var(--hairline);</span>
+<span class="d-ctx">   background: var(--hover-bg);</span>
+<span class="d-ctx">   border-radius: 4px;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/* Paired with the above: these buttons are flex containers whose automatic</span>
+<span class="d-add">+   minimum is the whole nowrap address, which would re-impose the width the</span>
+<span class="d-add">+   legend just gave up. (The ≤1080 block sets this too; it has to hold at every</span>
+<span class="d-add">+   width now.) */</span>
+<span class="d-add">+.legend-item-coords {</span>
+<span class="d-add">+  min-width: 0;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /* Internal hairline dividers — vertical between columns, horizontal on left col only */</span>
+<span class="d-ctx"> .topbar-legend &gt; :nth-child(odd) {</span>
+<span class="d-ctx">   border-right: 1px solid var(--hairline);</span>
+<span class="d-hunk">@@ -298,7 +311,7 @@ body {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /* ==========================================================================</span>
+<span class="d-del">-   Topbar Actions (2×2 grid: Mode/Feedback·About·Donate over VoteType/Actions)</span>
+<span class="d-add">+   Topbar Actions (2×2 grid: Map/nav-rail over VoteType/selection-actions)</span>
+<span class="d-ctx">    ========================================================================== */</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> .topbar-actions {</span>
+<span class="d-hunk">@@ -1449,10 +1462,10 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   /* The Cast/Clear group stays in the DOM (just .hidden-reserve&#x27;d) with no</span>
+<span class="d-del">-     selection, so it always sizes the right column and the header links keep</span>
+<span class="d-del">-     a fixed *horizontal* width instead of shrinking when Cast/Clear later</span>
+<span class="d-del">-     appear. The second row used to collapse to 0 until a selection, but it</span>
+<span class="d-del">-     now hosts the always-visible How-it-Works button, so it stays open. */</span>
+<span class="d-add">+     selection, so it always sizes the right column and the nav rail keeps a</span>
+<span class="d-add">+     fixed *horizontal* width instead of shrinking when Cast/Clear later</span>
+<span class="d-add">+     appear. The explicit grid-template-rows below is what holds the second row</span>
+<span class="d-add">+     open while it&#x27;s empty. */</span>
+<span class="d-ctx">   .topbar-actions {</span>
+<span class="d-ctx">     column-gap: var(--space-2);</span>
+<span class="d-ctx">     row-gap: var(--space-2);</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes-nav-rail.diff</code> by <code>changelog/build_nav_rail_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_nav_rail_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

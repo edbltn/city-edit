@@ -29,6 +29,24 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-09-nav-rail-blog-link.html">
+    <div class="date">2026-08-09</div>
+    <h2>A blog link, and a header with room for it</h2>
+    <p>The blog needed a home in the map header, and the header had four meta buttons already —
+    Feedback, About, Donate, and a stray How it Works sitting among the vote controls — all the same
+    size and weight as the controls people actually come to the map to use. They collapse into a
+    <code>NavRail</code>: two enclosed boxes of icon buttons, things to <em>read</em> then things to
+    <em>do</em>, shared with the landing page. The glyphs are drawn to the app's own grid (square
+    caps, mitered joins, every mark built from a rectangle) rather than pulled from a pack, whose
+    rounded strokes would read as a foreign body next to <code>CheckIcon</code> and the crossword
+    logo. Everything goes icon-only except Donate, which keeps its word and the map's accent so one
+    item in the quiet half still lands first. The right-hand column drops <strong>395px → 294px</strong>,
+    which exposed a pre-existing overflow worth more than the decluttering: the desktop layout had a
+    hard ~1353px floor because <code>.topbar-legend</code> was <code>flex-shrink: 0</code> and could
+    never let its address ellipsise, so every window between the 1080px breakpoint and that figure
+    scrolled sideways. Measured at twelve widths from 320 to 1440: none of them do now.</p>
+  </a>
+
   <a class="entry" href="./2026-08-09-donate-to-proposals.html">
     <div class="date">2026-08-09</div>
     <h2>Donate to a proposal</h2>

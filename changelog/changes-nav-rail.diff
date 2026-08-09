@@ -1,0 +1,661 @@
+diff --git a/client-react/src/components/Landing/Landing.css b/client-react/src/components/Landing/Landing.css
+index f71a7d5..6375e52 100644
+--- a/client-react/src/components/Landing/Landing.css
++++ b/client-react/src/components/Landing/Landing.css
+@@ -15,6 +15,7 @@
+ }
+ 
+ .landing-header {
++  position: relative;
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+@@ -24,6 +25,27 @@
+   border-bottom: 1px solid var(--hairline);
+ }
+ 
++/* Pinned to the corner rather than sitting in the column flow: the header's job
++   is the logo + tagline, and the meta links should stay out of that axis. The
++   top padding above is what keeps it clear of the logo. */
++.landing-nav {
++  position: absolute;
++  top: var(--space-4);
++  right: var(--space-5);
++}
++
++/* Donate keeps its word here at every width. The rail drops the label below
++   1080px because the *map* header is fighting for room at that size — this page
++   isn't, and Donate is the one thing on it worth asking for outright. */
++.landing-nav .nav-btn-donate {
++  width: auto;
++  padding: 0 var(--space-3);
++}
++
++.landing-nav .nav-btn-label {
++  display: inline;
++}
++
+ .landing-logo-link {
+   display: block;
+   line-height: 0;
+@@ -305,21 +327,17 @@
+   opacity: 0.5;
+ }
+ 
+-.landing-footer-link {
+-  color: var(--ink);
+-  text-decoration: none;
+-  border-bottom: 1px solid var(--hairline);
+-}
+-
+-.landing-footer-link:hover {
+-  border-bottom-color: var(--ink);
+-}
+-
+ @media (max-width: 720px) {
+   .landing-header {
+     padding: 40px var(--space-4) var(--space-4);
+   }
+ 
++  /* Unpinned: at this width the corner would clip the logo's top-left corner.
++     Back in the column it centres under the tagline, clear of everything. */
++  .landing-nav {
++    position: static;
++  }
++
+   .landing-logo {
+     height: 112px;
+   }
+diff --git a/client-react/src/components/Landing/Landing.tsx b/client-react/src/components/Landing/Landing.tsx
+index 3847b1c..fae9c10 100644
+--- a/client-react/src/components/Landing/Landing.tsx
++++ b/client-react/src/components/Landing/Landing.tsx
+@@ -4,6 +4,7 @@ import {
+ } from "../../themes";
+ import { CONFIG } from "../../config";
+ import { ProposeMapModal } from "../ProposeMap/ProposeMapModal";
++import { NavRail } from "../NavRail";
+ import { Logo } from "../Logo";
+ import "./Landing.css";
+ 
+@@ -148,6 +149,10 @@ export function Landing() {
+           <Logo className="landing-logo" />
+         </a>
+         <p className="landing-tagline">Redraw your city.</p>
++        {/* Last in the DOM on purpose: it's pinned to the corner on wide screens
++            (position is cosmetic there), but drops back into the column below
++            the tagline on narrow ones — where source order is the visual order. */}
++        <NavRail className="landing-nav" />
+       </header>
+ 
+       <div className="landing-toolbar">
+@@ -213,17 +218,10 @@ export function Landing() {
+             ))}
+       </main>
+ 
++      {/* Blog/About/Feedback/Donate all live in the header rail now — repeating
++          them here just doubled the nav on a page whose job is picking a map. */}
+       <footer className="landing-footer">
+         <span>© {year} City Edit. All rights reserved.</span>
+-        <a href="https://sphericalharmonics.org/" className="landing-footer-link">
+-          About
+-        </a>
+-        <a href="https://feedback.cityedit.org" className="landing-footer-link">
+-          Feedback
+-        </a>
+-        <a href="https://donate.cityedit.org" className="landing-footer-link">
+-          Donate
+-        </a>
+       </footer>
+ 
+       {proposeOpen && <ProposeMapModal onClose={() => setProposeOpen(false)} />}
+diff --git a/client-react/src/components/NavRail/NavRail.css b/client-react/src/components/NavRail/NavRail.css
+new file mode 100644
+index 0000000..87c160b
+--- /dev/null
++++ b/client-react/src/components/NavRail/NavRail.css
+@@ -0,0 +1,176 @@
++/* Meta nav rail — two enclosed segments of icon buttons (read | act).
++   Shared by the map topbar and the landing header. */
++
++.nav-rail {
++  /* Squares: the group's 1px border eats into the row height, so subtracting it
++     from the width keeps every button exactly square at every breakpoint. */
++  --nav-btn-size: calc(var(--control-height) - 2px);
++  --nav-icon-size: 18px;
++
++  display: flex;
++  align-items: stretch;
++  gap: var(--space-2);
++  height: var(--control-height);
++  flex-shrink: 0;
++}
++
++/* Enclosure is the grouping cue: buttons inside one box are one semantic set,
++   and the gap between boxes separates "read" from "act". */
++.nav-group {
++  display: flex;
++  align-items: stretch;
++  height: 100%;
++  box-sizing: border-box;
++  border: 1px solid var(--hairline);
++  background: var(--paper);
++}
++
++.nav-btn {
++  position: relative;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  gap: var(--space-2);
++  width: var(--nav-btn-size);
++  padding: 0;
++  border: 0;
++  background: none;
++  font-family: var(--font-main);
++  font-size: var(--control-font-size);
++  font-weight: 400;
++  color: var(--ink);
++  text-decoration: none;
++  cursor: pointer;
++  transition: background 0.12s ease, color 0.12s ease;
++}
++
++.nav-btn + .nav-btn {
++  border-left: 1px solid var(--hairline);
++}
++
++.nav-btn svg {
++  display: block;
++  width: var(--nav-icon-size);
++  height: var(--nav-icon-size);
++  flex-shrink: 0;
++}
++
++.nav-btn:hover {
++  background: var(--hover-bg);
++  color: var(--ink-strong);
++}
++
++.nav-btn:active {
++  background: var(--hover-bg-strong);
++}
++
++.nav-btn:focus-visible {
++  outline: 1px solid var(--ink-strong);
++  outline-offset: -3px;
++}
++
++/* Donate is the only labelled item: it carries the active map's accent so it's
++   the one thing in this otherwise-quiet rail that pulls the eye. Every theme
++   accent is bright enough that --on-accent (near-black) keeps contrast. */
++.nav-btn-donate {
++  width: auto;
++  padding: 0 var(--space-3);
++  background: var(--accent);
++  color: var(--on-accent);
++  font-weight: 600;
++}
++
++.nav-btn-donate:hover {
++  background: var(--accent);
++  color: var(--on-accent);
++  filter: brightness(1.12);
++}
++
++.nav-btn-donate:active {
++  background: var(--accent);
++  filter: brightness(0.94);
++}
++
++.nav-btn-label {
++  white-space: nowrap;
++}
++
++/* Tooltips — icon-only buttons need their name on hover. Same instant-reveal
++   pattern as .landing-search-tip (the native `title` waits ~500ms). Hover-only
++   media so a tap on touch doesn't leave one stuck open; the aria-label carries
++   the name for assistive tech either way. */
++@media (hover: hover) {
++  .nav-btn::after {
++    content: attr(data-tip);
++    position: absolute;
++    top: calc(100% + 7px);
++    left: 50%;
++    z-index: var(--z-dropdown);
++    padding: 3px 7px;
++    font-family: var(--font-main);
++    font-size: var(--font-size-2xs);
++    font-weight: 400;
++    line-height: 1.3;
++    color: var(--ink);
++    background: var(--paper);
++    border: 1px solid var(--ink);
++    white-space: nowrap;
++    pointer-events: none;
++    opacity: 0;
++    transform: translate(-50%, -2px);
++    transition: opacity 0.12s ease, transform 0.12s ease;
++  }
++
++  .nav-btn:hover::after,
++  .nav-btn:focus-visible::after {
++    opacity: 1;
++    transform: translate(-50%, 0);
++  }
++
++  /* The rail sits hard against the right edge of the topbar, so the last
++     tooltip anchors to its own right edge instead of overflowing the viewport. */
++  .nav-group:last-child .nav-btn:last-child::after {
++    left: auto;
++    right: 0;
++    transform: translate(0, -2px);
++  }
++
++  .nav-group:last-child .nav-btn:last-child:hover::after,
++  .nav-group:last-child .nav-btn:last-child:focus-visible::after {
++    transform: translate(0, 0);
++  }
++}
++
++@media (prefers-reduced-motion: reduce) {
++  .nav-btn,
++  .nav-btn::after {
++    transition: none;
++  }
++}
++
++/* Narrow: Donate sheds its label and joins the grid of squares. The buttons go
++   slightly narrower than tall here — the rail is secondary chrome, and the
++   width it gives back goes to the Mode/Vote selectors, which are the controls
++   people actually came to use. */
++@media (max-width: 1080px) {
++  .nav-rail {
++    --nav-btn-size: 32px;
++    --nav-icon-size: 16px;
++  }
++
++  .nav-btn-donate {
++    width: var(--nav-btn-size);
++    padding: 0;
++  }
++
++  .nav-btn-label {
++    display: none;
++  }
++}
++
++@media (max-width: 400px) {
++  .nav-rail {
++    --nav-btn-size: 29px;
++    --nav-icon-size: 15px;
++  }
++}
+diff --git a/client-react/src/components/NavRail/NavRail.tsx b/client-react/src/components/NavRail/NavRail.tsx
+new file mode 100644
+index 0000000..7d7aa11
+--- /dev/null
++++ b/client-react/src/components/NavRail/NavRail.tsx
+@@ -0,0 +1,94 @@
++import { IconQuestion, IconArticle, IconInfo, IconBubble, IconHeart } from "./icons";
++import "./NavRail.css";
++
++export const BLOG_URL = "https://sphericalharmonics.substack.com/";
++export const ABOUT_URL = "https://sphericalharmonics.org/";
++export const FEEDBACK_URL = "https://feedback.cityedit.org";
++export const DONATE_URL = "https://donate.cityedit.org";
++
++interface NavRailProps {
++  /**
++   * Opens the How-it-Works modal. Only the map header passes this — the glyph
++   * is about *this map's* controls, so it has nothing to say on the landing
++   * page and is dropped there rather than shown inert.
++   */
++  onHowItWorks?: () => void;
++  className?: string;
++}
++
++/**
++ * Secondary/meta nav — How it Works · Blog · About | Feedback · Donate.
++ *
++ * Shared by the map topbar and the landing header so there's one place these
++ * links live. Two enclosed segments carry the semantics: the first group is
++ * things to *read*, the second is things to *do*. Everything is icon-only
++ * except Donate, which keeps its label and the map's accent fill — this rail
++ * is deliberately the quiet half of the header, and Donate is the one item in
++ * it worth spending attention on.
++ */
++export function NavRail({ onHowItWorks, className }: NavRailProps) {
++  return (
++    <nav className={`nav-rail${className ? ` ${className}` : ""}`} aria-label="Site links">
++      <div className="nav-group">
++        {onHowItWorks && (
++          <button
++            type="button"
++            className="nav-btn"
++            onClick={onHowItWorks}
++            aria-label="How it works"
++            data-tip="How it works"
++          >
++            <IconQuestion />
++          </button>
++        )}
++
++        <a
++          className="nav-btn"
++          href={BLOG_URL}
++          target="_blank"
++          rel="noopener noreferrer"
++          aria-label="Blog"
++          data-tip="Blog"
++        >
++          <IconArticle />
++        </a>
++
++        <a
++          className="nav-btn"
++          href={ABOUT_URL}
++          target="_blank"
++          rel="noopener noreferrer"
++          aria-label="About"
++          data-tip="About"
++        >
++          <IconInfo />
++        </a>
++      </div>
++
++      <div className="nav-group">
++        <a
++          className="nav-btn"
++          href={FEEDBACK_URL}
++          target="_blank"
++          rel="noopener noreferrer"
++          aria-label="Feedback"
++          data-tip="Feedback"
++        >
++          <IconBubble />
++        </a>
++
++        <a
++          className="nav-btn nav-btn-donate"
++          href={DONATE_URL}
++          target="_blank"
++          rel="noopener noreferrer"
++          aria-label="Donate"
++          data-tip="Donate"
++        >
++          <IconHeart />
++          <span className="nav-btn-label">Donate</span>
++        </a>
++      </div>
++    </nav>
++  );
++}
+diff --git a/client-react/src/components/NavRail/icons.tsx b/client-react/src/components/NavRail/icons.tsx
+new file mode 100644
+index 0000000..b66d4eb
+--- /dev/null
++++ b/client-react/src/components/NavRail/icons.tsx
+@@ -0,0 +1,87 @@
++/**
++ * Nav glyph set — the icons for the secondary/meta nav rail.
++ *
++ * Drawn to one skeleton so the five marks read as a family: a 24×24 grid,
++ * 1.75px strokes, `square` caps and `miter` joins (no rounded corners), and
++ * every glyph built from a rectangle on that grid. That's the same drafting
++ * language as CheckIcon and the crossword-grid logo — an off-the-shelf icon
++ * pack (rounded caps, 2px strokes) reads as a foreign body next to them.
++ *
++ * The heart is the deliberate exception: it's the only curve-led mark in the
++ * set, which is what makes Donate the one glyph that catches the eye.
++ *
++ * All inherit color via currentColor and are aria-hidden — the surrounding
++ * button carries the accessible name.
++ */
++
++interface IconProps {
++  className?: string;
++}
++
++const base = {
++  viewBox: "0 0 24 24",
++  fill: "none",
++  stroke: "currentColor",
++  strokeWidth: 1.75,
++  strokeLinecap: "square",
++  strokeLinejoin: "miter",
++  "aria-hidden": true,
++  focusable: false,
++} as const;
++
++/** How it Works — a "?" set in the logo's lettered box. */
++export function IconQuestion({ className }: IconProps) {
++  return (
++    <svg {...base} className={className}>
++      <rect x="3.5" y="3.5" width="17" height="17" />
++      <path d="M9.4 9.6 A2.6 2.6 0 1 1 12 12.2 L12 13.7" />
++      <rect x="11.1" y="15.9" width="1.8" height="1.8" fill="currentColor" stroke="none" />
++    </svg>
++  );
++}
++
++/** About — an "i" in the matching box, so the two info marks read as a pair. */
++export function IconInfo({ className }: IconProps) {
++  return (
++    <svg {...base} className={className}>
++      <rect x="3.5" y="3.5" width="17" height="17" />
++      <rect x="11.1" y="6.5" width="1.8" height="1.8" fill="currentColor" stroke="none" />
++      <path d="M12 10.6 L12 17.4" />
++    </svg>
++  );
++}
++
++/**
++ * Blog — a laid-out article: image block, two column rules, one full measure.
++ * The image block is filled rather than stroked: at the 15–18px this renders
++ * at, a 6×5 stroked box is all outline and silts up into a grey smudge.
++ */
++export function IconArticle({ className }: IconProps) {
++  return (
++    <svg {...base} className={className}>
++      <rect x="2.5" y="4.5" width="19" height="15" />
++      <rect x="5.5" y="7.6" width="6.4" height="5.2" fill="currentColor" stroke="none" />
++      <path d="M15.1 8.5 L18.6 8.5" />
++      <path d="M15.1 11.9 L18.6 11.9" />
++      <path d="M5.5 16.3 L18.6 16.3" />
++    </svg>
++  );
++}
++
++/** Feedback — a square speech bubble; the tail is mitered, not rounded. */
++export function IconBubble({ className }: IconProps) {
++  return (
++    <svg {...base} className={className}>
++      <path d="M3 4.5 L21 4.5 L21 15.5 L11 15.5 L7 19.5 L7 15.5 L3 15.5 Z" />
++    </svg>
++  );
++}
++
++/** Donate — the one curve in the set, so it reads first. */
++export function IconHeart({ className }: IconProps) {
++  return (
++    <svg {...base} className={className}>
++      <path d="M12 20.4 L4.4 12.8 A5 5 0 0 1 12 7.5 A5 5 0 0 1 19.6 12.8 Z" />
++    </svg>
++  );
++}
+diff --git a/client-react/src/components/NavRail/index.ts b/client-react/src/components/NavRail/index.ts
+new file mode 100644
+index 0000000..5fd8be5
+--- /dev/null
++++ b/client-react/src/components/NavRail/index.ts
+@@ -0,0 +1 @@
++export { NavRail } from "./NavRail";
+diff --git a/client-react/src/components/TopBar/TopBar.css b/client-react/src/components/TopBar/TopBar.css
+index a51dd9e..552e11f 100644
+--- a/client-react/src/components/TopBar/TopBar.css
++++ b/client-react/src/components/TopBar/TopBar.css
+@@ -58,31 +58,12 @@
+   }
+ }
+ 
+-/* Feedback + About + Donate share one .topbar-actions grid cell */
+-.header-btn-group {
+-  display: flex;
+-  align-items: stretch;
+-  gap: var(--space-2);
+-  min-width: 0;
+-}
+-
+-.header-btn-group .btn-header {
+-  flex: 1;
+-  text-decoration: none;
+-}
+-
+-/* Donate carries the active map's accent so it pops against its neighbours.
+-   Every theme accent is bright enough that near-black text keeps contrast. */
+-.btn-donate {
+-  background: var(--accent);
+-  border-color: var(--accent);
+-  color: #111;
+-  font-weight: 600;
+-}
+-
+-.btn-donate:hover:not(:disabled) {
+-  background: var(--accent);
+-  filter: brightness(1.12);
++/* The rail shares its grid column with the Cast/Clear group below it, and the
++   column is as wide as whichever is wider. Pinning the rail to the column's end
++   keeps its right edge flush with the legend's and with Clear's, whichever way
++   that comparison happens to fall (it currently ties almost exactly). */
++.topbar-actions > .nav-rail {
++  justify-self: end;
+ }
+ 
+ /* Loading state pulse animation for route fields */
+diff --git a/client-react/src/components/TopBar/TopBar.tsx b/client-react/src/components/TopBar/TopBar.tsx
+index 1b0e473..c2f28d4 100644
+--- a/client-react/src/components/TopBar/TopBar.tsx
++++ b/client-react/src/components/TopBar/TopBar.tsx
+@@ -7,6 +7,7 @@ import { HowItWorksModal } from "../HowItWorksModal";
+ import { ModeSwitcher } from "../ModeSwitcher";
+ import { VoteTypeSelector } from "../VoteTypeSelector";
+ import { AddressSearch } from "../AddressSearch";
++import { NavRail } from "../NavRail";
+ import { Logo } from "../Logo";
+ import type { LatLng } from "../../types";
+ import "./TopBar.css";
+@@ -223,49 +224,21 @@ export const TopBar = memo(function TopBar() {
+           </div>
+ 
+           {/* One grid cell: .topbar-actions is a strict 2×2 grid (4-across in
+-              landscape), so the three links share a wrapper to keep 4 children. */}
+-          <div className="header-btn-group">
+-            <a
+-              className="btn-header"
+-              href="https://feedback.cityedit.org"
+-              target="_blank"
+-              rel="noopener noreferrer"
+-            >
+-              Feedback
+-            </a>
+-
+-            <a
+-              className="btn-header"
+-              href="https://sphericalharmonics.org"
+-              target="_blank"
+-              rel="noopener noreferrer"
+-            >
+-              About
+-            </a>
+-
+-            <a
+-              className="btn-header btn-donate"
+-              href="https://donate.cityedit.org"
+-              target="_blank"
+-              rel="noopener noreferrer"
+-            >
+-              Donate
+-            </a>
+-          </div>
++              landscape), so all the meta links share the one rail. How-it-Works
++              lives here too — it's something to read, not an action on the
++              current selection, which is what the second row is for. */}
++          <NavRail onHowItWorks={() => setShowHowItWorks(true)} />
+ 
+           <div className={`vote-switcher-group ${(canVote || (start.coords && end.coords)) ? "" : "hidden-reserve"}`}>
+             <span className="mode-prefix-label">Vote:</span>
+             <VoteTypeSelector />
+           </div>
+ 
++          {/* Row 2, right cell: acts on the current selection only, so it is
++              empty until there is one. How-it-Works used to sit here purely to
++              keep the row from collapsing — the fixed grid-template-rows does
++              that on its own. */}
+           <div className="actions-group">
+-            <button
+-              className="btn-header"
+-              onClick={() => setShowHowItWorks(true)}
+-            >
+-              How it Works
+-            </button>
+-
+             <div className={`calculating-indicator ${isLoading && start.coords && end.coords ? "active" : ""}`}>
+               <div className="spinner"></div>
+               <span>Calculating...</span>
+diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css
+index 3c97a5f..29f675b 100644
+--- a/client-react/src/styles/globals.css
++++ b/client-react/src/styles/globals.css
+@@ -280,13 +280,26 @@ body {
+   gap: 0;
+   font-size: var(--control-font-size);
+   color: var(--ink);
+-  flex-shrink: 0;
++  /* Shrinkable, not fixed: the legend holds the widest thing in the bar (a
++     250px address slot), and pinning it meant the desktop layout had a hard
++     ~1353px minimum — so every window between the 1080px breakpoint and that
++     figure overflowed sideways. Letting it give way lets the address ellipsise
++     instead, exactly as it already does below 1080. */
++  min-width: 0;
+   align-self: stretch;
+   border: 1px solid var(--hairline);
+   background: var(--hover-bg);
+   border-radius: 4px;
+ }
+ 
++/* Paired with the above: these buttons are flex containers whose automatic
++   minimum is the whole nowrap address, which would re-impose the width the
++   legend just gave up. (The ≤1080 block sets this too; it has to hold at every
++   width now.) */
++.legend-item-coords {
++  min-width: 0;
++}
++
+ /* Internal hairline dividers — vertical between columns, horizontal on left col only */
+ .topbar-legend > :nth-child(odd) {
+   border-right: 1px solid var(--hairline);
+@@ -298,7 +311,7 @@ body {
+ 
+ 
+ /* ==========================================================================
+-   Topbar Actions (2×2 grid: Mode/Feedback·About·Donate over VoteType/Actions)
++   Topbar Actions (2×2 grid: Map/nav-rail over VoteType/selection-actions)
+    ========================================================================== */
+ 
+ .topbar-actions {
+@@ -1449,10 +1462,10 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
+   }
+ 
+   /* The Cast/Clear group stays in the DOM (just .hidden-reserve'd) with no
+-     selection, so it always sizes the right column and the header links keep
+-     a fixed *horizontal* width instead of shrinking when Cast/Clear later
+-     appear. The second row used to collapse to 0 until a selection, but it
+-     now hosts the always-visible How-it-Works button, so it stays open. */
++     selection, so it always sizes the right column and the nav rail keeps a
++     fixed *horizontal* width instead of shrinking when Cast/Clear later
++     appear. The explicit grid-template-rows below is what holds the second row
++     open while it's empty. */
+   .topbar-actions {
+     column-gap: var(--space-2);
+     row-gap: var(--space-2);
