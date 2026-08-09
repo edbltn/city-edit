@@ -1,10 +1,23 @@
-import { IconQuestion, IconArticle, IconInfo, IconBubble, IconHeart } from "./icons";
+import { IconQuestion, IconArticle, IconInfo, IconBubble, IconHeart, IconTote } from "./icons";
 import "./NavRail.css";
 
 export const BLOG_URL = "https://sphericalharmonics.substack.com/";
 export const ABOUT_URL = "https://sphericalharmonics.org/";
 export const FEEDBACK_URL = "https://feedback.cityedit.org";
 export const DONATE_URL = "https://donate.cityedit.org";
+
+/**
+ * Merch store. Unlike donate/feedback — which are an nginx 301 and an nginx
+ * rewrite respectively — this hostname is a plain DNS CNAME at the storefront
+ * host and never reaches Cloud Run at all. Do NOT add it to the terraform
+ * `custom_domains` list: a Cloud Run domain mapping needs the DNS pointed at
+ * Google, which is exactly what this hostname must not do.
+ *
+ * Empty until that CNAME resolves, and the rail drops the glyph entirely while
+ * it is — a nav item that dead-ends is worse than no nav item. Setting this to
+ * "https://shop.cityedit.org" is the whole switch-on. Setup: tools/merch/README.md.
+ */
+export const SHOP_URL = "";
 
 interface NavRailProps {
   /**
@@ -17,7 +30,7 @@ interface NavRailProps {
 }
 
 /**
- * Secondary/meta nav — How it Works · Blog · About | Feedback · Donate.
+ * Secondary/meta nav — How it Works · Blog · About | Feedback · Shop · Donate.
  *
  * Shared by the map topbar and the landing header so there's one place these
  * links live. Two enclosed segments carry the semantics: the first group is
@@ -76,6 +89,19 @@ export function NavRail({ onHowItWorks, className }: NavRailProps) {
         >
           <IconBubble />
         </a>
+
+        {SHOP_URL && (
+          <a
+            className="nav-btn"
+            href={SHOP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Shop"
+            data-tip="Shop"
+          >
+            <IconTote />
+          </a>
+        )}
 
         <a
           className="nav-btn nav-btn-donate"

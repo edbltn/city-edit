@@ -77,6 +77,20 @@ export function IconBubble({ className }: IconProps) {
   );
 }
 
+/**
+ * Shop — a tote. The handle is a squared arch rather than the usual half-round
+ * one, which is what keeps it in this set's drafting language instead of
+ * looking like it came from a checkout page.
+ */
+export function IconTote({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="3.5" y="8.5" width="17" height="11.5" />
+      <path d="M8.4 8.5 L8.4 4.5 L15.6 4.5 L15.6 8.5" />
+    </svg>
+  );
+}
+
 /** Donate — the one curve in the set, so it reads first. */
 export function IconHeart({ className }: IconProps) {
   return (
