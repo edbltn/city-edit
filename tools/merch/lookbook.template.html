@@ -1,0 +1,761 @@
+<title>City Edit — Merch Proof Sheet</title>
+
+<style>
+  @font-face {
+    font-family: "Red Hat Mono";
+    src: url("{{FONT}}") format("woff2");
+    font-weight: 300 700;
+    font-display: block;
+  }
+
+  /* ----------------------------------------------------------------------
+     Tokens. Dark-first on purpose: this sheet documents a black-garment line
+     for a product whose entire identity is a terminal, and the artwork is
+     proofed against the ground it actually prints on. The light palette below
+     is the app's own [data-basemap="light"] theme, so a light-mode reader gets
+     City Edit's other real skin rather than a washed-out inversion.
+     ---------------------------------------------------------------------- */
+  :root {
+    color-scheme: dark;
+
+    --paper: #0d0d0d;
+    --surface: #151513;          /* neutral pulled a hair toward the amber */
+    --surface-sunk: #0a0a09;
+    --ink: #d4d4d4;
+    --ink-strong: #ffffff;
+    --ink-quiet: #86867e;
+    --hairline: rgba(212, 212, 212, 0.16);
+    --hairline-strong: rgba(212, 212, 212, 0.32);
+    --accent: #e0a23a;
+    --accent-sunk: rgba(224, 162, 58, 0.12);
+    --warn: #dc343b;
+    --warn-sunk: rgba(220, 52, 59, 0.10);
+    --start: #00c4d4;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      color-scheme: light;
+      --paper: #f4f5f0;
+      --surface: #ffffff;
+      --surface-sunk: #ecede6;
+      --ink: #2b2b28;
+      --ink-strong: #000000;
+      --ink-quiet: #6d6d64;
+      --hairline: rgba(40, 40, 35, 0.16);
+      --hairline-strong: rgba(40, 40, 35, 0.34);
+      --accent: #9a6410;
+      --accent-sunk: rgba(154, 100, 16, 0.10);
+      --warn: #b21f26;
+      --warn-sunk: rgba(178, 31, 38, 0.08);
+      --start: #00707a;
+    }
+  }
+
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --paper: #f4f5f0;
+    --surface: #ffffff;
+    --surface-sunk: #ecede6;
+    --ink: #2b2b28;
+    --ink-strong: #000000;
+    --ink-quiet: #6d6d64;
+    --hairline: rgba(40, 40, 35, 0.16);
+    --hairline-strong: rgba(40, 40, 35, 0.34);
+    --accent: #9a6410;
+    --accent-sunk: rgba(154, 100, 16, 0.10);
+    --warn: #b21f26;
+    --warn-sunk: rgba(178, 31, 38, 0.08);
+    --start: #00707a;
+  }
+
+  /* Garment and ceramic grounds are product data, not page chrome — they hold
+     their real colour in both themes, because that is what gets printed on. */
+  :root {
+    --garment-black: #17171a;
+    --garment-natural: #e6e0d2;
+    --ceramic: #f6f5f1;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 0 clamp(16px, 5vw, 64px) 96px;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Red Hat Mono", ui-monospace, "Courier New", monospace;
+    font-size: 15px;
+    font-weight: 400;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet { max-width: 1180px; margin: 0 auto; }
+
+  /* --- shared type roles ------------------------------------------------ */
+
+  .label {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 400;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--ink-quiet);
+  }
+
+  h1, h2, h3 { font-weight: 600; text-wrap: balance; margin: 0; }
+
+  h1 {
+    font-size: clamp(38px, 8vw, 76px);
+    letter-spacing: 0.12em;
+    line-height: 1.05;
+    color: var(--ink-strong);
+  }
+
+  h2 {
+    font-size: clamp(20px, 3vw, 26px);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-strong);
+  }
+
+  h3 {
+    font-size: 19px;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--ink-strong);
+  }
+
+  p { margin: 0; max-width: 64ch; }
+
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible,
+  summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  code {
+    font-family: inherit;
+    font-size: 0.92em;
+    padding: 1px 5px;
+    background: var(--surface-sunk);
+    border: 1px solid var(--hairline);
+    color: var(--ink-strong);
+  }
+
+  /* --- masthead --------------------------------------------------------- */
+
+  .masthead {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: clamp(20px, 4vw, 44px);
+    align-items: end;
+    padding: clamp(40px, 7vw, 88px) 0 26px;
+    border-bottom: 1px solid var(--hairline-strong);
+  }
+
+  .masthead-mark { width: clamp(88px, 12vw, 132px); color: var(--ink); }
+  .masthead-mark svg { width: 100%; height: auto; display: block; }
+
+  .masthead-titles { display: flex; flex-direction: column; gap: 10px; }
+
+  .colophon {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 28px;
+    padding: 14px 0 0;
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-quiet);
+  }
+  .colophon b { color: var(--ink); font-weight: 600; }
+
+  .lede {
+    padding: 34px 0 0;
+    font-size: 17px;
+    max-width: 66ch;
+  }
+  .lede strong { color: var(--ink-strong); font-weight: 600; }
+
+  /* --- sections --------------------------------------------------------- */
+
+  section { padding: clamp(52px, 8vw, 96px) 0 0; }
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 20px;
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .section-head .label { margin-left: auto; white-space: nowrap; }
+
+  /* --- product plates ---------------------------------------------------- */
+
+  .plates { display: flex; flex-direction: column; gap: 0; }
+
+  .plate {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    gap: clamp(24px, 4vw, 56px);
+    align-items: start;
+    padding: clamp(32px, 5vw, 56px) 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  @media (max-width: 820px) {
+    .plate { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  /* The proof: artwork on its real ground, inside registration corners. */
+  .proof { display: flex; flex-direction: column; gap: 12px; }
+
+  .proof-frame {
+    position: relative;
+    padding: clamp(18px, 3vw, 34px);
+    background: var(--ground);
+  }
+
+  /* Corner crop marks, drawn as two crossing gradients per corner so they
+     read as printer's registration rather than as a border. */
+  .proof-frame::before,
+  .proof-frame::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .proof-frame::before {
+    border-top: 1px solid var(--crop);
+    border-bottom: 1px solid var(--crop);
+    inset: 10px 0;
+  }
+  .proof-frame::after {
+    border-left: 1px solid var(--crop);
+    border-right: 1px solid var(--crop);
+    inset: 0 10px;
+  }
+
+  .proof-frame img {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: 100%;
+  }
+
+  /* Mugs: the wrap meets the handle at the two edges. Mark those zones — it
+     is the one place on a mug where a full-bleed design can go wrong. */
+  .proof-frame.is-wrap .handle-zone {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: clamp(14px, 3vw, 30px);
+    border-inline: 1px dashed var(--crop);
+    pointer-events: none;
+  }
+  .proof-frame.is-wrap .handle-zone.left { left: 0; }
+  .proof-frame.is-wrap .handle-zone.right { right: 0; }
+
+  /* Dimension callout under each proof. */
+  .dim {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-quiet);
+  }
+  .dim::before,
+  .dim::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--hairline-strong);
+  }
+
+  /* --- spec column ------------------------------------------------------- */
+
+  .spec { display: flex; flex-direction: column; gap: 18px; }
+
+  .spec-title { display: flex; flex-direction: column; gap: 6px; }
+  .spec-title .idx {
+    font-size: 12px;
+    letter-spacing: 0.24em;
+    color: var(--accent);
+  }
+
+  .spec-note { color: var(--ink); }
+
+  dl.rows {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 7px 20px;
+    margin: 0;
+    padding: 16px 0 0;
+    border-top: 1px solid var(--hairline);
+    font-size: 13px;
+  }
+  dl.rows dt {
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-quiet);
+    padding-top: 2px;
+  }
+  dl.rows dd { margin: 0; font-variant-numeric: tabular-nums; }
+  dl.rows dd b { color: var(--accent); font-weight: 600; }
+
+  .ways { display: flex; flex-wrap: wrap; gap: 10px; }
+
+  .way {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px 5px 6px;
+    border: 1px solid var(--hairline);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-quiet);
+  }
+  .way i {
+    width: 26px;
+    height: 26px;
+    background: var(--chip);
+    border: 1px solid var(--hairline-strong);
+  }
+
+  .alt {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+  }
+  .alt img {
+    width: 96px;
+    height: auto;
+    display: block;
+    background: var(--garment-natural);
+    padding: 5px;
+    flex: none;
+  }
+  .alt img.is-wrap { width: 132px; background: var(--ceramic); }
+  .alt p { font-size: 12px; color: var(--ink-quiet); letter-spacing: 0.04em; }
+
+  /* --- the build sequence ------------------------------------------------ */
+
+  ol.steps {
+    counter-reset: step;
+    list-style: none;
+    margin: 0;
+    padding: 34px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+  }
+
+  ol.steps > li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 46px minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+
+  ol.steps > li::before {
+    content: counter(step, decimal-leading-zero);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    padding-top: 3px;
+    border-top: 2px solid var(--accent);
+  }
+
+  .step-body { display: flex; flex-direction: column; gap: 9px; }
+  .step-body h3 { font-size: 15px; letter-spacing: 0.12em; }
+
+  .callout {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 16px 18px;
+    background: var(--tone-sunk, var(--accent-sunk));
+    border-left: 3px solid var(--tone, var(--accent));
+  }
+  .callout.is-warn { --tone: var(--warn); --tone-sunk: var(--warn-sunk); }
+  .callout .label { color: var(--tone, var(--accent)); }
+
+  /* --- comparison table --------------------------------------------------- */
+
+  .scroller { overflow-x: auto; padding: 30px 0 0; }
+
+  table {
+    width: 100%;
+    min-width: 620px;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    text-align: left;
+    padding: 13px 18px 13px 0;
+    border-bottom: 1px solid var(--hairline);
+    vertical-align: top;
+  }
+  thead th {
+    font-size: 11px;
+    font-weight: 400;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-quiet);
+    border-bottom-color: var(--hairline-strong);
+  }
+  tbody th { font-weight: 600; color: var(--ink-strong); white-space: nowrap; }
+  td b { color: var(--accent); font-weight: 600; }
+  tbody tr.is-pick th { color: var(--accent); }
+
+  .prose { display: flex; flex-direction: column; gap: 16px; padding: 30px 0 0; }
+
+  footer {
+    margin-top: clamp(56px, 8vw, 96px);
+    padding-top: 22px;
+    border-top: 1px solid var(--hairline-strong);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 30px;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-quiet);
+  }
+</style>
+
+<div class="sheet">
+
+  <header class="masthead">
+    <div class="masthead-mark">{{MARK}}</div>
+    <div class="masthead-titles">
+      <p class="label">City Edit · proof sheet</p>
+      <h1>Merch</h1>
+    </div>
+  </header>
+
+  <div class="colophon">
+    <span><b>5</b> designs</span>
+    <span><b>2</b> colourways each</span>
+    <span><b>300</b> dpi</span>
+    <span>built from <b>tools/merch</b></span>
+    <span>rev <b>2026-08-09</b></span>
+  </div>
+
+  <p class="lede">
+    Three tees and two mugs, drawn from four things the app already owns: the
+    mono grid, the crossword cell, the heat ramp, and the cyan/red waypoint
+    kites. <strong>Nothing here is a logo on a blank.</strong> Every file below
+    is print-ready at real physical size — proofed here on the ground it
+    actually prints on.
+  </p>
+
+  <section id="line">
+    <div class="section-head">
+      <h2>The line</h2>
+      <p class="label">Artwork at print scale</p>
+    </div>
+
+    <div class="plates">
+
+      <article class="plate">
+        <div class="proof">
+          <div class="proof-frame" style="--ground: var(--garment-black); --crop: rgba(255,255,255,0.22)">
+            <img src="{{IMG:tee-crossword--black}}" alt="Crossword tee artwork: a seven-by-seven crossword grid spelling CITY, EDIT, CROSS, TREE, EXIT and IDEA, above the line REDRAW YOUR CITY." />
+          </div>
+          <p class="dim">11 in × 13 in</p>
+        </div>
+        <div class="spec">
+          <div class="spec-title">
+            <span class="idx">01 — TEE</span>
+            <h3>Crossword</h3>
+          </div>
+          <p class="spec-note">
+            The logo mark, opened out into a grid you can actually solve. CITY
+            and EDIT sit exactly where they do in the wordmark; CROSS, TREE,
+            EXIT and IDEA thread through them, and every run of two or more
+            cells is a real word. One ink, centre chest — the cheapest thing
+            here to print and the one most likely to get worn.
+          </p>
+          <div class="ways">
+            <span class="way"><i style="--chip: var(--garment-black)"></i>Black</span>
+            <span class="way"><i style="--chip: var(--garment-natural)"></i>Natural</span>
+          </div>
+          <dl class="rows">
+            <dt>File</dt><dd>tee-crossword--black.png</dd>
+            <dt>Canvas</dt><dd>3300 × 3900 px</dd>
+            <dt>Placement</dt><dd>Centre chest, front</dd>
+            <dt>Inks</dt><dd>1 (plus amber clue numbers)</dd>
+            <dt>Price</dt><dd><b>$32</b> · base ~$11.75 · keep ~$19</dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="plate">
+        <div class="proof">
+          <div class="proof-frame" style="--ground: var(--garment-black); --crop: rgba(255,255,255,0.22)">
+            <img src="{{IMG:tee-desire-path--black}}" alt="Desire Path tee artwork: a street grid with a dashed staircase route and a worn amber diagonal between a cyan and a red waypoint, over the words THE FASTEST ROUTE IS THE ONE PEOPLE ALREADY WALK." />
+          </div>
+          <p class="dim">11 in × 14 in</p>
+        </div>
+        <div class="spec">
+          <div class="spec-title">
+            <span class="idx">02 — TEE</span>
+            <h3>Desire Path</h3>
+          </div>
+          <p class="spec-note">
+            The whole thesis in one picture. Dashed grey is the route the
+            network offers, turning only at corners; amber is the one people
+            wear into the ground. The database has been called
+            <code>desire-path-votes</code> since the beginning — this is that
+            name, drawn.
+          </p>
+          <div class="ways">
+            <span class="way"><i style="--chip: var(--garment-black)"></i>Black</span>
+            <span class="way"><i style="--chip: var(--garment-natural)"></i>Natural</span>
+          </div>
+          <dl class="rows">
+            <dt>File</dt><dd>tee-desire-path--black.png</dd>
+            <dt>Canvas</dt><dd>3300 × 4200 px</dd>
+            <dt>Placement</dt><dd>Full front</dd>
+            <dt>Inks</dt><dd>3 (grey · amber · kites)</dd>
+            <dt>Price</dt><dd><b>$34</b> · base ~$11.75 · keep ~$21</dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="plate">
+        <div class="proof">
+          <div class="proof-frame" style="--ground: var(--garment-black); --crop: rgba(255,255,255,0.22)">
+            <img src="{{IMG:tee-heat--black}}" alt="Heat tee artwork: a city grid where each block is coloured by the heatmap ramp, with a hot amber core, a hot diagonal corridor, and cold purple blocks fraying at the edges." />
+          </div>
+          <p class="dim">13 in × 17 in</p>
+        </div>
+        <div class="spec">
+          <div class="spec-title">
+            <span class="idx">03 — TEE</span>
+            <h3>Heat</h3>
+          </div>
+          <p class="spec-note">
+            The product itself, at poster scale on the back. Every block between
+            two crossings carries its own vote count, so demand pools into a
+            hot core and runs down the diagonal that breaks the grid. The cold
+            edges fray, because real networks do.
+          </p>
+          <div class="ways">
+            <span class="way"><i style="--chip: var(--garment-black)"></i>Black</span>
+            <span class="way"><i style="--chip: var(--garment-natural)"></i>Natural</span>
+          </div>
+          <dl class="rows">
+            <dt>File</dt><dd>tee-heat--black.png</dd>
+            <dt>Canvas</dt><dd>3900 × 5100 px</dd>
+            <dt>Placement</dt><dd>Full back</dd>
+            <dt>Inks</dt><dd>Full colour</dd>
+            <dt>Price</dt><dd><b>$36</b> · base ~$13 · keep ~$22</dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="plate">
+        <div class="proof">
+          <div class="proof-frame is-wrap" style="--ground: var(--ceramic); --crop: rgba(0,0,0,0.28)">
+            <span class="handle-zone left"></span>
+            <span class="handle-zone right"></span>
+            <img src="{{IMG:mug-heat-ramp--black}}" alt="Heat Ramp mug wrap: the heatmap legend gradient running the full circumference with tick marks from minus ten to plus ten net votes, under the words REDRAW YOUR CITY." />
+          </div>
+          <p class="dim">9.25 in × 3.8 in · full wrap</p>
+        </div>
+        <div class="spec">
+          <div class="spec-title">
+            <span class="idx">04 — MUG</span>
+            <h3>Heat Ramp</h3>
+          </div>
+          <p class="spec-note">
+            The legend, blown up and wrapped the whole way round — cold arm,
+            hot arm, and the zero in the middle where a block goes invisible.
+            It is the one piece of the interface that explains itself without
+            the map, which is what makes it survive the trip to a desk.
+          </p>
+          <div class="ways">
+            <span class="way"><i style="--chip: var(--garment-black)"></i>Dark wrap</span>
+            <span class="way"><i style="--chip: var(--ceramic)"></i>Bone</span>
+          </div>
+          <dl class="rows">
+            <dt>File</dt><dd>mug-heat-ramp--black.png</dd>
+            <dt>Canvas</dt><dd>2475 × 1155 px</dd>
+            <dt>Blank</dt><dd>11oz <b>white</b> glossy</dd>
+            <dt>Bleed</dt><dd>Full · type 0.5 in clear of edges</dd>
+            <dt>Price</dt><dd><b>$20</b> · base ~$5.95 · keep ~$14</dd>
+          </dl>
+        </div>
+      </article>
+
+      <article class="plate">
+        <div class="proof">
+          <div class="proof-frame is-wrap" style="--ground: var(--ceramic); --crop: rgba(0,0,0,0.28)">
+            <span class="handle-zone left"></span>
+            <span class="handle-zone right"></span>
+            <img src="{{IMG:mug-clues--black}}" alt="Clues mug wrap: the crossword grid on the left and its across and down clue list on the right." />
+          </div>
+          <p class="dim">9.25 in × 3.8 in · full wrap</p>
+        </div>
+        <div class="spec">
+          <div class="spec-title">
+            <span class="idx">05 — MUG</span>
+            <h3>Clues</h3>
+          </div>
+          <p class="spec-note">
+            The grid from design 01 with the clues the tee has no room for.
+            Sell the two together: you wear the puzzle, you drink the answers.
+            It is the only piece in the line that needs another piece to be
+            complete, which is exactly why it works as a pair.
+          </p>
+          <div class="ways">
+            <span class="way"><i style="--chip: var(--garment-black)"></i>Dark wrap</span>
+            <span class="way"><i style="--chip: var(--ceramic)"></i>Bone</span>
+          </div>
+          <dl class="rows">
+            <dt>File</dt><dd>mug-clues--black.png</dd>
+            <dt>Canvas</dt><dd>2475 × 1155 px</dd>
+            <dt>Blank</dt><dd>11oz <b>white</b> glossy</dd>
+            <dt>Pairs with</dt><dd>01 — Crossword tee</dd>
+            <dt>Price</dt><dd><b>$20</b> · or <b>$46</b> bundled with 01</dd>
+          </dl>
+          <div class="alt">
+            <img class="is-wrap" src="{{IMG:mug-clues--bone}}" alt="The same Clues wrap in the bone colourway: dark ink on a pale ground." />
+            <p>Every design also builds as a pale colourway, with a deeper cut of the amber — <code>#E0A23A</code> is tuned for a black ground and vanishes on natural cotton.</p>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <section id="make">
+    <div class="section-head">
+      <h2>Getting it made</h2>
+      <p class="label">Seven steps, in order</p>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Route</th>
+            <th scope="col">Fixed cost</th>
+            <th scope="col">Sales tax / VAT</th>
+            <th scope="col">Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="is-pick">
+            <th scope="row">Fourthwall</th>
+            <td><b>$0/mo</b><br />base cost per item only</td>
+            <td>They are <b>merchant of record</b> — they register, collect and remit</td>
+            <td>Print-on-demand, checkout and a custom subdomain in one free product. Take this one.</td>
+          </tr>
+          <tr>
+            <th scope="row">Printful + Shopify</th>
+            <td>$39/mo before a single sale</td>
+            <td>Yours to file, in every state with nexus</td>
+            <td>Better storefront control. Not worth the tax admin below serious volume.</td>
+          </tr>
+          <tr>
+            <th scope="row">Printify + Etsy</th>
+            <td>Listing + 6.5% transaction fees</td>
+            <td>Etsy collects</td>
+            <td>Buys you Etsy's traffic, costs you the brand. Wrong fit for a first-party project.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <ol class="steps">
+      <li>
+        <div class="step-body">
+          <h3>Build the files</h3>
+          <p><code>cd tools/merch &amp;&amp; ./env/bin/python build_merch.py --previews --clean</code> writes ten PNGs to <code>out/</code>. Deterministic — the same command always produces the same bytes.</p>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <h3>Open the shop and pick the blanks</h3>
+          <p>Create a free Fourthwall shop. Choose a black tee, a natural tee, and a <strong>white</strong> glossy 11oz mug. The mug art is a dark full-bleed wrap for a white blank — that is not the same thing as ordering a black mug.</p>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <h3>Upload one product per design</h3>
+          <p>Choose "fit to print area" for each. The canvases are already the right physical size, so nothing needs scaling. Leave the tee art transparent — flattening it onto a black rectangle prints a black box on a black shirt at roughly triple the ink cost.</p>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <h3>Order a sample of every design</h3>
+          <p>The step to not skip. Whether 30% grey survives DTG on black, whether the ramp's purple end reads as purple or as mud, and how the wrap meets the mug handle are all things a screen cannot tell you.</p>
+          <div class="callout">
+            <p class="label">Check on arrival</p>
+            <p>Crossword cell rules unbroken · desire-path kites still cyan and red, not washed · heat ramp showing four distinct steps · mug seam with no white sliver at the handle.</p>
+          </div>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <h3>Price from the sample</h3>
+          <p>Tees around $32–36, mugs around $20 — roughly 2.5× base, and in line with other civic-project shops. Bundle the Crossword tee with the Clues mug at $46; they were designed as one object.</p>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <h3>Point shop.cityedit.org at the store</h3>
+          <p>Add a CNAME at the registrar to the host Fourthwall gives you, then connect the subdomain in its dashboard. One DNS record, zero deploys.</p>
+          <div class="callout is-warn">
+            <p class="label">Do not add it to terraform</p>
+            <p><code>custom_domains</code> in <code>terraform/main.tf</code> is for hostnames Cloud Run answers, and a Cloud Run domain mapping needs DNS pointed at Google — the opposite of what this hostname needs. This is why the shop is a CNAME and not an nginx 301 like <code>donate.cityedit.org</code>.</p>
+          </div>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <h3>Turn on the nav link</h3>
+          <p>Set <code>SHOP_URL = "https://shop.cityedit.org"</code> in <code>NavRail.tsx</code> and deploy the client. The tote glyph is hidden while that constant is empty, so the link cannot ship ahead of the store.</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section id="notes">
+    <div class="section-head">
+      <h2>What the files already handle</h2>
+      <p class="label">So you don't rediscover it</p>
+    </div>
+    <div class="prose">
+      <p><strong>Ink opacity is floored at 30%.</strong> The logo draws empty crossword cells at 15%; over a black garment, DTG lays that over a white underbase and it silts up into a muddy near-black. 30% is the faintest mark that survives fabric.</p>
+      <p><strong>No stroke thinner than 6px at 300 DPI.</strong> DTG prints thin lines broken or not at all; 4px is the usual floor and the lightest rule in the set clears it.</p>
+      <p><strong>Text is outlined at build time.</strong> No print shop ever needs Red Hat Mono installed, and no glyph can silently fall back to Courier on someone else's machine.</p>
+      <p><strong>Physical size is stamped into each PNG.</strong> Uploaders read the <code>pHYs</code> chunk to sanity-check dimensions, and the renderer doesn't write one on its own.</p>
+      <p>Confirm the 2475 × 1155 mug template against Fourthwall's own download before the first order — it is the common 11oz spec but not a universal one. It lives in one place: <code>MUG_W</code>/<code>MUG_H</code> in <code>designs.py</code>.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>City Edit</span>
+    <span>tools/merch</span>
+    <span>Red Hat Mono · OFL</span>
+    <span>Proof — not a final print</span>
+  </footer>
+
+</div>

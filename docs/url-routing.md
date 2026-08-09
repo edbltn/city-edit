@@ -204,6 +204,7 @@ one, add a row here.
 |------|-----------|-------|--------------|
 | `donate.cityedit.org` → donorbox | nginx `return 301` | `deploy/nginx-cloudrun.conf` | preserved (`$is_args$args`) — proposal cards send UTM params naming what's being funded |
 | `feedback.cityedit.org` → feedback page | nginx `try_files` rewrite (not a redirect) | `deploy/nginx-cloudrun.conf` | n/a |
+| `shop.cityedit.org` → merch storefront | **DNS CNAME — not served by us at all** | registrar DNS; see `tools/merch/README.md` | n/a |
 | Canonical-subdomain redirect (`/m/nyc-bikes` → `bikepaths.cityedit.org`) | client `location.replace` after map-config fetch | `App.tsx` + `themes.ts subdomainRedirectUrl` | preserved (+ re-attached `src`) |
 | Retired-slug redirects (renamed maps) | client `location.replace` on `MapConfig.redirect` | DB `map_redirects` table + `App.tsx` + `map/runtime.ts slugRedirectUrl` | preserved, `append_query` merged |
 | Staging: subdomain redirect disabled | `APP_ENV=staging` → `staging: true` on map config | `app.py` / `App.tsx` | n/a |

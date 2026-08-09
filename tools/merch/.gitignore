@@ -1,0 +1,7 @@
+# Generated print files + proof sheet — the build is deterministic, so these
+# are always exactly reproducible from designs.py.
+out/
+# Derived from the vendored TTF at build time.
+fonts/*.woff2
+# Local venv symlink.
+env
