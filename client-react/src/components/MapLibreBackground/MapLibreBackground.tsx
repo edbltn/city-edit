@@ -18,6 +18,7 @@ import {
   POI_COLORS,
   type MapStyle,
 } from "../../mapStyles";
+import { makeHeatNormalization } from "../../map/blockHeat";
 import { hottestBlockId } from "./hottestBlock";
 import { registerPlaceIcons, placeIconExpression } from "./placeIcons";
 import { PLACE_LABEL_TEXT_SIZE } from "./placeLabelStyle";
@@ -629,14 +630,9 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         return;
       }
       const { blockDiff, max, maxNeg } = detail;
-      // Two log denominators, one per arm: positives normalize against the
-      // busy-map ceiling, negatives against their own (much smaller) floor so
-      // net-against blocks actually reach the deep-cold end of the ramp.
-      const denomPos = Math.log(Math.max(1, max) + 1);
-      const denomNeg = Math.log(Math.max(1, maxNeg) + 1);
-      const denomKey = `${denomPos}|${denomNeg}`;
-      const signedHeat = (v: number) =>
-        v > 0 ? Math.log(v + 1) / denomPos : -Math.log(1 - v) / denomNeg;
+      // Signed differential → ramp position, one log denominator per arm
+      // (docs/algorithms/05-heat-coloring.md).
+      const { heatOf: signedHeat, denomKey } = makeHeatNormalization(max, maxNeg);
       const prev = applied.current;
       // Full rewrite only on the first apply and when a normalization
       // ceiling moved (every lit block's heat changes then — rare). Otherwise
