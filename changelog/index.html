@@ -29,6 +29,27 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-09-donate-to-proposals.html">
+    <div class="date">2026-08-09</div>
+    <h2>Donate to a proposal</h2>
+    <p>Donating was one site-wide button in the topbar: you could support City Edit, but not the
+    bike lane you had just clicked on — which is where someone has actually decided they care about
+    a block. Proposal cards now carry one row at their foot, <code>[$] Fund this proposal</code>, in
+    the same bracket-token voice as the <code>[a][b][c]</code> source markers and the
+    <code>[−│net│+]</code> control, so a dense modal gains an action and not a section. The
+    interesting half is making the money say what it is <em>for</em>. Donorbox has a comment field
+    but will not prefill it from a URL — that was measured, not assumed — while it <em>does</em>
+    stamp UTM parameters onto the donation record server-side, so the proposal rides there instead:
+    the message in <code>utm_content</code>, a deep link that re-selects the exact proposal in
+    <code>utm_term</code>. All of which would have vanished in transit, because nginx drops the
+    query string on a literal <code>return 301</code> — the redirect inventory even recorded it, in
+    a column reading <em>dropped</em> — and nothing would have errored; every donation would simply
+    have arrived anonymous. The row appears only where a card names <em>one</em> proposal, since a
+    busy corner would have to guess which. And chasing why the new row rendered blue turned up the
+    <code>[a][b][c]</code> footnotes doing the same: Leaflet paints every anchor inside the map
+    container its own link blue, and these cards portal into it.</p>
+  </a>
+
   <a class="entry" href="./2026-08-03-place-labels.html">
     <div class="date">2026-08-03</div>
     <h2>Putting names back on the map — streets, places and businesses</h2>

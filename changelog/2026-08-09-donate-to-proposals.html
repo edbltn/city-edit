@@ -1,0 +1,857 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Donate to a proposal — 2026-08-09</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Donate to a proposal</h1>
+    <div class="dateline">2026-08-09 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#affordance">One row at the foot of the card</a>
+<a href="#identity">Making the donation say what it is for</a>
+<a href="#redirect">The redirect was dropping the whole query string</a>
+<a href="#rule">Refusing to guess which proposal</a>
+<a href="#leaflet">The source footnotes were Leaflet blue</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">A proposal can now be donated to. Its card carries one row at the foot — <code>[$] Fund this proposal</code> — in the same bracket-token voice as the <code>[a][b][c]</code> source markers and the <code>[−│net│+]</code> control, so a dense modal gains an action rather than a section. The link carries WHAT is being funded: Donorbox will not prefill its comment box from a URL, but it does stamp UTM parameters onto the donation record, so the message rides <code>utm_content</code> and a deep link back to the exact proposal rides <code>utm_term</code>. All of which nginx was silently dropping — a literal <code>return 301</code> does not forward the query string.</p>
+
+  
+    <section class="card" id="affordance">
+      <div class="tag">THE FEATURE</div>
+      <h2>One row at the foot of the card</h2>
+      <h3>Symptom</h3>
+      <p>Donating was a single site-wide button in the topbar. You could support City Edit, but you could not support the bike lane you had just clicked on — and the proposal modal is exactly where someone has decided they care about a specific block.</p>
+      <h3>Root cause</h3>
+      <ul><li>The proposal card is already dense: header, place, meta line, an optional column header, then one row per vote type carrying a top-proposal badge, a coverage fraction, source footnotes and a three-part vote control — plus four tool icons in the corner. A donate button competing with any of that would fight the vote controls, which are what the card is FOR</li>
+<li>The card's existing language is bracket tokens: <code>[a][b][c]</code> for sources, <code>[−│net│+]</code> for votes, <code>[×]</code> for remove</li></ul>
+      <h3>What changed</h3>
+      <ul><li>A single row at the foot, under a hairline: <strong>[$] Fund this proposal</strong> — the same bracket-token voice, so it reads as part of the card rather than a pasted-in donate button</li>
+<li>Quiet at rest (opacity 0.82, hairline border, the accent living on the <code>[$]</code> alone); the accent border and a 12% accent wash arrive on hover, at which point it is the thing being pointed at</li>
+<li>It is the card's only outbound money action and the only element that ASKS for something rather than reporting it — so it gets exactly one row, and nothing else moves</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/styles/globals.css</li></ul>
+    </section>
+    
+
+    <section class="card" id="identity">
+      <div class="tag">ATTRIBUTION</div>
+      <h2>Making the donation say what it is for</h2>
+      <h3>Symptom</h3>
+      <p>A donate link that just opens the campaign page tells you nothing: the money arrives with no idea which proposal prompted it.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>donate.cityedit.org</code> redirects to a Donorbox campaign. Donorbox does have a “leave a comment” field — <code>donation[comment]</code> — but it does NOT prefill it from the URL: passing <code>?comment=…</code> is ignored, and that field stays donor-authored</li>
+<li>It DOES prefill its UTM fields server-side. Fetching the embed with <code>?utm_content=X</code> comes back with <code>&lt;input value="X" … name="donation[utm_params_attributes][utm_content]"&gt;</code> already populated, and those values are stamped onto the donation record</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The proposal's identity rides the UTM parameters, which is the channel that actually reaches the record: <code>utm_content</code> is the message (“Fund: Add bus lane — Grand St &amp; Bowery — NYC Proposals”) and <code>utm_term</code> is the deep link that re-selects that exact proposal on the map</li>
+<li><code>utm_medium=proposal</code> is what separates a proposal-funding donation from a plain topbar one, which carries no UTM at all; <code>utm_campaign</code> is the map slug</li>
+<li>Each value is clipped at 160 chars with an ellipsis — ended legibly here rather than cut mid-word by something downstream</li>
+<li>The client links to <code>donate.cityedit.org</code>, never to Donorbox directly, so the campaign can move without a client deploy</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/utils/donateLink.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="redirect">
+      <div class="tag">INFRA · WOULD HAVE SILENTLY FAILED</div>
+      <h2>The redirect was dropping the whole query string</h2>
+      <h3>Symptom</h3>
+      <p>Every parameter above would have vanished in transit. <code>curl -sI 'https://donate.cityedit.org/?utm_source=cityedit'</code> returns a Location with no query at all.</p>
+      <h3>Root cause</h3>
+      <ul><li>nginx does not append the query string to a <code>return 301</code> whose target is a literal URL — only to rewrites and to targets containing variables. The redirect inventory in <code>docs/url-routing.md</code> even recorded this, in a column reading <strong>dropped</strong></li>
+<li>Nothing would have errored. The donation page would have opened normally and every donation would simply have arrived anonymous — the failure mode is silence, which is why it is worth calling out</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>return 301 https://donorbox.org/support-spherical-harmonics$is_args$args;</code>, with a comment at the line saying what depends on it</li>
+<li>The redirect inventory row flipped from <em>dropped</em> to <em>preserved</em> — it is the stated source of truth for every redirect the system performs, so a stale row there is a trap for the next person</li>
+<li><strong>This ships with the image</strong>: until the nginx config is deployed, the fund links work but arrive stripped of their attribution</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>deploy/nginx-cloudrun.conf</li>
+<li>docs/url-routing.md</li></ul>
+    </section>
+    
+
+    <section class="card" id="rule">
+      <div class="tag">CORRECTNESS</div>
+      <h2>Refusing to guess which proposal</h2>
+      <h3>Symptom</h3>
+      <p>“Fund this proposal” has to name ONE proposal. A busy intersection card lists several vote types, and a card on an unvoted segment lists none.</p>
+      <h3>Root cause</h3>
+      <ul><li>The card is headed by a proposal only when it has a winner — a top proposal (PBTP) for a point card, a covered corridor (RBTP) for the route-summary card. Otherwise it is a place with N proposals on it, and the header shows no label</li>
+<li>Station-network maps (e-bikes) suppress the top-proposal header entirely — their pins ARE the stations — so the winner the fund row may offer has to be the same gated value the header uses, not the raw one</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>fundableProposalName</code>: the winner if there is one; else a lone vote type; else the empty string and NO fund row — wrong is worse than absent</li>
+<li>The station gate is now computed once as <code>pinnedCardWinner</code> and used for the header, the eyebrow and the fund row together, so they cannot disagree. The share link's <code>?vt</code> deliberately keeps naming the raw winner, which is pre-existing behavior</li>
+<li>Hover cards never get the row: they are <code>pointer-events: none</code>, so the link would render and not be clickable</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/utils/donateLink.ts</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="leaflet">
+      <div class="tag">BUG FOUND EN ROUTE</div>
+      <h2>The source footnotes were Leaflet blue</h2>
+      <h3>Symptom</h3>
+      <p>The new row rendered in browser-link blue instead of the card's ink. Measuring it showed the same was already true of the <code>[a][b][c]</code> source markers shipped on 08-01 — described in their own comment as “deliberately small and quiet”, and rendering as bright blue links.</p>
+      <h3>Root cause</h3>
+      <ul><li>Leaflet's stylesheet carries <code>.leaflet-container a { color: #0078A8 }</code> — specificity 0-2-0. These cards are portaled INTO the map container, so every anchor inside them matches it</li>
+<li><code>.graph-proposal-row-link { color: inherit }</code> is 0-1-0 and simply loses. Nobody noticed because the card's other “link” (Street View) draws an SVG with a hardcoded fill</li></ul>
+      <h3>What changed</h3>
+      <ul><li>One reset above Leaflet's reach: <code>.leaflet-container .graph-proposal-card a { color: inherit }</code></li>
+<li>That fixes the source markers and is also what lets the fund row take the card's own ink — it expresses its rest/hover difference with <code>opacity</code> rather than a second color declaration that would need to win the same fight</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/styles/globals.css</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Donorbox's prefill behavior was <strong>measured, not assumed</strong>: fetching the embed with <code>?utm_content=TESTMSG123</code> returns that value already set on <code>donation[utm_params_attributes][utm_content]</code>, while <code>?comment=HELLOMSG</code> appears nowhere in the response.</li>
+<li>The dropped query string was confirmed against the live host, not read off the config: <code>curl -sI 'https://donate.cityedit.org/?utm_source=cityedit&amp;utm_content=TEST'</code> returns a Location with no query.</li>
+<li>Driven in the running app on <code>nyc-proposals</code>: clicking a top-proposal pin opens a TOP PROPOSAL card whose fund row's href resolves to <code>donate.cityedit.org</code> with <code>utm_content=“Fund: Fix dangerous intersection — 40.75732, -73.98965 — NYC Proposals”</code>, <code>utm_medium=proposal</code>, <code>utm_campaign=nyc-proposals</code> and a <code>utm_term</code> deep link carrying the vote type.</li>
+<li>The route side verified the same way: selecting the 30th Avenue corridor opens <strong>TOP ROUTE PROPOSAL — Add bus lane</strong> (72 blocks) and the fund row is present there too.</li>
+<li>Both negative cases seen in the app: a segment with no votes renders “No votes yet” and <strong>no fund row</strong> (checked by DOM query, <code>rows=0 fund=false</code>).</li>
+<li>The remaining branch — several proposals on one place — is covered by unit test rather than by screenshot, which is the more durable place for it. <strong>10 tests pass</strong> across the URL builder and the fundable-name rule.</li>
+<li>The Leaflet-blue bug was measured, not eyeballed: a probe anchor with class <code>graph-proposal-row-link</code> inserted into a live card computes to <code>rgb(0, 120, 168)</code>. After the fix, the <code>[a]</code> marker on the bus-lane row reads as grey.</li>
+<li><code>npx tsc -b</code> clean — Vite dev never type-checks, so this is the only thing standing between an edit and a broken client build.</li>
+<li>Committed as a <strong>partial stage</strong>: another session is mid-flight in the same two files (a legend vote-type filter and a nav rail), so only this workstream's hunks were applied to the index and <code>git diff --cached</code> was read back line by line before committing.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-proposals</code> and click a proposal pin — expect a <strong>[$] Fund this proposal</strong> row at the foot of the card, and an accent border when you hover it.</li>
+<li>Click that row and check the Donorbox page opens in a NEW tab with your map selection still behind it.</li>
+<li>On the opened donation URL, confirm the query string survives the redirect — this is the part that needs the nginx change deployed before it works in prod.</li>
+<li>Click a plain street segment with no votes and confirm there is <strong>no</strong> fund row; then click a busy intersection listing several vote types and confirm there is none there either.</li>
+<li>Look at a row with source footnotes (<code>[a]</code>) and confirm they now read as quiet grey rather than link blue.</li>
+<li>Run <code>cd client-react &amp;&amp; npx vitest run src/utils/donateLink.test.ts</code> — 10 tests.</li>
+<li><strong>Before trusting attribution in prod</strong>: deploy the image (the nginx conf ships with it), then re-run the curl above against <code>donate.cityedit.org</code> and confirm the Location now carries the query.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+73</span> / <span class="d-del">-6</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · graph layer</span>
+        <span class="ctx-sum">The map&#x27;s whole interactive surface: topology decode, heat paint, hit-testing, top-proposal pins and the proposal cards — including ProposalCard, shared by the hover preview and the pinned/route modals</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~5,100 LOC — the largest component in the client; this change touches only the card&#x27;s inputs and its footer</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports</span><span class="ol-sum">+1 line — the donation helpers</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">topology decode / heat paint / hit-testing</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">pinned card content (pinnedName, pinnedVoteTypes, pinnedWinner)</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">pinnedCardWinner / pinnedShareUrl / pinnedDonate</span><span class="ol-sum">new — the station gate computed once, then the share + fund links off it</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">route-summary derivations (coveredRouteProposal)</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">routeFundName / routeDonate</span><span class="ol-sum">new — the corridor&#x27;s fund target</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">indicator markers / RBTP diamonds</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">&lt;ProposalCard&gt; pinned + route call sites</span><span class="ol-sum">donate= passed; winner/eyebrow now read the gated value</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ProposalCardProps</span><span class="ol-sum">+1 prop — donate</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ProposalCard body</span><span class="ol-sum">+1 footer row — the fund link, interactive-only</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>pinnedCardWinner gates the station-network case ONCE — header, eyebrow and fund row can no longer disagree about whether the card names a proposal</li><li>The share link&#x27;s ?vt deliberately keeps the ungated winner: changing it would alter existing deep links on station maps</li><li>interactive &amp;&amp; donate — hover cards are pointer-events:none, so a link there would be visible and dead</li><li>target=_blank + rel=noopener: the donation page is outside the app and must never navigate the map away from an open selection</li><li>onClick stopPropagation mirrors the source links — a click on the row must not reach the map and re-select</li><li>The route card passes no place: a corridor spans many blocks and has no one street name, so the deep link locates it instead</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 1108ccc..afc4f58 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -80,6 +80,7 @@ import { useVotesVersion } from &quot;../../utils/useVotesVersion&quot;;</span>
+<span class="d-ctx"> import { getVoterId } from &quot;../../utils/voterIdentity&quot;;</span>
+<span class="d-ctx"> import { isHoverSuppressed } from &quot;../../utils/touchHover&quot;;</span>
+<span class="d-ctx"> import { buildSelectionUrl, copyToClipboard } from &quot;../../utils/shareLink&quot;;</span>
+<span class="d-add">+import { buildProposalDonateUrl, fundableProposalName } from &quot;../../utils/donateLink&quot;;</span>
+<span class="d-ctx"> import { CheckIcon } from &quot;../CheckIcon&quot;;</span>
+<span class="d-ctx"> import { arrayMax, haversineMeters, HEAT_FULL_SCALE, NEG_HEAT_FULL_SCALE, HEATMAP_OPACITY } from &quot;./geometryHelpers&quot;;</span>
+<span class="d-ctx"> import { resolveAddress } from &quot;./geocodingHelpers&quot;;</span>
+<span class="d-hunk">@@ -3172,6 +3173,27 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     pinnedVoteTypes = [{ label: pinnedWinner.label, up: pinnedWinner.count, down: 0 }];</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // Station networks show no top-proposal header (their pins ARE the stations),</span>
+<span class="d-add">+  // so the card&#x27;s winner — what the header names, and therefore what the fund</span>
+<span class="d-add">+  // row can offer — is gated here rather than at each use.</span>
+<span class="d-add">+  const pinnedCardWinner = isStationNetwork ? null : pinnedWinner;</span>
+<span class="d-add">+  const pinnedShareUrl = pinnedPointLatLng</span>
+<span class="d-add">+    // ?vt keeps naming the winner even on station maps, where the card itself</span>
+<span class="d-add">+    // doesn&#x27;t head with one.</span>
+<span class="d-add">+    ? buildSelectionUrl(pinnedPointLatLng, pinnedWinner?.label ?? pinnedVoteTypes[0]?.label)</span>
+<span class="d-add">+    : null;</span>
+<span class="d-add">+  const pinnedFundName = fundableProposalName(pinnedCardWinner?.label, pinnedVoteTypes);</span>
+<span class="d-add">+  const pinnedDonate = pinnedShareUrl &amp;&amp; pinnedFundName</span>
+<span class="d-add">+    ? {</span>
+<span class="d-add">+        name: pinnedFundName,</span>
+<span class="d-add">+        url: buildProposalDonateUrl({</span>
+<span class="d-add">+          name: pinnedFundName,</span>
+<span class="d-add">+          place: pinnedName,</span>
+<span class="d-add">+          url: pinnedShareUrl,</span>
+<span class="d-add">+        }),</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    : null;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   // -------------------------------------------------------------------------</span>
+<span class="d-ctx">   // Route-summary card content (docs §2.4: everything displays at block grain)</span>
+<span class="d-ctx">   // -------------------------------------------------------------------------</span>
+<span class="d-hunk">@@ -3324,6 +3346,18 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     return tapped &amp;&amp; anchorsAreWaypoints(tapped) ? tapped : null;</span>
+<span class="d-ctx">   }, [pathEdgeIds, routeProposals, isHeatmapLoading, selectedRbtpId, anchorsAreWaypoints]);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // What a donation from the route-summary card funds. The live URL already</span>
+<span class="d-add">+  // encodes the whole selection (waypoints + vote type), so it doubles as the</span>
+<span class="d-add">+  // deep link back to the corridor.</span>
+<span class="d-add">+  const routeFundName = fundableProposalName(</span>
+<span class="d-add">+    coveredRouteProposal?.label, routeUniqueRows ?? routeVoteRows);</span>
+<span class="d-add">+  const routeDonate = routeFundName</span>
+<span class="d-add">+    ? {</span>
+<span class="d-add">+        name: routeFundName,</span>
+<span class="d-add">+        url: buildProposalDonateUrl({ name: routeFundName, url: window.location.href }),</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    : null;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   // -------------------------------------------------------------------------</span>
+<span class="d-ctx">   // Top-proposal row badges — which of a card&#x27;s vote-type rows are CURRENT top</span>
+<span class="d-ctx">   // proposals for what that card shows. PURELY DERIVED, never stored: computed</span>
+<span class="d-hunk">@@ -4216,10 +4250,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           // selection&#x27;s minimized state — while re-clicking the SAME feature</span>
+<span class="d-ctx">           // keeps the existing card in place.</span>
+<span class="d-ctx">           key={pinnedTarget ? `${pinnedTarget.kind}:${pinnedTarget.index}` : &quot;pinned&quot;}</span>
+<span class="d-del">-          winner={isStationNetwork ? null : pinnedWinner}</span>
+<span class="d-add">+          winner={pinnedCardWinner}</span>
+<span class="d-ctx">           // A point selection is a &quot;Proposal&quot;; only one sitting on a current</span>
+<span class="d-ctx">           // PBTP winner is a &quot;Top Proposal&quot;.</span>
+<span class="d-del">-          eyebrow={pinnedWinner &amp;&amp; !isStationNetwork ? &quot;Top Proposal&quot; : &quot;Proposal&quot;}</span>
+<span class="d-add">+          eyebrow={pinnedCardWinner ? &quot;Top Proposal&quot; : &quot;Proposal&quot;}</span>
+<span class="d-ctx">           screenX={pinnedScreenPos.x}</span>
+<span class="d-ctx">           screenY={pinnedScreenPos.y}</span>
+<span class="d-ctx">           name={pinnedName}</span>
+<span class="d-hunk">@@ -4232,9 +4266,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           mode={themeMode}</span>
+<span class="d-ctx">           voteTypes={theme.suggestions}</span>
+<span class="d-ctx">           sources={pinnedSources}</span>
+<span class="d-del">-          shareUrl={pinnedPointLatLng</span>
+<span class="d-del">-            ? buildSelectionUrl(pinnedPointLatLng, pinnedWinner?.label ?? pinnedVoteTypes[0]?.label)</span>
+<span class="d-del">-            : null}</span>
+<span class="d-add">+          shareUrl={pinnedShareUrl}</span>
+<span class="d-add">+          // Funds the proposal the card is headed by — its top proposal, or</span>
+<span class="d-add">+          // failing that the first vote type listed. A card with no vote types</span>
+<span class="d-add">+          // names no proposal, so it gets no fund row.</span>
+<span class="d-add">+          donate={pinnedDonate}</span>
+<span class="d-ctx">           streetViewLatLng={pinnedPointLatLng}</span>
+<span class="d-ctx">           onVote={castProposalVote}</span>
+<span class="d-ctx">           onRemove={onRemoveSelectedRef.current}</span>
+<span class="d-hunk">@@ -4350,6 +4386,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           voteTypes={theme.suggestions}</span>
+<span class="d-ctx">           sources={routeSources}</span>
+<span class="d-ctx">           shareUrl={window.location.href}</span>
+<span class="d-add">+          // A corridor spans many blocks, so it has no one street name to cite</span>
+<span class="d-add">+          // as its place — the deep link (the live URL, which encodes the whole</span>
+<span class="d-add">+          // selection) is what locates it.</span>
+<span class="d-add">+          donate={routeDonate}</span>
+<span class="d-ctx">           onVote={castRouteVote}</span>
+<span class="d-ctx">           onRemove={onClearRoute ? () =&gt; onClearRouteRef.current?.() : undefined}</span>
+<span class="d-ctx">           removeLabel=&quot;Deselect this route&quot;</span>
+<span class="d-hunk">@@ -4480,6 +4520,12 @@ interface ProposalCardProps {</span>
+<span class="d-ctx">    *  card&#x27;s own anchor moving — e.g. the open modal the hover card dodges</span>
+<span class="d-ctx">    *  re-anchors while the hover target stays put. */</span>
+<span class="d-ctx">   avoidKey?: string;</span>
+<span class="d-add">+  /** Donation-page link for the proposal this card names, already carrying the</span>
+<span class="d-add">+   *  proposal&#x27;s identity (see buildProposalDonateUrl), plus that proposal&#x27;s own</span>
+<span class="d-add">+   *  name for the link&#x27;s title/aria. Absent ⇒ no fund row — the right answer</span>
+<span class="d-add">+   *  for a card naming no proposal (nothing to fund) and for every hover card</span>
+<span class="d-add">+   *  (they are pointer-events:none, so the link could not be clicked). */</span>
+<span class="d-add">+  donate?: { name: string; url: string } | null;</span>
+<span class="d-ctx">   edgeId?: number | null;</span>
+<span class="d-ctx">   /** The selection&#x27;s touched blocks as materialized edge lists (docs §4.1) —</span>
+<span class="d-ctx">    *  drives the ± buttons&#x27; active/unvote state. Null/absent falls back to the</span>
+<span class="d-hunk">@@ -4570,7 +4616,7 @@ function CoverageCell({</span>
+<span class="d-ctx"> function ProposalCard({</span>
+<span class="d-ctx">   winner, eyebrow = &quot;Top Proposal&quot;, screenX, screenY, name, metaText = null, rows, topKinds,</span>
+<span class="d-ctx">   coverage = null, coverageUnit = &quot;block&quot;, votersPending = false,</span>
+<span class="d-del">-  interactive = false, elevated = false, getAvoidRects, avoidKey, edgeId = null, blocks = null, mode = &quot;&quot;, shareUrl = null, streetViewLatLng = null, voteTypes, sources, onVote, onRemove, removeLabel = &quot;Remove this point&quot;, onHoverChange, registerEl,</span>
+<span class="d-add">+  interactive = false, elevated = false, getAvoidRects, avoidKey, donate = null, edgeId = null, blocks = null, mode = &quot;&quot;, shareUrl = null, streetViewLatLng = null, voteTypes, sources, onVote, onRemove, removeLabel = &quot;Remove this point&quot;, onHoverChange, registerEl,</span>
+<span class="d-ctx"> }: ProposalCardProps) {</span>
+<span class="d-ctx">   const [copied, setCopied] = useState(false);</span>
+<span class="d-ctx">   // Interactive cards can collapse to a small pill (icon + label + expand) so a</span>
+<span class="d-hunk">@@ -4951,6 +4997,27 @@ function ProposalCard({</span>
+<span class="d-ctx">                 })}</span>
+<span class="d-ctx">               &lt;/div&gt;</span>
+<span class="d-ctx">             )}</span>
+<span class="d-add">+            {/* The card&#x27;s one outbound money action, kept to a single row at</span>
+<span class="d-add">+                the foot so a proposal becomes fundable without the modal</span>
+<span class="d-add">+                growing a section. It speaks the card&#x27;s own bracket-token</span>
+<span class="d-add">+                language ([$] beside [a][b][c] and [−|net|+]) rather than</span>
+<span class="d-add">+                arriving as a pasted-in donate button. */}</span>
+<span class="d-add">+            {interactive &amp;&amp; donate &amp;&amp; (</span>
+<span class="d-add">+              &lt;a</span>
+<span class="d-add">+                className=&quot;graph-proposal-fund&quot;</span>
+<span class="d-add">+                href={donate.url}</span>
+<span class="d-add">+                // The donation page lives outside the app — never navigate the</span>
+<span class="d-add">+                // map out from under an open selection.</span>
+<span class="d-add">+                target=&quot;_blank&quot;</span>
+<span class="d-add">+                rel=&quot;noopener noreferrer&quot;</span>
+<span class="d-add">+                title={`Donate toward &quot;${donate.name}&quot; — opens our donation page`}</span>
+<span class="d-add">+                aria-label={`Donate toward ${donate.name}`}</span>
+<span class="d-add">+                onClick={(e) =&gt; e.stopPropagation()}</span>
+<span class="d-add">+              &gt;</span>
+<span class="d-add">+                &lt;span className=&quot;graph-proposal-fund-token&quot; aria-hidden=&quot;true&quot;&gt;[$]&lt;/span&gt;</span>
+<span class="d-add">+                &lt;span className=&quot;graph-proposal-fund-text&quot;&gt;Fund this proposal&lt;/span&gt;</span>
+<span class="d-add">+              &lt;/a&gt;</span>
+<span class="d-add">+            )}</span>
+<span class="d-ctx">           &lt;/div&gt;</span>
+<span class="d-ctx">         &lt;/&gt;</span>
+<span class="d-ctx">       )}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/styles/globals.css</span>
+            <span class="stat"><span class="d-add">+45</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · global styles</span>
+        <span class="ctx-sum">The single stylesheet: design tokens, the themeable palette, topbar, map controls, markers, and the proposal card&#x27;s whole visual language</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">globals.css</span>
+        <span class="ctx-sum">~2,900 lines — tokens first, then layout, then the card system; this change adds one reset and one component</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">design tokens (:root) + palette</span><span class="ol-sum">unchanged — --accent / --ink / --hairline are what the new row reads</span></li><li class="dim"><span class="ol-label">topbar / legend / map controls</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">graph-indicator-modal + proposal card</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">.graph-proposal-row-links / -link</span><span class="ol-sum">context — the footnote markers this reset repairs</span></li><li class="changed"><span class="ol-label">.leaflet-container .graph-proposal-card a</span><span class="ol-sum">new — the reset that outranks Leaflet&#x27;s link blue</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.graph-proposal-fund / -token</span><span class="ol-sum">new — the fund row and its accent glyph</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">.graph-vote (−│net│+)</span><span class="ol-sum">unchanged — the control the fund row must not compete with</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Leaflet&#x27;s .leaflet-container a is 0-2-0 and beats any single class on a card link — the reset has to be 0-3-0 to win</li><li>The reset is why the fund row can express rest vs hover with opacity instead of a color that would have to win the same fight again</li><li>opacity 0.82 at rest: present but under the vote controls, which are what the card is for</li><li>The accent lives on the [$] alone — one bright glyph on a grey row draws the eye without shouting</li><li>radius 0, monospace, hairline border — the row is built from the same primitives as [a][b][c] and [−│net│+]</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
+<span class="d-meta">index 94708e0..3c97a5f 100644</span>
+<span class="d-meta">--- a/client-react/src/styles/globals.css</span>
+<span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
+<span class="d-hunk">@@ -2190,6 +2190,16 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx">   white-space: nowrap;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/* Leaflet paints EVERY anchor inside the map container its own link blue</span>
+<span class="d-add">+   (`.leaflet-container a` — specificity 0-2-0). These cards portal INTO that</span>
+<span class="d-add">+   container, so a plain class rule on a card link loses the cascade and comes</span>
+<span class="d-add">+   out blue; that is what was happening to the source markers below, whose</span>
+<span class="d-add">+   `color: inherit` never stood a chance. Reset it once here, above Leaflet&#x27;s</span>
+<span class="d-add">+   reach, and let each card link style itself from the card&#x27;s own ink. */</span>
+<span class="d-add">+.leaflet-container .graph-proposal-card a {</span>
+<span class="d-add">+  color: inherit;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> .graph-proposal-row-link {</span>
+<span class="d-ctx">   color: inherit;</span>
+<span class="d-ctx">   opacity: 0.5;</span>
+<span class="d-hunk">@@ -2201,6 +2211,41 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx">   text-decoration: underline;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/* Fund link — the card&#x27;s one outbound money action, and the only thing in the</span>
+<span class="d-add">+   modal that asks for something rather than reporting it. It gets exactly one</span>
+<span class="d-add">+   row at the foot of the card: a hairline box in the same bracket-token voice</span>
+<span class="d-add">+   as the [a][b][c] source markers and the [−│net│+] control, so it reads as</span>
+<span class="d-add">+   part of the card&#x27;s own language instead of a pasted-in donate button.</span>
+<span class="d-add">+</span>
+<span class="d-add">+   Quiet at rest — hairline border, held just under full strength — so it never</span>
+<span class="d-add">+   competes with the vote controls above it, which are what the card is FOR. It</span>
+<span class="d-add">+   comes fully up on hover, at which point it is the thing being pointed at. */</span>
+<span class="d-add">+.graph-proposal-fund {</span>
+<span class="d-add">+  display: flex;</span>
+<span class="d-add">+  align-items: baseline;</span>
+<span class="d-add">+  gap: 7px;</span>
+<span class="d-add">+  margin-top: 8px;</span>
+<span class="d-add">+  padding: 5px 7px;</span>
+<span class="d-add">+  border: 1px solid var(--hairline);</span>
+<span class="d-add">+  font-size: 11px;</span>
+<span class="d-add">+  text-decoration: none;</span>
+<span class="d-add">+  opacity: 0.82;</span>
+<span class="d-add">+  transition: border-color 120ms ease, background-color 120ms ease, opacity 120ms ease;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.graph-proposal-fund:hover {</span>
+<span class="d-add">+  border-color: var(--accent);</span>
+<span class="d-add">+  background: color-mix(in srgb, var(--accent) 12%, transparent);</span>
+<span class="d-add">+  opacity: 1;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* The accent lives on the [$] alone — a single bright glyph on an otherwise</span>
+<span class="d-add">+   grey row draws the eye without shouting. */</span>
+<span class="d-add">+.graph-proposal-fund-token {</span>
+<span class="d-add">+  flex: 0 0 auto;</span>
+<span class="d-add">+  color: var(--accent);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /* Connected vote control: [ −down │ net │ +up ] reads as ONE unit rather than</span>
+<span class="d-ctx">    three free-floating numbers. Square (radius 0) and tabular monospace to match</span>
+<span class="d-ctx">    the terminal aesthetic; the outer hairline + internal dividers do the framing. */</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/donateLink.test.ts</span>
+            <span class="stat"><span class="d-add">+81</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · utils tests</span>
+        <span class="ctx-sum">Vitest suites beside the helpers they cover — vote keys, block selection, sparse votes, and now the donation link</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">donateLink.test.ts</span>
+        <span class="ctx-sum">~80 LOC — 10 tests over the URL builder and the fundable-name rule</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">map/runtime mock</span><span class="ol-sum">new — pins the map name + slug so the message is exact</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">buildProposalDonateUrl suite</span><span class="ol-sum">new — host, message, deep link, tagging, absent place, clipping</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">fundableProposalName suite</span><span class="ol-sum">new — winner / lone type / several / none</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Asserts the link points at donate.cityedit.org, NOT the payment processor — that indirection is deliberate and easy to lose</li><li>The absent-place case checks there is no dangling separator, which is the thing a naive join gets wrong</li><li>The clip test asserts both the ceiling and the ellipsis, so a silent mid-word cut would fail</li><li>&#x27;declines to guess between several proposals&#x27; is the branch the browser run could not reach — it lives here instead</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/donateLink.test.ts b/client-react/src/utils/donateLink.test.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..09aa3fa</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/utils/donateLink.test.ts</span>
+<span class="d-hunk">@@ -0,0 +1,81 @@</span>
+<span class="d-add">+import { beforeEach, describe, expect, it, vi } from &quot;vitest&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import { buildProposalDonateUrl, fundableProposalName } from &quot;./donateLink&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+vi.mock(&quot;../map/runtime&quot;, () =&gt; ({</span>
+<span class="d-add">+  getCurrentMap: () =&gt; ({ name: &quot;NYC Proposals&quot; }),</span>
+<span class="d-add">+  getMapSlug: () =&gt; &quot;nyc-proposals&quot;,</span>
+<span class="d-add">+}));</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;buildProposalDonateUrl&quot;, () =&gt; {</span>
+<span class="d-add">+  let url: URL;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  beforeEach(() =&gt; {</span>
+<span class="d-add">+    url = new URL(buildProposalDonateUrl({</span>
+<span class="d-add">+      name: &quot;Protected bike lane&quot;,</span>
+<span class="d-add">+      place: &quot;Grand St &amp; Bowery&quot;,</span>
+<span class="d-add">+      url: &quot;https://cityedit.org/m/nyc-proposals?w=40.72,-73.99&amp;vt=Protected+bike+lane&quot;,</span>
+<span class="d-add">+    }));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;points at our donation page, not the payment processor directly&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(url.origin + url.pathname).toBe(&quot;https://donate.cityedit.org/&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;names the proposal, its place and its map in the message&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(url.searchParams.get(&quot;utm_content&quot;))</span>
+<span class="d-add">+      .toBe(&quot;Fund: Protected bike lane — Grand St &amp; Bowery — NYC Proposals&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;carries the deep link back to the proposal&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(url.searchParams.get(&quot;utm_term&quot;))</span>
+<span class="d-add">+      .toBe(&quot;https://cityedit.org/m/nyc-proposals?w=40.72,-73.99&amp;vt=Protected+bike+lane&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;tags the source so proposal donations are distinguishable from plain ones&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(url.searchParams.get(&quot;utm_source&quot;)).toBe(&quot;cityedit&quot;);</span>
+<span class="d-add">+    expect(url.searchParams.get(&quot;utm_medium&quot;)).toBe(&quot;proposal&quot;);</span>
+<span class="d-add">+    expect(url.searchParams.get(&quot;utm_campaign&quot;)).toBe(&quot;nyc-proposals&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;omits an absent place rather than leaving a dangling separator&quot;, () =&gt; {</span>
+<span class="d-add">+    const routeUrl = new URL(buildProposalDonateUrl({</span>
+<span class="d-add">+      name: &quot;Protected bike lane&quot;,</span>
+<span class="d-add">+      url: &quot;https://cityedit.org/m/nyc-proposals&quot;,</span>
+<span class="d-add">+    }));</span>
+<span class="d-add">+    expect(routeUrl.searchParams.get(&quot;utm_content&quot;))</span>
+<span class="d-add">+      .toBe(&quot;Fund: Protected bike lane — NYC Proposals&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;clips an overlong value instead of emitting an unbounded parameter&quot;, () =&gt; {</span>
+<span class="d-add">+    const long = new URL(buildProposalDonateUrl({</span>
+<span class="d-add">+      name: &quot;x&quot;.repeat(400),</span>
+<span class="d-add">+      url: &quot;https://cityedit.org/m/nyc-proposals&quot;,</span>
+<span class="d-add">+    }));</span>
+<span class="d-add">+    const content = long.searchParams.get(&quot;utm_content&quot;)!;</span>
+<span class="d-add">+    expect(content.length).toBeLessThanOrEqual(160);</span>
+<span class="d-add">+    expect(content.endsWith(&quot;…&quot;)).toBe(true);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;fundableProposalName&quot;, () =&gt; {</span>
+<span class="d-add">+  const rows = (...labels: string[]) =&gt; labels.map((label) =&gt; ({ label }));</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;funds the proposal the card is headed by&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(fundableProposalName(&quot;Add bus lane&quot;, rows(&quot;Add bus lane&quot;, &quot;Fix crossing&quot;)))</span>
+<span class="d-add">+      .toBe(&quot;Add bus lane&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;funds a lone vote type even with no top proposal&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(fundableProposalName(null, rows(&quot;Improve sidewalk&quot;))).toBe(&quot;Improve sidewalk&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;declines to guess between several proposals on one place&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(fundableProposalName(null, rows(&quot;Improve sidewalk&quot;, &quot;Add bench&quot;, &quot;Fix crossing&quot;)))</span>
+<span class="d-add">+      .toBe(&quot;&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;has nothing to fund where nobody has voted&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(fundableProposalName(null, [])).toBe(&quot;&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/donateLink.ts</span>
+            <span class="stat"><span class="d-add">+88</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · utils</span>
+        <span class="ctx-sum">Small pure helpers shared across the map UI — share links, vote keys, geocoding, telemetry. This is the new one: what a donation targets, and the URL that says so</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">donateLink.ts</span>
+        <span class="ctx-sum">~85 LOC — the donation host, the UTM message builder, and the fundable-name rule</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header comment</span><span class="ol-sum">new — records that Donorbox ignores comment= but stamps UTM server-side, which is the whole reason for the design</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">DONATE_URL / MAX_UTM_CHARS / clip</span><span class="ol-sum">new — our own host (never Donorbox directly) + a 160-char legible clip</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">fundableProposalName</span><span class="ol-sum">new — winner, else a lone vote type, else nothing</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ProposalDonationTarget</span><span class="ol-sum">new — name / place / deep link</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">buildProposalDonateUrl</span><span class="ol-sum">new — assembles the five UTM parameters</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>comment= is NOT prefillable — verified against the live embed; the message has to ride utm_content instead</li><li>utm_term carries the deep link back to the exact selection, so the record links to the proposal and not just names it</li><li>utm_medium=proposal is what distinguishes these from topbar/landing donations, which carry no UTM at all</li><li>The message is written to be read cold in the donation record, because that record is the only place it is ever read</li><li>getCurrentMap()/getMapSlug() are read at click time, so the link always names the map you are actually on</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/donateLink.ts b/client-react/src/utils/donateLink.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..bc97237</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/utils/donateLink.ts</span>
+<span class="d-hunk">@@ -0,0 +1,88 @@</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// Per-proposal donation links</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// donate.cityedit.org is our donation page (an nginx 301 onto the Donorbox</span>
+<span class="d-add">+// campaign, forwarding the query string). Donorbox does NOT prefill its</span>
+<span class="d-add">+// &quot;leave a comment&quot; box from the URL — that field is donor-authored — but it</span>
+<span class="d-add">+// DOES stamp UTM parameters onto the donation record server-side. So that is</span>
+<span class="d-add">+// where a proposal&#x27;s identity rides:</span>
+<span class="d-add">+//</span>
+<span class="d-add">+//   utm_content  the message: what is being funded, in words</span>
+<span class="d-add">+//   utm_term     the deep link back to that exact proposal on the map</span>
+<span class="d-add">+//   utm_campaign the map slug it lives on</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// Every donation started from a proposal card therefore arrives naming the</span>
+<span class="d-add">+// proposal it was meant for, with a link that re-selects it.</span>
+<span class="d-add">+</span>
+<span class="d-add">+import { getCurrentMap, getMapSlug } from &quot;../map/runtime&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Our donation page. Keep the client pointed at the cityedit host (not the</span>
+<span class="d-add">+ *  Donorbox URL directly) so the campaign can move without a client deploy. */</span>
+<span class="d-add">+const DONATE_URL = &quot;https://donate.cityedit.org/&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Ceiling on each UTM value. These ride in a URL and land in a reporting</span>
+<span class="d-add">+ *  column of unspecified width, so clip long vote-type/street names here —</span>
+<span class="d-add">+ *  where we can end them legibly — rather than letting something downstream</span>
+<span class="d-add">+ *  cut them mid-word. */</span>
+<span class="d-add">+const MAX_UTM_CHARS = 160;</span>
+<span class="d-add">+</span>
+<span class="d-add">+function clip(text: string): string {</span>
+<span class="d-add">+  const trimmed = text.trim();</span>
+<span class="d-add">+  if (trimmed.length &lt;= MAX_UTM_CHARS) return trimmed;</span>
+<span class="d-add">+  return `${trimmed.slice(0, MAX_UTM_CHARS - 1).trimEnd()}…`;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * The one proposal a card may offer to fund, or &quot;&quot; when it names none.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * A card headed by a top proposal funds that proposal; a card listing exactly</span>
+<span class="d-add">+ * one vote type funds that one. Anything else is a place with several</span>
+<span class="d-add">+ * proposals on it — &quot;fund this proposal&quot; there would have to guess which, so</span>
+<span class="d-add">+ * the row is simply absent rather than wrong.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function fundableProposalName(</span>
+<span class="d-add">+  winnerLabel: string | null | undefined,</span>
+<span class="d-add">+  rows: readonly { label: string }[],</span>
+<span class="d-add">+): string {</span>
+<span class="d-add">+  if (winnerLabel) return winnerLabel;</span>
+<span class="d-add">+  return rows.length === 1 ? rows[0].label : &quot;&quot;;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+export interface ProposalDonationTarget {</span>
+<span class="d-add">+  /** The proposal&#x27;s vote-type label — &quot;Protected bike lane&quot;. */</span>
+<span class="d-add">+  name: string;</span>
+<span class="d-add">+  /** Where it is, in words: the card&#x27;s street or intersection name. Route</span>
+<span class="d-add">+   *  cards span many blocks and have no single place, so they omit it. */</span>
+<span class="d-add">+  place?: string | null;</span>
+<span class="d-add">+  /** Deep link that re-selects this proposal on the map (see buildSelectionUrl</span>
+<span class="d-add">+   *  for points; the live URL already is one for a route selection). */</span>
+<span class="d-add">+  url: string;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Donation-page URL carrying the identity of the proposal being funded.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * The message is written to be read cold in the donation record — &quot;Fund:</span>
+<span class="d-add">+ * Protected bike lane — Grand St &amp; Bowery — NYC Proposals&quot; — because that</span>
+<span class="d-add">+ * record is the only place it is ever read.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function buildProposalDonateUrl(target: ProposalDonationTarget): string {</span>
+<span class="d-add">+  const mapName = getCurrentMap()?.name ?? &quot;&quot;;</span>
+<span class="d-add">+  const place = target.place?.trim();</span>
+<span class="d-add">+  const message = [</span>
+<span class="d-add">+    `Fund: ${target.name}`,</span>
+<span class="d-add">+    place || null,</span>
+<span class="d-add">+    mapName || null,</span>
+<span class="d-add">+  ].filter(Boolean).join(&quot; — &quot;);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const params = new URLSearchParams({</span>
+<span class="d-add">+    utm_source: &quot;cityedit&quot;,</span>
+<span class="d-add">+    // Distinguishes a proposal-funding donation from a plain topbar/landing</span>
+<span class="d-add">+    // donation, which carries no UTM at all.</span>
+<span class="d-add">+    utm_medium: &quot;proposal&quot;,</span>
+<span class="d-add">+    utm_campaign: getMapSlug() || &quot;cityedit&quot;,</span>
+<span class="d-add">+    utm_content: clip(message),</span>
+<span class="d-add">+    utm_term: clip(target.url),</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+  return `${DONATE_URL}?${params.toString()}`;</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">deploy/nginx-cloudrun.conf</span>
+            <span class="stat"><span class="d-add">+6</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill on">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Deploy · nginx</span>
+        <span class="ctx-sum">The Cloud Run reverse proxy: static assets, tile caching, the per-subdomain server blocks, and the app upstream</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">nginx-cloudrun.conf</span>
+        <span class="ctx-sum">~200 lines — caches, the donate/feedback subdomain blocks, then the catch-all app server</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">tile proxy_cache_path</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">server donate.cityedit.org</span><span class="ol-sum">the 301 now forwards the query string</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">server feedback.cityedit.org</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">catch-all app server</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>nginx appends the query to a `return` target only when it is a rewrite or contains variables — a literal URL drops it</li><li>$is_args$args is the idiom: emits nothing when there is no query, ?… when there is</li><li>The failure this prevents is SILENT — the donation page opens fine, it just arrives anonymous</li><li>This ships with the app image; the client change is live before it, so attribution starts working only after the next deploy</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/deploy/nginx-cloudrun.conf b/deploy/nginx-cloudrun.conf</span>
+<span class="d-meta">index 9debb1a..007f277 100644</span>
+<span class="d-meta">--- a/deploy/nginx-cloudrun.conf</span>
+<span class="d-meta">+++ b/deploy/nginx-cloudrun.conf</span>
+<span class="d-hunk">@@ -63,7 +63,12 @@ http {</span>
+<span class="d-ctx">     server {</span>
+<span class="d-ctx">         listen 8080;</span>
+<span class="d-ctx">         server_name donate.cityedit.org;</span>
+<span class="d-del">-        return 301 https://donorbox.org/support-spherical-harmonics;</span>
+<span class="d-add">+        # $is_args$args forwards the query string, which a literal `return`</span>
+<span class="d-add">+        # target otherwise drops. Proposal cards link here carrying UTM</span>
+<span class="d-add">+        # parameters naming the proposal being funded (see donateLink.ts);</span>
+<span class="d-add">+        # Donorbox stamps those onto the donation record, so losing them here</span>
+<span class="d-add">+        # would silently strip every donation of what it was for.</span>
+<span class="d-add">+        return 301 https://donorbox.org/support-spherical-harmonics$is_args$args;</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # feedback.cityedit.org serves only the static feedback form (baked into</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">docs/url-routing.md</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill on">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · URL routing</span>
+        <span class="ctx-sum">How a URL becomes a map: slugs, subdomains, retired-slug redirects, and the redirect inventory that is the stated source of truth</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">url-routing.md</span>
+        <span class="ctx-sum">~230 lines — slug rules, rename procedure, then the redirect inventory table</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">slug + subdomain rules</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">rename procedure</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">Redirect inventory table</span><span class="ol-sum">the donate row&#x27;s query-param column flips dropped → preserved</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">map_redirects rows</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The table declares itself the source of truth — a stale row is a trap for whoever reads it next</li><li>The row now says WHY the query is preserved, so nobody &#x27;simplifies&#x27; the $is_args$args back out</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/url-routing.md b/docs/url-routing.md</span>
+<span class="d-meta">index 9c0ff35..edf0d2b 100644</span>
+<span class="d-meta">--- a/docs/url-routing.md</span>
+<span class="d-meta">+++ b/docs/url-routing.md</span>
+<span class="d-hunk">@@ -202,7 +202,7 @@ one, add a row here.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> | What | Mechanism | Where | Query params |</span>
+<span class="d-ctx"> |------|-----------|-------|--------------|</span>
+<span class="d-del">-| `donate.cityedit.org` → donorbox | nginx `return 301` | `deploy/nginx-cloudrun.conf` | dropped |</span>
+<span class="d-add">+| `donate.cityedit.org` → donorbox | nginx `return 301` | `deploy/nginx-cloudrun.conf` | preserved (`$is_args$args`) — proposal cards send UTM params naming what&#x27;s being funded |</span>
+<span class="d-ctx"> | `feedback.cityedit.org` → feedback page | nginx `try_files` rewrite (not a redirect) | `deploy/nginx-cloudrun.conf` | n/a |</span>
+<span class="d-ctx"> | Canonical-subdomain redirect (`/m/nyc-bikes` → `bikepaths.cityedit.org`) | client `location.replace` after map-config fetch | `App.tsx` + `themes.ts subdomainRedirectUrl` | preserved (+ re-attached `src`) |</span>
+<span class="d-ctx"> | Retired-slug redirects (renamed maps) | client `location.replace` on `MapConfig.redirect` | DB `map_redirects` table + `App.tsx` + `map/runtime.ts slugRedirectUrl` | preserved, `append_query` merged |</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_donate_proposals_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_donate_proposals_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
