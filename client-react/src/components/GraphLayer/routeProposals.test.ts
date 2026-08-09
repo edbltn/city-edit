@@ -15,6 +15,8 @@ import {
   dedupeRoutes,
   growCorridor,
   makeSegmentShortestCheck,
+  makeSegmentRecoveryCheck,
+  RECOVERY_MIN_BLOCK_COVERAGE,
   routeLengthBudgetM,
   MAX_GHOST_WAYPOINTS,
   MIN_ROUTE_SCORE,
@@ -26,6 +28,7 @@ import {
   type RouteProposal,
   type RouteProposalOptions,
   type SegmentShortestCheck,
+  type SegmentRecoveryCheck,
 } from "./routeProposals";
 import {
   topologyFromJson,
@@ -799,6 +802,58 @@ describe("makeSegmentShortestCheck (A* consistency oracle)", () => {
   });
 });
 
+describe("makeSegmentRecoveryCheck (does routing hand the corridor back?)", () => {
+  // A chain along one latitude, `bump` displaced north so the corridor through
+  // it is longer than the shortcut edge spanning its two neighbours.
+  const bumpedChain = (n: number, bump: number) => {
+    const nodes: [number, number][] = [];
+    for (let i = 0; i < n; i++) {
+      nodes.push([i === bump ? 40.7008 : 40.700, -74.000 + 0.0005 * i]);
+    }
+    const edges: [number, number][] =
+      Array.from({ length: n - 1 }, (_, i) => [i, i + 1]);
+    edges.push([bump - 1, bump + 1]); // the corner-cutting shortcut
+    return makeTopo2D(nodes, edges);
+  };
+
+  it("accepts a corridor routing reproduces exactly", () => {
+    const topo = makeTopo2D(
+      [[40.700, -74.000], [40.700, -73.9995], [40.700, -73.999]],
+      [[0, 1], [1, 2]],
+    );
+    const recovers = makeSegmentRecoveryCheck(topo, buildNodeAdj(topo));
+    expect(recovers(0, 2, [0, 1])).toBe(true);
+  });
+
+  it("rejects a shortcut that skips too much of the corridor", () => {
+    // 9 corridor edges, 2 of them cut away → 7/9 ≈ 0.78 recovered.
+    const topo = bumpedChain(10, 8);
+    const recovers = makeSegmentRecoveryCheck(topo, buildNodeAdj(topo));
+    expect(recovers(0, 9, [0, 1, 2, 3, 4, 5, 6, 7, 8])).toBe(false);
+  });
+
+  it("forgives a corner clipped off a long corridor", () => {
+    // Same two edges lost, but out of 29 → 27/29 ≈ 0.93 recovered.
+    expect(RECOVERY_MIN_BLOCK_COVERAGE).toBeLessThan(27 / 29);
+    const topo = bumpedChain(30, 28);
+    const recovers = makeSegmentRecoveryCheck(topo, buildNodeAdj(topo));
+    const corridor = Array.from({ length: 29 }, (_, i) => i);
+    expect(recovers(0, 29, corridor)).toBe(true);
+  });
+
+  it("fails closed at the pop cap (the pin stays)", () => {
+    const topo = bumpedChain(30, 28);
+    const recovers = makeSegmentRecoveryCheck(topo, buildNodeAdj(topo), { maxPops: 1 });
+    expect(recovers(0, 29, Array.from({ length: 29 }, (_, i) => i))).toBe(false);
+  });
+
+  it("honours a stricter coverage bar", () => {
+    const topo = bumpedChain(30, 28);
+    const recovers = makeSegmentRecoveryCheck(topo, buildNodeAdj(topo), { minCoverage: 1 });
+    expect(recovers(0, 29, Array.from({ length: 29 }, (_, i) => i))).toBe(false);
+  });
+});
+
 describe("growCorridor (routing-consistent extension + ghost waypoints)", () => {
   // Chain-of-arcs adjacency helper over edge list with weights.
   const typeAdjOf = (
@@ -881,6 +936,84 @@ describe("growCorridor (routing-consistent extension + ghost waypoints)", () => 
     // Equal-weight fork at node 1 → lower edge id (1→2) wins.
     expect(a.edges).toEqual([0, 1]);
   });
+
+  // ── Ghost pruning: pins are a means, not an end ──────────────────────────
+  const recoversAll: SegmentRecoveryCheck = () => true;
+
+  it("spends no ghost when the router hands the corridor back anyway", () => {
+    // Every extension loses the strict length race, but routing still returns
+    // the corridor — so nothing is pinned and growth never hits the pin cap.
+    const chain: [number, number][] = Array.from({ length: 8 }, (_, i) => [i, i + 1]);
+    const g = growCorridor(typeAdjOf(chain, chain.map(() => 5)), len100, never, {
+      recoversCorridor: recoversAll,
+    })!;
+    expect(g.edges.length).toBe(8);            // the whole chain, not 4
+    expect(g.waypointNodes).toEqual([0, 8]);   // anchors only
+    expect(g.segments).toEqual([g.edges]);
+  });
+
+  it("prunes a ghost that stopped being needed and grows on the reclaimed pin", () => {
+    // Consistency flips false once an open segment passes 300m, so the
+    // corridor pins a ghost every 4th edge and stops after 3 pins. The oracle
+    // certifies exactly one merged stretch (node 0 → node 6), so that pin
+    // comes back and growth continues past where it used to stop.
+    const chain: [number, number][] = Array.from({ length: 20 }, (_, i) => [i, i + 1]);
+    const adj = () => typeAdjOf(chain, chain.map(() => 5));
+    const check: SegmentShortestCheck = (_f, _t, len) => len <= 300;
+    const recoversOne: SegmentRecoveryCheck = (from, to) => from === 0 && to === 6;
+
+    const before = growCorridor(adj(), len100, check)!;
+    const after = growCorridor(adj(), len100, check, {
+      recoversCorridor: recoversOne,
+    })!;
+    expect(after.edges.length).toBeGreaterThan(before.edges.length);
+    expect(before.waypointNodes).toContain(3);
+    expect(after.waypointNodes).not.toContain(3);   // the pruned pin
+    expect(after.waypointNodes.length).toBeLessThanOrEqual(2 + MAX_GHOST_WAYPOINTS);
+    expect(after.segments.flat()).toEqual(after.edges);
+    expect(after.waypointNodes.length).toBe(after.segments.length + 1);
+  });
+
+  it("keeps pins the oracle can't certify (and stays deterministic)", () => {
+    const chain: [number, number][] = Array.from({ length: 8 }, (_, i) => [i, i + 1]);
+    const adj = () => typeAdjOf(chain, chain.map(() => 5));
+    const recoversNone: SegmentRecoveryCheck = () => false;
+    const plain = growCorridor(adj(), len100, never)!;
+    const withOracle = growCorridor(adj(), len100, never, {
+      recoversCorridor: recoversNone,
+    })!;
+    expect(withOracle).toEqual(plain);
+    expect(growCorridor(adj(), len100, never, { recoversCorridor: recoversNone }))
+      .toEqual(withOracle);
+  });
+
+  it("bounds the work: recovery checks are capped, plus the final reserve", () => {
+    const chain: [number, number][] = Array.from({ length: 40 }, (_, i) => [i, i + 1]);
+    let calls = 0;
+    // An oracle that certifies everything it is asked about would, uncapped,
+    // let the corridor pin-and-prune its way down the whole chain.
+    const counting: SegmentRecoveryCheck = () => { calls++; return true; };
+    const g = growCorridor(typeAdjOf(chain, chain.map(() => 5)), len100, never, {
+      recoversCorridor: counting,
+      maxRecoveryChecks: 4,
+    })!;
+    // 4 budgeted, then the reserved final pass — one per surviving pin.
+    expect(calls).toBeLessThanOrEqual(4 + MAX_GHOST_WAYPOINTS);
+    expect(calls).toBeGreaterThanOrEqual(4);
+    expect(g.waypointNodes.length).toBe(g.segments.length + 1);
+  });
+
+  it("re-examines the finished path even with the prune budget spent", () => {
+    // maxPrunePasses: 0 shuts the mid-growth passes off entirely — the pins a
+    // corridor ships still get their last look, so no URL carries a waypoint
+    // routing doesn't need.
+    const chain: [number, number][] = Array.from({ length: 8 }, (_, i) => [i, i + 1]);
+    const g = growCorridor(typeAdjOf(chain, chain.map(() => 5)), len100, never, {
+      recoversCorridor: () => true,
+      maxPrunePasses: 0,
+    })!;
+    expect(g.waypointNodes).toEqual([g.nodes[0], g.nodes[g.nodes.length - 1]]);
+  });
 });
 
 describe("computeRouteProposals — ghost waypoints end-to-end", () => {
@@ -920,6 +1053,40 @@ describe("computeRouteProposals — ghost waypoints end-to-end", () => {
     expect(ps).toHaveLength(1);
     expect(ps[0].edgeIds.length).toBe(edges.length);
     expect(ps[0].waypointNodes).toEqual([ps[0].anchors[0], ps[0].anchors[1]]);
+  });
+
+  it("spends no ghost on a corner the router only clips", () => {
+    // A long voted chain with one node bumped off the line, plus an UNVOTED
+    // shortcut spanning the bump. Routing the whole corridor cuts that corner
+    // — so the corridor is not strictly shortest — but hands back 27 of its 29
+    // blocks, which is the corridor for every purpose a proposal has. The pin
+    // that used to cost a ghost (and a waypoint in the shared URL) is not worth
+    // spending, so the anchors alone carry the route.
+    const n = 30, bump = 28;
+    const nodes: [number, number][] = Array.from({ length: n }, (_, i) =>
+      [i === bump ? 40.7008 : 40.700, -74.000 + 0.0005 * i]);
+    const chain: [number, number][] =
+      Array.from({ length: n - 1 }, (_, i) => [i, i + 1]);
+    const topo = makeTopo2D(nodes, [...chain, [bump - 1, bump + 1]]);
+    const votes = {
+      edge_vote_types: [
+        ...chain.map((): [number, number, number][] => [[BIKE, 5, 0]]),
+        [] as [number, number, number][],   // the shortcut is unvoted
+      ],
+      vote_type_legend: LEGEND,
+    };
+    const adj = buildNodeAdj(topo);
+
+    const pinned = computeRouteProposals(topo, adj, votes, {
+      segmentRecoveryCheck: null,   // strict-only: the old behaviour
+    });
+    expect(pinned[0].waypointNodes.length).toBeGreaterThan(2);
+
+    const ps = computeRouteProposals(topo, adj, votes);
+    expect(ps).toHaveLength(1);
+    expect(ps[0].edgeIds.length).toBe(chain.length);
+    expect(ps[0].waypointNodes).toEqual([ps[0].anchors[0], ps[0].anchors[1]]);
+    expect(ps[0].segments).toEqual([ps[0].edgeIds]);
   });
 
   it("waypoint segments always partition the path edges", () => {

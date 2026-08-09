@@ -153,6 +153,14 @@ Two constraints keep them honest:
   tip is pinned as a **ghost waypoint**. At most 3 pins, so any proposal is
   reproducible as ≤ 5 route waypoints — which is what lets a shared proposal URL
   still route back into the corridor after the proposal itself has retired.
+- **A pin must keep earning its place.** Shortest-ness is only a proxy for "would
+  routing hand this stretch back?", and it's pessimistic — an alternative two
+  metres shorter fails it while still riding the same blocks. So a corridor
+  re-asks the real question, by routing the stretch and comparing *blocks*, and
+  drops pins that stopped mattering once the far end moved on. Each one dropped
+  is a waypoint off the URL and a pin back in the budget, so the corridor reaches
+  further. On the NYC walkways map that halved the ghosts (25 → 13) while the
+  proposals grew 8% longer.
 
 They're **derived state**: a pure deterministic function of (topology, votes),
 computed on the client, never stored. Two people looking at the same map see

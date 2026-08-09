@@ -242,6 +242,23 @@ Per vote type `T`, over edges with net(T) ≥ `MIN_NET` (high-activity gate #1):
    the old straightness-splitting + budget-window trimming). Peel the grown
    corridor's edges out and repeat up to `PEEL_MAX_PATHS`, keeping corridors
    scoring ≥ `PEEL_DOMINANCE` × the first.
+3b. **Ghost pruning** (`makeSegmentRecoveryCheck`) — shortest-ness is only a
+   *proxy* for the question a pin exists to answer, "would routing hand this
+   stretch back?", and a pessimistic one: an alternative two metres shorter
+   fails it while still running along the corridor. So a second oracle routes
+   the stretch for real (bounded A* under the corridor's own length) and
+   compares **blocks** — the display/voting grain, and direction-twin-proof —
+   accepting it as recovered at ≥ `RECOVERY_MIN_BLOCK_COVERAGE` (0.85). Growth
+   consults it before spending a pin, and re-examines its pins whenever it
+   stalls or runs out: a ghost pinned early often stops mattering once the far
+   end moves on, because the shortcut that forced it no longer lies on the way
+   to the more distant target. Every ghost dropped is a waypoint off the shared
+   URL **and** a pin handed back, so the corridor reaches further on the same
+   budget. Mid-growth passes are budgeted (`MAX_RECOVERY_CHECKS`,
+   `MAX_PRUNE_PASSES`) because they can restart growth; the finished path
+   always gets one last pass on a reserved allowance, so no proposal ships a
+   waypoint routing doesn't need. Fails **closed** (pin kept) on an
+   unreachable goal or the pop cap.
 4. **Length budget** — growth may not extend past a meter budget that grows
    with support: `min(ROUTE_LENGTH_MAX_M, ROUTE_LENGTH_BASE_M +
    ROUTE_LENGTH_PER_SQRT_SCORE_M · √score)`. A corridor *earns* length with

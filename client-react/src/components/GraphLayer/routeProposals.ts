@@ -28,6 +28,7 @@ import type { LatLng } from "../../types";
 import {
   adjEdgesOf,
   blockKeyOf,
+  EARTH_RADIUS_M,
   buildBlockIndex,
   edgeLengthMeters,
   edgesOfBlockKey,
@@ -408,6 +409,14 @@ export function chooseAnchorOrderBefore(
 // it wouldn't — which also bounds how roundabout a corridor can get (the old
 // straightness-splitting + budget-window trimming this replaces).
 //
+// Why pins get re-examined: shortest-ness is only a proxy for "routing hands
+// this stretch back", and a pessimistic one — a two-metre-shorter alternative
+// that runs along the same blocks fails it. So growth asks a second oracle
+// (makeSegmentRecoveryCheck: route it and compare BLOCKS) before spending a
+// ghost, and prunes ghosts that stopped being needed as the corridor grew past
+// them. Reclaimed pins go straight back into the budget, so a corridor that
+// spent its three early can still reach further.
+//
 // Determinism contract: NO randomness, NO clock. Every iteration order and
 // tie-break is by ascending edge/node id (the A* check breaks heap ties by
 // node id), so the same (topology, vote state) yields byte-identical
@@ -433,6 +442,23 @@ export const ROUTE_CONSISTENCY_EPS_M = 1;
  *  pathological geometry, where the check FAILS OPEN (treats the corridor as
  *  shortest) to keep recompute time bounded. Deterministic either way. */
 export const ROUTE_CHECK_MAX_POPS = 30000;
+/** Fraction of a corridor stretch's BLOCKS that plain routing between its two
+ *  bounding waypoints must hand back for the stretch to count as "recovered" —
+ *  i.e. for the ghost pinning it to be unnecessary. Not 1.0: a shortcut that
+ *  clips a corner off one block in twenty still reproduces the corridor for
+ *  every purpose a proposal has (its blocks are the display and voting grain),
+ *  and demanding perfection would keep pins that buy nothing. */
+export const RECOVERY_MIN_BLOCK_COVERAGE = 0.85;
+/** Recovery-check budget per grown corridor (they cost an A* apiece, path
+ *  reconstruction included). Growth spends them on strict-check failures that
+ *  might not need a pin; the prune pass spends them on ghosts that might no
+ *  longer be needed. Exhausted, both fall back to the plain strict behaviour. */
+export const MAX_RECOVERY_CHECKS = 16;
+/** How many times one corridor may re-examine its ghosts. A pass runs when
+ *  growth stalls or spends its last pin: any ghost the router no longer needs
+ *  is dropped, which hands its budget back and lets growth continue. Capped
+ *  so a corridor can't ping-pong between pinning and pruning forever. */
+export const MAX_PRUNE_PASSES = 3;
 /** High-activity gate: minimum path score (sum of nets). */
 export const MIN_ROUTE_SCORE = 3;
 /** High-activity gate: minimum number of path edges. */
@@ -490,6 +516,16 @@ export interface RouteProposalOptions {
   /** Routing-consistency oracle override (tests inject fakes). Default:
    *  makeSegmentShortestCheck(topo, adj) — bounded A* over the full graph. */
   segmentShortestCheck?: SegmentShortestCheck;
+  /** Corridor-recovery oracle override — the second opinion that keeps growth
+   *  from pinning (and lets it un-pin) ghosts routing doesn't need. Default:
+   *  makeSegmentRecoveryCheck(topo, adj); pass null to disable pruning. */
+  segmentRecoveryCheck?: SegmentRecoveryCheck | null;
+  /** Recovery-check budget per corridor (MAX_RECOVERY_CHECKS). 0 leaves only
+   *  the reserved final pass: pins still get cleaned off finished corridors,
+   *  but none are reclaimed early enough to buy more reach. */
+  maxRecoveryChecks?: number;
+  /** Mid-growth prune passes per corridor (MAX_PRUNE_PASSES). */
+  maxPrunePasses?: number;
   /** Prebuilt edge→block index for `topo` (GraphLayer already holds one).
    *  Omitted, one is built here — an O(nEdges) pass worth skipping per call. */
   blockIndex?: BlockIndex | null;
@@ -647,15 +683,131 @@ export type SegmentShortestCheck = (
 ) => boolean;
 
 /**
- * The default oracle: bounded A* over the full topology. Searches from
- * `toNode` toward `fromNode` with a crow-flies heuristic (equirectangular,
- * scaled ×0.999 to stay admissible under the per-edge mean-latitude lengths)
- * and prunes every g-score above the corridor length — the explored region is
- * exactly the ellipse of paths that could beat the corridor, razor-thin for
- * the near-straight segments consistent growth produces. Returns false only
- * when a strictly (> eps) shorter path EXISTS; exhausting the frontier, a
- * crow distance already at/over the corridor, or the pop cap (fail open,
- * bounded work) all return true. Deterministic: heap ties break by node id.
+ * Bounded A* from `start` to `goal` over the FULL topology, refusing any path
+ * longer than `limit` meters. The heuristic is crow-flies (equirectangular,
+ * scaled ×0.999 to stay admissible under the per-edge mean-latitude lengths),
+ * so the explored region is exactly the ellipse of paths that could come in
+ * under `limit` — razor-thin for the near-straight segments consistent growth
+ * produces. `reached` is true only when a path of length ≤ limit EXISTS;
+ * exhausting the frontier, a crow distance already over the limit, or the pop
+ * cap all report unreached (`capped` distinguishes the last). With
+ * `wantPath`, `pathEdges` carries the optimal path's edge ids (goal→start
+ * order). Deterministic: heap ties break by node id.
+ */
+function boundedAStar(
+  topo: GraphTopology,
+  adj: NodeAdj,
+  start: number,
+  goal: number,
+  limit: number,
+  maxPops: number,
+  wantPath: boolean,
+): { reached: boolean; capped: boolean; pathEdges: number[] } {
+  const { ends } = topo;
+  const unreached = { reached: false, capped: false, pathEdges: [] as number[] };
+  // Crow-flies distance in the SAME earth model edgeLengthMeters uses — mixing
+  // models (the WGS84 metres-per-degree constants against its spherical R) put
+  // the heuristic ~0.1% ABOVE the graph's own edge lengths, i.e. inadmissible,
+  // which reads a straight corridor as unreachable inside its own length.
+  const [tLat, tLng] = nodeLatLng(topo, goal);
+  const degM = (EARTH_RADIUS_M * Math.PI) / 180;
+  const ky = degM;
+  const kx = degM * Math.cos((tLat * Math.PI) / 180);
+  const crowToTarget = (n: number): number => {
+    const [lat, lng] = nodeLatLng(topo, n);
+    return Math.hypot((lat - tLat) * ky, (lng - tLng) * kx) * 0.999;
+  };
+  if (crowToTarget(start) > limit) return unreached;
+
+  // Binary min-heap of (f, node) pairs; lazy deletes via the closed set.
+  const heapF: number[] = [];
+  const heapN: number[] = [];
+  const less = (i: number, j: number) =>
+    heapF[i] < heapF[j] || (heapF[i] === heapF[j] && heapN[i] < heapN[j]);
+  const swap = (i: number, j: number) => {
+    const f = heapF[i]; heapF[i] = heapF[j]; heapF[j] = f;
+    const n = heapN[i]; heapN[i] = heapN[j]; heapN[j] = n;
+  };
+  const push = (f: number, n: number) => {
+    heapF.push(f); heapN.push(n);
+    let i = heapF.length - 1;
+    while (i > 0) {
+      const par = (i - 1) >> 1;
+      if (!less(i, par)) break;
+      swap(i, par); i = par;
+    }
+  };
+  const pop = (): number => {
+    const top = heapN[0];
+    const lastF = heapF.pop()!;
+    const lastN = heapN.pop()!;
+    if (heapF.length) {
+      heapF[0] = lastF; heapN[0] = lastN;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1, r = l + 1;
+        let m = i;
+        if (l < heapF.length && less(l, m)) m = l;
+        if (r < heapF.length && less(r, m)) m = r;
+        if (m === i) break;
+        swap(i, m); i = m;
+      }
+    }
+    return top;
+  };
+
+  const g = new Map<number, number>([[start, 0]]);
+  const parentEdge = wantPath ? new Map<number, number>() : null;
+  const closed = new Set<number>();
+  push(crowToTarget(start), start);
+  let pops = 0;
+  while (heapF.length) {
+    const f = heapF[0];
+    const n = pop();
+    if (closed.has(n)) continue;
+    closed.add(n);
+    if (f > limit) return unreached;   // best possible remaining path > limit
+    if (n === goal) {
+      const pathEdges: number[] = [];
+      if (parentEdge) {
+        let cur = goal;
+        while (cur !== start) {
+          const e = parentEdge.get(cur);
+          if (e === undefined) break;
+          pathEdges.push(e);
+          const u = ends[2 * e];
+          cur = u === cur ? ends[2 * e + 1] : u;
+        }
+      }
+      return { reached: true, capped: false, pathEdges };
+    }
+    if (++pops > maxPops) return { reached: false, capped: true, pathEdges: [] };
+    const gn = g.get(n)!;
+    const row = adjEdgesOf(adj, n);
+    for (let i = 0; i < row.length; i++) {
+      const e = row[i];
+      const u = ends[2 * e];
+      const v = ends[2 * e + 1];
+      const other = u === n ? v : u;
+      if (other === n || closed.has(other)) continue;
+      const ng = gn + edgeLengthMeters(topo, e);
+      if (ng > limit) continue;
+      const cur = g.get(other);
+      if (cur !== undefined && cur <= ng) continue;
+      g.set(other, ng);
+      parentEdge?.set(other, e);
+      push(ng + crowToTarget(other), other);
+    }
+  }
+  return unreached; // frontier exhausted: nothing comes in under the limit
+}
+
+/**
+ * The default oracle: bounded A* over the full topology, searching from
+ * `toNode` toward `fromNode` under a budget of (corridor length − eps).
+ * Returns false only when a strictly (> eps) shorter path EXISTS; exhausting
+ * the frontier, a crow distance already at/over the corridor, or the pop cap
+ * (fail open, bounded work) all return true.
  */
 export function makeSegmentShortestCheck(
   topo: GraphTopology,
@@ -664,88 +816,79 @@ export function makeSegmentShortestCheck(
 ): SegmentShortestCheck {
   const eps = opts.epsM ?? ROUTE_CONSISTENCY_EPS_M;
   const maxPops = opts.maxPops ?? ROUTE_CHECK_MAX_POPS;
-  const { ends } = topo;
   return (fromNode, toNode, corridorLenM) => {
     if (fromNode === toNode) return true;
     const limit = corridorLenM - eps;
     if (limit <= 0) return true;
-    const [tLat, tLng] = nodeLatLng(topo, fromNode);
-    const kx = 111320 * Math.cos((tLat * Math.PI) / 180);
-    const ky = 110574;
-    const crowToTarget = (n: number): number => {
-      const [lat, lng] = nodeLatLng(topo, n);
-      return Math.hypot((lat - tLat) * ky, (lng - tLng) * kx) * 0.999;
-    };
-    if (crowToTarget(toNode) > limit) return true;
+    // Pushes are pruned at g > limit, so reaching the target means a path
+    // strictly shorter (by > eps) than the corridor exists.
+    return !boundedAStar(topo, adj, toNode, fromNode, limit, maxPops, false).reached;
+  };
+}
 
-    // Binary min-heap of (f, node) pairs; lazy deletes via the closed set.
-    const heapF: number[] = [];
-    const heapN: number[] = [];
-    const less = (i: number, j: number) =>
-      heapF[i] < heapF[j] || (heapF[i] === heapF[j] && heapN[i] < heapN[j]);
-    const swap = (i: number, j: number) => {
-      const f = heapF[i]; heapF[i] = heapF[j]; heapF[j] = f;
-      const n = heapN[i]; heapN[i] = heapN[j]; heapN[j] = n;
-    };
-    const push = (f: number, n: number) => {
-      heapF.push(f); heapN.push(n);
-      let i = heapF.length - 1;
-      while (i > 0) {
-        const par = (i - 1) >> 1;
-        if (!less(i, par)) break;
-        swap(i, par); i = par;
-      }
-    };
-    const pop = (): number => {
-      const top = heapN[0];
-      const lastF = heapF.pop()!;
-      const lastN = heapN.pop()!;
-      if (heapF.length) {
-        heapF[0] = lastF; heapN[0] = lastN;
-        let i = 0;
-        for (;;) {
-          const l = 2 * i + 1, r = l + 1;
-          let m = i;
-          if (l < heapF.length && less(l, m)) m = l;
-          if (r < heapF.length && less(r, m)) m = r;
-          if (m === i) break;
-          swap(i, m); i = m;
-        }
-      }
-      return top;
-    };
+/**
+ * Corridor-recovery oracle: routing plainly from `fromNode` to `toNode` — no
+ * waypoint in between — does it come back with (essentially) the corridor
+ * stretch `corridorEdges`?
+ *
+ * This is the question a ghost waypoint actually exists to answer, and it is
+ * WEAKER than shortest-ness in the direction that matters: a corridor can lose
+ * a metres-long race to a parallel alternative and still be what the router
+ * returns, and an alternative that shaves a corner off one block still hands
+ * back the same corridor for display purposes. Growth consults it before
+ * spending a ghost, and the prune pass consults it to hand ghosts back.
+ */
+export type SegmentRecoveryCheck = (
+  fromNode: number,
+  toNode: number,
+  corridorEdges: number[],
+) => boolean;
 
-    const g = new Map<number, number>([[toNode, 0]]);
-    const closed = new Set<number>();
-    push(crowToTarget(toNode), toNode);
-    let pops = 0;
-    while (heapF.length) {
-      const f = heapF[0];
-      const n = pop();
-      if (closed.has(n)) continue;
-      closed.add(n);
-      if (f > limit) return true;   // best possible remaining path ≥ corridor
-      // Pushes are pruned at g > limit, so reaching the target means a path
-      // strictly shorter (by > eps) than the corridor exists.
-      if (n === fromNode) return false;
-      if (++pops > maxPops) return true;
-      const gn = g.get(n)!;
-      const row = adjEdgesOf(adj, n);
-      for (let i = 0; i < row.length; i++) {
-        const e = row[i];
-        const u = ends[2 * e];
-        const v = ends[2 * e + 1];
-        const other = u === n ? v : u;
-        if (other === n || closed.has(other)) continue;
-        const ng = gn + edgeLengthMeters(topo, e);
-        if (ng > limit) continue;
-        const cur = g.get(other);
-        if (cur !== undefined && cur <= ng) continue;
-        g.set(other, ng);
-        push(ng + crowToTarget(other), other);
-      }
+/**
+ * The default recovery oracle: shortest-path A* between the two waypoints
+ * (bounded by the corridor's own length — the corridor IS a path, so nothing
+ * longer can win), then a BLOCK-grain comparison of what came back against
+ * what the corridor covers. Block grain is the point: blocks are the display
+ * and voting unit, and a routed path routinely rides the direction twin of the
+ * edge the corridor recorded. Recovered at ≥ `minCoverage` of the corridor's
+ * blocks. Fails CLOSED — an unreachable goal or the pop cap keeps the pin.
+ */
+export function makeSegmentRecoveryCheck(
+  topo: GraphTopology,
+  adj: NodeAdj,
+  opts: { maxPops?: number; minCoverage?: number } = {},
+): SegmentRecoveryCheck {
+  const maxPops = opts.maxPops ?? ROUTE_CHECK_MAX_POPS;
+  const minCoverage = opts.minCoverage ?? RECOVERY_MIN_BLOCK_COVERAGE;
+  const { ends } = topo;
+  // An edge's corridor UNIT: its block where it has one, else its undirected
+  // node pair — either way a direction twin counts as the same unit.
+  const unitOf = (e: number): number => {
+    const key = blockKeyOf(topo, e);
+    if (key >= 0) return key;
+    const u = ends[2 * e], v = ends[2 * e + 1];
+    const lo = u < v ? u : v;
+    const hi = u < v ? v : u;
+    return -1 - (lo * topo.nNodes + hi);
+  };
+  return (fromNode, toNode, corridorEdges) => {
+    if (fromNode === toNode || corridorEdges.length === 0) return false;
+    const units = new Set<number>();
+    let corridorLenM = 0;
+    for (const e of corridorEdges) {
+      units.add(unitOf(e));
+      corridorLenM += edgeLengthMeters(topo, e);
     }
-    return true; // frontier exhausted: nothing beats the corridor
+    // Slack absorbs float-summation order: the corridor must fit its own limit.
+    const found = boundedAStar(
+      topo, adj, toNode, fromNode, corridorLenM + 0.001, maxPops, true,
+    );
+    if (!found.reached) return false;
+    const routed = new Set<number>();
+    for (const e of found.pathEdges) routed.add(unitOf(e));
+    let hit = 0;
+    for (const u of units) if (routed.has(u)) hit++;
+    return hit / units.size >= minCoverage - 1e-9;
   };
 }
 
@@ -762,15 +905,38 @@ export function makeSegmentShortestCheck(
  * still-consistent extensions are taken. The seed edge itself is accepted
  * unchecked: there is nothing to pin between two adjacent nodes, and the
  * forced-corridor flag still pins exact geometry while the proposal lives.
+ *
+ * Pins are not final. Strict shortest-ness is a PROXY for the real question —
+ * would routing hand this stretch back? — and it is a pessimistic one: an
+ * alternative two metres shorter fails the proxy while still returning the
+ * same corridor. So, given a `recoversCorridor` oracle, growth (a) asks it
+ * before spending a ghost on a strict-check failure, and (b) runs a PRUNE PASS
+ * whenever it stalls or spends its last pin, re-testing every ghost against
+ * the stretch between its NEIGHBOURING waypoints. A ghost pinned early often
+ * turns unnecessary once the far end has moved on — routing to the more
+ * distant target no longer takes the shortcut that forced the pin. Every ghost
+ * dropped is a waypoint off the shared URL and a pin handed back to growth, so
+ * the corridor can reach further on the same budget.
  */
 export function growCorridor(
   adj: TypeAdj,
   lengthOf: (edgeId: number) => number,
   isSegmentShortest: SegmentShortestCheck,
-  opts: { maxGhosts?: number; budgetOf?: (weight: number) => number } = {},
+  opts: {
+    maxGhosts?: number;
+    budgetOf?: (weight: number) => number;
+    /** Oracle for "routing reproduces this stretch" (makeSegmentRecoveryCheck).
+     *  Omitted, growth keeps every pin the strict check asks for. */
+    recoversCorridor?: SegmentRecoveryCheck | null;
+    maxRecoveryChecks?: number;
+    maxPrunePasses?: number;
+  } = {},
 ): GrownCorridor | null {
   const maxGhosts = opts.maxGhosts ?? MAX_GHOST_WAYPOINTS;
   const budgetOf = opts.budgetOf ?? ((w: number) => routeLengthBudgetM(w));
+  const recoversCorridor = opts.recoversCorridor ?? null;
+  let recoveryChecksLeft = opts.maxRecoveryChecks ?? MAX_RECOVERY_CHECKS;
+  let prunePassesLeft = opts.maxPrunePasses ?? MAX_PRUNE_PASSES;
 
   // Seed: the heaviest arc; strict > keeps the first found (lowest node id,
   // then the row's ascending edge order) — the old greedy's exact seed rule.
@@ -789,19 +955,57 @@ export function growCorridor(
   const ghostSet = new Set<number>();
   let weight = seedW;
   let totalLen = seedLen;
-  let ghostCount = 0;
-  // Open-segment state per side: the inner waypoint bounding the segment that
-  // ends at that side's tip, and the corridor length between them. With no
-  // ghosts pinned yet, both segments ARE the whole path (both tips move, the
-  // bounds chase them).
-  let boundA = seedB, segLenA = seedLen;
-  let boundB = seedA, segLenB = seedLen;
-  // Arcs that would need a pin after the budget was spent — never reconsidered
-  // (the tip they left stays fixed once rejected in that state).
+  // Arcs that would need a pin after the budget was spent — not reconsidered
+  // until a prune pass hands a pin back (the state that rejected them changed).
   const rejected = new Set<number>();
+  // The path has changed since the last prune pass, so ghosts are worth
+  // re-testing. Cleared by a pass, set by every accepted extension.
+  let pathDirty = true;
 
-  let done = false;
-  while (!done) {
+  // Open-segment lengths are re-summed from the path (rather than carried
+  // incrementally) so a pruned pin needs no bookkeeping fixups — but every
+  // length is a trig call, so memoise per edge. Summation order is the path's,
+  // so the sums stay bit-identical run to run.
+  const lenCache = new Map<number, number>();
+  const lenOf = (e: number): number => {
+    let v = lenCache.get(e);
+    if (v === undefined) lenCache.set(e, (v = lengthOf(e)));
+    return v;
+  };
+  const sumLen = (eids: number[]): number => {
+    let total = 0;
+    for (const e of eids) total += lenOf(e);
+    return total;
+  };
+  /** Positions of the ghost pins along `nodes`, in path order. */
+  const ghostIndices = (): number[] => {
+    const out: number[] = [];
+    for (let i = 1; i < nodes.length - 1; i++) if (ghostSet.has(nodes[i])) out.push(i);
+    return out;
+  };
+  /**
+   * The OPEN segment ending at `side`'s tip (0 = front, 1 = back): the inner
+   * waypoint bounding it and the path edges in between. With no ghosts pinned
+   * the segment is the whole path — both tips move and the bounds chase them.
+   */
+  const openSegment = (side: 0 | 1): { bound: number; edges: number[] } => {
+    const ghosts = ghostIndices();
+    if (side === 0) {
+      const hi = ghosts.length ? ghosts[0] : nodes.length - 1;
+      return { bound: nodes[hi], edges: edges.slice(0, hi) };
+    }
+    const lo = ghosts.length ? ghosts[ghosts.length - 1] : 0;
+    return { bound: nodes[lo], edges: edges.slice(lo) };
+  };
+  const recovers = (from: number, to: number, stretch: number[]): boolean => {
+    if (!recoversCorridor || recoveryChecksLeft <= 0) return false;
+    recoveryChecksLeft--;
+    return recoversCorridor(from, to, stretch);
+  };
+
+  /** One growth step off either tip. */
+  type StepResult = "took" | "stalled" | "spent";
+  const extendOnce = (): StepResult => {
     const tipA = nodes[0];
     const tipB = nodes[nodes.length - 1];
     // Candidates off both tips, heaviest first (ties: lowest edge id).
@@ -809,21 +1013,25 @@ export function growCorridor(
     for (const [side, tip] of [[0, tipA], [1, tipB]] as const) {
       for (const arc of adj.get(tip) ?? []) {
         if (seen.has(arc.n) || rejected.has(arc.e)) continue;
-        cands.push({ side, n: arc.n, e: arc.e, w: arc.w, len: lengthOf(arc.e) });
+        cands.push({ side, n: arc.n, e: arc.e, w: arc.w, len: lenOf(arc.e) });
       }
     }
     cands.sort((x, y) => y.w - x.w || x.e - y.e);
 
-    let took = false;
     for (const c of cands) {
       // Support-earned length budget — support buys reach as it accumulates.
       // A skipped candidate is retried next round (more weight, more budget).
       if (totalLen + c.len > budgetOf(weight + c.w)) continue;
       const prevTip = c.side === 0 ? tipA : tipB;
-      const bound = c.side === 0 ? boundA : boundB;
-      const segLen = (c.side === 0 ? segLenA : segLenB) + c.len;
-      const consistent = isSegmentShortest(bound, c.n, segLen);
-      if (!consistent && ghostCount >= maxGhosts) {
+      const seg = openSegment(c.side);
+      let consistent = isSegmentShortest(seg.bound, c.n, sumLen(seg.edges) + c.len);
+      if (!consistent) {
+        // Beaten on length, but is the corridor still what routing returns? If
+        // so the pin would buy nothing — take the extension and keep the ghost.
+        const stretch = c.side === 0 ? [c.e, ...seg.edges] : [...seg.edges, c.e];
+        consistent = recovers(seg.bound, c.n, stretch);
+      }
+      if (!consistent && ghostSet.size >= maxGhosts) {
         rejected.add(c.e);
         continue;
       }
@@ -833,39 +1041,65 @@ export function growCorridor(
       seen.add(c.n);
       weight += c.w;
       totalLen += c.len;
-      if (consistent) {
-        if (ghostCount === 0) {
-          segLenA = segLenB = totalLen;
-          boundA = nodes[nodes.length - 1];
-          boundB = nodes[0];
-        } else if (c.side === 0) {
-          segLenA = segLen;
-        } else {
-          segLenB = segLen;
-        }
-      } else {
+      pathDirty = true;
+      if (!consistent) {
         // Pin the previous tip: routing from the bound would leave the
         // corridor here, so the URL must carry this point.
         ghostSet.add(prevTip);
-        const firstGhost = ghostCount === 0;
-        ghostCount++;
-        // The pinned side's open segment restarts at the pin (one edge). The
-        // FIRST pin also becomes the other side's inner bound: until now that
-        // side's segment spanned the whole path.
-        if (c.side === 0) {
-          boundA = prevTip; segLenA = c.len;
-          if (firstGhost) { boundB = prevTip; segLenB = totalLen - c.len; }
-        } else {
-          boundB = prevTip; segLenB = c.len;
-          if (firstGhost) { boundA = prevTip; segLenA = totalLen - c.len; }
-        }
-        if (ghostCount >= maxGhosts) done = true;
+        if (ghostSet.size >= maxGhosts) return "spent";
       }
-      took = true;
-      break;
+      return "took";
     }
-    if (!took) break;
+    return "stalled";
+  };
+
+  /**
+   * Re-test every ghost against the stretch between its NEIGHBOURING
+   * waypoints and drop the ones routing no longer needs, walking outward-in in
+   * path order so each test sees the survivors on its left. Returns whether
+   * anything was dropped (growth then resumes with the reclaimed budget).
+   */
+  const pruneGhosts = (): boolean => {
+    if (!recoversCorridor || !pathDirty || prunePassesLeft <= 0) return false;
+    if (ghostSet.size === 0) return false;
+    prunePassesLeft--;
+    pathDirty = false;
+    const ghosts = ghostIndices();
+    let dropped = false;
+    let prev = 0; // index of the last surviving waypoint
+    for (let k = 0; k < ghosts.length; k++) {
+      const i = ghosts[k];
+      const next = k + 1 < ghosts.length ? ghosts[k + 1] : nodes.length - 1;
+      if (recovers(nodes[prev], nodes[next], edges.slice(prev, next))) {
+        ghostSet.delete(nodes[i]);
+        dropped = true;
+      } else {
+        prev = i;
+      }
+    }
+    // A reclaimed pin makes the arcs rejected for want of one worth another look.
+    if (dropped) rejected.clear();
+    return dropped;
+  };
+
+  let spent = false;
+  for (;;) {
+    const step = spent ? "spent" : extendOnce();
+    if (step === "took") continue;
+    spent = step === "spent";
+    // Stalled or out of pins: reclaim what the router doesn't need and retry.
+    if (!pruneGhosts()) break;
+    spent = false;
   }
+  // The path is final — one last pass, on a RESERVED allowance the growth loop
+  // can't have spent. Mid-growth passes are budgeted (they can restart growth,
+  // so they compound); this one only deletes waypoints from a finished
+  // corridor, and skipping it would ship URLs carrying pins that stopped
+  // mattering several extensions ago. Cost is bounded by the pin count.
+  prunePassesLeft = Math.max(prunePassesLeft, 1);
+  recoveryChecksLeft = Math.max(recoveryChecksLeft, ghostSet.size);
+  pathDirty = true;
+  pruneGhosts();
 
   // Waypoints in path order + the per-segment edge slices they delimit.
   const waypointNodes: number[] = [nodes[0]];
@@ -1018,6 +1252,9 @@ export function createRouteProposalJob(
   const maxGhosts = opts.maxGhostWaypoints ?? MAX_GHOST_WAYPOINTS;
   const segmentShortest =
     opts.segmentShortestCheck ?? makeSegmentShortestCheck(topo, adj);
+  const segmentRecovery = opts.segmentRecoveryCheck !== undefined
+    ? opts.segmentRecoveryCheck
+    : makeSegmentRecoveryCheck(topo, adj);
   const blockIndex = opts.blockIndex !== undefined ? opts.blockIndex : buildBlockIndex(topo);
   const netsPerType = netsByType(edgeVoteTypes, topo.nEdges, legend.length);
 
@@ -1040,7 +1277,13 @@ export function createRouteProposalJob(
     const lengthOf = (e: number) => edgeLengthMeters(topo, e);
     const budgetOf = (w: number) => routeLengthBudgetM(w, maxRouteLengthM);
     const grow = (work: TypeAdj) =>
-      growCorridor(work, lengthOf, segmentShortest, { maxGhosts, budgetOf });
+      growCorridor(work, lengthOf, segmentShortest, {
+        maxGhosts,
+        budgetOf,
+        recoversCorridor: segmentRecovery,
+        maxRecoveryChecks: opts.maxRecoveryChecks,
+        maxPrunePasses: opts.maxPrunePasses,
+      });
     for (const compAdj of connectedComponents(typeAdj)) {
       // No corridor can outscore its component's total support, so cold
       // components skip growth (and its A* checks) entirely. With the

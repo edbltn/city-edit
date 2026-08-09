@@ -231,7 +231,7 @@ export function adjShortest(
   return best;
 }
 
-const EARTH_RADIUS_M = 6_371_000;
+export const EARTH_RADIUS_M = 6_371_000;
 
 /**
  * An edge's straight-line length in meters (fast equirectangular — exact
