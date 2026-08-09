@@ -203,7 +203,8 @@
 <li>The packet is a 39-page PDF: a cover that states what the two numbers are and are <em>not</em>, a placement checklist with a tick box and a code per poster, a citywide placement map with collision-nudged labels and leader lines, then the 36 posters.</li></ul>
       <h3>Files touched</h3>
       <ul class="files"><li>scripts/generate_wait_posters.py</li>
-<li>scripts/build_wait_packet.py</li></ul>
+<li>scripts/build_wait_packet.py</li>
+<li>scripts/check_wait_posters.py</li></ul>
     </section>
     
 
@@ -217,7 +218,7 @@
 <li>Signalised node count (25,039) against DOT's ~13,500 signalised intersections is the ~1.85 nodes-per-intersection ratio the carriageway model predicts; clustering yields 21,070 intersections, 11,907 of which sit inside the five boroughs with two named streets.</li>
 <li>Citywide total (406,261 person-hours a weekday) is reported on the cover alongside the model's weaknesses rather than as a bare headline.</li>
 <li>A generated QR target was fetched and returns <strong>HTTP 200</strong>: <code>https://cityedit.org/m/nyc-proposals?w=40.720984,-73.842910&amp;vt=Fix+signal+timing&amp;src=qr-wait</code>. <code>Fix signal timing</code> was confirmed against <code>/api/maps</code> as a real point vote type on that map.</li>
-<li>Every poster variant was rendered and inspected: 1-stage (42nd &amp; 7th), 2-stage, 3-stage and 4-stage (Queens Boulevard), plus both hero flavours (m:ss wait, and hours lost). Page overflow was caught and fixed at the 4-stage extreme, checklist overflow at 36 rows.</li>
+<li><strong>Every poster is checked programmatically, not sampled.</strong> The poster is a fixed 850&times;1134 with <code>overflow: hidden</code>, so an overlong layout does not error or reflow — it silently amputates the footer. Adding the site-notes row did exactly that to every 2-, 3- and 4-stage crossing while the 1-stage proof I had re-rendered looked perfect. <code>check_wait_posters.py</code> now reads the pixels of all 36: the wordmark must be present bottom-right, and the bottom margin must be clear of ink. All 36 pass.</li>
 <li>Generated artefacts are gitignored to match the existing campaign's convention (<code>data/.gitignore</code> already excludes <code>posters/out/</code>); the 88 MB of downloads sit under the already-ignored <code>data/raw/</code>.</li></ul>
   </section>
 
@@ -311,7 +312,7 @@
     
           <pre class="diff"><span class="d-meta">diff --git a/data/posters/templates/longest_wait.html b/data/posters/templates/longest_wait.html</span>
 <span class="d-meta">new file mode 100644</span>
-<span class="d-meta">index 0000000..607182e</span>
+<span class="d-meta">index 0000000..3cc9516</span>
 <span class="d-meta">--- /dev/null</span>
 <span class="d-meta">+++ b/data/posters/templates/longest_wait.html</span>
 <span class="d-hunk">@@ -0,0 +1,503 @@</span>
@@ -453,7 +454,7 @@
 <span class="d-add">+     The stroke stays at 3px so a 300 dpi laser still holds it. */</span>
 <span class="d-add">+  .hero { display: flex; align-items: flex-start; gap: 24px; margin-top: 6px; }</span>
 <span class="d-add">+  #figure {</span>
-<span class="d-add">+    font-size: 196px;</span>
+<span class="d-add">+    font-size: 188px;</span>
 <span class="d-add">+    font-weight: 700;</span>
 <span class="d-add">+    line-height: 0.88;</span>
 <span class="d-add">+    letter-spacing: -0.05em;</span>
@@ -474,7 +475,7 @@
 <span class="d-add">+  }</span>
 <span class="d-add">+</span>
 <span class="d-add">+  /* --- place ------------------------------------------------------------ */</span>
-<span class="d-add">+  .place { margin-top: 18px; }</span>
+<span class="d-add">+  .place { margin-top: 14px; }</span>
 <span class="d-add">+  #street {</span>
 <span class="d-add">+    font-size: 42px;</span>
 <span class="d-add">+    font-weight: 700;</span>
@@ -492,7 +493,7 @@
 <span class="d-add">+  #cross em { font-style: normal; color: var(--ink-3); }</span>
 <span class="d-add">+</span>
 <span class="d-add">+  /* --- the diagram ------------------------------------------------------ */</span>
-<span class="d-add">+  .diagram { margin-top: 22px; }</span>
+<span class="d-add">+  .diagram { margin-top: 18px; }</span>
 <span class="d-add">+  .diagram-head {</span>
 <span class="d-add">+    display: flex;</span>
 <span class="d-add">+    justify-content: space-between;</span>
@@ -614,7 +615,7 @@
 <span class="d-add">+    display: flex;</span>
 <span class="d-add">+    flex-wrap: wrap;</span>
 <span class="d-add">+    gap: 8px;</span>
-<span class="d-add">+    margin-top: 20px;</span>
+<span class="d-add">+    margin-top: 14px;</span>
 <span class="d-add">+  }</span>
 <span class="d-add">+  #notes span {</span>
 <span class="d-add">+    padding: 4px 9px 3px;</span>
@@ -657,7 +658,7 @@
 <span class="d-add">+  /* A daily figure is easy to shrug off. The same figure over a working year</span>
 <span class="d-add">+     is not, so the poster says it out loud once. */</span>
 <span class="d-add">+  #yearline {</span>
-<span class="d-add">+    margin-top: 20px;</span>
+<span class="d-add">+    margin-top: 16px;</span>
 <span class="d-add">+    padding: 14px 0 0;</span>
 <span class="d-add">+    border-top: 1px solid var(--rule);</span>
 <span class="d-add">+    font-size: 18.5px;</span>
@@ -674,7 +675,7 @@
 <span class="d-add">+    justify-content: space-between;</span>
 <span class="d-add">+    gap: 24px;</span>
 <span class="d-add">+    margin-top: auto;</span>
-<span class="d-add">+    padding-top: 18px;</span>
+<span class="d-add">+    padding-top: 14px;</span>
 <span class="d-add">+  }</span>
 <span class="d-add">+  .cta .say { flex: 1; min-width: 0; }</span>
 <span class="d-add">+  .here { flex: none; text-align: center; }</span>
@@ -2029,6 +2030,122 @@
         </details>
         
         <details>
+          <summary><span class="fname">scripts/check_wait_posters.py</span>
+            <span class="stat"><span class="d-add">+77</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span><span class="pill on">Analysis + posters (offline)</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Posters · verification</span>
+        <span class="ctx-sum">Reads the rendered pixels of every poster to catch the one failure a fixed-size page hides: content pushed off the sheet</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">check_wait_posters.py</span>
+        <span class="ctx-sum">~75 LOC — footer presence and bottom-margin bleed, per poster</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">geometry constants</span><span class="ol-sum">new — page size, bottom padding, footer band; scale inferred</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dark_pixels</span><span class="ol-sum">new — count ink in a band expressed from the bottom edge</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">check / main</span><span class="ol-sum">new — per-poster verdict, non-zero exit on any clip</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>overflow: hidden means an overlong layout neither errors nor reflows — it amputates the wordmark, and the render still succeeds</li><li>Adding the site-notes row clipped every 2-, 3- and 4-stage poster while the 1-stage proof re-rendered perfectly, which is exactly the shape of bug spot-checking cannot catch</li><li>Two independent assertions: the wordmark must be present bottom-right, and the bottom margin must be free of ink</li><li>The registration ticks live in the bottom margin, so the bleed band is measured across the middle 80% of the page width to ignore them</li><li>Scale is inferred from the rendered width, so the same thresholds work at scale 1 and 2</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/scripts/check_wait_posters.py b/scripts/check_wait_posters.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..5303d60</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/scripts/check_wait_posters.py</span>
+<span class="d-hunk">@@ -0,0 +1,77 @@</span>
+<span class="d-add">+#!/usr/bin/env python3</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+Check every generated poster for the two failures a rendered page can hide:</span>
+<span class="d-add">+content pushed off the bottom of the sheet, and a missing footer.</span>
+<span class="d-add">+</span>
+<span class="d-add">+The poster is a fixed 850x1134 with `overflow: hidden`, so an overlong layout</span>
+<span class="d-add">+does not error or reflow — it silently amputates the wordmark. This caught a</span>
+<span class="d-add">+whole class of posters (every 2-, 3- and 4-stage crossing) after a row was</span>
+<span class="d-add">+added to the template and only the one-stage proof was re-rendered.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Usage: python scripts/check_wait_posters.py [--dir data/posters/wait]</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import argparse</span>
+<span class="d-add">+import csv</span>
+<span class="d-add">+import sys</span>
+<span class="d-add">+from pathlib import Path</span>
+<span class="d-add">+</span>
+<span class="d-add">+from PIL import Image</span>
+<span class="d-add">+</span>
+<span class="d-add">+REPO = Path(__file__).resolve().parent.parent</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Template geometry in CSS pixels; the renderer&#x27;s scale factor is inferred.</span>
+<span class="d-add">+PAGE_W, PAGE_H = 850, 1134</span>
+<span class="d-add">+BOTTOM_PAD = 38        # .page padding-bottom — must stay clear of ink</span>
+<span class="d-add">+FOOTER_BAND = (86, 44)  # from the bottom: where the wordmark row lives</span>
+<span class="d-add">+REG_TICK = (35, 20)     # registration ticks live here; ignore them</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def dark_pixels(im, y0, y1, x0=0.0, x1=1.0, thresh=140):</span>
+<span class="d-add">+    W, H = im.size</span>
+<span class="d-add">+    box = (int(W * x0), H - y1, int(W * x1), H - y0)</span>
+<span class="d-add">+    return sum(1 for p in im.crop(box).convert(&quot;L&quot;).getdata() if p &lt; thresh)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def check(png, scale):</span>
+<span class="d-add">+    im = Image.open(png)</span>
+<span class="d-add">+    s = scale</span>
+<span class="d-add">+    # The wordmark sits bottom-right and is the last thing on the page.</span>
+<span class="d-add">+    footer = dark_pixels(im, FOOTER_BAND[1] * s, FOOTER_BAND[0] * s, 0.60, 1.0)</span>
+<span class="d-add">+    # Below the footer there is only white paper and the two corner ticks.</span>
+<span class="d-add">+    bleed = dark_pixels(im, 0, (BOTTOM_PAD - 20) * s, 0.10, 0.90)</span>
+<span class="d-add">+    return footer, bleed</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def main():</span>
+<span class="d-add">+    ap = argparse.ArgumentParser()</span>
+<span class="d-add">+    ap.add_argument(&quot;--dir&quot;, type=Path, default=REPO / &quot;data&quot; / &quot;posters&quot; / &quot;wait&quot;)</span>
+<span class="d-add">+    args = ap.parse_args()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    rows = list(csv.DictReader(open(args.dir / &quot;manifest.csv&quot;)))</span>
+<span class="d-add">+    if not rows:</span>
+<span class="d-add">+        sys.exit(&quot;no manifest&quot;)</span>
+<span class="d-add">+    first = Image.open(REPO / rows[0][&quot;png&quot;])</span>
+<span class="d-add">+    scale = first.size[0] // PAGE_W</span>
+<span class="d-add">+    print(f&quot;{len(rows)} posters at {first.size[0]}x{first.size[1]} (scale {scale})&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    bad = []</span>
+<span class="d-add">+    for m in rows:</span>
+<span class="d-add">+        footer, bleed = check(REPO / m[&quot;png&quot;], scale)</span>
+<span class="d-add">+        why = []</span>
+<span class="d-add">+        if footer &lt; 400:</span>
+<span class="d-add">+            why.append(f&quot;footer missing ({footer} dark px)&quot;)</span>
+<span class="d-add">+        if bleed &gt; 30:</span>
+<span class="d-add">+            why.append(f&quot;content past the bottom margin ({bleed} dark px)&quot;)</span>
+<span class="d-add">+        if why:</span>
+<span class="d-add">+            bad.append((m[&quot;code&quot;], m[&quot;name&quot;], m[&quot;stages&quot;], &quot;; &quot;.join(why)))</span>
+<span class="d-add">+</span>
+<span class="d-add">+    for code, name, stages, why in bad:</span>
+<span class="d-add">+        print(f&quot;  FAIL {code} {name} ({stages}-stage) — {why}&quot;)</span>
+<span class="d-add">+    if bad:</span>
+<span class="d-add">+        sys.exit(f&quot;\n{len(bad)}/{len(rows)} posters are clipped&quot;)</span>
+<span class="d-add">+    print(&quot;  all footers present, nothing past the bottom margin&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+if __name__ == &quot;__main__&quot;:</span>
+<span class="d-add">+    main()</span></pre>
+        </details>
+        
+        <details>
           <summary><span class="fname">scripts/extract_osm_intersections.py</span>
             <span class="stat"><span class="d-add">+207</span> / <span class="d-del">-0</span></span>
           </summary>
@@ -2451,7 +2568,7 @@
     
           <pre class="diff"><span class="d-meta">diff --git a/scripts/generate_wait_posters.py b/scripts/generate_wait_posters.py</span>
 <span class="d-meta">new file mode 100644</span>
-<span class="d-meta">index 0000000..47ecb86</span>
+<span class="d-meta">index 0000000..f8601e9</span>
 <span class="d-meta">--- /dev/null</span>
 <span class="d-meta">+++ b/scripts/generate_wait_posters.py</span>
 <span class="d-hunk">@@ -0,0 +1,578 @@</span>
@@ -2570,8 +2687,8 @@
 <span class="d-add">+# The signal diagram is the argument the poster is making, so it is drawn from</span>
 <span class="d-add">+# the same numbers the ranking used: the cycle, the green the model gives this</span>
 <span class="d-add">+# crossing, and how many carriageways stand between the two kerbs.</span>
-<span class="d-add">+BAR_H = {1: 96, 2: 56, 3: 40, 4: 30}     # keep the block near a constant height</span>
-<span class="d-add">+BAR_GAP = {1: 0, 2: 18, 3: 14, 4: 12}</span>
+<span class="d-add">+BAR_H = {1: 92, 2: 52, 3: 34, 4: 24}     # keep the block near a constant height</span>
+<span class="d-add">+BAR_GAP = {1: 0, 2: 16, 3: 11, 4: 9}</span>
 <span class="d-add">+</span>
 <span class="d-add">+</span>
 <span class="d-add">+def crossing_chart(r):</span>
@@ -2715,7 +2832,7 @@
 <span class="d-add">+    return paths, xy</span>
 <span class="d-add">+</span>
 <span class="d-add">+</span>
-<span class="d-add">+def locator(r, size=168):</span>
+<span class="d-add">+def locator(r, size=150):</span>
 <span class="d-add">+    paths, xy = city_path(size)</span>
 <span class="d-add">+    x, y = xy(r[&quot;lon&quot;], r[&quot;lat&quot;])</span>
 <span class="d-add">+    body = &quot;&quot;.join(f&#x27;&lt;path d=&quot;{d}&quot; fill=&quot;#e4e0d7&quot; stroke=&quot;none&quot;/&gt;&#x27;</span>

@@ -9,7 +9,7 @@ index 3eb9792..c551818 100644
 +posters/wait/
 diff --git a/data/posters/templates/longest_wait.html b/data/posters/templates/longest_wait.html
 new file mode 100644
-index 0000000..607182e
+index 0000000..3cc9516
 --- /dev/null
 +++ b/data/posters/templates/longest_wait.html
 @@ -0,0 +1,503 @@
@@ -151,7 +151,7 @@ index 0000000..607182e
 +     The stroke stays at 3px so a 300 dpi laser still holds it. */
 +  .hero { display: flex; align-items: flex-start; gap: 24px; margin-top: 6px; }
 +  #figure {
-+    font-size: 196px;
++    font-size: 188px;
 +    font-weight: 700;
 +    line-height: 0.88;
 +    letter-spacing: -0.05em;
@@ -172,7 +172,7 @@ index 0000000..607182e
 +  }
 +
 +  /* --- place ------------------------------------------------------------ */
-+  .place { margin-top: 18px; }
++  .place { margin-top: 14px; }
 +  #street {
 +    font-size: 42px;
 +    font-weight: 700;
@@ -190,7 +190,7 @@ index 0000000..607182e
 +  #cross em { font-style: normal; color: var(--ink-3); }
 +
 +  /* --- the diagram ------------------------------------------------------ */
-+  .diagram { margin-top: 22px; }
++  .diagram { margin-top: 18px; }
 +  .diagram-head {
 +    display: flex;
 +    justify-content: space-between;
@@ -312,7 +312,7 @@ index 0000000..607182e
 +    display: flex;
 +    flex-wrap: wrap;
 +    gap: 8px;
-+    margin-top: 20px;
++    margin-top: 14px;
 +  }
 +  #notes span {
 +    padding: 4px 9px 3px;
@@ -355,7 +355,7 @@ index 0000000..607182e
 +  /* A daily figure is easy to shrug off. The same figure over a working year
 +     is not, so the poster says it out loud once. */
 +  #yearline {
-+    margin-top: 20px;
++    margin-top: 16px;
 +    padding: 14px 0 0;
 +    border-top: 1px solid var(--rule);
 +    font-size: 18.5px;
@@ -372,7 +372,7 @@ index 0000000..607182e
 +    justify-content: space-between;
 +    gap: 24px;
 +    margin-top: auto;
-+    padding-top: 18px;
++    padding-top: 14px;
 +  }
 +  .cta .say { flex: 1; min-width: 0; }
 +  .here { flex: none; text-align: center; }
@@ -1658,6 +1658,89 @@ index 0000000..56c11d7
 +
 +if __name__ == "__main__":
 +    main()
+diff --git a/scripts/check_wait_posters.py b/scripts/check_wait_posters.py
+new file mode 100644
+index 0000000..5303d60
+--- /dev/null
++++ b/scripts/check_wait_posters.py
+@@ -0,0 +1,77 @@
++#!/usr/bin/env python3
++"""
++Check every generated poster for the two failures a rendered page can hide:
++content pushed off the bottom of the sheet, and a missing footer.
++
++The poster is a fixed 850x1134 with `overflow: hidden`, so an overlong layout
++does not error or reflow — it silently amputates the wordmark. This caught a
++whole class of posters (every 2-, 3- and 4-stage crossing) after a row was
++added to the template and only the one-stage proof was re-rendered.
++
++Usage: python scripts/check_wait_posters.py [--dir data/posters/wait]
++"""
++
++import argparse
++import csv
++import sys
++from pathlib import Path
++
++from PIL import Image
++
++REPO = Path(__file__).resolve().parent.parent
++
++# Template geometry in CSS pixels; the renderer's scale factor is inferred.
++PAGE_W, PAGE_H = 850, 1134
++BOTTOM_PAD = 38        # .page padding-bottom — must stay clear of ink
++FOOTER_BAND = (86, 44)  # from the bottom: where the wordmark row lives
++REG_TICK = (35, 20)     # registration ticks live here; ignore them
++
++
++def dark_pixels(im, y0, y1, x0=0.0, x1=1.0, thresh=140):
++    W, H = im.size
++    box = (int(W * x0), H - y1, int(W * x1), H - y0)
++    return sum(1 for p in im.crop(box).convert("L").getdata() if p < thresh)
++
++
++def check(png, scale):
++    im = Image.open(png)
++    s = scale
++    # The wordmark sits bottom-right and is the last thing on the page.
++    footer = dark_pixels(im, FOOTER_BAND[1] * s, FOOTER_BAND[0] * s, 0.60, 1.0)
++    # Below the footer there is only white paper and the two corner ticks.
++    bleed = dark_pixels(im, 0, (BOTTOM_PAD - 20) * s, 0.10, 0.90)
++    return footer, bleed
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--dir", type=Path, default=REPO / "data" / "posters" / "wait")
++    args = ap.parse_args()
++
++    rows = list(csv.DictReader(open(args.dir / "manifest.csv")))
++    if not rows:
++        sys.exit("no manifest")
++    first = Image.open(REPO / rows[0]["png"])
++    scale = first.size[0] // PAGE_W
++    print(f"{len(rows)} posters at {first.size[0]}x{first.size[1]} (scale {scale})")
++
++    bad = []
++    for m in rows:
++        footer, bleed = check(REPO / m["png"], scale)
++        why = []
++        if footer < 400:
++            why.append(f"footer missing ({footer} dark px)")
++        if bleed > 30:
++            why.append(f"content past the bottom margin ({bleed} dark px)")
++        if why:
++            bad.append((m["code"], m["name"], m["stages"], "; ".join(why)))
++
++    for code, name, stages, why in bad:
++        print(f"  FAIL {code} {name} ({stages}-stage) — {why}")
++    if bad:
++        sys.exit(f"\n{len(bad)}/{len(rows)} posters are clipped")
++    print("  all footers present, nothing past the bottom margin")
++
++
++if __name__ == "__main__":
++    main()
 diff --git a/scripts/extract_osm_intersections.py b/scripts/extract_osm_intersections.py
 new file mode 100644
 index 0000000..3c947ec
@@ -1984,7 +2067,7 @@ index 0000000..2f104ff
 +    main()
 diff --git a/scripts/generate_wait_posters.py b/scripts/generate_wait_posters.py
 new file mode 100644
-index 0000000..47ecb86
+index 0000000..f8601e9
 --- /dev/null
 +++ b/scripts/generate_wait_posters.py
 @@ -0,0 +1,578 @@
@@ -2103,8 +2186,8 @@ index 0000000..47ecb86
 +# The signal diagram is the argument the poster is making, so it is drawn from
 +# the same numbers the ranking used: the cycle, the green the model gives this
 +# crossing, and how many carriageways stand between the two kerbs.
-+BAR_H = {1: 96, 2: 56, 3: 40, 4: 30}     # keep the block near a constant height
-+BAR_GAP = {1: 0, 2: 18, 3: 14, 4: 12}
++BAR_H = {1: 92, 2: 52, 3: 34, 4: 24}     # keep the block near a constant height
++BAR_GAP = {1: 0, 2: 16, 3: 11, 4: 9}
 +
 +
 +def crossing_chart(r):
@@ -2248,7 +2331,7 @@ index 0000000..47ecb86
 +    return paths, xy
 +
 +
-+def locator(r, size=168):
++def locator(r, size=150):
 +    paths, xy = city_path(size)
 +    x, y = xy(r["lon"], r["lat"])
 +    body = "".join(f'<path d="{d}" fill="#e4e0d7" stroke="none"/>'

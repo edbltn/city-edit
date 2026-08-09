@@ -283,7 +283,8 @@ SECTIONS = [
             "collision-nudged labels and leader lines, then the 36 posters.",
         ],
         "files": ["scripts/generate_wait_posters.py",
-                  "scripts/build_wait_packet.py"],
+                  "scripts/build_wait_packet.py",
+                  "scripts/check_wait_posters.py"],
     },
 ]
 
@@ -317,10 +318,14 @@ VERIFY = [
     "&amp;vt=Fix+signal+timing&amp;src=qr-wait</code>. "
     "<code>Fix signal timing</code> was confirmed against "
     "<code>/api/maps</code> as a real point vote type on that map.",
-    "Every poster variant was rendered and inspected: 1-stage (42nd &amp; "
-    "7th), 2-stage, 3-stage and 4-stage (Queens Boulevard), plus both hero "
-    "flavours (m:ss wait, and hours lost). Page overflow was caught and fixed "
-    "at the 4-stage extreme, checklist overflow at 36 rows.",
+    "<strong>Every poster is checked programmatically, not sampled.</strong> "
+    "The poster is a fixed 850&times;1134 with <code>overflow: hidden</code>, so "
+    "an overlong layout does not error or reflow — it silently amputates the "
+    "footer. Adding the site-notes row did exactly that to every 2-, 3- and "
+    "4-stage crossing while the 1-stage proof I had re-rendered looked "
+    "perfect. <code>check_wait_posters.py</code> now reads the pixels of all "
+    "36: the wordmark must be present bottom-right, and the bottom margin "
+    "must be clear of ink. All 36 pass.",
     "Generated artefacts are gitignored to match the existing campaign's "
     "convention (<code>data/.gitignore</code> already excludes "
     "<code>posters/out/</code>); the 88 MB of downloads sit under the "
@@ -505,6 +510,25 @@ FILE_CONTEXT = {
             "ROWS_PER_COL = 18: at 22 the second column ran off the bottom of the sheet",
             "Map labels are nudged down and tied back with leader lines — Downtown and Midtown stack six corners inside a few hundred metres",
             "Field notes ('before you go') use the space the tightened checklist freed: eye level, facing the crossing, don't cover signage",
+        ],
+    },
+    "scripts/check_wait_posters.py": {
+        "on": ["Analysis + posters (offline)"],
+        "module": ("Posters \u00b7 verification",
+                   "Reads the rendered pixels of every poster to catch the one failure a fixed-size page hides: content pushed off the sheet"),
+        "file": ("check_wait_posters.py",
+                 "~75 LOC \u2014 footer presence and bottom-margin bleed, per poster"),
+        "outline": [
+            ("geometry constants", "new \u2014 page size, bottom padding, footer band; scale inferred", True),
+            ("dark_pixels", "new \u2014 count ink in a band expressed from the bottom edge", True),
+            ("check / main", "new \u2014 per-poster verdict, non-zero exit on any clip", True),
+        ],
+        "blocks": [
+            "overflow: hidden means an overlong layout neither errors nor reflows \u2014 it amputates the wordmark, and the render still succeeds",
+            "Adding the site-notes row clipped every 2-, 3- and 4-stage poster while the 1-stage proof re-rendered perfectly, which is exactly the shape of bug spot-checking cannot catch",
+            "Two independent assertions: the wordmark must be present bottom-right, and the bottom margin must be free of ink",
+            "The registration ticks live in the bottom margin, so the bleed band is measured across the middle 80% of the page width to ignore them",
+            "Scale is inferred from the rendered width, so the same thresholds work at scale 1 and 2",
         ],
     },
     "data/.gitignore": {
