@@ -1,0 +1,18 @@
+{
+  "volume_model": {
+    "beta": [
+      7.454912119390348,
+      0.48870688948259894,
+      0.10371230664167548
+    ],
+    "r2": 0.7298596268867225,
+    "spearman": 0.8261198208286674,
+    "log_rmse": 0.47530974388336467,
+    "n": 95,
+    "loo_r2": 0.7085393884268276,
+    "form": "log V = b0 + b1*log1p(subway/1e3) + b2*demand"
+  },
+  "count_sites": 95,
+  "intersections": 11907,
+  "citywide_lost_hours_per_weekday": 406261
+}

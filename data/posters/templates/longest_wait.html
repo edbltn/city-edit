@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Red+Hat+Mono:wght@300;400;500;600;700&display=swap');
+
+  /* ==========================================================================
+     City Edit — longest-wait poster
+     8.5 x 11in at 100 dpi (850 x 1134), meant to come off an office laser
+     printer without emptying it. Every choice here is also an ink choice:
+     the paper stays white, the hero figure is an outline rather than a fill,
+     and the one large field of colour is a 45-degree hatch at roughly an
+     eighth coverage. The only solid ink on the page is type, the QR, and the
+     few seconds of WALK the signal actually gives you.
+     ========================================================================== */
+
+  :root {
+    --ink: #111111;
+    --ink-2: #55534e;
+    --ink-3: #8d8a82;
+    --rule: #cfccc4;
+    --red: #dc343b;      /* --color-end in the app: the stop half of the pair */
+    --cyan: #00c4d4;     /* --color-start: the sliver you are actually given */
+
+    --m: 58px;           /* page margin */
+    --spine: 34px;       /* left strip holding the rotated survey line */
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    position: relative;
+    width: 850px;
+    height: 1134px;
+    overflow: hidden;
+    background: #fff;
+    color: var(--ink);
+    font-family: 'Red Hat Mono', ui-monospace, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* The plane everything is plotted on. 1px dots on an 18px pitch is about a
+     third of one percent coverage — atmosphere for free. */
+  .grid {
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle, #d8d5cc 0.7px, transparent 0.8px);
+    background-size: 18px 18px;
+    background-position: 4px 4px;
+  }
+
+  /* Print-shop registration ticks. */
+  .reg { position: absolute; width: 13px; height: 13px; }
+  .reg::before, .reg::after { content: ""; position: absolute; background: var(--ink-3); }
+  .reg::before { left: 0; top: 6px; width: 13px; height: 1px; }
+  .reg::after { top: 0; left: 6px; width: 1px; height: 13px; }
+  .reg.tl { top: 22px; left: 22px; }
+  .reg.tr { top: 22px; right: 22px; }
+  .reg.bl { bottom: 22px; left: 22px; }
+  .reg.br { bottom: 22px; right: 22px; }
+
+  .page {
+    position: absolute;
+    inset: 0;
+    padding: 44px var(--m) 38px calc(var(--m) + var(--spine));
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* --- left spine ------------------------------------------------------- */
+  .spine {
+    position: absolute;
+    left: var(--m);
+    top: 44px;
+    bottom: 38px;
+    width: var(--spine);
+    border-left: 1px solid var(--rule);
+  }
+  .spine span {
+    position: absolute;
+    bottom: 0;
+    left: 11px;
+    transform-origin: 0 0;
+    transform: rotate(-90deg);
+    white-space: nowrap;
+    font-size: 9.5px;
+    font-weight: 500;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  /* --- header ----------------------------------------------------------- */
+  .head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding-bottom: 9px;
+    border-bottom: 1.5px solid var(--ink);
+  }
+  .head .who {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+  }
+  .head .rank {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    padding: 3px 9px 2px;
+    border: 1.5px solid var(--red);
+    color: var(--red);
+  }
+
+  /* --- the claim -------------------------------------------------------- */
+  /* Deliberately small. From across the street you should read the figure and
+     the street name; the claim is for the person who has already stopped. */
+  #claim {
+    margin: 18px 0 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.7;
+    letter-spacing: 0.19em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+  #claim b { color: var(--red); font-weight: 700; }
+
+  /* --- hero figure ------------------------------------------------------ */
+  /* An outline, not a fill: the same presence for a twentieth of the toner.
+     The stroke stays at 3px so a 300 dpi laser still holds it. */
+  .hero { display: flex; align-items: flex-start; gap: 24px; margin-top: 6px; }
+  #figure {
+    font-size: 196px;
+    font-weight: 700;
+    line-height: 0.88;
+    letter-spacing: -0.05em;
+    color: transparent;
+    -webkit-text-stroke: 3px var(--ink);
+  }
+  .unit {
+    margin-top: 30px;
+    padding-top: 12px;
+    border-top: 2px solid var(--red);
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1.7;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    max-width: 175px;
+  }
+
+  /* --- place ------------------------------------------------------------ */
+  .place { margin-top: 18px; }
+  #street {
+    font-size: 42px;
+    font-weight: 700;
+    line-height: 1.02;
+    letter-spacing: -0.025em;
+    text-transform: uppercase;
+  }
+  #cross {
+    margin-top: 8px;
+    font-size: 16px;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    color: var(--ink-2);
+  }
+  #cross em { font-style: normal; color: var(--ink-3); }
+
+  /* --- the diagram ------------------------------------------------------ */
+  .diagram { margin-top: 22px; }
+  .diagram-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    padding-bottom: 7px;
+    border-bottom: 1px solid var(--rule);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.17em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+  .key { color: var(--ink-3); letter-spacing: 0.1em; white-space: nowrap; }
+  .key i {
+    display: inline-block;
+    width: 9px; height: 9px;
+    margin: 0 4px 0 13px;
+    vertical-align: -1px;
+    font-style: normal;
+    border: 1px solid var(--ink-3);
+  }
+  .key .k-walk { background: var(--cyan); border-color: var(--cyan); }
+  .key .k-flash {
+    border-color: var(--cyan);
+    background: repeating-linear-gradient(45deg, transparent 0 2px, var(--cyan) 2px 3px);
+  }
+  .key .k-stop {
+    border-color: var(--red);
+    background: repeating-linear-gradient(45deg, transparent 0 3px, var(--red) 3px 4px);
+  }
+
+  /* Plan view and time chart share one row per carriageway, so a band of
+     asphalt sits exactly beside the seconds it costs to get over it. */
+  .chart {
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    column-gap: 16px;
+    margin-top: 15px;
+    align-items: start;
+  }
+  .plan { display: block; }
+  .bars { display: flex; flex-direction: column; }
+
+  .bar {
+    position: relative;
+    border: 1px solid var(--ink);
+    background: repeating-linear-gradient(45deg,
+      transparent 0 6px, var(--red) 6px 7px);
+  }
+  .seg { position: absolute; top: 0; bottom: 0; }
+  .seg.walk { background: var(--cyan); }
+  /* White underneath, or the red hatch behind shows through and the two
+     screens moire into mud. */
+  .seg.flash {
+    background:
+      repeating-linear-gradient(45deg, transparent 0 4px, var(--cyan) 4px 5px),
+      #ffffff;
+    border-right: 1px solid var(--cyan);
+  }
+  .bar .lab {
+    position: absolute;
+    right: 7px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: var(--ink-2);
+    background: #fff;
+    padding: 1px 5px;
+    border: 1px solid var(--rule);
+    z-index: 2;
+  }
+
+  .axis {
+    grid-column: 2;
+    position: relative;
+    height: 20px;
+    margin-top: 7px;
+    border-top: 1px solid var(--ink);
+  }
+  .axis span {
+    position: absolute;
+    top: 5px;
+    font-size: 9.5px;
+    font-weight: 500;
+    letter-spacing: 0.07em;
+    color: var(--ink-2);
+    transform: translateX(-50%);
+  }
+  .axis span::before {
+    content: "";
+    position: absolute;
+    left: 50%; top: -6px;
+    width: 1px; height: 5px;
+    background: var(--ink);
+  }
+  .axis span.first { transform: none; }
+  .axis span.first::before { left: 0; }
+  .axis span.last { transform: translateX(-100%); }
+  .axis span.last::before { left: auto; right: 0; }
+
+  #plan-note {
+    grid-column: 1;
+    margin-top: 8px;
+    font-size: 9px;
+    font-weight: 500;
+    line-height: 1.5;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  /* --- site notes ------------------------------------------------------- */
+  /* Facts about this specific signal, in the app's own chip idiom. They also
+     keep the page from opening a hole under a one-stage crossing, whose
+     diagram is a quarter the height of a boulevard's. */
+  #notes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 20px;
+  }
+  #notes span {
+    padding: 4px 9px 3px;
+    border: 1px solid var(--rule);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+  #notes span.warn { border-color: var(--red); color: var(--red); }
+
+  /* --- stats ------------------------------------------------------------ */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    margin-top: 24px;
+    border-top: 1.5px solid var(--ink);
+  }
+  .stats div { padding: 12px 14px 0 0; }
+  .stats div + div { border-left: 1px solid var(--rule); padding-left: 20px; }
+  .stats .n {
+    font-size: 29px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.03em;
+  }
+  .stats .k {
+    margin-top: 8px;
+    font-size: 9.5px;
+    font-weight: 500;
+    line-height: 1.5;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+
+  /* --- the compounding line --------------------------------------------- */
+  /* A daily figure is easy to shrug off. The same figure over a working year
+     is not, so the poster says it out loud once. */
+  #yearline {
+    margin-top: 20px;
+    padding: 14px 0 0;
+    border-top: 1px solid var(--rule);
+    font-size: 18.5px;
+    font-weight: 400;
+    line-height: 1.42;
+    letter-spacing: -0.005em;
+  }
+  #yearline b { font-weight: 700; }
+
+  /* --- call to action --------------------------------------------------- */
+  .cta {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    margin-top: auto;
+    padding-top: 18px;
+  }
+  .cta .say { flex: 1; min-width: 0; }
+  .here { flex: none; text-align: center; }
+  .here svg { display: block; }
+  .here .cap {
+    margin-top: 7px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.19em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+  .cta .big {
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.14;
+    letter-spacing: -0.02em;
+  }
+  .cta .big u {
+    text-decoration: none;
+    box-shadow: inset 0 -0.26em 0 rgba(0, 196, 212, 0.4);
+  }
+  .cta .sub {
+    margin-top: 11px;
+    font-size: 12.5px;
+    font-weight: 400;
+    line-height: 1.55;
+    color: var(--ink-2);
+  }
+  .qr { text-align: center; flex: none; }
+  .qr img { display: block; width: 142px; height: 142px; }
+  .qr .scan {
+    margin-top: 7px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.19em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+
+  /* --- footer ----------------------------------------------------------- */
+  .foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 20px;
+    padding-top: 9px;
+    border-top: 1px solid var(--rule);
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    color: var(--ink-3);
+  }
+  .wordmark { display: flex; align-items: center; gap: 8px; }
+  .wordmark b {
+    display: inline-block;
+    border: 1.3px solid var(--ink-2);
+    padding: 0 2.5px;
+    margin-right: 1.5px;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 13px;
+    color: var(--ink-2);
+  }
+  .wordmark .gap { display: inline-block; width: 5px; }
+</style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="reg tl"></div><div class="reg tr"></div>
+  <div class="reg bl"></div><div class="reg br"></div>
+
+  <div class="spine"><span id="spineline">Pedestrian wait survey — New York City — 2026</span></div>
+
+  <div class="page">
+    <div class="head">
+      <div class="who">City&nbsp;Edit&nbsp;/&nbsp;Crossings</div>
+      <div class="rank" id="rank">No. 07</div>
+    </div>
+
+    <div id="claim">The <b>7th longest wait</b> of any crossing in New York City</div>
+
+    <div class="hero">
+      <div id="figure">2:09</div>
+      <div class="unit" id="unit">Average wait to cross,<br>every single time</div>
+    </div>
+
+    <div class="place">
+      <div id="street">Queens Boulevard</div>
+      <div id="cross"><em>at</em> 71st Road &middot; Forest Hills, Queens</div>
+    </div>
+
+    <div class="diagram">
+      <div class="diagram-head">
+        <span id="diagram-title">Four crossings &middot; a 120-second cycle each</span>
+        <span class="key"><i class="k-walk"></i>Walk<i class="k-flash"></i>Countdown<i class="k-stop"></i>Wait</span>
+      </div>
+      <div class="chart" id="chart">
+        <svg class="plan" width="96" height="138" viewBox="0 0 96 138"></svg>
+        <div class="bars"></div>
+        <div id="plan-note">50 m of road<br>3 islands</div>
+        <div class="axis"><span class="first">0s</span></div>
+      </div>
+    </div>
+
+    <div id="notes"><span>120 s cycle</span></div>
+
+    <div class="stats" id="stats">
+      <div><div class="n">14,472</div><div class="k">People cross<br>here each day</div></div>
+      <div><div class="n">7 sec</div><div class="k">Of every 120 you<br>may start walking</div></div>
+      <div><div class="n">283 hrs</div><div class="k">Of their time, lost<br>here every weekday</div></div>
+    </div>
+
+    <div id="yearline">Standing at this one corner adds up to
+      <b>39 full-time jobs&rsquo; worth</b> of doing nothing, every year.</div>
+
+    <div class="cta">
+      <div class="here">
+        <span id="locator"></span>
+        <div class="cap">You are here</div>
+      </div>
+      <div class="say">
+        <div class="big" id="ask">This corner is <u>editable</u>.</div>
+        <div class="sub" id="sub">Scan to open this exact crossing on City Edit
+          and say what should change — a shorter cycle, a head start, a wider
+          island.</div>
+      </div>
+      <div class="qr">
+        <img id="qr" src="qr.png" alt="">
+        <div class="scan">Scan&nbsp;me</div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <span id="code">A1</span>
+      <span class="wordmark">
+        <span><b>C</b><b>I</b><b>T</b><b>Y</b><span class="gap"></span><b>E</b><b>D</b><b>I</b><b>T</b></span>
+        <span>cityedit.org</span>
+      </span>
+    </div>
+  </div>
+</body>
+</html>
