@@ -76,6 +76,14 @@ export function compareWinners(
 export type VoteTypeKindResolver = (label: string) => "route" | "point" | null;
 
 /**
+ * Whether a vote type is toggled ON in the legend (map/voteTypeFilter). A type
+ * toggled off is excluded from selection entirely rather than filtered out of
+ * the finished list, so hiding nine of ten types PROMOTES the tenth's runners-up
+ * into the freed slots instead of leaving the map near-empty.
+ */
+export type VoteTypeVisibility = (label: string) => boolean;
+
+/**
  * Support floor for the "Top Proposal" badge: a proposal only counts as a top
  * proposal with STRICTLY MORE than this many net votes. Without it, a rare
  * vote type's best edge earns a pin at net 1–2 while the modal shows other
@@ -91,14 +99,16 @@ export const TOP_PROPOSAL_MIN_NET = 100;
  * (highest first). Vote types whose best edge is net ≤ max(0, minNet) are
  * dropped (a net-downvoted proposal is not a "top proposal", and below the
  * support floor it isn't "top" either), as are ROUTE-kind types when a
- * `kindOf` resolver is supplied — their corridors surface as RBTPs.
+ * `kindOf` resolver is supplied — their corridors surface as RBTPs — and types
+ * toggled off in the legend when an `isVisible` resolver is supplied.
  */
 export function computeVoteTypeWinners(
   legend: string[],
   edgeVoteTypes: [number, number, number][][],
   perTypeLimit = 1,
   kindOf?: VoteTypeKindResolver,
-  minNet = 0
+  minNet = 0,
+  isVisible?: VoteTypeVisibility
 ): VoteTypeWinner[] {
   if (!legend.length || !edgeVoteTypes.length) return [];
 
@@ -121,6 +131,7 @@ export function computeVoteTypeWinners(
     const label = legend[legendIdx];
     if (!label) continue;
     if (kindOf && kindOf(label) === "route") continue;
+    if (isVisible && !isVisible(label)) continue;
     edges.sort((a, b) => b.count - a.count);
     for (const { edgeIdx, count } of edges.slice(0, perTypeLimit)) {
       winners.push({ legendIdx, label, edgeIdx, count });
@@ -330,7 +341,8 @@ export const TOP_PROPOSAL_MIN_SPACING_M = 600;
  * `kindOf` (label → kind) keeps ROUTE-kind vote types out of the point family;
  * omit it (e.g. station networks, where every vote is a point) to admit all.
  * `minNet` is the top-proposal support floor (strictly-greater; default
- * TOP_PROPOSAL_MIN_NET) — pass 0 to admit any positive net.
+ * TOP_PROPOSAL_MIN_NET) — pass 0 to admit any positive net. `isVisible` is the
+ * legend toggle (map/voteTypeFilter.isVoteTypeVisible); omit it to admit all.
  */
 export function selectTopProposals(
   data:
@@ -340,7 +352,8 @@ export function selectTopProposals(
   limit: number,
   minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M,
   kindOf?: VoteTypeKindResolver,
-  minNet = TOP_PROPOSAL_MIN_NET
+  minNet = TOP_PROPOSAL_MIN_NET,
+  isVisible?: VoteTypeVisibility
 ): VoteTypeWinner[] {
   if (!data) return [];
   const perType = computeVoteTypeWinners(
@@ -348,7 +361,8 @@ export function selectTopProposals(
     data.edge_vote_types ?? [],
     TOP_PROPOSALS_PER_TYPE,
     kindOf,
-    minNet
+    minNet,
+    isVisible
   );
   const perEdge = dedupeWinnersByEdge(perType, salt);
   const perBlock = dedupeWinnersByBlock(

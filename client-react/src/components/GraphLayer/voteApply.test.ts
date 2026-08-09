@@ -270,4 +270,43 @@ describe("topProposalDiffs (signed block heat)", () => {
     expect(maxPos).toBe(4);
     expect(maxNeg).toBe(5);
   });
+
+  describe("legend visibility mask (vote-type filter)", () => {
+    it("ranks only the visible types", () => {
+      // Type 1 (the block's actual top proposal at +7) is toggled off, so the
+      // block falls back to the best VISIBLE type, A at +4.
+      const { diff, maxPos } = topProposalDiffs(
+        [13], [[[0, 5, 1], [1, 9, 2]]], new Uint8Array([1, 0]));
+      expect(diff[0]).toBe(4);
+      expect(maxPos).toBe(4);
+    });
+
+    it("goes cold when none of a block's types is visible", () => {
+      const { diff, maxPos, maxNeg } = topProposalDiffs(
+        [13], [[[0, 5, 1], [1, 9, 2]]], new Uint8Array([0, 0]));
+      expect(diff[0]).toBe(0);
+      expect(maxPos).toBe(0);
+      expect(maxNeg).toBe(0);
+    });
+
+    it("suppresses the untyped fallback while filtering", () => {
+      // An untyped block's total can't be attributed to any vote type, so with
+      // a filter on it must not paint heat the user didn't ask for.
+      const { diff } = topProposalDiffs([5, 2], [undefined, []], new Uint8Array([1]));
+      expect(diff[0]).toBe(0);
+      expect(diff[1]).toBe(0);
+    });
+
+    it("keeps types appended past the mask (an optimistic cast) visible", () => {
+      const { diff } = topProposalDiffs([6], [[[3, 6, 0]]], new Uint8Array([1, 0]));
+      expect(diff[0]).toBe(6);
+    });
+
+    it("still reports negative heat for a visible net-against type", () => {
+      const { diff, maxNeg } = topProposalDiffs(
+        [7], [[[0, 1, 4], [1, 9, 0]]], new Uint8Array([1, 0]));
+      expect(diff[0]).toBe(-3);
+      expect(maxNeg).toBe(3);
+    });
+  });
 });

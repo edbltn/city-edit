@@ -13,6 +13,8 @@
 
 import { CONFIG } from "../config";
 import { getMapSlug, getPasscodeToken } from "../map/runtime";
+import { ensureVoteTypeVisible } from "../map/voteTypeFilter";
+import { registerVoteTypeLabel } from "../map/voteTypeRegistry";
 import { dlog, derror } from "./debugLog";
 import { getVoterId } from "./voterIdentity";
 import {
@@ -154,6 +156,14 @@ export async function castVotes(params: {
   if (edges.length === 0 || !label) {
     return { ok: false, targetDir: direction, changedEdges: [] };
   }
+
+  // Casting is the strongest possible statement that this vote type matters to
+  // you, so it always (a) enters the registry — making a brand-new custom label
+  // searchable and legend-listed immediately, instead of only after the next
+  // map-config fetch reports it back — and (b) clears any legend toggle hiding
+  // it. Without (b) you could vote for something and watch the map not change.
+  registerVoteTypeLabel(label);
+  ensureVoteTypeVisible(label);
 
   const blocks = params.blocks ?? edges.map((e) => [e]);
   const { targetDir, castEdges, clearEdges } = planBlockVote({

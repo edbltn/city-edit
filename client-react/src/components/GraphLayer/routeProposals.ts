@@ -37,7 +37,7 @@ import {
   type GraphTopology,
   type NodeAdj,
 } from "./graphTopology";
-import type { VoteTypeKindResolver } from "./topProposals";
+import type { VoteTypeKindResolver, VoteTypeVisibility } from "./topProposals";
 
 export interface RouteProposal {
   id: string;
@@ -533,6 +533,11 @@ export interface RouteProposalOptions {
    *  surface as PBTP pins (topProposals.ts), not corridors. Unknown (null)
    *  kinds stay eligible. Omit to admit every type. */
   kindOf?: VoteTypeKindResolver;
+  /** Label → toggled on in the legend (map/voteTypeFilter). Hidden types are
+   *  skipped before any clustering runs, so filtering the map also SPEEDS UP
+   *  the recompute — and frees ranked slots for the types left on. Omit to
+   *  admit every type. */
+  isVisible?: VoteTypeVisibility;
 }
 
 /** Arc of the per-type subgraph: neighbor node, original edge id, net weight. */
@@ -1265,6 +1270,7 @@ export function createRouteProposalJob(
     // POINT-kind vote types never form corridors — their votes are PBTP pins
     // (topProposals.ts). Unknown kind (null) stays eligible for both families.
     if (opts.kindOf && opts.kindOf(label) === "point") continue;
+    if (opts.isVisible && !opts.isVisible(label)) continue;
     if (netsPerType[legendIdx].size === 0) continue;
     types.push(legendIdx);
   }

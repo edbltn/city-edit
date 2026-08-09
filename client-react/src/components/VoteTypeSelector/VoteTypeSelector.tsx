@@ -1,17 +1,59 @@
-import { useState, useCallback, useEffect, useLayoutEffect, useRef, memo } from "react";
+// ==========================================================================
+// Vote-type selector — the map's legend AND the cast-target picker
+// ==========================================================================
+// One list, two jobs, because they are the same list: every row is a vote type
+// whose icon is painted on the map (as a top-proposal pin) and whose support is
+// painted into the heat. So the panel reads as a legend — icon, name, net
+// support — and each row carries the two things you can do with a legend entry:
+//
+//   the checkbox  → show/hide this type's heat and pins  (map/voteTypeFilter)
+//   the row       → make it the type you're voting for   (RouteContext.voteType)
+//
+// Rows whose kind doesn't match the current selection (a corridor type while
+// you have a single point) stay listed and toggleable — their proposals are on
+// screen — but aren't castable, so they sit below the castable ones.
+// ==========================================================================
+
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, memo } from "react";
 import { useRoute, useTheme, useMap } from "../../context";
 import { getSuggestionsForTheme } from "../../constants/voteTypes";
-import { mapVoteTypesForPointType } from "../../map/runtime";
+import {
+  toggleVoteTypeVisible,
+  showAllVoteTypes,
+  showOnlyVoteTypes,
+} from "../../map/voteTypeFilter";
+import { registerVoteTypeLabel } from "../../map/voteTypeRegistry";
+import { useHiddenVoteTypes, useVoteTypeLegend } from "../../hooks/useVoteTypeLegend";
 import { iconSrc, iconForLabel } from "../../themes";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import { CheckIcon } from "../CheckIcon";
 import { noAutofillProps } from "../../utils/noAutofill";
 import "./VoteTypeSelector.css";
 
+/** One legend row: a vote type on this map. */
+interface PanelRow {
+  label: string;
+  /** Themed icon path, or null → the colorized suggestion glyph. */
+  icon: string | null;
+  /** Signed net support across the map (0 = no votes / perfectly contested). */
+  net: number;
+  /** Selectable as the cast target in the current selection mode. */
+  castable: boolean;
+}
+
+/** Support count for a legend row — "1,204", "−412", "" at zero. */
+function formatNet(net: number): string {
+  if (!net) return "";
+  const abs = Math.abs(net).toLocaleString("en-US");
+  return net < 0 ? `−${abs}` : abs;
+}
+
 export const VoteTypeSelector = memo(function VoteTypeSelector() {
   const { voteType, setVoteType, pointType } = useRoute();
   const theme = useTheme();
   const map = useMap();
+  const hidden = useHiddenVoteTypes();
+  const legend = useVoteTypeLegend(pointType);
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -24,38 +66,51 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
   // The committed vote type when the field opened, restored if editing is cancelled.
   const previousVoteTypeRef = useRef(voteType);
 
-  // Prefer the resolved map's server-provided vote-type list; fall back to theme.
-  const suggestions = map?.voteTypes?.length
-    ? mapVoteTypesForPointType(map, pointType)
-    : getSuggestionsForTheme(theme, pointType);
+  const isStationNetwork = (map?.network ?? "streets") !== "streets";
+
+  // The legend proper: every vote type the map draws, plus its authored types.
+  // A map that authored none of its own (legacy/preset maps) falls back to the
+  // theme's preset suggestions so there is still something to cast.
+  const rows: PanelRow[] = useMemo(() => {
+    const base: PanelRow[] = legend.map((e) => ({
+      label: e.label,
+      icon: e.icon,
+      net: e.net,
+      castable: e.castable,
+    }));
+    if (map?.voteTypes?.length) return base;
+    const known = new Set(base.map((r) => r.label));
+    const presets = getSuggestionsForTheme(theme, pointType)
+      .filter((s) => !known.has(s.label))
+      .map((s): PanelRow => ({ label: s.label, icon: s.icon, net: 0, castable: true }));
+    return [...presets, ...base];
+  }, [legend, map, theme, pointType]);
 
   const inputLower = inputValue.trim().toLowerCase();
-  const filteredSuggestions = inputLower
-    ? suggestions.filter((s) => s.label.toLowerCase().includes(inputLower))
-    : suggestions;
+  const matchingRows = inputLower
+    ? rows.filter((r) => r.label.toLowerCase().includes(inputLower))
+    : rows;
 
-  // Custom vote types already voted on this map. They surface only while the
-  // user is typing — never in the default list — and carry no themed icon, so
-  // they render with the colorized suggestion glyph. Kind-filtered like the
-  // default suggestions (a route-kind custom type shouldn't offer itself for a
-  // point selection); unknown kind (legacy rows) shows in both modes, and
-  // station networks skip the filter entirely (mapVoteTypesForPointType rule:
-  // stations only vote points, whatever kind the type was authored as).
-  const isStationNetwork = (map?.network ?? "streets") !== "streets";
-  const extraLabels = inputLower
+  // Custom vote types the server reported at load but that carry no live net
+  // (so buildVoteTypeLegend left them out of the legend). They surface only
+  // while typing — never in the default list — and are kind-filtered like the
+  // rest; station networks skip that filter (they only ever vote points,
+  // whatever kind the type was authored as).
+  const knownLabels = useMemo(() => new Set(rows.map((r) => r.label)), [rows]);
+  const searchOnlyRows: PanelRow[] = inputLower
     ? (map?.searchVoteTypes ?? [])
-        .filter((vt) => isStationNetwork || !vt.pointType || vt.pointType === pointType)
-        .map((vt) => vt.label)
-        .filter(
-          (lbl) =>
-            lbl.toLowerCase().includes(inputLower) &&
-            !suggestions.some((s) => s.label.toLowerCase() === lbl.toLowerCase())
-        )
+        .filter((vt) => !knownLabels.has(vt.label) && vt.label.toLowerCase().includes(inputLower))
+        .map((vt): PanelRow => ({
+          label: vt.label,
+          icon: iconForLabel(vt.label, map?.voteTypes),
+          net: 0,
+          castable: isStationNetwork || !vt.pointType || vt.pointType === pointType,
+        }))
     : [];
 
-  const hasExactMatch =
-    suggestions.some((s) => s.label.toLowerCase() === inputLower) ||
-    extraLabels.some((lbl) => lbl.toLowerCase() === inputLower);
+  const listRows = [...matchingRows, ...searchOnlyRows];
+
+  const hasExactMatch = listRows.some((r) => r.label.toLowerCase() === inputLower);
   // Maps that disallow user suggestions can't add custom vote types.
   const allowCustom = map ? map.allowSuggestions : true;
   const showCustomOption = allowCustom && inputLower !== "" && !hasExactMatch;
@@ -65,35 +120,27 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
   //   1. the map authored exactly one vote type overall, or
   //   2. the pointType-filtered list happens to have one entry.
   // Case 1 must ignore pointType: a route-only single type is filtered out of
-  // `suggestions` while in point mode (before both endpoints are set), which
+  // the castable rows while in point mode (before both endpoints are set), which
   // previously left the field unlocked until a full route was drawn. Keying the
   // lock off the map's full list keeps it frozen in every mode.
   const mapVoteTypes = map?.voteTypes ?? [];
+  const castableRows = rows.filter((r) => r.castable);
   const frozenLabel = !allowCustom
     ? mapVoteTypes.length === 1
       ? mapVoteTypes[0].label
-      : suggestions.length === 1
-        ? suggestions[0].label
+      : castableRows.length === 1
+        ? castableRows[0].label
         : null
     : null;
 
-  const options = [
-    ...filteredSuggestions.map((s) => ({
-      label: s.label,
-      icon: s.icon,
-      glyph: false,
-      isCustom: false,
-    })),
-    ...extraLabels.map((lbl) => ({
-      label: lbl,
-      icon: "",
-      glyph: true,
-      isCustom: false,
-    })),
-    ...(showCustomOption
-      ? [{ label: inputValue.trim(), icon: "", glyph: false, isCustom: true }]
-      : []),
-  ];
+  // Filter state, measured over the WHOLE legend (not the search-filtered view)
+  // so the readout is a stable statement about the map, not about the query.
+  const totalCount = rows.length;
+  const shownCount = rows.reduce((n, r) => n + (hidden.has(r.label) ? 0 : 1), 0);
+  const isFiltered = shownCount !== totalCount;
+
+  // Keyboard navigation runs over the rows plus the trailing "Suggest:" option.
+  const optionCount = listRows.length + (showCustomOption ? 1 : 0);
 
   useEffect(() => {
     setHighlightedIndex(0);
@@ -117,7 +164,10 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
   }, [isOpen]);
 
   const selectOption = useCallback(
-    (label: string) => {
+    (label: string, isCustom = false) => {
+      // Committing a brand-new suggestion registers it immediately, so it joins
+      // the legend and the searchable list before the cast round-trips.
+      if (isCustom) registerVoteTypeLabel(label);
       setVoteType(label);
       setInputValue("");
       inputValueRef.current = "";
@@ -152,17 +202,21 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setHighlightedIndex((prev) => Math.min(prev + 1, options.length - 1));
+        setHighlightedIndex((prev) => Math.min(prev + 1, optionCount - 1));
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setHighlightedIndex((prev) => Math.max(prev - 1, 0));
       } else if (e.key === "Enter") {
         e.preventDefault();
-        if (options.length > 0) {
-          const opt = options[highlightedIndex];
-          if (opt) selectOption(opt.label);
+        if (optionCount > 0) {
+          const row = listRows[highlightedIndex];
+          if (row) {
+            if (row.castable) selectOption(row.label);
+          } else if (showCustomOption) {
+            selectOption(inputValue.trim(), true);
+          }
         } else if (inputValue.trim()) {
-          selectOption(inputValue.trim());
+          selectOption(inputValue.trim(), true);
         }
       } else if (e.key === "Escape") {
         setVoteType(previousVoteTypeRef.current);
@@ -172,7 +226,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
         inputRef.current?.blur();
       }
     },
-    [options, highlightedIndex, inputValue, selectOption, setVoteType]
+    [optionCount, listRows, highlightedIndex, inputValue, showCustomOption, selectOption, setVoteType]
   );
 
   const handleChevronClick = useCallback((e: React.MouseEvent) => {
@@ -181,7 +235,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
     if (isOpen) {
       const trimmed = inputValueRef.current.trim();
       if (trimmed) {
-        selectOption(trimmed);
+        selectOption(trimmed, true);
       } else {
         setVoteType(previousVoteTypeRef.current);
         setIsOpen(false);
@@ -197,7 +251,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         const trimmed = inputValueRef.current.trim();
         if (trimmed) {
-          selectOption(trimmed);
+          selectOption(trimmed, true);
         } else if (isOpen) {
           // Cancelled with an empty field — revert the live-typed vote type.
           setVoteType(previousVoteTypeRef.current);
@@ -209,6 +263,15 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [selectOption, setVoteType, isOpen]);
 
+  // Visibility gestures fire on mousedown and swallow the event: the row's own
+  // mousedown would otherwise commit the type and close the panel, and the
+  // default would pull focus off the search field mid-toggle.
+  const swallow = (e: React.MouseEvent, run: () => void) => {
+    e.preventDefault();
+    e.stopPropagation();
+    run();
+  };
+
   // The committed type's themed icon: the map's own vote-type icon wins (user
   // maps define their own), then a matching preset icon. Null → it's a custom
   // type and renders the colorized suggestion glyph instead.
@@ -218,6 +281,20 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
   // the vote type defaults to it via getDefaultVoteTypeForTheme, so casting works.
   const frozenIcon = frozenLabel ? iconForLabel(frozenLabel, map?.voteTypes) : null;
 
+  // Where the castable half ends — the divider between "you can vote for this
+  // now" and "also drawn on the map".
+  const firstUncastable = listRows.findIndex((r) => !r.castable);
+
+  const renderIcon = (icon: string | null, label: string) =>
+    icon ? (
+      <img className="vote-type-icon-img" src={iconSrc(icon)} alt="" />
+    ) : (
+      <span
+        className="vote-type-icon-img"
+        dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(label, 18) }}
+      />
+    );
+
   return (
     <div
       ref={containerRef}
@@ -226,14 +303,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
     >
       {frozenLabel ? (
         <div className="vote-type-control">
-          {frozenIcon ? (
-            <img className="vote-type-icon-img" src={iconSrc(frozenIcon)} alt="" />
-          ) : (
-            <span
-              className="vote-type-icon-img"
-              dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(frozenLabel, 18) }}
-            />
-          )}
+          {renderIcon(frozenIcon, frozenLabel)}
           <span className="vote-type-display-text">{frozenLabel}</span>
         </div>
       ) : (
@@ -260,14 +330,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
         />
         {!isOpen && voteType && (
           <div className="vote-type-display">
-            {displayIcon ? (
-              <img className="vote-type-icon-img" src={iconSrc(displayIcon)} alt="" />
-            ) : (
-              <span
-                className="vote-type-icon-img"
-                dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(voteType, 18) }}
-              />
-            )}
+            {renderIcon(displayIcon, voteType)}
             <span className="vote-type-display-text">{voteType}</span>
           </div>
         )}
@@ -276,53 +339,119 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
             {allowCustom ? "Suggest a change..." : "Select a vote type"}
           </div>
         )}
+        {/* A filtered map is easy to mistake for an empty one, so the collapsed
+            control carries the count even when the panel is shut. */}
+        {!isOpen && isFiltered && (
+          <span
+            className="vote-type-filter-badge"
+            title={`${shownCount} of ${totalCount} proposal types shown on the map`}
+          >
+            {shownCount}/{totalCount}
+          </span>
+        )}
         <span className="vote-type-chevron" onMouseDown={handleChevronClick}>
           <span className="caret-down" />
         </span>
       </div>
 
-      {isOpen && options.length > 0 && (
+      {isOpen && (
         <div
           className="vote-type-dropdown"
+          role="listbox"
           style={dropdownMaxWidth ? { maxWidth: dropdownMaxWidth } : undefined}
         >
-          {options.map((option, index) => {
-            const isHighlighted = index === highlightedIndex;
-            const isSelected = option.label === voteType;
+          <div className="vt-panel-head">
+            <span className="vt-panel-title">Shown on map</span>
+            <span className={`vt-panel-count${isFiltered ? " is-filtered" : ""}`}>
+              {shownCount}/{totalCount}
+            </span>
+            <button
+              type="button"
+              className="vt-panel-action"
+              onMouseDown={(e) => swallow(e, () =>
+                isFiltered ? showAllVoteTypes() : showOnlyVoteTypes(rows.map((r) => r.label))
+              )}
+            >
+              {isFiltered ? "All" : "None"}
+            </button>
+          </div>
 
-            if (option.isCustom) {
-              return (
-                <div
-                  key="custom"
-                  className={`vote-type-option vote-type-custom ${isHighlighted ? "highlighted" : ""}`}
-                  onMouseDown={() => selectOption(option.label)}
-                  onMouseEnter={() => setHighlightedIndex(index)}
-                >
-                  <span>Suggest: <em>"{option.label}"</em></span>
-                </div>
-              );
-            }
+          {listRows.map((row, index) => {
+            const isHighlighted = index === highlightedIndex;
+            const isCasting = row.label === voteType;
+            const visible = !hidden.has(row.label);
+            const cls = [
+              "vote-type-option",
+              isHighlighted ? "highlighted" : "",
+              isCasting ? "is-casting" : "",
+              visible ? "" : "is-hidden",
+              row.castable ? "" : "is-uncastable",
+            ].filter(Boolean).join(" ");
 
             return (
-              <div
-                key={option.label}
-                className={`vote-type-option ${isHighlighted ? "highlighted" : ""} ${isSelected ? "selected" : ""}`}
-                onMouseDown={() => selectOption(option.label)}
-                onMouseEnter={() => setHighlightedIndex(index)}
-              >
-                {option.icon ? (
-                  <img className="vote-type-icon-img" src={iconSrc(option.icon)} alt="" />
-                ) : option.glyph ? (
-                  <span
-                    className="vote-type-icon-img"
-                    dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(option.label, 18) }}
-                  />
-                ) : null}
-                <span className="vote-type-label">{option.label}</span>
-                {isSelected && <span className="check-icon"><CheckIcon size={11} /></span>}
+              <div key={row.label}>
+                {index === firstUncastable && (
+                  <div className="vt-section">
+                    {pointType === "point" ? "Corridor proposals" : "Point proposals"}
+                    <span className="vt-section-note">on the map, vote elsewhere</span>
+                  </div>
+                )}
+                <div
+                  className={cls}
+                  role="option"
+                  aria-selected={isCasting}
+                  onMouseDown={() => row.castable && selectOption(row.label)}
+                  onMouseEnter={() => setHighlightedIndex(index)}
+                  title={row.castable ? undefined
+                    : `Drawn on the map. Draw ${pointType === "point" ? "a route" : "a single point"} to vote for it.`}
+                >
+                  <button
+                    type="button"
+                    className="vt-vis"
+                    role="switch"
+                    aria-checked={visible}
+                    aria-label={`${visible ? "Hide" : "Show"} ${row.label} on the map`}
+                    title={`${visible ? "Hide" : "Show"} on the map`}
+                    onMouseDown={(e) => swallow(e, () => toggleVoteTypeVisible(row.label))}
+                  >
+                    <span className="vt-vis-box">{visible && <CheckIcon size={10} />}</span>
+                  </button>
+                  {renderIcon(row.icon, row.label)}
+                  <span className="vote-type-label">{row.label}</span>
+                  <span className="vt-tail">
+                    <span className={`vt-net${row.net < 0 ? " is-negative" : ""}`}>
+                      {formatNet(row.net)}
+                    </span>
+                    <button
+                      type="button"
+                      className="vt-only"
+                      title={`Show only ${row.label}`}
+                      onMouseDown={(e) => swallow(e, () =>
+                        showOnlyVoteTypes(rows.map((r) => r.label), [row.label])
+                      )}
+                    >
+                      only
+                    </button>
+                  </span>
+                </div>
               </div>
             );
           })}
+
+          {showCustomOption && (
+            <div
+              className={`vote-type-option vote-type-custom ${
+                highlightedIndex === listRows.length ? "highlighted" : ""}`}
+              onMouseDown={() => selectOption(inputValue.trim(), true)}
+              onMouseEnter={() => setHighlightedIndex(listRows.length)}
+            >
+              <span>Suggest: <em>"{inputValue.trim()}"</em></span>
+            </div>
+          )}
+
+          {optionCount === 0 && (
+            <div className="vt-empty">No proposal types match “{inputValue.trim()}”</div>
+          )}
         </div>
       )}
       </>

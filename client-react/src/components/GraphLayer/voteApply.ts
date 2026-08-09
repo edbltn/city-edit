@@ -184,10 +184,19 @@ export function applyEdgeVoteChange(
  * Blocks with activity but no per-type breakdown (legacy untyped votes) fall
  * back to their deduped total. Returns the array plus both arm ceilings for
  * the renderer's two-sided log normalization.
+ *
+ * `allowed` is the legend-visibility mask from the vote-type filter (see
+ * map/voteTypeFilter.legendVisibilityMask): 1 = the type is toggled on, 0 =
+ * off. Pass null (the default, and what an unfiltered map always passes) to
+ * rank across every type. With a mask, a block ranks only its visible types
+ * and goes cold (0) when none of them is on — and the untyped fallback is
+ * suppressed too: a legacy block's total can't be attributed to any type, so
+ * showing it while the user has filtered would be heat they didn't ask for.
  */
 export function topProposalDiffs(
   blockVotes: ArrayLike<number>,
   blockVoteTypes?: ([number, number, number][] | undefined)[] | null,
+  allowed?: Uint8Array | null,
 ): { diff: Int32Array; maxPos: number; maxNeg: number } {
   const n = blockVotes.length;
   const diff = new Int32Array(n);
@@ -195,14 +204,19 @@ export function topProposalDiffs(
   let maxNeg = 0;
   for (let b = 0; b < n; b++) {
     const entries = blockVoteTypes?.[b];
-    let d: number;
+    let d = 0;
     if (entries && entries.length > 0) {
-      d = entries[0][1] - entries[0][2];
-      for (let i = 1; i < entries.length; i++) {
+      let found = false;
+      for (let i = 0; i < entries.length; i++) {
+        // Out-of-range index = a type appended to the legend after the mask was
+        // built (an optimistic cast); nothing has hidden it, so it stays visible.
+        const li = entries[i][0];
+        if (allowed && li < allowed.length && !allowed[li]) continue;
         const v = entries[i][1] - entries[i][2];
-        if (v > d) d = v;
+        if (!found || v > d) { d = v; found = true; }
       }
-    } else {
+      if (!found) d = 0;
+    } else if (!allowed) {
       d = blockVotes[b] || 0;
     }
     diff[b] = d;

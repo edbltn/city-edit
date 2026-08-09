@@ -19,6 +19,11 @@ import Flatbush from "flatbush";
 import { CONFIG } from "../../config";
 import { COLOR_START, COLOR_END } from "../../colors";
 import { withMap, getMapSlug, passcodeHeaders, getCurrentMap } from "../../map/runtime";
+import {
+  isVoteTypeVisible, legendVisibilityMask, subscribeVoteTypeFilter,
+  getHiddenVoteTypes, getVoteTypeFilterVersion,
+} from "../../map/voteTypeFilter";
+import { publishVoteTypeNets } from "../../map/voteTypeRegistry";
 import { useWebSocketContext } from "../../context/WebSocketContext";
 import { useGraphSnap, useTheme, useHeatmap, useGhostPin, useRoute } from "../../context";
 import type { GraphData, ProposalMatch } from "../../types";
@@ -336,6 +341,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // on hover/selection).
   const blocksActiveRef = useRef(false);
   const maxVotesRevRef = useRef(-1);
+  // Legend-filter version the cached max was measured at (see visibleEdgeVotes).
+  const maxVotesFilterRef = useRef(-1);
 
   // Node adjacency list — node index → [edge indices]. Built once from topology,
   // used to derive node votes from edge totals (max of adjacent edges).
@@ -817,6 +824,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       // Station networks don't badge winners as "top proposals" (every station
       // renders its own pin regardless), so the support floor stays off there.
       isStationNetwork ? 0 : topProposalMinNet,
+      // Legend toggles. Applied HERE rather than to the finished list so that
+      // hiding types promotes the survivors' runners-up into the freed slots.
+      isVoteTypeVisible,
     ), legendChanged);
   }, [setStableWinners, isStationNetwork, voteTypeKindOf, topProposalMinNet]);
 
@@ -1402,9 +1412,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // Block heat is the SIGNED vote differential (up − down) of the block's
     // top-ranked proposal — top-ranked BY differential (topProposalDiffs). A
     // block whose best proposal is still net-against gets a negative value
-    // and renders on the cold arm of the ramp.
+    // and renders on the cold arm of the ramp. The legend's visibility toggles
+    // (map/voteTypeFilter) mask the ranking: with types hidden, each block
+    // ranks only what's toggled on, so the heatmap answers "how much support
+    // do THESE proposals have" rather than "…any proposal".
     const { diff, maxPos, maxNeg } = topProposalDiffs(
-      blockVotes!, voteData.block_vote_types);
+      blockVotes!, voteData.block_vote_types,
+      legendVisibilityMask(voteData.block_vote_type_legend));
     const detail: BlockVotesDetail = {
       blockDiff: diff,
       max: Math.max(HEAT_FULL_SCALE, maxPos),
@@ -1437,6 +1451,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // (GraphLayer already built one for hover/selection).
     const job = createRouteProposalJob(topo, adj, data, {
       kindOf: voteTypeKindOf, blockIndex: blockIndexRef.current,
+      // Legend toggles — a hidden type is skipped before its clustering runs,
+      // so a filtered map recomputes faster, not slower.
+      isVisible: isVoteTypeVisible,
       // The top-proposal support floor (>topProposalMinNet net votes),
       // expressed as the pipeline's minimum path score — same rule the PBTP
       // winners apply, so both proposal families share one bar.
@@ -1481,11 +1498,43 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);
   useEffect(() => { recomputeRouteProposalsRef.current = recomputeRouteProposals; }, [recomputeRouteProposals]);
 
+  // Per-vote-type net support (Σ up − Σ down), published to the vote-type
+  // registry that backs the legend panel. BLOCK grain where the map has one —
+  // deduped, one person per block, the same number the proposal modal quotes —
+  // and per-edge nets otherwise. Deliberately NOT masked by the visibility
+  // filter: the legend has to keep reporting a hidden type's support, or
+  // toggling it off would zero its own row and you couldn't find it again.
+  const publishVoteTypeSupport = useCallback(() => {
+    const data = graphDataRef.current;
+    if (!data) return;
+    const useBlocks = blocksActiveRef.current && !!data.block_vote_types;
+    const legend = (useBlocks ? data.block_vote_type_legend : data.vote_type_legend) ?? [];
+    if (legend.length === 0) return;
+    const perType = (useBlocks ? data.block_vote_types : data.edge_vote_types) ?? [];
+    const totals = new Int32Array(legend.length);
+    const seen = new Uint8Array(legend.length);
+    for (let i = 0; i < perType.length; i++) {
+      const entries = perType[i];
+      if (!entries) continue;
+      for (const [li, up, down] of entries) {
+        if (li >= legend.length) continue;
+        totals[li] += up - down;
+        seen[li] = 1;
+      }
+    }
+    const nets = new Map<string, number>();
+    for (let li = 0; li < legend.length; li++) {
+      if (seen[li] && legend[li]) nets.set(legend[li], totals[li]);
+    }
+    publishVoteTypeNets(nets);
+  }, []);
+
   // Both proposal families in one sweep — the only place either recompute runs.
   const recomputeAllProposals = useCallback(() => {
+    publishVoteTypeSupport();
     recomputeTopProposalsRef.current();
     recomputeRouteProposalsRef.current();
-  }, []);
+  }, [publishVoteTypeSupport]);
 
   // Coalesced, idle-time recompute: at most one queued at a time, run via
   // requestIdleCallback so it never lands mid-gesture. Used for the "must be
@@ -1509,6 +1558,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   }, [recomputeAllProposals]);
   const requestProposalsRecomputeRef = useRef(requestProposalsRecompute);
   useEffect(() => { requestProposalsRecomputeRef.current = requestProposalsRecompute; }, [requestProposalsRecompute]);
+
+  // Legend visibility toggles (map/voteTypeFilter). Heat is a cheap re-derive
+  // from vote data we already hold, so it repaints on the spot and the checkbox
+  // feels instant; the proposal pins and corridors need the full edge-table scan
+  // and follow on an URGENT recompute — the user is watching for them, so this
+  // must not wait for the minute-cadence sweep.
+  useEffect(() => subscribeVoteTypeFilter(() => {
+    dlog("proposals", `vote-type filter: ${getHiddenVoteTypes().size} hidden`);
+    const data = graphDataRef.current;
+    if (data) broadcastBlockVotes(data);
+    scheduleRedrawRef.current();
+    requestProposalsRecomputeRef.current(true);
+  }), [broadcastBlockVotes]);
 
   // The batched sweep: votes (own casts and WS deltas) mark this flag; every
   // PROPOSALS_REFRESH_INTERVAL_MS — or as soon as a hidden tab comes back —
@@ -2218,6 +2280,43 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const redrawHoverHighlightRef = useRef(redrawHoverHighlight);
   useEffect(() => { redrawHoverHighlightRef.current = redrawHoverHighlight; }, [redrawHoverHighlight]);
 
+  // Per-edge nets restricted to the vote types toggled ON in the legend — the
+  // canvas heatmap's twin of the block mask above. `edge_votes` is a precomputed
+  // net across ALL types, so a filtered view has to re-sum the per-type
+  // breakdown. Only maps WITHOUT a block layer reach the canvas heat path (block
+  // maps return early), and those are the small ones — station networks — so
+  // this O(nEdges) pass is cheap; it is cached by (vote revision, filter
+  // version) and skipped outright when nothing is hidden.
+  const filteredEdgeVotesRef =
+    useRef<{ rev: number; filterVersion: number; votes: Int32Array } | null>(null);
+  const visibleEdgeVotes = useCallback((data: GraphData): ArrayLike<number> => {
+    const raw = data.edge_votes ?? [];
+    const mask = legendVisibilityMask(data.vote_type_legend);
+    if (!mask) return raw;
+    const rev = lastRevRef.current;
+    const filterVersion = getVoteTypeFilterVersion();
+    const cached = filteredEdgeVotesRef.current;
+    if (cached && cached.rev === rev && cached.filterVersion === filterVersion) {
+      return cached.votes;
+    }
+    const perType = data.edge_vote_types ?? [];
+    const votes = new Int32Array(raw.length);
+    const limit = Math.min(raw.length, perType.length);
+    for (let e = 0; e < limit; e++) {
+      const pairs = perType[e];
+      if (!pairs) continue;
+      let net = 0;
+      for (const [li, up, down] of pairs) {
+        // Beyond the mask = a type appended after it was built; nothing hid it.
+        if (li < mask.length && !mask[li]) continue;
+        net += up - down;
+      }
+      votes[e] = net;
+    }
+    filteredEdgeVotesRef.current = { rev, filterVersion, votes };
+    return votes;
+  }, []);
+
   // Redraw function - renders edges with vote-scaled styling
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -2257,14 +2356,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
     const coords = data.coords;
     const ends = data.ends;
-    const edgeVotes = data.edge_votes ?? [];
+    const edgeVotes = visibleEdgeVotes(data);
 
     // maxVotes is global (so colors stay consistent across the viewport) but
     // only changes when votes change — recompute on revision change, not every
-    // frame. lastRevRef advances on every full fetch and applied delta.
-    if (maxVotesRevRef.current !== lastRevRef.current) {
+    // frame. lastRevRef advances on every full fetch and applied delta; the
+    // filter version advances on every legend toggle, which rescales the ramp
+    // to the types left on (hiding the map's busiest type must not leave
+    // everything else painted at the bottom of the old scale).
+    const heatFilterVersion = getVoteTypeFilterVersion();
+    if (maxVotesRevRef.current !== lastRevRef.current
+      || maxVotesFilterRef.current !== heatFilterVersion) {
       maxVotesRef.current = Math.max(1, arrayMax(edgeVotes));
       maxVotesRevRef.current = lastRevRef.current;
+      maxVotesFilterRef.current = heatFilterVersion;
     }
     // Floor the scale so low-traffic maps don't saturate (see HEAT_FULL_SCALE).
     const maxVotes = Math.max(maxVotesRef.current, HEAT_FULL_SCALE);
@@ -2419,7 +2524,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     ctx.globalAlpha = 1.0;
 
     redrawHoverHighlightRef.current();
-  }, [map, mapStyle.heat, mapStyle.basemap, mapStyle.heatComposite, mapStyle.selection]);
+  }, [map, mapStyle.heat, mapStyle.basemap, mapStyle.heatComposite, mapStyle.selection,
+    visibleEdgeVotes]);
 
   // Schedule redraw. rAF is the fast path; the timer is a backstop because rAF
   // never fires in hidden/occluded windows — without it a zoomend repaint can be

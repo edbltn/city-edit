@@ -322,6 +322,38 @@ describe("computeVoteTypeWinners — route/point kind filter", () => {
   });
 });
 
+describe("computeVoteTypeWinners — legend visibility filter", () => {
+  const legend = ["Bike lane", "Tree", "Bench"];
+  const evt: [number, number, number][][] = [
+    [[0, 9, 0]],
+    [[1, 5, 0]],
+    [[2, 3, 0]],
+  ];
+
+  it("drops vote types toggled off in the legend", () => {
+    const out = computeVoteTypeWinners(legend, evt, 1, undefined, 0,
+      (label) => label !== "Tree");
+    expect(out.map((w) => w.label).sort()).toEqual(["Bench", "Bike lane"]);
+  });
+
+  it("admits every type when no resolver is given", () => {
+    expect(computeVoteTypeWinners(legend, evt, 1)).toHaveLength(3);
+  });
+
+  it("frees ranked slots for the survivors (filter, THEN limit)", () => {
+    // Two types, three edges each. With a limit of 2 and both types visible,
+    // one slot goes to each; hiding one type must promote the other's
+    // runner-up rather than leave the second slot empty.
+    const two = ["Bike lane", "Tree"];
+    const rows: [number, number, number][][] = [
+      [[0, 9, 0]], [[0, 8, 0]], [[1, 7, 0]],
+    ];
+    const visible = computeVoteTypeWinners(two, rows, 2, undefined, 0,
+      (label) => label === "Bike lane");
+    expect(applyTopProposalLimit(visible, SALT, 2).map((w) => w.count)).toEqual([9, 8]);
+  });
+});
+
 describe("dedupeWinnersByBlock", () => {
   const mk = (label: string, legendIdx: number, count: number, edgeIdx: number): VoteTypeWinner => ({
     legendIdx, label, edgeIdx, count,

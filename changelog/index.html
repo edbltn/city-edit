@@ -29,6 +29,24 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-09-vote-type-filter.html">
+    <div class="date">2026-08-09</div>
+    <h2>The vote-type dropdown becomes the map's legend</h2>
+    <p>The map drew seventeen vote types at once and offered no way to name them, weigh them, or look
+    at one without the others. The only per-type list in the app was a <em>cast-target picker</em> —
+    it showed just the types castable in your current selection mode, and it was hidden entirely until
+    you had a selection to vote on. So the dropdown becomes the <strong>legend</strong>: every vote
+    type on the map, with its icon, its name, its live net support, a checkbox to show or hide it on
+    the map, and a hover <code>only</code> to isolate one. Toggling reaches all four things that draw
+    vote signal — block heat, the canvas heatmap, the square point pins and the diamond corridors —
+    and is applied <em>before</em> selection rather than to the finished list, so hiding sixteen of
+    seventeen types promotes the survivor's runners-up into the freed slots instead of emptying the
+    map. Casting always un-hides the type you voted for, because a visibility filter next to a vote
+    button is otherwise a trap: hide a type, vote for it, and nothing moves. Isolating one type on
+    <code>nyc-proposals</code> takes the lit blocks from 466 to 154 and the corridors from 8 to 3;
+    pressing <em>All</em> puts both back exactly.</p>
+  </a>
+
   <a class="entry" href="./2026-08-09-nav-rail-blog-link.html">
     <div class="date">2026-08-09</div>
     <h2>A blog link, and a header with room for it</h2>

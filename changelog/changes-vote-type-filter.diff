@@ -1,0 +1,1885 @@
+diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
+index afc4f58..9549477 100644
+--- a/client-react/src/components/GraphLayer/GraphLayer.tsx
++++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -19,6 +19,11 @@ import Flatbush from "flatbush";
+ import { CONFIG } from "../../config";
+ import { COLOR_START, COLOR_END } from "../../colors";
+ import { withMap, getMapSlug, passcodeHeaders, getCurrentMap } from "../../map/runtime";
++import {
++  isVoteTypeVisible, legendVisibilityMask, subscribeVoteTypeFilter,
++  getHiddenVoteTypes, getVoteTypeFilterVersion,
++} from "../../map/voteTypeFilter";
++import { publishVoteTypeNets } from "../../map/voteTypeRegistry";
+ import { useWebSocketContext } from "../../context/WebSocketContext";
+ import { useGraphSnap, useTheme, useHeatmap, useGhostPin, useRoute } from "../../context";
+ import type { GraphData, ProposalMatch } from "../../types";
+@@ -336,6 +341,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // on hover/selection).
+   const blocksActiveRef = useRef(false);
+   const maxVotesRevRef = useRef(-1);
++  // Legend-filter version the cached max was measured at (see visibleEdgeVotes).
++  const maxVotesFilterRef = useRef(-1);
+ 
+   // Node adjacency list — node index → [edge indices]. Built once from topology,
+   // used to derive node votes from edge totals (max of adjacent edges).
+@@ -817,6 +824,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       // Station networks don't badge winners as "top proposals" (every station
+       // renders its own pin regardless), so the support floor stays off there.
+       isStationNetwork ? 0 : topProposalMinNet,
++      // Legend toggles. Applied HERE rather than to the finished list so that
++      // hiding types promotes the survivors' runners-up into the freed slots.
++      isVoteTypeVisible,
+     ), legendChanged);
+   }, [setStableWinners, isStationNetwork, voteTypeKindOf, topProposalMinNet]);
+ 
+@@ -1402,9 +1412,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     // Block heat is the SIGNED vote differential (up − down) of the block's
+     // top-ranked proposal — top-ranked BY differential (topProposalDiffs). A
+     // block whose best proposal is still net-against gets a negative value
+-    // and renders on the cold arm of the ramp.
++    // and renders on the cold arm of the ramp. The legend's visibility toggles
++    // (map/voteTypeFilter) mask the ranking: with types hidden, each block
++    // ranks only what's toggled on, so the heatmap answers "how much support
++    // do THESE proposals have" rather than "…any proposal".
+     const { diff, maxPos, maxNeg } = topProposalDiffs(
+-      blockVotes!, voteData.block_vote_types);
++      blockVotes!, voteData.block_vote_types,
++      legendVisibilityMask(voteData.block_vote_type_legend));
+     const detail: BlockVotesDetail = {
+       blockDiff: diff,
+       max: Math.max(HEAT_FULL_SCALE, maxPos),
+@@ -1437,6 +1451,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     // (GraphLayer already built one for hover/selection).
+     const job = createRouteProposalJob(topo, adj, data, {
+       kindOf: voteTypeKindOf, blockIndex: blockIndexRef.current,
++      // Legend toggles — a hidden type is skipped before its clustering runs,
++      // so a filtered map recomputes faster, not slower.
++      isVisible: isVoteTypeVisible,
+       // The top-proposal support floor (>topProposalMinNet net votes),
+       // expressed as the pipeline's minimum path score — same rule the PBTP
+       // winners apply, so both proposal families share one bar.
+@@ -1481,11 +1498,43 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);
+   useEffect(() => { recomputeRouteProposalsRef.current = recomputeRouteProposals; }, [recomputeRouteProposals]);
+ 
++  // Per-vote-type net support (Σ up − Σ down), published to the vote-type
++  // registry that backs the legend panel. BLOCK grain where the map has one —
++  // deduped, one person per block, the same number the proposal modal quotes —
++  // and per-edge nets otherwise. Deliberately NOT masked by the visibility
++  // filter: the legend has to keep reporting a hidden type's support, or
++  // toggling it off would zero its own row and you couldn't find it again.
++  const publishVoteTypeSupport = useCallback(() => {
++    const data = graphDataRef.current;
++    if (!data) return;
++    const useBlocks = blocksActiveRef.current && !!data.block_vote_types;
++    const legend = (useBlocks ? data.block_vote_type_legend : data.vote_type_legend) ?? [];
++    if (legend.length === 0) return;
++    const perType = (useBlocks ? data.block_vote_types : data.edge_vote_types) ?? [];
++    const totals = new Int32Array(legend.length);
++    const seen = new Uint8Array(legend.length);
++    for (let i = 0; i < perType.length; i++) {
++      const entries = perType[i];
++      if (!entries) continue;
++      for (const [li, up, down] of entries) {
++        if (li >= legend.length) continue;
++        totals[li] += up - down;
++        seen[li] = 1;
++      }
++    }
++    const nets = new Map<string, number>();
++    for (let li = 0; li < legend.length; li++) {
++      if (seen[li] && legend[li]) nets.set(legend[li], totals[li]);
++    }
++    publishVoteTypeNets(nets);
++  }, []);
++
+   // Both proposal families in one sweep — the only place either recompute runs.
+   const recomputeAllProposals = useCallback(() => {
++    publishVoteTypeSupport();
+     recomputeTopProposalsRef.current();
+     recomputeRouteProposalsRef.current();
+-  }, []);
++  }, [publishVoteTypeSupport]);
+ 
+   // Coalesced, idle-time recompute: at most one queued at a time, run via
+   // requestIdleCallback so it never lands mid-gesture. Used for the "must be
+@@ -1510,6 +1559,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   const requestProposalsRecomputeRef = useRef(requestProposalsRecompute);
+   useEffect(() => { requestProposalsRecomputeRef.current = requestProposalsRecompute; }, [requestProposalsRecompute]);
+ 
++  // Legend visibility toggles (map/voteTypeFilter). Heat is a cheap re-derive
++  // from vote data we already hold, so it repaints on the spot and the checkbox
++  // feels instant; the proposal pins and corridors need the full edge-table scan
++  // and follow on an URGENT recompute — the user is watching for them, so this
++  // must not wait for the minute-cadence sweep.
++  useEffect(() => subscribeVoteTypeFilter(() => {
++    dlog("proposals", `vote-type filter: ${getHiddenVoteTypes().size} hidden`);
++    const data = graphDataRef.current;
++    if (data) broadcastBlockVotes(data);
++    scheduleRedrawRef.current();
++    requestProposalsRecomputeRef.current(true);
++  }), [broadcastBlockVotes]);
++
+   // The batched sweep: votes (own casts and WS deltas) mark this flag; every
+   // PROPOSALS_REFRESH_INTERVAL_MS — or as soon as a hidden tab comes back —
+   // one idle recompute folds them all in. Proposals may therefore lag votes by
+@@ -2218,6 +2280,43 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   const redrawHoverHighlightRef = useRef(redrawHoverHighlight);
+   useEffect(() => { redrawHoverHighlightRef.current = redrawHoverHighlight; }, [redrawHoverHighlight]);
+ 
++  // Per-edge nets restricted to the vote types toggled ON in the legend — the
++  // canvas heatmap's twin of the block mask above. `edge_votes` is a precomputed
++  // net across ALL types, so a filtered view has to re-sum the per-type
++  // breakdown. Only maps WITHOUT a block layer reach the canvas heat path (block
++  // maps return early), and those are the small ones — station networks — so
++  // this O(nEdges) pass is cheap; it is cached by (vote revision, filter
++  // version) and skipped outright when nothing is hidden.
++  const filteredEdgeVotesRef =
++    useRef<{ rev: number; filterVersion: number; votes: Int32Array } | null>(null);
++  const visibleEdgeVotes = useCallback((data: GraphData): ArrayLike<number> => {
++    const raw = data.edge_votes ?? [];
++    const mask = legendVisibilityMask(data.vote_type_legend);
++    if (!mask) return raw;
++    const rev = lastRevRef.current;
++    const filterVersion = getVoteTypeFilterVersion();
++    const cached = filteredEdgeVotesRef.current;
++    if (cached && cached.rev === rev && cached.filterVersion === filterVersion) {
++      return cached.votes;
++    }
++    const perType = data.edge_vote_types ?? [];
++    const votes = new Int32Array(raw.length);
++    const limit = Math.min(raw.length, perType.length);
++    for (let e = 0; e < limit; e++) {
++      const pairs = perType[e];
++      if (!pairs) continue;
++      let net = 0;
++      for (const [li, up, down] of pairs) {
++        // Beyond the mask = a type appended after it was built; nothing hid it.
++        if (li < mask.length && !mask[li]) continue;
++        net += up - down;
++      }
++      votes[e] = net;
++    }
++    filteredEdgeVotesRef.current = { rev, filterVersion, votes };
++    return votes;
++  }, []);
++
+   // Redraw function - renders edges with vote-scaled styling
+   const redraw = useCallback(() => {
+     const canvas = canvasRef.current;
+@@ -2257,14 +2356,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+ 
+     const coords = data.coords;
+     const ends = data.ends;
+-    const edgeVotes = data.edge_votes ?? [];
++    const edgeVotes = visibleEdgeVotes(data);
+ 
+     // maxVotes is global (so colors stay consistent across the viewport) but
+     // only changes when votes change — recompute on revision change, not every
+-    // frame. lastRevRef advances on every full fetch and applied delta.
+-    if (maxVotesRevRef.current !== lastRevRef.current) {
++    // frame. lastRevRef advances on every full fetch and applied delta; the
++    // filter version advances on every legend toggle, which rescales the ramp
++    // to the types left on (hiding the map's busiest type must not leave
++    // everything else painted at the bottom of the old scale).
++    const heatFilterVersion = getVoteTypeFilterVersion();
++    if (maxVotesRevRef.current !== lastRevRef.current
++      || maxVotesFilterRef.current !== heatFilterVersion) {
+       maxVotesRef.current = Math.max(1, arrayMax(edgeVotes));
+       maxVotesRevRef.current = lastRevRef.current;
++      maxVotesFilterRef.current = heatFilterVersion;
+     }
+     // Floor the scale so low-traffic maps don't saturate (see HEAT_FULL_SCALE).
+     const maxVotes = Math.max(maxVotesRef.current, HEAT_FULL_SCALE);
+@@ -2419,7 +2524,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     ctx.globalAlpha = 1.0;
+ 
+     redrawHoverHighlightRef.current();
+-  }, [map, mapStyle.heat, mapStyle.basemap, mapStyle.heatComposite, mapStyle.selection]);
++  }, [map, mapStyle.heat, mapStyle.basemap, mapStyle.heatComposite, mapStyle.selection,
++    visibleEdgeVotes]);
+ 
+   // Schedule redraw. rAF is the fast path; the timer is a backstop because rAF
+   // never fires in hidden/occluded windows — without it a zoomend repaint can be
+diff --git a/client-react/src/components/GraphLayer/routeProposals.ts b/client-react/src/components/GraphLayer/routeProposals.ts
+index b645440..db844dc 100644
+--- a/client-react/src/components/GraphLayer/routeProposals.ts
++++ b/client-react/src/components/GraphLayer/routeProposals.ts
+@@ -37,7 +37,7 @@ import {
+   type GraphTopology,
+   type NodeAdj,
+ } from "./graphTopology";
+-import type { VoteTypeKindResolver } from "./topProposals";
++import type { VoteTypeKindResolver, VoteTypeVisibility } from "./topProposals";
+ 
+ export interface RouteProposal {
+   id: string;
+@@ -533,6 +533,11 @@ export interface RouteProposalOptions {
+    *  surface as PBTP pins (topProposals.ts), not corridors. Unknown (null)
+    *  kinds stay eligible. Omit to admit every type. */
+   kindOf?: VoteTypeKindResolver;
++  /** Label → toggled on in the legend (map/voteTypeFilter). Hidden types are
++   *  skipped before any clustering runs, so filtering the map also SPEEDS UP
++   *  the recompute — and frees ranked slots for the types left on. Omit to
++   *  admit every type. */
++  isVisible?: VoteTypeVisibility;
+ }
+ 
+ /** Arc of the per-type subgraph: neighbor node, original edge id, net weight. */
+@@ -1265,6 +1270,7 @@ export function createRouteProposalJob(
+     // POINT-kind vote types never form corridors — their votes are PBTP pins
+     // (topProposals.ts). Unknown kind (null) stays eligible for both families.
+     if (opts.kindOf && opts.kindOf(label) === "point") continue;
++    if (opts.isVisible && !opts.isVisible(label)) continue;
+     if (netsPerType[legendIdx].size === 0) continue;
+     types.push(legendIdx);
+   }
+diff --git a/client-react/src/components/GraphLayer/topProposals.test.ts b/client-react/src/components/GraphLayer/topProposals.test.ts
+index 54f7919..a445d20 100644
+--- a/client-react/src/components/GraphLayer/topProposals.test.ts
++++ b/client-react/src/components/GraphLayer/topProposals.test.ts
+@@ -322,6 +322,38 @@ describe("computeVoteTypeWinners — route/point kind filter", () => {
+   });
+ });
+ 
++describe("computeVoteTypeWinners — legend visibility filter", () => {
++  const legend = ["Bike lane", "Tree", "Bench"];
++  const evt: [number, number, number][][] = [
++    [[0, 9, 0]],
++    [[1, 5, 0]],
++    [[2, 3, 0]],
++  ];
++
++  it("drops vote types toggled off in the legend", () => {
++    const out = computeVoteTypeWinners(legend, evt, 1, undefined, 0,
++      (label) => label !== "Tree");
++    expect(out.map((w) => w.label).sort()).toEqual(["Bench", "Bike lane"]);
++  });
++
++  it("admits every type when no resolver is given", () => {
++    expect(computeVoteTypeWinners(legend, evt, 1)).toHaveLength(3);
++  });
++
++  it("frees ranked slots for the survivors (filter, THEN limit)", () => {
++    // Two types, three edges each. With a limit of 2 and both types visible,
++    // one slot goes to each; hiding one type must promote the other's
++    // runner-up rather than leave the second slot empty.
++    const two = ["Bike lane", "Tree"];
++    const rows: [number, number, number][][] = [
++      [[0, 9, 0]], [[0, 8, 0]], [[1, 7, 0]],
++    ];
++    const visible = computeVoteTypeWinners(two, rows, 2, undefined, 0,
++      (label) => label === "Bike lane");
++    expect(applyTopProposalLimit(visible, SALT, 2).map((w) => w.count)).toEqual([9, 8]);
++  });
++});
++
+ describe("dedupeWinnersByBlock", () => {
+   const mk = (label: string, legendIdx: number, count: number, edgeIdx: number): VoteTypeWinner => ({
+     legendIdx, label, edgeIdx, count,
+diff --git a/client-react/src/components/GraphLayer/topProposals.ts b/client-react/src/components/GraphLayer/topProposals.ts
+index 17f405f..d138e87 100644
+--- a/client-react/src/components/GraphLayer/topProposals.ts
++++ b/client-react/src/components/GraphLayer/topProposals.ts
+@@ -75,6 +75,14 @@ export function compareWinners(
+  */
+ export type VoteTypeKindResolver = (label: string) => "route" | "point" | null;
+ 
++/**
++ * Whether a vote type is toggled ON in the legend (map/voteTypeFilter). A type
++ * toggled off is excluded from selection entirely rather than filtered out of
++ * the finished list, so hiding nine of ten types PROMOTES the tenth's runners-up
++ * into the freed slots instead of leaving the map near-empty.
++ */
++export type VoteTypeVisibility = (label: string) => boolean;
++
+ /**
+  * Support floor for the "Top Proposal" badge: a proposal only counts as a top
+  * proposal with STRICTLY MORE than this many net votes. Without it, a rare
+@@ -91,14 +99,16 @@ export const TOP_PROPOSAL_MIN_NET = 100;
+  * (highest first). Vote types whose best edge is net ≤ max(0, minNet) are
+  * dropped (a net-downvoted proposal is not a "top proposal", and below the
+  * support floor it isn't "top" either), as are ROUTE-kind types when a
+- * `kindOf` resolver is supplied — their corridors surface as RBTPs.
++ * `kindOf` resolver is supplied — their corridors surface as RBTPs — and types
++ * toggled off in the legend when an `isVisible` resolver is supplied.
+  */
+ export function computeVoteTypeWinners(
+   legend: string[],
+   edgeVoteTypes: [number, number, number][][],
+   perTypeLimit = 1,
+   kindOf?: VoteTypeKindResolver,
+-  minNet = 0
++  minNet = 0,
++  isVisible?: VoteTypeVisibility
+ ): VoteTypeWinner[] {
+   if (!legend.length || !edgeVoteTypes.length) return [];
+ 
+@@ -121,6 +131,7 @@ export function computeVoteTypeWinners(
+     const label = legend[legendIdx];
+     if (!label) continue;
+     if (kindOf && kindOf(label) === "route") continue;
++    if (isVisible && !isVisible(label)) continue;
+     edges.sort((a, b) => b.count - a.count);
+     for (const { edgeIdx, count } of edges.slice(0, perTypeLimit)) {
+       winners.push({ legendIdx, label, edgeIdx, count });
+@@ -330,7 +341,8 @@ export const TOP_PROPOSAL_MIN_SPACING_M = 600;
+  * `kindOf` (label → kind) keeps ROUTE-kind vote types out of the point family;
+  * omit it (e.g. station networks, where every vote is a point) to admit all.
+  * `minNet` is the top-proposal support floor (strictly-greater; default
+- * TOP_PROPOSAL_MIN_NET) — pass 0 to admit any positive net.
++ * TOP_PROPOSAL_MIN_NET) — pass 0 to admit any positive net. `isVisible` is the
++ * legend toggle (map/voteTypeFilter.isVoteTypeVisible); omit it to admit all.
+  */
+ export function selectTopProposals(
+   data:
+@@ -340,7 +352,8 @@ export function selectTopProposals(
+   limit: number,
+   minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M,
+   kindOf?: VoteTypeKindResolver,
+-  minNet = TOP_PROPOSAL_MIN_NET
++  minNet = TOP_PROPOSAL_MIN_NET,
++  isVisible?: VoteTypeVisibility
+ ): VoteTypeWinner[] {
+   if (!data) return [];
+   const perType = computeVoteTypeWinners(
+@@ -348,7 +361,8 @@ export function selectTopProposals(
+     data.edge_vote_types ?? [],
+     TOP_PROPOSALS_PER_TYPE,
+     kindOf,
+-    minNet
++    minNet,
++    isVisible
+   );
+   const perEdge = dedupeWinnersByEdge(perType, salt);
+   const perBlock = dedupeWinnersByBlock(
+diff --git a/client-react/src/components/GraphLayer/voteApply.test.ts b/client-react/src/components/GraphLayer/voteApply.test.ts
+index 2f33702..66414e3 100644
+--- a/client-react/src/components/GraphLayer/voteApply.test.ts
++++ b/client-react/src/components/GraphLayer/voteApply.test.ts
+@@ -270,4 +270,43 @@ describe("topProposalDiffs (signed block heat)", () => {
+     expect(maxPos).toBe(4);
+     expect(maxNeg).toBe(5);
+   });
++
++  describe("legend visibility mask (vote-type filter)", () => {
++    it("ranks only the visible types", () => {
++      // Type 1 (the block's actual top proposal at +7) is toggled off, so the
++      // block falls back to the best VISIBLE type, A at +4.
++      const { diff, maxPos } = topProposalDiffs(
++        [13], [[[0, 5, 1], [1, 9, 2]]], new Uint8Array([1, 0]));
++      expect(diff[0]).toBe(4);
++      expect(maxPos).toBe(4);
++    });
++
++    it("goes cold when none of a block's types is visible", () => {
++      const { diff, maxPos, maxNeg } = topProposalDiffs(
++        [13], [[[0, 5, 1], [1, 9, 2]]], new Uint8Array([0, 0]));
++      expect(diff[0]).toBe(0);
++      expect(maxPos).toBe(0);
++      expect(maxNeg).toBe(0);
++    });
++
++    it("suppresses the untyped fallback while filtering", () => {
++      // An untyped block's total can't be attributed to any vote type, so with
++      // a filter on it must not paint heat the user didn't ask for.
++      const { diff } = topProposalDiffs([5, 2], [undefined, []], new Uint8Array([1]));
++      expect(diff[0]).toBe(0);
++      expect(diff[1]).toBe(0);
++    });
++
++    it("keeps types appended past the mask (an optimistic cast) visible", () => {
++      const { diff } = topProposalDiffs([6], [[[3, 6, 0]]], new Uint8Array([1, 0]));
++      expect(diff[0]).toBe(6);
++    });
++
++    it("still reports negative heat for a visible net-against type", () => {
++      const { diff, maxNeg } = topProposalDiffs(
++        [7], [[[0, 1, 4], [1, 9, 0]]], new Uint8Array([1, 0]));
++      expect(diff[0]).toBe(-3);
++      expect(maxNeg).toBe(3);
++    });
++  });
+ });
+diff --git a/client-react/src/components/GraphLayer/voteApply.ts b/client-react/src/components/GraphLayer/voteApply.ts
+index b67c4a3..8e2479c 100644
+--- a/client-react/src/components/GraphLayer/voteApply.ts
++++ b/client-react/src/components/GraphLayer/voteApply.ts
+@@ -184,10 +184,19 @@ export function applyEdgeVoteChange(
+  * Blocks with activity but no per-type breakdown (legacy untyped votes) fall
+  * back to their deduped total. Returns the array plus both arm ceilings for
+  * the renderer's two-sided log normalization.
++ *
++ * `allowed` is the legend-visibility mask from the vote-type filter (see
++ * map/voteTypeFilter.legendVisibilityMask): 1 = the type is toggled on, 0 =
++ * off. Pass null (the default, and what an unfiltered map always passes) to
++ * rank across every type. With a mask, a block ranks only its visible types
++ * and goes cold (0) when none of them is on — and the untyped fallback is
++ * suppressed too: a legacy block's total can't be attributed to any type, so
++ * showing it while the user has filtered would be heat they didn't ask for.
+  */
+ export function topProposalDiffs(
+   blockVotes: ArrayLike<number>,
+   blockVoteTypes?: ([number, number, number][] | undefined)[] | null,
++  allowed?: Uint8Array | null,
+ ): { diff: Int32Array; maxPos: number; maxNeg: number } {
+   const n = blockVotes.length;
+   const diff = new Int32Array(n);
+@@ -195,14 +204,19 @@ export function topProposalDiffs(
+   let maxNeg = 0;
+   for (let b = 0; b < n; b++) {
+     const entries = blockVoteTypes?.[b];
+-    let d: number;
++    let d = 0;
+     if (entries && entries.length > 0) {
+-      d = entries[0][1] - entries[0][2];
+-      for (let i = 1; i < entries.length; i++) {
++      let found = false;
++      for (let i = 0; i < entries.length; i++) {
++        // Out-of-range index = a type appended to the legend after the mask was
++        // built (an optimistic cast); nothing has hidden it, so it stays visible.
++        const li = entries[i][0];
++        if (allowed && li < allowed.length && !allowed[li]) continue;
+         const v = entries[i][1] - entries[i][2];
+-        if (v > d) d = v;
++        if (!found || v > d) { d = v; found = true; }
+       }
+-    } else {
++      if (!found) d = 0;
++    } else if (!allowed) {
+       d = blockVotes[b] || 0;
+     }
+     diff[b] = d;
+diff --git a/client-react/src/components/TopBar/TopBar.tsx b/client-react/src/components/TopBar/TopBar.tsx
+index c2f28d4..db8b6be 100644
+--- a/client-react/src/components/TopBar/TopBar.tsx
++++ b/client-react/src/components/TopBar/TopBar.tsx
+@@ -229,8 +229,12 @@ export const TopBar = memo(function TopBar() {
+               current selection, which is what the second row is for. */}
+           <NavRail onHowItWorks={() => setShowHowItWorks(true)} />
+ 
+-          <div className={`vote-switcher-group ${(canVote || (start.coords && end.coords)) ? "" : "hidden-reserve"}`}>
+-            <span className="mode-prefix-label">Vote:</span>
++          {/* Always visible: this control is now the map's LEGEND as well as
++              the cast-target picker (see VoteTypeSelector) — it says which
++              proposal types are drawn and lets you toggle them — so it can no
++              longer be gated on having a selection to vote on. */}
++          <div className="vote-switcher-group">
++            <span className="mode-prefix-label">Proposals:</span>
+             <VoteTypeSelector />
+           </div>
+ 
+diff --git a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.css b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.css
+index 3b2e9be..1891eb4 100644
+--- a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.css
++++ b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.css
+@@ -158,25 +158,115 @@
+   right: auto;
+   width: max-content;
+   min-width: 100%;
++  /* The legend lists every vote type on the map — 20+ on curated maps — so it
++     scrolls rather than running off the bottom of the viewport. */
++  max-height: min(58vh, 460px);
+   background: var(--paper);
+   border: 1px solid var(--hairline);
+-  overflow: hidden;
++  overflow-x: hidden;
++  overflow-y: auto;
++  overscroll-behavior: contain;
+   z-index: calc(var(--z-dropdown) - 1);
+   text-align: left !important;
+ }
+ 
++/* ==========================================================================
++   Legend panel
++   The dropdown doubles as the map's legend (see VoteTypeSelector.tsx): every
++   row is a vote type drawn on the map, with a visibility checkbox on the left
++   and its net support on the right.
++   ========================================================================== */
++
++/* The filter readout stays put while the list scrolls under it, so the
++   background has to be opaque — --hover-bg is a translucent wash, layered here
++   over --paper rather than hardcoded, so it still follows the theme. */
++.vt-panel-head {
++  position: sticky;
++  top: 0;
++  z-index: 1;
++  display: flex;
++  align-items: center;
++  gap: var(--space-2);
++  padding: var(--space-2) var(--space-3);
++  border-bottom: 1px solid var(--hairline);
++  background: linear-gradient(var(--hover-bg), var(--hover-bg)), var(--paper);
++}
++
++.vt-panel-title {
++  font-size: var(--font-size-2xs);
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  color: var(--ink);
++  opacity: 0.5;
++}
++
++.vt-panel-count {
++  font-size: var(--font-size-2xs);
++  font-variant-numeric: tabular-nums;
++  color: var(--ink);
++  opacity: 0.5;
++}
++
++/* Filtered state is the one thing in this panel that must never be missed —
++   a filtered map reads exactly like an empty one. */
++.vt-panel-count.is-filtered {
++  color: var(--accent);
++  opacity: 1;
++}
++
++.vt-panel-action {
++  appearance: none;
++  margin-left: auto;
++  padding: 2px var(--space-2);
++  border: 1px solid var(--hairline);
++  background: transparent;
++  font: inherit;
++  font-size: var(--font-size-2xs);
++  color: var(--ink);
++  opacity: 0.7;
++  cursor: pointer;
++  transition: opacity 0.12s ease, border-color 0.12s ease;
++}
++
++.vt-panel-action:hover {
++  opacity: 1;
++  border-color: var(--ink);
++}
++
++/* Divider caption before the rows that can't be cast in the current mode. */
++.vt-section {
++  display: flex;
++  align-items: baseline;
++  gap: var(--space-2);
++  padding: var(--space-2) var(--space-3) var(--space-1);
++  border-top: 1px solid var(--hairline);
++  font-size: var(--font-size-2xs);
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  color: var(--ink);
++  opacity: 0.4;
++}
++
++.vt-section-note {
++  letter-spacing: 0;
++  text-transform: none;
++}
++
+ .vote-type-option {
+   display: flex !important;
+   align-items: center !important;
+   justify-content: flex-start !important;
+   gap: var(--space-2);
+-  padding: var(--space-2) var(--space-3);
++  /* The left rule is the "casting target" marker — a hairline that turns solid
++     accent on the selected row. Reserved on every row so nothing shifts. */
++  padding: var(--space-2) var(--space-3) var(--space-2) calc(var(--space-3) - 3px);
++  border-left: 3px solid transparent;
+   font-size: var(--control-font-size);
+   font-weight: 400;
+   letter-spacing: 0;
+   color: var(--ink);
+   cursor: pointer;
+-  transition: background 0.1s ease;
++  transition: background 0.1s ease, border-color 0.12s ease, opacity 0.12s ease;
+   text-align: left !important;
+ }
+ 
+@@ -184,6 +274,36 @@
+   background: var(--hover-bg);
+ }
+ 
++.vote-type-option.is-casting {
++  border-left-color: var(--accent);
++}
++
++.vote-type-option.is-casting .vote-type-label {
++  color: var(--ink-strong);
++}
++
++/* Toggled off: still legible (you have to be able to find it again), but
++   plainly not on the map. */
++.vote-type-option.is-hidden .vote-type-icon-img,
++.vote-type-option.is-hidden .vote-type-label,
++.vote-type-option.is-hidden .vt-net {
++  opacity: 0.38;
++}
++
++.vote-type-option.is-hidden .vote-type-label {
++  text-decoration: line-through;
++  text-decoration-thickness: 1px;
++}
++
++/* Wrong kind for the current selection — toggleable, not castable. */
++.vote-type-option.is-uncastable {
++  cursor: default;
++}
++
++.vote-type-option.is-uncastable .vote-type-label {
++  opacity: 0.65;
++}
++
+ .vote-type-option .vote-type-icon-img {
+   width: 18px;
+   height: 18px;
+@@ -199,18 +319,123 @@
+   text-align: left !important;
+ }
+ 
+-.vote-type-option .check-icon {
+-  margin-left: auto;
++/* ── Visibility checkbox ─────────────────────────────────────────────────── */
++
++.vt-vis {
++  appearance: none;
++  display: flex;
++  align-items: center;
++  justify-content: center;
+   flex-shrink: 0;
+-  font-size: 11px;
+-  font-weight: 400;
+-  opacity: 0;
++  width: 18px;
++  height: 18px;
++  padding: 0;
++  border: none;
++  background: transparent;
++  color: inherit;
++  cursor: pointer;
++}
++
++.vt-vis-box {
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  width: 13px;
++  height: 13px;
++  border: 1px solid var(--ink);
++  opacity: 0.45;
++  transition: opacity 0.12s ease, border-color 0.12s ease;
+ }
+ 
+-.vote-type-option.selected .check-icon {
++.vote-type-option:not(.is-hidden) .vt-vis-box {
++  opacity: 0.85;
++  border-color: var(--accent);
++  color: var(--accent);
++}
++
++.vt-vis:hover .vt-vis-box {
+   opacity: 1;
+ }
+ 
++.vt-vis:focus-visible .vt-vis-box {
++  outline: 1px solid var(--accent);
++  outline-offset: 1px;
++}
++
++/* The tick lands rather than pops — 110ms, no overshoot. */
++.vt-vis-box svg {
++  animation: vt-tick 0.11s ease-out;
++}
++
++@keyframes vt-tick {
++  from { opacity: 0; transform: scale(0.6); }
++  to   { opacity: 1; transform: scale(1); }
++}
++
++/* ── Support count / "only" ──────────────────────────────────────────────── */
++
++/* One right-hand slot holding both: the count normally, the "only" isolate
++   action while the row is hovered. Stacking them in a single grid cell keeps
++   the column width fixed so rows never reflow under the cursor. */
++.vt-tail {
++  display: grid;
++  flex-shrink: 0;
++  min-width: 6ch;
++  margin-left: var(--space-3);
++}
++
++.vt-tail > * {
++  grid-area: 1 / 1;
++  align-self: center;
++  justify-self: end;
++  transition: opacity 0.12s ease;
++}
++
++.vt-net {
++  font-size: var(--font-size-2xs);
++  font-variant-numeric: tabular-nums;
++  color: var(--ink);
++  opacity: 0.55;
++  pointer-events: none;
++}
++
++/* Net-against types read cold, exactly as their blocks paint. */
++.vt-net.is-negative {
++  color: var(--color-start);
++  opacity: 0.75;
++}
++
++.vt-only {
++  appearance: none;
++  padding: 1px 5px;
++  border: 1px solid var(--hairline);
++  background: var(--paper);
++  font: inherit;
++  font-size: var(--font-size-2xs);
++  color: var(--ink);
++  cursor: pointer;
++  opacity: 0;
++}
++
++.vote-type-option:hover .vt-net {
++  opacity: 0;
++}
++
++.vote-type-option:hover .vt-only {
++  opacity: 0.7;
++}
++
++.vt-only:hover {
++  opacity: 1 !important;
++  border-color: var(--ink);
++}
++
++/* Touch: no hover, so the isolate action can't hide behind one. */
++@media (hover: none) {
++  .vote-type-option:hover .vt-net { opacity: 0.55; }
++  .vote-type-option:hover .vt-only { opacity: 0; }
++}
++
+ .vote-type-option.vote-type-custom {
+   border-top: 1px solid var(--hairline);
+   opacity: 0.6;
+@@ -220,6 +445,26 @@
+   opacity: 1;
+ }
+ 
++.vt-empty {
++  padding: var(--space-3);
++  font-size: var(--control-font-size);
++  color: var(--ink);
++  opacity: 0.45;
++}
++
++/* Collapsed-control badge: the filter is in effect even with the panel shut. */
++.vote-type-filter-badge {
++  flex-shrink: 0;
++  margin-left: auto;
++  padding: 1px 4px;
++  border: 1px solid var(--accent);
++  font-size: var(--font-size-2xs);
++  font-variant-numeric: tabular-nums;
++  line-height: 1.3;
++  color: var(--accent);
++  pointer-events: none;
++}
++
+ @media (max-width: 1080px) {
+   .vote-type-selector {
+     width: 100%;
+diff --git a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx
+index e77bd70..fde601e 100644
+--- a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx
++++ b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx
+@@ -1,17 +1,59 @@
+-import { useState, useCallback, useEffect, useLayoutEffect, useRef, memo } from "react";
++// ==========================================================================
++// Vote-type selector — the map's legend AND the cast-target picker
++// ==========================================================================
++// One list, two jobs, because they are the same list: every row is a vote type
++// whose icon is painted on the map (as a top-proposal pin) and whose support is
++// painted into the heat. So the panel reads as a legend — icon, name, net
++// support — and each row carries the two things you can do with a legend entry:
++//
++//   the checkbox  → show/hide this type's heat and pins  (map/voteTypeFilter)
++//   the row       → make it the type you're voting for   (RouteContext.voteType)
++//
++// Rows whose kind doesn't match the current selection (a corridor type while
++// you have a single point) stay listed and toggleable — their proposals are on
++// screen — but aren't castable, so they sit below the castable ones.
++// ==========================================================================
++
++import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, memo } from "react";
+ import { useRoute, useTheme, useMap } from "../../context";
+ import { getSuggestionsForTheme } from "../../constants/voteTypes";
+-import { mapVoteTypesForPointType } from "../../map/runtime";
++import {
++  toggleVoteTypeVisible,
++  showAllVoteTypes,
++  showOnlyVoteTypes,
++} from "../../map/voteTypeFilter";
++import { registerVoteTypeLabel } from "../../map/voteTypeRegistry";
++import { useHiddenVoteTypes, useVoteTypeLegend } from "../../hooks/useVoteTypeLegend";
+ import { iconSrc, iconForLabel } from "../../themes";
+ import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
+ import { CheckIcon } from "../CheckIcon";
+ import { noAutofillProps } from "../../utils/noAutofill";
+ import "./VoteTypeSelector.css";
+ 
++/** One legend row: a vote type on this map. */
++interface PanelRow {
++  label: string;
++  /** Themed icon path, or null → the colorized suggestion glyph. */
++  icon: string | null;
++  /** Signed net support across the map (0 = no votes / perfectly contested). */
++  net: number;
++  /** Selectable as the cast target in the current selection mode. */
++  castable: boolean;
++}
++
++/** Support count for a legend row — "1,204", "−412", "" at zero. */
++function formatNet(net: number): string {
++  if (!net) return "";
++  const abs = Math.abs(net).toLocaleString("en-US");
++  return net < 0 ? `−${abs}` : abs;
++}
++
+ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+   const { voteType, setVoteType, pointType } = useRoute();
+   const theme = useTheme();
+   const map = useMap();
++  const hidden = useHiddenVoteTypes();
++  const legend = useVoteTypeLegend(pointType);
+   const [isOpen, setIsOpen] = useState(false);
+   const [inputValue, setInputValue] = useState("");
+   const [highlightedIndex, setHighlightedIndex] = useState(0);
+@@ -24,38 +66,51 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+   // The committed vote type when the field opened, restored if editing is cancelled.
+   const previousVoteTypeRef = useRef(voteType);
+ 
+-  // Prefer the resolved map's server-provided vote-type list; fall back to theme.
+-  const suggestions = map?.voteTypes?.length
+-    ? mapVoteTypesForPointType(map, pointType)
+-    : getSuggestionsForTheme(theme, pointType);
++  const isStationNetwork = (map?.network ?? "streets") !== "streets";
++
++  // The legend proper: every vote type the map draws, plus its authored types.
++  // A map that authored none of its own (legacy/preset maps) falls back to the
++  // theme's preset suggestions so there is still something to cast.
++  const rows: PanelRow[] = useMemo(() => {
++    const base: PanelRow[] = legend.map((e) => ({
++      label: e.label,
++      icon: e.icon,
++      net: e.net,
++      castable: e.castable,
++    }));
++    if (map?.voteTypes?.length) return base;
++    const known = new Set(base.map((r) => r.label));
++    const presets = getSuggestionsForTheme(theme, pointType)
++      .filter((s) => !known.has(s.label))
++      .map((s): PanelRow => ({ label: s.label, icon: s.icon, net: 0, castable: true }));
++    return [...presets, ...base];
++  }, [legend, map, theme, pointType]);
+ 
+   const inputLower = inputValue.trim().toLowerCase();
+-  const filteredSuggestions = inputLower
+-    ? suggestions.filter((s) => s.label.toLowerCase().includes(inputLower))
+-    : suggestions;
+-
+-  // Custom vote types already voted on this map. They surface only while the
+-  // user is typing — never in the default list — and carry no themed icon, so
+-  // they render with the colorized suggestion glyph. Kind-filtered like the
+-  // default suggestions (a route-kind custom type shouldn't offer itself for a
+-  // point selection); unknown kind (legacy rows) shows in both modes, and
+-  // station networks skip the filter entirely (mapVoteTypesForPointType rule:
+-  // stations only vote points, whatever kind the type was authored as).
+-  const isStationNetwork = (map?.network ?? "streets") !== "streets";
+-  const extraLabels = inputLower
++  const matchingRows = inputLower
++    ? rows.filter((r) => r.label.toLowerCase().includes(inputLower))
++    : rows;
++
++  // Custom vote types the server reported at load but that carry no live net
++  // (so buildVoteTypeLegend left them out of the legend). They surface only
++  // while typing — never in the default list — and are kind-filtered like the
++  // rest; station networks skip that filter (they only ever vote points,
++  // whatever kind the type was authored as).
++  const knownLabels = useMemo(() => new Set(rows.map((r) => r.label)), [rows]);
++  const searchOnlyRows: PanelRow[] = inputLower
+     ? (map?.searchVoteTypes ?? [])
+-        .filter((vt) => isStationNetwork || !vt.pointType || vt.pointType === pointType)
+-        .map((vt) => vt.label)
+-        .filter(
+-          (lbl) =>
+-            lbl.toLowerCase().includes(inputLower) &&
+-            !suggestions.some((s) => s.label.toLowerCase() === lbl.toLowerCase())
+-        )
++        .filter((vt) => !knownLabels.has(vt.label) && vt.label.toLowerCase().includes(inputLower))
++        .map((vt): PanelRow => ({
++          label: vt.label,
++          icon: iconForLabel(vt.label, map?.voteTypes),
++          net: 0,
++          castable: isStationNetwork || !vt.pointType || vt.pointType === pointType,
++        }))
+     : [];
+ 
+-  const hasExactMatch =
+-    suggestions.some((s) => s.label.toLowerCase() === inputLower) ||
+-    extraLabels.some((lbl) => lbl.toLowerCase() === inputLower);
++  const listRows = [...matchingRows, ...searchOnlyRows];
++
++  const hasExactMatch = listRows.some((r) => r.label.toLowerCase() === inputLower);
+   // Maps that disallow user suggestions can't add custom vote types.
+   const allowCustom = map ? map.allowSuggestions : true;
+   const showCustomOption = allowCustom && inputLower !== "" && !hasExactMatch;
+@@ -65,35 +120,27 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+   //   1. the map authored exactly one vote type overall, or
+   //   2. the pointType-filtered list happens to have one entry.
+   // Case 1 must ignore pointType: a route-only single type is filtered out of
+-  // `suggestions` while in point mode (before both endpoints are set), which
++  // the castable rows while in point mode (before both endpoints are set), which
+   // previously left the field unlocked until a full route was drawn. Keying the
+   // lock off the map's full list keeps it frozen in every mode.
+   const mapVoteTypes = map?.voteTypes ?? [];
++  const castableRows = rows.filter((r) => r.castable);
+   const frozenLabel = !allowCustom
+     ? mapVoteTypes.length === 1
+       ? mapVoteTypes[0].label
+-      : suggestions.length === 1
+-        ? suggestions[0].label
++      : castableRows.length === 1
++        ? castableRows[0].label
+         : null
+     : null;
+ 
+-  const options = [
+-    ...filteredSuggestions.map((s) => ({
+-      label: s.label,
+-      icon: s.icon,
+-      glyph: false,
+-      isCustom: false,
+-    })),
+-    ...extraLabels.map((lbl) => ({
+-      label: lbl,
+-      icon: "",
+-      glyph: true,
+-      isCustom: false,
+-    })),
+-    ...(showCustomOption
+-      ? [{ label: inputValue.trim(), icon: "", glyph: false, isCustom: true }]
+-      : []),
+-  ];
++  // Filter state, measured over the WHOLE legend (not the search-filtered view)
++  // so the readout is a stable statement about the map, not about the query.
++  const totalCount = rows.length;
++  const shownCount = rows.reduce((n, r) => n + (hidden.has(r.label) ? 0 : 1), 0);
++  const isFiltered = shownCount !== totalCount;
++
++  // Keyboard navigation runs over the rows plus the trailing "Suggest:" option.
++  const optionCount = listRows.length + (showCustomOption ? 1 : 0);
+ 
+   useEffect(() => {
+     setHighlightedIndex(0);
+@@ -117,7 +164,10 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+   }, [isOpen]);
+ 
+   const selectOption = useCallback(
+-    (label: string) => {
++    (label: string, isCustom = false) => {
++      // Committing a brand-new suggestion registers it immediately, so it joins
++      // the legend and the searchable list before the cast round-trips.
++      if (isCustom) registerVoteTypeLabel(label);
+       setVoteType(label);
+       setInputValue("");
+       inputValueRef.current = "";
+@@ -152,17 +202,21 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+     (e: React.KeyboardEvent<HTMLInputElement>) => {
+       if (e.key === "ArrowDown") {
+         e.preventDefault();
+-        setHighlightedIndex((prev) => Math.min(prev + 1, options.length - 1));
++        setHighlightedIndex((prev) => Math.min(prev + 1, optionCount - 1));
+       } else if (e.key === "ArrowUp") {
+         e.preventDefault();
+         setHighlightedIndex((prev) => Math.max(prev - 1, 0));
+       } else if (e.key === "Enter") {
+         e.preventDefault();
+-        if (options.length > 0) {
+-          const opt = options[highlightedIndex];
+-          if (opt) selectOption(opt.label);
++        if (optionCount > 0) {
++          const row = listRows[highlightedIndex];
++          if (row) {
++            if (row.castable) selectOption(row.label);
++          } else if (showCustomOption) {
++            selectOption(inputValue.trim(), true);
++          }
+         } else if (inputValue.trim()) {
+-          selectOption(inputValue.trim());
++          selectOption(inputValue.trim(), true);
+         }
+       } else if (e.key === "Escape") {
+         setVoteType(previousVoteTypeRef.current);
+@@ -172,7 +226,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+         inputRef.current?.blur();
+       }
+     },
+-    [options, highlightedIndex, inputValue, selectOption, setVoteType]
++    [optionCount, listRows, highlightedIndex, inputValue, showCustomOption, selectOption, setVoteType]
+   );
+ 
+   const handleChevronClick = useCallback((e: React.MouseEvent) => {
+@@ -181,7 +235,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+     if (isOpen) {
+       const trimmed = inputValueRef.current.trim();
+       if (trimmed) {
+-        selectOption(trimmed);
++        selectOption(trimmed, true);
+       } else {
+         setVoteType(previousVoteTypeRef.current);
+         setIsOpen(false);
+@@ -197,7 +251,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+         const trimmed = inputValueRef.current.trim();
+         if (trimmed) {
+-          selectOption(trimmed);
++          selectOption(trimmed, true);
+         } else if (isOpen) {
+           // Cancelled with an empty field — revert the live-typed vote type.
+           setVoteType(previousVoteTypeRef.current);
+@@ -209,6 +263,15 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+     return () => document.removeEventListener("mousedown", handleClickOutside);
+   }, [selectOption, setVoteType, isOpen]);
+ 
++  // Visibility gestures fire on mousedown and swallow the event: the row's own
++  // mousedown would otherwise commit the type and close the panel, and the
++  // default would pull focus off the search field mid-toggle.
++  const swallow = (e: React.MouseEvent, run: () => void) => {
++    e.preventDefault();
++    e.stopPropagation();
++    run();
++  };
++
+   // The committed type's themed icon: the map's own vote-type icon wins (user
+   // maps define their own), then a matching preset icon. Null → it's a custom
+   // type and renders the colorized suggestion glyph instead.
+@@ -218,6 +281,20 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+   // the vote type defaults to it via getDefaultVoteTypeForTheme, so casting works.
+   const frozenIcon = frozenLabel ? iconForLabel(frozenLabel, map?.voteTypes) : null;
+ 
++  // Where the castable half ends — the divider between "you can vote for this
++  // now" and "also drawn on the map".
++  const firstUncastable = listRows.findIndex((r) => !r.castable);
++
++  const renderIcon = (icon: string | null, label: string) =>
++    icon ? (
++      <img className="vote-type-icon-img" src={iconSrc(icon)} alt="" />
++    ) : (
++      <span
++        className="vote-type-icon-img"
++        dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(label, 18) }}
++      />
++    );
++
+   return (
+     <div
+       ref={containerRef}
+@@ -226,14 +303,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+     >
+       {frozenLabel ? (
+         <div className="vote-type-control">
+-          {frozenIcon ? (
+-            <img className="vote-type-icon-img" src={iconSrc(frozenIcon)} alt="" />
+-          ) : (
+-            <span
+-              className="vote-type-icon-img"
+-              dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(frozenLabel, 18) }}
+-            />
+-          )}
++          {renderIcon(frozenIcon, frozenLabel)}
+           <span className="vote-type-display-text">{frozenLabel}</span>
+         </div>
+       ) : (
+@@ -260,14 +330,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+         />
+         {!isOpen && voteType && (
+           <div className="vote-type-display">
+-            {displayIcon ? (
+-              <img className="vote-type-icon-img" src={iconSrc(displayIcon)} alt="" />
+-            ) : (
+-              <span
+-                className="vote-type-icon-img"
+-                dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(voteType, 18) }}
+-              />
+-            )}
++            {renderIcon(displayIcon, voteType)}
+             <span className="vote-type-display-text">{voteType}</span>
+           </div>
+         )}
+@@ -276,53 +339,119 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+             {allowCustom ? "Suggest a change..." : "Select a vote type"}
+           </div>
+         )}
++        {/* A filtered map is easy to mistake for an empty one, so the collapsed
++            control carries the count even when the panel is shut. */}
++        {!isOpen && isFiltered && (
++          <span
++            className="vote-type-filter-badge"
++            title={`${shownCount} of ${totalCount} proposal types shown on the map`}
++          >
++            {shownCount}/{totalCount}
++          </span>
++        )}
+         <span className="vote-type-chevron" onMouseDown={handleChevronClick}>
+           <span className="caret-down" />
+         </span>
+       </div>
+ 
+-      {isOpen && options.length > 0 && (
++      {isOpen && (
+         <div
+           className="vote-type-dropdown"
++          role="listbox"
+           style={dropdownMaxWidth ? { maxWidth: dropdownMaxWidth } : undefined}
+         >
+-          {options.map((option, index) => {
++          <div className="vt-panel-head">
++            <span className="vt-panel-title">Shown on map</span>
++            <span className={`vt-panel-count${isFiltered ? " is-filtered" : ""}`}>
++              {shownCount}/{totalCount}
++            </span>
++            <button
++              type="button"
++              className="vt-panel-action"
++              onMouseDown={(e) => swallow(e, () =>
++                isFiltered ? showAllVoteTypes() : showOnlyVoteTypes(rows.map((r) => r.label))
++              )}
++            >
++              {isFiltered ? "All" : "None"}
++            </button>
++          </div>
++
++          {listRows.map((row, index) => {
+             const isHighlighted = index === highlightedIndex;
+-            const isSelected = option.label === voteType;
++            const isCasting = row.label === voteType;
++            const visible = !hidden.has(row.label);
++            const cls = [
++              "vote-type-option",
++              isHighlighted ? "highlighted" : "",
++              isCasting ? "is-casting" : "",
++              visible ? "" : "is-hidden",
++              row.castable ? "" : "is-uncastable",
++            ].filter(Boolean).join(" ");
+ 
+-            if (option.isCustom) {
+-              return (
++            return (
++              <div key={row.label}>
++                {index === firstUncastable && (
++                  <div className="vt-section">
++                    {pointType === "point" ? "Corridor proposals" : "Point proposals"}
++                    <span className="vt-section-note">on the map, vote elsewhere</span>
++                  </div>
++                )}
+                 <div
+-                  key="custom"
+-                  className={`vote-type-option vote-type-custom ${isHighlighted ? "highlighted" : ""}`}
+-                  onMouseDown={() => selectOption(option.label)}
++                  className={cls}
++                  role="option"
++                  aria-selected={isCasting}
++                  onMouseDown={() => row.castable && selectOption(row.label)}
+                   onMouseEnter={() => setHighlightedIndex(index)}
++                  title={row.castable ? undefined
++                    : `Drawn on the map. Draw ${pointType === "point" ? "a route" : "a single point"} to vote for it.`}
+                 >
+-                  <span>Suggest: <em>"{option.label}"</em></span>
++                  <button
++                    type="button"
++                    className="vt-vis"
++                    role="switch"
++                    aria-checked={visible}
++                    aria-label={`${visible ? "Hide" : "Show"} ${row.label} on the map`}
++                    title={`${visible ? "Hide" : "Show"} on the map`}
++                    onMouseDown={(e) => swallow(e, () => toggleVoteTypeVisible(row.label))}
++                  >
++                    <span className="vt-vis-box">{visible && <CheckIcon size={10} />}</span>
++                  </button>
++                  {renderIcon(row.icon, row.label)}
++                  <span className="vote-type-label">{row.label}</span>
++                  <span className="vt-tail">
++                    <span className={`vt-net${row.net < 0 ? " is-negative" : ""}`}>
++                      {formatNet(row.net)}
++                    </span>
++                    <button
++                      type="button"
++                      className="vt-only"
++                      title={`Show only ${row.label}`}
++                      onMouseDown={(e) => swallow(e, () =>
++                        showOnlyVoteTypes(rows.map((r) => r.label), [row.label])
++                      )}
++                    >
++                      only
++                    </button>
++                  </span>
+                 </div>
+-              );
+-            }
+-
+-            return (
+-              <div
+-                key={option.label}
+-                className={`vote-type-option ${isHighlighted ? "highlighted" : ""} ${isSelected ? "selected" : ""}`}
+-                onMouseDown={() => selectOption(option.label)}
+-                onMouseEnter={() => setHighlightedIndex(index)}
+-              >
+-                {option.icon ? (
+-                  <img className="vote-type-icon-img" src={iconSrc(option.icon)} alt="" />
+-                ) : option.glyph ? (
+-                  <span
+-                    className="vote-type-icon-img"
+-                    dangerouslySetInnerHTML={{ __html: suggestionGlyphForLabel(option.label, 18) }}
+-                  />
+-                ) : null}
+-                <span className="vote-type-label">{option.label}</span>
+-                {isSelected && <span className="check-icon"><CheckIcon size={11} /></span>}
+               </div>
+             );
+           })}
++
++          {showCustomOption && (
++            <div
++              className={`vote-type-option vote-type-custom ${
++                highlightedIndex === listRows.length ? "highlighted" : ""}`}
++              onMouseDown={() => selectOption(inputValue.trim(), true)}
++              onMouseEnter={() => setHighlightedIndex(listRows.length)}
++            >
++              <span>Suggest: <em>"{inputValue.trim()}"</em></span>
++            </div>
++          )}
++
++          {optionCount === 0 && (
++            <div className="vt-empty">No proposal types match “{inputValue.trim()}”</div>
++          )}
+         </div>
+       )}
+       </>
+diff --git a/client-react/src/hooks/useVoteTypeLegend.ts b/client-react/src/hooks/useVoteTypeLegend.ts
+new file mode 100644
+index 0000000..87bac37
+--- /dev/null
++++ b/client-react/src/hooks/useVoteTypeLegend.ts
+@@ -0,0 +1,43 @@
++// React bindings for the two vote-type stores (map/voteTypeRegistry —
++// what's on the map, map/voteTypeFilter — what's drawn). Both are module-level
++// singletons so non-React hot paths (GraphLayer's canvas + proposal recomputes)
++// can read them synchronously; these hooks are the reactive view for the UI.
++
++import { useMemo, useSyncExternalStore } from "react";
++import { getCurrentMap } from "../map/runtime";
++import {
++  buildVoteTypeLegend,
++  getVoteTypeRegistryVersion,
++  subscribeVoteTypeRegistry,
++  type VoteTypeLegendEntry,
++} from "../map/voteTypeRegistry";
++import {
++  getHiddenVoteTypes,
++  subscribeVoteTypeFilter,
++} from "../map/voteTypeFilter";
++
++/** The set of labels currently toggled OFF. Re-renders on every filter change. */
++export function useHiddenVoteTypes(): ReadonlySet<string> {
++  return useSyncExternalStore(subscribeVoteTypeFilter, getHiddenVoteTypes, getHiddenVoteTypes);
++}
++
++/**
++ * The map's vote types in legend order, each stamped with its live net support
++ * and whether it can be cast in the current selection mode. Rebuilt only when
++ * the registry actually changes (version-keyed), so the panel doesn't re-render
++ * on every vote poll.
++ */
++export function useVoteTypeLegend(pointType: "route" | "point"): VoteTypeLegendEntry[] {
++  const version = useSyncExternalStore(
++    subscribeVoteTypeRegistry,
++    getVoteTypeRegistryVersion,
++    getVoteTypeRegistryVersion
++  );
++  const map = getCurrentMap();
++  return useMemo(
++    () => buildVoteTypeLegend(map, pointType),
++    // `version` is the registry's snapshot key — buildVoteTypeLegend reads the
++    // module state it guards. `map` is a load-time constant.
++    [version, map, pointType]
++  );
++}
+diff --git a/client-react/src/map/voteTypeFilter.test.ts b/client-react/src/map/voteTypeFilter.test.ts
+new file mode 100644
+index 0000000..7e74235
+--- /dev/null
++++ b/client-react/src/map/voteTypeFilter.test.ts
+@@ -0,0 +1,96 @@
++import { describe, it, expect, beforeEach } from "vitest";
++import {
++  getHiddenVoteTypes,
++  isVoteTypeVisible,
++  setVoteTypeVisible,
++  toggleVoteTypeVisible,
++  ensureVoteTypeVisible,
++  showAllVoteTypes,
++  showOnlyVoteTypes,
++  legendVisibilityMask,
++  subscribeVoteTypeFilter,
++  getVoteTypeFilterVersion,
++} from "./voteTypeFilter";
++
++describe("voteTypeFilter", () => {
++  beforeEach(() => {
++    showAllVoteTypes();
++  });
++
++  it("shows everything by default", () => {
++    expect(getHiddenVoteTypes().size).toBe(0);
++    expect(isVoteTypeVisible("Add a bike lane")).toBe(true);
++    // A type nobody has heard of is visible too — the store holds HIDDEN
++    // labels, so new vote types never need opting in.
++    expect(isVoteTypeVisible("Brand new suggestion")).toBe(true);
++  });
++
++  it("hides and re-shows a single label", () => {
++    setVoteTypeVisible("Trees", false);
++    expect(isVoteTypeVisible("Trees")).toBe(false);
++    expect(isVoteTypeVisible("Benches")).toBe(true);
++    toggleVoteTypeVisible("Trees");
++    expect(isVoteTypeVisible("Trees")).toBe(true);
++  });
++
++  it("ensureVoteTypeVisible un-hides (the cast path's guarantee)", () => {
++    setVoteTypeVisible("Trees", false);
++    ensureVoteTypeVisible("Trees");
++    expect(isVoteTypeVisible("Trees")).toBe(true);
++  });
++
++  it("showOnlyVoteTypes isolates the kept labels", () => {
++    showOnlyVoteTypes(["A", "B", "C"], ["B"]);
++    expect(isVoteTypeVisible("A")).toBe(false);
++    expect(isVoteTypeVisible("B")).toBe(true);
++    expect(isVoteTypeVisible("C")).toBe(false);
++    showAllVoteTypes();
++    expect(getHiddenVoteTypes().size).toBe(0);
++  });
++
++  it("showOnlyVoteTypes with no keeps hides them all", () => {
++    showOnlyVoteTypes(["A", "B"]);
++    expect(getHiddenVoteTypes().size).toBe(2);
++  });
++
++  it("notifies subscribers only on a real change", () => {
++    let calls = 0;
++    const stop = subscribeVoteTypeFilter(() => { calls++; });
++    setVoteTypeVisible("A", false);
++    expect(calls).toBe(1);
++    setVoteTypeVisible("A", false); // already hidden — no-op
++    expect(calls).toBe(1);
++    setVoteTypeVisible("A", true);
++    expect(calls).toBe(2);
++    stop();
++    setVoteTypeVisible("A", false);
++    expect(calls).toBe(2);
++  });
++
++  it("bumps the version on each change (the derived-array cache key)", () => {
++    const before = getVoteTypeFilterVersion();
++    setVoteTypeVisible("A", false);
++    expect(getVoteTypeFilterVersion()).toBe(before + 1);
++    setVoteTypeVisible("A", false);
++    expect(getVoteTypeFilterVersion()).toBe(before + 1);
++  });
++
++  describe("legendVisibilityMask", () => {
++    it("is null when nothing is hidden — the no-filter fast path", () => {
++      expect(legendVisibilityMask(["A", "B"])).toBeNull();
++    });
++
++    it("is null for an absent or empty legend", () => {
++      setVoteTypeVisible("A", false);
++      expect(legendVisibilityMask(undefined)).toBeNull();
++      expect(legendVisibilityMask([])).toBeNull();
++    });
++
++    it("marks hidden legend indices 0 and the rest 1", () => {
++      setVoteTypeVisible("B", false);
++      const mask = legendVisibilityMask(["A", "B", "C"]);
++      expect(mask).not.toBeNull();
++      expect([...mask!]).toEqual([1, 0, 1]);
++    });
++  });
++});
+diff --git a/client-react/src/map/voteTypeFilter.ts b/client-react/src/map/voteTypeFilter.ts
+new file mode 100644
+index 0000000..ac2de23
+--- /dev/null
++++ b/client-react/src/map/voteTypeFilter.ts
+@@ -0,0 +1,146 @@
++// ==========================================================================
++// Vote-type visibility filter
++// ==========================================================================
++// Which vote types the map is currently DRAWING. The legend (the vote-type
++// panel — see VoteTypeSelector) toggles labels in and out; everything that
++// renders vote signal reads this one store:
++//
++//   block heat   — voteApply.topProposalDiffs, masked by legend index
++//   edge heat    — GraphLayer's canvas path (no-block maps), per-type nets
++//   PBTP pins    — topProposals.selectTopProposals via `allowLabel`
++//   RBTP corridors — routeProposals.createRouteProposalJob via `allowLabel`
++//
++// The store holds HIDDEN labels, not visible ones, so the default is "show
++// everything" and a vote type that appears later (a custom suggestion someone
++// casts while you're looking at the map) is visible without anyone opting it
++// in. Casting a type also force-clears it from the set — see
++// castVote/noteVoteTypeCast — so you can never vote for something and watch
++// nothing happen.
++//
++// Scoped per map slug and kept in sessionStorage: filtering is a browsing
++// gesture for this visit, not a durable preference that could leave someone
++// staring at an empty map weeks later wondering why.
++// ==========================================================================
++
++import { getMapSlug } from "./runtime";
++
++const EMPTY: ReadonlySet<string> = new Set<string>();
++
++let hidden: ReadonlySet<string> = EMPTY;
++let loadedSlug: string | null = null;
++/** Bumps on every change — cache key for filter-derived arrays (see GraphLayer). */
++let version = 0;
++const listeners = new Set<() => void>();
++
++function storageKey(slug: string): string {
++  return `cityedit_vt_hidden:${slug}`;
++}
++
++/** Load this map's hidden set on first read, and again if the map changed. */
++function ensureLoaded(): void {
++  const slug = getMapSlug();
++  if (loadedSlug === slug) return;
++  loadedSlug = slug;
++  hidden = EMPTY;
++  if (!slug) return;
++  try {
++    const raw = sessionStorage.getItem(storageKey(slug));
++    if (!raw) return;
++    const parsed = JSON.parse(raw);
++    if (Array.isArray(parsed) && parsed.length > 0) {
++      hidden = new Set(parsed.filter((l): l is string => typeof l === "string"));
++    }
++  } catch {
++    /* private mode / bad JSON — start unfiltered */
++  }
++}
++
++function persist(): void {
++  const slug = loadedSlug;
++  if (!slug) return;
++  try {
++    if (hidden.size === 0) sessionStorage.removeItem(storageKey(slug));
++    else sessionStorage.setItem(storageKey(slug), JSON.stringify([...hidden]));
++  } catch {
++    /* ignore */
++  }
++}
++
++function commit(next: ReadonlySet<string>): void {
++  if (next.size === hidden.size && [...next].every((l) => hidden.has(l))) return;
++  hidden = next.size === 0 ? EMPTY : next;
++  version++;
++  persist();
++  for (const fn of [...listeners]) fn();
++}
++
++/** The labels currently hidden from the map. Empty ⇒ everything is drawn. */
++export function getHiddenVoteTypes(): ReadonlySet<string> {
++  ensureLoaded();
++  return hidden;
++}
++
++export function isVoteTypeVisible(label: string): boolean {
++  return !getHiddenVoteTypes().has(label);
++}
++
++/** Cache key for anything derived from the filter (see GraphLayer's edge nets). */
++export function getVoteTypeFilterVersion(): number {
++  ensureLoaded();
++  return version;
++}
++
++export function setVoteTypeVisible(label: string, visible: boolean): void {
++  ensureLoaded();
++  if (visible === !hidden.has(label)) return;
++  const next = new Set(hidden);
++  if (visible) next.delete(label);
++  else next.add(label);
++  commit(next);
++}
++
++export function toggleVoteTypeVisible(label: string): void {
++  setVoteTypeVisible(label, !isVoteTypeVisible(label));
++}
++
++/** Un-hide a label — the cast path calls this so a vote is always visible. */
++export function ensureVoteTypeVisible(label: string): void {
++  if (label) setVoteTypeVisible(label, true);
++}
++
++export function showAllVoteTypes(): void {
++  commit(EMPTY);
++}
++
++/**
++ * Hide every label in `labels` except `keep` — the panel's "only" gesture
++ * (isolate one proposal type) and its "none" gesture (keep nothing).
++ */
++export function showOnlyVoteTypes(labels: Iterable<string>, keep: Iterable<string> = []): void {
++  const kept = new Set(keep);
++  const next = new Set<string>();
++  for (const l of labels) if (!kept.has(l)) next.add(l);
++  commit(next);
++}
++
++/**
++ * Per-legend-index visibility mask for a vote-type legend, or null when nothing
++ * is hidden. Null is the "no filter" fast path every consumer short-circuits on,
++ * so an unfiltered map does exactly the work it did before this feature.
++ */
++export function legendVisibilityMask(legend: readonly string[] | undefined | null): Uint8Array | null {
++  const hiddenNow = getHiddenVoteTypes();
++  if (hiddenNow.size === 0 || !legend?.length) return null;
++  const mask = new Uint8Array(legend.length);
++  for (let i = 0; i < legend.length; i++) {
++    mask[i] = legend[i] && hiddenNow.has(legend[i]) ? 0 : 1;
++  }
++  return mask;
++}
++
++export function subscribeVoteTypeFilter(fn: () => void): () => void {
++  listeners.add(fn);
++  return () => {
++    listeners.delete(fn);
++  };
++}
+diff --git a/client-react/src/map/voteTypeRegistry.test.ts b/client-react/src/map/voteTypeRegistry.test.ts
+new file mode 100644
+index 0000000..29bc141
+--- /dev/null
++++ b/client-react/src/map/voteTypeRegistry.test.ts
+@@ -0,0 +1,110 @@
++import { describe, it, expect, beforeEach } from "vitest";
++import {
++  buildVoteTypeLegend,
++  publishVoteTypeNets,
++  registerVoteTypeLabel,
++  getVoteTypeRegistryVersion,
++  subscribeVoteTypeRegistry,
++  resetVoteTypeRegistry,
++} from "./voteTypeRegistry";
++import type { MapConfig } from "./runtime";
++
++const cfg = (over: Partial<MapConfig> = {}): MapConfig => ({
++  slug: "test-map",
++  name: "Test",
++  cityId: "nyc",
++  mode: "walk",
++  style: "walkways",
++  symbol: "",
++  allowSuggestions: true,
++  requiresPasscode: false,
++  voteTypes: [
++    { label: "Add a bike lane", icon: "", pointType: "route" },
++    { label: "Plant a tree", icon: "", pointType: "point" },
++  ],
++  ...over,
++});
++
++describe("voteTypeRegistry", () => {
++  beforeEach(() => {
++    resetVoteTypeRegistry();
++  });
++
++  it("lists every authored type even at zero votes", () => {
++    const rows = buildVoteTypeLegend(cfg(), "point");
++    expect(rows.map((r) => r.label)).toEqual(["Plant a tree", "Add a bike lane"]);
++    expect(rows.every((r) => r.net === 0 && !r.onMap)).toBe(true);
++  });
++
++  it("puts castable rows first, keeping discovery order within each half", () => {
++    const routeMode = buildVoteTypeLegend(cfg(), "route");
++    expect(routeMode.map((r) => [r.label, r.castable])).toEqual([
++      ["Add a bike lane", true],
++      ["Plant a tree", false],
++    ]);
++  });
++
++  it("stamps live net support onto the rows", () => {
++    publishVoteTypeNets(new Map([["Plant a tree", 412], ["Add a bike lane", -30]]));
++    const byLabel = Object.fromEntries(
++      buildVoteTypeLegend(cfg(), "point").map((r) => [r.label, r])
++    );
++    expect(byLabel["Plant a tree"]).toMatchObject({ net: 412, onMap: true });
++    // Negative nets survive: a counter-voted type paints cold, and the legend
++    // has to say so.
++    expect(byLabel["Add a bike lane"]).toMatchObject({ net: -30, onMap: true });
++  });
++
++  it("lists an unauthored label once it carries votes", () => {
++    publishVoteTypeNets(new Map([["Ban cars here", 7]]));
++    const rows = buildVoteTypeLegend(cfg(), "point");
++    expect(rows.map((r) => r.label)).toContain("Ban cars here");
++  });
++
++  it("does NOT list a voted-once search type with no live votes", () => {
++    // searchVoteTypes is the server's load-time snapshot; without a live net
++    // the type isn't drawn, so it stays out of the legend (it remains findable
++    // by search — see VoteTypeSelector's searchOnlyRows).
++    const rows = buildVoteTypeLegend(
++      cfg({ searchVoteTypes: [{ label: "Old idea", pointType: "point" }] }), "point");
++    expect(rows.map((r) => r.label)).not.toContain("Old idea");
++  });
++
++  it("lists a label cast this session immediately, before any votes land", () => {
++    registerVoteTypeLabel("Fresh idea");
++    const rows = buildVoteTypeLegend(cfg(), "point");
++    expect(rows.map((r) => r.label)).toContain("Fresh idea");
++  });
++
++  it("makes every type castable on a station network, whatever its kind", () => {
++    const rows = buildVoteTypeLegend(cfg({ network: "ebikes" }), "point");
++    expect(rows.every((r) => r.castable)).toBe(true);
++  });
++
++  it("keeps unknown-kind labels castable in both modes", () => {
++    publishVoteTypeNets(new Map([["Legacy label", 3]]));
++    for (const mode of ["route", "point"] as const) {
++      const row = buildVoteTypeLegend(cfg(), mode).find((r) => r.label === "Legacy label");
++      expect(row?.castable).toBe(true);
++    }
++  });
++
++  it("notifies subscribers only when the nets actually move", () => {
++    let calls = 0;
++    const stop = subscribeVoteTypeRegistry(() => { calls++; });
++    publishVoteTypeNets(new Map([["A", 1]]));
++    expect(calls).toBe(1);
++    publishVoteTypeNets(new Map([["A", 1]]));
++    expect(calls).toBe(1);
++    publishVoteTypeNets(new Map([["A", 2]]));
++    expect(calls).toBe(2);
++    stop();
++  });
++
++  it("registers a label once", () => {
++    const before = getVoteTypeRegistryVersion();
++    registerVoteTypeLabel("Once");
++    registerVoteTypeLabel("Once");
++    expect(getVoteTypeRegistryVersion()).toBe(before + 1);
++  });
++});
+diff --git a/client-react/src/map/voteTypeRegistry.ts b/client-react/src/map/voteTypeRegistry.ts
+new file mode 100644
+index 0000000..ba7476b
+--- /dev/null
++++ b/client-react/src/map/voteTypeRegistry.ts
+@@ -0,0 +1,166 @@
++// ==========================================================================
++// Vote-type registry — what this map is actually showing
++// ==========================================================================
++// One list answering "which vote types exist on this map, and how much support
++// does each carry". It backs the legend/vote-type panel (VoteTypeSelector) and
++// the topbar's filtered-state readout, and it is what makes a just-cast custom
++// vote type searchable immediately instead of only after the next map-config
++// fetch (the server reports custom types back via MapConfig.searchVoteTypes,
++// which the client holds as a snapshot taken at load).
++//
++// Three sources merge here:
++//   1. the map's authored vote types            (MapConfig.voteTypes — always listed)
++//   2. every label carrying votes right now     (net totals published by GraphLayer)
++//   3. labels cast during THIS session          (registerVoteTypeLabel, from castVote)
++// plus MapConfig.searchVoteTypes, which is (2) as of page load.
++//
++// Nets are BLOCK-grain where the map has a block layer — one person, one block,
++// mirroring the deduped counts the proposal modal shows — and per-edge nets
++// otherwise. A net is signed: a counter-voted type reads negative, exactly as
++// its blocks paint on the cold arm of the heat ramp.
++// ==========================================================================
++
++import { iconForLabel, pointTypeForLabel } from "../themes";
++import type { MapConfig } from "./runtime";
++
++/** label → signed net support (Σ up − Σ down) across the map. */
++let nets: ReadonlyMap<string, number> = new Map();
++/** Labels first seen this session (cast, or typed and committed), in order. */
++const sessionLabels: string[] = [];
++let version = 0;
++const listeners = new Set<() => void>();
++
++function notify(): void {
++  version++;
++  for (const fn of [...listeners]) fn();
++}
++
++/** Bumps whenever the nets or the session labels change — a snapshot key. */
++export function getVoteTypeRegistryVersion(): number {
++  return version;
++}
++
++export function getVoteTypeNets(): ReadonlyMap<string, number> {
++  return nets;
++}
++
++/**
++ * Replace the live per-type net totals. Called from GraphLayer's batched
++ * proposal sweep, which already walks the vote table. No-ops when nothing moved
++ * so an unchanged sweep doesn't re-render the panel.
++ */
++export function publishVoteTypeNets(next: ReadonlyMap<string, number>): void {
++  if (next.size === nets.size) {
++    let same = true;
++    for (const [label, net] of next) {
++      if (nets.get(label) !== net) { same = false; break; }
++    }
++    if (same) return;
++  }
++  nets = next;
++  notify();
++}
++
++/**
++ * Record a label the user just committed to (a cast, or a custom suggestion).
++ * Makes it searchable and legend-listed before the server round-trips it back
++ * in the next MapConfig.
++ */
++export function registerVoteTypeLabel(label: string): void {
++  const trimmed = label.trim();
++  if (!trimmed || sessionLabels.includes(trimmed)) return;
++  sessionLabels.push(trimmed);
++  notify();
++}
++
++export function getSessionVoteTypeLabels(): readonly string[] {
++  return sessionLabels;
++}
++
++export function subscribeVoteTypeRegistry(fn: () => void): () => void {
++  listeners.add(fn);
++  return () => {
++    listeners.delete(fn);
++  };
++}
++
++/** Test seam: drop all registry state (module-level singleton). */
++export function resetVoteTypeRegistry(): void {
++  nets = new Map();
++  sessionLabels.length = 0;
++  notify();
++}
++
++// ── Legend composition ─────────────────────────────────────────────────────
++
++export interface VoteTypeLegendEntry {
++  label: string;
++  /** Themed icon path, or null → render the colorized suggestion glyph. */
++  icon: string | null;
++  /** Route/point kind, null when unknown (a legacy label nothing flagged). */
++  pointType: "route" | "point" | null;
++  /** Signed net support on the map; 0 when the type carries no votes yet. */
++  net: number;
++  /** Has real votes — i.e. this type is drawn somewhere on the map. */
++  onMap: boolean;
++  /**
++   * Selectable as the current cast target. A route-kind type can't be cast on
++   * a single point (and vice versa), but it still occupies the legend, because
++   * its corridors are on screen and toggling them off is the whole point.
++   */
++  castable: boolean;
++}
++
++/**
++ * The map's vote types in legend order: castable-in-this-mode first, then the
++ * rest, each preserving discovery order (authored list → types already voted →
++ * this session's casts). Every authored type is listed even at zero votes (it
++ * is what the map invites you to propose); non-authored types are listed only
++ * once they carry votes or you cast one, so the legend stays a description of
++ * what's actually drawn rather than a dump of every string ever suggested.
++ */
++export function buildVoteTypeLegend(
++  cfg: MapConfig | null,
++  pointType: "route" | "point"
++): VoteTypeLegendEntry[] {
++  // Station networks vote on fixed points whatever kind their types were
++  // authored as — same rule as mapVoteTypesForPointType, so every type is
++  // castable there.
++  const isStationNetwork = (cfg?.network ?? "streets") !== "streets";
++
++  const ordered: string[] = [];
++  const seen = new Set<string>();
++  const push = (label: string) => {
++    if (!label || seen.has(label)) return;
++    seen.add(label);
++    ordered.push(label);
++  };
++
++  for (const vt of cfg?.voteTypes ?? []) push(vt.label);
++  for (const vt of cfg?.searchVoteTypes ?? []) if (nets.has(vt.label)) push(vt.label);
++  for (const label of nets.keys()) push(label);
++  for (const label of sessionLabels) push(label);
++
++  const authored = new Set((cfg?.voteTypes ?? []).map((vt) => vt.label));
++  const entries = ordered
++    .map((label): VoteTypeLegendEntry => {
++      const net = nets.get(label) ?? 0;
++      const kind = pointTypeForLabel(label, cfg?.voteTypes, cfg?.searchVoteTypes);
++      return {
++        label,
++        icon: iconForLabel(label, cfg?.voteTypes),
++        pointType: kind,
++        net,
++        onMap: nets.has(label),
++        // Unknown kind stays castable in both modes — the same "never drop an
++        // unflagged label" rule the proposal families use.
++        castable: isStationNetwork || !kind || kind === pointType,
++      };
++    })
++    // An unauthored label with no votes only exists because this session cast
++    // it — keep those; drop nothing else.
++    .filter((e) => authored.has(e.label) || e.onMap || sessionLabels.includes(e.label));
++
++  // Stable partition: castable first, discovery order preserved within each half.
++  return [...entries.filter((e) => e.castable), ...entries.filter((e) => !e.castable)];
++}
+diff --git a/client-react/src/utils/castVote.ts b/client-react/src/utils/castVote.ts
+index 697e9ec..d35af14 100644
+--- a/client-react/src/utils/castVote.ts
++++ b/client-react/src/utils/castVote.ts
+@@ -13,6 +13,8 @@
+ 
+ import { CONFIG } from "../config";
+ import { getMapSlug, getPasscodeToken } from "../map/runtime";
++import { ensureVoteTypeVisible } from "../map/voteTypeFilter";
++import { registerVoteTypeLabel } from "../map/voteTypeRegistry";
+ import { dlog, derror } from "./debugLog";
+ import { getVoterId } from "./voterIdentity";
+ import {
+@@ -155,6 +157,14 @@ export async function castVotes(params: {
+     return { ok: false, targetDir: direction, changedEdges: [] };
+   }
+ 
++  // Casting is the strongest possible statement that this vote type matters to
++  // you, so it always (a) enters the registry — making a brand-new custom label
++  // searchable and legend-listed immediately, instead of only after the next
++  // map-config fetch reports it back — and (b) clears any legend toggle hiding
++  // it. Without (b) you could vote for something and watch the map not change.
++  registerVoteTypeLabel(label);
++  ensureVoteTypeVisible(label);
++
+   const blocks = params.blocks ?? edges.map((e) => [e]);
+   const { targetDir, castEdges, clearEdges } = planBlockVote({
+     mode, edgeIds: edges, label, direction, blocks,

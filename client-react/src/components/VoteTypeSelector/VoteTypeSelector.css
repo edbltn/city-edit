@@ -158,11 +158,98 @@
   right: auto;
   width: max-content;
   min-width: 100%;
+  /* The legend lists every vote type on the map — 20+ on curated maps — so it
+     scrolls rather than running off the bottom of the viewport. */
+  max-height: min(58vh, 460px);
   background: var(--paper);
   border: 1px solid var(--hairline);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   z-index: calc(var(--z-dropdown) - 1);
   text-align: left !important;
+}
+
+/* ==========================================================================
+   Legend panel
+   The dropdown doubles as the map's legend (see VoteTypeSelector.tsx): every
+   row is a vote type drawn on the map, with a visibility checkbox on the left
+   and its net support on the right.
+   ========================================================================== */
+
+/* The filter readout stays put while the list scrolls under it, so the
+   background has to be opaque — --hover-bg is a translucent wash, layered here
+   over --paper rather than hardcoded, so it still follows the theme. */
+.vt-panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--hairline);
+  background: linear-gradient(var(--hover-bg), var(--hover-bg)), var(--paper);
+}
+
+.vt-panel-title {
+  font-size: var(--font-size-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  opacity: 0.5;
+}
+
+.vt-panel-count {
+  font-size: var(--font-size-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  opacity: 0.5;
+}
+
+/* Filtered state is the one thing in this panel that must never be missed —
+   a filtered map reads exactly like an empty one. */
+.vt-panel-count.is-filtered {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.vt-panel-action {
+  appearance: none;
+  margin-left: auto;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--hairline);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-size-2xs);
+  color: var(--ink);
+  opacity: 0.7;
+  cursor: pointer;
+  transition: opacity 0.12s ease, border-color 0.12s ease;
+}
+
+.vt-panel-action:hover {
+  opacity: 1;
+  border-color: var(--ink);
+}
+
+/* Divider caption before the rows that can't be cast in the current mode. */
+.vt-section {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  border-top: 1px solid var(--hairline);
+  font-size: var(--font-size-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  opacity: 0.4;
+}
+
+.vt-section-note {
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .vote-type-option {
@@ -170,18 +257,51 @@
   align-items: center !important;
   justify-content: flex-start !important;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  /* The left rule is the "casting target" marker — a hairline that turns solid
+     accent on the selected row. Reserved on every row so nothing shifts. */
+  padding: var(--space-2) var(--space-3) var(--space-2) calc(var(--space-3) - 3px);
+  border-left: 3px solid transparent;
   font-size: var(--control-font-size);
   font-weight: 400;
   letter-spacing: 0;
   color: var(--ink);
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition: background 0.1s ease, border-color 0.12s ease, opacity 0.12s ease;
   text-align: left !important;
 }
 
 .vote-type-option.highlighted {
   background: var(--hover-bg);
+}
+
+.vote-type-option.is-casting {
+  border-left-color: var(--accent);
+}
+
+.vote-type-option.is-casting .vote-type-label {
+  color: var(--ink-strong);
+}
+
+/* Toggled off: still legible (you have to be able to find it again), but
+   plainly not on the map. */
+.vote-type-option.is-hidden .vote-type-icon-img,
+.vote-type-option.is-hidden .vote-type-label,
+.vote-type-option.is-hidden .vt-net {
+  opacity: 0.38;
+}
+
+.vote-type-option.is-hidden .vote-type-label {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* Wrong kind for the current selection — toggleable, not castable. */
+.vote-type-option.is-uncastable {
+  cursor: default;
+}
+
+.vote-type-option.is-uncastable .vote-type-label {
+  opacity: 0.65;
 }
 
 .vote-type-option .vote-type-icon-img {
@@ -199,16 +319,121 @@
   text-align: left !important;
 }
 
-.vote-type-option .check-icon {
-  margin-left: auto;
+/* ── Visibility checkbox ─────────────────────────────────────────────────── */
+
+.vt-vis {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 400;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.vt-vis-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--ink);
+  opacity: 0.45;
+  transition: opacity 0.12s ease, border-color 0.12s ease;
+}
+
+.vote-type-option:not(.is-hidden) .vt-vis-box {
+  opacity: 0.85;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.vt-vis:hover .vt-vis-box {
+  opacity: 1;
+}
+
+.vt-vis:focus-visible .vt-vis-box {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The tick lands rather than pops — 110ms, no overshoot. */
+.vt-vis-box svg {
+  animation: vt-tick 0.11s ease-out;
+}
+
+@keyframes vt-tick {
+  from { opacity: 0; transform: scale(0.6); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ── Support count / "only" ──────────────────────────────────────────────── */
+
+/* One right-hand slot holding both: the count normally, the "only" isolate
+   action while the row is hovered. Stacking them in a single grid cell keeps
+   the column width fixed so rows never reflow under the cursor. */
+.vt-tail {
+  display: grid;
+  flex-shrink: 0;
+  min-width: 6ch;
+  margin-left: var(--space-3);
+}
+
+.vt-tail > * {
+  grid-area: 1 / 1;
+  align-self: center;
+  justify-self: end;
+  transition: opacity 0.12s ease;
+}
+
+.vt-net {
+  font-size: var(--font-size-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* Net-against types read cold, exactly as their blocks paint. */
+.vt-net.is-negative {
+  color: var(--color-start);
+  opacity: 0.75;
+}
+
+.vt-only {
+  appearance: none;
+  padding: 1px 5px;
+  border: 1px solid var(--hairline);
+  background: var(--paper);
+  font: inherit;
+  font-size: var(--font-size-2xs);
+  color: var(--ink);
+  cursor: pointer;
   opacity: 0;
 }
 
-.vote-type-option.selected .check-icon {
-  opacity: 1;
+.vote-type-option:hover .vt-net {
+  opacity: 0;
+}
+
+.vote-type-option:hover .vt-only {
+  opacity: 0.7;
+}
+
+.vt-only:hover {
+  opacity: 1 !important;
+  border-color: var(--ink);
+}
+
+/* Touch: no hover, so the isolate action can't hide behind one. */
+@media (hover: none) {
+  .vote-type-option:hover .vt-net { opacity: 0.55; }
+  .vote-type-option:hover .vt-only { opacity: 0; }
 }
 
 .vote-type-option.vote-type-custom {
@@ -218,6 +443,26 @@
 
 .vote-type-option.vote-type-custom.highlighted {
   opacity: 1;
+}
+
+.vt-empty {
+  padding: var(--space-3);
+  font-size: var(--control-font-size);
+  color: var(--ink);
+  opacity: 0.45;
+}
+
+/* Collapsed-control badge: the filter is in effect even with the panel shut. */
+.vote-type-filter-badge {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 1px 4px;
+  border: 1px solid var(--accent);
+  font-size: var(--font-size-2xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  color: var(--accent);
+  pointer-events: none;
 }
 
 @media (max-width: 1080px) {

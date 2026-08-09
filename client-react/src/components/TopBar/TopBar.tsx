@@ -229,8 +229,12 @@ export const TopBar = memo(function TopBar() {
               current selection, which is what the second row is for. */}
           <NavRail onHowItWorks={() => setShowHowItWorks(true)} />
 
-          <div className={`vote-switcher-group ${(canVote || (start.coords && end.coords)) ? "" : "hidden-reserve"}`}>
-            <span className="mode-prefix-label">Vote:</span>
+          {/* Always visible: this control is now the map's LEGEND as well as
+              the cast-target picker (see VoteTypeSelector) — it says which
+              proposal types are drawn and lets you toggle them — so it can no
+              longer be gated on having a selection to vote on. */}
+          <div className="vote-switcher-group">
+            <span className="mode-prefix-label">Proposals:</span>
             <VoteTypeSelector />
           </div>
 
