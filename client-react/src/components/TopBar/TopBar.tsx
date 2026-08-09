@@ -218,7 +218,7 @@ export const TopBar = memo(function TopBar() {
 
         <div className={`topbar-actions${start.coords ? " has-selection" : ""}`}>
           <div className="mode-switcher-group">
-            <span className="mode-prefix-label">Mode:</span>
+            <span className="mode-prefix-label">Map:</span>
             <ModeSwitcher />
           </div>
 
