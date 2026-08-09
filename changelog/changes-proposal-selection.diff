@@ -1,0 +1,368 @@
+diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
+index 9549477..99e9dd4 100644
+--- a/client-react/src/components/GraphLayer/GraphLayer.tsx
++++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -36,6 +36,7 @@ import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
+ import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, TOP_PROPOSAL_MIN_NET, type VoteTypeWinner } from "./topProposals";
+ import {
+   createRouteProposalJob, corridorFromEdgeIds, corridorSliceBetween, routeBlockEdges, isRouteCovered,
++  routeCoverageRatio, ROUTE_SELECTED_MIN_COVERAGE,
+   expandSelectionToUndirected,
+   type RouteProposal,
+ } from "./routeProposals";
+@@ -972,7 +973,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // them is still draggable — dragging there spawns a real mid. Recomputed
+   // reactively from winners + the path, so a vote that promotes/demotes a
+   // proposal adds/removes its highlight.
++  //
++  // TWO GRAINS, deliberately (see the effect below):
++  //   onPathEdgeSet        — the winner's own edge is ON the routed path
++  //                          (direction twins forgiven). Drives click-through:
++  //                          only here is there really a polyline underneath to
++  //                          hand the gesture to.
++  //   onSelectedBlockSet   — the winner sits on a BLOCK the selection touches.
++  //                          Drives the selected ring, and nothing else. Blocks
++  //                          are the interaction grain everywhere else (votes,
++  //                          the card's rows, its "top proposal" badges), so
++  //                          this is the set that makes the pin agree with the
++  //                          modal.
+   const [onPathEdgeSet, setOnPathEdgeSet] = useState<Set<number>>(() => new Set());
++  const [onSelectedBlockSet, setOnSelectedBlockSet] = useState<Set<number>>(() => new Set());
+   const startLat = startPoint?.lat ?? null;
+   const startLng = startPoint?.lng ?? null;
+   const endLat = endPoint?.lat ?? null;
+@@ -1078,15 +1092,28 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   }, [getWaypointAvoidRects]);
+ 
+   // Highlight (but do NOT add as waypoints) the top proposals the current route
+-  // PASSES THROUGH. Matched by UNDIRECTED node-pair, not raw edge index: a two-way
+-  // street stores each direction as its own edge, and the route often traverses
+-  // the twin of the vote winner's edge (an exact edge-id intersection misses it).
++  // runs through. Two sets, at the two grains described above:
++  //
++  //   ON THE PATH — matched by UNDIRECTED node-pair, not raw edge index: a
++  //     two-way street stores each direction as its own edge, and the route often
++  //     traverses the twin of the vote winner's edge (an exact edge-id
++  //     intersection misses it). These stay click-through so the path beneath is
++  //     still draggable (dragging there spawns a real mid).
++  //   ON A SELECTED BLOCK — the winner's edge is any edge of a block the
++  //     selection touches, exactly the set `topKindsFor` badges as a "point" top
++  //     proposal in the card. A junction block holds dozens of stub edges and a
++  //     route crosses two of them, so the path test above misses ~every
++  //     intersection proposal the route plainly runs through: the card badged it
++  //     while its pin stayed dark. This set is the pin's half of that agreement.
++  //
+   // Reactive to winners + the path, so a vote promoting/demoting a proposal
+-  // adds/removes its highlight. Waypoint proposals (start/end/mid) are excluded —
+-  // those are styled by `role`. These stay click-through so the path beneath is
+-  // still draggable (dragging there spawns a real mid).
++  // adds/removes its highlight. Waypoint proposals (start/end/mid) are excluded
++  // from both — those are styled by `role`.
+   useEffect(() => {
+-    const clear = () => setOnPathEdgeSet((prev) => (prev.size ? new Set() : prev));
++    const clear = () => {
++      setOnPathEdgeSet((prev) => (prev.size ? new Set() : prev));
++      setOnSelectedBlockSet((prev) => (prev.size ? new Set() : prev));
++    };
+     if (isStationNetwork || isHeatmapLoading) { clear(); return; }
+     if (startLat === null || endLat === null) { clear(); return; }
+     if (!pathEdgeIds || pathEdgeIds.length === 0 || winners.length === 0) { clear(); return; }
+@@ -1098,17 +1125,24 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     for (const ei of pathEdgeIds) {
+       if (ei < g.nEdges) pathPairs.add(pairKey(edgeFrom(g, ei), edgeTo(g, ei)));
+     }
+-    const next = new Set<number>();
++    // Same block union the card's rows and badges are computed over.
++    const blockEdges = new Set<number>();
++    for (const block of materializeBlocks(g, blockIndexRef.current, pathEdgeIds)) {
++      for (let i = 0; i < block.length; i++) blockEdges.add(block[i]);
++    }
++    const nextPath = new Set<number>();
++    const nextBlock = new Set<number>();
+     for (const w of winners) {
+       // Skip proposals that ARE waypoints — `role` styles those.
+       if (w.edgeIdx === startEdgeIdx || w.edgeIdx === endEdgeIdx || midEdgeSet.has(w.edgeIdx)) continue;
+       if (w.edgeIdx >= g.nEdges) continue;
+-      if (pathPairs.has(pairKey(edgeFrom(g, w.edgeIdx), edgeTo(g, w.edgeIdx)))) next.add(w.edgeIdx);
++      if (pathPairs.has(pairKey(edgeFrom(g, w.edgeIdx), edgeTo(g, w.edgeIdx)))) nextPath.add(w.edgeIdx);
++      if (blockEdges.has(w.edgeIdx)) nextBlock.add(w.edgeIdx);
+     }
+-    setOnPathEdgeSet((prev) => {
+-      if (prev.size === next.size && [...next].every((x) => prev.has(x))) return prev;
+-      return next;
+-    });
++    const sameSet = (prev: Set<number>, next: Set<number>) =>
++      prev.size === next.size && [...next].every((x) => prev.has(x));
++    setOnPathEdgeSet((prev) => (sameSet(prev, nextPath) ? prev : nextPath));
++    setOnSelectedBlockSet((prev) => (sameSet(prev, nextBlock) ? prev : nextBlock));
+   }, [startLat, startLng, endLat, endLng, pathEdgeIds, winners, startEdgeIdx, endEdgeIdx, midEdgeSet, isStationNetwork, isHeatmapLoading]);
+ 
+   // Pixel hit-test: is a screen point over a top-proposal ICON? Tests the icon's
+@@ -3439,14 +3473,25 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // header, so selecting a diamond (or manually tracing its corridor) titles
+   // the summary with that proposal. Mirrors the diamonds' own selected rule:
+   // block coverage (twin-expanded) first, else the explicitly-tapped RBTP
+-  // whose anchors are still waypoints.
++  // whose anchors are still waypoints. Coverage is a THRESHOLD, not all-or-
++  // nothing (ROUTE_SELECTED_MIN_COVERAGE), so several corridors can qualify at
++  // once — the best-covered one wins the header rather than whichever ranked
++  // first.
+   const coveredRouteProposal = useMemo(() => {
+     void isHeatmapLoading;
+     const topo = topologyRef.current;
+     if (!topo || !pathEdgeIds || pathEdgeIds.length === 0 || routeProposals.length === 0) return null;
+     const sel = expandSelectionToUndirected(
+       topo, pathEdgeIds, routeProposals.flatMap((p) => p.blockEdgeIds));
+-    const byCoverage = routeProposals.find((p) => isRouteCovered(p.blocks, sel)) ?? null;
++    let byCoverage: RouteProposal | null = null;
++    let bestRatio = 0;
++    for (const p of routeProposals) {
++      const ratio = routeCoverageRatio(p.blocks, sel);
++      if (ratio >= ROUTE_SELECTED_MIN_COVERAGE && ratio > bestRatio) {
++        bestRatio = ratio;
++        byCoverage = p;
++      }
++    }
+     if (byCoverage) return byCoverage;
+     const tapped = routeProposals.find((p) => p.id === selectedRbtpId) ?? null;
+     return tapped && anchorsAreWaypoints(tapped) ? tapped : null;
+@@ -3472,10 +3517,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // batched proposal sweep).
+   //   - "point": a PBTP winner sits on one of the card's blocks (the same
+   //     block-grain the rows sum over, so the badge marks a row whose count
+-  //     includes that winner's votes).
+-  //   - "route": an RBTP whose corridor is FULLY contained in the selection
+-  //     (every block covered, direction twins forgiven) — a selection that
+-  //     merely brushes a corridor doesn't badge it.
++  //     includes that winner's votes). Same set that rings the pin — see
++  //     onSelectedBlockSet.
++  //   - "route": an RBTP whose corridor is MOSTLY inside the selection
++  //     (≥ ROUTE_SELECTED_MIN_COVERAGE of its blocks, direction twins
++  //     forgiven) — a selection that merely brushes a corridor doesn't badge
++  //     it. Same predicate that lights the diamond.
+   // -------------------------------------------------------------------------
+   const topKindsFor = useCallback(
+     (edgeIds: readonly number[] | null | undefined, includeRoutes: boolean): TopKindMap => {
+@@ -3862,13 +3909,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       // A fanned-out icon (spread override) sits off the path at its grid cell, so
+       // it can't be click-through — it must take its own click to be pickable.
+       const onPath = role === null && onPathEdgeSet.has(w.edgeIdx);
++      // Selected-but-not-under-the-path: the proposal sits on a block the
++      // selection covers (the card's grain) without the routed polyline running
++      // over its own edge — typically an intersection proposal on a junction
++      // block the route crosses. It reads selected, but stays INTERACTIVE:
++      // there's no path under it to hand a click to, so passthrough would only
++      // make it dead to the pointer.
++      const onSelectedBlock = role === null && !onPath && onSelectedBlockSet.has(w.edgeIdx);
+       const passthrough = (role !== null || onPath) && !isStationNetwork && !override;
+       const tint: "start" | "end" | null =
+         role === "start" ? "start" : role === "end" ? "end" : null;
+-      // White/black ring: a mid waypoint's pin, an on-path proposal, the drag's
+-      // drop-target affordance, or the pinned selection. (Same `is-selected`.)
++      // White/black ring: a mid waypoint's pin, a proposal the selection runs
++      // through (on its path or on one of its blocks), the drag's drop-target
++      // affordance, or the pinned selection. (Same `is-selected`.)
+       const isSelected =
+-        role === "mid" || onPath || w.edgeIdx === dropTargetEdgeIdx || w.edgeIdx === selectedEdgeIdx;
++        role === "mid" || onPath || onSelectedBlock
++        || w.edgeIdx === dropTargetEdgeIdx || w.edgeIdx === selectedEdgeIdx;
+       const isSpread = !!override;
+       // A matched waypoint (start/end/mid) in route mode carries a remove [×]
+       // badge baked into its icon — pinned to the corner, so it scales and fans
+@@ -4042,7 +4098,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     // clusterEngine carries the placed squares (winners/stations) and re-runs
+     // once topology+votes arrive, so stations appear even with zero votes.
+   }, [clusterEngine, currentZoom, map, spread, collapseSpread, clearSpreadTimer, armSpreadTimer,
+-      selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,
++      selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, onSelectedBlockSet,
++      dropTargetEdgeIdx,
+       isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, mapStyle.basemap, isStationNetwork, canHover]);
+ 
+   // Cast a directional vote on a single proposal (edge, vote type) through the
+@@ -4168,8 +4225,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // selects it FLAT OUT (the corridor replaces the route — start/end at its
+   // anchors; only a drag-DROP threads it into an existing route). A diamond
+   // reads selected when either
+-  //   (a) the live route covers every one of its blocks (the auto-select rule,
+-  //       twin-expanded), or
++  //   (a) the live route covers MOST of its blocks (the auto-select rule,
++  //       twin-expanded, ≥ ROUTE_SELECTED_MIN_COVERAGE — running along a
++  //       corridor without quite reaching both ends still counts, which is how
++  //       the point pins on that same path already behave), or
+   //   (b) it's the explicitly-tapped RBTP and both anchors are still waypoints
+   //       — see selectedRbtpId; OSRM's leg between the anchors rarely re-traces
+   //       the corridor, so (a) alone left a tapped diamond looking unselected.
+@@ -5036,7 +5095,7 @@ function ProposalCard({
+                             title={topKind === "point"
+                               ? "Top proposal on this block"
+                               : topKind === "route"
+-                                ? "Top route proposal — fully inside this selection"
++                                ? "Top route proposal — mostly inside this selection"
+                                 : "Top proposal here — point and route"}
+                           >
+                             {(topKind === "point" || topKind === "both") && (
+diff --git a/client-react/src/components/GraphLayer/routeProposals.test.ts b/client-react/src/components/GraphLayer/routeProposals.test.ts
+index ebaa6c0..e185241 100644
+--- a/client-react/src/components/GraphLayer/routeProposals.test.ts
++++ b/client-react/src/components/GraphLayer/routeProposals.test.ts
+@@ -4,6 +4,7 @@ import {
+   proposalShapeClass,
+   routeBlockEdges,
+   isRouteCovered,
++  routeCoverageRatio,
+   expandSelectionToUndirected,
+   dropPointsCoveredByRoutes,
+   chooseAnchorOrder,
+@@ -125,18 +126,38 @@ describe("routeBlockEdges (hover highlight + vote set)", () => {
+   });
+ });
+ 
++describe("routeCoverageRatio", () => {
++  const blocks = [[0, 5], [1], [2]];
++
++  it("counts blocks holding at least one selected edge", () => {
++    expect(routeCoverageRatio(blocks, [5, 1, 2])).toBe(1);   // 5 covers block 0
++    expect(routeCoverageRatio(blocks, [0, 1])).toBeCloseTo(2 / 3);
++    expect(routeCoverageRatio(blocks, [])).toBe(0);
++  });
++
++  it("is 0 for a corridor with no blocks (never accidentally 'covered')", () => {
++    expect(routeCoverageRatio([], [1, 2, 3])).toBe(0);
++  });
++});
++
+ describe("isRouteCovered (auto-select)", () => {
+   const blocks = [[0, 5], [1], [2]];
+ 
+-  it("fires only when every block has at least one selected edge", () => {
+-    expect(isRouteCovered(blocks, [5, 1, 2])).toBe(true); // one per block (5 covers block 0)
+-    expect(isRouteCovered(blocks, [0, 1])).toBe(false);   // block [2] uncovered
++  it("fires on a substantial share of the blocks, not only on all of them", () => {
++    expect(isRouteCovered(blocks, [5, 1, 2])).toBe(true);  // 3/3
++    expect(isRouteCovered(blocks, [0, 1])).toBe(true);     // 2/3 ≥ 0.6 — ran along most of it
++    expect(isRouteCovered(blocks, [0])).toBe(false);       // 1/3 — merely brushed it
+     expect(isRouteCovered(blocks, [])).toBe(false);
+   });
+ 
+-  it("clears coverage when a block drops out of the selection", () => {
++  it("takes an explicit ratio for callers that want the strict rule", () => {
++    expect(isRouteCovered(blocks, [0, 1], 1)).toBe(false);
++    expect(isRouteCovered(blocks, [0, 1, 2], 1)).toBe(true);
++  });
++
++  it("clears coverage when enough blocks drop out of the selection", () => {
+     expect(isRouteCovered(blocks, new Set([0, 1, 2]))).toBe(true);
+-    expect(isRouteCovered(blocks, new Set([0, 1]))).toBe(false);
++    expect(isRouteCovered(blocks, new Set([1]))).toBe(false);
+   });
+ });
+ 
+diff --git a/client-react/src/components/GraphLayer/routeProposals.ts b/client-react/src/components/GraphLayer/routeProposals.ts
+index db844dc..8b61f46 100644
+--- a/client-react/src/components/GraphLayer/routeProposals.ts
++++ b/client-react/src/components/GraphLayer/routeProposals.ts
+@@ -1,3 +1,4 @@
++// Algorithm doc: docs/algorithms/03-route-proposals.md
+ // ==========================================================================
+ // Route-based top proposals (RBTPs) — client side
+ // ==========================================================================
+@@ -143,13 +144,49 @@ export function routeBlockEdges(p: RouteProposal): number[] {
+ }
+ 
+ // --------------------------------------------------------------------------
+-// Auto-select coverage (block-grained) — mirrors server is_route_covered.
++// Auto-select coverage (block-grained).
+ // --------------------------------------------------------------------------
+-/** True iff the selection covers EVERY block (≥1 of each block's edges). */
+-export function isRouteCovered(blocks: number[][], selectedEdges: Iterable<number>): boolean {
++/**
++ * Share of a corridor's blocks the selection reaches (≥ 1 selected edge in the
++ * block). 0 for a corridor with no blocks.
++ */
++export function routeCoverageRatio(
++  blocks: number[][],
++  selectedEdges: Iterable<number>
++): number {
+   const sel = selectedEdges instanceof Set ? selectedEdges : new Set(selectedEdges);
++  if (blocks.length === 0) return 0;
++  let covered = 0;
++  for (const block of blocks) if (block.some((e) => sel.has(e))) covered++;
++  return covered / blocks.length;
++}
++
++/**
++ * A corridor reads SELECTED once the selection covers at least this share of
++ * its blocks. NOT 1.0: a selection that runs along most of a corridor plainly
++ * "is" that corridor to the person who traced it, yet full coverage almost
++ * never survives the ends — the route starts and stops mid-corridor, or OSRM
++ * clips a junction block at a turn. Requiring all-of-it left a diamond dark
++ * while the point pins on the very same path lit up (they only have one block
++ * to cover, so any overlap IS full coverage for them). Raise it toward 1 and
++ * corridors go dark again on near-misses; drop it much below a half and a
++ * selection that merely brushes a long corridor starts claiming it.
++ */
++export const ROUTE_SELECTED_MIN_COVERAGE = 0.6;
++
++/**
++ * True iff the selection covers at least `minRatio` of the route's blocks —
++ * the shared predicate behind the diamond's selected ring, the route-summary
++ * card's header, and the card's "top proposal" row badge, so those three can
++ * never disagree about what the selection stands for.
++ */
++export function isRouteCovered(
++  blocks: number[][],
++  selectedEdges: Iterable<number>,
++  minRatio = ROUTE_SELECTED_MIN_COVERAGE
++): boolean {
+   if (blocks.length === 0) return false;
+-  return blocks.every((block) => block.some((e) => sel.has(e)));
++  return routeCoverageRatio(blocks, selectedEdges) >= minRatio;
+ }
+ 
+ /**
+diff --git a/docs/three-layer-model.md b/docs/three-layer-model.md
+index e15c598..c062c53 100644
+--- a/docs/three-layer-model.md
++++ b/docs/three-layer-model.md
+@@ -279,12 +283,21 @@ proposal → blocks is a well-defined projection.
+ ### 3.3 Selection behavior
+ 
+ - An RBTP renders **selected** when either:
+-  1. **Coverage** — the current selection covers **all of its blocks** (≥ 1
+-     selected edge in every block), exactly like PBTPs render selected when
+-     their block is covered. `isRouteCovered` is the shared predicate, with the
+-     selection **expanded to direction twins** first
++  1. **Coverage** — the current selection covers at least
++     `ROUTE_SELECTED_MIN_COVERAGE` (0.6) of its blocks (≥ 1 selected edge in a
++     covered block), the same rule that makes a PBTP render selected when its
++     one block is covered. `isRouteCovered` is the shared predicate — the
++     diamond's ring, the route card's header, and the card's "top proposal" row
++     badge all ask it, so they cannot disagree about what the selection stands
++     for. The selection is **expanded to direction twins** first
+      (`expandSelectionToUndirected`) — a routed path often traverses the twin
+      of the edge a corridor's block recorded.
++
++     The threshold is not 1.0 because full coverage almost never survives the
++     ends: a route that runs along a corridor starts and stops mid-corridor, or
++     OSRM clips a junction block at a turn. Requiring all-of-it left the diamond
++     dark while the point pins on that very path lit up — a point has one block,
++     so any overlap already *is* full coverage for it.
+   2. **Explicit tap** — it is the RBTP the user tapped (GraphLayer's
+      `selectedRbtpId`) and **both of its anchors are still waypoints** of the
+      current route. Editing an anchor away or clearing the route deselects it.
+@@ -295,6 +308,15 @@ proposal → blocks is a well-defined projection.
+   especially on maps without block artifacts (singleton blocks). Routing the
+   leg through the proposal's stored `edgeIds` verbatim remains an open
+   follow-up.
++- A **PBTP** renders **selected** when the selection touches its **block** —
++  GraphLayer's `onSelectedBlockSet`, the same block union `topKindsFor` badges
++  in the card. Matching the winner's own edge against the routed path
++  (`onPathEdgeSet`, direction twins forgiven) is a strictly narrower test and
++  is kept for one thing only: deciding whether the pin goes **click-through**,
++  which is safe only where a route polyline really lies underneath it. A
++  junction block holds dozens of stub edges and a route crosses two, so the
++  path test alone missed nearly every intersection proposal a route ran through
++  — the card badged it while its pin stayed dark.
+ 
+ ## 4. Vote semantics — block-scoped clear-then-cast
+ 
