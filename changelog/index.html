@@ -29,6 +29,24 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-09-voters-blocks-counts.html">
+    <div class="date">2026-08-09</div>
+    <h2>Voters and Blocks: a crooked header and counts that never landed</h2>
+    <p>Two bugs off one screenshot. The header captions looked misaligned <em>again</em>, but the
+    earlier fix had shipped and was working — measured on the live card, both sat 0.0px off their
+    columns' centres. The error was on the axis nobody had checked: <strong>VOTERS rendered 3.5px
+    above BLOCKS</strong>, because one caption is bottom-aligned to the row while the other was
+    centred inside a 19px control mirror, and two labels in one header row that don't share a
+    baseline read exactly like horizontal raggedness. The vote columns, meanwhile, read
+    <code>‒</code> and stayed there. Not the server — prod answers a 4000-edge union in 150ms. The
+    distinct-voter request refetches on a token that bumps for <em>every vote anyone casts anywhere
+    on the map</em>, and its cleanup marked the open request cancelled, discarding a reply that was
+    still perfectly correct for the selection on screen. Nothing reached the cache, so every retry
+    took the cold, undebounced path for the next vote to kill in turn: a storm that never resolved,
+    on a card whose only fallback is &ldquo;pending&rdquo;. An answer is keyed by the edge set, so it
+    is now kept whoever asked — and a burst of votes costs one request plus one, not one per vote.</p>
+  </a>
+
   <a class="entry" href="./2026-08-09-proposal-selection-grain.html">
     <div class="date">2026-08-09</div>
     <h2>The pin and the card now agree on what you selected</h2>

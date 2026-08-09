@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voters and Blocks: a crooked header and counts that never landed — 2026-08-09</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Voters and Blocks: a crooked header and counts that never landed</h1>
+    <div class="dateline">2026-08-09 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#align">The captions never shared a baseline</a>
+<a href="#counts">The votes cancelled their own count</a>
+<a href="#tests">The coalescing rules, without a DOM</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Two bugs reported off one screenshot of a prod proposal card. The header was crooked on the axis nobody had measured — <strong>VOTERS sat 3.5px above BLOCKS</strong>, because one caption is bottom-aligned to the row and the other was centred inside a 19px control mirror. And the vote columns read <code>&ldquo;‒&rdquo;</code> and stayed there: the distinct-voter request was <strong>cancelled by the very votes it was counting</strong>, so its answer was thrown away before it could reach the cache — and because nothing was cached, every retry took the cold, undebounced path for the next vote to kill in turn.</p>
+
+  
+    <section class="card" id="align">
+      <div class="tag">BUG 1 · HEADER</div>
+      <h2>The captions never shared a baseline</h2>
+      <h3>Symptom</h3>
+      <p>The BLOCKS and VOTERS captions still looked misaligned, months after a fix that was supposed to line them up.</p>
+      <h3>Root cause</h3>
+      <ul><li>The earlier fix (<code>95d81c6</code>) was real and <strong>is already live on prod</strong> — the shipped bundle contains its <code>minWidth: ${String(total).length}ch</code> padding, and measured on the running card both captions sit <strong>0.0px</strong> off their columns' centres. Horizontally there was nothing left to fix, which is why re-shipping it would have changed nothing</li>
+<li>The remaining error is <strong>vertical</strong>. Measured on prod: VOTERS ink top/bottom sat <strong>3.5px above</strong> BLOCKS. Two labels side by side in one header row that don't share a baseline read exactly like horizontal raggedness — hence &quot;still slightly misaligned&quot;</li>
+<li>The two captions were placed by unrelated rules. BLOCKS is an ordinary flex item, so the head's <code>align-items: flex-end</code> bottom-aligns it to the row. VOTERS is an absolute overlay on the vote-control <em>mirror</em>, centred inside it — and that mirror is <strong>19px</strong> tall because it faithfully copies the real control's metrics (11px text + 3px padding + hairline borders). Centring a 10px caption in 19px lands nowhere near where a 10px caption bottom-aligned in the row sits</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Give the caption the same <strong>bottom edge</strong> instead of the same centre: <code>align-items: flex-end</code>, and a line-height that matches BLOCKS so the two line boxes are identical rather than merely adjacent</li>
+<li><code>inset: 0</code> resolves against the mirror's <strong>padding</strong> box — one hairline short of the row's own bottom — so the caption anchors to <code>bottom: calc(-1 * var(--vote-border))</code>, reaching back out through the border</li>
+<li>That border width is now a <strong>token</strong> on <code>.graph-vote</code> rather than a literal <code>1px</code>, so the compensation can't drift away from the border it compensates</li>
+<li>Phones sized the two captions differently (BLOCKS inherited the 10px data-cell rule while VOTERS was 9px). Two captions sharing a bottom edge must share a size or their baselines part again, so the head's BLOCKS rule is 9px there too</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/styles/globals.css</li></ul>
+    </section>
+    
+
+    <section class="card" id="counts">
+      <div class="tag">BUG 2 · COUNTS</div>
+      <h2>The votes cancelled their own count</h2>
+      <h3>Symptom</h3>
+      <p>Every vote column on the card rendered the pending figure-dash and stayed there; casting a vote didn't move it.</p>
+      <h3>Root cause</h3>
+      <ul><li>Not the server. <code>/api/route-votes</code> on prod answers a full <strong>4000-edge union in ~150ms</strong>, and it was never returning an error — a 141-, 384- and 440-block corridor all resolved correctly when asked directly</li>
+<li>Not the etag/304 desync either: prod's <code>graph-votes</code> reports <code>x-vote-rev</code> equal to <code>x-vote-rev-current</code>, so nothing was being served rev-stale and the bounded stale-refetch never engaged</li>
+<li><code>useRouteVoteRows</code> refetches on <code>refetchToken = votesVersion + graphVoteVersion</code>. That bumps on <strong>every vote mutation and every heatmap refresh</strong> — a WS delta from any user anywhere on the map, an optimistic cast, a snapshot reconcile. So the effect re-runs constantly on a busy map</li>
+<li>Its cleanup set <code>cancelled = true</code>, and the response handler tested that flag <strong>before writing the cache</strong>. A vote landing while the first request for a selection was open therefore discarded a reply that was still perfectly correct for the selection on screen</li>
+<li>Because nothing reached the cache, the next run took the <strong>cold path</strong> again — <code>delay = firstDelayMs</code>, which is <code>0</code> for the route card, not the 350ms debounce — and fired immediately, for the next vote to discard in turn. A request storm that never resolves, on a card whose only fallback state is &quot;pending&quot;</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The cancel flag was guarding a real invariant — one selection's rows must never land on another's card — but that invariant is about the <strong>key</strong>, not about which effect run happened to ask. So it now compares the live key and lets the answer through</li>
+<li>Rows resolve through a new <code>routeVotesCache.ts</code> that owns the contract: an answer is keyed by the edge set, so it is <strong>cached unconditionally</strong> once it arrives, whoever asked and whether or not they re-asked</li>
+<li><strong>One request per key at a time.</strong> A caller arriving mid-flight joins the open request instead of opening a second</li>
+<li>A caller that arrives mid-flight still wants FRESH rows (it only re-asked because a vote landed), so the flight is marked stale and re-issues <strong>exactly once</strong> on settle. A burst of bumps costs &quot;this request plus one more&quot; rather than one request per bump</li>
+<li>It never rejects — a network blip resolves to whatever is cached, so it cannot strand a card either</li>
+<li>The ref sync moved into an effect. It was assigned during render (a pre-existing <code>react-hooks/refs</code> error) and the fix now <em>leans</em> on that ref being current when the response lands, so it shouldn't stay a lint violation</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/routeVoteRows.ts</li>
+<li>client-react/src/components/GraphLayer/routeVotesCache.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="tests">
+      <div class="tag">REGRESSION</div>
+      <h2>The coalescing rules, without a DOM</h2>
+      <h3>Symptom</h3>
+      <p>—</p>
+      <h3>Root cause</h3>
+      <ul><li>The repo's client tests are pure-node (no jsdom, no testing-library), so a hook can't be rendered in a test</li>
+<li>Injecting the fetcher moves every rule worth pinning down out of React and into a module that <em>can</em> be tested directly</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>9 cases</strong>: an answer arriving after the asker re-asked is kept; N concurrent asks collapse to 1 request + 1 trailing refetch; no trailing refetch when nothing asked again; a resolved key serves without refetching; different edge sets stay apart; a failed request neither caches nor leaves the key marked in-flight; a failed <em>re</em>fetch keeps the previous answer; LRU eviction past the cap; re-resolving a key refreshes its recency</li>
+<li>Deferred promises rather than timing guesses, so &quot;while the request is open&quot; is an actual state in the test</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/routeVotesCache.test.ts</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li><strong>Reproduced before changing anything</strong>, per the debug-tab workflow — <code>localhost:3000/m/nyc-proposals?tab=counts</code>, plus the live prod card for the measurements that mattered.</li>
+<li>The alignment claim was <strong>measured, not eyeballed</strong>: <code>getBoundingClientRect</code> + a <code>Range</code> over the caption text on the running prod card. VOTERS-vs-BLOCKS ink delta <strong>3.5px → 0.0px</strong> after the fix, with both captions still centred on their columns (<code>-0.05px</code>, <code>-0.02px</code>).</li>
+<li>Confirmed <code>95d81c6</code> <strong>had already shipped</strong> by grepping prod's served bundle (<code>index-B4NpKIHS.js</code>) for its <code>minWidth</code> padding — so &quot;it just hasn't deployed&quot; was ruled out rather than assumed.</li>
+<li>Confirmed prod's <code>useRouteVoteRows</code> is <strong>byte-for-byte equivalent to main's</strong> (extracted from the minified bundle), so the counts bug is in main and not a stale deploy.</li>
+<li>Server ruled out directly against prod: <code>/api/route-votes</code> with a 4000-id body returns <strong>200 in ~150ms</strong> across <code>nyc-proposals</code>, <code>nyc-walkways</code> and <code>e-bikes-3</code>.</li>
+<li>The fix was verified <strong>under the failure's own conditions</strong>: a 383-block corridor with 6s of injected latency, then six casts fired inside the open window. Request count stayed at <strong>1</strong>, one trailing refetch landed, and the counts resolved and reflected the casts. Each of those six would previously have cancelled the open request and started another.</li>
+<li><code>npx vitest run</code>: <strong>410 passing</strong>, 1 skipped. <code>npx tsc -b</code> clean. <code>npx eslint</code> clean on all three files (and one pre-existing error removed).</li>
+<li>Test votes cast against the local dev DB during the investigation were <strong>un-cast afterwards</strong> — the corridors and the point card are back to their prior counts.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open a multi-block route proposal card and look at the header: <strong>BLOCKS and VOTERS should sit on one line</strong>, each centred over its own column. This is the fix for what the screenshot showed.</li>
+<li>Watch the vote columns on a fresh corridor: they should go from <code>‒</code> to real numbers <strong>once</strong> and stay there — not flicker back to pending.</li>
+<li>Cast a vote from the card and confirm the <strong>net updates within about a second</strong> rather than reverting to the pending dash.</li>
+<li>Open DevTools → Network, filter <code>route-votes</code>, and cast several votes quickly: you should see <strong>one request plus one follow-up</strong>, not one per click.</li>
+<li>Re-open a corridor you looked at earlier in the session — its counts should render <strong>immediately</strong> from cache, with no pending flash.</li>
+<li>Narrow the window to phone width and re-check the header: both captions should be the same size and still share a baseline.</li>
+<li>This is a <strong>client-only</strong> change, so it ships as an assets/code overlay — remember the prod DB backup before deploying, and verify by the served asset hash.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/routeVoteRows.ts</span>
+            <span class="stat"><span class="d-add">+40</span> / <span class="d-del">-32</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GraphLayer / distinct-voter counts</span>
+        <span class="ctx-sum">The single place that asks /api/route-votes, so the route-summary card and the hovered corridor always agree about the same edge set</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">routeVoteRows.ts</span>
+        <span class="ctx-sum">~130 LOC — the hook: build a capped edge-set query, debounce, fetch, key-match the answer</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module header</span><span class="ol-sum">+3 lines — why losing an answer is expensive here</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">imports</span><span class="ol-sum">changed — the cache moves out to routeVotesCache</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">module-level `cache` Map</span><span class="ol-sum">REMOVED — now owned by routeVotesCache</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">ROUTE_VOTES_HOVER_DELAY_MS</span><span class="ol-sum">unchanged — hover waits out the sweep</span></li><li class="dim"><span class="ol-label">RouteVoteRowsOptions / Result</span><span class="ol-sum">unchanged — refetchToken, firstDelayMs, {rows, key}</span></li><li class="dim"><span class="ol-label">query useMemo (dedupe + cap)</span><span class="ol-sum">unchanged — ROUTE_VOTES_EDGE_CAP at 4000</span></li><li class="changed"><span class="ol-label">queryRef sync</span><span class="ol-sum">changed — assigned in an effect, not during render</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">fetch effect</span><span class="ol-sum">rewritten — no cancel flag; key-scoped acceptance</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">return (cached ?? fetched)</span><span class="ol-sum">changed — reads through cachedRouteVoteRows</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>`let cancelled = false` and the `if (cancelled || ...) return` guard are GONE — that pair is the bug</li><li>The reply is accepted on `queryRef.current?.key !== q.key`: what makes an answer stale is the SELECTION moving on, not the effect re-running</li><li>Cleanup now only clears the not-yet-fired timer; a request already in flight is left to land and populate the cache</li><li>The fetcher is passed to loadRouteVoteRows as a closure, so response shape (r.ok, j.rows) stays here and coalescing lives there</li><li>delay still = ROUTE_VOTES_DEBOUNCE_MS for a resolved key, firstDelayMs for a cold one — unchanged semantics, now reading the shared cache</li><li>queryRef moves into `useEffect(() =&gt; { queryRef.current = query })` — declared FIRST so it is current before the fetch effect runs</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeVoteRows.ts b/client-react/src/components/GraphLayer/routeVoteRows.ts</span>
+<span class="d-meta">index ef4a20f..ccc2cd5 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/routeVoteRows.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeVoteRows.ts</span>
+<span class="d-hunk">@@ -1,3 +1,4 @@</span>
+<span class="d-add">+// Algorithm doc: docs/algorithms/07-counts.md</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-ctx"> // Route vote rows — DISTINCT-voter counts for a multi-block selection</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-hunk">@@ -16,20 +17,18 @@</span>
+<span class="d-ctx"> // The rows are `null` until the answer lands. Callers render that as PENDING</span>
+<span class="d-ctx"> // rather than substituting local sums: a number that is wrong for 300ms and</span>
+<span class="d-ctx"> // then silently changes is worse than a number that visibly hasn&#x27;t arrived.</span>
+<span class="d-add">+// That makes losing an answer expensive — the card doesn&#x27;t degrade, it just</span>
+<span class="d-add">+// keeps reading &quot;‒&quot; — so the cache and the one-request-per-key rule live in</span>
+<span class="d-add">+// routeVotesCache.ts, which never discards rows it has already been given.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> import { useEffect, useMemo, useRef, useState } from &quot;react&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> import { CONFIG } from &quot;../../config&quot;;</span>
+<span class="d-ctx"> import { getMapSlug, passcodeHeaders } from &quot;../../map/runtime&quot;;</span>
+<span class="d-del">-import { ROUTE_VOTES_CACHE_MAX, routeVotesKey } from &quot;../../utils/blockSelection&quot;;</span>
+<span class="d-add">+import { routeVotesKey } from &quot;../../utils/blockSelection&quot;;</span>
+<span class="d-add">+import { cachedRouteVoteRows, loadRouteVoteRows } from &quot;./routeVotesCache&quot;;</span>
+<span class="d-ctx"> import { ROUTE_VOTES_DEBOUNCE_MS, ROUTE_VOTES_EDGE_CAP, type VoteTypeRow } from &quot;./spatialLookup&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-// Session cache of resolved rows, keyed by map + capped edge set. Reopening a</span>
+<span class="d-del">-// selection (or re-hovering a diamond) renders server truth immediately</span>
+<span class="d-del">-// instead of flashing pending. Bounded and insertion-ordered, so dropping the</span>
+<span class="d-del">-// first key evicts the least-recently-resolved entry.</span>
+<span class="d-del">-const cache = new Map&lt;string, VoteTypeRow[]&gt;();</span>
+<span class="d-del">-</span>
+<span class="d-ctx"> /** Hover asks on a short delay so sweeping the cursor across a cluster of</span>
+<span class="d-ctx">  *  diamonds doesn&#x27;t fire a request per diamond. */</span>
+<span class="d-ctx"> export const ROUTE_VOTES_HOVER_DELAY_MS = 200;</span>
+<span class="d-hunk">@@ -79,43 +78,52 @@ export function useRouteVoteRows(</span>
+<span class="d-ctx">   }, [edgeIds]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const [fetched, setFetched] = useState&lt;{ key: string; rows: VoteTypeRow[] } | null&gt;(null);</span>
+<span class="d-add">+  // The effect below keys on `key`, not on `query` — `query` is a fresh object</span>
+<span class="d-add">+  // whenever the caller&#x27;s edgeIds array is, which for an unchanged selection</span>
+<span class="d-add">+  // would refetch on every render. It still needs the live query to read `ids`</span>
+<span class="d-add">+  // from and to tell &quot;is this answer still for what we&#x27;re showing&quot;, so it comes</span>
+<span class="d-add">+  // through a ref, synced after each commit (declared FIRST, so it is already</span>
+<span class="d-add">+  // current by the time the fetch effect below runs).</span>
+<span class="d-ctx">   const queryRef = useRef(query);</span>
+<span class="d-del">-  queryRef.current = query;</span>
+<span class="d-add">+  useEffect(() =&gt; { queryRef.current = query; });</span>
+<span class="d-ctx">   const key = query?.key ?? null;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-ctx">     const q = queryRef.current;</span>
+<span class="d-ctx">     if (!q) return;</span>
+<span class="d-del">-    let cancelled = false;</span>
+<span class="d-del">-    const delay = cache.has(q.key) ? ROUTE_VOTES_DEBOUNCE_MS : firstDelayMs;</span>
+<span class="d-add">+    const delay = cachedRouteVoteRows(q.key) ? ROUTE_VOTES_DEBOUNCE_MS : firstDelayMs;</span>
+<span class="d-ctx">     const timer = window.setTimeout(() =&gt; {</span>
+<span class="d-del">-      fetch(`${CONFIG.apiUrl}/route-votes`, {</span>
+<span class="d-del">-        method: &quot;POST&quot;,</span>
+<span class="d-del">-        headers: { &quot;Content-Type&quot;: &quot;application/json&quot;, ...passcodeHeaders() },</span>
+<span class="d-del">-        body: JSON.stringify({ map: getMapSlug(), edge_ids: q.ids }),</span>
+<span class="d-del">-      })</span>
+<span class="d-del">-        .then((r) =&gt; (r.ok ? r.json() : null))</span>
+<span class="d-del">-        .then((j) =&gt; {</span>
+<span class="d-del">-          if (cancelled || !j?.rows) return;</span>
+<span class="d-del">-          const rows = j.rows as VoteTypeRow[];</span>
+<span class="d-del">-          cache.delete(q.key);</span>
+<span class="d-del">-          cache.set(q.key, rows);</span>
+<span class="d-del">-          while (cache.size &gt; ROUTE_VOTES_CACHE_MAX) {</span>
+<span class="d-del">-            cache.delete(cache.keys().next().value as string);</span>
+<span class="d-del">-          }</span>
+<span class="d-del">-          setFetched({ key: q.key, rows });</span>
+<span class="d-del">-        })</span>
+<span class="d-del">-        .catch(() =&gt; {});</span>
+<span class="d-add">+      loadRouteVoteRows(q.key, async () =&gt; {</span>
+<span class="d-add">+        const r = await fetch(`${CONFIG.apiUrl}/route-votes`, {</span>
+<span class="d-add">+          method: &quot;POST&quot;,</span>
+<span class="d-add">+          headers: { &quot;Content-Type&quot;: &quot;application/json&quot;, ...passcodeHeaders() },</span>
+<span class="d-add">+          body: JSON.stringify({ map: getMapSlug(), edge_ids: q.ids }),</span>
+<span class="d-add">+        });</span>
+<span class="d-add">+        if (!r.ok) return null;</span>
+<span class="d-add">+        const j = await r.json();</span>
+<span class="d-add">+        return (j?.rows as VoteTypeRow[] | undefined) ?? null;</span>
+<span class="d-add">+      }).then((rows) =&gt; {</span>
+<span class="d-add">+        if (!rows) return;</span>
+<span class="d-add">+        // Key-scoped, NOT run-scoped. This effect re-runs on every refetchToken</span>
+<span class="d-add">+        // bump — i.e. on every vote anyone casts anywhere on the map — and it</span>
+<span class="d-add">+        // used to mark the open request cancelled on the way out, throwing away</span>
+<span class="d-add">+        // an answer that was still perfectly good for the selection on screen.</span>
+<span class="d-add">+        // Since nothing then reached the cache, the next run took the cold path</span>
+<span class="d-add">+        // again and the columns could stay pending indefinitely under traffic.</span>
+<span class="d-add">+        // What actually makes an answer stale is the SELECTION moving on, which</span>
+<span class="d-add">+        // is exactly what this compares.</span>
+<span class="d-add">+        if (queryRef.current?.key !== q.key) return;</span>
+<span class="d-add">+        setFetched({ key: q.key, rows });</span>
+<span class="d-add">+      });</span>
+<span class="d-ctx">     }, delay);</span>
+<span class="d-del">-    return () =&gt; {</span>
+<span class="d-del">-      cancelled = true;</span>
+<span class="d-del">-      window.clearTimeout(timer);</span>
+<span class="d-del">-    };</span>
+<span class="d-add">+    // Only the not-yet-fired timer is worth cancelling; a request already in</span>
+<span class="d-add">+    // flight is left to land and populate the cache.</span>
+<span class="d-add">+    return () =&gt; window.clearTimeout(timer);</span>
+<span class="d-ctx">   }, [key, refetchToken, firstDelayMs]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   if (!key) return { rows: null, key: null };</span>
+<span class="d-ctx">   return {</span>
+<span class="d-ctx">     key,</span>
+<span class="d-del">-    rows: cache.get(key) ?? (fetched?.key === key ? fetched.rows : null),</span>
+<span class="d-add">+    rows: cachedRouteVoteRows(key) ?? (fetched?.key === key ? fetched.rows : null),</span>
+<span class="d-ctx">   };</span>
+<span class="d-ctx"> }</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/routeVotesCache.test.ts</span>
+            <span class="stat"><span class="d-add">+124</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GraphLayer tests</span>
+        <span class="ctx-sum">Pure-node vitest suite — the repo has no jsdom, which is exactly why the coalescing rules were split out of the hook</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">routeVotesCache.test.ts</span>
+        <span class="ctx-sum">~125 LOC — 9 cases over the cache/single-flight contract</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">deferred() helper</span><span class="ol-sum">new — hand-released promises so &#x27;mid-flight&#x27; is a real state</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">keeps an answer after a re-ask</span><span class="ol-sum">new — the regression itself</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">coalesces N asks to 1 + 1 trailing</span><span class="ol-sum">new — the storm</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">no trailing refetch when idle</span><span class="ol-sum">new</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">resolved key serves from cache</span><span class="ol-sum">new</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">different edge sets stay apart</span><span class="ol-sum">new</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">failure neither caches nor hangs</span><span class="ol-sum">new</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">failed refetch keeps prior answer</span><span class="ol-sum">new</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">LRU cap + recency refresh</span><span class="ol-sum">new — two cases</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The first test is the bug in miniature: ask, ask again while open, release — the rows must be cached</li><li>The coalescing test asserts callCount 1 while three callers are waiting, then 2 after settle — not 3, not 4</li><li>vi.fn() with mockReturnValueOnce chains the two flights so the trailing refetch is observable</li><li>No fake timers needed — the deferreds make ordering explicit rather than timing-dependent</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeVotesCache.test.ts b/client-react/src/components/GraphLayer/routeVotesCache.test.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..77c864e</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeVotesCache.test.ts</span>
+<span class="d-hunk">@@ -0,0 +1,124 @@</span>
+<span class="d-add">+import { beforeEach, describe, expect, it, vi } from &quot;vitest&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import { ROUTE_VOTES_CACHE_MAX } from &quot;../../utils/blockSelection&quot;;</span>
+<span class="d-add">+import {</span>
+<span class="d-add">+  cachedRouteVoteRows,</span>
+<span class="d-add">+  loadRouteVoteRows,</span>
+<span class="d-add">+  resetRouteVotesCache,</span>
+<span class="d-add">+} from &quot;./routeVotesCache&quot;;</span>
+<span class="d-add">+import type { VoteTypeRow } from &quot;./spatialLookup&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const rows = (up: number): VoteTypeRow[] =&gt; [{ label: &quot;Add bike lane&quot;, up, down: 0 }];</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** A fetcher whose reply we release by hand, so &quot;while the request is open&quot; is</span>
+<span class="d-add">+ *  an actual state and not a timing guess. */</span>
+<span class="d-add">+function deferred() {</span>
+<span class="d-add">+  let release!: (r: VoteTypeRow[] | null) =&gt; void;</span>
+<span class="d-add">+  const promise = new Promise&lt;VoteTypeRow[] | null&gt;((res) =&gt; { release = res; });</span>
+<span class="d-add">+  return { promise, release };</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+beforeEach(() =&gt; resetRouteVotesCache());</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;loadRouteVoteRows&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;keeps an answer that arrives after the asker re-asked&quot;, async () =&gt; {</span>
+<span class="d-add">+    // The regression: a vote landing mid-flight used to cancel the open</span>
+<span class="d-add">+    // request, so its reply was dropped and nothing was ever cached — the</span>
+<span class="d-add">+    // card&#x27;s counts stayed pending.</span>
+<span class="d-add">+    const d = deferred();</span>
+<span class="d-add">+    const fetchRows = vi.fn(() =&gt; d.promise);</span>
+<span class="d-add">+</span>
+<span class="d-add">+    const first = loadRouteVoteRows(&quot;k&quot;, fetchRows);</span>
+<span class="d-add">+    // ...caller re-renders and asks again while the first is still open.</span>
+<span class="d-add">+    const second = loadRouteVoteRows(&quot;k&quot;, fetchRows);</span>
+<span class="d-add">+</span>
+<span class="d-add">+    d.release(rows(3));</span>
+<span class="d-add">+    await first;</span>
+<span class="d-add">+    await second;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    expect(cachedRouteVoteRows(&quot;k&quot;)).toEqual(rows(3));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;coalesces concurrent asks into one request plus one trailing refetch&quot;, async () =&gt; {</span>
+<span class="d-add">+    const first = deferred();</span>
+<span class="d-add">+    const second = deferred();</span>
+<span class="d-add">+    const fetchRows = vi.fn()</span>
+<span class="d-add">+      .mockReturnValueOnce(first.promise)</span>
+<span class="d-add">+      .mockReturnValueOnce(second.promise);</span>
+<span class="d-add">+</span>
+<span class="d-add">+    const a = loadRouteVoteRows(&quot;k&quot;, fetchRows);</span>
+<span class="d-add">+    loadRouteVoteRows(&quot;k&quot;, fetchRows);</span>
+<span class="d-add">+    loadRouteVoteRows(&quot;k&quot;, fetchRows);</span>
+<span class="d-add">+    expect(fetchRows).toHaveBeenCalledTimes(1); // three asks, one socket</span>
+<span class="d-add">+</span>
+<span class="d-add">+    first.release(rows(1));</span>
+<span class="d-add">+    await Promise.resolve();</span>
+<span class="d-add">+    await Promise.resolve();</span>
+<span class="d-add">+    // The asks that arrived mid-flight wanted FRESH rows, so exactly one more</span>
+<span class="d-add">+    // trip happens — not one per ask.</span>
+<span class="d-add">+    expect(fetchRows).toHaveBeenCalledTimes(2);</span>
+<span class="d-add">+</span>
+<span class="d-add">+    second.release(rows(2));</span>
+<span class="d-add">+    expect(await a).toEqual(rows(2));</span>
+<span class="d-add">+    expect(cachedRouteVoteRows(&quot;k&quot;)).toEqual(rows(2));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;does not refetch when nothing asked again mid-flight&quot;, async () =&gt; {</span>
+<span class="d-add">+    const fetchRows = vi.fn(async () =&gt; rows(1));</span>
+<span class="d-add">+    await loadRouteVoteRows(&quot;k&quot;, fetchRows);</span>
+<span class="d-add">+    expect(fetchRows).toHaveBeenCalledTimes(1);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;serves a later ask for a resolved key without refetching&quot;, async () =&gt; {</span>
+<span class="d-add">+    const fetchRows = vi.fn(async () =&gt; rows(5));</span>
+<span class="d-add">+    await loadRouteVoteRows(&quot;k&quot;, fetchRows);</span>
+<span class="d-add">+    expect(cachedRouteVoteRows(&quot;k&quot;)).toEqual(rows(5));</span>
+<span class="d-add">+    expect(fetchRows).toHaveBeenCalledTimes(1);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps different edge sets apart&quot;, async () =&gt; {</span>
+<span class="d-add">+    await loadRouteVoteRows(&quot;a&quot;, async () =&gt; rows(1));</span>
+<span class="d-add">+    await loadRouteVoteRows(&quot;b&quot;, async () =&gt; rows(9));</span>
+<span class="d-add">+    expect(cachedRouteVoteRows(&quot;a&quot;)).toEqual(rows(1));</span>
+<span class="d-add">+    expect(cachedRouteVoteRows(&quot;b&quot;)).toEqual(rows(9));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;survives a failed request without caching or hanging&quot;, async () =&gt; {</span>
+<span class="d-add">+    const boom = vi.fn(async () =&gt; { throw new Error(&quot;network&quot;); });</span>
+<span class="d-add">+    await expect(loadRouteVoteRows(&quot;k&quot;, boom)).resolves.toBeNull();</span>
+<span class="d-add">+    expect(cachedRouteVoteRows(&quot;k&quot;)).toBeNull();</span>
+<span class="d-add">+</span>
+<span class="d-add">+    // ...and the key is not left marked in-flight.</span>
+<span class="d-add">+    const ok = vi.fn(async () =&gt; rows(2));</span>
+<span class="d-add">+    expect(await loadRouteVoteRows(&quot;k&quot;, ok)).toEqual(rows(2));</span>
+<span class="d-add">+    expect(ok).toHaveBeenCalledTimes(1);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps the previous answer when a refetch fails&quot;, async () =&gt; {</span>
+<span class="d-add">+    await loadRouteVoteRows(&quot;k&quot;, async () =&gt; rows(4));</span>
+<span class="d-add">+    const stillCached = await loadRouteVoteRows(&quot;k&quot;, async () =&gt; null);</span>
+<span class="d-add">+    expect(stillCached).toEqual(rows(4));</span>
+<span class="d-add">+    expect(cachedRouteVoteRows(&quot;k&quot;)).toEqual(rows(4));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;evicts the least recently resolved key past the cap&quot;, async () =&gt; {</span>
+<span class="d-add">+    for (let i = 0; i &lt; ROUTE_VOTES_CACHE_MAX + 1; i++) {</span>
+<span class="d-add">+      await loadRouteVoteRows(`k${i}`, async () =&gt; rows(i));</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    expect(cachedRouteVoteRows(&quot;k0&quot;)).toBeNull();</span>
+<span class="d-add">+    expect(cachedRouteVoteRows(&quot;k1&quot;)).toEqual(rows(1));</span>
+<span class="d-add">+    expect(cachedRouteVoteRows(`k${ROUTE_VOTES_CACHE_MAX}`))</span>
+<span class="d-add">+      .toEqual(rows(ROUTE_VOTES_CACHE_MAX));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;re-resolving a key refreshes its recency&quot;, async () =&gt; {</span>
+<span class="d-add">+    await loadRouteVoteRows(&quot;old&quot;, async () =&gt; rows(1));</span>
+<span class="d-add">+    for (let i = 0; i &lt; ROUTE_VOTES_CACHE_MAX - 1; i++) {</span>
+<span class="d-add">+      await loadRouteVoteRows(`k${i}`, async () =&gt; rows(i));</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    // Touch &quot;old&quot; so it is no longer the eviction candidate, then overflow.</span>
+<span class="d-add">+    await loadRouteVoteRows(&quot;old&quot;, async () =&gt; rows(7));</span>
+<span class="d-add">+    await loadRouteVoteRows(&quot;newest&quot;, async () =&gt; rows(8));</span>
+<span class="d-add">+    expect(cachedRouteVoteRows(&quot;old&quot;)).toEqual(rows(7));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/routeVotesCache.ts</span>
+            <span class="stat"><span class="d-add">+109</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GraphLayer / distinct-voter counts</span>
+        <span class="ctx-sum">New: the shared answer store and the one-request-per-key rule, split out of the hook so it is testable without React</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">routeVotesCache.ts</span>
+        <span class="ctx-sum">~100 LOC — cache, in-flight map, single-flight with a trailing refetch</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module header</span><span class="ol-sum">new — states the keyed-answer rule and why the old code lost answers</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">cache Map + Flight interface</span><span class="ol-sum">new — bounded, insertion-ordered; a flight carries a `stale` bit</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">cachedRouteVoteRows</span><span class="ol-sum">new — synchronous read for render and for the debounce decision</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">resetRouteVotesCache</span><span class="ol-sum">new — test seam</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">remember (LRU insert + evict)</span><span class="ol-sum">new — re-inserts so a re-resolve refreshes recency</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">loadRouteVoteRows</span><span class="ol-sum">new — join-or-open, trailing refetch, never rejects</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>An answer is keyed by the EDGE SET, so it is cached whoever asked — the invariant the old cancel flag violated</li><li>A caller arriving mid-flight sets flight.stale and joins the open promise instead of opening a second request</li><li>On settle, a stale flight deletes itself from `inflight` FIRST, then re-issues once — so the retry opens a fresh flight rather than joining the one that is settling</li><li>The `.finally` only clears `inflight` if it is still the current flight, since the stale branch may already have replaced it</li><li>fetchRows() is called synchronously (inside try/catch), not a microtask later, so a second caller in the same tick sees the open flight</li><li>Failures resolve to the cached rows or null and never reject — a blip cannot strand a card on pending</li><li>ROUTE_VOTES_CACHE_MAX (64) is unchanged; only the ownership of the cache moved</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeVotesCache.ts b/client-react/src/components/GraphLayer/routeVotesCache.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..120bb23</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeVotesCache.ts</span>
+<span class="d-hunk">@@ -0,0 +1,109 @@</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// Route-votes cache — one in-flight request per edge set, answers never lost</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// /api/route-votes is asked the same question from two places (the route</span>
+<span class="d-add">+// summary card and the hovered corridor) and re-asked every time votes move.</span>
+<span class="d-add">+// This module owns the shared answer so those callers agree, and so that a</span>
+<span class="d-add">+// burst of re-asks costs one request instead of one per bump.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// The rule that matters: an answer is keyed by the EDGE SET, not by whoever</span>
+<span class="d-add">+// asked. Once rows come back for a key they are true for that key, so they go</span>
+<span class="d-add">+// into the cache unconditionally — even if the asker has since re-rendered,</span>
+<span class="d-add">+// re-asked, or gone away. Discarding an in-flight answer because the caller</span>
+<span class="d-add">+// re-ran is what left the vote columns reading &quot;‒&quot; indefinitely: every vote</span>
+<span class="d-add">+// that landed while the first request was open threw its reply away, and</span>
+<span class="d-add">+// because nothing reached the cache the next attempt was another cold</span>
+<span class="d-add">+// (undebounced) request that the next vote could throw away in turn.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// Pure except for the injected fetcher, so the coalescing rules are testable</span>
+<span class="d-add">+// without a DOM or a network.</span>
+<span class="d-add">+</span>
+<span class="d-add">+import { ROUTE_VOTES_CACHE_MAX } from &quot;../../utils/blockSelection&quot;;</span>
+<span class="d-add">+import type { VoteTypeRow } from &quot;./spatialLookup&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Resolved rows per edge set. Insertion-ordered and bounded, so evicting the</span>
+<span class="d-add">+ *  first key drops the least-recently-resolved entry. */</span>
+<span class="d-add">+const cache = new Map&lt;string, VoteTypeRow[]&gt;();</span>
+<span class="d-add">+</span>
+<span class="d-add">+interface Flight {</span>
+<span class="d-add">+  promise: Promise&lt;VoteTypeRow[] | null&gt;;</span>
+<span class="d-add">+  /** Someone asked again while this request was open — see loadRouteVoteRows. */</span>
+<span class="d-add">+  stale: boolean;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+const inflight = new Map&lt;string, Flight&gt;();</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Rows already known for this edge set, or null if it has never resolved. */</span>
+<span class="d-add">+export function cachedRouteVoteRows(key: string): VoteTypeRow[] | null {</span>
+<span class="d-add">+  return cache.get(key) ?? null;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Test seam — drops every cached answer and forgets any open request. */</span>
+<span class="d-add">+export function resetRouteVotesCache(): void {</span>
+<span class="d-add">+  cache.clear();</span>
+<span class="d-add">+  inflight.clear();</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+function remember(key: string, rows: VoteTypeRow[]): void {</span>
+<span class="d-add">+  // Re-insert so the key counts as most recently resolved.</span>
+<span class="d-add">+  cache.delete(key);</span>
+<span class="d-add">+  cache.set(key, rows);</span>
+<span class="d-add">+  while (cache.size &gt; ROUTE_VOTES_CACHE_MAX) {</span>
+<span class="d-add">+    cache.delete(cache.keys().next().value as string);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Resolve rows for `key`, fetching at most once at a time.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * A caller arriving while a request for the same key is open joins that</span>
+<span class="d-add">+ * request rather than opening a second one. It still wants FRESH rows though</span>
+<span class="d-add">+ * (it only re-asked because a vote landed), so the open flight is marked stale</span>
+<span class="d-add">+ * and re-issues exactly once when it settles. That collapses a storm of vote</span>
+<span class="d-add">+ * bumps into &quot;the request now, plus one more after it&quot; instead of one request</span>
+<span class="d-add">+ * per bump.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Never rejects: a failed request resolves to whatever is cached (or null), so</span>
+<span class="d-add">+ * callers can&#x27;t hang on a network blip.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function loadRouteVoteRows(</span>
+<span class="d-add">+  key: string,</span>
+<span class="d-add">+  fetchRows: () =&gt; Promise&lt;VoteTypeRow[] | null&gt;,</span>
+<span class="d-add">+): Promise&lt;VoteTypeRow[] | null&gt; {</span>
+<span class="d-add">+  const open = inflight.get(key);</span>
+<span class="d-add">+  if (open) {</span>
+<span class="d-add">+    open.stale = true;</span>
+<span class="d-add">+    return open.promise;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const flight: Flight = { stale: false, promise: Promise.resolve(null) };</span>
+<span class="d-add">+  // Start the request now rather than a microtask from now, so a second caller</span>
+<span class="d-add">+  // in the same tick sees an open flight and joins it instead of opening its</span>
+<span class="d-add">+  // own. The try/catch covers a fetcher that throws synchronously.</span>
+<span class="d-add">+  let started: Promise&lt;VoteTypeRow[] | null&gt;;</span>
+<span class="d-add">+  try {</span>
+<span class="d-add">+    started = Promise.resolve(fetchRows());</span>
+<span class="d-add">+  } catch {</span>
+<span class="d-add">+    started = Promise.resolve(null);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  flight.promise = started</span>
+<span class="d-add">+    .catch(() =&gt; null)</span>
+<span class="d-add">+    .then((rows) =&gt; {</span>
+<span class="d-add">+      if (rows) remember(key, rows);</span>
+<span class="d-add">+      if (flight.stale) {</span>
+<span class="d-add">+        // Clear ourselves out first so the re-issue opens a fresh flight</span>
+<span class="d-add">+        // rather than joining the one that is settling.</span>
+<span class="d-add">+        if (inflight.get(key) === flight) inflight.delete(key);</span>
+<span class="d-add">+        return loadRouteVoteRows(key, fetchRows);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+      return rows ?? cache.get(key) ?? null;</span>
+<span class="d-add">+    })</span>
+<span class="d-add">+    .finally(() =&gt; {</span>
+<span class="d-add">+      // Only if we&#x27;re still the current flight — the stale branch above may</span>
+<span class="d-add">+      // have already replaced us.</span>
+<span class="d-add">+      if (inflight.get(key) === flight) inflight.delete(key);</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  inflight.set(key, flight);</span>
+<span class="d-add">+  return flight.promise;</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/styles/globals.css</span>
+            <span class="stat"><span class="d-add">+28</span> / <span class="d-del">-3</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · global stylesheet</span>
+        <span class="ctx-sum">Every design token and component rule for the app shell, map chrome and the proposal cards — including the vote control and its column header</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">globals.css</span>
+        <span class="ctx-sum">~2600 LOC — tokens, base, topbar, map panes, proposal cards, vote controls, phone overrides</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">:root tokens / base</span><span class="ol-sum">unchanged — paper, ink, hairline, fonts, topbar height</span></li><li class="dim"><span class="ol-label">topbar / sidebar / map panes</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">.graph-proposal-row + label column</span><span class="ol-sum">unchanged — the flexible column that ellipsizes</span></li><li class="dim"><span class="ol-label">Coverage column (.graph-proposal-row-cover)</span><span class="ol-sum">unchanged — the fixed 44px column 95d81c6 fixed horizontally</span></li><li class="dim"><span class="ol-label">.graph-proposal-head</span><span class="ol-sum">unchanged — align-items: flex-end is what BLOCKS obeys</span></li><li class="changed"><span class="ol-label">.graph-vote</span><span class="ol-sum">+3 lines — border width becomes the --vote-border token</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.graph-proposal-head-caption</span><span class="ol-sum">+17 lines — bottom-aligned to the row instead of centred in the mirror</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">.graph-vote-cell / -net min-widths</span><span class="ol-sum">unchanged — the column floors</span></li><li class="changed"><span class="ol-label">phone overrides (max-width)</span><span class="ol-sum">+4 lines — BLOCKS caption down to the VOTERS caption&#x27;s 9px</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">staging ribbon</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>--vote-border: 1px on .graph-vote, with border: var(--vote-border) solid var(--hairline)</li><li>The caption swaps inset:0 for left:0/right:0 + bottom: calc(-1 * var(--vote-border))</li><li>align-items: center → flex-end, plus line-height: 1.2 to match .graph-proposal-row-cover</li><li>Horizontal centring is untouched — left:0/right:0 still spans the mirror, so the caption stays on the control&#x27;s centre line</li><li>Phone rule adds font-size: 9px to .graph-proposal-head .graph-proposal-row-cover (the HEAD instance only; data cells stay 10px)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
+<span class="d-meta">index 29f675b..3a2655f 100644</span>
+<span class="d-meta">--- a/client-react/src/styles/globals.css</span>
+<span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
+<span class="d-hunk">@@ -2154,13 +2154,29 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx">   border-right-color: transparent;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/* Horizontally: span the mirror, so the caption centres on the control it</span>
+<span class="d-add">+   labels. Vertically: sit on the head row&#x27;s own bottom edge, which is the</span>
+<span class="d-add">+   mirror&#x27;s BORDER box — one border further down than the padding box `inset: 0`</span>
+<span class="d-add">+   resolves against. Then flex-end puts this caption&#x27;s line box exactly where</span>
+<span class="d-add">+   the head&#x27;s own `align-items: flex-end` puts BLOCKS.</span>
+<span class="d-add">+</span>
+<span class="d-add">+   Centring it inside the control&#x27;s box instead (what this used to do) floated</span>
+<span class="d-add">+   it 3.5px ABOVE its neighbour: the mirror is 19px tall because it copies the</span>
+<span class="d-add">+   real control&#x27;s metrics (11px text + padding + borders), and a 10px caption</span>
+<span class="d-add">+   centred in 19px lands nowhere near the baseline a 10px caption bottom-aligned</span>
+<span class="d-add">+   in the head row sits on. Both captions are the same size and sit in the same</span>
+<span class="d-add">+   row, so the eye reads that offset as the header being crooked — which is</span>
+<span class="d-add">+   what it is. Matching line-height keeps the two line boxes identical. */</span>
+<span class="d-ctx"> .graph-proposal-head-caption {</span>
+<span class="d-ctx">   position: absolute;</span>
+<span class="d-del">-  inset: 0;</span>
+<span class="d-add">+  left: 0;</span>
+<span class="d-add">+  right: 0;</span>
+<span class="d-add">+  bottom: calc(-1 * var(--vote-border, 1px));</span>
+<span class="d-ctx">   display: flex;</span>
+<span class="d-del">-  align-items: center;</span>
+<span class="d-add">+  align-items: flex-end;</span>
+<span class="d-ctx">   justify-content: center;</span>
+<span class="d-ctx">   font-size: 10px;</span>
+<span class="d-add">+  line-height: 1.2;</span>
+<span class="d-ctx">   letter-spacing: 0.08em;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -2266,7 +2282,11 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx">   flex: 0 0 auto;</span>
+<span class="d-ctx">   display: inline-flex;</span>
+<span class="d-ctx">   align-items: stretch;</span>
+<span class="d-del">-  border: 1px solid var(--hairline);</span>
+<span class="d-add">+  /* Tokenised because the header caption has to reach back OUT through this</span>
+<span class="d-add">+     border to sit on the head row&#x27;s own bottom edge — see</span>
+<span class="d-add">+     .graph-proposal-head-caption. */</span>
+<span class="d-add">+  --vote-border: 1px;</span>
+<span class="d-add">+  border: var(--vote-border) solid var(--hairline);</span>
+<span class="d-ctx">   font-variant-numeric: tabular-nums;</span>
+<span class="d-ctx">   font-size: 11px;</span>
+<span class="d-ctx">   line-height: 1;</span>
+<span class="d-hunk">@@ -2526,7 +2546,12 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {</span>
+<span class="d-ctx">     font-size: 9px;</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  /* Down to the caption size its VOTERS twin already uses. The data cells stay</span>
+<span class="d-add">+     at 10px (that rule is theirs) — but in the HEAD this element is a caption,</span>
+<span class="d-add">+     and two captions in one row that share a bottom edge have to share a size</span>
+<span class="d-add">+     or their baselines part again. */</span>
+<span class="d-ctx">   .graph-proposal-head .graph-proposal-row-cover {</span>
+<span class="d-add">+    font-size: 9px;</span>
+<span class="d-ctx">     letter-spacing: 0.04em;</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
