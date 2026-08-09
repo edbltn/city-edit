@@ -4,6 +4,7 @@ import {
 } from "../../themes";
 import { CONFIG } from "../../config";
 import { ProposeMapModal } from "../ProposeMap/ProposeMapModal";
+import { NavRail } from "../NavRail";
 import { Logo } from "../Logo";
 import "./Landing.css";
 
@@ -148,6 +149,10 @@ export function Landing() {
           <Logo className="landing-logo" />
         </a>
         <p className="landing-tagline">Redraw your city.</p>
+        {/* Last in the DOM on purpose: it's pinned to the corner on wide screens
+            (position is cosmetic there), but drops back into the column below
+            the tagline on narrow ones — where source order is the visual order. */}
+        <NavRail className="landing-nav" />
       </header>
 
       <div className="landing-toolbar">
@@ -213,17 +218,10 @@ export function Landing() {
             ))}
       </main>
 
+      {/* Blog/About/Feedback/Donate all live in the header rail now — repeating
+          them here just doubled the nav on a page whose job is picking a map. */}
       <footer className="landing-footer">
         <span>© {year} City Edit. All rights reserved.</span>
-        <a href="https://sphericalharmonics.org/" className="landing-footer-link">
-          About
-        </a>
-        <a href="https://feedback.cityedit.org" className="landing-footer-link">
-          Feedback
-        </a>
-        <a href="https://donate.cityedit.org" className="landing-footer-link">
-          Donate
-        </a>
       </footer>
 
       {proposeOpen && <ProposeMapModal onClose={() => setProposeOpen(false)} />}

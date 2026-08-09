@@ -7,6 +7,7 @@ import { HowItWorksModal } from "../HowItWorksModal";
 import { ModeSwitcher } from "../ModeSwitcher";
 import { VoteTypeSelector } from "../VoteTypeSelector";
 import { AddressSearch } from "../AddressSearch";
+import { NavRail } from "../NavRail";
 import { Logo } from "../Logo";
 import type { LatLng } from "../../types";
 import "./TopBar.css";
@@ -223,49 +224,21 @@ export const TopBar = memo(function TopBar() {
           </div>
 
           {/* One grid cell: .topbar-actions is a strict 2×2 grid (4-across in
-              landscape), so the three links share a wrapper to keep 4 children. */}
-          <div className="header-btn-group">
-            <a
-              className="btn-header"
-              href="https://feedback.cityedit.org"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Feedback
-            </a>
-
-            <a
-              className="btn-header"
-              href="https://sphericalharmonics.org"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              About
-            </a>
-
-            <a
-              className="btn-header btn-donate"
-              href="https://donate.cityedit.org"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Donate
-            </a>
-          </div>
+              landscape), so all the meta links share the one rail. How-it-Works
+              lives here too — it's something to read, not an action on the
+              current selection, which is what the second row is for. */}
+          <NavRail onHowItWorks={() => setShowHowItWorks(true)} />
 
           <div className={`vote-switcher-group ${(canVote || (start.coords && end.coords)) ? "" : "hidden-reserve"}`}>
             <span className="mode-prefix-label">Vote:</span>
             <VoteTypeSelector />
           </div>
 
+          {/* Row 2, right cell: acts on the current selection only, so it is
+              empty until there is one. How-it-Works used to sit here purely to
+              keep the row from collapsing — the fixed grid-template-rows does
+              that on its own. */}
           <div className="actions-group">
-            <button
-              className="btn-header"
-              onClick={() => setShowHowItWorks(true)}
-            >
-              How it Works
-            </button>
-
             <div className={`calculating-indicator ${isLoading && start.coords && end.coords ? "active" : ""}`}>
               <div className="spinner"></div>
               <span>Calculating...</span>

@@ -58,31 +58,12 @@
   }
 }
 
-/* Feedback + About + Donate share one .topbar-actions grid cell */
-.header-btn-group {
-  display: flex;
-  align-items: stretch;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.header-btn-group .btn-header {
-  flex: 1;
-  text-decoration: none;
-}
-
-/* Donate carries the active map's accent so it pops against its neighbours.
-   Every theme accent is bright enough that near-black text keeps contrast. */
-.btn-donate {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #111;
-  font-weight: 600;
-}
-
-.btn-donate:hover:not(:disabled) {
-  background: var(--accent);
-  filter: brightness(1.12);
+/* The rail shares its grid column with the Cast/Clear group below it, and the
+   column is as wide as whichever is wider. Pinning the rail to the column's end
+   keeps its right edge flush with the legend's and with Clear's, whichever way
+   that comparison happens to fall (it currently ties almost exactly). */
+.topbar-actions > .nav-rail {
+  justify-self: end;
 }
 
 /* Loading state pulse animation for route fields */

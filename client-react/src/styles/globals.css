@@ -280,11 +280,24 @@ body {
   gap: 0;
   font-size: var(--control-font-size);
   color: var(--ink);
-  flex-shrink: 0;
+  /* Shrinkable, not fixed: the legend holds the widest thing in the bar (a
+     250px address slot), and pinning it meant the desktop layout had a hard
+     ~1353px minimum — so every window between the 1080px breakpoint and that
+     figure overflowed sideways. Letting it give way lets the address ellipsise
+     instead, exactly as it already does below 1080. */
+  min-width: 0;
   align-self: stretch;
   border: 1px solid var(--hairline);
   background: var(--hover-bg);
   border-radius: 4px;
+}
+
+/* Paired with the above: these buttons are flex containers whose automatic
+   minimum is the whole nowrap address, which would re-impose the width the
+   legend just gave up. (The ≤1080 block sets this too; it has to hold at every
+   width now.) */
+.legend-item-coords {
+  min-width: 0;
 }
 
 /* Internal hairline dividers — vertical between columns, horizontal on left col only */
@@ -298,7 +311,7 @@ body {
 
 
 /* ==========================================================================
-   Topbar Actions (2×2 grid: Mode/Feedback·About·Donate over VoteType/Actions)
+   Topbar Actions (2×2 grid: Map/nav-rail over VoteType/selection-actions)
    ========================================================================== */
 
 .topbar-actions {
@@ -1449,10 +1462,10 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 
   /* The Cast/Clear group stays in the DOM (just .hidden-reserve'd) with no
-     selection, so it always sizes the right column and the header links keep
-     a fixed *horizontal* width instead of shrinking when Cast/Clear later
-     appear. The second row used to collapse to 0 until a selection, but it
-     now hosts the always-visible How-it-Works button, so it stays open. */
+     selection, so it always sizes the right column and the nav rail keeps a
+     fixed *horizontal* width instead of shrinking when Cast/Clear later
+     appear. The explicit grid-template-rows below is what holds the second row
+     open while it's empty. */
   .topbar-actions {
     column-gap: var(--space-2);
     row-gap: var(--space-2);

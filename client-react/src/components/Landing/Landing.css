@@ -15,6 +15,7 @@
 }
 
 .landing-header {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -22,6 +23,27 @@
   padding: 64px var(--space-5) var(--space-5);
   text-align: center;
   border-bottom: 1px solid var(--hairline);
+}
+
+/* Pinned to the corner rather than sitting in the column flow: the header's job
+   is the logo + tagline, and the meta links should stay out of that axis. The
+   top padding above is what keeps it clear of the logo. */
+.landing-nav {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-5);
+}
+
+/* Donate keeps its word here at every width. The rail drops the label below
+   1080px because the *map* header is fighting for room at that size — this page
+   isn't, and Donate is the one thing on it worth asking for outright. */
+.landing-nav .nav-btn-donate {
+  width: auto;
+  padding: 0 var(--space-3);
+}
+
+.landing-nav .nav-btn-label {
+  display: inline;
 }
 
 .landing-logo-link {
@@ -305,19 +327,15 @@
   opacity: 0.5;
 }
 
-.landing-footer-link {
-  color: var(--ink);
-  text-decoration: none;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.landing-footer-link:hover {
-  border-bottom-color: var(--ink);
-}
-
 @media (max-width: 720px) {
   .landing-header {
     padding: 40px var(--space-4) var(--space-4);
+  }
+
+  /* Unpinned: at this width the corner would clip the logo's top-left corner.
+     Back in the column it centres under the tagline, clear of everything. */
+  .landing-nav {
+    position: static;
   }
 
   .landing-logo {
