@@ -1,3 +1,6 @@
+// Referenced by: docs/algorithms/06-ranking.md (proposal-row order) and
+//   docs/algorithms/07-counts.md (the block-vs-edge regime split, and why
+//   summing block counts over-counts people).
 // ==========================================================================
 // Block-scoped selection helpers (docs/three-layer-model.md §2.4, §4)
 // ==========================================================================

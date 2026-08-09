@@ -1,3 +1,5 @@
+// Referenced by: docs/algorithms/05-heat-coloring.md
+//   (HEAT_FULL_SCALE / NEG_HEAT_FULL_SCALE — the per-arm ceiling floors).
 // ---------------------------------------------------------------------------
 // Geometry helpers
 // ---------------------------------------------------------------------------

@@ -1,3 +1,5 @@
+// Referenced by: docs/algorithms/05-heat-coloring.md
+//   (topProposalDiffs — the signed number behind every block's colour).
 // ==========================================================================
 // Vote application (pure)
 // ==========================================================================

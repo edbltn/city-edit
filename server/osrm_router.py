@@ -1,3 +1,4 @@
+# Algorithm doc: docs/algorithms/04-route-finding.md
 """
 OSRM-based routing via the OSRM HTTP API.
 

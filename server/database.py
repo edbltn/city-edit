@@ -1,3 +1,6 @@
+# Referenced by: docs/algorithms/06-ranking.md (list_maps — how the landing
+#   page is ordered) and docs/algorithms/07-counts.md
+#   (count_unique_voters_for_edges — the honest distinct-voter number).
 """
 PostgreSQL database module for persistent vote storage.
 

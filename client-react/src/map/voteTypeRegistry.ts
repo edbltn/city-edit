@@ -1,3 +1,5 @@
+// Referenced by: docs/algorithms/06-ranking.md
+//   (buildVoteTypeLegend — the legend is ordered by provenance, not votes).
 // ==========================================================================
 // Vote-type registry — what this map is actually showing
 // ==========================================================================

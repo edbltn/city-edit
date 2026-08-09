@@ -1,3 +1,5 @@
+# Referenced by: docs/algorithms/04-route-finding.md
+#   (osm_nodes_to_edge_ids — how an OSRM route becomes votable edge ids).
 """
 Redis vote cache using packed integer field keys.
 

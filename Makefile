@@ -41,6 +41,11 @@ help:
 	@echo "  deploy       Build and deploy to Cloud Run"
 	@echo "  test-cloud   Test the cloud instance"
 	@echo ""
+	@echo "Documentation:"
+	@echo "  docs-check         Verify the algorithm dossiers match the code"
+	@echo "  docs-check-branch  ...plus warn on sources changed without their doc"
+	@echo "  docs-serve         Preview the docs site (localhost:8000)"
+	@echo ""
 	@echo "Terraform:"
 	@echo "  tf-init      Initialize Terraform"
 	@echo "  tf-plan      Preview infrastructure changes"
@@ -134,6 +139,22 @@ test-frontend:
 
 test-backend:
 	cd server && env/bin/python -m pytest
+
+# Verify the algorithm dossiers still describe the code they claim to: every
+# cited symbol exists, every documented tuning knob matches its literal, every
+# bound file points back at its doc. See docs/algorithms/README.md.
+docs-check:
+	python3 scripts/check_algorithm_docs.py
+
+# Same, plus a warning for any bound source that changed on this branch without
+# its dossier being touched. Run before opening a PR.
+docs-check-branch:
+	python3 scripts/check_algorithm_docs.py --base origin/main
+
+# Serve the docs site locally at http://127.0.0.1:8000 (needs
+# `uv pip install -r docs/requirements.txt`).
+docs-serve:
+	mkdocs serve
 
 # Stateful load test: assign each agent an expected final vote state, march them
 # there concurrently, then verify the server converged. USERS defaults to 10.

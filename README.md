@@ -5,6 +5,24 @@ between two points, then vote on the streets and crossings that should change â€
 the aggregate renders as a live heatmap of desire paths.
 
 Live at **[cityedit.org](https://cityedit.org)**.
+Docs at **[edbltn.github.io/city-edit](https://edbltn.github.io/city-edit/)**.
+
+## Contributing â€” start with the algorithms
+
+Most of what is hard here is bespoke: cutting a street network into clickable
+blocks, eliciting point- and route-shaped proposals out of raw votes, turning
+support into colour. Each of those has a **pseudocode dossier** in
+[docs/algorithms/](docs/algorithms/README.md) covering how it works, every
+tuning knob, and the failure that produced each rule.
+
+The dossiers are bound to the code by a CI check, so they cannot silently rot:
+
+```bash
+make docs-check      # cited symbols exist, documented constants match
+```
+
+If you change one of these algorithms, updating its dossier is part of the
+change. [The contract is here.](docs/algorithms/README.md#the-contract)
 
 ## Quickstart
 
@@ -146,6 +164,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 make test            # frontend (vitest) + backend (pytest)
 make test-frontend
 make test-backend
+make docs-check      # algorithm dossiers still match the code
 ```
 
 See [docs/testing.md](docs/testing.md) for the full taxonomy and the stateful

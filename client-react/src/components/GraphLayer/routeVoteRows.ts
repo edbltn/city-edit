@@ -1,3 +1,4 @@
+// Algorithm doc: docs/algorithms/07-counts.md
 // ==========================================================================
 // Route vote rows — DISTINCT-voter counts for a multi-block selection
 // ==========================================================================

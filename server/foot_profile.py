@@ -1,3 +1,6 @@
+# Referenced by: docs/algorithms/04-route-finding.md — this file and
+#   osrm/foot.lua must change TOGETHER, or OSRM routes over edges the
+#   votable graph does not have.
 """
 Foot routability rules — the Python mirror of osrm/foot.lua (OSRM v5.25.0).
 

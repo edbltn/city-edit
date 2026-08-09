@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Algorithm doc: docs/algorithms/01-block-identification.md
 """Graph-first block builder — grouping first, geometry from the groups.
 
 Replaces the five-stage pipeline (build_blocks_generic → build_node_blocks →

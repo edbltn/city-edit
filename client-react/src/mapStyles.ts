@@ -1,3 +1,4 @@
+// Referenced by: docs/algorithms/05-heat-coloring.md (the heat ramp).
 // ==========================================================================
 // Map Styles
 // The visual identity of a map: a two-color (base + accent) representation plus

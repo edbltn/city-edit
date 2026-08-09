@@ -1,3 +1,6 @@
+# Referenced by: docs/algorithms/01-block-identification.md (block ids ->
+#   deduped vote aggregates) and docs/algorithms/07-counts.md (why summing
+#   these across a selection over-counts people).
 """
 Block-level vote display — a deduplicated projection of edge votes onto blocks.
 

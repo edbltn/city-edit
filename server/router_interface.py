@@ -1,3 +1,4 @@
+# Algorithm doc: docs/algorithms/04-route-finding.md
 """
 Abstract base class for route calculation.
 

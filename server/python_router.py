@@ -1,3 +1,6 @@
+# Referenced by: docs/algorithms/04-route-finding.md — this is the graph
+#   PROVIDER (snapping, reverse geocoding). Its router is NOT wired into
+#   /api/routes; see the doc for why there is no fallback.
 """
 Walk-graph provider: topology, nearest-node snapping, and reverse geocoding.
 

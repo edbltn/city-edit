@@ -1,3 +1,6 @@
+// Referenced by: docs/algorithms/06-ranking.md and
+//   docs/algorithms/07-counts.md (touchedBlockKeys / edgesOfBlockKey —
+//   the edge <-> block projection every selection number is computed over).
 // ==========================================================================
 // Graph topology — typed-array representation + accessors
 // ==========================================================================
