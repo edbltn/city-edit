@@ -202,7 +202,7 @@ one, add a row here.
 
 | What | Mechanism | Where | Query params |
 |------|-----------|-------|--------------|
-| `donate.cityedit.org` → donorbox | nginx `return 301` | `deploy/nginx-cloudrun.conf` | dropped |
+| `donate.cityedit.org` → donorbox | nginx `return 301` | `deploy/nginx-cloudrun.conf` | preserved (`$is_args$args`) — proposal cards send UTM params naming what's being funded |
 | `feedback.cityedit.org` → feedback page | nginx `try_files` rewrite (not a redirect) | `deploy/nginx-cloudrun.conf` | n/a |
 | Canonical-subdomain redirect (`/m/nyc-bikes` → `bikepaths.cityedit.org`) | client `location.replace` after map-config fetch | `App.tsx` + `themes.ts subdomainRedirectUrl` | preserved (+ re-attached `src`) |
 | Retired-slug redirects (renamed maps) | client `location.replace` on `MapConfig.redirect` | DB `map_redirects` table + `App.tsx` + `map/runtime.ts slugRedirectUrl` | preserved, `append_query` merged |

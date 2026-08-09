@@ -2190,6 +2190,16 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   white-space: nowrap;
 }
 
+/* Leaflet paints EVERY anchor inside the map container its own link blue
+   (`.leaflet-container a` — specificity 0-2-0). These cards portal INTO that
+   container, so a plain class rule on a card link loses the cascade and comes
+   out blue; that is what was happening to the source markers below, whose
+   `color: inherit` never stood a chance. Reset it once here, above Leaflet's
+   reach, and let each card link style itself from the card's own ink. */
+.leaflet-container .graph-proposal-card a {
+  color: inherit;
+}
+
 .graph-proposal-row-link {
   color: inherit;
   opacity: 0.5;
@@ -2199,6 +2209,41 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .graph-proposal-row-link:hover {
   opacity: 1;
   text-decoration: underline;
+}
+
+/* Fund link — the card's one outbound money action, and the only thing in the
+   modal that asks for something rather than reporting it. It gets exactly one
+   row at the foot of the card: a hairline box in the same bracket-token voice
+   as the [a][b][c] source markers and the [−│net│+] control, so it reads as
+   part of the card's own language instead of a pasted-in donate button.
+
+   Quiet at rest — hairline border, held just under full strength — so it never
+   competes with the vote controls above it, which are what the card is FOR. It
+   comes fully up on hover, at which point it is the thing being pointed at. */
+.graph-proposal-fund {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 5px 7px;
+  border: 1px solid var(--hairline);
+  font-size: 11px;
+  text-decoration: none;
+  opacity: 0.82;
+  transition: border-color 120ms ease, background-color 120ms ease, opacity 120ms ease;
+}
+
+.graph-proposal-fund:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  opacity: 1;
+}
+
+/* The accent lives on the [$] alone — a single bright glyph on an otherwise
+   grey row draws the eye without shouting. */
+.graph-proposal-fund-token {
+  flex: 0 0 auto;
+  color: var(--accent);
 }
 
 /* Connected vote control: [ −down │ net │ +up ] reads as ONE unit rather than
