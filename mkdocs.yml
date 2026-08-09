@@ -1,0 +1,115 @@
+site_name: City Edit
+site_description: >-
+  How City Edit works — the algorithms behind block identification, top
+  proposals, routing, heat, ranking and counts, plus operational runbooks.
+site_url: https://edbltn.github.io/city-edit/
+repo_url: https://github.com/edbltn/city-edit
+repo_name: edbltn/city-edit
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - toc.follow
+  palette:
+    # The site follows the reader's OS theme, with a manual override — same
+    # contract as the app's own light/dark handling.
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Follow system theme
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+      # GitHub-style heading slugs. These docs are read on GitHub as often as on
+      # the site, and python-markdown's default slugifier disagrees with GitHub
+      # wherever a heading contains punctuation ("Admin runbook — rename a map
+      # slug"), which silently breaks every in-page link written against GitHub.
+      slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower}}
+      separator: "-"
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+
+plugins:
+  - search
+
+nav:
+  - Overview: README.md
+  - Algorithms:
+      - Overview: algorithms/README.md
+      - Block identification: algorithms/01-block-identification.md
+      - Top proposals — points: algorithms/02-top-proposals.md
+      - Top proposals — routes: algorithms/03-route-proposals.md
+      - Route finding: algorithms/04-route-finding.md
+      - Heat colouring: algorithms/05-heat-coloring.md
+      - Sorting and ranking: algorithms/06-ranking.md
+      - Displayed counts: algorithms/07-counts.md
+  - Architecture:
+      - Three-layer model: three-layer-model.md
+      - Voting architecture: voting-architecture.md
+      - URL routing: url-routing.md
+      - Flask considerations: flask-considerations.md
+  - Working on City Edit:
+      - Testing: testing.md
+      - Debugging: debugging.md
+      - Agents: agents.md
+  - Operations:
+      - GCP deployment: gcp-deployment.md
+      - QGIS export: qgis-export.md
+      - NYC proposal data sources: nyc-proposal-data-sources.md
+  - Story: story.md
+
+# NOT published. Both stay in the repo and are readable on GitHub; neither
+# belongs on a site a newcomer browses.
+#   archive/ — explicitly superseded designs. Its own README says these "no
+#              longer describe the running code"; publishing them alongside the
+#              current docs is how a contributor implements the wrong thing.
+#   course/  — an interactive tutoring workspace with a personal progress
+#              ledger, not reference material.
+#   proposed-deletions.md — an internal proposal awaiting sign-off. Delete the
+#              file and this line together once the list is resolved.
+exclude_docs: |
+  archive/
+  course/
+  proposed-deletions.md
+
+# These docs are read on GitHub as often as on the site, so they link freely to
+# files outside docs/ — source files, changelog reports, the root README. Those
+# are not site pages and must not fail the build. A broken in-page ANCHOR still
+# fails, because that is always a real mistake.
+validation:
+  omitted_files: warn
+  links:
+    not_found: info
+    absolute_links: info
+    unrecognized_links: info
+    anchors: warn

@@ -1,0 +1,4 @@
+# Docs site only — NOT a runtime dependency of the app.
+# Install with uv:  uv pip install -r docs/requirements.txt
+# Build locally:    mkdocs serve   (http://127.0.0.1:8000)
+mkdocs-material==9.5.44
