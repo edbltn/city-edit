@@ -32,6 +32,9 @@ class Face:
         self.glyphs = font.getGlyphSet()
         # Monospace: every glyph advances the same, so measure one and reuse it.
         self.advance = font["hmtx"][self.cmap[ord("M")]][0]
+        # Cap height, for optically centring capitals in a box — the em box is
+        # mostly empty above a capital, so centring on it sits the letter low.
+        self.cap_height = getattr(font["OS/2"], "sCapHeight", 0) or round(self.upem * 0.7)
 
     def outline(self, char: str) -> str:
         """SVG path data for one glyph, in font units with the y axis pointing up."""

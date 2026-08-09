@@ -16,7 +16,7 @@ master and a 300 DPI PNG. Deterministic: same input, byte-identical output.
 
 | File | Product | Print | Canvas |
 |------|---------|-------|--------|
-| `tee-crossword` | Tee, centre chest | 1-colour | 3300 × 3900 (11" × 13") |
+| `tee-isogrid` | Tee, centre chest | greyscale | 3300 × 3900 (11" × 13") |
 | `tee-desire-path` | Tee, full front | 3-colour | 3300 × 4200 (11" × 14") |
 | `tee-heat` | Tee, full back | full colour | 3900 × 5100 (13" × 17") |
 | `mug-heat-ramp` | 11oz mug, full wrap | full colour | 2475 × 1155 (9.25" × 3.8") |
@@ -25,8 +25,9 @@ master and a 300 DPI PNG. Deterministic: same input, byte-identical output.
 Colourways are `--black` (light ink, for dark garments and for a dark full-bleed
 mug wrap) and `--natural` / `--bone` (dark ink, for pale garments).
 
-The two mugs and `tee-crossword` are one object split across three products:
-the tee carries the puzzle, the mug carries its clues. Sell them as a pair.
+`tee-isogrid` is the active design; the rest predate it and are unreviewed.
+`mug-clues` in particular was the crossword reading of the logo, which is
+retired — it should probably go.
 
 **Tee art is transparent** — the garment is the background. Don't flatten it
 onto a black rectangle before uploading or you'll print a black box on a black
@@ -36,11 +37,24 @@ shirt, at roughly triple the ink cost.
 glossy mug blank — that is not the same thing as ordering a black mug blank.
 Order the white one.
 
+**`tee-isogrid` is tied to its blank.** Its faces are opaque colours
+pre-composited against the garment (`GARMENT_BLACK` / `GARMENT_NATURAL` in
+`build_merch.py`), because stacked transparency prints as compounding ink
+rather than the tone you asked for. Print the black files on navy or heather
+and the tones will read off.
+
 ## Why it looks like this
 
-Everything is built from four moves borrowed straight from the app: the mono
-grid, the crossword cell (`components/Logo/Logo.tsx`), the heat ramp
+Everything is built from moves borrowed straight from the app: the mono grid,
+the logo's cell grid (`components/Logo/Logo.tsx`), the heat ramp
 (`--heat-gradient` in `styles/globals.css`), and the cyan/red start-end kites.
+
+`iso.py` is the isometric design. The logo's grid is a street plan, not a
+crossword, and it is built as one — cells become volumes, letter cells become
+plinths with the letter standing on them. The letters stand up rather than lie
+on the roofs: on the ground plane a glyph shears in both axes at once and turns
+to mush at chest scale, while in the wall plane only the baseline slants and
+every vertical stem stays vertical. See the docstrings there for the rest.
 The palette in `designs.py` mirrors `globals.css` — if the app's accent moves,
 move it here too.
 

@@ -31,6 +31,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).parent))
 
 import designs as d  # noqa: E402
+import iso  # noqa: E402
 
 OUT = Path(__file__).parent / "out"
 FONT_TTF = Path(__file__).parent / "fonts" / "RedHatMono[wght].ttf"
@@ -43,20 +44,26 @@ INK_ON_DARK = d.INK
 INK_ON_LIGHT = "#141414"
 PAPER_LIGHT = "#F4F5F0"     # --paper for light basemaps
 
+# Actual blank colours. Designs that pre-composite their fills (the isometric
+# tee) resolve every tone against these, so a colourway is tied to the garment
+# it was built for — printing the black files on navy or heather will read off.
+GARMENT_BLACK = "#17171a"
+GARMENT_NATURAL = "#e6e0d2"
 
-def tee(name, fn, title, placement, size_in):
-    return dict(kind="tee", name=name, fn=fn, title=title,
-                placement=placement, size_in=size_in)
+
+def tee(name, fn, title, placement, size_in, ground=False):
+    return dict(kind="tee", name=name, fn=fn, title=title, placement=placement,
+                size_in=size_in, ground=ground)
 
 
 def mug(name, fn, title):
-    return dict(kind="mug", name=name, fn=fn, title=title,
+    return dict(kind="mug", name=name, fn=fn, title=title, ground=False,
                 placement="Full wrap, 11oz", size_in='9.25" × 3.8"')
 
 
 PRODUCTS = [
-    tee("tee-crossword", d.tee_crossword, "Crossword",
-        "Centre chest, front", '11" × 13"'),
+    tee("tee-isogrid", iso.tee_isogrid, "Isometric Grid",
+        "Centre chest, front", '11" × 13"', ground=True),
     tee("tee-desire-path", d.tee_desire_path, "Desire Path",
         "Full front", '11" × 14"'),
     tee("tee-heat", d.tee_heat, "Heat",
@@ -65,14 +72,23 @@ PRODUCTS = [
     mug("mug-clues", d.mug_clues, "Clues"),
 ]
 
-# (suffix, ink, background) per colourway.
-TEE_WAYS = [("black", INK_ON_DARK, None), ("natural", INK_ON_LIGHT, None)]
-MUG_WAYS = [("black", INK_ON_DARK, d.PAPER), ("bone", INK_ON_LIGHT, PAPER_LIGHT)]
+# Per colourway: the ink, the painted background (mugs only — tee art is
+# transparent), and the blank it will be printed on.
+TEE_WAYS = [
+    ("black", INK_ON_DARK, None, GARMENT_BLACK),
+    ("natural", INK_ON_LIGHT, None, GARMENT_NATURAL),
+]
+MUG_WAYS = [
+    ("black", INK_ON_DARK, d.PAPER, d.PAPER),
+    ("bone", INK_ON_LIGHT, PAPER_LIGHT, PAPER_LIGHT),
+]
 
 
-def render(product, suffix, ink, background, previews):
+def render(product, suffix, ink, background, garment, previews):
     accent = d.ACCENT if suffix in ("black",) else d.ACCENT_ON_LIGHT
-    if product["kind"] == "tee":
+    if product["ground"]:
+        w, h, body = product["fn"](ink, accent, garment)
+    elif product["kind"] == "tee":
         w, h, body = product["fn"](ink, accent)
     else:
         w, h, body = product["fn"](ink, background, accent)
@@ -128,15 +144,25 @@ def build_lookbook() -> Path:
         font.flavor = "woff2"
         font.save(FONT_WOFF2)
 
-    # The masthead mark, drawn from the same grid as the tee so the sheet and
-    # the thing it documents cannot drift apart. currentColor throughout, so it
-    # follows the page theme.
-    cell = 18.0
-    grid = 7 * cell + 6 * (cell * 0.25)
-    mark = d.svg(
-        round(grid), round(grid),
-        d.crossword(0, 0, cell, "currentColor", "currentColor", numbers=False),
+    # The masthead mark is the design itself, at badge size — the sheet and the
+    # thing it documents cannot drift apart if they come out of one function.
+    mark_body, (mx0, my0, mx1, my1) = iso.city(
+        iso.tones_for(GARMENT_BLACK, INK_ON_DARK), grid=["X.", "C."]
     )
+    mw, mh = mx1 - mx0, my1 - my0
+    mark = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{mw * 40:.0f}" '
+        f'height="{mh * 40:.0f}" viewBox="{mx0:.3f} {my0:.3f} {mw:.3f} {mh:.3f}">'
+        f'{mark_body}</svg>'
+    )
+
+    # An amber-lettered variant, rendered only for the sheet: it is an option to
+    # decide on, not a colourway anyone has asked to print yet.
+    aw, ah, abody = iso.tee_isogrid(INK_ON_DARK, d.ACCENT, GARMENT_BLACK,
+                                    letter_ink=d.ACCENT)
+    cairosvg.svg2png(bytestring=d.svg(aw, ah, abody).encode(),
+                     write_to=str(preview_dir / "tee-isogrid--accent.png"),
+                     output_width=760, output_height=round(760 * ah / aw))
 
     html = template.replace("{{FONT}}", data_uri(FONT_WOFF2, "font/woff2"))
     html = html.replace("{{MARK}}", mark)
@@ -167,8 +193,9 @@ def main():
 
     for product in PRODUCTS:
         ways = TEE_WAYS if product["kind"] == "tee" else MUG_WAYS
-        for suffix, ink, background in ways:
-            slug, w, h, nbytes = render(product, suffix, ink, background, previews)
+        for suffix, ink, background, garment in ways:
+            slug, w, h, nbytes = render(product, suffix, ink, background,
+                                        garment, previews)
             print(f"  {slug:<28} {w}×{h}px @ {DPI}dpi   {nbytes / 1024:7.0f} KB")
 
     print(f"\n{len(PRODUCTS)} designs → {OUT}")
