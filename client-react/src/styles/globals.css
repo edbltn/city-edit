@@ -2154,13 +2154,29 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   border-right-color: transparent;
 }
 
+/* Horizontally: span the mirror, so the caption centres on the control it
+   labels. Vertically: sit on the head row's own bottom edge, which is the
+   mirror's BORDER box — one border further down than the padding box `inset: 0`
+   resolves against. Then flex-end puts this caption's line box exactly where
+   the head's own `align-items: flex-end` puts BLOCKS.
+
+   Centring it inside the control's box instead (what this used to do) floated
+   it 3.5px ABOVE its neighbour: the mirror is 19px tall because it copies the
+   real control's metrics (11px text + padding + borders), and a 10px caption
+   centred in 19px lands nowhere near the baseline a 10px caption bottom-aligned
+   in the head row sits on. Both captions are the same size and sit in the same
+   row, so the eye reads that offset as the header being crooked — which is
+   what it is. Matching line-height keeps the two line boxes identical. */
 .graph-proposal-head-caption {
   position: absolute;
-  inset: 0;
+  left: 0;
+  right: 0;
+  bottom: calc(-1 * var(--vote-border, 1px));
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
   font-size: 10px;
+  line-height: 1.2;
   letter-spacing: 0.08em;
 }
 
@@ -2266,7 +2282,11 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: stretch;
-  border: 1px solid var(--hairline);
+  /* Tokenised because the header caption has to reach back OUT through this
+     border to sit on the head row's own bottom edge — see
+     .graph-proposal-head-caption. */
+  --vote-border: 1px;
+  border: var(--vote-border) solid var(--hairline);
   font-variant-numeric: tabular-nums;
   font-size: 11px;
   line-height: 1;
@@ -2526,7 +2546,12 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
     font-size: 9px;
   }
 
+  /* Down to the caption size its VOTERS twin already uses. The data cells stay
+     at 10px (that rule is theirs) — but in the HEAD this element is a caption,
+     and two captions in one row that share a bottom edge have to share a size
+     or their baselines part again. */
   .graph-proposal-head .graph-proposal-row-cover {
+    font-size: 9px;
     letter-spacing: 0.04em;
   }
 
