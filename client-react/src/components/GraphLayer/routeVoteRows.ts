@@ -17,19 +17,17 @@
 // The rows are `null` until the answer lands. Callers render that as PENDING
 // rather than substituting local sums: a number that is wrong for 300ms and
 // then silently changes is worse than a number that visibly hasn't arrived.
+// That makes losing an answer expensive — the card doesn't degrade, it just
+// keeps reading "‒" — so the cache and the one-request-per-key rule live in
+// routeVotesCache.ts, which never discards rows it has already been given.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CONFIG } from "../../config";
 import { getMapSlug, passcodeHeaders } from "../../map/runtime";
-import { ROUTE_VOTES_CACHE_MAX, routeVotesKey } from "../../utils/blockSelection";
+import { routeVotesKey } from "../../utils/blockSelection";
+import { cachedRouteVoteRows, loadRouteVoteRows } from "./routeVotesCache";
 import { ROUTE_VOTES_DEBOUNCE_MS, ROUTE_VOTES_EDGE_CAP, type VoteTypeRow } from "./spatialLookup";
-
-// Session cache of resolved rows, keyed by map + capped edge set. Reopening a
-// selection (or re-hovering a diamond) renders server truth immediately
-// instead of flashing pending. Bounded and insertion-ordered, so dropping the
-// first key evicts the least-recently-resolved entry.
-const cache = new Map<string, VoteTypeRow[]>();
 
 /** Hover asks on a short delay so sweeping the cursor across a cluster of
  *  diamonds doesn't fire a request per diamond. */
@@ -80,43 +78,52 @@ export function useRouteVoteRows(
   }, [edgeIds]);
 
   const [fetched, setFetched] = useState<{ key: string; rows: VoteTypeRow[] } | null>(null);
+  // The effect below keys on `key`, not on `query` — `query` is a fresh object
+  // whenever the caller's edgeIds array is, which for an unchanged selection
+  // would refetch on every render. It still needs the live query to read `ids`
+  // from and to tell "is this answer still for what we're showing", so it comes
+  // through a ref, synced after each commit (declared FIRST, so it is already
+  // current by the time the fetch effect below runs).
   const queryRef = useRef(query);
-  queryRef.current = query;
+  useEffect(() => { queryRef.current = query; });
   const key = query?.key ?? null;
 
   useEffect(() => {
     const q = queryRef.current;
     if (!q) return;
-    let cancelled = false;
-    const delay = cache.has(q.key) ? ROUTE_VOTES_DEBOUNCE_MS : firstDelayMs;
+    const delay = cachedRouteVoteRows(q.key) ? ROUTE_VOTES_DEBOUNCE_MS : firstDelayMs;
     const timer = window.setTimeout(() => {
-      fetch(`${CONFIG.apiUrl}/route-votes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...passcodeHeaders() },
-        body: JSON.stringify({ map: getMapSlug(), edge_ids: q.ids }),
-      })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => {
-          if (cancelled || !j?.rows) return;
-          const rows = j.rows as VoteTypeRow[];
-          cache.delete(q.key);
-          cache.set(q.key, rows);
-          while (cache.size > ROUTE_VOTES_CACHE_MAX) {
-            cache.delete(cache.keys().next().value as string);
-          }
-          setFetched({ key: q.key, rows });
-        })
-        .catch(() => {});
+      loadRouteVoteRows(q.key, async () => {
+        const r = await fetch(`${CONFIG.apiUrl}/route-votes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...passcodeHeaders() },
+          body: JSON.stringify({ map: getMapSlug(), edge_ids: q.ids }),
+        });
+        if (!r.ok) return null;
+        const j = await r.json();
+        return (j?.rows as VoteTypeRow[] | undefined) ?? null;
+      }).then((rows) => {
+        if (!rows) return;
+        // Key-scoped, NOT run-scoped. This effect re-runs on every refetchToken
+        // bump — i.e. on every vote anyone casts anywhere on the map — and it
+        // used to mark the open request cancelled on the way out, throwing away
+        // an answer that was still perfectly good for the selection on screen.
+        // Since nothing then reached the cache, the next run took the cold path
+        // again and the columns could stay pending indefinitely under traffic.
+        // What actually makes an answer stale is the SELECTION moving on, which
+        // is exactly what this compares.
+        if (queryRef.current?.key !== q.key) return;
+        setFetched({ key: q.key, rows });
+      });
     }, delay);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
+    // Only the not-yet-fired timer is worth cancelling; a request already in
+    // flight is left to land and populate the cache.
+    return () => window.clearTimeout(timer);
   }, [key, refetchToken, firstDelayMs]);
 
   if (!key) return { rows: null, key: null };
   return {
     key,
-    rows: cache.get(key) ?? (fetched?.key === key ? fetched.rows : null),
+    rows: cachedRouteVoteRows(key) ?? (fetched?.key === key ? fetched.rows : null),
   };
 }
