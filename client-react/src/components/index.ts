@@ -4,6 +4,7 @@ export { MapView } from "./MapView";
 export { RouteMarker } from "./RouteMarker";
 export { RouteLayer, DesirePathLayer } from "./RouteLayer";
 export { ErrorToast } from "./ErrorToast";
+export { EventBanner } from "./EventBanner";
 export { GhostPin } from "./GhostPin";
 export { VoteTypeSelector } from "./VoteTypeSelector";
 export { Landing } from "./Landing";

@@ -1,6 +1,9 @@
 .error-toast {
   position: fixed;
-  bottom: 24px;
+  /* The event banner shares this slot and publishes its measured height as
+     --event-banner-offset (see EventBanner.tsx); when it's up we stack above
+     it instead of landing on top of it. */
+  bottom: calc(24px + var(--event-banner-offset, 0px));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
