@@ -113,8 +113,8 @@ def set_src(doc, slot_id, value):
 # The signal diagram is the argument the poster is making, so it is drawn from
 # the same numbers the ranking used: the cycle, the green the model gives this
 # crossing, and how many carriageways stand between the two kerbs.
-BAR_H = {1: 96, 2: 56, 3: 40, 4: 30}     # keep the block near a constant height
-BAR_GAP = {1: 0, 2: 18, 3: 14, 4: 12}
+BAR_H = {1: 92, 2: 52, 3: 34, 4: 24}     # keep the block near a constant height
+BAR_GAP = {1: 0, 2: 16, 3: 11, 4: 9}
 
 
 def crossing_chart(r):
@@ -258,7 +258,7 @@ def city_path(size):
     return paths, xy
 
 
-def locator(r, size=168):
+def locator(r, size=150):
     paths, xy = city_path(size)
     x, y = xy(r["lon"], r["lat"])
     body = "".join(f'<path d="{d}" fill="#e4e0d7" stroke="none"/>'
