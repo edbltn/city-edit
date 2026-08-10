@@ -86,7 +86,7 @@ import { useVotesVersion } from "../../utils/useVotesVersion";
 import { getVoterId } from "../../utils/voterIdentity";
 import { isHoverSuppressed } from "../../utils/touchHover";
 import { buildSelectionUrl, copyToClipboard } from "../../utils/shareLink";
-import { buildProposalDonateUrl, fundableProposalName } from "../../utils/donateLink";
+import { buildProposalDonateUrl } from "../../utils/donateLink";
 import { CheckIcon } from "../CheckIcon";
 import { arrayMax, haversineMeters, HEAT_FULL_SCALE, NEG_HEAT_FULL_SCALE, HEATMAP_OPACITY } from "./geometryHelpers";
 import { resolveAddress } from "./geocodingHelpers";
@@ -3322,17 +3322,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // doesn't head with one.
     ? buildSelectionUrl(pinnedPointLatLng, pinnedWinner?.label ?? pinnedVoteTypes[0]?.label)
     : null;
-  const pinnedFundName = fundableProposalName(pinnedCardWinner?.label, pinnedVoteTypes);
-  const pinnedDonate = pinnedShareUrl && pinnedFundName
-    ? {
-        name: pinnedFundName,
-        url: buildProposalDonateUrl({
-          name: pinnedFundName,
+  // Per-row funding: each vote type gets a link naming THAT proposal, with a
+  // deep link selecting this point under that type — so the donation record
+  // says which of the card's proposals the money was for.
+  const pinnedDonateUrlFor = (label: string) =>
+    (pinnedPointLatLng
+      ? buildProposalDonateUrl({
+          name: label,
           place: pinnedName,
-          url: pinnedShareUrl,
-        }),
-      }
-    : null;
+          url: buildSelectionUrl(pinnedPointLatLng, label),
+        })
+      : null);
 
   // -------------------------------------------------------------------------
   // Route-summary card content (docs §2.4: everything displays at block grain)
@@ -3497,17 +3497,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     return tapped && anchorsAreWaypoints(tapped) ? tapped : null;
   }, [pathEdgeIds, routeProposals, isHeatmapLoading, selectedRbtpId, anchorsAreWaypoints]);
 
-  // What a donation from the route-summary card funds. The live URL already
-  // encodes the whole selection (waypoints + vote type), so it doubles as the
-  // deep link back to the corridor.
-  const routeFundName = fundableProposalName(
-    coveredRouteProposal?.label, routeUniqueRows ?? routeVoteRows);
-  const routeDonate = routeFundName
-    ? {
-        name: routeFundName,
-        url: buildProposalDonateUrl({ name: routeFundName, url: window.location.href }),
-      }
-    : null;
+  // The route card's per-row funding. A corridor spans many blocks and so has
+  // no one street name to cite as its place; the live URL already encodes the
+  // whole selection, so it is what locates the proposal.
+  const routeDonateUrlFor = (label: string) =>
+    buildProposalDonateUrl({ name: label, url: window.location.href });
 
   // -------------------------------------------------------------------------
   // Top-proposal row badges — which of a card's vote-type rows are CURRENT top
@@ -4432,10 +4426,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           voteTypes={theme.suggestions}
           sources={pinnedSources}
           shareUrl={pinnedShareUrl}
-          // Funds the proposal the card is headed by — its top proposal, or
-          // failing that the first vote type listed. A card with no vote types
-          // names no proposal, so it gets no fund row.
-          donate={pinnedDonate}
+          donateUrlFor={pinnedDonateUrlFor}
           streetViewLatLng={pinnedPointLatLng}
           onVote={castProposalVote}
           onRemove={onRemoveSelectedRef.current}
@@ -4551,10 +4542,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           voteTypes={theme.suggestions}
           sources={routeSources}
           shareUrl={window.location.href}
-          // A corridor spans many blocks, so it has no one street name to cite
-          // as its place — the deep link (the live URL, which encodes the whole
-          // selection) is what locates it.
-          donate={routeDonate}
+          donateUrlFor={routeDonateUrlFor}
           onVote={castRouteVote}
           onRemove={onClearRoute ? () => onClearRouteRef.current?.() : undefined}
           removeLabel="Deselect this route"
@@ -4685,12 +4673,12 @@ interface ProposalCardProps {
    *  card's own anchor moving — e.g. the open modal the hover card dodges
    *  re-anchors while the hover target stays put. */
   avoidKey?: string;
-  /** Donation-page link for the proposal this card names, already carrying the
-   *  proposal's identity (see buildProposalDonateUrl), plus that proposal's own
-   *  name for the link's title/aria. Absent ⇒ no fund row — the right answer
-   *  for a card naming no proposal (nothing to fund) and for every hover card
-   *  (they are pointer-events:none, so the link could not be clicked). */
-  donate?: { name: string; url: string } | null;
+  /** Donation-page link for ONE of the card's vote types, carrying that
+   *  proposal's identity (see buildProposalDonateUrl). Per row, because a row
+   *  IS a proposal — the card as a whole may name several. Absent ⇒ no fund
+   *  chips; hover cards never get them anyway (pointer-events: none, so the
+   *  link could not be clicked), which is also why sources skip them. */
+  donateUrlFor?: (label: string) => string | null;
   edgeId?: number | null;
   /** The selection's touched blocks as materialized edge lists (docs §4.1) —
    *  drives the ± buttons' active/unvote state. Null/absent falls back to the
@@ -4781,7 +4769,7 @@ function CoverageCell({
 function ProposalCard({
   winner, eyebrow = "Top Proposal", screenX, screenY, name, metaText = null, rows, topKinds,
   coverage = null, coverageUnit = "block", votersPending = false,
-  interactive = false, elevated = false, getAvoidRects, avoidKey, donate = null, edgeId = null, blocks = null, mode = "", shareUrl = null, streetViewLatLng = null, voteTypes, sources, onVote, onRemove, removeLabel = "Remove this point", onHoverChange, registerEl,
+  interactive = false, elevated = false, getAvoidRects, avoidKey, donateUrlFor, edgeId = null, blocks = null, mode = "", shareUrl = null, streetViewLatLng = null, voteTypes, sources, onVote, onRemove, removeLabel = "Remove this point", onHoverChange, registerEl,
 }: ProposalCardProps) {
   const [copied, setCopied] = useState(false);
   // Interactive cards can collapse to a small pill (icon + label + expand) so a
@@ -5083,6 +5071,9 @@ function ProposalCard({
                   // as "this type has a pin here".
                   const topKind = topKinds?.get(row.label);
                   const links = (sources?.[row.label] ?? []).slice(0, MAX_ROW_LINKS);
+                  // Each ROW is one proposal, so funding belongs here rather
+                  // than on the card: no "which of these?" to resolve.
+                  const fundHref = interactive ? donateUrlFor?.(row.label) : null;
                   return (
                     <div
                       className={`graph-proposal-row${topKind ? " is-top-proposal" : ""}`}
@@ -5109,6 +5100,25 @@ function ProposalCard({
                         <span className="graph-proposal-row-label-text">
                           {row.label}
                         </span>
+                        {/* Fund chip — the same bracket token as the source
+                            markers beside it, but an ACTION, so it carries the
+                            accent and leads the run. First (not last) so it
+                            keeps one position down the card: the citation count
+                            varies row to row, and a chip that slid sideways
+                            with it would be hard to aim at. */}
+                        {fundHref && (
+                          <a
+                            className="graph-proposal-row-fund"
+                            href={fundHref}
+                            // The donation page is outside the app — never
+                            // navigate the map out from under a selection.
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`Donate toward "${row.label}" here`}
+                            aria-label={`Donate toward ${row.label}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >[$]</a>
+                        )}
                         {/* Source links ride WITH the label, inside its column,
                             so they read as a footnote on the vote type rather
                             than a stray line under the row. The label text is
@@ -5161,27 +5171,6 @@ function ProposalCard({
                   );
                 })}
               </div>
-            )}
-            {/* The card's one outbound money action, kept to a single row at
-                the foot so a proposal becomes fundable without the modal
-                growing a section. It speaks the card's own bracket-token
-                language ([$] beside [a][b][c] and [−|net|+]) rather than
-                arriving as a pasted-in donate button. */}
-            {interactive && donate && (
-              <a
-                className="graph-proposal-fund"
-                href={donate.url}
-                // The donation page lives outside the app — never navigate the
-                // map out from under an open selection.
-                target="_blank"
-                rel="noopener noreferrer"
-                title={`Donate toward "${donate.name}" — opens our donation page`}
-                aria-label={`Donate toward ${donate.name}`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <span className="graph-proposal-fund-token" aria-hidden="true">[$]</span>
-                <span className="graph-proposal-fund-text">Fund this proposal</span>
-              </a>
             )}
           </div>
         </>

@@ -2240,39 +2240,48 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   text-decoration: underline;
 }
 
-/* Fund link — the card's one outbound money action, and the only thing in the
-   modal that asks for something rather than reporting it. It gets exactly one
-   row at the foot of the card: a hairline box in the same bracket-token voice
-   as the [a][b][c] source markers and the [−│net│+] control, so it reads as
-   part of the card's own language instead of a pasted-in donate button.
+/* Fund chip — the row's own donate link, in the same bracket-token voice as
+   the [a][b][c] markers it sits beside. It leads the run rather than trailing
+   it: the citation count varies row to row, so a chip placed after them would
+   land at a different x on every line, and this one is a target you aim at.
 
-   Quiet at rest — hairline border, held just under full strength — so it never
-   competes with the vote controls above it, which are what the card is FOR. It
-   comes fully up on hover, at which point it is the thing being pointed at. */
-.graph-proposal-fund {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-  margin-top: 8px;
-  padding: 5px 7px;
-  border: 1px solid var(--hairline);
-  font-size: 11px;
-  text-decoration: none;
-  opacity: 0.82;
-  transition: border-color 120ms ease, background-color 120ms ease, opacity 120ms ease;
-}
-
-.graph-proposal-fund:hover {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  opacity: 1;
-}
-
-/* The accent lives on the [$] alone — a single bright glyph on an otherwise
-   grey row draws the eye without shouting. */
-.graph-proposal-fund-token {
+   The accent is what separates an ACTION from the citations next to it — same
+   size, same shape, different job. It has to carry the reset's own selector
+   weight to say so: the rule above is 0-3-0 and would otherwise flatten this
+   colour back to card ink. */
+.graph-proposal-row-fund {
   flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 1.3;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.leaflet-container .graph-proposal-card .graph-proposal-row-fund {
   color: var(--accent);
+}
+
+.graph-proposal-row-fund:hover {
+  text-decoration: underline;
+}
+
+/* Touch devices never reach the hover above, so the markers would sit at half
+   strength forever — and 10px at 50% opacity on a phone reads as nothing there
+   at all, which is exactly how these were being missed. Where there is no
+   hover to recover them they rest near full strength instead, and the whole
+   marker run (fund chip included) gets vertical padding so a fingertip has
+   something to land on without widening the row. Last in the file so it wins
+   the size back from the rules above at equal specificity. */
+@media (hover: none) {
+  .graph-proposal-row-link {
+    opacity: 0.85;
+  }
+
+  .graph-proposal-row-link,
+  .graph-proposal-row-fund {
+    padding: 4px 0;
+    font-size: 11px;
+  }
 }
 
 /* Connected vote control: [ −down │ net │ +up ] reads as ONE unit rather than

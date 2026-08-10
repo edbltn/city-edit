@@ -32,22 +32,6 @@ function clip(text: string): string {
   return `${trimmed.slice(0, MAX_UTM_CHARS - 1).trimEnd()}…`;
 }
 
-/**
- * The one proposal a card may offer to fund, or "" when it names none.
- *
- * A card headed by a top proposal funds that proposal; a card listing exactly
- * one vote type funds that one. Anything else is a place with several
- * proposals on it — "fund this proposal" there would have to guess which, so
- * the row is simply absent rather than wrong.
- */
-export function fundableProposalName(
-  winnerLabel: string | null | undefined,
-  rows: readonly { label: string }[],
-): string {
-  if (winnerLabel) return winnerLabel;
-  return rows.length === 1 ? rows[0].label : "";
-}
-
 export interface ProposalDonationTarget {
   /** The proposal's vote-type label — "Protected bike lane". */
   name: string;

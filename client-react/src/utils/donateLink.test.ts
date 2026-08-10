@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildProposalDonateUrl, fundableProposalName } from "./donateLink";
+import { buildProposalDonateUrl } from "./donateLink";
 
 vi.mock("../map/runtime", () => ({
   getCurrentMap: () => ({ name: "NYC Proposals" }),
@@ -58,24 +58,19 @@ describe("buildProposalDonateUrl", () => {
   });
 });
 
-describe("fundableProposalName", () => {
-  const rows = (...labels: string[]) => labels.map((label) => ({ label }));
-
-  it("funds the proposal the card is headed by", () => {
-    expect(fundableProposalName("Add bus lane", rows("Add bus lane", "Fix crossing")))
-      .toBe("Add bus lane");
-  });
-
-  it("funds a lone vote type even with no top proposal", () => {
-    expect(fundableProposalName(null, rows("Improve sidewalk"))).toBe("Improve sidewalk");
-  });
-
-  it("declines to guess between several proposals on one place", () => {
-    expect(fundableProposalName(null, rows("Improve sidewalk", "Add bench", "Fix crossing")))
-      .toBe("");
-  });
-
-  it("has nothing to fund where nobody has voted", () => {
-    expect(fundableProposalName(null, [])).toBe("");
+describe("per-row donation targets", () => {
+  // Each row of a card is its own proposal, so two rows on the same place must
+  // produce two distinguishable links — that is the whole point of moving the
+  // chip onto the row.
+  it("names the row's own vote type, not the card's", () => {
+    const bus = new URL(buildProposalDonateUrl({
+      name: "Add bus lane", place: "21st St", url: "https://cityedit.org/m/nyc-proposals?w=1,2",
+    }));
+    const bike = new URL(buildProposalDonateUrl({
+      name: "Add protected bike lane", place: "21st St", url: "https://cityedit.org/m/nyc-proposals?w=1,2",
+    }));
+    expect(bus.searchParams.get("utm_content")).toContain("Add bus lane");
+    expect(bike.searchParams.get("utm_content")).toContain("Add protected bike lane");
+    expect(bus.searchParams.get("utm_content")).not.toBe(bike.searchParams.get("utm_content"));
   });
 });
