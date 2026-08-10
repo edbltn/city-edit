@@ -1,5 +1,5 @@
 diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
-index afc4f58..9549477 100644
+index afc4f58..bcde150 100644
 --- a/client-react/src/components/GraphLayer/GraphLayer.tsx
 +++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
 @@ -19,6 +19,11 @@ import Flatbush from "flatbush";
@@ -14,7 +14,24 @@ index afc4f58..9549477 100644
  import { useWebSocketContext } from "../../context/WebSocketContext";
  import { useGraphSnap, useTheme, useHeatmap, useGhostPin, useRoute } from "../../context";
  import type { GraphData, ProposalMatch } from "../../types";
-@@ -336,6 +341,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+@@ -31,6 +36,7 @@ import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
+ import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, TOP_PROPOSAL_MIN_NET, type VoteTypeWinner } from "./topProposals";
+ import {
+   createRouteProposalJob, corridorFromEdgeIds, corridorSliceBetween, routeBlockEdges, isRouteCovered,
++  routeCoverageRatio, ROUTE_SELECTED_MIN_COVERAGE,
+   expandSelectionToUndirected,
+   type RouteProposal,
+ } from "./routeProposals";
+@@ -80,7 +86,7 @@ import { useVotesVersion } from "../../utils/useVotesVersion";
+ import { getVoterId } from "../../utils/voterIdentity";
+ import { isHoverSuppressed } from "../../utils/touchHover";
+ import { buildSelectionUrl, copyToClipboard } from "../../utils/shareLink";
+-import { buildProposalDonateUrl, fundableProposalName } from "../../utils/donateLink";
++import { buildProposalDonateUrl } from "../../utils/donateLink";
+ import { CheckIcon } from "../CheckIcon";
+ import { arrayMax, haversineMeters, HEAT_FULL_SCALE, NEG_HEAT_FULL_SCALE, HEATMAP_OPACITY } from "./geometryHelpers";
+ import { resolveAddress } from "./geocodingHelpers";
+@@ -336,6 +342,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
    // on hover/selection).
    const blocksActiveRef = useRef(false);
    const maxVotesRevRef = useRef(-1);
@@ -23,7 +40,7 @@ index afc4f58..9549477 100644
  
    // Node adjacency list — node index → [edge indices]. Built once from topology,
    // used to derive node votes from edge totals (max of adjacent edges).
-@@ -817,6 +824,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+@@ -817,6 +825,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
        // Station networks don't badge winners as "top proposals" (every station
        // renders its own pin regardless), so the support floor stays off there.
        isStationNetwork ? 0 : topProposalMinNet,
@@ -33,7 +50,95 @@ index afc4f58..9549477 100644
      ), legendChanged);
    }, [setStableWinners, isStationNetwork, voteTypeKindOf, topProposalMinNet]);
  
-@@ -1402,9 +1412,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+@@ -962,7 +973,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // them is still draggable — dragging there spawns a real mid. Recomputed
+   // reactively from winners + the path, so a vote that promotes/demotes a
+   // proposal adds/removes its highlight.
++  //
++  // TWO GRAINS, deliberately (see the effect below):
++  //   onPathEdgeSet        — the winner's own edge is ON the routed path
++  //                          (direction twins forgiven). Drives click-through:
++  //                          only here is there really a polyline underneath to
++  //                          hand the gesture to.
++  //   onSelectedBlockSet   — the winner sits on a BLOCK the selection touches.
++  //                          Drives the selected ring, and nothing else. Blocks
++  //                          are the interaction grain everywhere else (votes,
++  //                          the card's rows, its "top proposal" badges), so
++  //                          this is the set that makes the pin agree with the
++  //                          modal.
+   const [onPathEdgeSet, setOnPathEdgeSet] = useState<Set<number>>(() => new Set());
++  const [onSelectedBlockSet, setOnSelectedBlockSet] = useState<Set<number>>(() => new Set());
+   const startLat = startPoint?.lat ?? null;
+   const startLng = startPoint?.lng ?? null;
+   const endLat = endPoint?.lat ?? null;
+@@ -1068,15 +1092,28 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   }, [getWaypointAvoidRects]);
+ 
+   // Highlight (but do NOT add as waypoints) the top proposals the current route
+-  // PASSES THROUGH. Matched by UNDIRECTED node-pair, not raw edge index: a two-way
+-  // street stores each direction as its own edge, and the route often traverses
+-  // the twin of the vote winner's edge (an exact edge-id intersection misses it).
++  // runs through. Two sets, at the two grains described above:
++  //
++  //   ON THE PATH — matched by UNDIRECTED node-pair, not raw edge index: a
++  //     two-way street stores each direction as its own edge, and the route often
++  //     traverses the twin of the vote winner's edge (an exact edge-id
++  //     intersection misses it). These stay click-through so the path beneath is
++  //     still draggable (dragging there spawns a real mid).
++  //   ON A SELECTED BLOCK — the winner's edge is any edge of a block the
++  //     selection touches, exactly the set `topKindsFor` badges as a "point" top
++  //     proposal in the card. A junction block holds dozens of stub edges and a
++  //     route crosses two of them, so the path test above misses ~every
++  //     intersection proposal the route plainly runs through: the card badged it
++  //     while its pin stayed dark. This set is the pin's half of that agreement.
++  //
+   // Reactive to winners + the path, so a vote promoting/demoting a proposal
+-  // adds/removes its highlight. Waypoint proposals (start/end/mid) are excluded —
+-  // those are styled by `role`. These stay click-through so the path beneath is
+-  // still draggable (dragging there spawns a real mid).
++  // adds/removes its highlight. Waypoint proposals (start/end/mid) are excluded
++  // from both — those are styled by `role`.
+   useEffect(() => {
+-    const clear = () => setOnPathEdgeSet((prev) => (prev.size ? new Set() : prev));
++    const clear = () => {
++      setOnPathEdgeSet((prev) => (prev.size ? new Set() : prev));
++      setOnSelectedBlockSet((prev) => (prev.size ? new Set() : prev));
++    };
+     if (isStationNetwork || isHeatmapLoading) { clear(); return; }
+     if (startLat === null || endLat === null) { clear(); return; }
+     if (!pathEdgeIds || pathEdgeIds.length === 0 || winners.length === 0) { clear(); return; }
+@@ -1088,17 +1125,24 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     for (const ei of pathEdgeIds) {
+       if (ei < g.nEdges) pathPairs.add(pairKey(edgeFrom(g, ei), edgeTo(g, ei)));
+     }
+-    const next = new Set<number>();
++    // Same block union the card's rows and badges are computed over.
++    const blockEdges = new Set<number>();
++    for (const block of materializeBlocks(g, blockIndexRef.current, pathEdgeIds)) {
++      for (let i = 0; i < block.length; i++) blockEdges.add(block[i]);
++    }
++    const nextPath = new Set<number>();
++    const nextBlock = new Set<number>();
+     for (const w of winners) {
+       // Skip proposals that ARE waypoints — `role` styles those.
+       if (w.edgeIdx === startEdgeIdx || w.edgeIdx === endEdgeIdx || midEdgeSet.has(w.edgeIdx)) continue;
+       if (w.edgeIdx >= g.nEdges) continue;
+-      if (pathPairs.has(pairKey(edgeFrom(g, w.edgeIdx), edgeTo(g, w.edgeIdx)))) next.add(w.edgeIdx);
++      if (pathPairs.has(pairKey(edgeFrom(g, w.edgeIdx), edgeTo(g, w.edgeIdx)))) nextPath.add(w.edgeIdx);
++      if (blockEdges.has(w.edgeIdx)) nextBlock.add(w.edgeIdx);
+     }
+-    setOnPathEdgeSet((prev) => {
+-      if (prev.size === next.size && [...next].every((x) => prev.has(x))) return prev;
+-      return next;
+-    });
++    const sameSet = (prev: Set<number>, next: Set<number>) =>
++      prev.size === next.size && [...next].every((x) => prev.has(x));
++    setOnPathEdgeSet((prev) => (sameSet(prev, nextPath) ? prev : nextPath));
++    setOnSelectedBlockSet((prev) => (sameSet(prev, nextBlock) ? prev : nextBlock));
+   }, [startLat, startLng, endLat, endLng, pathEdgeIds, winners, startEdgeIdx, endEdgeIdx, midEdgeSet, isStationNetwork, isHeatmapLoading]);
+ 
+   // Pixel hit-test: is a screen point over a top-proposal ICON? Tests the icon's
+@@ -1402,9 +1446,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
      // Block heat is the SIGNED vote differential (up − down) of the block's
      // top-ranked proposal — top-ranked BY differential (topProposalDiffs). A
      // block whose best proposal is still net-against gets a negative value
@@ -49,7 +154,7 @@ index afc4f58..9549477 100644
      const detail: BlockVotesDetail = {
        blockDiff: diff,
        max: Math.max(HEAT_FULL_SCALE, maxPos),
-@@ -1437,6 +1451,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+@@ -1437,6 +1485,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
      // (GraphLayer already built one for hover/selection).
      const job = createRouteProposalJob(topo, adj, data, {
        kindOf: voteTypeKindOf, blockIndex: blockIndexRef.current,
@@ -59,7 +164,7 @@ index afc4f58..9549477 100644
        // The top-proposal support floor (>topProposalMinNet net votes),
        // expressed as the pipeline's minimum path score — same rule the PBTP
        // winners apply, so both proposal families share one bar.
-@@ -1481,11 +1498,43 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+@@ -1481,11 +1532,43 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
    const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);
    useEffect(() => { recomputeRouteProposalsRef.current = recomputeRouteProposals; }, [recomputeRouteProposals]);
  
@@ -104,7 +209,7 @@ index afc4f58..9549477 100644
  
    // Coalesced, idle-time recompute: at most one queued at a time, run via
    // requestIdleCallback so it never lands mid-gesture. Used for the "must be
-@@ -1510,6 +1559,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+@@ -1510,6 +1593,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
    const requestProposalsRecomputeRef = useRef(requestProposalsRecompute);
    useEffect(() => { requestProposalsRecomputeRef.current = requestProposalsRecompute; }, [requestProposalsRecompute]);
  
@@ -124,7 +229,7 @@ index afc4f58..9549477 100644
    // The batched sweep: votes (own casts and WS deltas) mark this flag; every
    // PROPOSALS_REFRESH_INTERVAL_MS — or as soon as a hidden tab comes back —
    // one idle recompute folds them all in. Proposals may therefore lag votes by
-@@ -2218,6 +2280,43 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+@@ -2218,6 +2314,43 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
    const redrawHoverHighlightRef = useRef(redrawHoverHighlight);
    useEffect(() => { redrawHoverHighlightRef.current = redrawHoverHighlight; }, [redrawHoverHighlight]);
  
@@ -168,7 +273,7 @@ index afc4f58..9549477 100644
    // Redraw function - renders edges with vote-scaled styling
    const redraw = useCallback(() => {
      const canvas = canvasRef.current;
-@@ -2257,14 +2356,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+@@ -2257,14 +2390,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
  
      const coords = data.coords;
      const ends = data.ends;
@@ -192,7 +297,7 @@ index afc4f58..9549477 100644
      }
      // Floor the scale so low-traffic maps don't saturate (see HEAT_FULL_SCALE).
      const maxVotes = Math.max(maxVotesRef.current, HEAT_FULL_SCALE);
-@@ -2419,7 +2524,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+@@ -2419,7 +2558,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
      ctx.globalAlpha = 1.0;
  
      redrawHoverHighlightRef.current();
@@ -202,11 +307,284 @@ index afc4f58..9549477 100644
  
    // Schedule redraw. rAF is the fast path; the timer is a backstop because rAF
    // never fires in hidden/occluded windows — without it a zoomend repaint can be
+@@ -3182,17 +3322,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     // doesn't head with one.
+     ? buildSelectionUrl(pinnedPointLatLng, pinnedWinner?.label ?? pinnedVoteTypes[0]?.label)
+     : null;
+-  const pinnedFundName = fundableProposalName(pinnedCardWinner?.label, pinnedVoteTypes);
+-  const pinnedDonate = pinnedShareUrl && pinnedFundName
+-    ? {
+-        name: pinnedFundName,
+-        url: buildProposalDonateUrl({
+-          name: pinnedFundName,
++  // Per-row funding: each vote type gets a link naming THAT proposal, with a
++  // deep link selecting this point under that type — so the donation record
++  // says which of the card's proposals the money was for.
++  const pinnedDonateUrlFor = (label: string) =>
++    (pinnedPointLatLng
++      ? buildProposalDonateUrl({
++          name: label,
+           place: pinnedName,
+-          url: pinnedShareUrl,
+-        }),
+-      }
+-    : null;
++          url: buildSelectionUrl(pinnedPointLatLng, label),
++        })
++      : null);
+ 
+   // -------------------------------------------------------------------------
+   // Route-summary card content (docs §2.4: everything displays at block grain)
+@@ -3333,30 +3473,35 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // header, so selecting a diamond (or manually tracing its corridor) titles
+   // the summary with that proposal. Mirrors the diamonds' own selected rule:
+   // block coverage (twin-expanded) first, else the explicitly-tapped RBTP
+-  // whose anchors are still waypoints.
++  // whose anchors are still waypoints. Coverage is a THRESHOLD, not all-or-
++  // nothing (ROUTE_SELECTED_MIN_COVERAGE), so several corridors can qualify at
++  // once — the best-covered one wins the header rather than whichever ranked
++  // first.
+   const coveredRouteProposal = useMemo(() => {
+     void isHeatmapLoading;
+     const topo = topologyRef.current;
+     if (!topo || !pathEdgeIds || pathEdgeIds.length === 0 || routeProposals.length === 0) return null;
+     const sel = expandSelectionToUndirected(
+       topo, pathEdgeIds, routeProposals.flatMap((p) => p.blockEdgeIds));
+-    const byCoverage = routeProposals.find((p) => isRouteCovered(p.blocks, sel)) ?? null;
++    let byCoverage: RouteProposal | null = null;
++    let bestRatio = 0;
++    for (const p of routeProposals) {
++      const ratio = routeCoverageRatio(p.blocks, sel);
++      if (ratio >= ROUTE_SELECTED_MIN_COVERAGE && ratio > bestRatio) {
++        bestRatio = ratio;
++        byCoverage = p;
++      }
++    }
+     if (byCoverage) return byCoverage;
+     const tapped = routeProposals.find((p) => p.id === selectedRbtpId) ?? null;
+     return tapped && anchorsAreWaypoints(tapped) ? tapped : null;
+   }, [pathEdgeIds, routeProposals, isHeatmapLoading, selectedRbtpId, anchorsAreWaypoints]);
+ 
+-  // What a donation from the route-summary card funds. The live URL already
+-  // encodes the whole selection (waypoints + vote type), so it doubles as the
+-  // deep link back to the corridor.
+-  const routeFundName = fundableProposalName(
+-    coveredRouteProposal?.label, routeUniqueRows ?? routeVoteRows);
+-  const routeDonate = routeFundName
+-    ? {
+-        name: routeFundName,
+-        url: buildProposalDonateUrl({ name: routeFundName, url: window.location.href }),
+-      }
+-    : null;
++  // The route card's per-row funding. A corridor spans many blocks and so has
++  // no one street name to cite as its place; the live URL already encodes the
++  // whole selection, so it is what locates the proposal.
++  const routeDonateUrlFor = (label: string) =>
++    buildProposalDonateUrl({ name: label, url: window.location.href });
+ 
+   // -------------------------------------------------------------------------
+   // Top-proposal row badges — which of a card's vote-type rows are CURRENT top
+@@ -3366,10 +3511,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // batched proposal sweep).
+   //   - "point": a PBTP winner sits on one of the card's blocks (the same
+   //     block-grain the rows sum over, so the badge marks a row whose count
+-  //     includes that winner's votes).
+-  //   - "route": an RBTP whose corridor is FULLY contained in the selection
+-  //     (every block covered, direction twins forgiven) — a selection that
+-  //     merely brushes a corridor doesn't badge it.
++  //     includes that winner's votes). Same set that rings the pin — see
++  //     onSelectedBlockSet.
++  //   - "route": an RBTP whose corridor is MOSTLY inside the selection
++  //     (≥ ROUTE_SELECTED_MIN_COVERAGE of its blocks, direction twins
++  //     forgiven) — a selection that merely brushes a corridor doesn't badge
++  //     it. Same predicate that lights the diamond.
+   // -------------------------------------------------------------------------
+   const topKindsFor = useCallback(
+     (edgeIds: readonly number[] | null | undefined, includeRoutes: boolean): TopKindMap => {
+@@ -3756,13 +3903,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       // A fanned-out icon (spread override) sits off the path at its grid cell, so
+       // it can't be click-through — it must take its own click to be pickable.
+       const onPath = role === null && onPathEdgeSet.has(w.edgeIdx);
++      // Selected-but-not-under-the-path: the proposal sits on a block the
++      // selection covers (the card's grain) without the routed polyline running
++      // over its own edge — typically an intersection proposal on a junction
++      // block the route crosses. It reads selected, but stays INTERACTIVE:
++      // there's no path under it to hand a click to, so passthrough would only
++      // make it dead to the pointer.
++      const onSelectedBlock = role === null && !onPath && onSelectedBlockSet.has(w.edgeIdx);
+       const passthrough = (role !== null || onPath) && !isStationNetwork && !override;
+       const tint: "start" | "end" | null =
+         role === "start" ? "start" : role === "end" ? "end" : null;
+-      // White/black ring: a mid waypoint's pin, an on-path proposal, the drag's
+-      // drop-target affordance, or the pinned selection. (Same `is-selected`.)
++      // White/black ring: a mid waypoint's pin, a proposal the selection runs
++      // through (on its path or on one of its blocks), the drag's drop-target
++      // affordance, or the pinned selection. (Same `is-selected`.)
+       const isSelected =
+-        role === "mid" || onPath || w.edgeIdx === dropTargetEdgeIdx || w.edgeIdx === selectedEdgeIdx;
++        role === "mid" || onPath || onSelectedBlock
++        || w.edgeIdx === dropTargetEdgeIdx || w.edgeIdx === selectedEdgeIdx;
+       const isSpread = !!override;
+       // A matched waypoint (start/end/mid) in route mode carries a remove [×]
+       // badge baked into its icon — pinned to the corner, so it scales and fans
+@@ -3936,7 +4092,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     // clusterEngine carries the placed squares (winners/stations) and re-runs
+     // once topology+votes arrive, so stations appear even with zero votes.
+   }, [clusterEngine, currentZoom, map, spread, collapseSpread, clearSpreadTimer, armSpreadTimer,
+-      selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,
++      selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, onSelectedBlockSet,
++      dropTargetEdgeIdx,
+       isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, mapStyle.basemap, isStationNetwork, canHover]);
+ 
+   // Cast a directional vote on a single proposal (edge, vote type) through the
+@@ -4062,8 +4219,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // selects it FLAT OUT (the corridor replaces the route — start/end at its
+   // anchors; only a drag-DROP threads it into an existing route). A diamond
+   // reads selected when either
+-  //   (a) the live route covers every one of its blocks (the auto-select rule,
+-  //       twin-expanded), or
++  //   (a) the live route covers MOST of its blocks (the auto-select rule,
++  //       twin-expanded, ≥ ROUTE_SELECTED_MIN_COVERAGE — running along a
++  //       corridor without quite reaching both ends still counts, which is how
++  //       the point pins on that same path already behave), or
+   //   (b) it's the explicitly-tapped RBTP and both anchors are still waypoints
+   //       — see selectedRbtpId; OSRM's leg between the anchors rarely re-traces
+   //       the corridor, so (a) alone left a tapped diamond looking unselected.
+@@ -4267,10 +4426,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+           voteTypes={theme.suggestions}
+           sources={pinnedSources}
+           shareUrl={pinnedShareUrl}
+-          // Funds the proposal the card is headed by — its top proposal, or
+-          // failing that the first vote type listed. A card with no vote types
+-          // names no proposal, so it gets no fund row.
+-          donate={pinnedDonate}
++          donateUrlFor={pinnedDonateUrlFor}
+           streetViewLatLng={pinnedPointLatLng}
+           onVote={castProposalVote}
+           onRemove={onRemoveSelectedRef.current}
+@@ -4386,10 +4542,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+           voteTypes={theme.suggestions}
+           sources={routeSources}
+           shareUrl={window.location.href}
+-          // A corridor spans many blocks, so it has no one street name to cite
+-          // as its place — the deep link (the live URL, which encodes the whole
+-          // selection) is what locates it.
+-          donate={routeDonate}
++          donateUrlFor={routeDonateUrlFor}
+           onVote={castRouteVote}
+           onRemove={onClearRoute ? () => onClearRouteRef.current?.() : undefined}
+           removeLabel="Deselect this route"
+@@ -4520,12 +4673,12 @@ interface ProposalCardProps {
+    *  card's own anchor moving — e.g. the open modal the hover card dodges
+    *  re-anchors while the hover target stays put. */
+   avoidKey?: string;
+-  /** Donation-page link for the proposal this card names, already carrying the
+-   *  proposal's identity (see buildProposalDonateUrl), plus that proposal's own
+-   *  name for the link's title/aria. Absent ⇒ no fund row — the right answer
+-   *  for a card naming no proposal (nothing to fund) and for every hover card
+-   *  (they are pointer-events:none, so the link could not be clicked). */
+-  donate?: { name: string; url: string } | null;
++  /** Donation-page link for ONE of the card's vote types, carrying that
++   *  proposal's identity (see buildProposalDonateUrl). Per row, because a row
++   *  IS a proposal — the card as a whole may name several. Absent ⇒ no fund
++   *  chips; hover cards never get them anyway (pointer-events: none, so the
++   *  link could not be clicked), which is also why sources skip them. */
++  donateUrlFor?: (label: string) => string | null;
+   edgeId?: number | null;
+   /** The selection's touched blocks as materialized edge lists (docs §4.1) —
+    *  drives the ± buttons' active/unvote state. Null/absent falls back to the
+@@ -4616,7 +4769,7 @@ function CoverageCell({
+ function ProposalCard({
+   winner, eyebrow = "Top Proposal", screenX, screenY, name, metaText = null, rows, topKinds,
+   coverage = null, coverageUnit = "block", votersPending = false,
+-  interactive = false, elevated = false, getAvoidRects, avoidKey, donate = null, edgeId = null, blocks = null, mode = "", shareUrl = null, streetViewLatLng = null, voteTypes, sources, onVote, onRemove, removeLabel = "Remove this point", onHoverChange, registerEl,
++  interactive = false, elevated = false, getAvoidRects, avoidKey, donateUrlFor, edgeId = null, blocks = null, mode = "", shareUrl = null, streetViewLatLng = null, voteTypes, sources, onVote, onRemove, removeLabel = "Remove this point", onHoverChange, registerEl,
+ }: ProposalCardProps) {
+   const [copied, setCopied] = useState(false);
+   // Interactive cards can collapse to a small pill (icon + label + expand) so a
+@@ -4918,6 +5071,9 @@ function ProposalCard({
+                   // as "this type has a pin here".
+                   const topKind = topKinds?.get(row.label);
+                   const links = (sources?.[row.label] ?? []).slice(0, MAX_ROW_LINKS);
++                  // Each ROW is one proposal, so funding belongs here rather
++                  // than on the card: no "which of these?" to resolve.
++                  const fundHref = interactive ? donateUrlFor?.(row.label) : null;
+                   return (
+                     <div
+                       className={`graph-proposal-row${topKind ? " is-top-proposal" : ""}`}
+@@ -4930,7 +5086,7 @@ function ProposalCard({
+                             title={topKind === "point"
+                               ? "Top proposal on this block"
+                               : topKind === "route"
+-                                ? "Top route proposal — fully inside this selection"
++                                ? "Top route proposal — mostly inside this selection"
+                                 : "Top proposal here — point and route"}
+                           >
+                             {(topKind === "point" || topKind === "both") && (
+@@ -4944,6 +5100,25 @@ function ProposalCard({
+                         <span className="graph-proposal-row-label-text">
+                           {row.label}
+                         </span>
++                        {/* Fund chip — the same bracket token as the source
++                            markers beside it, but an ACTION, so it carries the
++                            accent and leads the run. First (not last) so it
++                            keeps one position down the card: the citation count
++                            varies row to row, and a chip that slid sideways
++                            with it would be hard to aim at. */}
++                        {fundHref && (
++                          <a
++                            className="graph-proposal-row-fund"
++                            href={fundHref}
++                            // The donation page is outside the app — never
++                            // navigate the map out from under a selection.
++                            target="_blank"
++                            rel="noopener noreferrer"
++                            title={`Donate toward "${row.label}" here`}
++                            aria-label={`Donate toward ${row.label}`}
++                            onClick={(e) => e.stopPropagation()}
++                          >[$]</a>
++                        )}
+                         {/* Source links ride WITH the label, inside its column,
+                             so they read as a footnote on the vote type rather
+                             than a stray line under the row. The label text is
+@@ -4997,27 +5172,6 @@ function ProposalCard({
+                 })}
+               </div>
+             )}
+-            {/* The card's one outbound money action, kept to a single row at
+-                the foot so a proposal becomes fundable without the modal
+-                growing a section. It speaks the card's own bracket-token
+-                language ([$] beside [a][b][c] and [−|net|+]) rather than
+-                arriving as a pasted-in donate button. */}
+-            {interactive && donate && (
+-              <a
+-                className="graph-proposal-fund"
+-                href={donate.url}
+-                // The donation page lives outside the app — never navigate the
+-                // map out from under an open selection.
+-                target="_blank"
+-                rel="noopener noreferrer"
+-                title={`Donate toward "${donate.name}" — opens our donation page`}
+-                aria-label={`Donate toward ${donate.name}`}
+-                onClick={(e) => e.stopPropagation()}
+-              >
+-                <span className="graph-proposal-fund-token" aria-hidden="true">[$]</span>
+-                <span className="graph-proposal-fund-text">Fund this proposal</span>
+-              </a>
+-            )}
+           </div>
+         </>
+       )}
 diff --git a/client-react/src/components/GraphLayer/routeProposals.ts b/client-react/src/components/GraphLayer/routeProposals.ts
-index b645440..db844dc 100644
+index b645440..8b61f46 100644
 --- a/client-react/src/components/GraphLayer/routeProposals.ts
 +++ b/client-react/src/components/GraphLayer/routeProposals.ts
-@@ -37,7 +37,7 @@ import {
+@@ -1,3 +1,4 @@
++// Algorithm doc: docs/algorithms/03-route-proposals.md
+ // ==========================================================================
+ // Route-based top proposals (RBTPs) — client side
+ // ==========================================================================
+@@ -37,7 +38,7 @@ import {
    type GraphTopology,
    type NodeAdj,
  } from "./graphTopology";
@@ -215,7 +593,61 @@ index b645440..db844dc 100644
  
  export interface RouteProposal {
    id: string;
-@@ -533,6 +533,11 @@ export interface RouteProposalOptions {
+@@ -143,13 +144,49 @@ export function routeBlockEdges(p: RouteProposal): number[] {
+ }
+ 
+ // --------------------------------------------------------------------------
+-// Auto-select coverage (block-grained) — mirrors server is_route_covered.
++// Auto-select coverage (block-grained).
+ // --------------------------------------------------------------------------
+-/** True iff the selection covers EVERY block (≥1 of each block's edges). */
+-export function isRouteCovered(blocks: number[][], selectedEdges: Iterable<number>): boolean {
++/**
++ * Share of a corridor's blocks the selection reaches (≥ 1 selected edge in the
++ * block). 0 for a corridor with no blocks.
++ */
++export function routeCoverageRatio(
++  blocks: number[][],
++  selectedEdges: Iterable<number>
++): number {
+   const sel = selectedEdges instanceof Set ? selectedEdges : new Set(selectedEdges);
++  if (blocks.length === 0) return 0;
++  let covered = 0;
++  for (const block of blocks) if (block.some((e) => sel.has(e))) covered++;
++  return covered / blocks.length;
++}
++
++/**
++ * A corridor reads SELECTED once the selection covers at least this share of
++ * its blocks. NOT 1.0: a selection that runs along most of a corridor plainly
++ * "is" that corridor to the person who traced it, yet full coverage almost
++ * never survives the ends — the route starts and stops mid-corridor, or OSRM
++ * clips a junction block at a turn. Requiring all-of-it left a diamond dark
++ * while the point pins on the very same path lit up (they only have one block
++ * to cover, so any overlap IS full coverage for them). Raise it toward 1 and
++ * corridors go dark again on near-misses; drop it much below a half and a
++ * selection that merely brushes a long corridor starts claiming it.
++ */
++export const ROUTE_SELECTED_MIN_COVERAGE = 0.6;
++
++/**
++ * True iff the selection covers at least `minRatio` of the route's blocks —
++ * the shared predicate behind the diamond's selected ring, the route-summary
++ * card's header, and the card's "top proposal" row badge, so those three can
++ * never disagree about what the selection stands for.
++ */
++export function isRouteCovered(
++  blocks: number[][],
++  selectedEdges: Iterable<number>,
++  minRatio = ROUTE_SELECTED_MIN_COVERAGE
++): boolean {
+   if (blocks.length === 0) return false;
+-  return blocks.every((block) => block.some((e) => sel.has(e)));
++  return routeCoverageRatio(blocks, selectedEdges) >= minRatio;
+ }
+ 
+ /**
+@@ -533,6 +570,11 @@ export interface RouteProposalOptions {
     *  surface as PBTP pins (topProposals.ts), not corridors. Unknown (null)
     *  kinds stay eligible. Omit to admit every type. */
    kindOf?: VoteTypeKindResolver;
@@ -227,7 +659,7 @@ index b645440..db844dc 100644
  }
  
  /** Arc of the per-type subgraph: neighbor node, original edge id, net weight. */
-@@ -1265,6 +1270,7 @@ export function createRouteProposalJob(
+@@ -1265,6 +1307,7 @@ export function createRouteProposalJob(
      // POINT-kind vote types never form corridors — their votes are PBTP pins
      // (topProposals.ts). Unknown kind (null) stays eligible for both families.
      if (opts.kindOf && opts.kindOf(label) === "point") continue;
@@ -279,10 +711,15 @@ index 54f7919..a445d20 100644
    const mk = (label: string, legendIdx: number, count: number, edgeIdx: number): VoteTypeWinner => ({
      legendIdx, label, edgeIdx, count,
 diff --git a/client-react/src/components/GraphLayer/topProposals.ts b/client-react/src/components/GraphLayer/topProposals.ts
-index 17f405f..d138e87 100644
+index 17f405f..ca027e8 100644
 --- a/client-react/src/components/GraphLayer/topProposals.ts
 +++ b/client-react/src/components/GraphLayer/topProposals.ts
-@@ -75,6 +75,14 @@ export function compareWinners(
+@@ -1,3 +1,4 @@
++// Algorithm doc: docs/algorithms/02-top-proposals.md
+ // ==========================================================================
+ // Point-based top proposals (PBTPs) — selection
+ // ==========================================================================
+@@ -75,6 +76,14 @@ export function compareWinners(
   */
  export type VoteTypeKindResolver = (label: string) => "route" | "point" | null;
  
@@ -297,7 +734,7 @@ index 17f405f..d138e87 100644
  /**
   * Support floor for the "Top Proposal" badge: a proposal only counts as a top
   * proposal with STRICTLY MORE than this many net votes. Without it, a rare
-@@ -91,14 +99,16 @@ export const TOP_PROPOSAL_MIN_NET = 100;
+@@ -91,14 +100,16 @@ export const TOP_PROPOSAL_MIN_NET = 100;
   * (highest first). Vote types whose best edge is net ≤ max(0, minNet) are
   * dropped (a net-downvoted proposal is not a "top proposal", and below the
   * support floor it isn't "top" either), as are ROUTE-kind types when a
@@ -316,7 +753,7 @@ index 17f405f..d138e87 100644
  ): VoteTypeWinner[] {
    if (!legend.length || !edgeVoteTypes.length) return [];
  
-@@ -121,6 +131,7 @@ export function computeVoteTypeWinners(
+@@ -121,6 +132,7 @@ export function computeVoteTypeWinners(
      const label = legend[legendIdx];
      if (!label) continue;
      if (kindOf && kindOf(label) === "route") continue;
@@ -324,7 +761,7 @@ index 17f405f..d138e87 100644
      edges.sort((a, b) => b.count - a.count);
      for (const { edgeIdx, count } of edges.slice(0, perTypeLimit)) {
        winners.push({ legendIdx, label, edgeIdx, count });
-@@ -330,7 +341,8 @@ export const TOP_PROPOSAL_MIN_SPACING_M = 600;
+@@ -330,7 +342,8 @@ export const TOP_PROPOSAL_MIN_SPACING_M = 600;
   * `kindOf` (label → kind) keeps ROUTE-kind vote types out of the point family;
   * omit it (e.g. station networks, where every vote is a point) to admit all.
   * `minNet` is the top-proposal support floor (strictly-greater; default
@@ -334,7 +771,7 @@ index 17f405f..d138e87 100644
   */
  export function selectTopProposals(
    data:
-@@ -340,7 +352,8 @@ export function selectTopProposals(
+@@ -340,7 +353,8 @@ export function selectTopProposals(
    limit: number,
    minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M,
    kindOf?: VoteTypeKindResolver,
@@ -344,7 +781,7 @@ index 17f405f..d138e87 100644
  ): VoteTypeWinner[] {
    if (!data) return [];
    const perType = computeVoteTypeWinners(
-@@ -348,7 +361,8 @@ export function selectTopProposals(
+@@ -348,7 +362,8 @@ export function selectTopProposals(
      data.edge_vote_types ?? [],
      TOP_PROPOSALS_PER_TYPE,
      kindOf,
@@ -403,10 +840,16 @@ index 2f33702..66414e3 100644
 +  });
  });
 diff --git a/client-react/src/components/GraphLayer/voteApply.ts b/client-react/src/components/GraphLayer/voteApply.ts
-index b67c4a3..8e2479c 100644
+index b67c4a3..94c21b0 100644
 --- a/client-react/src/components/GraphLayer/voteApply.ts
 +++ b/client-react/src/components/GraphLayer/voteApply.ts
-@@ -184,10 +184,19 @@ export function applyEdgeVoteChange(
+@@ -1,3 +1,5 @@
++// Referenced by: docs/algorithms/05-heat-coloring.md
++//   (topProposalDiffs — the signed number behind every block's colour).
+ // ==========================================================================
+ // Vote application (pure)
+ // ==========================================================================
+@@ -184,10 +186,19 @@ export function applyEdgeVoteChange(
   * Blocks with activity but no per-type breakdown (legacy untyped votes) fall
   * back to their deduped total. Returns the array plus both arm ceilings for
   * the renderer's two-sided log normalization.
@@ -426,7 +869,7 @@ index b67c4a3..8e2479c 100644
  ): { diff: Int32Array; maxPos: number; maxNeg: number } {
    const n = blockVotes.length;
    const diff = new Int32Array(n);
-@@ -195,14 +204,19 @@ export function topProposalDiffs(
+@@ -195,14 +206,19 @@ export function topProposalDiffs(
    let maxNeg = 0;
    for (let b = 0; b < n; b++) {
      const entries = blockVoteTypes?.[b];
@@ -471,10 +914,10 @@ index c2f28d4..db8b6be 100644
            </div>
  
 diff --git a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.css b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.css
-index 3b2e9be..1891eb4 100644
+index 3b2e9be..3dffa2a 100644
 --- a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.css
 +++ b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.css
-@@ -158,25 +158,115 @@
+@@ -158,25 +158,94 @@
    right: auto;
    width: max-content;
    min-width: 100%;
@@ -498,79 +941,58 @@ index 3b2e9be..1891eb4 100644
 +   and its net support on the right.
 +   ========================================================================== */
 +
-+/* The filter readout stays put while the list scrolls under it, so the
-+   background has to be opaque — --hover-bg is a translucent wash, layered here
-+   over --paper rather than hardcoded, so it still follows the theme. */
-+.vt-panel-head {
-+  position: sticky;
-+  top: 0;
-+  z-index: 1;
++/* One heading per proposal family, each led by its own show-all/hide-all eye.
++   Its left padding matches a row's (border + inset) so the section eye and the
++   row eyes form one unbroken column. The first heading sheds its top rule — it
++   sits directly under the search field. */
++.vt-section {
 +  display: flex;
 +  align-items: center;
 +  gap: var(--space-2);
-+  padding: var(--space-2) var(--space-3);
-+  border-bottom: 1px solid var(--hairline);
-+  background: linear-gradient(var(--hover-bg), var(--hover-bg)), var(--paper);
-+}
-+
-+.vt-panel-title {
-+  font-size: var(--font-size-2xs);
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  color: var(--ink);
-+  opacity: 0.5;
-+}
-+
-+.vt-panel-count {
-+  font-size: var(--font-size-2xs);
-+  font-variant-numeric: tabular-nums;
-+  color: var(--ink);
-+  opacity: 0.5;
-+}
-+
-+/* Filtered state is the one thing in this panel that must never be missed —
-+   a filtered map reads exactly like an empty one. */
-+.vt-panel-count.is-filtered {
-+  color: var(--accent);
-+  opacity: 1;
-+}
-+
-+.vt-panel-action {
-+  appearance: none;
-+  margin-left: auto;
-+  padding: 2px var(--space-2);
-+  border: 1px solid var(--hairline);
-+  background: transparent;
-+  font: inherit;
-+  font-size: var(--font-size-2xs);
-+  color: var(--ink);
-+  opacity: 0.7;
-+  cursor: pointer;
-+  transition: opacity 0.12s ease, border-color 0.12s ease;
-+}
-+
-+.vt-panel-action:hover {
-+  opacity: 1;
-+  border-color: var(--ink);
-+}
-+
-+/* Divider caption before the rows that can't be cast in the current mode. */
-+.vt-section {
-+  display: flex;
-+  align-items: baseline;
-+  gap: var(--space-2);
-+  padding: var(--space-2) var(--space-3) var(--space-1);
++  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-3);
 +  border-top: 1px solid var(--hairline);
 +  font-size: var(--font-size-2xs);
 +  letter-spacing: 0.08em;
 +  text-transform: uppercase;
 +  color: var(--ink);
-+  opacity: 0.4;
 +}
 +
-+.vt-section-note {
++.vt-group:first-child .vt-section {
++  border-top: none;
++}
++
++/* The master row leads the panel and is separated from the families it spans. */
++.vt-section-all {
++  border-top: none;
++  border-bottom: 1px solid var(--hairline);
++}
++
++.vt-group:first-of-type .vt-section {
++  border-top: none;
++}
++
++.vt-section-all + .vt-group .vt-section {
++  border-top: none;
++}
++
++.vt-section-title {
++  opacity: 0.55;
++}
++
++/* How much of this group is drawn. Lower-case on purpose — the heading is
++   uppercased, and a readout is a measurement, not a label. */
++.vt-section-count {
++  margin-left: auto;
++  padding-left: var(--space-3);
 +  letter-spacing: 0;
 +  text-transform: none;
++  font-variant-numeric: tabular-nums;
++  opacity: 0.42;
++}
++
++.vt-section-count.is-filtered {
++  color: var(--accent);
++  opacity: 1;
 +}
 +
  .vote-type-option {
@@ -593,7 +1015,7 @@ index 3b2e9be..1891eb4 100644
    text-align: left !important;
  }
  
-@@ -184,6 +274,36 @@
+@@ -184,6 +253,36 @@
    background: var(--hover-bg);
  }
  
@@ -630,13 +1052,15 @@ index 3b2e9be..1891eb4 100644
  .vote-type-option .vote-type-icon-img {
    width: 18px;
    height: 18px;
-@@ -199,18 +319,123 @@
+@@ -199,18 +298,117 @@
    text-align: left !important;
  }
  
 -.vote-type-option .check-icon {
 -  margin-left: auto;
-+/* ── Visibility checkbox ─────────────────────────────────────────────────── */
++/* ── Visibility eye ──────────────────────────────────────────────────────── */
++/* One control, three places: per row, per section (show/hide all), and as the
++   struck-through marker on the collapsed field. */
 +
 +.vt-vis {
 +  appearance: none;
@@ -647,49 +1071,41 @@ index 3b2e9be..1891eb4 100644
 -  font-size: 11px;
 -  font-weight: 400;
 -  opacity: 0;
-+  width: 18px;
++  width: 20px;
 +  height: 18px;
 +  padding: 0;
 +  border: none;
 +  background: transparent;
-+  color: inherit;
++  color: var(--accent);
++  opacity: 0.85;
 +  cursor: pointer;
-+}
-+
-+.vt-vis-box {
-+  display: flex;
-+  align-items: center;
-+  justify-content: center;
-+  width: 13px;
-+  height: 13px;
-+  border: 1px solid var(--ink);
-+  opacity: 0.45;
-+  transition: opacity 0.12s ease, border-color 0.12s ease;
++  transition: opacity 0.12s ease, color 0.12s ease;
  }
  
 -.vote-type-option.selected .check-icon {
-+.vote-type-option:not(.is-hidden) .vt-vis-box {
-+  opacity: 0.85;
-+  border-color: var(--accent);
-+  color: var(--accent);
++/* Hidden reads as ink, not accent: accent is reserved for what's on the map. */
++.vt-vis.is-off {
++  color: var(--ink);
++  opacity: 0.42;
 +}
 +
-+.vt-vis:hover .vt-vis-box {
++.vt-vis:hover,
++.vt-vis.is-off:hover {
    opacity: 1;
  }
  
-+.vt-vis:focus-visible .vt-vis-box {
++.vt-vis:focus-visible {
 +  outline: 1px solid var(--accent);
 +  outline-offset: 1px;
 +}
 +
-+/* The tick lands rather than pops — 110ms, no overshoot. */
-+.vt-vis-box svg {
-+  animation: vt-tick 0.11s ease-out;
++/* The state lands rather than pops — 110ms, no overshoot. */
++.vt-vis svg {
++  animation: vt-eye 0.11s ease-out;
 +}
 +
-+@keyframes vt-tick {
-+  from { opacity: 0; transform: scale(0.6); }
++@keyframes vt-eye {
++  from { opacity: 0.3; transform: scale(0.82); }
 +  to   { opacity: 1; transform: scale(1); }
 +}
 +
@@ -760,7 +1176,7 @@ index 3b2e9be..1891eb4 100644
  .vote-type-option.vote-type-custom {
    border-top: 1px solid var(--hairline);
    opacity: 0.6;
-@@ -220,6 +445,26 @@
+@@ -220,6 +418,25 @@
    opacity: 1;
  }
  
@@ -771,16 +1187,15 @@ index 3b2e9be..1891eb4 100644
 +  opacity: 0.45;
 +}
 +
-+/* Collapsed-control badge: the filter is in effect even with the panel shut. */
++/* Collapsed-control marker: a filtered map is otherwise indistinguishable from
++   an empty one, so the shut field still shows the struck-through eye. */
 +.vote-type-filter-badge {
++  display: flex;
++  align-items: center;
 +  flex-shrink: 0;
 +  margin-left: auto;
-+  padding: 1px 4px;
-+  border: 1px solid var(--accent);
-+  font-size: var(--font-size-2xs);
-+  font-variant-numeric: tabular-nums;
-+  line-height: 1.3;
 +  color: var(--accent);
++  opacity: 0.9;
 +  pointer-events: none;
 +}
 +
@@ -788,10 +1203,10 @@ index 3b2e9be..1891eb4 100644
    .vote-type-selector {
      width: 100%;
 diff --git a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx
-index e77bd70..fde601e 100644
+index e77bd70..18a9dff 100644
 --- a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx
 +++ b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx
-@@ -1,17 +1,59 @@
+@@ -1,17 +1,71 @@
 -import { useState, useCallback, useEffect, useLayoutEffect, useRef, memo } from "react";
 +// ==========================================================================
 +// Vote-type selector — the map's legend AND the cast-target picker
@@ -801,12 +1216,15 @@ index e77bd70..fde601e 100644
 +// painted into the heat. So the panel reads as a legend — icon, name, net
 +// support — and each row carries the two things you can do with a legend entry:
 +//
-+//   the checkbox  → show/hide this type's heat and pins  (map/voteTypeFilter)
-+//   the row       → make it the type you're voting for   (RouteContext.voteType)
++//   the eye  → show/hide this type's heat and pins  (map/voteTypeFilter)
++//   the row  → make it the type you're voting for   (RouteContext.voteType)
 +//
-+// Rows whose kind doesn't match the current selection (a corridor type while
-+// you have a single point) stay listed and toggleable — their proposals are on
-+// screen — but aren't castable, so they sit below the castable ones.
++// The panel is split into the map's two proposal FAMILIES — Point proposals
++// (square pins) and Route proposals (diamond corridors) — each with its own
++// heading and its own show-all/hide-all eye. Grouping by family rather than by
++// "castable right now" keeps the headings stable: a corridor type doesn't move
++// house the moment you finish drawing a route. The family you can currently
++// cast into leads, and the other carries a note saying how to reach it.
 +// ==========================================================================
 +
 +import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, memo } from "react";
@@ -815,14 +1233,15 @@ index e77bd70..fde601e 100644
 -import { mapVoteTypesForPointType } from "../../map/runtime";
 +import {
 +  toggleVoteTypeVisible,
-+  showAllVoteTypes,
++  setVoteTypesVisible,
 +  showOnlyVoteTypes,
 +} from "../../map/voteTypeFilter";
 +import { registerVoteTypeLabel } from "../../map/voteTypeRegistry";
 +import { useHiddenVoteTypes, useVoteTypeLegend } from "../../hooks/useVoteTypeLegend";
  import { iconSrc, iconForLabel } from "../../themes";
  import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
- import { CheckIcon } from "../CheckIcon";
+-import { CheckIcon } from "../CheckIcon";
++import { EyeIcon } from "../EyeIcon";
  import { noAutofillProps } from "../../utils/noAutofill";
  import "./VoteTypeSelector.css";
  
@@ -835,6 +1254,15 @@ index e77bd70..fde601e 100644
 +  net: number;
 +  /** Selectable as the cast target in the current selection mode. */
 +  castable: boolean;
++  /** Which proposal family the type belongs to — decides its section. */
++  family: "route" | "point";
++}
++
++/** A headed group of rows: one proposal family, with its own show/hide-all. */
++interface PanelSection {
++  key: string;
++  title: string;
++  rows: PanelRow[];
 +}
 +
 +/** Support count for a legend row — "1,204", "−412", "" at zero. */
@@ -853,7 +1281,7 @@ index e77bd70..fde601e 100644
    const [isOpen, setIsOpen] = useState(false);
    const [inputValue, setInputValue] = useState("");
    const [highlightedIndex, setHighlightedIndex] = useState(0);
-@@ -24,38 +66,51 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+@@ -24,38 +78,60 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
    // The committed vote type when the field opened, restored if editing is cancelled.
    const previousVoteTypeRef = useRef(voteType);
  
@@ -867,17 +1295,25 @@ index e77bd70..fde601e 100644
 +  // A map that authored none of its own (legacy/preset maps) falls back to the
 +  // theme's preset suggestions so there is still something to cast.
 +  const rows: PanelRow[] = useMemo(() => {
++    // A legacy label the DB never flagged has no family of its own — its votes
++    // surface in BOTH, so file it under the one you can cast into right now.
++    const familyOf = (kind: "route" | "point" | null): "route" | "point" =>
++      kind ?? pointType;
 +    const base: PanelRow[] = legend.map((e) => ({
 +      label: e.label,
 +      icon: e.icon,
 +      net: e.net,
 +      castable: e.castable,
++      family: familyOf(e.pointType),
 +    }));
 +    if (map?.voteTypes?.length) return base;
 +    const known = new Set(base.map((r) => r.label));
 +    const presets = getSuggestionsForTheme(theme, pointType)
 +      .filter((s) => !known.has(s.label))
-+      .map((s): PanelRow => ({ label: s.label, icon: s.icon, net: 0, castable: true }));
++      .map((s): PanelRow => ({
++        label: s.label, icon: s.icon, net: 0, castable: true,
++        family: familyOf(s.pointType ?? null),
++      }));
 +    return [...presets, ...base];
 +  }, [legend, map, theme, pointType]);
  
@@ -920,6 +1356,7 @@ index e77bd70..fde601e 100644
 +          icon: iconForLabel(vt.label, map?.voteTypes),
 +          net: 0,
 +          castable: isStationNetwork || !vt.pointType || vt.pointType === pointType,
++          family: vt.pointType ?? pointType,
 +        }))
      : [];
  
@@ -932,7 +1369,7 @@ index e77bd70..fde601e 100644
    // Maps that disallow user suggestions can't add custom vote types.
    const allowCustom = map ? map.allowSuggestions : true;
    const showCustomOption = allowCustom && inputLower !== "" && !hasExactMatch;
-@@ -65,35 +120,27 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+@@ -65,35 +141,43 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
    //   1. the map authored exactly one vote type overall, or
    //   2. the pointType-filtered list happens to have one entry.
    // Case 1 must ignore pointType: a route-only single type is filtered out of
@@ -969,18 +1406,34 @@ index e77bd70..fde601e 100644
 -      ? [{ label: inputValue.trim(), icon: "", glyph: false, isCustom: true }]
 -      : []),
 -  ];
-+  // Filter state, measured over the WHOLE legend (not the search-filtered view)
-+  // so the readout is a stable statement about the map, not about the query.
-+  const totalCount = rows.length;
-+  const shownCount = rows.reduce((n, r) => n + (hidden.has(r.label) ? 0 : 1), 0);
-+  const isFiltered = shownCount !== totalCount;
++  // One section per proposal FAMILY (docs/three-layer-model.md §3.1): point
++  // proposals are square pins, route proposals are diamond corridors. The family
++  // you can cast into leads; the other keeps its heading and its eye, and says
++  // how to reach it. Station networks vote on fixed points whatever kind their
++  // types were authored as, so they get one undivided list.
++  const sections: PanelSection[] = isStationNetwork
++    ? (listRows.length ? [{ key: "all", title: "Proposals", rows: listRows }] : [])
++    : (pointType === "route" ? (["route", "point"] as const) : (["point", "route"] as const))
++        .map((family): PanelSection => ({
++          key: family,
++          title: family === "route" ? "Route proposals" : "Point proposals",
++          rows: listRows.filter((r) => r.family === family),
++        }))
++        .filter((s) => s.rows.length > 0);
++
++  // Rendered order — what the arrow keys walk and what highlightedIndex means.
++  const orderedRows = sections.flatMap((s) => s.rows);
++
++  // Is anything on THIS map hidden? Measured over the whole legend, not the
++  // search-filtered view, so it's a statement about the map and not the query.
++  const isFiltered = rows.some((r) => hidden.has(r.label));
 +
 +  // Keyboard navigation runs over the rows plus the trailing "Suggest:" option.
-+  const optionCount = listRows.length + (showCustomOption ? 1 : 0);
++  const optionCount = orderedRows.length + (showCustomOption ? 1 : 0);
  
    useEffect(() => {
      setHighlightedIndex(0);
-@@ -117,7 +164,10 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+@@ -117,7 +201,10 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
    }, [isOpen]);
  
    const selectOption = useCallback(
@@ -992,7 +1445,7 @@ index e77bd70..fde601e 100644
        setVoteType(label);
        setInputValue("");
        inputValueRef.current = "";
-@@ -152,17 +202,21 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+@@ -152,17 +239,21 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
      (e: React.KeyboardEvent<HTMLInputElement>) => {
        if (e.key === "ArrowDown") {
          e.preventDefault();
@@ -1007,7 +1460,7 @@ index e77bd70..fde601e 100644
 -          const opt = options[highlightedIndex];
 -          if (opt) selectOption(opt.label);
 +        if (optionCount > 0) {
-+          const row = listRows[highlightedIndex];
++          const row = orderedRows[highlightedIndex];
 +          if (row) {
 +            if (row.castable) selectOption(row.label);
 +          } else if (showCustomOption) {
@@ -1019,16 +1472,16 @@ index e77bd70..fde601e 100644
          }
        } else if (e.key === "Escape") {
          setVoteType(previousVoteTypeRef.current);
-@@ -172,7 +226,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+@@ -172,7 +263,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
          inputRef.current?.blur();
        }
      },
 -    [options, highlightedIndex, inputValue, selectOption, setVoteType]
-+    [optionCount, listRows, highlightedIndex, inputValue, showCustomOption, selectOption, setVoteType]
++    [optionCount, orderedRows, highlightedIndex, inputValue, showCustomOption, selectOption, setVoteType]
    );
  
    const handleChevronClick = useCallback((e: React.MouseEvent) => {
-@@ -181,7 +235,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+@@ -181,7 +272,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
      if (isOpen) {
        const trimmed = inputValueRef.current.trim();
        if (trimmed) {
@@ -1037,7 +1490,7 @@ index e77bd70..fde601e 100644
        } else {
          setVoteType(previousVoteTypeRef.current);
          setIsOpen(false);
-@@ -197,7 +251,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+@@ -197,7 +288,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
        if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
          const trimmed = inputValueRef.current.trim();
          if (trimmed) {
@@ -1046,7 +1499,7 @@ index e77bd70..fde601e 100644
          } else if (isOpen) {
            // Cancelled with an empty field — revert the live-typed vote type.
            setVoteType(previousVoteTypeRef.current);
-@@ -209,6 +263,15 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+@@ -209,6 +300,15 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
      return () => document.removeEventListener("mousedown", handleClickOutside);
    }, [selectOption, setVoteType, isOpen]);
  
@@ -1062,13 +1515,45 @@ index e77bd70..fde601e 100644
    // The committed type's themed icon: the map's own vote-type icon wins (user
    // maps define their own), then a matching preset icon. Null → it's a custom
    // type and renders the colorized suggestion glyph instead.
-@@ -218,6 +281,20 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+@@ -218,6 +318,52 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
    // the vote type defaults to it via getDefaultVoteTypeForTheme, so casting works.
    const frozenIcon = frozenLabel ? iconForLabel(frozenLabel, map?.voteTypes) : null;
  
-+  // Where the castable half ends — the divider between "you can vote for this
-+  // now" and "also drawn on the map".
-+  const firstUncastable = listRows.findIndex((r) => !r.castable);
++  /**
++   * A heading row: a show-all/hide-all eye, a title, and how much of the group
++   * is currently drawn. Used for each proposal family and for the "All
++   * proposals" master row, so the two are the same control at two scales.
++   *
++   * The eye sits in the same left column as the rows' own eyes, so a section
++   * and its members read as one unit. From a MIXED group it shows everything —
++   * the recovering direction, since a blank map is the outcome worth making
++   * people ask for twice.
++   */
++  const groupHeader = (title: string, groupRows: PanelRow[], extraClass = "") => {
++    const shown = groupRows.reduce((n, r) => n + (hidden.has(r.label) ? 0 : 1), 0);
++    const allVisible = shown === groupRows.length;
++    return (
++      <div className={`vt-section ${extraClass}`.trim()}>
++        <button
++          type="button"
++          className={`vt-vis vt-vis-all${allVisible ? "" : " is-off"}`}
++          role="switch"
++          aria-checked={allVisible}
++          aria-label={`${allVisible ? "Hide" : "Show"} all ${title.toLowerCase()}`}
++          title={`${allVisible ? "Hide" : "Show"} all ${title.toLowerCase()}`}
++          onMouseDown={(e) => swallow(e, () =>
++            setVoteTypesVisible(groupRows.map((r) => r.label), !allVisible)
++          )}
++        >
++          <EyeIcon size={14} off={shown === 0} />
++        </button>
++        <span className="vt-section-title">{title}</span>
++        <span className={`vt-section-count${allVisible ? "" : " is-filtered"}`}>
++          ({shown}/{groupRows.length} shown)
++        </span>
++      </div>
++    );
++  };
 +
 +  const renderIcon = (icon: string | null, label: string) =>
 +    icon ? (
@@ -1083,7 +1568,7 @@ index e77bd70..fde601e 100644
    return (
      <div
        ref={containerRef}
-@@ -226,14 +303,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+@@ -226,14 +372,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
      >
        {frozenLabel ? (
          <div className="vote-type-control">
@@ -1099,7 +1584,7 @@ index e77bd70..fde601e 100644
            <span className="vote-type-display-text">{frozenLabel}</span>
          </div>
        ) : (
-@@ -260,14 +330,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+@@ -260,14 +399,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
          />
          {!isOpen && voteType && (
            <div className="vote-type-display">
@@ -1115,18 +1600,18 @@ index e77bd70..fde601e 100644
              <span className="vote-type-display-text">{voteType}</span>
            </div>
          )}
-@@ -276,53 +339,119 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
+@@ -276,53 +408,108 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
              {allowCustom ? "Suggest a change..." : "Select a vote type"}
            </div>
          )}
 +        {/* A filtered map is easy to mistake for an empty one, so the collapsed
-+            control carries the count even when the panel is shut. */}
++            control still says so — the struck-through eye, no count. */}
 +        {!isOpen && isFiltered && (
 +          <span
 +            className="vote-type-filter-badge"
-+            title={`${shownCount} of ${totalCount} proposal types shown on the map`}
++            title="Some proposal types are hidden on the map"
 +          >
-+            {shownCount}/{totalCount}
++            <EyeIcon size={13} off />
 +          </span>
 +        )}
          <span className="vote-type-chevron" onMouseDown={handleChevronClick}>
@@ -1142,87 +1627,19 @@ index e77bd70..fde601e 100644
            style={dropdownMaxWidth ? { maxWidth: dropdownMaxWidth } : undefined}
          >
 -          {options.map((option, index) => {
-+          <div className="vt-panel-head">
-+            <span className="vt-panel-title">Shown on map</span>
-+            <span className={`vt-panel-count${isFiltered ? " is-filtered" : ""}`}>
-+              {shownCount}/{totalCount}
-+            </span>
-+            <button
-+              type="button"
-+              className="vt-panel-action"
-+              onMouseDown={(e) => swallow(e, () =>
-+                isFiltered ? showAllVoteTypes() : showOnlyVoteTypes(rows.map((r) => r.label))
-+              )}
-+            >
-+              {isFiltered ? "All" : "None"}
-+            </button>
-+          </div>
-+
-+          {listRows.map((row, index) => {
-             const isHighlighted = index === highlightedIndex;
+-            const isHighlighted = index === highlightedIndex;
 -            const isSelected = option.label === voteType;
-+            const isCasting = row.label === voteType;
-+            const visible = !hidden.has(row.label);
-+            const cls = [
-+              "vote-type-option",
-+              isHighlighted ? "highlighted" : "",
-+              isCasting ? "is-casting" : "",
-+              visible ? "" : "is-hidden",
-+              row.castable ? "" : "is-uncastable",
-+            ].filter(Boolean).join(" ");
- 
+-
 -            if (option.isCustom) {
 -              return (
-+            return (
-+              <div key={row.label}>
-+                {index === firstUncastable && (
-+                  <div className="vt-section">
-+                    {pointType === "point" ? "Corridor proposals" : "Point proposals"}
-+                    <span className="vt-section-note">on the map, vote elsewhere</span>
-+                  </div>
-+                )}
-                 <div
+-                <div
 -                  key="custom"
 -                  className={`vote-type-option vote-type-custom ${isHighlighted ? "highlighted" : ""}`}
 -                  onMouseDown={() => selectOption(option.label)}
-+                  className={cls}
-+                  role="option"
-+                  aria-selected={isCasting}
-+                  onMouseDown={() => row.castable && selectOption(row.label)}
-                   onMouseEnter={() => setHighlightedIndex(index)}
-+                  title={row.castable ? undefined
-+                    : `Drawn on the map. Draw ${pointType === "point" ? "a route" : "a single point"} to vote for it.`}
-                 >
+-                  onMouseEnter={() => setHighlightedIndex(index)}
+-                >
 -                  <span>Suggest: <em>"{option.label}"</em></span>
-+                  <button
-+                    type="button"
-+                    className="vt-vis"
-+                    role="switch"
-+                    aria-checked={visible}
-+                    aria-label={`${visible ? "Hide" : "Show"} ${row.label} on the map`}
-+                    title={`${visible ? "Hide" : "Show"} on the map`}
-+                    onMouseDown={(e) => swallow(e, () => toggleVoteTypeVisible(row.label))}
-+                  >
-+                    <span className="vt-vis-box">{visible && <CheckIcon size={10} />}</span>
-+                  </button>
-+                  {renderIcon(row.icon, row.label)}
-+                  <span className="vote-type-label">{row.label}</span>
-+                  <span className="vt-tail">
-+                    <span className={`vt-net${row.net < 0 ? " is-negative" : ""}`}>
-+                      {formatNet(row.net)}
-+                    </span>
-+                    <button
-+                      type="button"
-+                      className="vt-only"
-+                      title={`Show only ${row.label}`}
-+                      onMouseDown={(e) => swallow(e, () =>
-+                        showOnlyVoteTypes(rows.map((r) => r.label), [row.label])
-+                      )}
-+                    >
-+                      only
-+                    </button>
-+                  </span>
-                 </div>
+-                </div>
 -              );
 -            }
 -
@@ -1243,16 +1660,81 @@ index e77bd70..fde601e 100644
 -                ) : null}
 -                <span className="vote-type-label">{option.label}</span>
 -                {isSelected && <span className="check-icon"><CheckIcon size={11} /></span>}
++          {/* Master row. Only earns its place when there's more than one family
++              to reach across — with a single section it would just shadow that
++              section's own eye. */}
++          {sections.length > 1 && groupHeader("All proposals", orderedRows, "vt-section-all")}
++
++          {sections.map((section) => (
++              <div key={section.key} className="vt-group">
++                {groupHeader(section.title, section.rows)}
++
++                {section.rows.map((row) => {
++                  const index = orderedRows.indexOf(row);
++                  const isHighlighted = index === highlightedIndex;
++                  const isCasting = row.label === voteType;
++                  const visible = !hidden.has(row.label);
++                  const cls = [
++                    "vote-type-option",
++                    isHighlighted ? "highlighted" : "",
++                    isCasting ? "is-casting" : "",
++                    visible ? "" : "is-hidden",
++                    row.castable ? "" : "is-uncastable",
++                  ].filter(Boolean).join(" ");
++
++                  return (
++                    <div
++                      key={row.label}
++                      className={cls}
++                      role="option"
++                      aria-selected={isCasting}
++                      onMouseDown={() => row.castable && selectOption(row.label)}
++                      onMouseEnter={() => setHighlightedIndex(index)}
++                      title={row.castable ? undefined
++                        : `Drawn on the map. Draw ${pointType === "point" ? "a route" : "a single point"} to vote for it.`}
++                    >
++                      <button
++                        type="button"
++                        className={`vt-vis${visible ? "" : " is-off"}`}
++                        role="switch"
++                        aria-checked={visible}
++                        aria-label={`${visible ? "Hide" : "Show"} ${row.label} on the map`}
++                        title={`${visible ? "Hide" : "Show"} on the map`}
++                        onMouseDown={(e) => swallow(e, () => toggleVoteTypeVisible(row.label))}
++                      >
++                        <EyeIcon size={14} off={!visible} />
++                      </button>
++                      {renderIcon(row.icon, row.label)}
++                      <span className="vote-type-label">{row.label}</span>
++                      <span className="vt-tail">
++                        <span className={`vt-net${row.net < 0 ? " is-negative" : ""}`}>
++                          {formatNet(row.net)}
++                        </span>
++                        <button
++                          type="button"
++                          className="vt-only"
++                          title={`Show only ${row.label}`}
++                          onMouseDown={(e) => swallow(e, () =>
++                            showOnlyVoteTypes(rows.map((r) => r.label), [row.label])
++                          )}
++                        >
++                          only
++                        </button>
++                      </span>
++                    </div>
++                  );
++                })}
                </div>
-             );
-           })}
+-            );
+-          })}
++          ))}
 +
 +          {showCustomOption && (
 +            <div
 +              className={`vote-type-option vote-type-custom ${
-+                highlightedIndex === listRows.length ? "highlighted" : ""}`}
++                highlightedIndex === orderedRows.length ? "highlighted" : ""}`}
 +              onMouseDown={() => selectOption(inputValue.trim(), true)}
-+              onMouseEnter={() => setHighlightedIndex(listRows.length)}
++              onMouseEnter={() => setHighlightedIndex(orderedRows.length)}
 +            >
 +              <span>Suggest: <em>"{inputValue.trim()}"</em></span>
 +            </div>
@@ -1315,15 +1797,16 @@ index 0000000..87bac37
 +}
 diff --git a/client-react/src/map/voteTypeFilter.test.ts b/client-react/src/map/voteTypeFilter.test.ts
 new file mode 100644
-index 0000000..7e74235
+index 0000000..99c1630
 --- /dev/null
 +++ b/client-react/src/map/voteTypeFilter.test.ts
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,116 @@
 +import { describe, it, expect, beforeEach } from "vitest";
 +import {
 +  getHiddenVoteTypes,
 +  isVoteTypeVisible,
 +  setVoteTypeVisible,
++  setVoteTypesVisible,
 +  toggleVoteTypeVisible,
 +  ensureVoteTypeVisible,
 +  showAllVoteTypes,
@@ -1374,6 +1857,25 @@ index 0000000..7e74235
 +    expect(getHiddenVoteTypes().size).toBe(2);
 +  });
 +
++  it("setVoteTypesVisible flips a whole group in ONE commit", () => {
++    let calls = 0;
++    const stop = subscribeVoteTypeFilter(() => { calls++; });
++    setVoteTypesVisible(["A", "B", "C"], false);
++    expect(calls).toBe(1); // not 3 — the section eye must cost one repaint
++    expect(["A", "B", "C"].every((l) => !isVoteTypeVisible(l))).toBe(true);
++    setVoteTypesVisible(["A", "B", "C"], true);
++    expect(calls).toBe(2);
++    expect(getHiddenVoteTypes().size).toBe(0);
++    stop();
++  });
++
++  it("setVoteTypesVisible leaves labels outside the group alone", () => {
++    setVoteTypeVisible("Other", false);
++    setVoteTypesVisible(["A", "B"], false);
++    setVoteTypesVisible(["A", "B"], true);
++    expect(isVoteTypeVisible("Other")).toBe(false);
++  });
++
 +  it("notifies subscribers only on a real change", () => {
 +    let calls = 0;
 +    const stop = subscribeVoteTypeFilter(() => { calls++; });
@@ -1417,10 +1919,10 @@ index 0000000..7e74235
 +});
 diff --git a/client-react/src/map/voteTypeFilter.ts b/client-react/src/map/voteTypeFilter.ts
 new file mode 100644
-index 0000000..ac2de23
+index 0000000..12f569f
 --- /dev/null
 +++ b/client-react/src/map/voteTypeFilter.ts
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,161 @@
 +// ==========================================================================
 +// Vote-type visibility filter
 +// ==========================================================================
@@ -1519,6 +2021,21 @@ index 0000000..ac2de23
 +  const next = new Set(hidden);
 +  if (visible) next.delete(label);
 +  else next.add(label);
++  commit(next);
++}
++
++/**
++ * Show or hide a whole group at once — the legend's per-section eye. One commit,
++ * so a 14-type section costs a single repaint and a single proposal recompute
++ * instead of fourteen.
++ */
++export function setVoteTypesVisible(labels: Iterable<string>, visible: boolean): void {
++  ensureLoaded();
++  const next = new Set(hidden);
++  for (const label of labels) {
++    if (visible) next.delete(label);
++    else next.add(label);
++  }
 +  commit(next);
 +}
 +
@@ -1685,10 +2202,12 @@ index 0000000..29bc141
 +});
 diff --git a/client-react/src/map/voteTypeRegistry.ts b/client-react/src/map/voteTypeRegistry.ts
 new file mode 100644
-index 0000000..ba7476b
+index 0000000..6b22a4e
 --- /dev/null
 +++ b/client-react/src/map/voteTypeRegistry.ts
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,168 @@
++// Referenced by: docs/algorithms/06-ranking.md
++//   (buildVoteTypeLegend — the legend is ordered by provenance, not votes).
 +// ==========================================================================
 +// Vote-type registry — what this map is actually showing
 +// ==========================================================================
@@ -1883,3 +2402,56 @@ index 697e9ec..d35af14 100644
    const blocks = params.blocks ?? edges.map((e) => [e]);
    const { targetDir, castEdges, clearEdges } = planBlockVote({
      mode, edgeIds: edges, label, direction, blocks,
+diff --git a/client-react/src/components/EyeIcon.tsx b/client-react/src/components/EyeIcon.tsx
+new file mode 100644
+index 0000000..895b325
+--- /dev/null
++++ b/client-react/src/components/EyeIcon.tsx
+@@ -0,0 +1,47 @@
++interface EyeIconProps {
++  /** Width/height in px. */
++  size?: number;
++  /** Draw the struck-through (hidden) state. */
++  off?: boolean;
++  className?: string;
++}
++
++/**
++ * Visibility toggle glyph — the legend's show/hide control (VoteTypeSelector).
++ *
++ * The conventional eye / eye-with-slash pair, drawn to the standard Feather
++ * geometry on a 24 grid. Deliberately NOT restyled into the app's square-capped
++ * house language (CheckIcon, the nav rail): this control's whole job is to be
++ * recognised instantly, and recognition here comes from the shape people
++ * already know. Callers dim the `off` state so the two read apart at a glance
++ * as well as up close.
++ */
++export function EyeIcon({ size = 14, off = false, className }: EyeIconProps) {
++  return (
++    <svg
++      className={className}
++      viewBox="0 0 24 24"
++      width={size}
++      height={size}
++      fill="none"
++      stroke="currentColor"
++      strokeWidth="2"
++      strokeLinecap="round"
++      strokeLinejoin="round"
++      aria-hidden="true"
++      style={{ display: "block" }}
++    >
++      {off ? (
++        <>
++          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
++          <line x1="1" y1="1" x2="23" y2="23" />
++        </>
++      ) : (
++        <>
++          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
++          <circle cx="12" cy="12" r="3" />
++        </>
++      )}
++    </svg>
++  );
++}

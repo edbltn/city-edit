@@ -155,6 +155,33 @@ SECTIONS = [
         ],
         "files": ["client-react/src/components/TopBar/TopBar.tsx"],
     },
+    {
+        "id": "revision",
+        "tag": "REVISION",
+        "title": "Two families, two headings, one column of eyes",
+        "symptom": "First pass headed the panel <em>Shown on map \u00b7 N/M \u00b7 All\u2009/\u2009None</em> and split it with a divider that renamed itself as you drew. One global count and one global All\u2009/\u2009None were the wrong grain, the divider read as an afterthought, and a checkbox is a form control \u2014 not what \u201cis this drawn on the map\u201d looks like.",
+        "cause": [
+            "The split was on <em>castable right now</em>, so a corridor type changed house the moment you finished drawing a route \u2014 the heading moved under the reader",
+            "A single <code>N/M</code> spanning the whole panel could not say <em>which</em> half was turned down \u2014 \u201c8 of 17\u201d reads the same whether you hid the pins or the corridors",
+            "One global All\u2009/\u2009None is the wrong grain: the useful gesture is \u201call the corridors\u201d or \u201call the pins\u201d, not \u201ceverything\u201d",
+        ],
+        "fixes": [
+            "Split by proposal FAMILY instead \u2014 <strong>Point proposals</strong> and <strong>Route proposals</strong>, headings that never move. The family you can cast into leads",
+            "Each heading carries its own show-all\u2009/\u2009hide-all eye, in the <em>same left column</em> as the rows' eyes, so the section control and its members read as one unit",
+            "From a mixed section that eye SHOWS everything \u2014 the recovering direction; a blank map is the outcome worth making people ask for twice",
+            "Every toggle is now the conventional <strong>eye / eye-with-slash</strong>. Deliberately NOT restyled into the app's square-capped house language: this control's job is instant recognition",
+            "An <strong>All proposals</strong> master row sits above the families \u2014 the same control at a wider scale \u2014 and is suppressed on single-family maps, where it would only shadow the one section's own eye",
+            "Each heading carries <code>(n/N shown)</code> for its own group, which is the grain that was missing: one global count said nothing actionable, while a per-family count tells you which half of the map you have turned down",
+            "The collapsed field keeps a struck-through eye rather than a number \u2014 it has room for one signal, and <em>filtered</em> is the one that matters there",
+            "New <code>setVoteTypesVisible</code> commits a whole section in ONE write, so a 12-type family costs one repaint and one recompute rather than twelve",
+        ],
+        "files": [
+            "client-react/src/components/EyeIcon.tsx",
+            "client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx",
+            "client-react/src/components/VoteTypeSelector/VoteTypeSelector.css",
+            "client-react/src/map/voteTypeFilter.ts",
+        ],
+    },
 ]
 
 
@@ -317,6 +344,22 @@ FILE_CONTEXT = {
             "That test would pass either way if the predicate were applied to the finished list \u2014 it is written against counts (9, 8) specifically to catch that",
         ],
     },
+    "client-react/src/components/EyeIcon.tsx": {
+        "on": ["React / Leaflet client"],
+        "module": ("Client \u00b7 shared icons", "Sibling of CheckIcon: the small glyphs shared across components rather than owned by one"),
+        "file": ("EyeIcon.tsx", "~50 LOC \u2014 new. One component, two states"),
+        "outline": [
+            ("header comment", "new \u2014 records WHY this one glyph is not in the house style", True),
+            ("open eye", "new \u2014 the conventional lens + pupil", True),
+            ("eye-with-slash", "new \u2014 the conventional off state", True),
+        ],
+        "blocks": [
+            "The one glyph in the app deliberately NOT drawn to the square-cap/miter house language \u2014 recognition beats consistency for a control whose whole job is to be understood instantly",
+            "Standard geometry, standard round caps: a restyled eye is a shape people have to decode, and this one sits 14px tall in a dense list",
+            "`off` swaps the path rather than overlaying a slash on the open eye \u2014 stacking both muddies at this size",
+            "aria-hidden: the accessible name lives on the surrounding button, never doubled here",
+        ],
+    },
     "client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx": {
         "on": ["React / Leaflet client"],
         "module": ("Client · VoteTypeSelector", "The topbar control that was the cast-target picker and is now also the map's legend"),
@@ -337,8 +380,8 @@ FILE_CONTEXT = {
             "Two affordances per row, deliberately distinct: a checkbox on the LEFT for visibility, an accent left-rule for the cast target — two checkmarks would have been unreadable",
             "The gestures fire on mousedown and swallow the event: the row's own mousedown would otherwise commit the type and close the panel",
             "shownCount is measured over every row, not the filtered view — the readout is a statement about the MAP, not about the query",
-            "Non-castable rows keep their checkbox and lose their click target, under a divider that says where to vote for them instead",
-            "The badge on the collapsed control is the whole safety net: a filtered map is otherwise indistinguishable from an empty one",
+            "Non-castable rows keep their eye and lose their click target \u2014 their pins are on screen either way, and hiding them is the whole point",
+            "The struck-through eye on the collapsed control is the whole safety net: a filtered map is otherwise indistinguishable from an empty one",
             "The theme-preset fallback is preserved for maps that authored no vote types of their own",
         ],
     },
@@ -359,7 +402,7 @@ FILE_CONTEXT = {
         ],
         "blocks": [
             "Every new rule is built from the app's existing tokens — zero radius, hairlines, --accent, --font-size-2xs — so the panel reads as the same object as the rest of the bar",
-            "The head is sticky, so its background has to be OPAQUE: --hover-bg is a translucent wash, layered over --paper via a gradient rather than hardcoded, so it still follows the theme",
+            "The heading's left padding equals a row's border + inset, which is what puts the section eye and the row eyes in one unbroken column",
             "The count and the `only` button share one grid cell and crossfade — the column width is fixed, so rows never reflow under the cursor",
             "@media (hover: none) pins the count visible on touch, where there is no hover to reveal `only` behind",
             "Hidden rows are struck through and dimmed to 0.38, not removed — you have to be able to find one again",

@@ -177,79 +177,58 @@
    and its net support on the right.
    ========================================================================== */
 
-/* The filter readout stays put while the list scrolls under it, so the
-   background has to be opaque — --hover-bg is a translucent wash, layered here
-   over --paper rather than hardcoded, so it still follows the theme. */
-.vt-panel-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+/* One heading per proposal family, each led by its own show-all/hide-all eye.
+   Its left padding matches a row's (border + inset) so the section eye and the
+   row eyes form one unbroken column. The first heading sheds its top rule — it
+   sits directly under the search field. */
+.vt-section {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--hairline);
-  background: linear-gradient(var(--hover-bg), var(--hover-bg)), var(--paper);
-}
-
-.vt-panel-title {
-  font-size: var(--font-size-2xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink);
-  opacity: 0.5;
-}
-
-.vt-panel-count {
-  font-size: var(--font-size-2xs);
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
-  opacity: 0.5;
-}
-
-/* Filtered state is the one thing in this panel that must never be missed —
-   a filtered map reads exactly like an empty one. */
-.vt-panel-count.is-filtered {
-  color: var(--accent);
-  opacity: 1;
-}
-
-.vt-panel-action {
-  appearance: none;
-  margin-left: auto;
-  padding: 2px var(--space-2);
-  border: 1px solid var(--hairline);
-  background: transparent;
-  font: inherit;
-  font-size: var(--font-size-2xs);
-  color: var(--ink);
-  opacity: 0.7;
-  cursor: pointer;
-  transition: opacity 0.12s ease, border-color 0.12s ease;
-}
-
-.vt-panel-action:hover {
-  opacity: 1;
-  border-color: var(--ink);
-}
-
-/* Divider caption before the rows that can't be cast in the current mode. */
-.vt-section {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3) var(--space-1);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-3);
   border-top: 1px solid var(--hairline);
   font-size: var(--font-size-2xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink);
-  opacity: 0.4;
 }
 
-.vt-section-note {
+.vt-group:first-child .vt-section {
+  border-top: none;
+}
+
+/* The master row leads the panel and is separated from the families it spans. */
+.vt-section-all {
+  border-top: none;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.vt-group:first-of-type .vt-section {
+  border-top: none;
+}
+
+.vt-section-all + .vt-group .vt-section {
+  border-top: none;
+}
+
+.vt-section-title {
+  opacity: 0.55;
+}
+
+/* How much of this group is drawn. Lower-case on purpose — the heading is
+   uppercased, and a readout is a measurement, not a label. */
+.vt-section-count {
+  margin-left: auto;
+  padding-left: var(--space-3);
   letter-spacing: 0;
   text-transform: none;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.42;
+}
+
+.vt-section-count.is-filtered {
+  color: var(--accent);
+  opacity: 1;
 }
 
 .vote-type-option {
@@ -319,7 +298,9 @@
   text-align: left !important;
 }
 
-/* ── Visibility checkbox ─────────────────────────────────────────────────── */
+/* ── Visibility eye ──────────────────────────────────────────────────────── */
+/* One control, three places: per row, per section (show/hide all), and as the
+   struck-through marker on the collapsed field. */
 
 .vt-vis {
   appearance: none;
@@ -327,48 +308,40 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 18px;
+  width: 20px;
   height: 18px;
   padding: 0;
   border: none;
   background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-
-.vt-vis-box {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 13px;
-  height: 13px;
-  border: 1px solid var(--ink);
-  opacity: 0.45;
-  transition: opacity 0.12s ease, border-color 0.12s ease;
-}
-
-.vote-type-option:not(.is-hidden) .vt-vis-box {
-  opacity: 0.85;
-  border-color: var(--accent);
   color: var(--accent);
+  opacity: 0.85;
+  cursor: pointer;
+  transition: opacity 0.12s ease, color 0.12s ease;
 }
 
-.vt-vis:hover .vt-vis-box {
+/* Hidden reads as ink, not accent: accent is reserved for what's on the map. */
+.vt-vis.is-off {
+  color: var(--ink);
+  opacity: 0.42;
+}
+
+.vt-vis:hover,
+.vt-vis.is-off:hover {
   opacity: 1;
 }
 
-.vt-vis:focus-visible .vt-vis-box {
+.vt-vis:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 1px;
 }
 
-/* The tick lands rather than pops — 110ms, no overshoot. */
-.vt-vis-box svg {
-  animation: vt-tick 0.11s ease-out;
+/* The state lands rather than pops — 110ms, no overshoot. */
+.vt-vis svg {
+  animation: vt-eye 0.11s ease-out;
 }
 
-@keyframes vt-tick {
-  from { opacity: 0; transform: scale(0.6); }
+@keyframes vt-eye {
+  from { opacity: 0.3; transform: scale(0.82); }
   to   { opacity: 1; transform: scale(1); }
 }
 
@@ -452,16 +425,15 @@
   opacity: 0.45;
 }
 
-/* Collapsed-control badge: the filter is in effect even with the panel shut. */
+/* Collapsed-control marker: a filtered map is otherwise indistinguishable from
+   an empty one, so the shut field still shows the struck-through eye. */
 .vote-type-filter-badge {
+  display: flex;
+  align-items: center;
   flex-shrink: 0;
   margin-left: auto;
-  padding: 1px 4px;
-  border: 1px solid var(--accent);
-  font-size: var(--font-size-2xs);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.3;
   color: var(--accent);
+  opacity: 0.9;
   pointer-events: none;
 }
 

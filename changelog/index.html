@@ -112,9 +112,14 @@
     and is applied <em>before</em> selection rather than to the finished list, so hiding sixteen of
     seventeen types promotes the survivor's runners-up into the freed slots instead of emptying the
     map. Casting always un-hides the type you voted for, because a visibility filter next to a vote
-    button is otherwise a trap: hide a type, vote for it, and nothing moves. Isolating one type on
-    <code>nyc-proposals</code> takes the lit blocks from 466 to 154 and the corridors from 8 to 3;
-    pressing <em>All</em> puts both back exactly.</p>
+    button is otherwise a trap: hide a type, vote for it, and nothing moves. The panel is headed by
+    the map's two proposal families &mdash; <strong>Point proposals</strong> and <strong>Route
+    proposals</strong> &mdash; each with an <code>(n/N shown)</code> readout and its own show-all eye,
+    under an <em>All proposals</em> master row; every toggle is the conventional eye / eye-with-slash,
+    in one left column. Isolating one type on <code>nyc-proposals</code> takes the lit blocks from 466
+    to 154 and the corridors from 8 to 3; hiding everything from the master row is a single commit
+    (466 &rarr; 0 lit, and the corridor recompute drops from 280ms to 25ms because there is nothing
+    left to cluster).</p>
   </a>
 
   <a class="entry" href="./2026-08-09-nav-rail-blog-link.html">

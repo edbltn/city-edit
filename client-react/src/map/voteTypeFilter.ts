@@ -99,6 +99,21 @@ export function setVoteTypeVisible(label: string, visible: boolean): void {
   commit(next);
 }
 
+/**
+ * Show or hide a whole group at once — the legend's per-section eye. One commit,
+ * so a 14-type section costs a single repaint and a single proposal recompute
+ * instead of fourteen.
+ */
+export function setVoteTypesVisible(labels: Iterable<string>, visible: boolean): void {
+  ensureLoaded();
+  const next = new Set(hidden);
+  for (const label of labels) {
+    if (visible) next.delete(label);
+    else next.add(label);
+  }
+  commit(next);
+}
+
 export function toggleVoteTypeVisible(label: string): void {
   setVoteTypeVisible(label, !isVoteTypeVisible(label));
 }

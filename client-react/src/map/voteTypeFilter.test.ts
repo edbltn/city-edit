@@ -3,6 +3,7 @@ import {
   getHiddenVoteTypes,
   isVoteTypeVisible,
   setVoteTypeVisible,
+  setVoteTypesVisible,
   toggleVoteTypeVisible,
   ensureVoteTypeVisible,
   showAllVoteTypes,
@@ -51,6 +52,25 @@ describe("voteTypeFilter", () => {
   it("showOnlyVoteTypes with no keeps hides them all", () => {
     showOnlyVoteTypes(["A", "B"]);
     expect(getHiddenVoteTypes().size).toBe(2);
+  });
+
+  it("setVoteTypesVisible flips a whole group in ONE commit", () => {
+    let calls = 0;
+    const stop = subscribeVoteTypeFilter(() => { calls++; });
+    setVoteTypesVisible(["A", "B", "C"], false);
+    expect(calls).toBe(1); // not 3 — the section eye must cost one repaint
+    expect(["A", "B", "C"].every((l) => !isVoteTypeVisible(l))).toBe(true);
+    setVoteTypesVisible(["A", "B", "C"], true);
+    expect(calls).toBe(2);
+    expect(getHiddenVoteTypes().size).toBe(0);
+    stop();
+  });
+
+  it("setVoteTypesVisible leaves labels outside the group alone", () => {
+    setVoteTypeVisible("Other", false);
+    setVoteTypesVisible(["A", "B"], false);
+    setVoteTypesVisible(["A", "B"], true);
+    expect(isVoteTypeVisible("Other")).toBe(false);
   });
 
   it("notifies subscribers only on a real change", () => {

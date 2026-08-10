@@ -102,6 +102,7 @@
 <a href="#render">Four places draw vote signal; all four had to agree</a>
 <a href="#cast">You can never vote into a void</a>
 <a href="#reach">A legend you can't open isn't a legend</a>
+<a href="#revision">Two families, two headings, one column of eyes</a>
     <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
   </nav>
 
@@ -206,6 +207,32 @@
     </section>
     
 
+    <section class="card" id="revision">
+      <div class="tag">REVISION</div>
+      <h2>Two families, two headings, one column of eyes</h2>
+      <h3>Symptom</h3>
+      <p>First pass headed the panel <em>Shown on map · N/M · All / None</em> and split it with a divider that renamed itself as you drew. One global count and one global All / None were the wrong grain, the divider read as an afterthought, and a checkbox is a form control — not what “is this drawn on the map” looks like.</p>
+      <h3>Root cause</h3>
+      <ul><li>The split was on <em>castable right now</em>, so a corridor type changed house the moment you finished drawing a route — the heading moved under the reader</li>
+<li>A single <code>N/M</code> spanning the whole panel could not say <em>which</em> half was turned down — “8 of 17” reads the same whether you hid the pins or the corridors</li>
+<li>One global All / None is the wrong grain: the useful gesture is “all the corridors” or “all the pins”, not “everything”</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Split by proposal FAMILY instead — <strong>Point proposals</strong> and <strong>Route proposals</strong>, headings that never move. The family you can cast into leads</li>
+<li>Each heading carries its own show-all / hide-all eye, in the <em>same left column</em> as the rows' eyes, so the section control and its members read as one unit</li>
+<li>From a mixed section that eye SHOWS everything — the recovering direction; a blank map is the outcome worth making people ask for twice</li>
+<li>Every toggle is now the conventional <strong>eye / eye-with-slash</strong>. Deliberately NOT restyled into the app's square-capped house language: this control's job is instant recognition</li>
+<li>An <strong>All proposals</strong> master row sits above the families — the same control at a wider scale — and is suppressed on single-family maps, where it would only shadow the one section's own eye</li>
+<li>Each heading carries <code>(n/N shown)</code> for its own group, which is the grain that was missing: one global count said nothing actionable, while a per-family count tells you which half of the map you have turned down</li>
+<li>The collapsed field keeps a struck-through eye rather than a number — it has room for one signal, and <em>filtered</em> is the one that matters there</li>
+<li>New <code>setVoteTypesVisible</code> commits a whole section in ONE write, so a 12-type family costs one repaint and one recompute rather than twelve</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/EyeIcon.tsx</li>
+<li>client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx</li>
+<li>client-react/src/components/VoteTypeSelector/VoteTypeSelector.css</li>
+<li>client-react/src/map/voteTypeFilter.ts</li></ul>
+    </section>
+    
+
   <section class="card verify" id="verify">
     <div class="tag">Verification</div>
     <h2>What was run</h2>
@@ -242,7 +269,7 @@
     
         <details>
           <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
-            <span class="stat"><span class="d-add">+113</span> / <span class="d-del">-7</span></span>
+            <span class="stat"><span class="d-add">+245</span> / <span class="d-del">-91</span></span>
           </summary>
           
     <div class="ctx">
@@ -272,7 +299,7 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
-<span class="d-meta">index afc4f58..9549477 100644</span>
+<span class="d-meta">index afc4f58..bcde150 100644</span>
 <span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
 <span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
 <span class="d-hunk">@@ -19,6 +19,11 @@ import Flatbush from &quot;flatbush&quot;;</span>
@@ -287,7 +314,24 @@
 <span class="d-ctx"> import { useWebSocketContext } from &quot;../../context/WebSocketContext&quot;;</span>
 <span class="d-ctx"> import { useGraphSnap, useTheme, useHeatmap, useGhostPin, useRoute } from &quot;../../context&quot;;</span>
 <span class="d-ctx"> import type { GraphData, ProposalMatch } from &quot;../../types&quot;;</span>
-<span class="d-hunk">@@ -336,6 +341,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-hunk">@@ -31,6 +36,7 @@ import { suggestionGlyphForLabel } from &quot;../../utils/suggestionIcon&quot;;</span>
+<span class="d-ctx"> import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, TOP_PROPOSAL_MIN_NET, type VoteTypeWinner } from &quot;./topProposals&quot;;</span>
+<span class="d-ctx"> import {</span>
+<span class="d-ctx">   createRouteProposalJob, corridorFromEdgeIds, corridorSliceBetween, routeBlockEdges, isRouteCovered,</span>
+<span class="d-add">+  routeCoverageRatio, ROUTE_SELECTED_MIN_COVERAGE,</span>
+<span class="d-ctx">   expandSelectionToUndirected,</span>
+<span class="d-ctx">   type RouteProposal,</span>
+<span class="d-ctx"> } from &quot;./routeProposals&quot;;</span>
+<span class="d-hunk">@@ -80,7 +86,7 @@ import { useVotesVersion } from &quot;../../utils/useVotesVersion&quot;;</span>
+<span class="d-ctx"> import { getVoterId } from &quot;../../utils/voterIdentity&quot;;</span>
+<span class="d-ctx"> import { isHoverSuppressed } from &quot;../../utils/touchHover&quot;;</span>
+<span class="d-ctx"> import { buildSelectionUrl, copyToClipboard } from &quot;../../utils/shareLink&quot;;</span>
+<span class="d-del">-import { buildProposalDonateUrl, fundableProposalName } from &quot;../../utils/donateLink&quot;;</span>
+<span class="d-add">+import { buildProposalDonateUrl } from &quot;../../utils/donateLink&quot;;</span>
+<span class="d-ctx"> import { CheckIcon } from &quot;../CheckIcon&quot;;</span>
+<span class="d-ctx"> import { arrayMax, haversineMeters, HEAT_FULL_SCALE, NEG_HEAT_FULL_SCALE, HEATMAP_OPACITY } from &quot;./geometryHelpers&quot;;</span>
+<span class="d-ctx"> import { resolveAddress } from &quot;./geocodingHelpers&quot;;</span>
+<span class="d-hunk">@@ -336,6 +342,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
 <span class="d-ctx">   // on hover/selection).</span>
 <span class="d-ctx">   const blocksActiveRef = useRef(false);</span>
 <span class="d-ctx">   const maxVotesRevRef = useRef(-1);</span>
@@ -296,7 +340,7 @@
 <span class="d-ctx"> </span>
 <span class="d-ctx">   // Node adjacency list — node index → [edge indices]. Built once from topology,</span>
 <span class="d-ctx">   // used to derive node votes from edge totals (max of adjacent edges).</span>
-<span class="d-hunk">@@ -817,6 +824,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-hunk">@@ -817,6 +825,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
 <span class="d-ctx">       // Station networks don&#x27;t badge winners as &quot;top proposals&quot; (every station</span>
 <span class="d-ctx">       // renders its own pin regardless), so the support floor stays off there.</span>
 <span class="d-ctx">       isStationNetwork ? 0 : topProposalMinNet,</span>
@@ -306,7 +350,95 @@
 <span class="d-ctx">     ), legendChanged);</span>
 <span class="d-ctx">   }, [setStableWinners, isStationNetwork, voteTypeKindOf, topProposalMinNet]);</span>
 <span class="d-ctx"> </span>
-<span class="d-hunk">@@ -1402,9 +1412,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-hunk">@@ -962,7 +973,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // them is still draggable — dragging there spawns a real mid. Recomputed</span>
+<span class="d-ctx">   // reactively from winners + the path, so a vote that promotes/demotes a</span>
+<span class="d-ctx">   // proposal adds/removes its highlight.</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  // TWO GRAINS, deliberately (see the effect below):</span>
+<span class="d-add">+  //   onPathEdgeSet        — the winner&#x27;s own edge is ON the routed path</span>
+<span class="d-add">+  //                          (direction twins forgiven). Drives click-through:</span>
+<span class="d-add">+  //                          only here is there really a polyline underneath to</span>
+<span class="d-add">+  //                          hand the gesture to.</span>
+<span class="d-add">+  //   onSelectedBlockSet   — the winner sits on a BLOCK the selection touches.</span>
+<span class="d-add">+  //                          Drives the selected ring, and nothing else. Blocks</span>
+<span class="d-add">+  //                          are the interaction grain everywhere else (votes,</span>
+<span class="d-add">+  //                          the card&#x27;s rows, its &quot;top proposal&quot; badges), so</span>
+<span class="d-add">+  //                          this is the set that makes the pin agree with the</span>
+<span class="d-add">+  //                          modal.</span>
+<span class="d-ctx">   const [onPathEdgeSet, setOnPathEdgeSet] = useState&lt;Set&lt;number&gt;&gt;(() =&gt; new Set());</span>
+<span class="d-add">+  const [onSelectedBlockSet, setOnSelectedBlockSet] = useState&lt;Set&lt;number&gt;&gt;(() =&gt; new Set());</span>
+<span class="d-ctx">   const startLat = startPoint?.lat ?? null;</span>
+<span class="d-ctx">   const startLng = startPoint?.lng ?? null;</span>
+<span class="d-ctx">   const endLat = endPoint?.lat ?? null;</span>
+<span class="d-hunk">@@ -1068,15 +1092,28 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   }, [getWaypointAvoidRects]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Highlight (but do NOT add as waypoints) the top proposals the current route</span>
+<span class="d-del">-  // PASSES THROUGH. Matched by UNDIRECTED node-pair, not raw edge index: a two-way</span>
+<span class="d-del">-  // street stores each direction as its own edge, and the route often traverses</span>
+<span class="d-del">-  // the twin of the vote winner&#x27;s edge (an exact edge-id intersection misses it).</span>
+<span class="d-add">+  // runs through. Two sets, at the two grains described above:</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  //   ON THE PATH — matched by UNDIRECTED node-pair, not raw edge index: a</span>
+<span class="d-add">+  //     two-way street stores each direction as its own edge, and the route often</span>
+<span class="d-add">+  //     traverses the twin of the vote winner&#x27;s edge (an exact edge-id</span>
+<span class="d-add">+  //     intersection misses it). These stay click-through so the path beneath is</span>
+<span class="d-add">+  //     still draggable (dragging there spawns a real mid).</span>
+<span class="d-add">+  //   ON A SELECTED BLOCK — the winner&#x27;s edge is any edge of a block the</span>
+<span class="d-add">+  //     selection touches, exactly the set `topKindsFor` badges as a &quot;point&quot; top</span>
+<span class="d-add">+  //     proposal in the card. A junction block holds dozens of stub edges and a</span>
+<span class="d-add">+  //     route crosses two of them, so the path test above misses ~every</span>
+<span class="d-add">+  //     intersection proposal the route plainly runs through: the card badged it</span>
+<span class="d-add">+  //     while its pin stayed dark. This set is the pin&#x27;s half of that agreement.</span>
+<span class="d-add">+  //</span>
+<span class="d-ctx">   // Reactive to winners + the path, so a vote promoting/demoting a proposal</span>
+<span class="d-del">-  // adds/removes its highlight. Waypoint proposals (start/end/mid) are excluded —</span>
+<span class="d-del">-  // those are styled by `role`. These stay click-through so the path beneath is</span>
+<span class="d-del">-  // still draggable (dragging there spawns a real mid).</span>
+<span class="d-add">+  // adds/removes its highlight. Waypoint proposals (start/end/mid) are excluded</span>
+<span class="d-add">+  // from both — those are styled by `role`.</span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-del">-    const clear = () =&gt; setOnPathEdgeSet((prev) =&gt; (prev.size ? new Set() : prev));</span>
+<span class="d-add">+    const clear = () =&gt; {</span>
+<span class="d-add">+      setOnPathEdgeSet((prev) =&gt; (prev.size ? new Set() : prev));</span>
+<span class="d-add">+      setOnSelectedBlockSet((prev) =&gt; (prev.size ? new Set() : prev));</span>
+<span class="d-add">+    };</span>
+<span class="d-ctx">     if (isStationNetwork || isHeatmapLoading) { clear(); return; }</span>
+<span class="d-ctx">     if (startLat === null || endLat === null) { clear(); return; }</span>
+<span class="d-ctx">     if (!pathEdgeIds || pathEdgeIds.length === 0 || winners.length === 0) { clear(); return; }</span>
+<span class="d-hunk">@@ -1088,17 +1125,24 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     for (const ei of pathEdgeIds) {</span>
+<span class="d-ctx">       if (ei &lt; g.nEdges) pathPairs.add(pairKey(edgeFrom(g, ei), edgeTo(g, ei)));</span>
+<span class="d-ctx">     }</span>
+<span class="d-del">-    const next = new Set&lt;number&gt;();</span>
+<span class="d-add">+    // Same block union the card&#x27;s rows and badges are computed over.</span>
+<span class="d-add">+    const blockEdges = new Set&lt;number&gt;();</span>
+<span class="d-add">+    for (const block of materializeBlocks(g, blockIndexRef.current, pathEdgeIds)) {</span>
+<span class="d-add">+      for (let i = 0; i &lt; block.length; i++) blockEdges.add(block[i]);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    const nextPath = new Set&lt;number&gt;();</span>
+<span class="d-add">+    const nextBlock = new Set&lt;number&gt;();</span>
+<span class="d-ctx">     for (const w of winners) {</span>
+<span class="d-ctx">       // Skip proposals that ARE waypoints — `role` styles those.</span>
+<span class="d-ctx">       if (w.edgeIdx === startEdgeIdx || w.edgeIdx === endEdgeIdx || midEdgeSet.has(w.edgeIdx)) continue;</span>
+<span class="d-ctx">       if (w.edgeIdx &gt;= g.nEdges) continue;</span>
+<span class="d-del">-      if (pathPairs.has(pairKey(edgeFrom(g, w.edgeIdx), edgeTo(g, w.edgeIdx)))) next.add(w.edgeIdx);</span>
+<span class="d-add">+      if (pathPairs.has(pairKey(edgeFrom(g, w.edgeIdx), edgeTo(g, w.edgeIdx)))) nextPath.add(w.edgeIdx);</span>
+<span class="d-add">+      if (blockEdges.has(w.edgeIdx)) nextBlock.add(w.edgeIdx);</span>
+<span class="d-ctx">     }</span>
+<span class="d-del">-    setOnPathEdgeSet((prev) =&gt; {</span>
+<span class="d-del">-      if (prev.size === next.size &amp;&amp; [...next].every((x) =&gt; prev.has(x))) return prev;</span>
+<span class="d-del">-      return next;</span>
+<span class="d-del">-    });</span>
+<span class="d-add">+    const sameSet = (prev: Set&lt;number&gt;, next: Set&lt;number&gt;) =&gt;</span>
+<span class="d-add">+      prev.size === next.size &amp;&amp; [...next].every((x) =&gt; prev.has(x));</span>
+<span class="d-add">+    setOnPathEdgeSet((prev) =&gt; (sameSet(prev, nextPath) ? prev : nextPath));</span>
+<span class="d-add">+    setOnSelectedBlockSet((prev) =&gt; (sameSet(prev, nextBlock) ? prev : nextBlock));</span>
+<span class="d-ctx">   }, [startLat, startLng, endLat, endLng, pathEdgeIds, winners, startEdgeIdx, endEdgeIdx, midEdgeSet, isStationNetwork, isHeatmapLoading]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Pixel hit-test: is a screen point over a top-proposal ICON? Tests the icon&#x27;s</span>
+<span class="d-hunk">@@ -1402,9 +1446,13 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
 <span class="d-ctx">     // Block heat is the SIGNED vote differential (up − down) of the block&#x27;s</span>
 <span class="d-ctx">     // top-ranked proposal — top-ranked BY differential (topProposalDiffs). A</span>
 <span class="d-ctx">     // block whose best proposal is still net-against gets a negative value</span>
@@ -322,7 +454,7 @@
 <span class="d-ctx">     const detail: BlockVotesDetail = {</span>
 <span class="d-ctx">       blockDiff: diff,</span>
 <span class="d-ctx">       max: Math.max(HEAT_FULL_SCALE, maxPos),</span>
-<span class="d-hunk">@@ -1437,6 +1451,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-hunk">@@ -1437,6 +1485,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
 <span class="d-ctx">     // (GraphLayer already built one for hover/selection).</span>
 <span class="d-ctx">     const job = createRouteProposalJob(topo, adj, data, {</span>
 <span class="d-ctx">       kindOf: voteTypeKindOf, blockIndex: blockIndexRef.current,</span>
@@ -332,7 +464,7 @@
 <span class="d-ctx">       // The top-proposal support floor (&gt;topProposalMinNet net votes),</span>
 <span class="d-ctx">       // expressed as the pipeline&#x27;s minimum path score — same rule the PBTP</span>
 <span class="d-ctx">       // winners apply, so both proposal families share one bar.</span>
-<span class="d-hunk">@@ -1481,11 +1498,43 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-hunk">@@ -1481,11 +1532,43 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
 <span class="d-ctx">   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);</span>
 <span class="d-ctx">   useEffect(() =&gt; { recomputeRouteProposalsRef.current = recomputeRouteProposals; }, [recomputeRouteProposals]);</span>
 <span class="d-ctx"> </span>
@@ -377,7 +509,7 @@
 <span class="d-ctx"> </span>
 <span class="d-ctx">   // Coalesced, idle-time recompute: at most one queued at a time, run via</span>
 <span class="d-ctx">   // requestIdleCallback so it never lands mid-gesture. Used for the &quot;must be</span>
-<span class="d-hunk">@@ -1510,6 +1559,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-hunk">@@ -1510,6 +1593,19 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
 <span class="d-ctx">   const requestProposalsRecomputeRef = useRef(requestProposalsRecompute);</span>
 <span class="d-ctx">   useEffect(() =&gt; { requestProposalsRecomputeRef.current = requestProposalsRecompute; }, [requestProposalsRecompute]);</span>
 <span class="d-ctx"> </span>
@@ -397,7 +529,7 @@
 <span class="d-ctx">   // The batched sweep: votes (own casts and WS deltas) mark this flag; every</span>
 <span class="d-ctx">   // PROPOSALS_REFRESH_INTERVAL_MS — or as soon as a hidden tab comes back —</span>
 <span class="d-ctx">   // one idle recompute folds them all in. Proposals may therefore lag votes by</span>
-<span class="d-hunk">@@ -2218,6 +2280,43 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-hunk">@@ -2218,6 +2314,43 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
 <span class="d-ctx">   const redrawHoverHighlightRef = useRef(redrawHoverHighlight);</span>
 <span class="d-ctx">   useEffect(() =&gt; { redrawHoverHighlightRef.current = redrawHoverHighlight; }, [redrawHoverHighlight]);</span>
 <span class="d-ctx"> </span>
@@ -441,7 +573,7 @@
 <span class="d-ctx">   // Redraw function - renders edges with vote-scaled styling</span>
 <span class="d-ctx">   const redraw = useCallback(() =&gt; {</span>
 <span class="d-ctx">     const canvas = canvasRef.current;</span>
-<span class="d-hunk">@@ -2257,14 +2356,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-hunk">@@ -2257,14 +2390,20 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx">     const coords = data.coords;</span>
 <span class="d-ctx">     const ends = data.ends;</span>
@@ -465,7 +597,7 @@
 <span class="d-ctx">     }</span>
 <span class="d-ctx">     // Floor the scale so low-traffic maps don&#x27;t saturate (see HEAT_FULL_SCALE).</span>
 <span class="d-ctx">     const maxVotes = Math.max(maxVotesRef.current, HEAT_FULL_SCALE);</span>
-<span class="d-hunk">@@ -2419,7 +2524,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-hunk">@@ -2419,7 +2558,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
 <span class="d-ctx">     ctx.globalAlpha = 1.0;</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx">     redrawHoverHighlightRef.current();</span>
@@ -474,12 +606,280 @@
 <span class="d-add">+    visibleEdgeVotes]);</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx">   // Schedule redraw. rAF is the fast path; the timer is a backstop because rAF</span>
-<span class="d-ctx">   // never fires in hidden/occluded windows — without it a zoomend repaint can be</span></pre>
+<span class="d-ctx">   // never fires in hidden/occluded windows — without it a zoomend repaint can be</span>
+<span class="d-hunk">@@ -3182,17 +3322,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     // doesn&#x27;t head with one.</span>
+<span class="d-ctx">     ? buildSelectionUrl(pinnedPointLatLng, pinnedWinner?.label ?? pinnedVoteTypes[0]?.label)</span>
+<span class="d-ctx">     : null;</span>
+<span class="d-del">-  const pinnedFundName = fundableProposalName(pinnedCardWinner?.label, pinnedVoteTypes);</span>
+<span class="d-del">-  const pinnedDonate = pinnedShareUrl &amp;&amp; pinnedFundName</span>
+<span class="d-del">-    ? {</span>
+<span class="d-del">-        name: pinnedFundName,</span>
+<span class="d-del">-        url: buildProposalDonateUrl({</span>
+<span class="d-del">-          name: pinnedFundName,</span>
+<span class="d-add">+  // Per-row funding: each vote type gets a link naming THAT proposal, with a</span>
+<span class="d-add">+  // deep link selecting this point under that type — so the donation record</span>
+<span class="d-add">+  // says which of the card&#x27;s proposals the money was for.</span>
+<span class="d-add">+  const pinnedDonateUrlFor = (label: string) =&gt;</span>
+<span class="d-add">+    (pinnedPointLatLng</span>
+<span class="d-add">+      ? buildProposalDonateUrl({</span>
+<span class="d-add">+          name: label,</span>
+<span class="d-ctx">           place: pinnedName,</span>
+<span class="d-del">-          url: pinnedShareUrl,</span>
+<span class="d-del">-        }),</span>
+<span class="d-del">-      }</span>
+<span class="d-del">-    : null;</span>
+<span class="d-add">+          url: buildSelectionUrl(pinnedPointLatLng, label),</span>
+<span class="d-add">+        })</span>
+<span class="d-add">+      : null);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // -------------------------------------------------------------------------</span>
+<span class="d-ctx">   // Route-summary card content (docs §2.4: everything displays at block grain)</span>
+<span class="d-hunk">@@ -3333,30 +3473,35 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // header, so selecting a diamond (or manually tracing its corridor) titles</span>
+<span class="d-ctx">   // the summary with that proposal. Mirrors the diamonds&#x27; own selected rule:</span>
+<span class="d-ctx">   // block coverage (twin-expanded) first, else the explicitly-tapped RBTP</span>
+<span class="d-del">-  // whose anchors are still waypoints.</span>
+<span class="d-add">+  // whose anchors are still waypoints. Coverage is a THRESHOLD, not all-or-</span>
+<span class="d-add">+  // nothing (ROUTE_SELECTED_MIN_COVERAGE), so several corridors can qualify at</span>
+<span class="d-add">+  // once — the best-covered one wins the header rather than whichever ranked</span>
+<span class="d-add">+  // first.</span>
+<span class="d-ctx">   const coveredRouteProposal = useMemo(() =&gt; {</span>
+<span class="d-ctx">     void isHeatmapLoading;</span>
+<span class="d-ctx">     const topo = topologyRef.current;</span>
+<span class="d-ctx">     if (!topo || !pathEdgeIds || pathEdgeIds.length === 0 || routeProposals.length === 0) return null;</span>
+<span class="d-ctx">     const sel = expandSelectionToUndirected(</span>
+<span class="d-ctx">       topo, pathEdgeIds, routeProposals.flatMap((p) =&gt; p.blockEdgeIds));</span>
+<span class="d-del">-    const byCoverage = routeProposals.find((p) =&gt; isRouteCovered(p.blocks, sel)) ?? null;</span>
+<span class="d-add">+    let byCoverage: RouteProposal | null = null;</span>
+<span class="d-add">+    let bestRatio = 0;</span>
+<span class="d-add">+    for (const p of routeProposals) {</span>
+<span class="d-add">+      const ratio = routeCoverageRatio(p.blocks, sel);</span>
+<span class="d-add">+      if (ratio &gt;= ROUTE_SELECTED_MIN_COVERAGE &amp;&amp; ratio &gt; bestRatio) {</span>
+<span class="d-add">+        bestRatio = ratio;</span>
+<span class="d-add">+        byCoverage = p;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-ctx">     if (byCoverage) return byCoverage;</span>
+<span class="d-ctx">     const tapped = routeProposals.find((p) =&gt; p.id === selectedRbtpId) ?? null;</span>
+<span class="d-ctx">     return tapped &amp;&amp; anchorsAreWaypoints(tapped) ? tapped : null;</span>
+<span class="d-ctx">   }, [pathEdgeIds, routeProposals, isHeatmapLoading, selectedRbtpId, anchorsAreWaypoints]);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // What a donation from the route-summary card funds. The live URL already</span>
+<span class="d-del">-  // encodes the whole selection (waypoints + vote type), so it doubles as the</span>
+<span class="d-del">-  // deep link back to the corridor.</span>
+<span class="d-del">-  const routeFundName = fundableProposalName(</span>
+<span class="d-del">-    coveredRouteProposal?.label, routeUniqueRows ?? routeVoteRows);</span>
+<span class="d-del">-  const routeDonate = routeFundName</span>
+<span class="d-del">-    ? {</span>
+<span class="d-del">-        name: routeFundName,</span>
+<span class="d-del">-        url: buildProposalDonateUrl({ name: routeFundName, url: window.location.href }),</span>
+<span class="d-del">-      }</span>
+<span class="d-del">-    : null;</span>
+<span class="d-add">+  // The route card&#x27;s per-row funding. A corridor spans many blocks and so has</span>
+<span class="d-add">+  // no one street name to cite as its place; the live URL already encodes the</span>
+<span class="d-add">+  // whole selection, so it is what locates the proposal.</span>
+<span class="d-add">+  const routeDonateUrlFor = (label: string) =&gt;</span>
+<span class="d-add">+    buildProposalDonateUrl({ name: label, url: window.location.href });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // -------------------------------------------------------------------------</span>
+<span class="d-ctx">   // Top-proposal row badges — which of a card&#x27;s vote-type rows are CURRENT top</span>
+<span class="d-hunk">@@ -3366,10 +3511,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // batched proposal sweep).</span>
+<span class="d-ctx">   //   - &quot;point&quot;: a PBTP winner sits on one of the card&#x27;s blocks (the same</span>
+<span class="d-ctx">   //     block-grain the rows sum over, so the badge marks a row whose count</span>
+<span class="d-del">-  //     includes that winner&#x27;s votes).</span>
+<span class="d-del">-  //   - &quot;route&quot;: an RBTP whose corridor is FULLY contained in the selection</span>
+<span class="d-del">-  //     (every block covered, direction twins forgiven) — a selection that</span>
+<span class="d-del">-  //     merely brushes a corridor doesn&#x27;t badge it.</span>
+<span class="d-add">+  //     includes that winner&#x27;s votes). Same set that rings the pin — see</span>
+<span class="d-add">+  //     onSelectedBlockSet.</span>
+<span class="d-add">+  //   - &quot;route&quot;: an RBTP whose corridor is MOSTLY inside the selection</span>
+<span class="d-add">+  //     (≥ ROUTE_SELECTED_MIN_COVERAGE of its blocks, direction twins</span>
+<span class="d-add">+  //     forgiven) — a selection that merely brushes a corridor doesn&#x27;t badge</span>
+<span class="d-add">+  //     it. Same predicate that lights the diamond.</span>
+<span class="d-ctx">   // -------------------------------------------------------------------------</span>
+<span class="d-ctx">   const topKindsFor = useCallback(</span>
+<span class="d-ctx">     (edgeIds: readonly number[] | null | undefined, includeRoutes: boolean): TopKindMap =&gt; {</span>
+<span class="d-hunk">@@ -3756,13 +3903,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       // A fanned-out icon (spread override) sits off the path at its grid cell, so</span>
+<span class="d-ctx">       // it can&#x27;t be click-through — it must take its own click to be pickable.</span>
+<span class="d-ctx">       const onPath = role === null &amp;&amp; onPathEdgeSet.has(w.edgeIdx);</span>
+<span class="d-add">+      // Selected-but-not-under-the-path: the proposal sits on a block the</span>
+<span class="d-add">+      // selection covers (the card&#x27;s grain) without the routed polyline running</span>
+<span class="d-add">+      // over its own edge — typically an intersection proposal on a junction</span>
+<span class="d-add">+      // block the route crosses. It reads selected, but stays INTERACTIVE:</span>
+<span class="d-add">+      // there&#x27;s no path under it to hand a click to, so passthrough would only</span>
+<span class="d-add">+      // make it dead to the pointer.</span>
+<span class="d-add">+      const onSelectedBlock = role === null &amp;&amp; !onPath &amp;&amp; onSelectedBlockSet.has(w.edgeIdx);</span>
+<span class="d-ctx">       const passthrough = (role !== null || onPath) &amp;&amp; !isStationNetwork &amp;&amp; !override;</span>
+<span class="d-ctx">       const tint: &quot;start&quot; | &quot;end&quot; | null =</span>
+<span class="d-ctx">         role === &quot;start&quot; ? &quot;start&quot; : role === &quot;end&quot; ? &quot;end&quot; : null;</span>
+<span class="d-del">-      // White/black ring: a mid waypoint&#x27;s pin, an on-path proposal, the drag&#x27;s</span>
+<span class="d-del">-      // drop-target affordance, or the pinned selection. (Same `is-selected`.)</span>
+<span class="d-add">+      // White/black ring: a mid waypoint&#x27;s pin, a proposal the selection runs</span>
+<span class="d-add">+      // through (on its path or on one of its blocks), the drag&#x27;s drop-target</span>
+<span class="d-add">+      // affordance, or the pinned selection. (Same `is-selected`.)</span>
+<span class="d-ctx">       const isSelected =</span>
+<span class="d-del">-        role === &quot;mid&quot; || onPath || w.edgeIdx === dropTargetEdgeIdx || w.edgeIdx === selectedEdgeIdx;</span>
+<span class="d-add">+        role === &quot;mid&quot; || onPath || onSelectedBlock</span>
+<span class="d-add">+        || w.edgeIdx === dropTargetEdgeIdx || w.edgeIdx === selectedEdgeIdx;</span>
+<span class="d-ctx">       const isSpread = !!override;</span>
+<span class="d-ctx">       // A matched waypoint (start/end/mid) in route mode carries a remove [×]</span>
+<span class="d-ctx">       // badge baked into its icon — pinned to the corner, so it scales and fans</span>
+<span class="d-hunk">@@ -3936,7 +4092,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     // clusterEngine carries the placed squares (winners/stations) and re-runs</span>
+<span class="d-ctx">     // once topology+votes arrive, so stations appear even with zero votes.</span>
+<span class="d-ctx">   }, [clusterEngine, currentZoom, map, spread, collapseSpread, clearSpreadTimer, armSpreadTimer,</span>
+<span class="d-del">-      selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, dropTargetEdgeIdx,</span>
+<span class="d-add">+      selectedEdgeIdx, startEdgeIdx, endEdgeIdx, midEdgeSet, onPathEdgeSet, onSelectedBlockSet,</span>
+<span class="d-add">+      dropTargetEdgeIdx,</span>
+<span class="d-ctx">       isRouteMode, beginProposalMidDrag, mapStyle.selection, mapStyle.heat, mapStyle.basemap, isStationNetwork, canHover]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Cast a directional vote on a single proposal (edge, vote type) through the</span>
+<span class="d-hunk">@@ -4062,8 +4219,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // selects it FLAT OUT (the corridor replaces the route — start/end at its</span>
+<span class="d-ctx">   // anchors; only a drag-DROP threads it into an existing route). A diamond</span>
+<span class="d-ctx">   // reads selected when either</span>
+<span class="d-del">-  //   (a) the live route covers every one of its blocks (the auto-select rule,</span>
+<span class="d-del">-  //       twin-expanded), or</span>
+<span class="d-add">+  //   (a) the live route covers MOST of its blocks (the auto-select rule,</span>
+<span class="d-add">+  //       twin-expanded, ≥ ROUTE_SELECTED_MIN_COVERAGE — running along a</span>
+<span class="d-add">+  //       corridor without quite reaching both ends still counts, which is how</span>
+<span class="d-add">+  //       the point pins on that same path already behave), or</span>
+<span class="d-ctx">   //   (b) it&#x27;s the explicitly-tapped RBTP and both anchors are still waypoints</span>
+<span class="d-ctx">   //       — see selectedRbtpId; OSRM&#x27;s leg between the anchors rarely re-traces</span>
+<span class="d-ctx">   //       the corridor, so (a) alone left a tapped diamond looking unselected.</span>
+<span class="d-hunk">@@ -4267,10 +4426,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           voteTypes={theme.suggestions}</span>
+<span class="d-ctx">           sources={pinnedSources}</span>
+<span class="d-ctx">           shareUrl={pinnedShareUrl}</span>
+<span class="d-del">-          // Funds the proposal the card is headed by — its top proposal, or</span>
+<span class="d-del">-          // failing that the first vote type listed. A card with no vote types</span>
+<span class="d-del">-          // names no proposal, so it gets no fund row.</span>
+<span class="d-del">-          donate={pinnedDonate}</span>
+<span class="d-add">+          donateUrlFor={pinnedDonateUrlFor}</span>
+<span class="d-ctx">           streetViewLatLng={pinnedPointLatLng}</span>
+<span class="d-ctx">           onVote={castProposalVote}</span>
+<span class="d-ctx">           onRemove={onRemoveSelectedRef.current}</span>
+<span class="d-hunk">@@ -4386,10 +4542,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           voteTypes={theme.suggestions}</span>
+<span class="d-ctx">           sources={routeSources}</span>
+<span class="d-ctx">           shareUrl={window.location.href}</span>
+<span class="d-del">-          // A corridor spans many blocks, so it has no one street name to cite</span>
+<span class="d-del">-          // as its place — the deep link (the live URL, which encodes the whole</span>
+<span class="d-del">-          // selection) is what locates it.</span>
+<span class="d-del">-          donate={routeDonate}</span>
+<span class="d-add">+          donateUrlFor={routeDonateUrlFor}</span>
+<span class="d-ctx">           onVote={castRouteVote}</span>
+<span class="d-ctx">           onRemove={onClearRoute ? () =&gt; onClearRouteRef.current?.() : undefined}</span>
+<span class="d-ctx">           removeLabel=&quot;Deselect this route&quot;</span>
+<span class="d-hunk">@@ -4520,12 +4673,12 @@ interface ProposalCardProps {</span>
+<span class="d-ctx">    *  card&#x27;s own anchor moving — e.g. the open modal the hover card dodges</span>
+<span class="d-ctx">    *  re-anchors while the hover target stays put. */</span>
+<span class="d-ctx">   avoidKey?: string;</span>
+<span class="d-del">-  /** Donation-page link for the proposal this card names, already carrying the</span>
+<span class="d-del">-   *  proposal&#x27;s identity (see buildProposalDonateUrl), plus that proposal&#x27;s own</span>
+<span class="d-del">-   *  name for the link&#x27;s title/aria. Absent ⇒ no fund row — the right answer</span>
+<span class="d-del">-   *  for a card naming no proposal (nothing to fund) and for every hover card</span>
+<span class="d-del">-   *  (they are pointer-events:none, so the link could not be clicked). */</span>
+<span class="d-del">-  donate?: { name: string; url: string } | null;</span>
+<span class="d-add">+  /** Donation-page link for ONE of the card&#x27;s vote types, carrying that</span>
+<span class="d-add">+   *  proposal&#x27;s identity (see buildProposalDonateUrl). Per row, because a row</span>
+<span class="d-add">+   *  IS a proposal — the card as a whole may name several. Absent ⇒ no fund</span>
+<span class="d-add">+   *  chips; hover cards never get them anyway (pointer-events: none, so the</span>
+<span class="d-add">+   *  link could not be clicked), which is also why sources skip them. */</span>
+<span class="d-add">+  donateUrlFor?: (label: string) =&gt; string | null;</span>
+<span class="d-ctx">   edgeId?: number | null;</span>
+<span class="d-ctx">   /** The selection&#x27;s touched blocks as materialized edge lists (docs §4.1) —</span>
+<span class="d-ctx">    *  drives the ± buttons&#x27; active/unvote state. Null/absent falls back to the</span>
+<span class="d-hunk">@@ -4616,7 +4769,7 @@ function CoverageCell({</span>
+<span class="d-ctx"> function ProposalCard({</span>
+<span class="d-ctx">   winner, eyebrow = &quot;Top Proposal&quot;, screenX, screenY, name, metaText = null, rows, topKinds,</span>
+<span class="d-ctx">   coverage = null, coverageUnit = &quot;block&quot;, votersPending = false,</span>
+<span class="d-del">-  interactive = false, elevated = false, getAvoidRects, avoidKey, donate = null, edgeId = null, blocks = null, mode = &quot;&quot;, shareUrl = null, streetViewLatLng = null, voteTypes, sources, onVote, onRemove, removeLabel = &quot;Remove this point&quot;, onHoverChange, registerEl,</span>
+<span class="d-add">+  interactive = false, elevated = false, getAvoidRects, avoidKey, donateUrlFor, edgeId = null, blocks = null, mode = &quot;&quot;, shareUrl = null, streetViewLatLng = null, voteTypes, sources, onVote, onRemove, removeLabel = &quot;Remove this point&quot;, onHoverChange, registerEl,</span>
+<span class="d-ctx"> }: ProposalCardProps) {</span>
+<span class="d-ctx">   const [copied, setCopied] = useState(false);</span>
+<span class="d-ctx">   // Interactive cards can collapse to a small pill (icon + label + expand) so a</span>
+<span class="d-hunk">@@ -4918,6 +5071,9 @@ function ProposalCard({</span>
+<span class="d-ctx">                   // as &quot;this type has a pin here&quot;.</span>
+<span class="d-ctx">                   const topKind = topKinds?.get(row.label);</span>
+<span class="d-ctx">                   const links = (sources?.[row.label] ?? []).slice(0, MAX_ROW_LINKS);</span>
+<span class="d-add">+                  // Each ROW is one proposal, so funding belongs here rather</span>
+<span class="d-add">+                  // than on the card: no &quot;which of these?&quot; to resolve.</span>
+<span class="d-add">+                  const fundHref = interactive ? donateUrlFor?.(row.label) : null;</span>
+<span class="d-ctx">                   return (</span>
+<span class="d-ctx">                     &lt;div</span>
+<span class="d-ctx">                       className={`graph-proposal-row${topKind ? &quot; is-top-proposal&quot; : &quot;&quot;}`}</span>
+<span class="d-hunk">@@ -4930,7 +5086,7 @@ function ProposalCard({</span>
+<span class="d-ctx">                             title={topKind === &quot;point&quot;</span>
+<span class="d-ctx">                               ? &quot;Top proposal on this block&quot;</span>
+<span class="d-ctx">                               : topKind === &quot;route&quot;</span>
+<span class="d-del">-                                ? &quot;Top route proposal — fully inside this selection&quot;</span>
+<span class="d-add">+                                ? &quot;Top route proposal — mostly inside this selection&quot;</span>
+<span class="d-ctx">                                 : &quot;Top proposal here — point and route&quot;}</span>
+<span class="d-ctx">                           &gt;</span>
+<span class="d-ctx">                             {(topKind === &quot;point&quot; || topKind === &quot;both&quot;) &amp;&amp; (</span>
+<span class="d-hunk">@@ -4944,6 +5100,25 @@ function ProposalCard({</span>
+<span class="d-ctx">                         &lt;span className=&quot;graph-proposal-row-label-text&quot;&gt;</span>
+<span class="d-ctx">                           {row.label}</span>
+<span class="d-ctx">                         &lt;/span&gt;</span>
+<span class="d-add">+                        {/* Fund chip — the same bracket token as the source</span>
+<span class="d-add">+                            markers beside it, but an ACTION, so it carries the</span>
+<span class="d-add">+                            accent and leads the run. First (not last) so it</span>
+<span class="d-add">+                            keeps one position down the card: the citation count</span>
+<span class="d-add">+                            varies row to row, and a chip that slid sideways</span>
+<span class="d-add">+                            with it would be hard to aim at. */}</span>
+<span class="d-add">+                        {fundHref &amp;&amp; (</span>
+<span class="d-add">+                          &lt;a</span>
+<span class="d-add">+                            className=&quot;graph-proposal-row-fund&quot;</span>
+<span class="d-add">+                            href={fundHref}</span>
+<span class="d-add">+                            // The donation page is outside the app — never</span>
+<span class="d-add">+                            // navigate the map out from under a selection.</span>
+<span class="d-add">+                            target=&quot;_blank&quot;</span>
+<span class="d-add">+                            rel=&quot;noopener noreferrer&quot;</span>
+<span class="d-add">+                            title={`Donate toward &quot;${row.label}&quot; here`}</span>
+<span class="d-add">+                            aria-label={`Donate toward ${row.label}`}</span>
+<span class="d-add">+                            onClick={(e) =&gt; e.stopPropagation()}</span>
+<span class="d-add">+                          &gt;[$]&lt;/a&gt;</span>
+<span class="d-add">+                        )}</span>
+<span class="d-ctx">                         {/* Source links ride WITH the label, inside its column,</span>
+<span class="d-ctx">                             so they read as a footnote on the vote type rather</span>
+<span class="d-ctx">                             than a stray line under the row. The label text is</span>
+<span class="d-hunk">@@ -4997,27 +5172,6 @@ function ProposalCard({</span>
+<span class="d-ctx">                 })}</span>
+<span class="d-ctx">               &lt;/div&gt;</span>
+<span class="d-ctx">             )}</span>
+<span class="d-del">-            {/* The card&#x27;s one outbound money action, kept to a single row at</span>
+<span class="d-del">-                the foot so a proposal becomes fundable without the modal</span>
+<span class="d-del">-                growing a section. It speaks the card&#x27;s own bracket-token</span>
+<span class="d-del">-                language ([$] beside [a][b][c] and [−|net|+]) rather than</span>
+<span class="d-del">-                arriving as a pasted-in donate button. */}</span>
+<span class="d-del">-            {interactive &amp;&amp; donate &amp;&amp; (</span>
+<span class="d-del">-              &lt;a</span>
+<span class="d-del">-                className=&quot;graph-proposal-fund&quot;</span>
+<span class="d-del">-                href={donate.url}</span>
+<span class="d-del">-                // The donation page lives outside the app — never navigate the</span>
+<span class="d-del">-                // map out from under an open selection.</span>
+<span class="d-del">-                target=&quot;_blank&quot;</span>
+<span class="d-del">-                rel=&quot;noopener noreferrer&quot;</span>
+<span class="d-del">-                title={`Donate toward &quot;${donate.name}&quot; — opens our donation page`}</span>
+<span class="d-del">-                aria-label={`Donate toward ${donate.name}`}</span>
+<span class="d-del">-                onClick={(e) =&gt; e.stopPropagation()}</span>
+<span class="d-del">-              &gt;</span>
+<span class="d-del">-                &lt;span className=&quot;graph-proposal-fund-token&quot; aria-hidden=&quot;true&quot;&gt;[$]&lt;/span&gt;</span>
+<span class="d-del">-                &lt;span className=&quot;graph-proposal-fund-text&quot;&gt;Fund this proposal&lt;/span&gt;</span>
+<span class="d-del">-              &lt;/a&gt;</span>
+<span class="d-del">-            )}</span>
+<span class="d-ctx">           &lt;/div&gt;</span>
+<span class="d-ctx">         &lt;/&gt;</span>
+<span class="d-ctx">       )}</span></pre>
         </details>
         
         <details>
           <summary><span class="fname">client-react/src/components/GraphLayer/routeProposals.ts</span>
-            <span class="stat"><span class="d-add">+7</span> / <span class="d-del">-1</span></span>
+            <span class="stat"><span class="d-add">+48</span> / <span class="d-del">-5</span></span>
           </summary>
           
     <div class="ctx">
@@ -509,10 +909,15 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeProposals.ts b/client-react/src/components/GraphLayer/routeProposals.ts</span>
-<span class="d-meta">index b645440..db844dc 100644</span>
+<span class="d-meta">index b645440..8b61f46 100644</span>
 <span class="d-meta">--- a/client-react/src/components/GraphLayer/routeProposals.ts</span>
 <span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeProposals.ts</span>
-<span class="d-hunk">@@ -37,7 +37,7 @@ import {</span>
+<span class="d-hunk">@@ -1,3 +1,4 @@</span>
+<span class="d-add">+// Algorithm doc: docs/algorithms/03-route-proposals.md</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-ctx"> // Route-based top proposals (RBTPs) — client side</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-hunk">@@ -37,7 +38,7 @@ import {</span>
 <span class="d-ctx">   type GraphTopology,</span>
 <span class="d-ctx">   type NodeAdj,</span>
 <span class="d-ctx"> } from &quot;./graphTopology&quot;;</span>
@@ -521,7 +926,61 @@
 <span class="d-ctx"> </span>
 <span class="d-ctx"> export interface RouteProposal {</span>
 <span class="d-ctx">   id: string;</span>
-<span class="d-hunk">@@ -533,6 +533,11 @@ export interface RouteProposalOptions {</span>
+<span class="d-hunk">@@ -143,13 +144,49 @@ export function routeBlockEdges(p: RouteProposal): number[] {</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> // --------------------------------------------------------------------------</span>
+<span class="d-del">-// Auto-select coverage (block-grained) — mirrors server is_route_covered.</span>
+<span class="d-add">+// Auto-select coverage (block-grained).</span>
+<span class="d-ctx"> // --------------------------------------------------------------------------</span>
+<span class="d-del">-/** True iff the selection covers EVERY block (≥1 of each block&#x27;s edges). */</span>
+<span class="d-del">-export function isRouteCovered(blocks: number[][], selectedEdges: Iterable&lt;number&gt;): boolean {</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Share of a corridor&#x27;s blocks the selection reaches (≥ 1 selected edge in the</span>
+<span class="d-add">+ * block). 0 for a corridor with no blocks.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function routeCoverageRatio(</span>
+<span class="d-add">+  blocks: number[][],</span>
+<span class="d-add">+  selectedEdges: Iterable&lt;number&gt;</span>
+<span class="d-add">+): number {</span>
+<span class="d-ctx">   const sel = selectedEdges instanceof Set ? selectedEdges : new Set(selectedEdges);</span>
+<span class="d-add">+  if (blocks.length === 0) return 0;</span>
+<span class="d-add">+  let covered = 0;</span>
+<span class="d-add">+  for (const block of blocks) if (block.some((e) =&gt; sel.has(e))) covered++;</span>
+<span class="d-add">+  return covered / blocks.length;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * A corridor reads SELECTED once the selection covers at least this share of</span>
+<span class="d-add">+ * its blocks. NOT 1.0: a selection that runs along most of a corridor plainly</span>
+<span class="d-add">+ * &quot;is&quot; that corridor to the person who traced it, yet full coverage almost</span>
+<span class="d-add">+ * never survives the ends — the route starts and stops mid-corridor, or OSRM</span>
+<span class="d-add">+ * clips a junction block at a turn. Requiring all-of-it left a diamond dark</span>
+<span class="d-add">+ * while the point pins on the very same path lit up (they only have one block</span>
+<span class="d-add">+ * to cover, so any overlap IS full coverage for them). Raise it toward 1 and</span>
+<span class="d-add">+ * corridors go dark again on near-misses; drop it much below a half and a</span>
+<span class="d-add">+ * selection that merely brushes a long corridor starts claiming it.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export const ROUTE_SELECTED_MIN_COVERAGE = 0.6;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * True iff the selection covers at least `minRatio` of the route&#x27;s blocks —</span>
+<span class="d-add">+ * the shared predicate behind the diamond&#x27;s selected ring, the route-summary</span>
+<span class="d-add">+ * card&#x27;s header, and the card&#x27;s &quot;top proposal&quot; row badge, so those three can</span>
+<span class="d-add">+ * never disagree about what the selection stands for.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function isRouteCovered(</span>
+<span class="d-add">+  blocks: number[][],</span>
+<span class="d-add">+  selectedEdges: Iterable&lt;number&gt;,</span>
+<span class="d-add">+  minRatio = ROUTE_SELECTED_MIN_COVERAGE</span>
+<span class="d-add">+): boolean {</span>
+<span class="d-ctx">   if (blocks.length === 0) return false;</span>
+<span class="d-del">-  return blocks.every((block) =&gt; block.some((e) =&gt; sel.has(e)));</span>
+<span class="d-add">+  return routeCoverageRatio(blocks, selectedEdges) &gt;= minRatio;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /**</span>
+<span class="d-hunk">@@ -533,6 +570,11 @@ export interface RouteProposalOptions {</span>
 <span class="d-ctx">    *  surface as PBTP pins (topProposals.ts), not corridors. Unknown (null)</span>
 <span class="d-ctx">    *  kinds stay eligible. Omit to admit every type. */</span>
 <span class="d-ctx">   kindOf?: VoteTypeKindResolver;</span>
@@ -533,7 +992,7 @@
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx"> /** Arc of the per-type subgraph: neighbor node, original edge id, net weight. */</span>
-<span class="d-hunk">@@ -1265,6 +1270,7 @@ export function createRouteProposalJob(</span>
+<span class="d-hunk">@@ -1265,6 +1307,7 @@ export function createRouteProposalJob(</span>
 <span class="d-ctx">     // POINT-kind vote types never form corridors — their votes are PBTP pins</span>
 <span class="d-ctx">     // (topProposals.ts). Unknown kind (null) stays eligible for both families.</span>
 <span class="d-ctx">     if (opts.kindOf &amp;&amp; opts.kindOf(label) === &quot;point&quot;) continue;</span>
@@ -621,7 +1080,7 @@
         
         <details>
           <summary><span class="fname">client-react/src/components/GraphLayer/topProposals.ts</span>
-            <span class="stat"><span class="d-add">+19</span> / <span class="d-del">-5</span></span>
+            <span class="stat"><span class="d-add">+20</span> / <span class="d-del">-5</span></span>
           </summary>
           
     <div class="ctx">
@@ -651,10 +1110,15 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/topProposals.ts b/client-react/src/components/GraphLayer/topProposals.ts</span>
-<span class="d-meta">index 17f405f..d138e87 100644</span>
+<span class="d-meta">index 17f405f..ca027e8 100644</span>
 <span class="d-meta">--- a/client-react/src/components/GraphLayer/topProposals.ts</span>
 <span class="d-meta">+++ b/client-react/src/components/GraphLayer/topProposals.ts</span>
-<span class="d-hunk">@@ -75,6 +75,14 @@ export function compareWinners(</span>
+<span class="d-hunk">@@ -1,3 +1,4 @@</span>
+<span class="d-add">+// Algorithm doc: docs/algorithms/02-top-proposals.md</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-ctx"> // Point-based top proposals (PBTPs) — selection</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-hunk">@@ -75,6 +76,14 @@ export function compareWinners(</span>
 <span class="d-ctx">  */</span>
 <span class="d-ctx"> export type VoteTypeKindResolver = (label: string) =&gt; &quot;route&quot; | &quot;point&quot; | null;</span>
 <span class="d-ctx"> </span>
@@ -669,7 +1133,7 @@
 <span class="d-ctx"> /**</span>
 <span class="d-ctx">  * Support floor for the &quot;Top Proposal&quot; badge: a proposal only counts as a top</span>
 <span class="d-ctx">  * proposal with STRICTLY MORE than this many net votes. Without it, a rare</span>
-<span class="d-hunk">@@ -91,14 +99,16 @@ export const TOP_PROPOSAL_MIN_NET = 100;</span>
+<span class="d-hunk">@@ -91,14 +100,16 @@ export const TOP_PROPOSAL_MIN_NET = 100;</span>
 <span class="d-ctx">  * (highest first). Vote types whose best edge is net ≤ max(0, minNet) are</span>
 <span class="d-ctx">  * dropped (a net-downvoted proposal is not a &quot;top proposal&quot;, and below the</span>
 <span class="d-ctx">  * support floor it isn&#x27;t &quot;top&quot; either), as are ROUTE-kind types when a</span>
@@ -688,7 +1152,7 @@
 <span class="d-ctx"> ): VoteTypeWinner[] {</span>
 <span class="d-ctx">   if (!legend.length || !edgeVoteTypes.length) return [];</span>
 <span class="d-ctx"> </span>
-<span class="d-hunk">@@ -121,6 +131,7 @@ export function computeVoteTypeWinners(</span>
+<span class="d-hunk">@@ -121,6 +132,7 @@ export function computeVoteTypeWinners(</span>
 <span class="d-ctx">     const label = legend[legendIdx];</span>
 <span class="d-ctx">     if (!label) continue;</span>
 <span class="d-ctx">     if (kindOf &amp;&amp; kindOf(label) === &quot;route&quot;) continue;</span>
@@ -696,7 +1160,7 @@
 <span class="d-ctx">     edges.sort((a, b) =&gt; b.count - a.count);</span>
 <span class="d-ctx">     for (const { edgeIdx, count } of edges.slice(0, perTypeLimit)) {</span>
 <span class="d-ctx">       winners.push({ legendIdx, label, edgeIdx, count });</span>
-<span class="d-hunk">@@ -330,7 +341,8 @@ export const TOP_PROPOSAL_MIN_SPACING_M = 600;</span>
+<span class="d-hunk">@@ -330,7 +342,8 @@ export const TOP_PROPOSAL_MIN_SPACING_M = 600;</span>
 <span class="d-ctx">  * `kindOf` (label → kind) keeps ROUTE-kind vote types out of the point family;</span>
 <span class="d-ctx">  * omit it (e.g. station networks, where every vote is a point) to admit all.</span>
 <span class="d-ctx">  * `minNet` is the top-proposal support floor (strictly-greater; default</span>
@@ -706,7 +1170,7 @@
 <span class="d-ctx">  */</span>
 <span class="d-ctx"> export function selectTopProposals(</span>
 <span class="d-ctx">   data:</span>
-<span class="d-hunk">@@ -340,7 +352,8 @@ export function selectTopProposals(</span>
+<span class="d-hunk">@@ -340,7 +353,8 @@ export function selectTopProposals(</span>
 <span class="d-ctx">   limit: number,</span>
 <span class="d-ctx">   minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M,</span>
 <span class="d-ctx">   kindOf?: VoteTypeKindResolver,</span>
@@ -716,7 +1180,7 @@
 <span class="d-ctx"> ): VoteTypeWinner[] {</span>
 <span class="d-ctx">   if (!data) return [];</span>
 <span class="d-ctx">   const perType = computeVoteTypeWinners(</span>
-<span class="d-hunk">@@ -348,7 +361,8 @@ export function selectTopProposals(</span>
+<span class="d-hunk">@@ -348,7 +362,8 @@ export function selectTopProposals(</span>
 <span class="d-ctx">     data.edge_vote_types ?? [],</span>
 <span class="d-ctx">     TOP_PROPOSALS_PER_TYPE,</span>
 <span class="d-ctx">     kindOf,</span>
@@ -811,7 +1275,7 @@
         
         <details>
           <summary><span class="fname">client-react/src/components/GraphLayer/voteApply.ts</span>
-            <span class="stat"><span class="d-add">+19</span> / <span class="d-del">-5</span></span>
+            <span class="stat"><span class="d-add">+21</span> / <span class="d-del">-5</span></span>
           </summary>
           
     <div class="ctx">
@@ -841,10 +1305,16 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/voteApply.ts b/client-react/src/components/GraphLayer/voteApply.ts</span>
-<span class="d-meta">index b67c4a3..8e2479c 100644</span>
+<span class="d-meta">index b67c4a3..94c21b0 100644</span>
 <span class="d-meta">--- a/client-react/src/components/GraphLayer/voteApply.ts</span>
 <span class="d-meta">+++ b/client-react/src/components/GraphLayer/voteApply.ts</span>
-<span class="d-hunk">@@ -184,10 +184,19 @@ export function applyEdgeVoteChange(</span>
+<span class="d-hunk">@@ -1,3 +1,5 @@</span>
+<span class="d-add">+// Referenced by: docs/algorithms/05-heat-coloring.md</span>
+<span class="d-add">+//   (topProposalDiffs — the signed number behind every block&#x27;s colour).</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-ctx"> // Vote application (pure)</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-hunk">@@ -184,10 +186,19 @@ export function applyEdgeVoteChange(</span>
 <span class="d-ctx">  * Blocks with activity but no per-type breakdown (legacy untyped votes) fall</span>
 <span class="d-ctx">  * back to their deduped total. Returns the array plus both arm ceilings for</span>
 <span class="d-ctx">  * the renderer&#x27;s two-sided log normalization.</span>
@@ -864,7 +1334,7 @@
 <span class="d-ctx"> ): { diff: Int32Array; maxPos: number; maxNeg: number } {</span>
 <span class="d-ctx">   const n = blockVotes.length;</span>
 <span class="d-ctx">   const diff = new Int32Array(n);</span>
-<span class="d-hunk">@@ -195,14 +204,19 @@ export function topProposalDiffs(</span>
+<span class="d-hunk">@@ -195,14 +206,19 @@ export function topProposalDiffs(</span>
 <span class="d-ctx">   let maxNeg = 0;</span>
 <span class="d-ctx">   for (let b = 0; b &lt; n; b++) {</span>
 <span class="d-ctx">     const entries = blockVoteTypes?.[b];</span>
@@ -945,7 +1415,7 @@
         
         <details>
           <summary><span class="fname">client-react/src/components/VoteTypeSelector/VoteTypeSelector.css</span>
-            <span class="stat"><span class="d-add">+254</span> / <span class="d-del">-9</span></span>
+            <span class="stat"><span class="d-add">+226</span> / <span class="d-del">-9</span></span>
           </summary>
           
     <div class="ctx">
@@ -970,15 +1440,15 @@
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">Changed blocks (top → bottom)</div>
-        <ol class="ctx-blocks"><li>Every new rule is built from the app&#x27;s existing tokens — zero radius, hairlines, --accent, --font-size-2xs — so the panel reads as the same object as the rest of the bar</li><li>The head is sticky, so its background has to be OPAQUE: --hover-bg is a translucent wash, layered over --paper via a gradient rather than hardcoded, so it still follows the theme</li><li>The count and the `only` button share one grid cell and crossfade — the column width is fixed, so rows never reflow under the cursor</li><li>@media (hover: none) pins the count visible on touch, where there is no hover to reveal `only` behind</li><li>Hidden rows are struck through and dimmed to 0.38, not removed — you have to be able to find one again</li><li>max-height + scroll: the legend lists every type on the map, which is 17+ on curated maps</li></ol>
+        <ol class="ctx-blocks"><li>Every new rule is built from the app&#x27;s existing tokens — zero radius, hairlines, --accent, --font-size-2xs — so the panel reads as the same object as the rest of the bar</li><li>The heading&#x27;s left padding equals a row&#x27;s border + inset, which is what puts the section eye and the row eyes in one unbroken column</li><li>The count and the `only` button share one grid cell and crossfade — the column width is fixed, so rows never reflow under the cursor</li><li>@media (hover: none) pins the count visible on touch, where there is no hover to reveal `only` behind</li><li>Hidden rows are struck through and dimmed to 0.38, not removed — you have to be able to find one again</li><li>max-height + scroll: the legend lists every type on the map, which is 17+ on curated maps</li></ol>
       </div>
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.css b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.css</span>
-<span class="d-meta">index 3b2e9be..1891eb4 100644</span>
+<span class="d-meta">index 3b2e9be..3dffa2a 100644</span>
 <span class="d-meta">--- a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.css</span>
 <span class="d-meta">+++ b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.css</span>
-<span class="d-hunk">@@ -158,25 +158,115 @@</span>
+<span class="d-hunk">@@ -158,25 +158,94 @@</span>
 <span class="d-ctx">   right: auto;</span>
 <span class="d-ctx">   width: max-content;</span>
 <span class="d-ctx">   min-width: 100%;</span>
@@ -1002,79 +1472,58 @@
 <span class="d-add">+   and its net support on the right.</span>
 <span class="d-add">+   ========================================================================== */</span>
 <span class="d-add">+</span>
-<span class="d-add">+/* The filter readout stays put while the list scrolls under it, so the</span>
-<span class="d-add">+   background has to be opaque — --hover-bg is a translucent wash, layered here</span>
-<span class="d-add">+   over --paper rather than hardcoded, so it still follows the theme. */</span>
-<span class="d-add">+.vt-panel-head {</span>
-<span class="d-add">+  position: sticky;</span>
-<span class="d-add">+  top: 0;</span>
-<span class="d-add">+  z-index: 1;</span>
+<span class="d-add">+/* One heading per proposal family, each led by its own show-all/hide-all eye.</span>
+<span class="d-add">+   Its left padding matches a row&#x27;s (border + inset) so the section eye and the</span>
+<span class="d-add">+   row eyes form one unbroken column. The first heading sheds its top rule — it</span>
+<span class="d-add">+   sits directly under the search field. */</span>
+<span class="d-add">+.vt-section {</span>
 <span class="d-add">+  display: flex;</span>
 <span class="d-add">+  align-items: center;</span>
 <span class="d-add">+  gap: var(--space-2);</span>
-<span class="d-add">+  padding: var(--space-2) var(--space-3);</span>
-<span class="d-add">+  border-bottom: 1px solid var(--hairline);</span>
-<span class="d-add">+  background: linear-gradient(var(--hover-bg), var(--hover-bg)), var(--paper);</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+.vt-panel-title {</span>
-<span class="d-add">+  font-size: var(--font-size-2xs);</span>
-<span class="d-add">+  letter-spacing: 0.08em;</span>
-<span class="d-add">+  text-transform: uppercase;</span>
-<span class="d-add">+  color: var(--ink);</span>
-<span class="d-add">+  opacity: 0.5;</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+.vt-panel-count {</span>
-<span class="d-add">+  font-size: var(--font-size-2xs);</span>
-<span class="d-add">+  font-variant-numeric: tabular-nums;</span>
-<span class="d-add">+  color: var(--ink);</span>
-<span class="d-add">+  opacity: 0.5;</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+/* Filtered state is the one thing in this panel that must never be missed —</span>
-<span class="d-add">+   a filtered map reads exactly like an empty one. */</span>
-<span class="d-add">+.vt-panel-count.is-filtered {</span>
-<span class="d-add">+  color: var(--accent);</span>
-<span class="d-add">+  opacity: 1;</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+.vt-panel-action {</span>
-<span class="d-add">+  appearance: none;</span>
-<span class="d-add">+  margin-left: auto;</span>
-<span class="d-add">+  padding: 2px var(--space-2);</span>
-<span class="d-add">+  border: 1px solid var(--hairline);</span>
-<span class="d-add">+  background: transparent;</span>
-<span class="d-add">+  font: inherit;</span>
-<span class="d-add">+  font-size: var(--font-size-2xs);</span>
-<span class="d-add">+  color: var(--ink);</span>
-<span class="d-add">+  opacity: 0.7;</span>
-<span class="d-add">+  cursor: pointer;</span>
-<span class="d-add">+  transition: opacity 0.12s ease, border-color 0.12s ease;</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+.vt-panel-action:hover {</span>
-<span class="d-add">+  opacity: 1;</span>
-<span class="d-add">+  border-color: var(--ink);</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+/* Divider caption before the rows that can&#x27;t be cast in the current mode. */</span>
-<span class="d-add">+.vt-section {</span>
-<span class="d-add">+  display: flex;</span>
-<span class="d-add">+  align-items: baseline;</span>
-<span class="d-add">+  gap: var(--space-2);</span>
-<span class="d-add">+  padding: var(--space-2) var(--space-3) var(--space-1);</span>
+<span class="d-add">+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-3);</span>
 <span class="d-add">+  border-top: 1px solid var(--hairline);</span>
 <span class="d-add">+  font-size: var(--font-size-2xs);</span>
 <span class="d-add">+  letter-spacing: 0.08em;</span>
 <span class="d-add">+  text-transform: uppercase;</span>
 <span class="d-add">+  color: var(--ink);</span>
-<span class="d-add">+  opacity: 0.4;</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
-<span class="d-add">+.vt-section-note {</span>
+<span class="d-add">+.vt-group:first-child .vt-section {</span>
+<span class="d-add">+  border-top: none;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* The master row leads the panel and is separated from the families it spans. */</span>
+<span class="d-add">+.vt-section-all {</span>
+<span class="d-add">+  border-top: none;</span>
+<span class="d-add">+  border-bottom: 1px solid var(--hairline);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.vt-group:first-of-type .vt-section {</span>
+<span class="d-add">+  border-top: none;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.vt-section-all + .vt-group .vt-section {</span>
+<span class="d-add">+  border-top: none;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.vt-section-title {</span>
+<span class="d-add">+  opacity: 0.55;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* How much of this group is drawn. Lower-case on purpose — the heading is</span>
+<span class="d-add">+   uppercased, and a readout is a measurement, not a label. */</span>
+<span class="d-add">+.vt-section-count {</span>
+<span class="d-add">+  margin-left: auto;</span>
+<span class="d-add">+  padding-left: var(--space-3);</span>
 <span class="d-add">+  letter-spacing: 0;</span>
 <span class="d-add">+  text-transform: none;</span>
+<span class="d-add">+  font-variant-numeric: tabular-nums;</span>
+<span class="d-add">+  opacity: 0.42;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.vt-section-count.is-filtered {</span>
+<span class="d-add">+  color: var(--accent);</span>
+<span class="d-add">+  opacity: 1;</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
 <span class="d-ctx"> .vote-type-option {</span>
@@ -1097,7 +1546,7 @@
 <span class="d-ctx">   text-align: left !important;</span>
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
-<span class="d-hunk">@@ -184,6 +274,36 @@</span>
+<span class="d-hunk">@@ -184,6 +253,36 @@</span>
 <span class="d-ctx">   background: var(--hover-bg);</span>
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
@@ -1134,13 +1583,15 @@
 <span class="d-ctx"> .vote-type-option .vote-type-icon-img {</span>
 <span class="d-ctx">   width: 18px;</span>
 <span class="d-ctx">   height: 18px;</span>
-<span class="d-hunk">@@ -199,18 +319,123 @@</span>
+<span class="d-hunk">@@ -199,18 +298,117 @@</span>
 <span class="d-ctx">   text-align: left !important;</span>
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
 <span class="d-del">-.vote-type-option .check-icon {</span>
 <span class="d-del">-  margin-left: auto;</span>
-<span class="d-add">+/* ── Visibility checkbox ─────────────────────────────────────────────────── */</span>
+<span class="d-add">+/* ── Visibility eye ──────────────────────────────────────────────────────── */</span>
+<span class="d-add">+/* One control, three places: per row, per section (show/hide all), and as the</span>
+<span class="d-add">+   struck-through marker on the collapsed field. */</span>
 <span class="d-add">+</span>
 <span class="d-add">+.vt-vis {</span>
 <span class="d-add">+  appearance: none;</span>
@@ -1151,49 +1602,41 @@
 <span class="d-del">-  font-size: 11px;</span>
 <span class="d-del">-  font-weight: 400;</span>
 <span class="d-del">-  opacity: 0;</span>
-<span class="d-add">+  width: 18px;</span>
+<span class="d-add">+  width: 20px;</span>
 <span class="d-add">+  height: 18px;</span>
 <span class="d-add">+  padding: 0;</span>
 <span class="d-add">+  border: none;</span>
 <span class="d-add">+  background: transparent;</span>
-<span class="d-add">+  color: inherit;</span>
+<span class="d-add">+  color: var(--accent);</span>
+<span class="d-add">+  opacity: 0.85;</span>
 <span class="d-add">+  cursor: pointer;</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+.vt-vis-box {</span>
-<span class="d-add">+  display: flex;</span>
-<span class="d-add">+  align-items: center;</span>
-<span class="d-add">+  justify-content: center;</span>
-<span class="d-add">+  width: 13px;</span>
-<span class="d-add">+  height: 13px;</span>
-<span class="d-add">+  border: 1px solid var(--ink);</span>
-<span class="d-add">+  opacity: 0.45;</span>
-<span class="d-add">+  transition: opacity 0.12s ease, border-color 0.12s ease;</span>
+<span class="d-add">+  transition: opacity 0.12s ease, color 0.12s ease;</span>
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
 <span class="d-del">-.vote-type-option.selected .check-icon {</span>
-<span class="d-add">+.vote-type-option:not(.is-hidden) .vt-vis-box {</span>
-<span class="d-add">+  opacity: 0.85;</span>
-<span class="d-add">+  border-color: var(--accent);</span>
-<span class="d-add">+  color: var(--accent);</span>
+<span class="d-add">+/* Hidden reads as ink, not accent: accent is reserved for what&#x27;s on the map. */</span>
+<span class="d-add">+.vt-vis.is-off {</span>
+<span class="d-add">+  color: var(--ink);</span>
+<span class="d-add">+  opacity: 0.42;</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
-<span class="d-add">+.vt-vis:hover .vt-vis-box {</span>
+<span class="d-add">+.vt-vis:hover,</span>
+<span class="d-add">+.vt-vis.is-off:hover {</span>
 <span class="d-ctx">   opacity: 1;</span>
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
-<span class="d-add">+.vt-vis:focus-visible .vt-vis-box {</span>
+<span class="d-add">+.vt-vis:focus-visible {</span>
 <span class="d-add">+  outline: 1px solid var(--accent);</span>
 <span class="d-add">+  outline-offset: 1px;</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
-<span class="d-add">+/* The tick lands rather than pops — 110ms, no overshoot. */</span>
-<span class="d-add">+.vt-vis-box svg {</span>
-<span class="d-add">+  animation: vt-tick 0.11s ease-out;</span>
+<span class="d-add">+/* The state lands rather than pops — 110ms, no overshoot. */</span>
+<span class="d-add">+.vt-vis svg {</span>
+<span class="d-add">+  animation: vt-eye 0.11s ease-out;</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
-<span class="d-add">+@keyframes vt-tick {</span>
-<span class="d-add">+  from { opacity: 0; transform: scale(0.6); }</span>
+<span class="d-add">+@keyframes vt-eye {</span>
+<span class="d-add">+  from { opacity: 0.3; transform: scale(0.82); }</span>
 <span class="d-add">+  to   { opacity: 1; transform: scale(1); }</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
@@ -1264,7 +1707,7 @@
 <span class="d-ctx"> .vote-type-option.vote-type-custom {</span>
 <span class="d-ctx">   border-top: 1px solid var(--hairline);</span>
 <span class="d-ctx">   opacity: 0.6;</span>
-<span class="d-hunk">@@ -220,6 +445,26 @@</span>
+<span class="d-hunk">@@ -220,6 +418,25 @@</span>
 <span class="d-ctx">   opacity: 1;</span>
 <span class="d-ctx"> }</span>
 <span class="d-ctx"> </span>
@@ -1275,16 +1718,15 @@
 <span class="d-add">+  opacity: 0.45;</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
-<span class="d-add">+/* Collapsed-control badge: the filter is in effect even with the panel shut. */</span>
+<span class="d-add">+/* Collapsed-control marker: a filtered map is otherwise indistinguishable from</span>
+<span class="d-add">+   an empty one, so the shut field still shows the struck-through eye. */</span>
 <span class="d-add">+.vote-type-filter-badge {</span>
+<span class="d-add">+  display: flex;</span>
+<span class="d-add">+  align-items: center;</span>
 <span class="d-add">+  flex-shrink: 0;</span>
 <span class="d-add">+  margin-left: auto;</span>
-<span class="d-add">+  padding: 1px 4px;</span>
-<span class="d-add">+  border: 1px solid var(--accent);</span>
-<span class="d-add">+  font-size: var(--font-size-2xs);</span>
-<span class="d-add">+  font-variant-numeric: tabular-nums;</span>
-<span class="d-add">+  line-height: 1.3;</span>
 <span class="d-add">+  color: var(--accent);</span>
+<span class="d-add">+  opacity: 0.9;</span>
 <span class="d-add">+  pointer-events: none;</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
@@ -1295,7 +1737,7 @@
         
         <details>
           <summary><span class="fname">client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx</span>
-            <span class="stat"><span class="d-add">+232</span> / <span class="d-del">-103</span></span>
+            <span class="stat"><span class="d-add">+299</span> / <span class="d-del">-112</span></span>
           </summary>
           
     <div class="ctx">
@@ -1320,15 +1762,15 @@
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">Changed blocks (top → bottom)</div>
-        <ol class="ctx-blocks"><li>Two affordances per row, deliberately distinct: a checkbox on the LEFT for visibility, an accent left-rule for the cast target — two checkmarks would have been unreadable</li><li>The gestures fire on mousedown and swallow the event: the row&#x27;s own mousedown would otherwise commit the type and close the panel</li><li>shownCount is measured over every row, not the filtered view — the readout is a statement about the MAP, not about the query</li><li>Non-castable rows keep their checkbox and lose their click target, under a divider that says where to vote for them instead</li><li>The badge on the collapsed control is the whole safety net: a filtered map is otherwise indistinguishable from an empty one</li><li>The theme-preset fallback is preserved for maps that authored no vote types of their own</li></ol>
+        <ol class="ctx-blocks"><li>Two affordances per row, deliberately distinct: a checkbox on the LEFT for visibility, an accent left-rule for the cast target — two checkmarks would have been unreadable</li><li>The gestures fire on mousedown and swallow the event: the row&#x27;s own mousedown would otherwise commit the type and close the panel</li><li>shownCount is measured over every row, not the filtered view — the readout is a statement about the MAP, not about the query</li><li>Non-castable rows keep their eye and lose their click target — their pins are on screen either way, and hiding them is the whole point</li><li>The struck-through eye on the collapsed control is the whole safety net: a filtered map is otherwise indistinguishable from an empty one</li><li>The theme-preset fallback is preserved for maps that authored no vote types of their own</li></ol>
       </div>
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx</span>
-<span class="d-meta">index e77bd70..fde601e 100644</span>
+<span class="d-meta">index e77bd70..18a9dff 100644</span>
 <span class="d-meta">--- a/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx</span>
 <span class="d-meta">+++ b/client-react/src/components/VoteTypeSelector/VoteTypeSelector.tsx</span>
-<span class="d-hunk">@@ -1,17 +1,59 @@</span>
+<span class="d-hunk">@@ -1,17 +1,71 @@</span>
 <span class="d-del">-import { useState, useCallback, useEffect, useLayoutEffect, useRef, memo } from &quot;react&quot;;</span>
 <span class="d-add">+// ==========================================================================</span>
 <span class="d-add">+// Vote-type selector — the map&#x27;s legend AND the cast-target picker</span>
@@ -1338,12 +1780,15 @@
 <span class="d-add">+// painted into the heat. So the panel reads as a legend — icon, name, net</span>
 <span class="d-add">+// support — and each row carries the two things you can do with a legend entry:</span>
 <span class="d-add">+//</span>
-<span class="d-add">+//   the checkbox  → show/hide this type&#x27;s heat and pins  (map/voteTypeFilter)</span>
-<span class="d-add">+//   the row       → make it the type you&#x27;re voting for   (RouteContext.voteType)</span>
+<span class="d-add">+//   the eye  → show/hide this type&#x27;s heat and pins  (map/voteTypeFilter)</span>
+<span class="d-add">+//   the row  → make it the type you&#x27;re voting for   (RouteContext.voteType)</span>
 <span class="d-add">+//</span>
-<span class="d-add">+// Rows whose kind doesn&#x27;t match the current selection (a corridor type while</span>
-<span class="d-add">+// you have a single point) stay listed and toggleable — their proposals are on</span>
-<span class="d-add">+// screen — but aren&#x27;t castable, so they sit below the castable ones.</span>
+<span class="d-add">+// The panel is split into the map&#x27;s two proposal FAMILIES — Point proposals</span>
+<span class="d-add">+// (square pins) and Route proposals (diamond corridors) — each with its own</span>
+<span class="d-add">+// heading and its own show-all/hide-all eye. Grouping by family rather than by</span>
+<span class="d-add">+// &quot;castable right now&quot; keeps the headings stable: a corridor type doesn&#x27;t move</span>
+<span class="d-add">+// house the moment you finish drawing a route. The family you can currently</span>
+<span class="d-add">+// cast into leads, and the other carries a note saying how to reach it.</span>
 <span class="d-add">+// ==========================================================================</span>
 <span class="d-add">+</span>
 <span class="d-add">+import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, memo } from &quot;react&quot;;</span>
@@ -1352,14 +1797,15 @@
 <span class="d-del">-import { mapVoteTypesForPointType } from &quot;../../map/runtime&quot;;</span>
 <span class="d-add">+import {</span>
 <span class="d-add">+  toggleVoteTypeVisible,</span>
-<span class="d-add">+  showAllVoteTypes,</span>
+<span class="d-add">+  setVoteTypesVisible,</span>
 <span class="d-add">+  showOnlyVoteTypes,</span>
 <span class="d-add">+} from &quot;../../map/voteTypeFilter&quot;;</span>
 <span class="d-add">+import { registerVoteTypeLabel } from &quot;../../map/voteTypeRegistry&quot;;</span>
 <span class="d-add">+import { useHiddenVoteTypes, useVoteTypeLegend } from &quot;../../hooks/useVoteTypeLegend&quot;;</span>
 <span class="d-ctx"> import { iconSrc, iconForLabel } from &quot;../../themes&quot;;</span>
 <span class="d-ctx"> import { suggestionGlyphForLabel } from &quot;../../utils/suggestionIcon&quot;;</span>
-<span class="d-ctx"> import { CheckIcon } from &quot;../CheckIcon&quot;;</span>
+<span class="d-del">-import { CheckIcon } from &quot;../CheckIcon&quot;;</span>
+<span class="d-add">+import { EyeIcon } from &quot;../EyeIcon&quot;;</span>
 <span class="d-ctx"> import { noAutofillProps } from &quot;../../utils/noAutofill&quot;;</span>
 <span class="d-ctx"> import &quot;./VoteTypeSelector.css&quot;;</span>
 <span class="d-ctx"> </span>
@@ -1372,6 +1818,15 @@
 <span class="d-add">+  net: number;</span>
 <span class="d-add">+  /** Selectable as the cast target in the current selection mode. */</span>
 <span class="d-add">+  castable: boolean;</span>
+<span class="d-add">+  /** Which proposal family the type belongs to — decides its section. */</span>
+<span class="d-add">+  family: &quot;route&quot; | &quot;point&quot;;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** A headed group of rows: one proposal family, with its own show/hide-all. */</span>
+<span class="d-add">+interface PanelSection {</span>
+<span class="d-add">+  key: string;</span>
+<span class="d-add">+  title: string;</span>
+<span class="d-add">+  rows: PanelRow[];</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
 <span class="d-add">+/** Support count for a legend row — &quot;1,204&quot;, &quot;−412&quot;, &quot;&quot; at zero. */</span>
@@ -1390,7 +1845,7 @@
 <span class="d-ctx">   const [isOpen, setIsOpen] = useState(false);</span>
 <span class="d-ctx">   const [inputValue, setInputValue] = useState(&quot;&quot;);</span>
 <span class="d-ctx">   const [highlightedIndex, setHighlightedIndex] = useState(0);</span>
-<span class="d-hunk">@@ -24,38 +66,51 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
+<span class="d-hunk">@@ -24,38 +78,60 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
 <span class="d-ctx">   // The committed vote type when the field opened, restored if editing is cancelled.</span>
 <span class="d-ctx">   const previousVoteTypeRef = useRef(voteType);</span>
 <span class="d-ctx"> </span>
@@ -1404,17 +1859,25 @@
 <span class="d-add">+  // A map that authored none of its own (legacy/preset maps) falls back to the</span>
 <span class="d-add">+  // theme&#x27;s preset suggestions so there is still something to cast.</span>
 <span class="d-add">+  const rows: PanelRow[] = useMemo(() =&gt; {</span>
+<span class="d-add">+    // A legacy label the DB never flagged has no family of its own — its votes</span>
+<span class="d-add">+    // surface in BOTH, so file it under the one you can cast into right now.</span>
+<span class="d-add">+    const familyOf = (kind: &quot;route&quot; | &quot;point&quot; | null): &quot;route&quot; | &quot;point&quot; =&gt;</span>
+<span class="d-add">+      kind ?? pointType;</span>
 <span class="d-add">+    const base: PanelRow[] = legend.map((e) =&gt; ({</span>
 <span class="d-add">+      label: e.label,</span>
 <span class="d-add">+      icon: e.icon,</span>
 <span class="d-add">+      net: e.net,</span>
 <span class="d-add">+      castable: e.castable,</span>
+<span class="d-add">+      family: familyOf(e.pointType),</span>
 <span class="d-add">+    }));</span>
 <span class="d-add">+    if (map?.voteTypes?.length) return base;</span>
 <span class="d-add">+    const known = new Set(base.map((r) =&gt; r.label));</span>
 <span class="d-add">+    const presets = getSuggestionsForTheme(theme, pointType)</span>
 <span class="d-add">+      .filter((s) =&gt; !known.has(s.label))</span>
-<span class="d-add">+      .map((s): PanelRow =&gt; ({ label: s.label, icon: s.icon, net: 0, castable: true }));</span>
+<span class="d-add">+      .map((s): PanelRow =&gt; ({</span>
+<span class="d-add">+        label: s.label, icon: s.icon, net: 0, castable: true,</span>
+<span class="d-add">+        family: familyOf(s.pointType ?? null),</span>
+<span class="d-add">+      }));</span>
 <span class="d-add">+    return [...presets, ...base];</span>
 <span class="d-add">+  }, [legend, map, theme, pointType]);</span>
 <span class="d-ctx"> </span>
@@ -1457,6 +1920,7 @@
 <span class="d-add">+          icon: iconForLabel(vt.label, map?.voteTypes),</span>
 <span class="d-add">+          net: 0,</span>
 <span class="d-add">+          castable: isStationNetwork || !vt.pointType || vt.pointType === pointType,</span>
+<span class="d-add">+          family: vt.pointType ?? pointType,</span>
 <span class="d-add">+        }))</span>
 <span class="d-ctx">     : [];</span>
 <span class="d-ctx"> </span>
@@ -1469,7 +1933,7 @@
 <span class="d-ctx">   // Maps that disallow user suggestions can&#x27;t add custom vote types.</span>
 <span class="d-ctx">   const allowCustom = map ? map.allowSuggestions : true;</span>
 <span class="d-ctx">   const showCustomOption = allowCustom &amp;&amp; inputLower !== &quot;&quot; &amp;&amp; !hasExactMatch;</span>
-<span class="d-hunk">@@ -65,35 +120,27 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
+<span class="d-hunk">@@ -65,35 +141,43 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
 <span class="d-ctx">   //   1. the map authored exactly one vote type overall, or</span>
 <span class="d-ctx">   //   2. the pointType-filtered list happens to have one entry.</span>
 <span class="d-ctx">   // Case 1 must ignore pointType: a route-only single type is filtered out of</span>
@@ -1506,18 +1970,34 @@
 <span class="d-del">-      ? [{ label: inputValue.trim(), icon: &quot;&quot;, glyph: false, isCustom: true }]</span>
 <span class="d-del">-      : []),</span>
 <span class="d-del">-  ];</span>
-<span class="d-add">+  // Filter state, measured over the WHOLE legend (not the search-filtered view)</span>
-<span class="d-add">+  // so the readout is a stable statement about the map, not about the query.</span>
-<span class="d-add">+  const totalCount = rows.length;</span>
-<span class="d-add">+  const shownCount = rows.reduce((n, r) =&gt; n + (hidden.has(r.label) ? 0 : 1), 0);</span>
-<span class="d-add">+  const isFiltered = shownCount !== totalCount;</span>
+<span class="d-add">+  // One section per proposal FAMILY (docs/three-layer-model.md §3.1): point</span>
+<span class="d-add">+  // proposals are square pins, route proposals are diamond corridors. The family</span>
+<span class="d-add">+  // you can cast into leads; the other keeps its heading and its eye, and says</span>
+<span class="d-add">+  // how to reach it. Station networks vote on fixed points whatever kind their</span>
+<span class="d-add">+  // types were authored as, so they get one undivided list.</span>
+<span class="d-add">+  const sections: PanelSection[] = isStationNetwork</span>
+<span class="d-add">+    ? (listRows.length ? [{ key: &quot;all&quot;, title: &quot;Proposals&quot;, rows: listRows }] : [])</span>
+<span class="d-add">+    : (pointType === &quot;route&quot; ? ([&quot;route&quot;, &quot;point&quot;] as const) : ([&quot;point&quot;, &quot;route&quot;] as const))</span>
+<span class="d-add">+        .map((family): PanelSection =&gt; ({</span>
+<span class="d-add">+          key: family,</span>
+<span class="d-add">+          title: family === &quot;route&quot; ? &quot;Route proposals&quot; : &quot;Point proposals&quot;,</span>
+<span class="d-add">+          rows: listRows.filter((r) =&gt; r.family === family),</span>
+<span class="d-add">+        }))</span>
+<span class="d-add">+        .filter((s) =&gt; s.rows.length &gt; 0);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Rendered order — what the arrow keys walk and what highlightedIndex means.</span>
+<span class="d-add">+  const orderedRows = sections.flatMap((s) =&gt; s.rows);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Is anything on THIS map hidden? Measured over the whole legend, not the</span>
+<span class="d-add">+  // search-filtered view, so it&#x27;s a statement about the map and not the query.</span>
+<span class="d-add">+  const isFiltered = rows.some((r) =&gt; hidden.has(r.label));</span>
 <span class="d-add">+</span>
 <span class="d-add">+  // Keyboard navigation runs over the rows plus the trailing &quot;Suggest:&quot; option.</span>
-<span class="d-add">+  const optionCount = listRows.length + (showCustomOption ? 1 : 0);</span>
+<span class="d-add">+  const optionCount = orderedRows.length + (showCustomOption ? 1 : 0);</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx">   useEffect(() =&gt; {</span>
 <span class="d-ctx">     setHighlightedIndex(0);</span>
-<span class="d-hunk">@@ -117,7 +164,10 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
+<span class="d-hunk">@@ -117,7 +201,10 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
 <span class="d-ctx">   }, [isOpen]);</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx">   const selectOption = useCallback(</span>
@@ -1529,7 +2009,7 @@
 <span class="d-ctx">       setVoteType(label);</span>
 <span class="d-ctx">       setInputValue(&quot;&quot;);</span>
 <span class="d-ctx">       inputValueRef.current = &quot;&quot;;</span>
-<span class="d-hunk">@@ -152,17 +202,21 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
+<span class="d-hunk">@@ -152,17 +239,21 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
 <span class="d-ctx">     (e: React.KeyboardEvent&lt;HTMLInputElement&gt;) =&gt; {</span>
 <span class="d-ctx">       if (e.key === &quot;ArrowDown&quot;) {</span>
 <span class="d-ctx">         e.preventDefault();</span>
@@ -1544,7 +2024,7 @@
 <span class="d-del">-          const opt = options[highlightedIndex];</span>
 <span class="d-del">-          if (opt) selectOption(opt.label);</span>
 <span class="d-add">+        if (optionCount &gt; 0) {</span>
-<span class="d-add">+          const row = listRows[highlightedIndex];</span>
+<span class="d-add">+          const row = orderedRows[highlightedIndex];</span>
 <span class="d-add">+          if (row) {</span>
 <span class="d-add">+            if (row.castable) selectOption(row.label);</span>
 <span class="d-add">+          } else if (showCustomOption) {</span>
@@ -1556,16 +2036,16 @@
 <span class="d-ctx">         }</span>
 <span class="d-ctx">       } else if (e.key === &quot;Escape&quot;) {</span>
 <span class="d-ctx">         setVoteType(previousVoteTypeRef.current);</span>
-<span class="d-hunk">@@ -172,7 +226,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
+<span class="d-hunk">@@ -172,7 +263,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
 <span class="d-ctx">         inputRef.current?.blur();</span>
 <span class="d-ctx">       }</span>
 <span class="d-ctx">     },</span>
 <span class="d-del">-    [options, highlightedIndex, inputValue, selectOption, setVoteType]</span>
-<span class="d-add">+    [optionCount, listRows, highlightedIndex, inputValue, showCustomOption, selectOption, setVoteType]</span>
+<span class="d-add">+    [optionCount, orderedRows, highlightedIndex, inputValue, showCustomOption, selectOption, setVoteType]</span>
 <span class="d-ctx">   );</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx">   const handleChevronClick = useCallback((e: React.MouseEvent) =&gt; {</span>
-<span class="d-hunk">@@ -181,7 +235,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
+<span class="d-hunk">@@ -181,7 +272,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
 <span class="d-ctx">     if (isOpen) {</span>
 <span class="d-ctx">       const trimmed = inputValueRef.current.trim();</span>
 <span class="d-ctx">       if (trimmed) {</span>
@@ -1574,7 +2054,7 @@
 <span class="d-ctx">       } else {</span>
 <span class="d-ctx">         setVoteType(previousVoteTypeRef.current);</span>
 <span class="d-ctx">         setIsOpen(false);</span>
-<span class="d-hunk">@@ -197,7 +251,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
+<span class="d-hunk">@@ -197,7 +288,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
 <span class="d-ctx">       if (containerRef.current &amp;&amp; !containerRef.current.contains(e.target as Node)) {</span>
 <span class="d-ctx">         const trimmed = inputValueRef.current.trim();</span>
 <span class="d-ctx">         if (trimmed) {</span>
@@ -1583,7 +2063,7 @@
 <span class="d-ctx">         } else if (isOpen) {</span>
 <span class="d-ctx">           // Cancelled with an empty field — revert the live-typed vote type.</span>
 <span class="d-ctx">           setVoteType(previousVoteTypeRef.current);</span>
-<span class="d-hunk">@@ -209,6 +263,15 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
+<span class="d-hunk">@@ -209,6 +300,15 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
 <span class="d-ctx">     return () =&gt; document.removeEventListener(&quot;mousedown&quot;, handleClickOutside);</span>
 <span class="d-ctx">   }, [selectOption, setVoteType, isOpen]);</span>
 <span class="d-ctx"> </span>
@@ -1599,13 +2079,45 @@
 <span class="d-ctx">   // The committed type&#x27;s themed icon: the map&#x27;s own vote-type icon wins (user</span>
 <span class="d-ctx">   // maps define their own), then a matching preset icon. Null → it&#x27;s a custom</span>
 <span class="d-ctx">   // type and renders the colorized suggestion glyph instead.</span>
-<span class="d-hunk">@@ -218,6 +281,20 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
+<span class="d-hunk">@@ -218,6 +318,52 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
 <span class="d-ctx">   // the vote type defaults to it via getDefaultVoteTypeForTheme, so casting works.</span>
 <span class="d-ctx">   const frozenIcon = frozenLabel ? iconForLabel(frozenLabel, map?.voteTypes) : null;</span>
 <span class="d-ctx"> </span>
-<span class="d-add">+  // Where the castable half ends — the divider between &quot;you can vote for this</span>
-<span class="d-add">+  // now&quot; and &quot;also drawn on the map&quot;.</span>
-<span class="d-add">+  const firstUncastable = listRows.findIndex((r) =&gt; !r.castable);</span>
+<span class="d-add">+  /**</span>
+<span class="d-add">+   * A heading row: a show-all/hide-all eye, a title, and how much of the group</span>
+<span class="d-add">+   * is currently drawn. Used for each proposal family and for the &quot;All</span>
+<span class="d-add">+   * proposals&quot; master row, so the two are the same control at two scales.</span>
+<span class="d-add">+   *</span>
+<span class="d-add">+   * The eye sits in the same left column as the rows&#x27; own eyes, so a section</span>
+<span class="d-add">+   * and its members read as one unit. From a MIXED group it shows everything —</span>
+<span class="d-add">+   * the recovering direction, since a blank map is the outcome worth making</span>
+<span class="d-add">+   * people ask for twice.</span>
+<span class="d-add">+   */</span>
+<span class="d-add">+  const groupHeader = (title: string, groupRows: PanelRow[], extraClass = &quot;&quot;) =&gt; {</span>
+<span class="d-add">+    const shown = groupRows.reduce((n, r) =&gt; n + (hidden.has(r.label) ? 0 : 1), 0);</span>
+<span class="d-add">+    const allVisible = shown === groupRows.length;</span>
+<span class="d-add">+    return (</span>
+<span class="d-add">+      &lt;div className={`vt-section ${extraClass}`.trim()}&gt;</span>
+<span class="d-add">+        &lt;button</span>
+<span class="d-add">+          type=&quot;button&quot;</span>
+<span class="d-add">+          className={`vt-vis vt-vis-all${allVisible ? &quot;&quot; : &quot; is-off&quot;}`}</span>
+<span class="d-add">+          role=&quot;switch&quot;</span>
+<span class="d-add">+          aria-checked={allVisible}</span>
+<span class="d-add">+          aria-label={`${allVisible ? &quot;Hide&quot; : &quot;Show&quot;} all ${title.toLowerCase()}`}</span>
+<span class="d-add">+          title={`${allVisible ? &quot;Hide&quot; : &quot;Show&quot;} all ${title.toLowerCase()}`}</span>
+<span class="d-add">+          onMouseDown={(e) =&gt; swallow(e, () =&gt;</span>
+<span class="d-add">+            setVoteTypesVisible(groupRows.map((r) =&gt; r.label), !allVisible)</span>
+<span class="d-add">+          )}</span>
+<span class="d-add">+        &gt;</span>
+<span class="d-add">+          &lt;EyeIcon size={14} off={shown === 0} /&gt;</span>
+<span class="d-add">+        &lt;/button&gt;</span>
+<span class="d-add">+        &lt;span className=&quot;vt-section-title&quot;&gt;{title}&lt;/span&gt;</span>
+<span class="d-add">+        &lt;span className={`vt-section-count${allVisible ? &quot;&quot; : &quot; is-filtered&quot;}`}&gt;</span>
+<span class="d-add">+          ({shown}/{groupRows.length} shown)</span>
+<span class="d-add">+        &lt;/span&gt;</span>
+<span class="d-add">+      &lt;/div&gt;</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+  };</span>
 <span class="d-add">+</span>
 <span class="d-add">+  const renderIcon = (icon: string | null, label: string) =&gt;</span>
 <span class="d-add">+    icon ? (</span>
@@ -1620,7 +2132,7 @@
 <span class="d-ctx">   return (</span>
 <span class="d-ctx">     &lt;div</span>
 <span class="d-ctx">       ref={containerRef}</span>
-<span class="d-hunk">@@ -226,14 +303,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
+<span class="d-hunk">@@ -226,14 +372,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
 <span class="d-ctx">     &gt;</span>
 <span class="d-ctx">       {frozenLabel ? (</span>
 <span class="d-ctx">         &lt;div className=&quot;vote-type-control&quot;&gt;</span>
@@ -1636,7 +2148,7 @@
 <span class="d-ctx">           &lt;span className=&quot;vote-type-display-text&quot;&gt;{frozenLabel}&lt;/span&gt;</span>
 <span class="d-ctx">         &lt;/div&gt;</span>
 <span class="d-ctx">       ) : (</span>
-<span class="d-hunk">@@ -260,14 +330,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
+<span class="d-hunk">@@ -260,14 +399,7 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
 <span class="d-ctx">         /&gt;</span>
 <span class="d-ctx">         {!isOpen &amp;&amp; voteType &amp;&amp; (</span>
 <span class="d-ctx">           &lt;div className=&quot;vote-type-display&quot;&gt;</span>
@@ -1652,18 +2164,18 @@
 <span class="d-ctx">             &lt;span className=&quot;vote-type-display-text&quot;&gt;{voteType}&lt;/span&gt;</span>
 <span class="d-ctx">           &lt;/div&gt;</span>
 <span class="d-ctx">         )}</span>
-<span class="d-hunk">@@ -276,53 +339,119 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
+<span class="d-hunk">@@ -276,53 +408,108 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {</span>
 <span class="d-ctx">             {allowCustom ? &quot;Suggest a change...&quot; : &quot;Select a vote type&quot;}</span>
 <span class="d-ctx">           &lt;/div&gt;</span>
 <span class="d-ctx">         )}</span>
 <span class="d-add">+        {/* A filtered map is easy to mistake for an empty one, so the collapsed</span>
-<span class="d-add">+            control carries the count even when the panel is shut. */}</span>
+<span class="d-add">+            control still says so — the struck-through eye, no count. */}</span>
 <span class="d-add">+        {!isOpen &amp;&amp; isFiltered &amp;&amp; (</span>
 <span class="d-add">+          &lt;span</span>
 <span class="d-add">+            className=&quot;vote-type-filter-badge&quot;</span>
-<span class="d-add">+            title={`${shownCount} of ${totalCount} proposal types shown on the map`}</span>
+<span class="d-add">+            title=&quot;Some proposal types are hidden on the map&quot;</span>
 <span class="d-add">+          &gt;</span>
-<span class="d-add">+            {shownCount}/{totalCount}</span>
+<span class="d-add">+            &lt;EyeIcon size={13} off /&gt;</span>
 <span class="d-add">+          &lt;/span&gt;</span>
 <span class="d-add">+        )}</span>
 <span class="d-ctx">         &lt;span className=&quot;vote-type-chevron&quot; onMouseDown={handleChevronClick}&gt;</span>
@@ -1679,87 +2191,19 @@
 <span class="d-ctx">           style={dropdownMaxWidth ? { maxWidth: dropdownMaxWidth } : undefined}</span>
 <span class="d-ctx">         &gt;</span>
 <span class="d-del">-          {options.map((option, index) =&gt; {</span>
-<span class="d-add">+          &lt;div className=&quot;vt-panel-head&quot;&gt;</span>
-<span class="d-add">+            &lt;span className=&quot;vt-panel-title&quot;&gt;Shown on map&lt;/span&gt;</span>
-<span class="d-add">+            &lt;span className={`vt-panel-count${isFiltered ? &quot; is-filtered&quot; : &quot;&quot;}`}&gt;</span>
-<span class="d-add">+              {shownCount}/{totalCount}</span>
-<span class="d-add">+            &lt;/span&gt;</span>
-<span class="d-add">+            &lt;button</span>
-<span class="d-add">+              type=&quot;button&quot;</span>
-<span class="d-add">+              className=&quot;vt-panel-action&quot;</span>
-<span class="d-add">+              onMouseDown={(e) =&gt; swallow(e, () =&gt;</span>
-<span class="d-add">+                isFiltered ? showAllVoteTypes() : showOnlyVoteTypes(rows.map((r) =&gt; r.label))</span>
-<span class="d-add">+              )}</span>
-<span class="d-add">+            &gt;</span>
-<span class="d-add">+              {isFiltered ? &quot;All&quot; : &quot;None&quot;}</span>
-<span class="d-add">+            &lt;/button&gt;</span>
-<span class="d-add">+          &lt;/div&gt;</span>
-<span class="d-add">+</span>
-<span class="d-add">+          {listRows.map((row, index) =&gt; {</span>
-<span class="d-ctx">             const isHighlighted = index === highlightedIndex;</span>
+<span class="d-del">-            const isHighlighted = index === highlightedIndex;</span>
 <span class="d-del">-            const isSelected = option.label === voteType;</span>
-<span class="d-add">+            const isCasting = row.label === voteType;</span>
-<span class="d-add">+            const visible = !hidden.has(row.label);</span>
-<span class="d-add">+            const cls = [</span>
-<span class="d-add">+              &quot;vote-type-option&quot;,</span>
-<span class="d-add">+              isHighlighted ? &quot;highlighted&quot; : &quot;&quot;,</span>
-<span class="d-add">+              isCasting ? &quot;is-casting&quot; : &quot;&quot;,</span>
-<span class="d-add">+              visible ? &quot;&quot; : &quot;is-hidden&quot;,</span>
-<span class="d-add">+              row.castable ? &quot;&quot; : &quot;is-uncastable&quot;,</span>
-<span class="d-add">+            ].filter(Boolean).join(&quot; &quot;);</span>
-<span class="d-ctx"> </span>
+<span class="d-del">-</span>
 <span class="d-del">-            if (option.isCustom) {</span>
 <span class="d-del">-              return (</span>
-<span class="d-add">+            return (</span>
-<span class="d-add">+              &lt;div key={row.label}&gt;</span>
-<span class="d-add">+                {index === firstUncastable &amp;&amp; (</span>
-<span class="d-add">+                  &lt;div className=&quot;vt-section&quot;&gt;</span>
-<span class="d-add">+                    {pointType === &quot;point&quot; ? &quot;Corridor proposals&quot; : &quot;Point proposals&quot;}</span>
-<span class="d-add">+                    &lt;span className=&quot;vt-section-note&quot;&gt;on the map, vote elsewhere&lt;/span&gt;</span>
-<span class="d-add">+                  &lt;/div&gt;</span>
-<span class="d-add">+                )}</span>
-<span class="d-ctx">                 &lt;div</span>
+<span class="d-del">-                &lt;div</span>
 <span class="d-del">-                  key=&quot;custom&quot;</span>
 <span class="d-del">-                  className={`vote-type-option vote-type-custom ${isHighlighted ? &quot;highlighted&quot; : &quot;&quot;}`}</span>
 <span class="d-del">-                  onMouseDown={() =&gt; selectOption(option.label)}</span>
-<span class="d-add">+                  className={cls}</span>
-<span class="d-add">+                  role=&quot;option&quot;</span>
-<span class="d-add">+                  aria-selected={isCasting}</span>
-<span class="d-add">+                  onMouseDown={() =&gt; row.castable &amp;&amp; selectOption(row.label)}</span>
-<span class="d-ctx">                   onMouseEnter={() =&gt; setHighlightedIndex(index)}</span>
-<span class="d-add">+                  title={row.castable ? undefined</span>
-<span class="d-add">+                    : `Drawn on the map. Draw ${pointType === &quot;point&quot; ? &quot;a route&quot; : &quot;a single point&quot;} to vote for it.`}</span>
-<span class="d-ctx">                 &gt;</span>
+<span class="d-del">-                  onMouseEnter={() =&gt; setHighlightedIndex(index)}</span>
+<span class="d-del">-                &gt;</span>
 <span class="d-del">-                  &lt;span&gt;Suggest: &lt;em&gt;&quot;{option.label}&quot;&lt;/em&gt;&lt;/span&gt;</span>
-<span class="d-add">+                  &lt;button</span>
-<span class="d-add">+                    type=&quot;button&quot;</span>
-<span class="d-add">+                    className=&quot;vt-vis&quot;</span>
-<span class="d-add">+                    role=&quot;switch&quot;</span>
-<span class="d-add">+                    aria-checked={visible}</span>
-<span class="d-add">+                    aria-label={`${visible ? &quot;Hide&quot; : &quot;Show&quot;} ${row.label} on the map`}</span>
-<span class="d-add">+                    title={`${visible ? &quot;Hide&quot; : &quot;Show&quot;} on the map`}</span>
-<span class="d-add">+                    onMouseDown={(e) =&gt; swallow(e, () =&gt; toggleVoteTypeVisible(row.label))}</span>
-<span class="d-add">+                  &gt;</span>
-<span class="d-add">+                    &lt;span className=&quot;vt-vis-box&quot;&gt;{visible &amp;&amp; &lt;CheckIcon size={10} /&gt;}&lt;/span&gt;</span>
-<span class="d-add">+                  &lt;/button&gt;</span>
-<span class="d-add">+                  {renderIcon(row.icon, row.label)}</span>
-<span class="d-add">+                  &lt;span className=&quot;vote-type-label&quot;&gt;{row.label}&lt;/span&gt;</span>
-<span class="d-add">+                  &lt;span className=&quot;vt-tail&quot;&gt;</span>
-<span class="d-add">+                    &lt;span className={`vt-net${row.net &lt; 0 ? &quot; is-negative&quot; : &quot;&quot;}`}&gt;</span>
-<span class="d-add">+                      {formatNet(row.net)}</span>
-<span class="d-add">+                    &lt;/span&gt;</span>
-<span class="d-add">+                    &lt;button</span>
-<span class="d-add">+                      type=&quot;button&quot;</span>
-<span class="d-add">+                      className=&quot;vt-only&quot;</span>
-<span class="d-add">+                      title={`Show only ${row.label}`}</span>
-<span class="d-add">+                      onMouseDown={(e) =&gt; swallow(e, () =&gt;</span>
-<span class="d-add">+                        showOnlyVoteTypes(rows.map((r) =&gt; r.label), [row.label])</span>
-<span class="d-add">+                      )}</span>
-<span class="d-add">+                    &gt;</span>
-<span class="d-add">+                      only</span>
-<span class="d-add">+                    &lt;/button&gt;</span>
-<span class="d-add">+                  &lt;/span&gt;</span>
-<span class="d-ctx">                 &lt;/div&gt;</span>
+<span class="d-del">-                &lt;/div&gt;</span>
 <span class="d-del">-              );</span>
 <span class="d-del">-            }</span>
 <span class="d-del">-</span>
@@ -1780,16 +2224,81 @@
 <span class="d-del">-                ) : null}</span>
 <span class="d-del">-                &lt;span className=&quot;vote-type-label&quot;&gt;{option.label}&lt;/span&gt;</span>
 <span class="d-del">-                {isSelected &amp;&amp; &lt;span className=&quot;check-icon&quot;&gt;&lt;CheckIcon size={11} /&gt;&lt;/span&gt;}</span>
+<span class="d-add">+          {/* Master row. Only earns its place when there&#x27;s more than one family</span>
+<span class="d-add">+              to reach across — with a single section it would just shadow that</span>
+<span class="d-add">+              section&#x27;s own eye. */}</span>
+<span class="d-add">+          {sections.length &gt; 1 &amp;&amp; groupHeader(&quot;All proposals&quot;, orderedRows, &quot;vt-section-all&quot;)}</span>
+<span class="d-add">+</span>
+<span class="d-add">+          {sections.map((section) =&gt; (</span>
+<span class="d-add">+              &lt;div key={section.key} className=&quot;vt-group&quot;&gt;</span>
+<span class="d-add">+                {groupHeader(section.title, section.rows)}</span>
+<span class="d-add">+</span>
+<span class="d-add">+                {section.rows.map((row) =&gt; {</span>
+<span class="d-add">+                  const index = orderedRows.indexOf(row);</span>
+<span class="d-add">+                  const isHighlighted = index === highlightedIndex;</span>
+<span class="d-add">+                  const isCasting = row.label === voteType;</span>
+<span class="d-add">+                  const visible = !hidden.has(row.label);</span>
+<span class="d-add">+                  const cls = [</span>
+<span class="d-add">+                    &quot;vote-type-option&quot;,</span>
+<span class="d-add">+                    isHighlighted ? &quot;highlighted&quot; : &quot;&quot;,</span>
+<span class="d-add">+                    isCasting ? &quot;is-casting&quot; : &quot;&quot;,</span>
+<span class="d-add">+                    visible ? &quot;&quot; : &quot;is-hidden&quot;,</span>
+<span class="d-add">+                    row.castable ? &quot;&quot; : &quot;is-uncastable&quot;,</span>
+<span class="d-add">+                  ].filter(Boolean).join(&quot; &quot;);</span>
+<span class="d-add">+</span>
+<span class="d-add">+                  return (</span>
+<span class="d-add">+                    &lt;div</span>
+<span class="d-add">+                      key={row.label}</span>
+<span class="d-add">+                      className={cls}</span>
+<span class="d-add">+                      role=&quot;option&quot;</span>
+<span class="d-add">+                      aria-selected={isCasting}</span>
+<span class="d-add">+                      onMouseDown={() =&gt; row.castable &amp;&amp; selectOption(row.label)}</span>
+<span class="d-add">+                      onMouseEnter={() =&gt; setHighlightedIndex(index)}</span>
+<span class="d-add">+                      title={row.castable ? undefined</span>
+<span class="d-add">+                        : `Drawn on the map. Draw ${pointType === &quot;point&quot; ? &quot;a route&quot; : &quot;a single point&quot;} to vote for it.`}</span>
+<span class="d-add">+                    &gt;</span>
+<span class="d-add">+                      &lt;button</span>
+<span class="d-add">+                        type=&quot;button&quot;</span>
+<span class="d-add">+                        className={`vt-vis${visible ? &quot;&quot; : &quot; is-off&quot;}`}</span>
+<span class="d-add">+                        role=&quot;switch&quot;</span>
+<span class="d-add">+                        aria-checked={visible}</span>
+<span class="d-add">+                        aria-label={`${visible ? &quot;Hide&quot; : &quot;Show&quot;} ${row.label} on the map`}</span>
+<span class="d-add">+                        title={`${visible ? &quot;Hide&quot; : &quot;Show&quot;} on the map`}</span>
+<span class="d-add">+                        onMouseDown={(e) =&gt; swallow(e, () =&gt; toggleVoteTypeVisible(row.label))}</span>
+<span class="d-add">+                      &gt;</span>
+<span class="d-add">+                        &lt;EyeIcon size={14} off={!visible} /&gt;</span>
+<span class="d-add">+                      &lt;/button&gt;</span>
+<span class="d-add">+                      {renderIcon(row.icon, row.label)}</span>
+<span class="d-add">+                      &lt;span className=&quot;vote-type-label&quot;&gt;{row.label}&lt;/span&gt;</span>
+<span class="d-add">+                      &lt;span className=&quot;vt-tail&quot;&gt;</span>
+<span class="d-add">+                        &lt;span className={`vt-net${row.net &lt; 0 ? &quot; is-negative&quot; : &quot;&quot;}`}&gt;</span>
+<span class="d-add">+                          {formatNet(row.net)}</span>
+<span class="d-add">+                        &lt;/span&gt;</span>
+<span class="d-add">+                        &lt;button</span>
+<span class="d-add">+                          type=&quot;button&quot;</span>
+<span class="d-add">+                          className=&quot;vt-only&quot;</span>
+<span class="d-add">+                          title={`Show only ${row.label}`}</span>
+<span class="d-add">+                          onMouseDown={(e) =&gt; swallow(e, () =&gt;</span>
+<span class="d-add">+                            showOnlyVoteTypes(rows.map((r) =&gt; r.label), [row.label])</span>
+<span class="d-add">+                          )}</span>
+<span class="d-add">+                        &gt;</span>
+<span class="d-add">+                          only</span>
+<span class="d-add">+                        &lt;/button&gt;</span>
+<span class="d-add">+                      &lt;/span&gt;</span>
+<span class="d-add">+                    &lt;/div&gt;</span>
+<span class="d-add">+                  );</span>
+<span class="d-add">+                })}</span>
 <span class="d-ctx">               &lt;/div&gt;</span>
-<span class="d-ctx">             );</span>
-<span class="d-ctx">           })}</span>
+<span class="d-del">-            );</span>
+<span class="d-del">-          })}</span>
+<span class="d-add">+          ))}</span>
 <span class="d-add">+</span>
 <span class="d-add">+          {showCustomOption &amp;&amp; (</span>
 <span class="d-add">+            &lt;div</span>
 <span class="d-add">+              className={`vote-type-option vote-type-custom ${</span>
-<span class="d-add">+                highlightedIndex === listRows.length ? &quot;highlighted&quot; : &quot;&quot;}`}</span>
+<span class="d-add">+                highlightedIndex === orderedRows.length ? &quot;highlighted&quot; : &quot;&quot;}`}</span>
 <span class="d-add">+              onMouseDown={() =&gt; selectOption(inputValue.trim(), true)}</span>
-<span class="d-add">+              onMouseEnter={() =&gt; setHighlightedIndex(listRows.length)}</span>
+<span class="d-add">+              onMouseEnter={() =&gt; setHighlightedIndex(orderedRows.length)}</span>
 <span class="d-add">+            &gt;</span>
 <span class="d-add">+              &lt;span&gt;Suggest: &lt;em&gt;&quot;{inputValue.trim()}&quot;&lt;/em&gt;&lt;/span&gt;</span>
 <span class="d-add">+            &lt;/div&gt;</span>
@@ -1887,7 +2396,7 @@
         
         <details>
           <summary><span class="fname">client-react/src/map/voteTypeFilter.test.ts</span>
-            <span class="stat"><span class="d-add">+96</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+116</span> / <span class="d-del">-0</span></span>
           </summary>
           
     <div class="ctx">
@@ -1918,15 +2427,16 @@
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/map/voteTypeFilter.test.ts b/client-react/src/map/voteTypeFilter.test.ts</span>
 <span class="d-meta">new file mode 100644</span>
-<span class="d-meta">index 0000000..7e74235</span>
+<span class="d-meta">index 0000000..99c1630</span>
 <span class="d-meta">--- /dev/null</span>
 <span class="d-meta">+++ b/client-react/src/map/voteTypeFilter.test.ts</span>
-<span class="d-hunk">@@ -0,0 +1,96 @@</span>
+<span class="d-hunk">@@ -0,0 +1,116 @@</span>
 <span class="d-add">+import { describe, it, expect, beforeEach } from &quot;vitest&quot;;</span>
 <span class="d-add">+import {</span>
 <span class="d-add">+  getHiddenVoteTypes,</span>
 <span class="d-add">+  isVoteTypeVisible,</span>
 <span class="d-add">+  setVoteTypeVisible,</span>
+<span class="d-add">+  setVoteTypesVisible,</span>
 <span class="d-add">+  toggleVoteTypeVisible,</span>
 <span class="d-add">+  ensureVoteTypeVisible,</span>
 <span class="d-add">+  showAllVoteTypes,</span>
@@ -1977,6 +2487,25 @@
 <span class="d-add">+    expect(getHiddenVoteTypes().size).toBe(2);</span>
 <span class="d-add">+  });</span>
 <span class="d-add">+</span>
+<span class="d-add">+  it(&quot;setVoteTypesVisible flips a whole group in ONE commit&quot;, () =&gt; {</span>
+<span class="d-add">+    let calls = 0;</span>
+<span class="d-add">+    const stop = subscribeVoteTypeFilter(() =&gt; { calls++; });</span>
+<span class="d-add">+    setVoteTypesVisible([&quot;A&quot;, &quot;B&quot;, &quot;C&quot;], false);</span>
+<span class="d-add">+    expect(calls).toBe(1); // not 3 — the section eye must cost one repaint</span>
+<span class="d-add">+    expect([&quot;A&quot;, &quot;B&quot;, &quot;C&quot;].every((l) =&gt; !isVoteTypeVisible(l))).toBe(true);</span>
+<span class="d-add">+    setVoteTypesVisible([&quot;A&quot;, &quot;B&quot;, &quot;C&quot;], true);</span>
+<span class="d-add">+    expect(calls).toBe(2);</span>
+<span class="d-add">+    expect(getHiddenVoteTypes().size).toBe(0);</span>
+<span class="d-add">+    stop();</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;setVoteTypesVisible leaves labels outside the group alone&quot;, () =&gt; {</span>
+<span class="d-add">+    setVoteTypeVisible(&quot;Other&quot;, false);</span>
+<span class="d-add">+    setVoteTypesVisible([&quot;A&quot;, &quot;B&quot;], false);</span>
+<span class="d-add">+    setVoteTypesVisible([&quot;A&quot;, &quot;B&quot;], true);</span>
+<span class="d-add">+    expect(isVoteTypeVisible(&quot;Other&quot;)).toBe(false);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
 <span class="d-add">+  it(&quot;notifies subscribers only on a real change&quot;, () =&gt; {</span>
 <span class="d-add">+    let calls = 0;</span>
 <span class="d-add">+    const stop = subscribeVoteTypeFilter(() =&gt; { calls++; });</span>
@@ -2022,7 +2551,7 @@
         
         <details>
           <summary><span class="fname">client-react/src/map/voteTypeFilter.ts</span>
-            <span class="stat"><span class="d-add">+146</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+161</span> / <span class="d-del">-0</span></span>
           </summary>
           
     <div class="ctx">
@@ -2053,10 +2582,10 @@
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/map/voteTypeFilter.ts b/client-react/src/map/voteTypeFilter.ts</span>
 <span class="d-meta">new file mode 100644</span>
-<span class="d-meta">index 0000000..ac2de23</span>
+<span class="d-meta">index 0000000..12f569f</span>
 <span class="d-meta">--- /dev/null</span>
 <span class="d-meta">+++ b/client-react/src/map/voteTypeFilter.ts</span>
-<span class="d-hunk">@@ -0,0 +1,146 @@</span>
+<span class="d-hunk">@@ -0,0 +1,161 @@</span>
 <span class="d-add">+// ==========================================================================</span>
 <span class="d-add">+// Vote-type visibility filter</span>
 <span class="d-add">+// ==========================================================================</span>
@@ -2155,6 +2684,21 @@
 <span class="d-add">+  const next = new Set(hidden);</span>
 <span class="d-add">+  if (visible) next.delete(label);</span>
 <span class="d-add">+  else next.add(label);</span>
+<span class="d-add">+  commit(next);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Show or hide a whole group at once — the legend&#x27;s per-section eye. One commit,</span>
+<span class="d-add">+ * so a 14-type section costs a single repaint and a single proposal recompute</span>
+<span class="d-add">+ * instead of fourteen.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function setVoteTypesVisible(labels: Iterable&lt;string&gt;, visible: boolean): void {</span>
+<span class="d-add">+  ensureLoaded();</span>
+<span class="d-add">+  const next = new Set(hidden);</span>
+<span class="d-add">+  for (const label of labels) {</span>
+<span class="d-add">+    if (visible) next.delete(label);</span>
+<span class="d-add">+    else next.add(label);</span>
+<span class="d-add">+  }</span>
 <span class="d-add">+  commit(next);</span>
 <span class="d-add">+}</span>
 <span class="d-add">+</span>
@@ -2356,7 +2900,7 @@
         
         <details>
           <summary><span class="fname">client-react/src/map/voteTypeRegistry.ts</span>
-            <span class="stat"><span class="d-add">+166</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+168</span> / <span class="d-del">-0</span></span>
           </summary>
           
     <div class="ctx">
@@ -2387,10 +2931,12 @@
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/map/voteTypeRegistry.ts b/client-react/src/map/voteTypeRegistry.ts</span>
 <span class="d-meta">new file mode 100644</span>
-<span class="d-meta">index 0000000..ba7476b</span>
+<span class="d-meta">index 0000000..6b22a4e</span>
 <span class="d-meta">--- /dev/null</span>
 <span class="d-meta">+++ b/client-react/src/map/voteTypeRegistry.ts</span>
-<span class="d-hunk">@@ -0,0 +1,166 @@</span>
+<span class="d-hunk">@@ -0,0 +1,168 @@</span>
+<span class="d-add">+// Referenced by: docs/algorithms/06-ranking.md</span>
+<span class="d-add">+//   (buildVoteTypeLegend — the legend is ordered by provenance, not votes).</span>
 <span class="d-add">+// ==========================================================================</span>
 <span class="d-add">+// Vote-type registry — what this map is actually showing</span>
 <span class="d-add">+// ==========================================================================</span>
@@ -2618,6 +3164,92 @@
 <span class="d-ctx">   const blocks = params.blocks ?? edges.map((e) =&gt; [e]);</span>
 <span class="d-ctx">   const { targetDir, castEdges, clearEdges } = planBlockVote({</span>
 <span class="d-ctx">     mode, edgeIds: edges, label, direction, blocks,</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/EyeIcon.tsx</span>
+            <span class="stat"><span class="d-add">+47</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · shared icons</span>
+        <span class="ctx-sum">Sibling of CheckIcon: the small glyphs shared across components rather than owned by one</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">EyeIcon.tsx</span>
+        <span class="ctx-sum">~50 LOC — new. One component, two states</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header comment</span><span class="ol-sum">new — records WHY this one glyph is not in the house style</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">open eye</span><span class="ol-sum">new — the conventional lens + pupil</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">eye-with-slash</span><span class="ol-sum">new — the conventional off state</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The one glyph in the app deliberately NOT drawn to the square-cap/miter house language — recognition beats consistency for a control whose whole job is to be understood instantly</li><li>Standard geometry, standard round caps: a restyled eye is a shape people have to decode, and this one sits 14px tall in a dense list</li><li>`off` swaps the path rather than overlaying a slash on the open eye — stacking both muddies at this size</li><li>aria-hidden: the accessible name lives on the surrounding button, never doubled here</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/EyeIcon.tsx b/client-react/src/components/EyeIcon.tsx</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..895b325</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/EyeIcon.tsx</span>
+<span class="d-hunk">@@ -0,0 +1,47 @@</span>
+<span class="d-add">+interface EyeIconProps {</span>
+<span class="d-add">+  /** Width/height in px. */</span>
+<span class="d-add">+  size?: number;</span>
+<span class="d-add">+  /** Draw the struck-through (hidden) state. */</span>
+<span class="d-add">+  off?: boolean;</span>
+<span class="d-add">+  className?: string;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Visibility toggle glyph — the legend&#x27;s show/hide control (VoteTypeSelector).</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * The conventional eye / eye-with-slash pair, drawn to the standard Feather</span>
+<span class="d-add">+ * geometry on a 24 grid. Deliberately NOT restyled into the app&#x27;s square-capped</span>
+<span class="d-add">+ * house language (CheckIcon, the nav rail): this control&#x27;s whole job is to be</span>
+<span class="d-add">+ * recognised instantly, and recognition here comes from the shape people</span>
+<span class="d-add">+ * already know. Callers dim the `off` state so the two read apart at a glance</span>
+<span class="d-add">+ * as well as up close.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function EyeIcon({ size = 14, off = false, className }: EyeIconProps) {</span>
+<span class="d-add">+  return (</span>
+<span class="d-add">+    &lt;svg</span>
+<span class="d-add">+      className={className}</span>
+<span class="d-add">+      viewBox=&quot;0 0 24 24&quot;</span>
+<span class="d-add">+      width={size}</span>
+<span class="d-add">+      height={size}</span>
+<span class="d-add">+      fill=&quot;none&quot;</span>
+<span class="d-add">+      stroke=&quot;currentColor&quot;</span>
+<span class="d-add">+      strokeWidth=&quot;2&quot;</span>
+<span class="d-add">+      strokeLinecap=&quot;round&quot;</span>
+<span class="d-add">+      strokeLinejoin=&quot;round&quot;</span>
+<span class="d-add">+      aria-hidden=&quot;true&quot;</span>
+<span class="d-add">+      style={{ display: &quot;block&quot; }}</span>
+<span class="d-add">+    &gt;</span>
+<span class="d-add">+      {off ? (</span>
+<span class="d-add">+        &lt;&gt;</span>
+<span class="d-add">+          &lt;path d=&quot;M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24&quot; /&gt;</span>
+<span class="d-add">+          &lt;line x1=&quot;1&quot; y1=&quot;1&quot; x2=&quot;23&quot; y2=&quot;23&quot; /&gt;</span>
+<span class="d-add">+        &lt;/&gt;</span>
+<span class="d-add">+      ) : (</span>
+<span class="d-add">+        &lt;&gt;</span>
+<span class="d-add">+          &lt;path d=&quot;M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z&quot; /&gt;</span>
+<span class="d-add">+          &lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;3&quot; /&gt;</span>
+<span class="d-add">+        &lt;/&gt;</span>
+<span class="d-add">+      )}</span>
+<span class="d-add">+    &lt;/svg&gt;</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+}</span></pre>
         </details>
         
   </section>
