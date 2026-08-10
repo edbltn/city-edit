@@ -140,6 +140,25 @@
     scrolled sideways. Measured at twelve widths from 320 to 1440: none of them do now.</p>
   </a>
 
+  <a class="entry" href="./2026-08-09-donate-followups.html">
+    <div class="date">2026-08-09</div>
+    <h2>Fund per row — and three things that were not what they looked like</h2>
+    <p>The fund affordance moves off the card and onto the row: a <code>[$]</code> chip beside that
+    row's <code>[a][b][c]</code> source markers. That also lets the &quot;which proposal did you
+    mean&quot; rule be <em>deleted</em> rather than refined — a card is a place, but a row is a
+    proposal, so a corner with three proposals now offers three separate donations instead of none.
+    The other three items were each misdiagnosed by their symptom. The nav tooltip was not losing a
+    z-index fight: painted magenta it sits plainly on top of the Clear button — it was drawn in the
+    same paper fill and hairline border as the controls it lands on, so it dissolved into them
+    (inverting it fixes what raising it never would). The mobile source markers were not missing
+    either; driven headless at 390px with a real tap, the anchor is in the DOM, laid out and visible
+    — it was sitting at the half-strength resting state only a hover can lift, at 10px, which on a
+    phone is indistinguishable from absent. And the donation links populate nothing in prod because
+    the redirect still eats the query string there: a deploy, not a bug. The one thing that genuinely
+    cannot be done is the comment field — probed a parameter at a time, Donorbox ignores every
+    spelling of it while stamping UTM onto the record.</p>
+  </a>
+
   <a class="entry" href="./2026-08-09-donate-to-proposals.html">
     <div class="date">2026-08-09</div>
     <h2>Donate to a proposal</h2>
