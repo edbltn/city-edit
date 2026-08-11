@@ -2246,23 +2246,24 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
    it: the citation count varies row to row, so a chip placed after them would
    land at a different x on every line, and this one is a target you aim at.
 
-   The accent is what separates an ACTION from the citations next to it — same
-   size, same shape, different job. It has to carry the reset's own selector
-   weight to say so: the rule above is 0-3-0 and would otherwise flatten this
-   colour back to card ink. */
+   It sits a step QUIETER than those markers — the faintest thing in the row.
+   Asking for money should be available, not insistent: the citations are
+   evidence you may want, the vote controls are what the card is for, and this
+   only needs to be findable once you are looking for it. Hover brings it fully
+   up, the same way the markers recover. Colour is the card's own ink via the
+   Leaflet reset above (no accent — that read as the loudest thing on the row);
+   the opacity alone does the recessing. */
 .graph-proposal-row-fund {
   flex: 0 0 auto;
+  opacity: 0.35;
   font-size: 10px;
   line-height: 1.3;
   text-decoration: none;
   white-space: nowrap;
 }
 
-.leaflet-container .graph-proposal-card .graph-proposal-row-fund {
-  color: var(--accent);
-}
-
 .graph-proposal-row-fund:hover {
+  opacity: 1;
   text-decoration: underline;
 }
 
@@ -2276,6 +2277,12 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 @media (hover: none) {
   .graph-proposal-row-link {
     opacity: 0.85;
+  }
+
+  /* Lifted too, for the same no-hover reason — but kept a clear step below the
+     citations, so the ordering desktop shows survives onto touch. */
+  .graph-proposal-row-fund {
+    opacity: 0.55;
   }
 
   .graph-proposal-row-link,
