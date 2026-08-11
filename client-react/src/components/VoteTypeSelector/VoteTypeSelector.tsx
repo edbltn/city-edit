@@ -61,7 +61,7 @@ function formatNet(net: number): string {
 }
 
 export const VoteTypeSelector = memo(function VoteTypeSelector() {
-  const { voteType, setVoteType, pointType } = useRoute();
+  const { voteType, requestedVoteType, setVoteType, pointType } = useRoute();
   const theme = useTheme();
   const map = useMap();
   const hidden = useHiddenVoteTypes();
@@ -75,8 +75,11 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const inputValueRef = useRef("");
-  // The committed vote type when the field opened, restored if editing is cancelled.
-  const previousVoteTypeRef = useRef(voteType);
+  // The REQUESTED vote type when the field opened, restored if editing is
+  // cancelled. Deliberately the raw request (often "") rather than the displayed
+  // effective label: restoring the resolved label would commit a choice the user
+  // never made and stamp `vt=` onto the URL just for opening and closing the box.
+  const previousVoteTypeRef = useRef(requestedVoteType);
 
   const isStationNetwork = (map?.network ?? "streets") !== "streets";
 
@@ -215,13 +218,13 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
   );
 
   const handleFocus = useCallback(() => {
-    // Remember the committed type so Escape / empty-close can revert to it.
-    previousVoteTypeRef.current = voteType;
+    // Remember the requested type so Escape / empty-close can revert to it.
+    previousVoteTypeRef.current = requestedVoteType;
     setIsOpen(true);
     setInputValue("");
     inputValueRef.current = "";
     setHighlightedIndex(0);
-  }, [voteType]);
+  }, [requestedVoteType]);
 
   const handleBlur = useCallback(() => {}, []);
 

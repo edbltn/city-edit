@@ -198,6 +198,11 @@ interface RouteContextValue {
    *  requested label resolved through the map's valid set / most-voted-on-path /
    *  theme default (see resolveEffectiveVoteType). */
   voteType: string;
+  /** The RAW requested label — "" when the user hasn't picked one (no `vt` in the
+   *  URL, nothing chosen yet). Only the selector's cancel paths need this: they
+   *  restore what was requested, not what it resolved to, so backing out of the
+   *  dropdown doesn't pin the derived default into the selection (and the URL). */
+  requestedVoteType: string;
   pointType: "route" | "point";
   activeTool: ActiveTool;
   /** True when the start tool was explicitly armed from the legend to MOVE the
@@ -327,13 +332,16 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // Seeded synchronously from the URL so a deep link renders its points on the
   // first paint (and history entry 0 is correct). start/end/mids are DERIVED.
   const [selection, setSelectionRaw] = useState<Selection>(() => {
-    const defaultPointType = theme.inputMode === "point" || isStationNetwork ? "point" : "route";
-    const defaultVt = getDefaultVoteTypeForTheme(theme, defaultPointType);
-    if (typeof window === "undefined") return { waypoints: [], voteType: defaultVt };
+    // No `vt` in the URL → leave the REQUESTED type empty rather than seeding the
+    // map default. An empty request is what makes the fallback chain in
+    // resolveEffectiveVoteType do its job (top-voted type on the current path,
+    // else the map default), and it keeps `vt=` out of the address bar until the
+    // user actually picks a type. Never seed a default here.
+    if (typeof window === "undefined") return { waypoints: [], voteType: "" };
     const parsed = selectionFromParams(new URLSearchParams(window.location.search), {
       stationNetwork: isStationNetwork,
     });
-    if (!parsed) return { waypoints: [], voteType: defaultVt };
+    if (!parsed) return { waypoints: [], voteType: "" };
     return {
       waypoints: parsed.waypoints.map((pw, i) => ({
         coords: pw.coords,
@@ -348,7 +356,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
             ? { proposalId: pw.forcedProposalId }
             : null,
       })),
-      voteType: parsed.voteType ?? defaultVt,
+      voteType: parsed.voteType ?? "",
     };
   });
 
@@ -1629,6 +1637,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       isCalculatingSplit,
       routeEdgeIds,
       voteType: effectiveVoteType,
+      requestedVoteType: selection.voteType,
       pointType,
       activeTool,
       startReplaceArmed,
@@ -1686,6 +1695,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       isCalculatingSplit,
       routeEdgeIds,
       effectiveVoteType,
+      selection.voteType,
       pointType,
       activeTool,
       startReplaceArmed,
