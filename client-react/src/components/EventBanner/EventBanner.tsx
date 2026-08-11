@@ -23,6 +23,15 @@ const EVENT_URL = "https://luma.com/3mvlme31";
 /** City ids (MapConfig.cityId) this event is relevant to — it's an NYC walk. */
 const AUDIENCE_CITIES = new Set(["nyc"]);
 
+/**
+ * The banner sunsets itself the moment the event is over, so nobody is invited
+ * to a walk that already happened if the deploy that removes this component
+ * lags behind the date. Midnight ending Aug 22 2026, New York time (EDT, -04:00)
+ * — the offset is explicit because the cutoff is the event's local midnight, not
+ * the visitor's.
+ */
+const EVENT_ENDS_AT = Date.parse("2026-08-23T00:00:00-04:00");
+
 const STORAGE_KEY = `cityedit_banner_dismissed:${CAMPAIGN_ID}`;
 
 function wasDismissed(): boolean {
@@ -46,7 +55,7 @@ export function EventBanner() {
   const ref = useRef<HTMLElement | null>(null);
 
   const inAudience = AUDIENCE_CITIES.has(getCurrentMap()?.cityId ?? "");
-  const visible = !dismissed && inAudience;
+  const visible = !dismissed && inAudience && Date.now() < EVENT_ENDS_AT;
 
   const dismiss = useCallback(() => {
     rememberDismissal();
@@ -81,7 +90,7 @@ export function EventBanner() {
   return (
     <aside className="event-banner" ref={ref} aria-label="Upcoming event">
       <span className="event-banner-text">
-        Our first Tactical Urbanism Adventure — join us in NYC.
+        Join us for our first Tactical Urbanism Adventure on Aug. 22!
       </span>
       <a
         className="event-banner-cta"
