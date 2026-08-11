@@ -80,18 +80,16 @@ export function EventBanner() {
 
   return (
     <aside className="event-banner" ref={ref} aria-label="Upcoming event">
-      <div className="event-banner-body">
-        <span className="event-banner-eyebrow">First NYC Meetup</span>
-        <span className="event-banner-title">Tactical Urbanism Adventure</span>
-        <span className="event-banner-detail">Tree beds, flower bombs, clogged drains.</span>
-      </div>
+      <span className="event-banner-text">
+        Our first Tactical Urbanism Adventure — join us in NYC.
+      </span>
       <a
         className="event-banner-cta"
         href={EVENT_URL}
         target="_blank"
         rel="noopener noreferrer"
       >
-        RSVP <span aria-hidden>↗</span>
+        RSVP
       </a>
       <button
         className="event-banner-close"
