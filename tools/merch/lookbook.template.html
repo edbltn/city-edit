@@ -8,60 +8,36 @@
     font-display: block;
   }
 
-  /* ----------------------------------------------------------------------
-     Tokens. Dark-first on purpose: this proofs a black-garment print for a
-     product whose whole identity is a terminal. The light palette is the app's
-     own [data-basemap="light"] theme, so a light-mode reader gets City Edit's
-     other real skin rather than a washed-out inversion.
-     ---------------------------------------------------------------------- */
+  /* Dark-first: this proofs a black-garment print for a product whose whole
+     identity is a terminal. The light palette is the app's own light basemap
+     theme, so a light-mode reader gets City Edit's other real skin. */
   :root {
     color-scheme: dark;
     --paper: #0d0d0d;
-    --surface: #151513;
-    --surface-sunk: #0a0a09;
     --ink: #d4d4d4;
     --ink-strong: #ffffff;
     --ink-quiet: #86867e;
-    --hairline: rgba(212, 212, 212, 0.16);
-    --hairline-strong: rgba(212, 212, 212, 0.32);
-    --accent: #e0a23a;
-    --accent-sunk: rgba(224, 162, 58, 0.12);
-    --warn: #dc343b;
-    --warn-sunk: rgba(220, 52, 59, 0.10);
+    --hairline: rgba(212, 212, 212, 0.28);
   }
 
   @media (prefers-color-scheme: light) {
     :root:not([data-theme="dark"]) {
       color-scheme: light;
       --paper: #f4f5f0;
-      --surface: #ffffff;
-      --surface-sunk: #ecede6;
       --ink: #2b2b28;
       --ink-strong: #000000;
       --ink-quiet: #6d6d64;
-      --hairline: rgba(40, 40, 35, 0.16);
-      --hairline-strong: rgba(40, 40, 35, 0.34);
-      --accent: #9a6410;
-      --accent-sunk: rgba(154, 100, 16, 0.10);
-      --warn: #b21f26;
-      --warn-sunk: rgba(178, 31, 38, 0.08);
+      --hairline: rgba(40, 40, 35, 0.3);
     }
   }
 
   :root[data-theme="light"] {
     color-scheme: light;
     --paper: #f4f5f0;
-    --surface: #ffffff;
-    --surface-sunk: #ecede6;
     --ink: #2b2b28;
     --ink-strong: #000000;
     --ink-quiet: #6d6d64;
-    --hairline: rgba(40, 40, 35, 0.16);
-    --hairline-strong: rgba(40, 40, 35, 0.34);
-    --accent: #9a6410;
-    --accent-sunk: rgba(154, 100, 16, 0.10);
-    --warn: #b21f26;
-    --warn-sunk: rgba(178, 31, 38, 0.08);
+    --hairline: rgba(40, 40, 35, 0.3);
   }
 
   /* Blank colours are product data — they hold in both themes, because they
@@ -75,115 +51,47 @@
 
   body {
     margin: 0;
-    padding: 0 clamp(16px, 5vw, 64px) 96px;
+    padding: clamp(36px, 7vw, 76px) clamp(16px, 5vw, 64px) clamp(48px, 8vw, 96px);
     background: var(--paper);
     color: var(--ink);
     font-family: "Red Hat Mono", ui-monospace, "Courier New", monospace;
-    font-size: 15px;
-    line-height: 1.65;
+    font-size: 14px;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
 
-  .sheet { max-width: 1100px; margin: 0 auto; }
+  .sheet {
+    max-width: 900px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(28px, 5vw, 52px);
+  }
 
-  .label {
+  header { display: flex; align-items: center; gap: 20px; }
+  header .mark { width: clamp(52px, 8vw, 76px); color: var(--ink); flex: none; }
+  header .mark svg { width: 100%; height: auto; display: block; }
+  header h1 {
     margin: 0;
+    font-size: clamp(20px, 3.4vw, 30px);
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-strong);
+  }
+  header p {
+    margin: 2px 0 0;
     font-size: 11px;
-    letter-spacing: 0.26em;
+    letter-spacing: 0.24em;
     text-transform: uppercase;
     color: var(--ink-quiet);
   }
 
-  h1, h2, h3 { font-weight: 600; text-wrap: balance; margin: 0; }
-  h1 {
-    font-size: clamp(32px, 6.5vw, 62px);
-    letter-spacing: 0.10em;
-    line-height: 1.06;
-    color: var(--ink-strong);
-  }
-  h2 {
-    font-size: clamp(19px, 3vw, 25px);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--ink-strong);
-  }
-  h3 { font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-strong); }
+  figure { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  figure .art { padding: clamp(14px, 3vw, 32px); background: var(--ground); }
+  figure img { display: block; width: 100%; height: auto; }
 
-  p { margin: 0; max-width: 64ch; }
-  a { color: var(--accent); text-underline-offset: 3px; }
-  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-
-  code {
-    font-family: inherit;
-    font-size: 0.92em;
-    padding: 1px 5px;
-    background: var(--surface-sunk);
-    border: 1px solid var(--hairline);
-    color: var(--ink-strong);
-  }
-
-  .masthead {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: clamp(20px, 4vw, 40px);
-    align-items: end;
-    padding: clamp(40px, 7vw, 80px) 0 26px;
-    border-bottom: 1px solid var(--hairline-strong);
-  }
-  .masthead-mark { width: clamp(96px, 14vw, 160px); color: var(--ink); }
-  .masthead-mark svg { width: 100%; height: auto; display: block; }
-  .masthead-titles { display: flex; flex-direction: column; gap: 10px; }
-
-  .colophon {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 28px;
-    padding: 14px 0 0;
-    font-size: 12px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--ink-quiet);
-  }
-  .colophon b { color: var(--ink); font-weight: 600; }
-
-  .lede { padding: 34px 0 0; font-size: 17px; max-width: 66ch; }
-  .lede strong { color: var(--ink-strong); font-weight: 600; }
-
-  section { padding: clamp(48px, 7vw, 88px) 0 0; }
-
-  .section-head {
-    display: flex;
-    align-items: baseline;
-    gap: 20px;
-    padding-bottom: 28px;
-    border-bottom: 1px solid var(--hairline);
-  }
-  .section-head .label { margin-left: auto; white-space: nowrap; }
-
-  /* The hero proof — artwork on the garment it prints on, in registration
-     corners rather than a border, so it reads as a press proof. */
-  .proof { display: flex; flex-direction: column; gap: 12px; padding: 34px 0 0; }
-
-  .proof-frame {
-    position: relative;
-    padding: clamp(18px, 3vw, 36px);
-    background: var(--ground, var(--garment-black));
-  }
-  .proof-frame::before,
-  .proof-frame::after { content: ""; position: absolute; pointer-events: none; }
-  .proof-frame::before {
-    inset: 10px 0;
-    border-top: 1px solid var(--crop);
-    border-bottom: 1px solid var(--crop);
-  }
-  .proof-frame::after {
-    inset: 0 10px;
-    border-left: 1px solid var(--crop);
-    border-right: 1px solid var(--crop);
-  }
-  .proof-frame img { position: relative; display: block; width: 100%; height: auto; }
-
-  .dim {
+  figcaption {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -192,227 +100,42 @@
     text-transform: uppercase;
     color: var(--ink-quiet);
   }
-  .dim::before, .dim::after {
-    content: "";
-    flex: 1;
-    height: 1px;
-    background: var(--hairline-strong);
-  }
+  figcaption::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
 
-  .ways {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: clamp(20px, 3vw, 34px);
-    padding: 34px 0 0;
-  }
-  .way { display: flex; flex-direction: column; gap: 12px; }
-  .way-art { padding: 16px; background: var(--ground); }
-  .way-art img { display: block; width: 100%; height: auto; }
-  .way-meta { display: flex; flex-direction: column; gap: 4px; }
-  .way-meta b { color: var(--ink-strong); font-weight: 600; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; }
-  .way-meta span { font-size: 12px; color: var(--ink-quiet); }
-
-  dl.rows {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    gap: 7px 24px;
-    margin: 0;
-    padding: 30px 0 0;
-    font-size: 13px;
-  }
-  dl.rows dt {
-    font-size: 11px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--ink-quiet);
-    padding-top: 2px;
-  }
-  dl.rows dd { margin: 0; font-variant-numeric: tabular-nums; }
-  dl.rows dd b { color: var(--accent); font-weight: 600; }
-
-  .prose { display: flex; flex-direction: column; gap: 16px; padding: 30px 0 0; }
-  .prose strong { color: var(--ink-strong); font-weight: 600; }
-
-  ol.steps {
-    counter-reset: step;
-    list-style: none;
-    margin: 0;
-    padding: 32px 0 0;
-    display: flex;
-    flex-direction: column;
-    gap: 28px;
-  }
-  ol.steps > li {
-    counter-increment: step;
-    display: grid;
-    grid-template-columns: 46px minmax(0, 1fr);
-    gap: 20px;
-    align-items: start;
-  }
-  ol.steps > li::before {
-    content: counter(step, decimal-leading-zero);
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    color: var(--accent);
-    padding-top: 3px;
-    border-top: 2px solid var(--accent);
-  }
-  .step-body { display: flex; flex-direction: column; gap: 9px; }
-
-  .callout {
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-    padding: 16px 18px;
-    background: var(--tone-sunk, var(--accent-sunk));
-    border-left: 3px solid var(--tone, var(--accent));
-  }
-  .callout.is-warn { --tone: var(--warn); --tone-sunk: var(--warn-sunk); }
-  .callout .label { color: var(--tone, var(--accent)); }
-
-  footer {
-    margin-top: clamp(56px, 8vw, 96px);
-    padding-top: 22px;
-    border-top: 1px solid var(--hairline-strong);
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px 30px;
-    font-size: 11px;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    color: var(--ink-quiet);
-  }
+  .alts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: clamp(20px, 3vw, 32px); }
+  .alts figcaption b { color: var(--ink-strong); font-weight: 600; }
 </style>
 
 <div class="sheet">
 
-  <header class="masthead">
-    <div class="masthead-mark">{{MARK}}</div>
-    <div class="masthead-titles">
-      <p class="label">City Edit · merch · design 01</p>
+  <header>
+    <div class="mark">{{MARK}}</div>
+    <div>
       <h1>Isometric Grid</h1>
+      <p>City Edit · tee · 11 × 13 in</p>
     </div>
   </header>
 
-  <div class="colophon">
-    <span><b>1</b> design</span>
-    <span><b>2</b> colourways</span>
-    <span><b>300</b> dpi</span>
-    <span>built from <b>tools/merch</b></span>
+  <figure>
+    <div class="art" style="--ground: var(--garment-black)">
+      <img src="{{IMG:tee-isogrid--black}}" alt="Isometric Grid tee artwork: the City Edit logo grid built as an isometric city of grey blocks, with the letters CITY and EDIT standing as solid volumes on raised plinths, above the line REDRAW YOUR CITY." />
+    </div>
+    <figcaption>Black</figcaption>
+  </figure>
+
+  <div class="alts">
+    <figure>
+      <div class="art" style="--ground: var(--garment-natural)">
+        <img src="{{IMG:tee-isogrid--natural}}" alt="The same design on natural cotton: dark blocks and near-black letters on a pale ground." />
+      </div>
+      <figcaption><b>Natural</b></figcaption>
+    </figure>
+    <figure>
+      <div class="art" style="--ground: var(--garment-black)">
+        <img src="{{IMG:tee-isogrid--accent}}" alt="An option: the same design with the CITY EDIT letters in the brand amber instead of grey." />
+      </div>
+      <figcaption><b>Amber letters</b> — option</figcaption>
+    </figure>
   </div>
-
-  <p class="lede">
-    The logo's grid read as a crossword, and it was never meant to. It's a
-    street plan. So it's built as one: the same six-by-four cells lifted into
-    isometric, <strong>every cell a volume</strong> — plain cells low-rise, the
-    logo's crossed cells vacant lots, and the letter cells plinths with the
-    letter standing on them. Flatten it back and it is still the wordmark.
-  </p>
-
-  <section id="proof">
-    <div class="section-head">
-      <h2>The print</h2>
-      <p class="label">Artwork at print scale</p>
-    </div>
-
-    <div class="proof">
-      <div class="proof-frame" style="--crop: rgba(255,255,255,0.22)">
-        <img src="{{IMG:tee-isogrid--black}}" alt="Isometric Grid tee artwork: the City Edit logo grid built as an isometric city of grey blocks, with the letters CITY and EDIT standing as solid volumes on raised plinths, above the line REDRAW YOUR CITY." />
-      </div>
-      <p class="dim">11 in × 13 in · centre chest</p>
-    </div>
-
-    <dl class="rows">
-      <dt>File</dt><dd>tee-isogrid--black.png</dd>
-      <dt>Canvas</dt><dd>3300 × 3900 px</dd>
-      <dt>Ink</dt><dd>Greyscale, no accent — five flat tones</dd>
-      <dt>Price</dt><dd><b>$32</b> · base ~$11.75 · keep ~$19</dd>
-    </dl>
-  </section>
-
-  <section id="ways">
-    <div class="section-head">
-      <h2>Colourways</h2>
-      <p class="label">And one option to decide</p>
-    </div>
-
-    <div class="ways">
-      <div class="way">
-        <div class="way-art" style="--ground: var(--garment-natural)">
-          <img src="{{IMG:tee-isogrid--natural}}" alt="The same design on natural cotton: dark blocks and near-black letters on a pale ground." />
-        </div>
-        <div class="way-meta">
-          <b>Natural</b>
-          <span>Dark ink on pale cotton. Builds today.</span>
-        </div>
-      </div>
-      <div class="way">
-        <div class="way-art" style="--ground: var(--garment-black)">
-          <img src="{{IMG:tee-isogrid--accent}}" alt="An option: the same design with the CITY EDIT letters in the brand amber instead of grey." />
-        </div>
-        <div class="way-meta">
-          <b>Amber letters — option</b>
-          <span>The wordmark in the map accent. Two inks instead of one. Not built unless you want it.</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section id="how">
-    <div class="section-head">
-      <h2>How it's drawn</h2>
-      <p class="label">And what it took to get here</p>
-    </div>
-    <div class="prose">
-      <p><strong>The letters stand up rather than lie down.</strong> Two earlier passes lay them flat on the roofs, and both failed the same way — on the ground plane a glyph shears in both axes at once, so it reads as a smudge at chest scale. Stood up in the wall plane only the baseline slants; every vertical stem stays vertical, and the wordmark survives across a room.</p>
-      <p><strong>30° isometric, because it keeps the vertical axis vertical.</strong> That one property makes everything else cheap: a plane of constant height maps through a plain affine transform, and extruding a letterform is a pure screen translation — so the solid body is the front face stamped back up the page, not a solved silhouette.</p>
-      <p><strong>Fills are opaque, not stacked opacity.</strong> Drawn with transparency every block lets the one behind ghost through; on cloth it's worse, since overlapping half-tones print as compounding ink rather than the tone you asked for. Each face is pre-composited against the garment instead — which is also why a colourway is tied to its blank, and the black files will read off on navy or heather.</p>
-      <p><strong>The city is quiet on purpose.</strong> Blocks top out at half ink, the letters take all of it. Physically the light would be more even than that, but hierarchy beats accuracy on a garment.</p>
-      <p><strong>Plinths clear the low-rise.</strong> Letter cells sit higher than the tallest plain block, so nothing in front can crop a letter at the knee — and that's what lets every block draw first and every letter draw after, which is what killed the notches where a letterform extruded into space its neighbour also claimed.</p>
-    </div>
-  </section>
-
-  <section id="make">
-    <div class="section-head">
-      <h2>Getting it made</h2>
-      <p class="label">Seven steps, in order</p>
-    </div>
-
-    <p class="lede" style="padding-top: 0">
-      Use <a href="https://fourthwall.com/pricing">Fourthwall</a>: $0/month, and
-      it acts as <strong>merchant of record</strong>, so it registers, collects
-      and remits sales tax and VAT rather than leaving that to you. Printful +
-      Shopify is $39/month before a single sale and hands you the filing.
-    </p>
-
-    <ol class="steps">
-      <li><div class="step-body"><h3>Build the files</h3>
-        <p><code>cd tools/merch &amp;&amp; ./env/bin/python build_merch.py --lookbook --clean</code>. Deterministic — the same command always produces the same bytes.</p></div></li>
-      <li><div class="step-body"><h3>Open the shop, pick the blank</h3>
-        <p>A free Fourthwall shop and a black tee. Match the blank to <code>GARMENT_BLACK</code> (<code>#17171a</code>) — the fills are composited against it.</p></div></li>
-      <li><div class="step-body"><h3>Upload, fit to print area</h3>
-        <p>The canvas is already the right physical size. Leave the art transparent: the streets between blocks are the shirt, and flattening it onto a black rectangle prints a black box on a black shirt at triple the ink.</p></div></li>
-      <li><div class="step-body"><h3>Order a sample</h3>
-        <p>The step to not skip. Whether five flat greys stay five greys through a white underbase is not a thing a screen can tell you.</p>
-        <div class="callout"><p class="label">Check on arrival</p>
-        <p>Block faces still separating into distinct tones · letter edges crisp, no banding down the extrusions · the darkest face still reading as ink rather than as shirt.</p></div></div></li>
-      <li><div class="step-body"><h3>Price from the sample</h3>
-        <p>~$32 is roughly 2.5× base and in line with other civic-project shops.</p></div></li>
-      <li><div class="step-body"><h3>Point shop.cityedit.org at the store</h3>
-        <p>A CNAME at the registrar, then connect the subdomain in Fourthwall. One DNS record, zero deploys.</p>
-        <div class="callout is-warn"><p class="label">Do not add it to terraform</p>
-        <p><code>custom_domains</code> is for hostnames Cloud Run answers, and a Cloud Run mapping needs DNS pointed at Google — the opposite of what this needs.</p></div></div></li>
-      <li><div class="step-body"><h3>Turn on the nav link</h3>
-        <p>Set <code>SHOP_URL</code> in <code>NavRail.tsx</code> and deploy. The tote glyph stays hidden while it's empty, so the link can't ship ahead of the store.</p></div></li>
-    </ol>
-  </section>
-
-  <footer>
-    <span>City Edit</span>
-    <span>tools/merch/iso.py</span>
-    <span>Red Hat Mono · OFL</span>
-    <span>Proof — not a final print</span>
-  </footer>
 
 </div>
