@@ -116,7 +116,7 @@
       <ul><li>A card is a place; a ROW is a proposal. Putting the action on the card forced a rule (<code>fundableProposalName</code>: the top proposal, else a lone vote type, else nothing) whose entire job was to disambiguate something the rows already disambiguate by existing</li>
 <li>That rule also meant the commonest interesting case — a corner where three different things have been proposed — got NO fund affordance at all, because guessing would have been wrong</li></ul>
       <h3>What changed</h3>
-      <ul><li>The row carries a <code>[$]</code> chip beside its own <code>[a][b][c]</code> source markers: same bracket-token vocabulary, same size, in the accent because it is an ACTION and they are citations</li>
+      <ul><li>The row carries a <code>[$]</code> chip beside its own <code>[a][b][c]</code> source markers: same bracket-token vocabulary, same size, one step QUIETER — asking for money should be available, not insistent, so it is the faintest thing in the row and hover brings it up</li>
 <li>Each chip's link names its own vote type, and its deep link re-selects this point under that type — so two rows on one corner produce two distinguishable donations</li>
 <li>The chip LEADS the marker run instead of trailing it: citation counts vary row to row, so a chip after them would land at a different x on every line, and this is a thing you aim at</li>
 <li>The card-level <code>donate</code> prop becomes <code>donateUrlFor(label)</code>, and <code>fundableProposalName</code> is deleted outright — the question it answered no longer exists</li></ul>
@@ -185,7 +185,7 @@
     <ul><li>The z-index theory was <strong>disproved before anything was changed</strong>: a probe copy of the tooltip painted in magenta sits fully on top of the Clear button. The fix is a colour change, not a stacking change.</li>
 <li>Mobile was measured rather than assumed, twice over — once by deep link and once by a real <code>touchscreen.tap</code> on a pin at 390×844 with <code>hasTouch</code>. Both open the interactive card, both resolve sources, both render the anchor.</li>
 <li>Touch now reports <code>opacity 0.85</code>, <code>font-size 11px</code>, a <strong>22px</strong> tap height; desktop is unchanged at 0.5 / 10px / 13px.</li>
-<li>The chip renders in the accent on both: <code>rgb(192, 103, 74)</code> against this map's terracotta, with <code>utm_content = “Fund: Add bus lane — NYC Proposals”</code> and the host still <code>donate.cityedit.org</code>.</li>
+<li>The chip renders in card ink at <strong>0.35 opacity against the citations' 0.5</strong> (0.55 vs 0.85 on touch) — measurably subtler than the links it sits beside, which is the ordering it is supposed to have — with <code>utm_content = “Fund: Add bus lane — NYC Proposals”</code> and the host still <code>donate.cityedit.org</code>.</li>
 <li>Donorbox's prefill surface was enumerated by probe, not by documentation: 10 candidate parameters fetched one at a time against the live embed, and only first_name / email / amount / UTM come back populated.</li>
 <li>Full client suite green — <strong>409 passed, 1 skipped</strong> — and <code>npx tsc -b</code> clean.</li>
 <li>Seen in the app: the row reads <code>◆ Add bus lane [$] [a] 72/72 [−0│1│+1]</code>, and the inverted Feedback tooltip is legible sitting directly over Cast/Clear.</li></ul>
@@ -194,7 +194,7 @@
   <section class="card checklist" id="checklist">
     <div class="tag">For you</div>
     <h2>Manual checklist</h2>
-    <ul><li>Open <code>http://localhost:3000/m/nyc-proposals</code>, click a proposal — expect a small accent <code>[$]</code> right after the vote-type name, before any <code>[a]</code> markers, and no row at the foot of the card.</li>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-proposals</code>, click a proposal — expect a faint grey <code>[$]</code> right after the vote-type name, lighter than the <code>[a]</code> markers beside it, coming up to full strength on hover.</li>
 <li>Click a corner with SEVERAL vote types and confirm every row has its own chip — that is the case the old footer row had to skip.</li>
 <li>Hover a nav-rail icon (Blog / About / Feedback) and confirm the label is now a dark inverted chip that reads clearly over Cast/Clear.</li>
 <li>Hover <strong>Donate</strong> at a wide window and confirm NO tooltip appears (its label is already showing); narrow the window under 1080px and confirm the label hides and the tooltip returns.</li>
@@ -502,120 +502,6 @@
         </details>
         
         <details>
-          <summary><span class="fname">client-react/src/styles/globals.css</span>
-            <span class="stat"><span class="d-add">+37</span> / <span class="d-del">-28</span></span>
-          </summary>
-          
-    <div class="ctx">
-      <div class="ctx-tier ctx-sys">
-        <span class="ctx-k">System</span>
-        <span class="ctx-v">City Edit</span>
-        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
-      </div>
-      <div class="ctx-tier ctx-mod">
-        <span class="ctx-k">Module</span>
-        <span class="ctx-v">Client · global styles</span>
-        <span class="ctx-sum">Design tokens, the themeable palette, topbar, map controls, markers, and the proposal card&#x27;s whole visual language</span>
-      </div>
-      <div class="ctx-tier ctx-file">
-        <span class="ctx-k">File</span>
-        <span class="ctx-v">globals.css</span>
-        <span class="ctx-sum">~2,900 lines — this change swaps the fund row for a chip and repairs the marker run on touch</span>
-      </div>
-      <div class="ctx-map">
-        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
-        <ul class="ctx-outline"><li class="dim"><span class="ol-label">.graph-proposal-row-links</span><span class="ol-sum">unchanged — the run the chip joins</span></li><li class="dim"><span class="ol-label">.leaflet-container .graph-proposal-card a</span><span class="ol-sum">unchanged — the Leaflet-blue reset</span></li><li class="dim"><span class="ol-label">.graph-proposal-row-link / :hover</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">.graph-proposal-fund + -token</span><span class="ol-sum">REMOVED — the footer row&#x27;s styles</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.graph-proposal-row-fund</span><span class="ol-sum">new — the chip</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.leaflet-container … .graph-proposal-row-fund</span><span class="ol-sum">new — the accent, at the reset&#x27;s own weight</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">@media (hover: none)</span><span class="ol-sum">new — rest state + tap target for the whole run</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">.graph-vote</span><span class="ol-sum">unchanged</span></li></ul>
-      </div>
-      <div class="ctx-map">
-        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
-        <ol class="ctx-blocks"><li>The chip&#x27;s colour needs the reset&#x27;s own 0-3-0 selector: a plain class would be flattened back to card ink by the Leaflet fix from the first round</li><li>Rule ORDER is load-bearing: the (hover: none) block sits last so its 11px wins back from the base rule at equal specificity</li><li>0.85 rather than 1.0 on touch — still a footnote, just a legible one</li><li>padding: 4px 0 buys tap height (13px → 22px) without widening the row or touching desktop</li></ol>
-      </div>
-    </div>
-    
-          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
-<span class="d-meta">index 3a2655f..f7e56a9 100644</span>
-<span class="d-meta">--- a/client-react/src/styles/globals.css</span>
-<span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
-<span class="d-hunk">@@ -2240,39 +2240,48 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
-<span class="d-ctx">   text-decoration: underline;</span>
-<span class="d-ctx"> }</span>
-<span class="d-ctx"> </span>
-<span class="d-del">-/* Fund link — the card&#x27;s one outbound money action, and the only thing in the</span>
-<span class="d-del">-   modal that asks for something rather than reporting it. It gets exactly one</span>
-<span class="d-del">-   row at the foot of the card: a hairline box in the same bracket-token voice</span>
-<span class="d-del">-   as the [a][b][c] source markers and the [−│net│+] control, so it reads as</span>
-<span class="d-del">-   part of the card&#x27;s own language instead of a pasted-in donate button.</span>
-<span class="d-del">-</span>
-<span class="d-del">-   Quiet at rest — hairline border, held just under full strength — so it never</span>
-<span class="d-del">-   competes with the vote controls above it, which are what the card is FOR. It</span>
-<span class="d-del">-   comes fully up on hover, at which point it is the thing being pointed at. */</span>
-<span class="d-del">-.graph-proposal-fund {</span>
-<span class="d-del">-  display: flex;</span>
-<span class="d-del">-  align-items: baseline;</span>
-<span class="d-del">-  gap: 7px;</span>
-<span class="d-del">-  margin-top: 8px;</span>
-<span class="d-del">-  padding: 5px 7px;</span>
-<span class="d-del">-  border: 1px solid var(--hairline);</span>
-<span class="d-del">-  font-size: 11px;</span>
-<span class="d-add">+/* Fund chip — the row&#x27;s own donate link, in the same bracket-token voice as</span>
-<span class="d-add">+   the [a][b][c] markers it sits beside. It leads the run rather than trailing</span>
-<span class="d-add">+   it: the citation count varies row to row, so a chip placed after them would</span>
-<span class="d-add">+   land at a different x on every line, and this one is a target you aim at.</span>
-<span class="d-add">+</span>
-<span class="d-add">+   The accent is what separates an ACTION from the citations next to it — same</span>
-<span class="d-add">+   size, same shape, different job. It has to carry the reset&#x27;s own selector</span>
-<span class="d-add">+   weight to say so: the rule above is 0-3-0 and would otherwise flatten this</span>
-<span class="d-add">+   colour back to card ink. */</span>
-<span class="d-add">+.graph-proposal-row-fund {</span>
-<span class="d-add">+  flex: 0 0 auto;</span>
-<span class="d-add">+  font-size: 10px;</span>
-<span class="d-add">+  line-height: 1.3;</span>
-<span class="d-ctx">   text-decoration: none;</span>
-<span class="d-del">-  opacity: 0.82;</span>
-<span class="d-del">-  transition: border-color 120ms ease, background-color 120ms ease, opacity 120ms ease;</span>
-<span class="d-add">+  white-space: nowrap;</span>
-<span class="d-ctx"> }</span>
-<span class="d-ctx"> </span>
-<span class="d-del">-.graph-proposal-fund:hover {</span>
-<span class="d-del">-  border-color: var(--accent);</span>
-<span class="d-del">-  background: color-mix(in srgb, var(--accent) 12%, transparent);</span>
-<span class="d-del">-  opacity: 1;</span>
-<span class="d-add">+.leaflet-container .graph-proposal-card .graph-proposal-row-fund {</span>
-<span class="d-add">+  color: var(--accent);</span>
-<span class="d-ctx"> }</span>
-<span class="d-ctx"> </span>
-<span class="d-del">-/* The accent lives on the [$] alone — a single bright glyph on an otherwise</span>
-<span class="d-del">-   grey row draws the eye without shouting. */</span>
-<span class="d-del">-.graph-proposal-fund-token {</span>
-<span class="d-del">-  flex: 0 0 auto;</span>
-<span class="d-del">-  color: var(--accent);</span>
-<span class="d-add">+.graph-proposal-row-fund:hover {</span>
-<span class="d-add">+  text-decoration: underline;</span>
-<span class="d-add">+}</span>
-<span class="d-add">+</span>
-<span class="d-add">+/* Touch devices never reach the hover above, so the markers would sit at half</span>
-<span class="d-add">+   strength forever — and 10px at 50% opacity on a phone reads as nothing there</span>
-<span class="d-add">+   at all, which is exactly how these were being missed. Where there is no</span>
-<span class="d-add">+   hover to recover them they rest near full strength instead, and the whole</span>
-<span class="d-add">+   marker run (fund chip included) gets vertical padding so a fingertip has</span>
-<span class="d-add">+   something to land on without widening the row. Last in the file so it wins</span>
-<span class="d-add">+   the size back from the rules above at equal specificity. */</span>
-<span class="d-add">+@media (hover: none) {</span>
-<span class="d-add">+  .graph-proposal-row-link {</span>
-<span class="d-add">+    opacity: 0.85;</span>
-<span class="d-add">+  }</span>
-<span class="d-add">+</span>
-<span class="d-add">+  .graph-proposal-row-link,</span>
-<span class="d-add">+  .graph-proposal-row-fund {</span>
-<span class="d-add">+    padding: 4px 0;</span>
-<span class="d-add">+    font-size: 11px;</span>
-<span class="d-add">+  }</span>
-<span class="d-ctx"> }</span>
-<span class="d-ctx"> </span>
-<span class="d-ctx"> /* Connected vote control: [ −down │ net │ +up ] reads as ONE unit rather than</span></pre>
-        </details>
-        
-        <details>
           <summary><span class="fname">client-react/src/utils/donateLink.test.ts</span>
             <span class="stat"><span class="d-add">+15</span> / <span class="d-del">-20</span></span>
           </summary>
@@ -757,6 +643,203 @@
 <span class="d-ctx"> export interface ProposalDonationTarget {</span>
 <span class="d-ctx">   /** The proposal&#x27;s vote-type label — &quot;Protected bike lane&quot;. */</span>
 <span class="d-ctx">   name: string;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/styles/globals.css</span>
+            <span class="stat"><span class="d-add">+37</span> / <span class="d-del">-28</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · global styles</span>
+        <span class="ctx-sum">Design tokens, the themeable palette, topbar, map controls, markers, and the proposal card&#x27;s whole visual language</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">globals.css</span>
+        <span class="ctx-sum">~2,900 lines — this change swaps the fund row for a chip and repairs the marker run on touch</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">.graph-proposal-row-links</span><span class="ol-sum">unchanged — the run the chip joins</span></li><li class="dim"><span class="ol-label">.leaflet-container .graph-proposal-card a</span><span class="ol-sum">unchanged — the Leaflet-blue reset</span></li><li class="dim"><span class="ol-label">.graph-proposal-row-link / :hover</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">.graph-proposal-fund + -token</span><span class="ol-sum">REMOVED — the footer row&#x27;s styles</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.graph-proposal-row-fund</span><span class="ol-sum">new — the chip</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.graph-proposal-row-fund:hover</span><span class="ol-sum">new — recovers to full, like the citations</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">@media (hover: none)</span><span class="ol-sum">new — rest state + tap target for the whole run</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">.graph-vote</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The chip takes card ink straight from the Leaflet reset and recesses with opacity alone — an accent here read as the LOUDEST thing on the row, which is backwards for the ask</li><li>Rule ORDER is load-bearing: the (hover: none) block sits last so its 11px wins back from the base rule at equal specificity</li><li>0.85 rather than 1.0 on touch — still a footnote, just a legible one</li><li>padding: 4px 0 buys tap height (13px → 22px) without widening the row or touching desktop</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
+<span class="d-meta">index 3a2655f..f7e56a9 100644</span>
+<span class="d-meta">--- a/client-react/src/styles/globals.css</span>
+<span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
+<span class="d-hunk">@@ -2240,39 +2240,48 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx">   text-decoration: underline;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/* Fund link — the card&#x27;s one outbound money action, and the only thing in the</span>
+<span class="d-del">-   modal that asks for something rather than reporting it. It gets exactly one</span>
+<span class="d-del">-   row at the foot of the card: a hairline box in the same bracket-token voice</span>
+<span class="d-del">-   as the [a][b][c] source markers and the [−│net│+] control, so it reads as</span>
+<span class="d-del">-   part of the card&#x27;s own language instead of a pasted-in donate button.</span>
+<span class="d-del">-</span>
+<span class="d-del">-   Quiet at rest — hairline border, held just under full strength — so it never</span>
+<span class="d-del">-   competes with the vote controls above it, which are what the card is FOR. It</span>
+<span class="d-del">-   comes fully up on hover, at which point it is the thing being pointed at. */</span>
+<span class="d-del">-.graph-proposal-fund {</span>
+<span class="d-del">-  display: flex;</span>
+<span class="d-del">-  align-items: baseline;</span>
+<span class="d-del">-  gap: 7px;</span>
+<span class="d-del">-  margin-top: 8px;</span>
+<span class="d-del">-  padding: 5px 7px;</span>
+<span class="d-del">-  border: 1px solid var(--hairline);</span>
+<span class="d-del">-  font-size: 11px;</span>
+<span class="d-add">+/* Fund chip — the row&#x27;s own donate link, in the same bracket-token voice as</span>
+<span class="d-add">+   the [a][b][c] markers it sits beside. It leads the run rather than trailing</span>
+<span class="d-add">+   it: the citation count varies row to row, so a chip placed after them would</span>
+<span class="d-add">+   land at a different x on every line, and this one is a target you aim at.</span>
+<span class="d-add">+</span>
+<span class="d-add">+   The accent is what separates an ACTION from the citations next to it — same</span>
+<span class="d-add">+   size, same shape, different job. It has to carry the reset&#x27;s own selector</span>
+<span class="d-add">+   weight to say so: the rule above is 0-3-0 and would otherwise flatten this</span>
+<span class="d-add">+   colour back to card ink. */</span>
+<span class="d-add">+.graph-proposal-row-fund {</span>
+<span class="d-add">+  flex: 0 0 auto;</span>
+<span class="d-add">+  font-size: 10px;</span>
+<span class="d-add">+  line-height: 1.3;</span>
+<span class="d-ctx">   text-decoration: none;</span>
+<span class="d-del">-  opacity: 0.82;</span>
+<span class="d-del">-  transition: border-color 120ms ease, background-color 120ms ease, opacity 120ms ease;</span>
+<span class="d-add">+  white-space: nowrap;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-.graph-proposal-fund:hover {</span>
+<span class="d-del">-  border-color: var(--accent);</span>
+<span class="d-del">-  background: color-mix(in srgb, var(--accent) 12%, transparent);</span>
+<span class="d-del">-  opacity: 1;</span>
+<span class="d-add">+.leaflet-container .graph-proposal-card .graph-proposal-row-fund {</span>
+<span class="d-add">+  color: var(--accent);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/* The accent lives on the [$] alone — a single bright glyph on an otherwise</span>
+<span class="d-del">-   grey row draws the eye without shouting. */</span>
+<span class="d-del">-.graph-proposal-fund-token {</span>
+<span class="d-del">-  flex: 0 0 auto;</span>
+<span class="d-del">-  color: var(--accent);</span>
+<span class="d-add">+.graph-proposal-row-fund:hover {</span>
+<span class="d-add">+  text-decoration: underline;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* Touch devices never reach the hover above, so the markers would sit at half</span>
+<span class="d-add">+   strength forever — and 10px at 50% opacity on a phone reads as nothing there</span>
+<span class="d-add">+   at all, which is exactly how these were being missed. Where there is no</span>
+<span class="d-add">+   hover to recover them they rest near full strength instead, and the whole</span>
+<span class="d-add">+   marker run (fund chip included) gets vertical padding so a fingertip has</span>
+<span class="d-add">+   something to land on without widening the row. Last in the file so it wins</span>
+<span class="d-add">+   the size back from the rules above at equal specificity. */</span>
+<span class="d-add">+@media (hover: none) {</span>
+<span class="d-add">+  .graph-proposal-row-link {</span>
+<span class="d-add">+    opacity: 0.85;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  .graph-proposal-row-link,</span>
+<span class="d-add">+  .graph-proposal-row-fund {</span>
+<span class="d-add">+    padding: 4px 0;</span>
+<span class="d-add">+    font-size: 11px;</span>
+<span class="d-add">+  }</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /* Connected vote control: [ −down │ net │ +up ] reads as ONE unit rather than</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/styles/globals.css</span>
+            <span class="stat"><span class="d-add">+15</span> / <span class="d-del">-8</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · global styles</span>
+        <span class="ctx-sum">Design tokens, the themeable palette, topbar, map controls, markers, and the proposal card&#x27;s whole visual language</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">globals.css</span>
+        <span class="ctx-sum">~2,900 lines — this change swaps the fund row for a chip and repairs the marker run on touch</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">.graph-proposal-row-links</span><span class="ol-sum">unchanged — the run the chip joins</span></li><li class="dim"><span class="ol-label">.leaflet-container .graph-proposal-card a</span><span class="ol-sum">unchanged — the Leaflet-blue reset</span></li><li class="dim"><span class="ol-label">.graph-proposal-row-link / :hover</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">.graph-proposal-fund + -token</span><span class="ol-sum">REMOVED — the footer row&#x27;s styles</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.graph-proposal-row-fund</span><span class="ol-sum">new — the chip</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.graph-proposal-row-fund:hover</span><span class="ol-sum">new — recovers to full, like the citations</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">@media (hover: none)</span><span class="ol-sum">new — rest state + tap target for the whole run</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">.graph-vote</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The chip takes card ink straight from the Leaflet reset and recesses with opacity alone — an accent here read as the LOUDEST thing on the row, which is backwards for the ask</li><li>Rule ORDER is load-bearing: the (hover: none) block sits last so its 11px wins back from the base rule at equal specificity</li><li>0.85 rather than 1.0 on touch — still a footnote, just a legible one</li><li>padding: 4px 0 buys tap height (13px → 22px) without widening the row or touching desktop</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
+<span class="d-meta">index 32bca59..5824d40 100644</span>
+<span class="d-meta">--- a/client-react/src/styles/globals.css</span>
+<span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
+<span class="d-hunk">@@ -2246,23 +2246,24 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx">    it: the citation count varies row to row, so a chip placed after them would</span>
+<span class="d-ctx">    land at a different x on every line, and this one is a target you aim at.</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-   The accent is what separates an ACTION from the citations next to it — same</span>
+<span class="d-del">-   size, same shape, different job. It has to carry the reset&#x27;s own selector</span>
+<span class="d-del">-   weight to say so: the rule above is 0-3-0 and would otherwise flatten this</span>
+<span class="d-del">-   colour back to card ink. */</span>
+<span class="d-add">+   It sits a step QUIETER than those markers — the faintest thing in the row.</span>
+<span class="d-add">+   Asking for money should be available, not insistent: the citations are</span>
+<span class="d-add">+   evidence you may want, the vote controls are what the card is for, and this</span>
+<span class="d-add">+   only needs to be findable once you are looking for it. Hover brings it fully</span>
+<span class="d-add">+   up, the same way the markers recover. Colour is the card&#x27;s own ink via the</span>
+<span class="d-add">+   Leaflet reset above (no accent — that read as the loudest thing on the row);</span>
+<span class="d-add">+   the opacity alone does the recessing. */</span>
+<span class="d-ctx"> .graph-proposal-row-fund {</span>
+<span class="d-ctx">   flex: 0 0 auto;</span>
+<span class="d-add">+  opacity: 0.35;</span>
+<span class="d-ctx">   font-size: 10px;</span>
+<span class="d-ctx">   line-height: 1.3;</span>
+<span class="d-ctx">   text-decoration: none;</span>
+<span class="d-ctx">   white-space: nowrap;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-.leaflet-container .graph-proposal-card .graph-proposal-row-fund {</span>
+<span class="d-del">-  color: var(--accent);</span>
+<span class="d-del">-}</span>
+<span class="d-del">-</span>
+<span class="d-ctx"> .graph-proposal-row-fund:hover {</span>
+<span class="d-add">+  opacity: 1;</span>
+<span class="d-ctx">   text-decoration: underline;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -2278,6 +2279,12 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx">     opacity: 0.85;</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  /* Lifted too, for the same no-hover reason — but kept a clear step below the</span>
+<span class="d-add">+     citations, so the ordering desktop shows survives onto touch. */</span>
+<span class="d-add">+  .graph-proposal-row-fund {</span>
+<span class="d-add">+    opacity: 0.55;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   .graph-proposal-row-link,</span>
+<span class="d-ctx">   .graph-proposal-row-fund {</span>
+<span class="d-ctx">     padding: 4px 0;</span></pre>
         </details>
         
   </section>

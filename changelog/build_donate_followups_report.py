@@ -66,7 +66,7 @@ SECTIONS = [
             "That rule also meant the commonest interesting case \u2014 a corner where three different things have been proposed \u2014 got NO fund affordance at all, because guessing would have been wrong",
         ],
         "fixes": [
-            "The row carries a <code>[$]</code> chip beside its own <code>[a][b][c]</code> source markers: same bracket-token vocabulary, same size, in the accent because it is an ACTION and they are citations",
+            "The row carries a <code>[$]</code> chip beside its own <code>[a][b][c]</code> source markers: same bracket-token vocabulary, same size, one step QUIETER \u2014 asking for money should be available, not insistent, so it is the faintest thing in the row and hover brings it up",
             "Each chip's link names its own vote type, and its deep link re-selects this point under that type \u2014 so two rows on one corner produce two distinguishable donations",
             "The chip LEADS the marker run instead of trailing it: citation counts vary row to row, so a chip after them would land at a different x on every line, and this is a thing you aim at",
             "The card-level <code>donate</code> prop becomes <code>donateUrlFor(label)</code>, and <code>fundableProposalName</code> is deleted outright \u2014 the question it answered no longer exists",
@@ -130,14 +130,14 @@ VERIFY = [
     "The z-index theory was <strong>disproved before anything was changed</strong>: a probe copy of the tooltip painted in magenta sits fully on top of the Clear button. The fix is a colour change, not a stacking change.",
     "Mobile was measured rather than assumed, twice over \u2014 once by deep link and once by a real <code>touchscreen.tap</code> on a pin at 390\u00d7844 with <code>hasTouch</code>. Both open the interactive card, both resolve sources, both render the anchor.",
     "Touch now reports <code>opacity 0.85</code>, <code>font-size 11px</code>, a <strong>22px</strong> tap height; desktop is unchanged at 0.5 / 10px / 13px.",
-    "The chip renders in the accent on both: <code>rgb(192, 103, 74)</code> against this map's terracotta, with <code>utm_content = \u201cFund: Add bus lane \u2014 NYC Proposals\u201d</code> and the host still <code>donate.cityedit.org</code>.",
+    "The chip renders in card ink at <strong>0.35 opacity against the citations' 0.5</strong> (0.55 vs 0.85 on touch) \u2014 measurably subtler than the links it sits beside, which is the ordering it is supposed to have \u2014 with <code>utm_content = \u201cFund: Add bus lane \u2014 NYC Proposals\u201d</code> and the host still <code>donate.cityedit.org</code>.",
     "Donorbox's prefill surface was enumerated by probe, not by documentation: 10 candidate parameters fetched one at a time against the live embed, and only first_name / email / amount / UTM come back populated.",
     "Full client suite green \u2014 <strong>409 passed, 1 skipped</strong> \u2014 and <code>npx tsc -b</code> clean.",
     "Seen in the app: the row reads <code>\u25c6 Add bus lane [$] [a] 72/72 [\u22120\u25021\u2502+1]</code>, and the inverted Feedback tooltip is legible sitting directly over Cast/Clear.",
 ]
 
 CHECKLIST = [
-    "Open <code>http://localhost:3000/m/nyc-proposals</code>, click a proposal \u2014 expect a small accent <code>[$]</code> right after the vote-type name, before any <code>[a]</code> markers, and no row at the foot of the card.",
+    "Open <code>http://localhost:3000/m/nyc-proposals</code>, click a proposal \u2014 expect a faint grey <code>[$]</code> right after the vote-type name, lighter than the <code>[a]</code> markers beside it, coming up to full strength on hover.",
     "Click a corner with SEVERAL vote types and confirm every row has its own chip \u2014 that is the case the old footer row had to skip.",
     "Hover a nav-rail icon (Blog / About / Feedback) and confirm the label is now a dark inverted chip that reads clearly over Cast/Clear.",
     "Hover <strong>Donate</strong> at a wide window and confirm NO tooltip appears (its label is already showing); narrow the window under 1080px and confirm the label hides and the tooltip returns.",
@@ -232,12 +232,12 @@ FILE_CONTEXT = {
             (".graph-proposal-row-link / :hover", "unchanged", False),
             (".graph-proposal-fund + -token", "REMOVED \u2014 the footer row's styles", True),
             (".graph-proposal-row-fund", "new \u2014 the chip", True),
-            (".leaflet-container \u2026 .graph-proposal-row-fund", "new \u2014 the accent, at the reset's own weight", True),
+            (".graph-proposal-row-fund:hover", "new \u2014 recovers to full, like the citations", True),
             ("@media (hover: none)", "new \u2014 rest state + tap target for the whole run", True),
             (".graph-vote", "unchanged", False),
         ],
         "blocks": [
-            "The chip's colour needs the reset's own 0-3-0 selector: a plain class would be flattened back to card ink by the Leaflet fix from the first round",
+            "The chip takes card ink straight from the Leaflet reset and recesses with opacity alone \u2014 an accent here read as the LOUDEST thing on the row, which is backwards for the ask",
             "Rule ORDER is load-bearing: the (hover: none) block sits last so its 11px wins back from the base rule at equal specificity",
             "0.85 rather than 1.0 on touch \u2014 still a footnote, just a legible one",
             "padding: 4px 0 buys tap height (13px \u2192 22px) without widening the row or touching desktop",
