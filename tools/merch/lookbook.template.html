@@ -1,4 +1,4 @@
-<title>City Edit — Isometric Grid</title>
+<title>City Edit — Merch</title>
 
 <style>
   @font-face {
@@ -71,6 +71,19 @@
   header { display: flex; align-items: center; gap: 20px; }
   header .mark { width: clamp(52px, 8vw, 76px); color: var(--ink); flex: none; }
   header .mark svg { width: 100%; height: auto; display: block; }
+  h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-strong);
+  }
+  h2 + p { margin: 2px 0 0; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-quiet); }
+
+  section { display: flex; flex-direction: column; gap: clamp(18px, 3vw, 28px); }
+  section > hgroup { padding-bottom: 14px; border-bottom: 1px solid var(--hairline); }
+
   header h1 {
     margin: 0;
     font-size: clamp(20px, 3.4vw, 30px);
@@ -111,31 +124,73 @@
   <header>
     <div class="mark">{{MARK}}</div>
     <div>
-      <h1>Isometric Grid</h1>
-      <p>City Edit · tee · 11 × 13 in</p>
+      <h1>Merch</h1>
+      <p>City Edit · tees · 11 × 13 in</p>
     </div>
   </header>
 
-  <figure>
-    <div class="art" style="--ground: var(--garment-black)">
-      <img src="{{IMG:tee-isogrid--black}}" alt="Isometric Grid tee artwork: the City Edit logo grid built as an isometric city of grey blocks, with the letters CITY and EDIT standing as solid volumes on raised plinths, above the line REDRAW YOUR CITY." />
-    </div>
-    <figcaption>Black</figcaption>
-  </figure>
+  <section>
+    <hgroup>
+      <h2>01 — Isometric Grid</h2>
+      <p>The logo grid, built as the street plan it always was</p>
+    </hgroup>
 
-  <div class="alts">
-    <figure>
-      <div class="art" style="--ground: var(--garment-natural)">
-        <img src="{{IMG:tee-isogrid--natural}}" alt="The same design on natural cotton: dark blocks and near-black letters on a pale ground." />
-      </div>
-      <figcaption><b>Natural</b></figcaption>
-    </figure>
     <figure>
       <div class="art" style="--ground: var(--garment-black)">
-        <img src="{{IMG:tee-isogrid--accent}}" alt="An option: the same design with the CITY EDIT letters in the brand amber instead of grey." />
+        <img src="{{IMG:tee-isogrid--black}}" alt="Isometric Grid tee: the City Edit logo grid built as an isometric city of grey blocks, with CITY and EDIT standing as solid volumes on raised plinths, above the line REDRAW YOUR CITY." />
       </div>
-      <figcaption><b>Amber letters</b> — option</figcaption>
+      <figcaption>Black</figcaption>
     </figure>
-  </div>
+
+    <div class="alts">
+      <figure>
+        <div class="art" style="--ground: var(--garment-natural)">
+          <img src="{{IMG:tee-isogrid--natural}}" alt="The same design on natural cotton: dark blocks and near-black letters on a pale ground." />
+        </div>
+        <figcaption><b>Natural</b></figcaption>
+      </figure>
+      <figure>
+        <div class="art" style="--ground: var(--garment-black)">
+          <img src="{{IMG:tee-isogrid--accent}}" alt="An option: the same design with the CITY EDIT letters in the brand amber instead of grey." />
+        </div>
+        <figcaption><b>Amber letters</b> — option</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <hgroup>
+      <h2>02 — Single Issue Voter</h2>
+      <p>The code goes to one proposal. Each wearer's is different.</p>
+    </hgroup>
+
+    <figure>
+      <div class="art" style="--ground: var(--garment-black)">
+        <img src="{{IMG:tee-single-issue--black}}" alt="Single Issue Voter tee: the words SINGLE, ISSUE and VOTER stacked in large justified monospace capitals, above a QR code, above the line IT'S PETTIER THAN YOU THINK." />
+      </div>
+      <figcaption>Black</figcaption>
+    </figure>
+
+    <div class="alts">
+      <figure>
+        <div class="art" style="--ground: var(--garment-natural)">
+          <img src="{{IMG:tee-single-issue--natural}}" alt="The same design on natural cotton, with the code printed directly on the fabric instead of in a light panel." />
+        </div>
+        <figcaption><b>Natural</b></figcaption>
+      </figure>
+      <figure>
+        <div class="art" style="--ground: var(--garment-black)">
+          <img src="{{IMG:tee-single-issue--quiet}}" alt="Subline alternate: AND I WON'T SHUT UP ABOUT IT." />
+        </div>
+        <figcaption><b>Subline B</b> — alternate</figcaption>
+      </figure>
+      <figure>
+        <div class="art" style="--ground: var(--garment-black)">
+          <img src="{{IMG:tee-single-issue--scan}}" alt="Subline alternate: SCAN TO SEE HOW PETTY." />
+        </div>
+        <figcaption><b>Subline C</b> — alternate</figcaption>
+      </figure>
+    </div>
+  </section>
 
 </div>

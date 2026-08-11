@@ -61,6 +61,23 @@ def text_width(s: str, size: float, weight: int = 400, tracking: float = 0.0) ->
     return len(s) * step - size * tracking
 
 
+def size_to_fit(s: str, width: float, weight: int = 400,
+                tracking: float = 0.0) -> float:
+    """
+    The point size at which `s` sets to exactly `width`.
+
+    Stacked poster type is justified by size, not by tracking: every line is
+    flush to the same measure and the words with fewer letters simply come out
+    bigger. Tracking a five-letter word out to match a twelve-letter one instead
+    leaves gaps you could park in.
+    """
+    f = face(weight)
+    n = len(s)
+    if n == 0:
+        return 0.0
+    return width / (n * f.advance / f.upem + (n - 1) * tracking)
+
+
 def text(
     s: str,
     x: float,

@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import designs as d  # noqa: E402
 import iso  # noqa: E402
+import qr_tee  # noqa: E402
 
 OUT = Path(__file__).parent / "out"
 FONT_TTF = Path(__file__).parent / "fonts" / "RedHatMono[wght].ttf"
@@ -63,6 +64,8 @@ def mug(name, fn, title):
 
 PRODUCTS = [
     tee("tee-isogrid", iso.tee_isogrid, "Isometric Grid",
+        "Centre chest, front", '11" × 13"', ground=True),
+    tee("tee-single-issue", qr_tee.tee_single_issue, "Single Issue Voter",
         "Centre chest, front", '11" × 13"', ground=True),
     tee("tee-desire-path", d.tee_desire_path, "Desire Path",
         "Full front", '11" × 14"'),
@@ -156,13 +159,20 @@ def build_lookbook() -> Path:
         f'{mark_body}</svg>'
     )
 
-    # An amber-lettered variant, rendered only for the sheet: it is an option to
-    # decide on, not a colourway anyone has asked to print yet.
-    aw, ah, abody = iso.tee_isogrid(INK_ON_DARK, d.ACCENT, GARMENT_BLACK,
-                                    letter_ink=d.ACCENT)
-    cairosvg.svg2png(bytestring=d.svg(aw, ah, abody).encode(),
-                     write_to=str(preview_dir / "tee-isogrid--accent.png"),
-                     output_width=760, output_height=round(760 * ah / aw))
+    # Variants rendered only for the sheet: options still to be decided on, not
+    # colourways anyone has asked to print.
+    def sheet_variant(name, w, h, markup):
+        cairosvg.svg2png(bytestring=d.svg(w, h, markup).encode(),
+                         write_to=str(preview_dir / f"{name}.png"),
+                         output_width=760, output_height=round(760 * h / w))
+
+    sheet_variant("tee-isogrid--accent",
+                  *iso.tee_isogrid(INK_ON_DARK, d.ACCENT, GARMENT_BLACK,
+                                   letter_ink=d.ACCENT))
+    for key in ("quiet", "scan"):
+        sheet_variant(f"tee-single-issue--{key}",
+                      *qr_tee.tee_single_issue(INK_ON_DARK, d.ACCENT,
+                                               GARMENT_BLACK, subline=key))
 
     html = template.replace("{{FONT}}", data_uri(FONT_WOFF2, "font/woff2"))
     html = html.replace("{{MARK}}", mark)
@@ -182,8 +192,12 @@ def main():
                     help="also write 760px-wide web previews to out/preview/")
     ap.add_argument("--lookbook", action="store_true",
                     help="also build the self-contained proof sheet (implies --previews)")
+    ap.add_argument("--qr-url", default=qr_tee.DEFAULT_URL,
+                    help="what the Single Issue Voter code points at")
     ap.add_argument("--clean", action="store_true", help="wipe out/ first")
     args = ap.parse_args()
+
+    qr_tee.DEFAULT_URL = args.qr_url
 
     if args.clean and OUT.exists():
         shutil.rmtree(OUT)
