@@ -90,6 +90,13 @@ ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 # registers the vote while the total stays put.
 MAX_DEVICES_PER_IP_PER_EDGE = int(os.environ.get("MAX_DEVICES_PER_IP_PER_EDGE", "10"))
 
+# Share of a route's consecutive OSM node pairs that must resolve to votable edges
+# before /api/routes stops complaining. Below this the topology is not the superset
+# of OSRM's foot network it's supposed to be (docs/algorithms/04-route-finding.md),
+# and every unmapped stretch silently drops its votes. Not 1.0: OSRM legitimately
+# repeats a node at a via/turn, so a route or two short of perfect is normal.
+ROUTE_EDGE_COVERAGE_MIN = 0.8
+
 
 def _admin_authorized() -> bool:
     """True when ADMIN_TOKEN is configured and matches the request header."""
@@ -1357,8 +1364,22 @@ def calculate_route():
             edge_ids = vote_store.osm_nodes_to_edge_ids(
                 osm_node_ids, rmap.graph.osm_to_graph_idx, rmap.graph.node_pair_to_edge,
             )
+        # A route that resolves to NOTHING is loud; one that resolves to HALF was
+        # silent, and it loses exactly as many votes per unmapped metre. It means
+        # OSRM routed over ways the votable graph doesn't carry — in practice the
+        # graph and OSRM were built from different OSM extracts, and the ways
+        # retagged in between (e.g. Central Park's drives, cycleway →
+        # unclassified+foot=yes) flip foot-routability.
+        pairs = max(len(osm_node_ids) - 1, 0)
         if not edge_ids:
             logger.warning(f"[ROUTE] {rmap.slug}: OSRM route resolved to 0 edge ids")
+        elif pairs and len(edge_ids) < ROUTE_EDGE_COVERAGE_MIN * pairs:
+            logger.warning(
+                f"[ROUTE] {rmap.slug}: only {len(edge_ids)}/{pairs} routed node pairs "
+                f"mapped to votable edges — votes along the unmapped stretch are LOST. "
+                f"Rebuild so graph and OSRM share one extract; "
+                f"tests/validate_osrm_topology.py measures the gap."
+            )
 
         return jsonify({
             "route": route,
