@@ -13,7 +13,7 @@ mkdir -p "$OUT/png"
 for f in "$OUT"/*.svg; do
   n="$(basename "$f" .svg)"
   "$SHELL_BIN" --disable-gpu --virtual-time-budget=8000 --window-size=1600,900 \
-    --force-device-scale-factor=1.5 --hide-scrollbars \
+    --force-device-scale-factor=2 --hide-scrollbars \
     --screenshot="$OUT/png/$n.png" "file://$f" 2>/dev/null
 done
 
