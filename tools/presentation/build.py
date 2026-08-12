@@ -194,9 +194,9 @@ def slides_blocks():
         lines(TEXT_X, [
             "Per vote type, the **6 strongest edges**",
             "compete, ranked by **net votes**.",
-            "Minimum to qualify: **net > 100**.",
-            "Same-type pins stay **600 m** apart.",
-            "**One pin per block**, **20 pins** per map.",
+            "**No minimum** — one vote can earn a pin.",
+            "Same-type pins stay **1 km** apart.",
+            "**One pin per block**, **50 pins** per map.",
         ]))
 
 
