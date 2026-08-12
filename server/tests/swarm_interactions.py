@@ -52,9 +52,14 @@ BUDGETS = {
     "reverse_geocode": (15,  3.0, 0.05),
 }
 
+# Route-kind labels that ALREADY exist in the global vote_types registry.
+# Deliberately excludes "More trees"/"Better lighting": those rows carry a NULL
+# point_type, and get_or_create_vote_type_id FILLS a NULL kind from the first
+# cast that witnesses it — so a swarm run would permanently stamp them 'route'
+# in every tenant's registry. Only cast labels whose kind is already recorded.
 VOTE_TYPES = [
-    "Improve bike lane", "Add bike lane", "Widen sidewalk",
-    "More trees", "Better lighting",
+    "Improve bike lane", "Add bike lane", "Add protected bike lane",
+    "Widen bike lane", "Widen sidewalk",
 ]
 
 
