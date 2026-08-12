@@ -14,6 +14,7 @@ import base64
 import heapq
 import json
 import math
+import re
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -279,25 +280,32 @@ def _xml(t):
     return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def text_block(x, y, heading, lines, size=21, leading=41, dim=0.62):
-    out = [f'<text x="{x}" y="{y}" font-size="13.5" letter-spacing="5" fill="{INK}" '
-           f'fill-opacity="0.42">{_xml(heading.upper())}</text>',
-           f'<line x1="{x}" y1="{y + 18}" x2="{x + 430}" y2="{y + 18}" stroke="{INK}" '
-           f'stroke-opacity="0.22" stroke-width="1"/>']
-    ty = y + 62
-    for raw in lines:
-        spans = []
-        for i, part in enumerate(raw.split("**")):
-            if not part:
-                continue
-            if i % 2:
-                spans.append(f'<tspan font-weight="700" fill="{SEL}">{_xml(part)}</tspan>')
-            else:
-                spans.append(f'<tspan fill-opacity="{dim}">{_xml(part)}</tspan>')
-        out.append(f'<text x="{x}" y="{ty}" font-size="{size}" fill="{INK}" '
-                   f'xml:space="preserve">{"".join(spans)}</text>')
-        ty += leading
-    return "".join(out)
+# Inline emphasis: **bold white**, @@start colour@@, ##end colour##.
+_MARKS = {"**": (SEL, "700"), "@@": (START, "700"), "##": (END, "700")}
+_TOKEN = re.compile(r"(\*\*.*?\*\*|@@.*?@@|##.*?##)")
+
+
+def rich(x, y, text, size=21, dim=0.62, anchor="start"):
+    """One line of copy — one face, one size; only weight and colour vary."""
+    spans = []
+    for part in _TOKEN.split(text):
+        if not part:
+            continue
+        mark = part[:2]
+        if mark in _MARKS and part.endswith(mark) and len(part) > 4:
+            colour, weight = _MARKS[mark]
+            spans.append(f'<tspan font-weight="{weight}" fill="{colour}">{_xml(part[2:-2])}</tspan>')
+        else:
+            spans.append(f'<tspan fill-opacity="{dim}">{_xml(part)}</tspan>')
+    return (f'<text x="{x}" y="{y}" font-size="{size}" fill="{INK}" text-anchor="{anchor}" '
+            f'xml:space="preserve">{"".join(spans)}</text>')
+
+
+def lines(x, lines_, size=25, leading=46, mid=450):
+    """The slide's copy: plain mono at one size, keywords bold. No subtitles,
+       no second face — the only variation is what the words say."""
+    y0 = mid - (len(lines_) - 1) * leading / 2
+    return "".join(rich(x, y0 + i * leading, t, size, dim=0.66) for i, t in enumerate(lines_))
 
 
 # ---------------------------------------------------------------------------

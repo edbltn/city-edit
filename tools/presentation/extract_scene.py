@@ -22,6 +22,7 @@ ap.add_argument("--lat", type=float, default=40.7415)
 ap.add_argument("--lon", type=float, default=-73.9895)
 ap.add_argument("--width", type=float, default=1180.0)
 ap.add_argument("--foot", action="store_true", help="include sidewalks/crossings/paths")
+ap.add_argument("--buf", type=float, default=None, help="block half-width in metres")
 args = ap.parse_args()
 
 OUT = Path(__file__).with_name(args.out)
@@ -102,7 +103,7 @@ for i in idx:
 
 # Real block polygons: buffered union of each block's own member edges — the
 # same "generate geometry from membership" rule the block builder uses.
-BUF = 7.0 if args.foot else 11.0
+BUF = args.buf if args.buf else (7.0 if args.foot else 11.0)
 scale_x = CANVAS_W / WIDTH_M
 scale_y = CANVAS_H / HEIGHT_M
 blocks = []

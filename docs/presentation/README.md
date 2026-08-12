@@ -23,13 +23,17 @@ Everything drawn is the app's own asset, not an approximation:
 | | Art | Talks about |
 |---|---|---|
 | `01-basemap` | bare CARTO dark map | **Leaflet** as the camera; the `nolabels` / `only_labels` split |
-| `02-waypoint-start` | one start kite | the waypoint list as the whole UI, `?w=` serialization, snapping lat/lng onto the walk graph |
-| `03-waypoint-route` | start + end + route | **OSRM** foot/MLD routing, `annotations=nodes` → edge ids |
-| `04-waypoint-mid` | mid pulled out of the line | drag-to-insert, `TAP_MAX_MS`, sequencing, tap-to-delete |
+| `02-waypoint-start` | one start kite | the `?w=` params and snapping lat/lng onto the walk graph |
+| `03-waypoint-route` | start + end + route | **OSRM** foot profile with Multilevel Dijkstra |
+| `04-waypoint-mid` | mid pulled out of the line | drag-to-insert, tap-to-delete, start/end derived from the list |
 | `05-graph-to-blocks` | an X intersection: graph ghosted under 4 street blocks + 1 junction block | the clustering rules |
 | `06-block-heat` | the same blocks, lit | signed differential, log normalization, zero is invisible |
 | `07-top-proposal-point` | the square pin on the junction | PBTP: per-block winner, floor, spacing |
 | `08-top-proposal-route` | a heated corridor with its diamond + 5 waypoints | RBTP: peeling, budget, ghost waypoints |
+
+Copy is plain mono at one size per slide — bold for keywords, the start/end
+colours for the words "start" and "end". `build.py` fails the build if a line
+overruns the text column, since an overlong line silently collides with the art.
 
 ## Rebuilding
 

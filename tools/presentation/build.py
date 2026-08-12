@@ -8,12 +8,13 @@ own asset (see deck.py).
 
 import base64
 import math
+import re
 from pathlib import Path
 
 from deck import (
     END, INK, PAPER, SEL, START, W, H, Scene,
-    at, block_heat, block_selected, fit_into, kite, line, panel,
-    path_d, poly_d, proposal_icon, selection_line, text_block, tick,
+    at, block_heat, block_selected, fit_into, kite, line, lines, panel,
+    path_d, poly_d, proposal_icon, selection_line, tick,
 )
 
 OUT = Path(__file__).resolve().parent.parent.parent / "docs/presentation/story"
@@ -37,14 +38,12 @@ def add(name, title, body):
 def slide_basemap():
     png = base64.b64encode((HERE / "basemap.png").read_bytes()).decode()
     b = [f'<image href="data:image/png;base64,{png}" x="0" y="0" width="{W}" height="{H}"/>',
-         f'<rect x="0" y="0" width="660" height="{H}" fill="{PAPER}" opacity="0.88"/>',
-         f'<rect x="660" y="0" width="260" height="{H}" fill="url(#scrimRight)"/>',
-         text_block(TEXT_X, 300, "Basemap", [
-             "**Leaflet** owns the camera —",
-             "42 kB, imperative, plugin-rich.",
-             "**CARTO dark** raster tiles, split",
-             "**nolabels** + **only_labels**, so text",
-             "sits **above** the vote heat.",
+         f'<rect x="0" y="0" width="830" height="{H}" fill="{PAPER}" opacity="0.9"/>',
+         f'<rect x="830" y="0" width="220" height="{H}" fill="url(#scrimRight)"/>',
+         lines(TEXT_X, [
+             "**Leaflet** for the map: panning, zoom, markers.",
+             "**CARTO** raster tiles for the map layer.",
+             "Labels are a separate layer, drawn on top.",
          ])]
     add("01-basemap", "Basemap", "".join(b))
 
@@ -66,44 +65,28 @@ def slides_selection():
 
     add("02-waypoint-start", "Start waypoint",
         kite(S, START, K) +
-        text_block(TEXT_X, 205, "Waypoints", [
-            "One **ordered list of coordinates**",
-            "is the whole interface.",
-            "The URL is the serialization:",
-            "**?w=lat,lng;…&vt=<label>**",
-            "A point **snaps to the walk graph** —",
-            "**Flatbush** R-tree hit-test, O(log n)",
-            "over 3.3 M edges. Coordinates survive",
-            "a **graph rebuild**; edge ids don't.",
+        lines(TEXT_X, [
+            "A waypoint is a **lat/lng** pair.",
+            "**?w=40.7391,-73.9905&vt=Add+bike+lane**",
+            "Each point snaps to the nearest **graph node**.",
         ]))
 
     add("03-waypoint-route", "Route",
         selection_line(direct) + kite(S, START, K) + kite(E, END, K) +
-        text_block(TEXT_X, 205, "Routing", [
-            "The path between waypoints is",
-            "**derived**, never stored.",
-            "**OSRM**, self-hosted: **foot profile**,",
-            "**MLD** partitioning, sub-ms queries.",
-            "**annotations=nodes** hands back **OSM**",
-            "**node ids** → our edge ids, 1:1.",
-            "The votable graph is built from the",
-            "**same PBF + foot filter** as OSRM.",
+        lines(TEXT_X, [
+            "Two waypoints, one route.",
+            "**OSRM** does the routing, foot profile,",
+            "with **Multilevel Dijkstra**.",
         ]))
 
     add("04-waypoint-mid", "Midpoint",
         selection_line(direct, opacity=0.10, dashed=True) + selection_line(via) +
         kite(S, START, K) + kite(M, SEL, K) + kite(E, END, K) +
-        text_block(TEXT_X, 150, "Mid waypoints", [
-            "**Drag the polyline** to pull out a mid;",
-            "the route re-derives through it.",
-            "Tap vs drag is **time-based** —",
-            "**TAP_MAX_MS = 300**, one feel for the",
-            "marker and the path alike.",
-            "First is **start**, last is **end**, the",
-            "middle **rebalances**. Phase, vote type",
-            "and button state are all **derived**.",
-            "**Tap a kite to delete** it — one pure",
-            "reducer, no async, 46 unit tests.",
+        lines(TEXT_X, [
+            "Drag the line to add a **mid waypoint**.",
+            "Tap a waypoint to **delete** it.",
+            "First is @@start@@, last is ##end##.",
+            "Everything else is derived from the list.",
         ]))
 
 
@@ -190,52 +173,45 @@ HEATS = [0.92, 0.0, 0.46, 0.0, 0.18]   # junction hottest; two arms carry nothin
 def slides_blocks():
     add("05-graph-to-blocks", "Graph → blocks",
         x_scene(lambda i, d: block_selected(d), ghost=0.85) +
-        text_block(TEXT_X, 150, "Blocks", [
-            "One street is **6–20 OSM edges**:",
-            "roadway, both sidewalks, crossing stubs.",
-            "Membership is decided **topologically**",
-            "**first**, edge by edge — then each polygon",
-            "is generated **from its own members**.",
-            "Junction nodes **cluster** into a single",
-            "intersection block; a **Voronoi trim**",
-            "keeps every block **disjoint**.",
-            "Coverage holds **by construction**, and a",
-            "device counts **once per block, per type**.",
+        lines(TEXT_X, [
+            "One crossing becomes **5 blocks**:",
+            "**4 street blocks + 1 intersection**.",
+            "Each graph edge/node is assigned",
+            "to exactly one block.",
+            "One device, **one vote per block, per type**.",
         ]))
 
     add("06-block-heat", "Block heat",
         x_scene(lambda i, d: block_heat(d, HEATS[i], 2.0), ghost=0.55) +
-        text_block(TEXT_X, 205, "Heat", [
-            "A block's heat is its **top proposal's**",
-            "**differential** — up minus down.",
-            "**Log-normalized per arm**, with ceilings",
-            "floored so a quiet map can't saturate.",
-            "Warm arm, cold arm, and **zero is**",
-            "**invisible** — cancelled signal, no heat.",
-            "Applied as **MapLibre feature-state**,",
-            "diffed per block, never re-styled.",
+        lines(TEXT_X, [
+            "Block heat = **(up votes) − (down votes)**.",
+            "Log-scaled and min-max-scaled.",
         ]))
 
     pin = proposal_icon((0, 4), "safety", heat=0.92, selected=True, scale=1.7)
     add("07-top-proposal-point", "Point proposal",
         x_scene(lambda i, d: block_heat(d, HEATS[i], 2.0), ghost=0.5, extra=pin) +
-        text_block(TEXT_X, 150, "Top proposal · point", [
-            "Per block, per **vote type**:",
-            "**net = up − down**, ranked by differential.",
-            "The block's winner becomes **one pin**.",
-            "Support floor: **TOP_PROPOSAL_MIN_NET**",
-            "**= 100**, overridable per map.",
-            "**6 per type** reach the spacing step, then",
-            "same-type **non-max suppression at 600 m**",
-            "so one avenue can't stack identical pins.",
-            "Rank drives the **glow ring** — never the",
-            "outline, which belongs to hover.",
+        lines(TEXT_X, [
+            "Per vote type, the **6 strongest edges**",
+            "compete, ranked by **net votes**.",
+            "Minimum to qualify: **net > 100**.",
+            "Same-type pins stay **600 m** apart.",
+            "**One pin per block**, **20 pins** per map.",
         ]))
 
 
 # ===========================================================================
 # 08 — The route family
 # ===========================================================================
+def inset(block, k=0.94):
+    """Shrink a block slightly about its centre. The scene's polygons are
+       buffered per block and can graze their neighbours; in the app blocks are
+       disjoint, so a hair of daylight is the honest look."""
+    cx, cy = block["c"]
+    return {"rings": [[[cx + (x - cx) * k, cy + (y - cy) * k] for x, y in r]
+                      for r in block["rings"]], "c": block["c"]}
+
+
 def slide_route_proposal():
     edges = wide.street_edges("Broadway", (120, 300, 1480, 800))
     blocks = wide.blocks_of(edges)
@@ -270,7 +246,7 @@ def slide_route_proposal():
         t = i / max(1, len(mv) - 1)
         return round(0.32 + 0.63 * math.sin(math.pi * t) ** 0.7, 3)
 
-    art = "".join(block_heat(poly_d(b), profile(i), 2.0) for i, b in enumerate(mv))
+    art = "".join(block_heat(poly_d(inset(b)), profile(i), 1.3) for i, b in enumerate(mv))
 
     spine = [b["c"] for b in mv]
     ghosts = [spine[len(spine) // 4], spine[len(spine) // 2], spine[3 * len(spine) // 4]]
@@ -281,20 +257,14 @@ def slide_route_proposal():
                          heat=0.95, selected=True, scale=2.3)
 
     add("08-top-proposal-route", "Route proposal", art +
-        text_block(TEXT_X, 120, "Top proposal · route", [
-            "Edges with **net ≥ 1** form a per-type",
-            "subgraph → **connected components**.",
-            "**Peel** a corridor from the heaviest edge,",
-            "taking the strongest arc off either tip.",
-            "Budget **2700 m + 660·√score**, cap 10.5 km",
-            "— support buys reach **sublinearly**.",
-            "Keep an extension only if routing still",
-            "**hands the stretch back** (**≥ 85 % of blocks**);",
-            "otherwise **pin a ghost waypoint** there.",
-            "**MAX_GHOST_WAYPOINTS = 3**, so a corridor",
-            "is always **≤ 5 waypoints** — shareable,",
-            "re-routable, **deterministic** on every client.",
-        ], size=19, leading=36))
+        lines(TEXT_X, [
+            "Start at the **highest vote count edge**.",
+            "Grow along the strongest neighbor, both ways.",
+            "Length budget: **2700 m + 660·√score**",
+            "(after some tweaking).",
+            "**Pin a ghost waypoint** where routing diverges.",
+            "**No more than 5 waypoints**.",
+        ]))
 
 
 # ===========================================================================
@@ -302,6 +272,13 @@ slide_basemap()
 slides_selection()
 slides_blocks()
 slide_route_proposal()
+
+MAX_CHARS = 47
+for name, _t, svg in panels:
+    for raw in re.findall(r'xml:space="preserve">(.*?)</text>', svg):
+        plain = re.sub(r"<[^>]+>", "", raw)
+        if len(plain) > MAX_CHARS:
+            raise SystemExit(f"{name}: copy line is {len(plain)} chars (max {MAX_CHARS}): {plain}")
 
 for old in OUT.glob("*.svg"):
     old.unlink()
