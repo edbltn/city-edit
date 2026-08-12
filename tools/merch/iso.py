@@ -16,6 +16,7 @@ silhouette.
 
 import math
 
+from palette import is_dark
 from typo import face, text
 
 K = math.cos(math.radians(30))
@@ -50,11 +51,15 @@ EXTRUDE_STEP = 0.0025   # sweep step; ~0.8px at print size
 # carry the full ink, blocks sit well below it. Physically the light would be
 # more even than this — but the mark has to lead, and hierarchy beats accuracy
 # on a garment seen from across a room.
-TONE_TOP = 0.50
-TONE_LEFT = 0.30
-TONE_RIGHT = 0.17
+LADDER_ON_DARK = (0.50, 0.30, 0.17)     # top, left, right
 LETTER_FACE = 1.0
 LETTER_SIDE = 0.72
+
+# A light garment needs its own ladder, not the same numbers. The dark one
+# bottoms out around 17% coverage, which is a readable grey over black and a
+# near-invisible one over white — on cotton the right-hand faces would drop out
+# of the print altogether and the blocks would lose their third side.
+LADDER_ON_LIGHT = (0.66, 0.44, 0.28)
 
 
 def project(x: float, y: float, z: float) -> tuple[float, float]:
@@ -227,16 +232,17 @@ def tones_for(ground: str, ink: str, letter_ink: str | None = None) -> dict:
     accent, say — without disturbing the tonal ladder the blocks are built on.
     """
     letter_ink = letter_ink or ink
+    top, left, right = LADDER_ON_DARK if is_dark(ground) else LADDER_ON_LIGHT
     return {
-        "top": mix(ground, ink, TONE_TOP),
-        "left": mix(ground, ink, TONE_LEFT),
-        "right": mix(ground, ink, TONE_RIGHT),
+        "top": mix(ground, ink, top),
+        "left": mix(ground, ink, left),
+        "right": mix(ground, ink, right),
         "letter_face": mix(ground, letter_ink, LETTER_FACE),
         "letter_side": mix(ground, letter_ink, LETTER_SIDE),
     }
 
 
-def tee_isogrid(ink: str, accent: str, ground: str,
+def tee_isogrid(ink: str, ground: str,
                 letter_ink: str | None = None) -> tuple[int, int, str]:
     """The mark as a city. Centre chest."""
     W, H = 3300, 3900

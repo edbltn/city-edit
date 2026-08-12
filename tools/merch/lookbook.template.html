@@ -8,9 +8,9 @@
     font-display: block;
   }
 
-  /* Dark-first: this proofs a black-garment print for a product whose whole
-     identity is a terminal. The light palette is the app's own light basemap
-     theme, so a light-mode reader gets City Edit's other real skin. */
+  /* Dark-first: this proofs prints for a product whose whole identity is a
+     terminal. The light palette is the app's own light basemap theme, so a
+     light-mode reader gets City Edit's other real skin. */
   :root {
     color-scheme: dark;
     --paper: #0d0d0d;
@@ -44,7 +44,7 @@
      are what actually gets printed on. */
   :root {
     --garment-black: #17171a;
-    --garment-natural: #e6e0d2;
+    --garment-white: #ffffff;
   }
 
   * { box-sizing: border-box; }
@@ -61,29 +61,16 @@
   }
 
   .sheet {
-    max-width: 900px;
+    max-width: 980px;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: clamp(28px, 5vw, 52px);
+    gap: clamp(34px, 6vw, 64px);
   }
 
   header { display: flex; align-items: center; gap: 20px; }
   header .mark { width: clamp(52px, 8vw, 76px); color: var(--ink); flex: none; }
   header .mark svg { width: 100%; height: auto; display: block; }
-  h2 {
-    margin: 0;
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    color: var(--ink-strong);
-  }
-  h2 + p { margin: 2px 0 0; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-quiet); }
-
-  section { display: flex; flex-direction: column; gap: clamp(18px, 3vw, 28px); }
-  section > hgroup { padding-bottom: 14px; border-bottom: 1px solid var(--hairline); }
-
   header h1 {
     margin: 0;
     font-size: clamp(20px, 3.4vw, 30px);
@@ -100,8 +87,33 @@
     color: var(--ink-quiet);
   }
 
+  section { display: flex; flex-direction: column; gap: clamp(18px, 3vw, 26px); }
+
+  hgroup { padding-bottom: 14px; border-bottom: 1px solid var(--hairline); }
+  hgroup h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-strong);
+  }
+  hgroup p {
+    margin: 3px 0 0;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-quiet);
+  }
+
+  .pair {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: clamp(18px, 3vw, 28px);
+  }
+
   figure { margin: 0; display: flex; flex-direction: column; gap: 10px; }
-  figure .art { padding: clamp(14px, 3vw, 32px); background: var(--ground); }
+  figure .art { padding: clamp(14px, 2.6vw, 28px); background: var(--ground); }
   figure img { display: block; width: 100%; height: auto; }
 
   figcaption {
@@ -113,10 +125,8 @@
     text-transform: uppercase;
     color: var(--ink-quiet);
   }
+  figcaption b { color: var(--ink-strong); font-weight: 600; }
   figcaption::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
-
-  .alts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: clamp(20px, 3vw, 32px); }
-  .alts figcaption b { color: var(--ink-strong); font-weight: 600; }
 </style>
 
 <div class="sheet">
@@ -125,35 +135,27 @@
     <div class="mark">{{MARK}}</div>
     <div>
       <h1>Merch</h1>
-      <p>City Edit · tees · 11 × 13 in</p>
+      <p>City Edit · 2 designs · 4 shirts</p>
     </div>
   </header>
 
   <section>
     <hgroup>
       <h2>01 — Isometric Grid</h2>
-      <p>The logo grid, built as the street plan it always was</p>
+      <p>11 × 13 in · centre chest</p>
     </hgroup>
-
-    <figure>
-      <div class="art" style="--ground: var(--garment-black)">
-        <img src="{{IMG:tee-isogrid--black}}" alt="Isometric Grid tee: the City Edit logo grid built as an isometric city of grey blocks, with CITY and EDIT standing as solid volumes on raised plinths, above the line REDRAW YOUR CITY." />
-      </div>
-      <figcaption>Black</figcaption>
-    </figure>
-
-    <div class="alts">
-      <figure>
-        <div class="art" style="--ground: var(--garment-natural)">
-          <img src="{{IMG:tee-isogrid--natural}}" alt="The same design on natural cotton: dark blocks and near-black letters on a pale ground." />
-        </div>
-        <figcaption><b>Natural</b></figcaption>
-      </figure>
+    <div class="pair">
       <figure>
         <div class="art" style="--ground: var(--garment-black)">
-          <img src="{{IMG:tee-isogrid--accent}}" alt="An option: the same design with the CITY EDIT letters in the brand amber instead of grey." />
+          <img src="{{IMG:tee-isogrid--black}}" alt="Isometric Grid tee on black: the City Edit logo grid built as an isometric city of grey blocks, with CITY and EDIT standing as solid amber volumes on raised plinths, above the line REDRAW YOUR CITY." />
         </div>
-        <figcaption><b>Amber letters</b> — option</figcaption>
+        <figcaption><b>Amber on black</b></figcaption>
+      </figure>
+      <figure>
+        <div class="art" style="--ground: var(--garment-white)">
+          <img src="{{IMG:tee-isogrid--white}}" alt="The same design on white: grey blocks and near-black letters." />
+        </div>
+        <figcaption><b>Grey on white</b></figcaption>
       </figure>
     </div>
   </section>
@@ -161,28 +163,20 @@
   <section>
     <hgroup>
       <h2>02 — One Note</h2>
-      <p>A souvenir shirt at ten feet, a correction at five</p>
+      <p>11 × 11 in · centre chest · code points at one proposal</p>
     </hgroup>
-
-    <figure>
-      <div class="art" style="--ground: var(--garment-black)">
-        <img src="{{IMG:tee-one-note--black}}" alt="One Note tee: the words I, a heart, and THIS CITY stacked in large monospace capitals, then the smaller line BUT I HAVE ONE NOTE, above a QR code." />
-      </div>
-      <figcaption>Black</figcaption>
-    </figure>
-
-    <div class="alts">
-      <figure>
-        <div class="art" style="--ground: var(--garment-natural)">
-          <img src="{{IMG:tee-one-note--natural}}" alt="The same design on natural cotton, with the code printed straight onto the fabric instead of inside a light panel." />
-        </div>
-        <figcaption><b>Natural</b></figcaption>
-      </figure>
+    <div class="pair">
       <figure>
         <div class="art" style="--ground: var(--garment-black)">
-          <img src="{{IMG:tee-one-note--line}}" alt="Layout alternate: I heart THIS CITY set on a single line instead of stacked." />
+          <img src="{{IMG:tee-one-note--black}}" alt="One Note tee on black: the line I, a heart, THIS CITY in large monospace capitals, then BUT I HAVE ONE NOTE, above a QR code knocked out of a white panel." />
         </div>
-        <figcaption><b>One line</b> — alternate</figcaption>
+        <figcaption><b>White on black</b></figcaption>
+      </figure>
+      <figure>
+        <div class="art" style="--ground: var(--garment-white)">
+          <img src="{{IMG:tee-one-note--white}}" alt="The same design on white, with the code printed straight onto the fabric instead of inside a panel." />
+        </div>
+        <figcaption><b>Black on white</b></figcaption>
       </figure>
     </div>
   </section>

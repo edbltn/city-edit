@@ -15,6 +15,7 @@ be a second punchline for a shirt that already landed one.
 
 import segno
 
+from palette import is_dark
 from typo import face, size_to_fit, text
 
 # 11 × 11 in. The composition is near-square, and a taller canvas would just be
@@ -24,11 +25,9 @@ QR_SIZE = 1080
 QR_QUIET = 4                # modules of quiet zone, per the QR spec's minimum
 
 HEART = "@"                 # stands in for the mark inside a monospaced line
-BLOCK = ["I @", "THIS CITY"]
-ONE_LINE = "I @ THIS CITY"
+LINE = "I @ THIS CITY"
 TURN = "BUT I HAVE ONE NOTE"
 
-BLOCK_MEASURE = 2350
 LINE_MEASURE = 2500
 TURN_MEASURE = 2400
 
@@ -45,11 +44,6 @@ HEART_BOX = (3.6, 6.2, 20.4, 20.4)   # x0, y0, x1, y1, including the arc bulge
 # Coarser modules survive ink spread and a creased chest. See tools/stickers,
 # whose /s/<code> route is case-insensitive for exactly this reason.
 DEFAULT_URL = "HTTPS://CITYEDIT.ORG/S/K4M9X"
-
-
-def is_dark(hex_color: str) -> bool:
-    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
-    return (0.299 * r + 0.587 * g + 0.114 * b) < 128
 
 
 def heart(x: float, baseline: float, size: float, cell: float, fill: str) -> str:
@@ -138,44 +132,27 @@ def qr_block(url: str, x: float, y: float, size: float, ink: str,
     return f'<path fill="{ink}" d="{"".join(runs)}"/>'
 
 
-def tee_one_note(ink: str, accent: str, ground: str, *,
-                 url: str | None = None, layout: str = "stack",
-                 ) -> tuple[int, int, str]:
+def tee_one_note(ink: str, ground: str, *,
+                 url: str | None = None) -> tuple[int, int, str]:
     # Resolved here, not defaulted in the signature, so --qr-url can rebind the
     # module global and have it take effect.
     url = url or DEFAULT_URL
 
     cap = face(600).cap_height / face(600).upem
-    if layout == "line":
-        lines = [ONE_LINE]
-        # One size, one measure — nothing to balance.
-        block_sizes = [size_to_fit(ONE_LINE, LINE_MEASURE, 600, 0.06)]
-    else:
-        lines = BLOCK
-        # Both lines at ONE size, set by the longer. Justifying each to the same
-        # measure instead makes "I @" three times the size of "THIS CITY",
-        # which stops reading as a souvenir block and starts reading as a
-        # mistake.
-        size = size_to_fit(BLOCK[1], BLOCK_MEASURE, 600, 0.06)
-        block_sizes = [size, size]
-
+    head_size = size_to_fit(LINE, LINE_MEASURE, 600, 0.06)
     turn_size = size_to_fit(TURN, TURN_MEASURE, 400, 0.10)
 
     # Measure the whole column, then centre it. Laying out from a fixed top
     # leaves the slack at the bottom, which reads as a design that ran out.
-    block_h = block_sizes[0] * cap + sum(s * 1.02 for s in block_sizes[1:])
     gap_turn, gap_qr, gap_url = 250, 230, 130
-    total = (block_h + gap_turn + turn_size * cap + gap_qr
+    total = (head_size * cap + gap_turn + turn_size * cap + gap_qr
              + QR_SIZE + gap_url + 64)
     top = (H - total) / 2 - 40          # bias up; a chest print reads better high
 
     body = []
-    y = top + block_sizes[0] * cap
-    for i, line in enumerate(lines):
-        if i:
-            y += block_sizes[i] * 1.02
-        body.append(mono_line(line, W / 2, y, block_sizes[i], ink,
-                              tracking=0.06, anchor="middle"))
+    y = top + head_size * cap
+    body.append(mono_line(LINE, W / 2, y, head_size, ink,
+                          tracking=0.06, anchor="middle"))
 
     y += gap_turn + turn_size * cap
     body.append(text(TURN, W / 2, y, turn_size, weight=400, fill=ink,
