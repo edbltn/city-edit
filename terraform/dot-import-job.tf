@@ -69,6 +69,11 @@ resource "google_cloud_run_v2_job" "dot_import" {
   depends_on = [
     google_project_service.cloud_run,
     google_artifact_registry_repository.app,
+    # Cloud Run validates the secret reference against the job's service
+    # account at update time, so the grant has to exist first — nothing in the
+    # container spec refers to it, so without this Terraform is free to order
+    # the update ahead of the binding, and the update fails.
+    google_secret_manager_secret_iam_member.dot_import_admin_token_access,
   ]
 }
 
