@@ -83,7 +83,7 @@ def slides_selection():
         selection_line(direct, opacity=0.10, dashed=True) + selection_line(via) +
         kite(S, START, K) + kite(M, SEL, K) + kite(E, END, K) +
         lines(TEXT_X, [
-            "Drag the line to add a **mid waypoint**.",
+            "Drag the line to add a **midwaypoint**.",
             "Tap a waypoint to **delete** it.",
             "First is @@start@@, last is ##end##.",
             "Everything in between is a midwaypoint.",
