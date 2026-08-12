@@ -1,0 +1,931 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Words on the map: a text tier for top proposals — 2026-08-12</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Words on the map: a text tier for top proposals</h1>
+    <div class="dateline">2026-08-12 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#why">A pin cannot say what it wants</a>
+<a href="#collide">Letting MapLibre place them, and teaching it where the pins are</a>
+<a href="#color">The contrast floor found two accents the eye had not</a>
+<a href="#type">Two lines, one symbol, and no bold to lean on</a>
+<a href="#silent">Four ways this layer can vanish without saying anything</a>
+<a href="#pending">The wiring is written and verified, and is still uncommitted</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Three fixes to Top Proposals: a pin now takes real support (&gt;100 net votes, both point and route families); every modal badges the vote types that are CURRENT top proposals for what it shows (square = point, diamond = route fully inside the selection); and route corridors are now grown ROUTING-CONSISTENTLY — an extension either keeps the segment a shortest path or pins a ghost waypoint (max 3), and the whole waypoint chain lands in the URL, so a shared top-proposal link keeps routing into its corridor long after the proposal itself has churned away.</p>
+
+  
+    <section class="card" id="why">
+      <div class="tag">THE GAP</div>
+      <h2>A pin cannot say what it wants</h2>
+      <h3>Symptom</h3>
+      <p>Every top proposal on the map is a pin — a square for a point proposal, a diamond for a corridor. A pin says that <em>something</em> is wanted <em>somewhere</em>. What it is wanted FOR is only available by hovering or clicking, one proposal at a time. There is no way to look at a city and read what it is asking for.</p>
+      <h3>Root cause</h3>
+      <ul><li>The map already has two text tiers, and both are deliberately quiet. CARTO's <code>*_only_labels</code> raster carries street, neighbourhood, water and park names as baked pixels. Our own <code>places.pmtiles</code> layer carries businesses, transit, civic and culture POIs, pulled 58% toward neutral grey by <code>POI_MUTE</code></li>
+<li><code>POI_MUTE</code> exists for exactly one reason, stated in its own comment: to leave the top proposals room to be the loudest thing on the map. But the whole of that headroom was being spent on pin SHAPE and glow rings — the two channels least able to carry meaning</li>
+<li>Adding text to the pin's divIcon would have been the short path, and it inherits the zoom scaling and fan-out for free. It also has no collision avoidance whatsoever: twenty pins on Manhattan would have produced twenty overlapping sentences, on top of the place labels, on top of the street names</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The words are drawn as a MapLibre <strong>symbol layer</strong>, not as pin markup, so decluttering is not ours to write — MapLibre runs one global collision index across every symbol layer and crowded labels simply do not place</li>
+<li>They are the ONE text tier allowed to be <strong>vivid</strong>: the map style's accent at full chroma, which is the same color the heat wears, so a label reads as belonging to the heat it names</li>
+<li>The pins stay exactly where they are. They are interactive and MapLibre here is <code>interactive: false</code>, so this adds words beside the existing pins rather than reimplementing them</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/mapStyles.ts</li>
+<li>client-react/src/components/MapLibreBackground/proposalLabelStyle.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="collide">
+      <div class="tag">DECLUTTERING</div>
+      <h2>Letting MapLibre place them, and teaching it where the pins are</h2>
+      <h3>Symptom</h3>
+      <p>A GL symbol layer collides against other GL symbols. It has no idea the Leaflet pins exist — they are DOM nodes floating above the canvas — so it would happily place a deli's name straight through one.</p>
+      <h3>Root cause</h3>
+      <ul><li>Placement in MapLibre runs from the TOPMOST symbol layer down (<code>PauseablePlacement</code> starts at <code>order.length - 1</code> and decrements), so the last layer added is the first one placed and wins every contest it enters. Verified in the installed <code>maplibre-gl</code> source rather than assumed — the ordering decides the entire scheme</li>
+<li>The proposal pin is a 34×42 divIcon whose tail tip — the anchor, the point sitting on the location — is at (17, 36). Relative to that anchor the pin occupies y ∈ [−36, +6]</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>proposal-labels</code> is added AFTER <code>place-labels</code>, so proposals claim their space first and the POI names move aside</li>
+<li>Each symbol carries a fully transparent <strong>34×42 collision puck</strong> (a zeroed RGBA buffer — collision boxes come from an image's dimensions, never its contents), offset by <code>[0, 6]</code> so it coincides exactly with the pin drawn over it. A side effect worth naming: a business name can no longer land underneath a proposal pin, which it could before this layer existed</li>
+<li><code>icon-allow-overlap: true</code> with <code>icon-ignore-placement</code> left at its default <code>false</code>. The two are independent — <code>insertCollisionBox</code> is called for the icon regardless of allow-overlap, and only ignore-placement decides whether it lands in the real grid or the ignored one. So the puck is never itself suppressed (the Leaflet pin is drawn whatever MapLibre decides) while still blocking everything else</li>
+<li><code>text-optional: true</code> is load-bearing rather than decorative: without it a label that cannot place takes the puck down with it and the pin loses its reserved footprint. With it, a crowded pin keeps its space and simply goes quiet</li>
+<li>A <strong>rank reveal schedule</strong> makes the coarse call that collision cannot: two headline proposals at z12, five by z13, ten by z14, everything from z15. Collision thins by geometry; rank thins by importance, and <code>symbol-sort-key: ["get", "rank"]</code> means the proposal with more votes behind it takes contested space</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/MapLibreBackground/proposalLabelStyle.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="color">
+      <div class="tag">COLOR</div>
+      <h2>The contrast floor found two accents the eye had not</h2>
+      <h3>Symptom</h3>
+      <p>&quot;Use the accent at full chroma&quot; is the right instinct and quietly wrong for two of the eight map styles.</p>
+      <h3>Root cause</h3>
+      <ul><li>Transit's <code>#3B8EE0</code> manages only <strong>5.7:1</strong> against the near-black basemap — UNDER the muted place labels' own 7.0–7.9:1. The tier it was supposed to outrank was louder than it was</li>
+<li>Trees' <code>#5FA052</code> manages <strong>5.0:1</strong> on the light paper against a POI band of 4.8–5.5:1 — inside the noise</li>
+<li>A one-directional knob (&quot;deepen on light basemaps&quot;) cannot fix a dim accent on a dark one, and a fixed lift toward white would desaturate the accents that were already strong</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The correction is a <strong>ratio over the place labels</strong>, not an absolute number, because what has to hold is the hierarchy: <code>PROPOSAL_CONTRAST_OVER_POI = 1.15</code>. Whatever the POI tier is painted at, a proposal clears it</li>
+<li>The accent is mixed toward the theme's <code>selection</code> ink only as far as needed. That single rule runs in OPPOSITE directions per basemap for free, because <code>selection</code> is white on the dark themes and near-black on the light ones — it LIFTS transit to 9.6:1 and DEEPENS trees to 6.4:1</li>
+<li>Accents that already clear the bar are left exactly as authored — the bike green at 11.1:1 and the harbor teal at 9.5:1 are untouched, asserted by a test so a future refactor cannot quietly desaturate every theme</li>
+<li><code>PROPOSAL_CONTRAST_MAX_MIX = 0.55</code> caps the drag: past that a color stops being the map's accent and becomes a tint of the selection color. Better a slightly quiet label that still wears the theme than a legible one belonging to no map in particular</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/mapStyles.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="type">
+      <div class="tag">TYPOGRAPHY</div>
+      <h2>Two lines, one symbol, and no bold to lean on</h2>
+      <h3>Symptom</h3>
+      <p>The label has to read as a different KIND of thing from a nail salon's name, using a font family that ships in exactly one weight.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>npm run build:glyphs</code> bakes a single SDF stack, <code>Red Hat Mono Regular</code>. There is no bold cut, so every step of the hierarchy has to be made of size, color, spacing and halo</li>
+<li>It bakes only four Unicode ranges — 0–255, 256–511, 512–767 and General Punctuation 8192–8447. Arrows (↑), geometric shapes (▲ ◆) and even the proper minus sign U+2212 have NO GLYPHS and would render as nothing at all</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Uppercase</strong> is the tier marker: both other text layers are mixed case, so caps read instantly as a different register without needing a weight. The label is never abbreviated — every one of these strings starts with a verb, and the verb is the entire difference between &quot;Add bike lane&quot; and &quot;Improve bike lane&quot;</li>
+<li><strong>Size</strong> steps clearly above the place labels (10.5–12.5px against their 8.6–10.5), asserted at every zoom by a test</li>
+<li>The claim comes FIRST, nearest the pin, with the count under it. The other order was built and rejected in the browser: it put the smallest, faintest text in the tightest slot — the few pixels directly under the pin's tail — and made you read a number before knowing what it counted</li>
+<li>Both lines are ONE <code>format</code> expression with a per-section <code>text-color</code> override, not two layers: a single symbol means a single collision box, so the count can never place without its claim or drift away from it</li>
+<li>The count is signed because it is a differential (<code>+412</code>), and compacts to <code>+1.6k</code> past a thousand. A test asserts every string this can emit stays inside the four baked glyph ranges</li>
+<li>Halo is <strong>2.0 at 0.2 blur</strong> — heavier and HARDER than the place labels' 1.2/0.3. Measured on the NYC bike map, where the heat under a label is a dense field of saturated green and blue: at 1.2 the type dissolved into it, and a blurred halo only smeared the boundary</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/MapLibreBackground/proposalLabelStyle.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="silent">
+      <div class="tag">FAILS QUIETLY</div>
+      <h2>Four ways this layer can vanish without saying anything</h2>
+      <h3>Symptom</h3>
+      <p>Every one of these produces the same symptom — no labels at all, nothing in the console — which is why they are pinned by tests rather than left to review.</p>
+      <h3>Root cause</h3>
+      <ul><li><strong>Two zoom curves.</strong> MapLibre allows ONE zoom-driven <code>interpolate</code>/<code>step</code> per expression and rejects the whole layer for a second one, as a NON-FATAL style error. This is the same trap <code>placeLabelStyle.ts</code> was split out for; its exported <code>countZoomCurves</code> guard is reused here</li>
+<li><strong>The zoom-unit off-by-one.</strong> <code>minz</code> is a LEAFLET zoom and MapLibre's camera runs one level lower, so the filter must compare against <code>["+", ["zoom"], 1]</code>. Get it wrong and every label appears one zoom level late — visible only if you are looking for it</li>
+<li><strong>Puck drift.</strong> GraphLayer eases the pins smaller at both zoom extremes via <code>--indicator-scale</code>. If the puck's own ramp drifts from that, the reserved footprint stops matching the pin drawn over it</li>
+<li><strong>Unbaked glyphs.</strong> A tempting <code>↑412</code> renders as nothing</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>proposalLabelStyle.ts</code> holds every expression and formatter as a pure module, with <code>proposalLabelStyle.test.ts</code> asserting: one zoom curve per expression, the <code>zoom + 1</code> filter shape verbatim, the puck ramp against a re-derivation of GraphLayer's own scale formula, the 34×42/[0,6] pin geometry, and that all emitted text stays in the baked ranges</li>
+<li>Plus the design invariants that are easy to erode: proposal contrast clears the loudest place label on every style, strong accents stay untouched, the count stays subordinate but above 3:1, and the reveal schedule is monotonic</li>
+<li><strong>32 tests</strong> in this area; 464 in the suite, all passing</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/MapLibreBackground/proposalLabelStyle.test.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="pending">
+      <div class="tag">NOT IN THIS COMMIT</div>
+      <h2>The wiring is written and verified, and is still uncommitted</h2>
+      <h3>Symptom</h3>
+      <p>This report covers the committed foundation. The layer that consumes it — <code>addProposalLabels</code> in MapLibreBackground and the broadcast effect in GraphLayer — is written, type-checked, and was driven in the browser, but is NOT in the commit.</p>
+      <h3>Root cause</h3>
+      <ul><li>Another session has roughly 500 lines of uncommitted arrival-animation and vote-epoch work interleaved in those same two files, including <code>arrivalAnimation.ts</code>, which is still untracked</li>
+<li>The changes are not separable at hunk granularity — the very first hunk of <code>MapLibreBackground.tsx</code> contains my <code>proposalLabelColors</code> import and their <code>HeatNormalization</code> / <code>arrivalAnimation</code> imports on adjacent lines</li>
+<li>Staging the whole files would have committed their unfinished work under this message; line surgery across 24 hunks of someone else's in-flight edits is not a call to make unilaterally</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>The bridge</strong> is the existing cross-renderer pattern: GraphLayer dispatches <code>PROPOSAL_LABELS_EVENT</code> on <code>window</code> with the resolved label list, exactly as it already does for <code>BLOCK_VOTES_EVENT</code> and <code>BLOCK_SELECT_EVENT</code>; MapLibreBackground listens and <code>setData</code>s a GeoJSON source</li>
+<li><strong>Positions are the pins' settled ones</strong> — edge midpoint for a square, <code>rbtpDisplayPos</code> for a diamond — deliberately NOT the transient fan-out overrides. A fan-out only happens where pins are stacked within 26px, which is precisely where all but the top-ranked label is suppressed anyway</li>
+<li><strong>Rank runs within each family</strong>, not across the merged list: a PBTP's <code>count</code> is the net on one hot edge while an RBTP's <code>score</code> sums net across a whole corridor, so ranking them together by magnitude would simply put every corridor above every point. They are interleaved after the fact, ties going to the corridor</li>
+<li><strong>Station networks are skipped</strong> — they turn every edge into a pseudo-winner sharing one label, which would be thousands of identical words; those maps name their stations through the place-label layer</li>
+<li>One bug found and fixed during review: <code>setData</code> fires <code>sourcedata</code> for its own source, so the not-yet-loaded retry re-applied its own write in an unbroken loop. Guarded by tracking the applied payload identity</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Driven in the real app on <code>/m/nyc-bikes</code> (the 18 MB vote set): <strong>20 proposal labels</strong> broadcast and set on the source, the layer confirmed as the TOPMOST of ten, the puck image registered, and no style errors on the <code>map.on(&quot;error&quot;)</code> channel.</li>
+<li>Rendered and read correctly on screen — &quot;ADD PROTECTED BIKE LANE / +1.4k&quot; wrapping to two lines under its diamond, in the bikepaths green.</li>
+<li>The claim-first vs count-first ordering was decided by building BOTH in the live map and looking, not on paper. Count-first is what the ProposalCard does, and it is worse on a map.</li>
+<li>Placement order verified in the installed <code>maplibre-gl</code> source (<code>PauseablePlacement</code> iterates layers top-down), and the allow-overlap / ignore-placement independence verified at the <code>insertCollisionBox</code> call site. Both are load-bearing enough not to take on trust.</li>
+<li>A 66px offset between the pins and the labels turned out to be PRE-EXISTING and unrelated: MapLibre's internal transform was 1309×657 while its container was 1440×723 — a missed resize — which offsets the entire GL layer, basemap included, by exactly half the difference. <code>ml.resize()</code> brought both renderers to (692, 598) for the same coordinate.</li>
+<li><code>npx tsc -b</code> clean; <strong>464 tests pass</strong>; <code>eslint</code> reports the same 2 pre-existing errors before and after this change, so none were introduced.</li>
+<li>The other session's uncommitted work was backed up before staging and verified byte-identical afterwards (md5 match on both files), and <code>arrivalAnimation.ts</code> is still present and untracked.</li>
+<li>NOT yet verified visually: the z12 rank reveal and the collision thinning in a dense downtown at high zoom. The Chrome window went occluded partway through, which freezes rAF so MapLibre never fires <code>load</code> — the documented trap — and it could not be raised from the tooling. The underlying reveal schedule and filter are pure functions covered by unit tests, but the on-screen result is unconfirmed.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-bikes</code> with the Chrome window in the FOREGROUND (occluded, MapLibre never finishes loading) and wait ~15s for the corridor recompute. Expect uppercase labels under the proposal pins.</li>
+<li>Zoom out to z12 and confirm only about two labels speak; zoom in one level at a time and confirm more appear rather than all at once.</li>
+<li>Zoom into a dense area (Midtown at z16+) and confirm labels DROP rather than overlap — pins should stay, words should thin out.</li>
+<li>Confirm no place label sits on top of a proposal pin any more; the POI names should be visibly stepping around them.</li>
+<li>Switch to a light map (<code>/m/nyc-trees</code>) and a blue one (a transit-styled map) and check the label is legible on paper and on near-black — those are the two accents the contrast floor had to correct.</li>
+<li>Toggle a vote type off in the legend dropdown and confirm its labels disappear with its pins.</li>
+<li>Then commit the wiring: once the arrival-animation session lands, <code>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</code> and <code>client-react/src/components/GraphLayer/GraphLayer.tsx</code> still carry this feature's changes and need a follow-up commit.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/proposalLabelStyle.test.ts</span>
+            <span class="stat"><span class="d-add">+254</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GL label layers</span>
+        <span class="ctx-sum">Guards for the parts of the label layers that fail silently or erode quietly</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">proposalLabelStyle.test.ts (new)</span>
+        <span class="ctx-sum">~230 LOC — 19 tests over the expressions, the palette, the reveal schedule, the pin footprint and the text</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">parseColor / luminance / contrast helpers</span><span class="ol-sum">local WCAG math for the palette assertions</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">proposal label expressions</span><span class="ol-sum">one zoom curve per expression; the format field&#x27;s shape and order</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">proposal labels vs place labels</span><span class="ol-sum">the size step, the contrast floor, strong accents left alone, the count subordinate</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">the reveal schedule</span><span class="ol-sum">monotonic, never below the layer minzoom, the zoom+1 filter verbatim</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">the pin footprint</span><span class="ol-sum">34×42/[0,6] geometry, and the puck ramp vs GraphLayer&#x27;s own formula</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">label text</span><span class="ol-sum">uppercase keeps the verb; signed and compacted counts; baked-glyph-range coverage</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The contrast test is the one that earned its place: it FAILED on first run and surfaced transit at 5.7:1 and trees at 5.0:1 — both under the tier they were meant to outrank, and neither obvious by eye.</li><li>It also caught a bug in its own helper first: scraping digits with a regex turns &quot;#F4F5F0&quot; into rgb(4, 5, 0), so the light basemap&#x27;s paper read as black and every light-theme assertion inverted.</li><li>The puck test re-derives GraphLayer&#x27;s clamp(1 − (z−15)·0.1 − (14−z)·0.1, 0.5, 1) rather than restating the stop values, so the two ramps cannot drift apart silently.</li><li>The glyph-range test enumerates every count string the formatter can emit and checks each codepoint against the four ranges build_glyphs.js actually bakes.</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/proposalLabelStyle.test.ts b/client-react/src/components/MapLibreBackground/proposalLabelStyle.test.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..df8f917</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/proposalLabelStyle.test.ts</span>
+<span class="d-hunk">@@ -0,0 +1,254 @@</span>
+<span class="d-add">+import { describe, it, expect } from &quot;vitest&quot;;</span>
+<span class="d-add">+import { countZoomCurves, PLACE_LABEL_TEXT_SIZE } from &quot;./placeLabelStyle&quot;;</span>
+<span class="d-add">+import {</span>
+<span class="d-add">+  PIN_H,</span>
+<span class="d-add">+  PIN_W,</span>
+<span class="d-add">+  PROPOSAL_COUNT_SCALE,</span>
+<span class="d-add">+  PROPOSAL_LABEL_FILTER,</span>
+<span class="d-add">+  PROPOSAL_LABEL_TEXT_SIZE,</span>
+<span class="d-add">+  PROPOSAL_MIN_LEAFLET_ZOOM,</span>
+<span class="d-add">+  PROPOSAL_PUCK_OFFSET,</span>
+<span class="d-add">+  PROPOSAL_PUCK_SIZE,</span>
+<span class="d-add">+  PROPOSAL_TEXT_MAX_WIDTH,</span>
+<span class="d-add">+  formatProposalCount,</span>
+<span class="d-add">+  proposalLabelText,</span>
+<span class="d-add">+  proposalRevealZoom,</span>
+<span class="d-add">+  proposalTextField,</span>
+<span class="d-add">+} from &quot;./proposalLabelStyle&quot;;</span>
+<span class="d-add">+import { MAP_STYLES, proposalLabelColors, POI_COLORS } from &quot;../../mapStyles&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Evaluate a plain [&quot;interpolate&quot;,[&quot;linear&quot;],[&quot;zoom&quot;], z, v, …] at one zoom. */</span>
+<span class="d-add">+function rampAt(expr: unknown, zoom: number): number {</span>
+<span class="d-add">+  const e = expr as unknown[];</span>
+<span class="d-add">+  const stops: Array&lt;[number, number]&gt; = [];</span>
+<span class="d-add">+  for (let i = 3; i &lt; e.length; i += 2) stops.push([e[i] as number, e[i + 1] as number]);</span>
+<span class="d-add">+  if (zoom &lt;= stops[0][0]) return stops[0][1];</span>
+<span class="d-add">+  const last = stops[stops.length - 1];</span>
+<span class="d-add">+  if (zoom &gt;= last[0]) return last[1];</span>
+<span class="d-add">+  for (let i = 0; i &lt; stops.length - 1; i++) {</span>
+<span class="d-add">+    const [z0, v0] = stops[i], [z1, v1] = stops[i + 1];</span>
+<span class="d-add">+    if (zoom &gt;= z0 &amp;&amp; zoom &lt;= z1) return v0 + ((v1 - v0) * (zoom - z0)) / (z1 - z0);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  throw new Error(&quot;unreachable&quot;);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Parse the two color notations the styles use: &quot;#rrggbb&quot; and &quot;rgb(r, g, b)&quot;.</span>
+<span class="d-add">+ *  (Scraping digits with a regex silently turns &quot;#F4F5F0&quot; into rgb(4, 5, 0) —</span>
+<span class="d-add">+ *  the light basemap&#x27;s paper reads as black and every contrast check inverts.) */</span>
+<span class="d-add">+function parseColor(css: string): [number, number, number] {</span>
+<span class="d-add">+  const hex = css.match(/^#([0-9a-f]{6})$/i);</span>
+<span class="d-add">+  if (hex) {</span>
+<span class="d-add">+    const n = parseInt(hex[1], 16);</span>
+<span class="d-add">+    return [(n &gt;&gt; 16) &amp; 0xff, (n &gt;&gt; 8) &amp; 0xff, n &amp; 0xff];</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  const rgb = css.match(/\d+/g)!.map(Number);</span>
+<span class="d-add">+  return [rgb[0], rgb[1], rgb[2]];</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** sRGB relative luminance, for the contrast checks below. */</span>
+<span class="d-add">+function luminance(css: string): number {</span>
+<span class="d-add">+  const [r, g, b] = parseColor(css).map((v) =&gt; {</span>
+<span class="d-add">+    const s = v / 255;</span>
+<span class="d-add">+    return s &lt;= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+function contrast(a: string, b: string): number {</span>
+<span class="d-add">+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) =&gt; y - x);</span>
+<span class="d-add">+  return (hi + 0.05) / (lo + 0.05);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;proposal label expressions&quot;, () =&gt; {</span>
+<span class="d-add">+  // The reason this file exists, same as its place-label sibling: MapLibre</span>
+<span class="d-add">+  // allows ONE zoom curve per expression and rejects the whole layer for a</span>
+<span class="d-add">+  // second one — as a non-fatal style error, so the only symptom is that every</span>
+<span class="d-add">+  // proposal label silently stops rendering.</span>
+<span class="d-add">+  it(&quot;keeps each expression to exactly one zoom curve&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(countZoomCurves(PROPOSAL_LABEL_TEXT_SIZE)).toBe(1);</span>
+<span class="d-add">+    expect(countZoomCurves(PROPOSAL_PUCK_SIZE)).toBe(1);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // The count line rides the label&#x27;s ramp via font-scale rather than carrying a</span>
+<span class="d-add">+  // ramp of its own — which is what keeps the two-line label to one zoom curve.</span>
+<span class="d-add">+  it(&quot;keeps the two-line text-field free of zoom curves&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(countZoomCurves(proposalTextField(&quot;rgb(1, 2, 3)&quot;))).toBe(0);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Claim first, nearest the pin; count below it, smaller and dimmer. The other</span>
+<span class="d-add">+  // order put the faintest text in the most crowded slot (directly under the</span>
+<span class="d-add">+  // pin&#x27;s tail) and made you read a number before knowing what it counted.</span>
+<span class="d-add">+  it(&quot;puts the claim first and the count under it, dimmed and smaller&quot;, () =&gt; {</span>
+<span class="d-add">+    const field = proposalTextField(&quot;rgb(9, 9, 9)&quot;) as unknown[];</span>
+<span class="d-add">+    expect(field[0]).toBe(&quot;format&quot;);</span>
+<span class="d-add">+    expect(field[1]).toEqual([&quot;get&quot;, &quot;text&quot;]);</span>
+<span class="d-add">+    expect(field[2]).toEqual({});</span>
+<span class="d-add">+    expect(field[3]).toBe(&quot;\n&quot;);</span>
+<span class="d-add">+    expect(field[5]).toEqual([&quot;get&quot;, &quot;count&quot;]);</span>
+<span class="d-add">+    expect(field[6]).toEqual({ &quot;font-scale&quot;: PROPOSAL_COUNT_SCALE, &quot;text-color&quot;: &quot;rgb(9, 9, 9)&quot; });</span>
+<span class="d-add">+    expect(PROPOSAL_COUNT_SCALE).toBeLessThan(1);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;proposal labels vs place labels&quot;, () =&gt; {</span>
+<span class="d-add">+  // The tier signal. If a proposal ever read at the same size as a nail salon,</span>
+<span class="d-add">+  // the hierarchy would rest on color alone.</span>
+<span class="d-add">+  it(&quot;draws a clear step larger than the place labels at every zoom&quot;, () =&gt; {</span>
+<span class="d-add">+    for (const zoom of [11, 13, 15, 18, 20]) {</span>
+<span class="d-add">+      const proposal = rampAt(PROPOSAL_LABEL_TEXT_SIZE, zoom);</span>
+<span class="d-add">+      // Place-label ramp stops are [&quot;match&quot;, …] — the non-subway (miss) arm.</span>
+<span class="d-add">+      const place = (() =&gt; {</span>
+<span class="d-add">+        const e = PLACE_LABEL_TEXT_SIZE as unknown as unknown[];</span>
+<span class="d-add">+        const stops: Array&lt;[number, number]&gt; = [];</span>
+<span class="d-add">+        for (let i = 3; i &lt; e.length; i += 2) {</span>
+<span class="d-add">+          stops.push([e[i] as number, (e[i + 1] as unknown[])[4] as number]);</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+        if (zoom &lt;= stops[0][0]) return stops[0][1];</span>
+<span class="d-add">+        const last = stops[stops.length - 1];</span>
+<span class="d-add">+        if (zoom &gt;= last[0]) return last[1];</span>
+<span class="d-add">+        for (let i = 0; i &lt; stops.length - 1; i++) {</span>
+<span class="d-add">+          const [z0, v0] = stops[i], [z1, v1] = stops[i + 1];</span>
+<span class="d-add">+          if (zoom &gt;= z0 &amp;&amp; zoom &lt;= z1) return v0 + ((v1 - v0) * (zoom - z0)) / (z1 - z0);</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+        throw new Error(&quot;unreachable&quot;);</span>
+<span class="d-add">+      })();</span>
+<span class="d-add">+      expect(proposal).toBeGreaterThan(place + 1);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // POI_MUTE exists to buy the proposals this headroom; the point of the layer</span>
+<span class="d-add">+  // is spending it on the words. If someone mutes these too, or authors a new</span>
+<span class="d-add">+  // theme around a dim accent, the design collapses back into &quot;a pin you have</span>
+<span class="d-add">+  // to click&quot; — so the hierarchy is asserted, not assumed. This is the check</span>
+<span class="d-add">+  // that caught transit&#x27;s #3B8EE0 (5.7:1 against near-black, UNDER the place</span>
+<span class="d-add">+  // labels&#x27; own 7–8:1) and trees&#x27; #5FA052 (5.0:1 against 5.5:1).</span>
+<span class="d-add">+  it(&quot;clears the loudest place label by a margin, on every style&quot;, () =&gt; {</span>
+<span class="d-add">+    for (const style of Object.values(MAP_STYLES)) {</span>
+<span class="d-add">+      const { label, halo } = proposalLabelColors(style);</span>
+<span class="d-add">+      const loudestPoi = Math.max(</span>
+<span class="d-add">+        ...Object.values(POI_COLORS[style.basemap]).map((c) =&gt; contrast(c, style.base)),</span>
+<span class="d-add">+      );</span>
+<span class="d-add">+      expect(contrast(label, halo)).toBeGreaterThan(loudestPoi * 1.1);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;leaves an accent that already carries the type at full chroma&quot;, () =&gt; {</span>
+<span class="d-add">+    // The bike green and the harbor teal are strong enough on near-black to</span>
+<span class="d-add">+    // need no correction at all; a rule that quietly desaturated every theme</span>
+<span class="d-add">+    // would be a worse rule.</span>
+<span class="d-add">+    expect(proposalLabelColors(MAP_STYLES.bikepaths).label).toBe(&quot;rgb(43, 224, 107)&quot;);</span>
+<span class="d-add">+    expect(proposalLabelColors(MAP_STYLES.waterfront).label).toBe(&quot;rgb(34, 201, 201)&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps the count subordinate to the claim, without losing it&quot;, () =&gt; {</span>
+<span class="d-add">+    for (const style of Object.values(MAP_STYLES)) {</span>
+<span class="d-add">+      const { label, count, halo } = proposalLabelColors(style);</span>
+<span class="d-add">+      expect(contrast(count, halo)).toBeLessThan(contrast(label, halo) * 0.75);</span>
+<span class="d-add">+      // Still a readable number, not a ghost — 3:1 is the floor for text this</span>
+<span class="d-add">+      // size that nobody has to read word by word.</span>
+<span class="d-add">+      expect(contrast(count, halo)).toBeGreaterThan(3);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;the reveal schedule&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;never reveals anything before the layer&#x27;s own minzoom&quot;, () =&gt; {</span>
+<span class="d-add">+    for (let rank = 0; rank &lt; 60; rank++) {</span>
+<span class="d-add">+      expect(proposalRevealZoom(rank)).toBeGreaterThanOrEqual(PROPOSAL_MIN_LEAFLET_ZOOM);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;is monotonic — a stronger proposal never appears later than a weaker one&quot;, () =&gt; {</span>
+<span class="d-add">+    for (let rank = 1; rank &lt; 60; rank++) {</span>
+<span class="d-add">+      expect(proposalRevealZoom(rank)).toBeGreaterThanOrEqual(proposalRevealZoom(rank - 1));</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;lets only a headline pair speak at the city-wide view&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(proposalRevealZoom(0)).toBe(12);</span>
+<span class="d-add">+    expect(proposalRevealZoom(1)).toBe(12);</span>
+<span class="d-add">+    expect(proposalRevealZoom(2)).toBeGreaterThan(12);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;has everything revealed by z15, so zooming in stops adding text&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(proposalRevealZoom(999)).toBe(15);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // `minz` is a LEAFLET zoom and MapLibre&#x27;s camera runs one lower. Comparing it</span>
+<span class="d-add">+  // against a bare [&quot;zoom&quot;] would reveal every label one level late — a silent</span>
+<span class="d-add">+  // off-by-one, and the same trap the place-label filter documents.</span>
+<span class="d-add">+  it(&quot;compares minz against the LEAFLET zoom, not MapLibre&#x27;s&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(PROPOSAL_LABEL_FILTER).toEqual([&quot;&lt;=&quot;, [&quot;get&quot;, &quot;minz&quot;], [&quot;+&quot;, [&quot;zoom&quot;], 1]]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;the pin footprint&quot;, () =&gt; {</span>
+<span class="d-add">+  // The puck is what keeps a POI name from landing underneath a proposal pin.</span>
+<span class="d-add">+  // These mirror voteTypeIcon.ts&#x27;s SVG_W / SVG_H / TIP; if the pin art changes</span>
+<span class="d-add">+  // and these don&#x27;t, the reserved hole stops matching the pin drawn over it.</span>
+<span class="d-add">+  it(&quot;matches the divIcon geometry the Leaflet pin is drawn at&quot;, () =&gt; {</span>
+<span class="d-add">+    expect([PIN_W, PIN_H]).toEqual([34, 42]);</span>
+<span class="d-add">+    // Bottom-anchored the puck covers y ∈ [−42, 0]; the pin, anchored at its</span>
+<span class="d-add">+    // tail tip (17, 36), covers [−36, +6]. The offset is the difference.</span>
+<span class="d-add">+    expect(PROPOSAL_PUCK_OFFSET).toEqual([0, 6]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // GraphLayer eases the pins smaller at both zoom extremes via</span>
+<span class="d-add">+  // `--indicator-scale`; the puck has to ride the same curve or the reserved</span>
+<span class="d-add">+  // footprint drifts off the pin. Stops here are MapLibre zooms (Leaflet − 1).</span>
+<span class="d-add">+  it(&quot;tracks the pins&#x27; zoom scaling&quot;, () =&gt; {</span>
+<span class="d-add">+    const leafletScale = (z: number) =&gt;</span>
+<span class="d-add">+      Math.max(0.5, Math.min(1, 1 - Math.max(0, z - 15) * 0.1 - Math.max(0, 14 - z) * 0.1));</span>
+<span class="d-add">+    for (const leaflet of [11, 12, 13, 14, 15, 17, 20]) {</span>
+<span class="d-add">+      expect(rampAt(PROPOSAL_PUCK_SIZE, leaflet - 1)).toBeCloseTo(leafletScale(leaflet), 1);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;label text&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;uppercases the claim as the tier marker, keeping the verb&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(proposalLabelText(&quot;Add protected bike lane&quot;)).toBe(&quot;ADD PROTECTED BIKE LANE&quot;);</span>
+<span class="d-add">+    // &quot;Add&quot; vs &quot;Improve&quot; is the entire difference between two vote types, so</span>
+<span class="d-add">+    // no abbreviation may eat the leading verb.</span>
+<span class="d-add">+    expect(proposalLabelText(&quot;Improve bike lane&quot;)).toContain(&quot;IMPROVE&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;signs the count, because it is a differential&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(formatProposalCount(412)).toBe(&quot;+412&quot;);</span>
+<span class="d-add">+    expect(formatProposalCount(1)).toBe(&quot;+1&quot;);</span>
+<span class="d-add">+    expect(formatProposalCount(-30)).toBe(&quot;-30&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;compacts thousands so the count never dominates the wrap budget&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(formatProposalCount(1000)).toBe(&quot;+1k&quot;);</span>
+<span class="d-add">+    expect(formatProposalCount(1240)).toBe(&quot;+1.2k&quot;);</span>
+<span class="d-add">+    expect(formatProposalCount(12_400)).toBe(&quot;+12k&quot;);</span>
+<span class="d-add">+    expect(formatProposalCount(999)).toBe(&quot;+999&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // The SDF glyph ranges we bake stop at General Punctuation (8192–8447): no</span>
+<span class="d-add">+  // arrows, no geometric shapes, and no U+2212 minus. Anything outside them</span>
+<span class="d-add">+  // renders as nothing at all.</span>
+<span class="d-add">+  it(&quot;emits only glyphs the baked SDF ranges actually contain&quot;, () =&gt; {</span>
+<span class="d-add">+    const inRange = (s: string) =&gt; [...s].every((c) =&gt; {</span>
+<span class="d-add">+      const cp = c.codePointAt(0)!;</span>
+<span class="d-add">+      return cp &lt;= 767 || (cp &gt;= 8192 &amp;&amp; cp &lt;= 8447);</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+    for (const n of [0, 7, 412, 1240, 12_400, -30, 250_000]) {</span>
+<span class="d-add">+      expect(inRange(formatProposalCount(n))).toBe(true);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    expect(inRange(proposalLabelText(&quot;Add café seating&quot;))).toBe(true);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;wraps the longest realistic claim to two lines&quot;, () =&gt; {</span>
+<span class="d-add">+    const longest = proposalLabelText(&quot;Add protected bike lane&quot;);</span>
+<span class="d-add">+    const lines = longest.split(&quot; &quot;).reduce&lt;string[]&gt;((acc, word) =&gt; {</span>
+<span class="d-add">+      const last = acc[acc.length - 1];</span>
+<span class="d-add">+      if (last &amp;&amp; (last + &quot; &quot; + word).length &lt;= PROPOSAL_TEXT_MAX_WIDTH) {</span>
+<span class="d-add">+        acc[acc.length - 1] = last + &quot; &quot; + word;</span>
+<span class="d-add">+      } else acc.push(word);</span>
+<span class="d-add">+      return acc;</span>
+<span class="d-add">+    }, []);</span>
+<span class="d-add">+    expect(lines.length).toBeLessThanOrEqual(2);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/proposalLabelStyle.ts</span>
+            <span class="stat"><span class="d-add">+195</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GL label layers</span>
+        <span class="ctx-sum">The MapLibre symbol layers drawn over the heat: place/POI names, and now the top-proposal text</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">proposalLabelStyle.ts (new)</span>
+        <span class="ctx-sum">~190 LOC — every expression, constant and formatter for the proposal label layer, kept pure so it can be tested without a GL context</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">PROPOSAL_LABEL_FONT</span><span class="ol-sum">the only SDF stack we bake — no bold cut exists</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">PIN_W / PIN_H / PROPOSAL_PUCK_OFFSET</span><span class="ol-sum">the 34×42 divIcon footprint and the [0,6] shift onto its tail-tip anchor</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">PROPOSAL_PUCK_SIZE</span><span class="ol-sum">puck scale by zoom — mirrors GraphLayer&#x27;s --indicator-scale ramp</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">PROPOSAL_LABEL_TEXT_SIZE</span><span class="ol-sum">10.5→12.5px, a clear step above the place labels</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">PROPOSAL_TEXT_MAX_WIDTH</span><span class="ol-sum">14 characters — the widest wrap keeping the longest label to two lines</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">proposalRevealZoom / PROPOSAL_LABEL_FILTER</span><span class="ol-sum">the rank schedule, and the Leaflet-vs-MapLibre zoom+1 filter</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">proposalLabelText / formatProposalCount</span><span class="ol-sum">uppercase claim; signed, compacted, ASCII-only count</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">proposalTextField</span><span class="ol-sum">the two-line format expression with a per-section color override</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Split out of the layer definition for the same reason placeLabelStyle.ts was: MapLibre allows ONE zoom curve per expression and rejects the whole layer for a second one as a non-fatal error, so the failure mode is silent.</li><li>The count line rides the label&#x27;s size ramp via `font-scale` rather than carrying a ramp of its own — which is precisely what keeps a two-line label down to one zoom curve.</li><li>PROPOSAL_PUCK_OFFSET is derived, not guessed: bottom-anchored the puck covers y ∈ [−42, 0] while the pin, anchored at its tail tip (17, 36), covers [−36, +6].</li><li>Reveal is 2 proposals at Leaflet z12, 5 by z13, 10 by z14, all from z15 — collision thins by geometry, so something has to thin by importance.</li><li>formatProposalCount is ASCII-only by necessity: the baked ranges stop at General Punctuation, so U+2212 MINUS and every arrow would render as nothing.</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/proposalLabelStyle.ts b/client-react/src/components/MapLibreBackground/proposalLabelStyle.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..d397600</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/proposalLabelStyle.ts</span>
+<span class="d-hunk">@@ -0,0 +1,195 @@</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Style expressions and text formatting for the TOP-PROPOSAL label layer — the</span>
+<span class="d-add">+ * words drawn on the map beside each proposal pin.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Sibling of placeLabelStyle.ts, and bound by the same silent-failure rule: an</span>
+<span class="d-add">+ * expression may contain only ONE zoom-based `interpolate`/`step`, and breaking</span>
+<span class="d-add">+ * it makes MapLibre reject the whole layer as a *non-fatal* style error, so</span>
+<span class="d-add">+ * every proposal label simply stops rendering with nothing in the console but a</span>
+<span class="d-add">+ * warning. Both expressions below are guarded by `countZoomCurves` in the tests.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Everything here is pure so the reveal schedule, the wrap, and the count</span>
+<span class="d-add">+ * formatting can be tested without a GL context.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+import type maplibregl from &quot;maplibre-gl&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** The font stack baked by `npm run build:glyphs` — the ONLY SDF stack we</span>
+<span class="d-add">+ *  serve. There is no bold cut, so every step of the type hierarchy here is</span>
+<span class="d-add">+ *  made of size, color and halo. */</span>
+<span class="d-add">+export const PROPOSAL_LABEL_FONT = &quot;Red Hat Mono Regular&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ── The pin footprint ───────────────────────────────────────────────────────</span>
+<span class="d-add">+// The proposal pin is a Leaflet divIcon, drawn in the OTHER renderer, on top of</span>
+<span class="d-add">+// the GL canvas. MapLibre cannot see it, so it would happily place a POI name</span>
+<span class="d-add">+// straight through one. These are voteTypeIcon.ts&#x27;s SVG_W / SVG_H / TIP: a</span>
+<span class="d-add">+// 34×42 pin whose tail tip — the anchor, the point that sits on the location —</span>
+<span class="d-add">+// is at (17, 36). Relative to that anchor the pin body occupies y ∈ [−36, +6].</span>
+<span class="d-add">+// A transparent image of this size registered on the symbol keeps the pin&#x27;s</span>
+<span class="d-add">+// footprint in MapLibre&#x27;s collision index; see PROPOSAL_PUCK_OFFSET.</span>
+<span class="d-add">+export const PIN_W = 34;</span>
+<span class="d-add">+export const PIN_H = 42;</span>
+<span class="d-add">+const PIN_TIP_Y = 36;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Bottom-anchored, the puck covers y ∈ [−42, 0]; the pin covers [−36, +6].</span>
+<span class="d-add">+ *  Shift it down by the difference so the two coincide exactly. */</span>
+<span class="d-add">+export const PROPOSAL_PUCK_OFFSET: [number, number] = [0, PIN_H - PIN_TIP_Y];</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Name of the transparent collision image registered via `addImage`. */</span>
+<span class="d-add">+export const PROPOSAL_PUCK_IMAGE = &quot;proposal-pin-puck&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Puck scale by zoom — a mirror of the `--indicator-scale` CSS variable that</span>
+<span class="d-add">+ * GraphLayer sets on the Leaflet container (pins ease smaller at BOTH zoom</span>
+<span class="d-add">+ * extremes, full size only around the middle). If these two drift apart the</span>
+<span class="d-add">+ * reserved footprint stops matching the pin actually drawn, and labels start</span>
+<span class="d-add">+ * either colliding with pins or standing off them by a visible margin.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Stops are MAPLIBRE zooms — one below their Leaflet counterparts (ml 10 = the</span>
+<span class="d-add">+ * Leaflet 11 end of GraphLayer&#x27;s ramp, ml 13/14 = Leaflet 14/15&#x27;s full size,</span>
+<span class="d-add">+ * ml 19 = Leaflet 20&#x27;s 0.5 floor).</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export const PROPOSAL_PUCK_SIZE = [</span>
+<span class="d-add">+  &quot;interpolate&quot;, [&quot;linear&quot;], [&quot;zoom&quot;],</span>
+<span class="d-add">+  10, 0.7,</span>
+<span class="d-add">+  13, 1,</span>
+<span class="d-add">+  14, 1,</span>
+<span class="d-add">+  19, 0.5,</span>
+<span class="d-add">+] as unknown as maplibregl.ExpressionSpecification;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Label type size, in px, ramped by zoom.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Deliberately a clear step ABOVE the place labels (which run 8.6–10.5px): the</span>
+<span class="d-add">+ * two tiers sit side by side on the same map, and if a proposal read at the</span>
+<span class="d-add">+ * same size as a nail salon the hierarchy would rest on color alone. It stays</span>
+<span class="d-add">+ * modest in absolute terms because mono is wide and these strings are whole</span>
+<span class="d-add">+ * sentences, not names.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * The count line is not sized here — it rides this ramp scaled down by</span>
+<span class="d-add">+ * PROPOSAL_COUNT_SCALE inside the `format` expression, which keeps the whole</span>
+<span class="d-add">+ * label to ONE zoom curve.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export const PROPOSAL_LABEL_TEXT_SIZE = [</span>
+<span class="d-add">+  &quot;interpolate&quot;, [&quot;linear&quot;], [&quot;zoom&quot;],</span>
+<span class="d-add">+  11, 10.5,</span>
+<span class="d-add">+  15, 11.5,</span>
+<span class="d-add">+  18, 12.5,</span>
+<span class="d-add">+] as unknown as maplibregl.ExpressionSpecification;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** The count line&#x27;s size relative to the label&#x27;s. */</span>
+<span class="d-add">+export const PROPOSAL_COUNT_SCALE = 0.82;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Wrap width, in characters (mono, so characters are uniformly wide).</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * 14 is the widest setting that still keeps &quot;Add protected bike lane&quot; — about</span>
+<span class="d-add">+ * the longest label anyone actually writes — to two lines. Wider starts winning</span>
+<span class="d-add">+ * the wrap but losing the collision, because a long single-line block sweeps</span>
+<span class="d-add">+ * horizontally across neighbouring labels; narrower turns ordinary three-word</span>
+<span class="d-add">+ * demands into three-line paragraphs.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export const PROPOSAL_TEXT_MAX_WIDTH = 14;</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ── Reveal schedule ─────────────────────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Leaflet zoom at which the strongest proposals are allowed to speak. */</span>
+<span class="d-add">+const REVEAL_BASE_Z = 12;</span>
+<span class="d-add">+/** Reveal zoom of each successive rank band, as offsets from REVEAL_BASE_Z.</span>
+<span class="d-add">+ *  Index = band, value = how many proposals that band and all before it hold. */</span>
+<span class="d-add">+const REVEAL_BANDS = [2, 5, 10];</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * The Leaflet zoom at which the proposal ranked `rank` (0 = strongest) may show</span>
+<span class="d-add">+ * its label.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Collision alone would already thin these — and it does the fine work — but it</span>
+<span class="d-add">+ * thins by geometry, not by importance, so at a city-wide view it would scatter</span>
+<span class="d-add">+ * whichever dozen labels happened not to touch. A rank schedule makes the</span>
+<span class="d-add">+ * coarse decision on purpose: two headline proposals at z12, five by z13, ten by</span>
+<span class="d-add">+ * z14, everything from z15. Zooming in is then a steady reveal rather than a</span>
+<span class="d-add">+ * wall of type that appears all at once.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function proposalRevealZoom(rank: number): number {</span>
+<span class="d-add">+  for (let band = 0; band &lt; REVEAL_BANDS.length; band++) {</span>
+<span class="d-add">+    if (rank &lt; REVEAL_BANDS[band]) return REVEAL_BASE_Z + band;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return REVEAL_BASE_Z + REVEAL_BANDS.length;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Earliest Leaflet zoom any proposal label can appear at — the layer&#x27;s own</span>
+<span class="d-add">+ *  `minzoom` is derived from this so MapLibre skips the layer entirely below it</span>
+<span class="d-add">+ *  instead of placing symbols the filter then throws away. */</span>
+<span class="d-add">+export const PROPOSAL_MIN_LEAFLET_ZOOM = REVEAL_BASE_Z;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * `minz` is a LEAFLET zoom — the units used by CONFIG.maxZoom, map URLs, the</span>
+<span class="d-add">+ * place-label builder and proposalRevealZoom above. MapLibre drives its camera</span>
+<span class="d-add">+ * one level lower (256px vs 512px tiles), hence the +1. Same idiom as</span>
+<span class="d-add">+ * `place-labels`; getting it wrong is a silent one-zoom-level offset.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export const PROPOSAL_LABEL_FILTER = [</span>
+<span class="d-add">+  &quot;&lt;=&quot;, [&quot;get&quot;, &quot;minz&quot;], [&quot;+&quot;, [&quot;zoom&quot;], 1],</span>
+<span class="d-add">+] as unknown as maplibregl.FilterSpecification;</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ── Text ────────────────────────────────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * The claim, as drawn: the vote type&#x27;s own label, uppercased.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Uppercase is the tier marker. CARTO&#x27;s street names and our place labels are</span>
+<span class="d-add">+ * both mixed case, so caps read instantly as &quot;this is a different kind of</span>
+<span class="d-add">+ * thing&quot; without needing a weight we do not have a glyph set for. The label is</span>
+<span class="d-add">+ * NOT abbreviated: every one of these strings starts with a verb (&quot;Add&quot; /</span>
+<span class="d-add">+ * &quot;Improve&quot; / &quot;Widen&quot; / &quot;Fix&quot;), and the verb is the entire difference between</span>
+<span class="d-add">+ * &quot;Add bike lane&quot; and &quot;Improve bike lane&quot;.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function proposalLabelText(label: string): string {</span>
+<span class="d-add">+  return label.toLocaleUpperCase();</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * The vote count, as drawn.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Signed, because the number IS a differential (up − down) and &quot;+412&quot; says that</span>
+<span class="d-add">+ * where &quot;412&quot; only implies it. Thousands are compacted: &quot;+12.4k&quot; holds the</span>
+<span class="d-add">+ * magnitude in a third of the width, and at this size an exact five-digit count</span>
+<span class="d-add">+ * is neither readable nor interesting. ASCII only — the SDF glyph ranges we</span>
+<span class="d-add">+ * bake stop at General Punctuation, so there is no &quot;−&quot; (U+2212) and no arrows.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function formatProposalCount(net: number): string {</span>
+<span class="d-add">+  const sign = net &lt; 0 ? &quot;-&quot; : &quot;+&quot;;</span>
+<span class="d-add">+  const n = Math.abs(Math.round(net));</span>
+<span class="d-add">+  if (n &lt; 1000) return `${sign}${n}`;</span>
+<span class="d-add">+  const k = n / 1000;</span>
+<span class="d-add">+  // 10k and up loses the decimal: &quot;+12.4k&quot; and &quot;+12k&quot; read the same at a glance</span>
+<span class="d-add">+  // and the shorter one costs less width in a wrap budget of 14 characters.</span>
+<span class="d-add">+  return `${sign}${k &lt; 10 ? k.toFixed(1).replace(/\.0$/, &quot;&quot;) : Math.round(k)}k`;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * The `text-field`: the claim, then the vote count under it.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * The claim goes FIRST — nearest the pin, where the eye lands after the pin</span>
+<span class="d-add">+ * itself, and where the tail tip visually points. Tried the other way round</span>
+<span class="d-add">+ * (count as an eyebrow, mirroring the ProposalCard&#x27;s eyebrow-above-title), and</span>
+<span class="d-add">+ * on the map it is worse in two ways: it puts the smallest, faintest text in</span>
+<span class="d-add">+ * the tightest slot, the few pixels directly under the pin&#x27;s tail where</span>
+<span class="d-add">+ * neighbouring labels crowd hardest; and it makes you read a number before you</span>
+<span class="d-add">+ * know what the number is about. Below the claim, the count reads as what it</span>
+<span class="d-add">+ * is — the evidence, after the demand.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * One `format` with two sections, not two layers: a single symbol means a</span>
+<span class="d-add">+ * single collision box, so the count can never place without its claim or drift</span>
+<span class="d-add">+ * away from it. The section&#x27;s `text-color` override (MapLibre resolves these</span>
+<span class="d-add">+ * through FormatSectionOverride) is what lets the two carry different colors</span>
+<span class="d-add">+ * inside that one symbol; `countColor` is per-STYLE, not per-feature, so it is</span>
+<span class="d-add">+ * baked into the expression rather than shipped on every proposal.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function proposalTextField(countColor: string): maplibregl.ExpressionSpecification {</span>
+<span class="d-add">+  return [</span>
+<span class="d-add">+    &quot;format&quot;,</span>
+<span class="d-add">+    [&quot;get&quot;, &quot;text&quot;], {},</span>
+<span class="d-add">+    &quot;\n&quot;, {},</span>
+<span class="d-add">+    [&quot;get&quot;, &quot;count&quot;], { &quot;font-scale&quot;: PROPOSAL_COUNT_SCALE, &quot;text-color&quot;: countColor },</span>
+<span class="d-add">+  ] as unknown as maplibregl.ExpressionSpecification;</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/mapStyles.ts</span>
+            <span class="stat"><span class="d-add">+94</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · visual identity</span>
+        <span class="ctx-sum">The two-color identity of every map — basemap, accent, heat ramp — plus the derived palettes that keep each text tier in its place</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">mapStyles.ts</span>
+        <span class="ctx-sum">~575 LOC — the MapStyle type, the eight authored styles, the CARTO tile templates, and the derived POI / pin / proposal palettes</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">HeatRamp / MapStyle types</span><span class="ol-sum">unchanged — the shape of a map&#x27;s identity</span></li><li class="dim"><span class="ol-label">CARTO tile templates + label opacity</span><span class="ol-sum">unchanged — the two-tier basemap, labels split out as an overlay</span></li><li class="dim"><span class="ol-label">darkStyle / lightStyle builders</span><span class="ol-sum">unchanged — shared defaults per basemap</span></li><li class="dim"><span class="ol-label">MAP_STYLES: the eight authored styles</span><span class="ol-sum">unchanged — bikepaths, walkways, transit, waterfront, trees, terracotta, plum, default</span></li><li class="dim"><span class="ol-label">POI_HUES / POI_NEUTRAL / POI_MUTE</span><span class="ol-sum">unchanged — place labels pulled 58% toward grey</span></li><li class="dim"><span class="ol-label">POI_COLORS</span><span class="ol-sum">unchanged — the hues as actually painted</span></li><li class="changed"><span class="ol-label">luminance / contrastRatio (new)</span><span class="ol-sum">+14 lines — WCAG relative luminance and ratio, for the contrast floor</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">PROPOSAL_CONTRAST_OVER_POI / _MAX_MIX / COUNT_FADE (new)</span><span class="ol-sum">+30 lines — the three knobs, and why the floor is a ratio not a number</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">proposalLabelColors() (new)</span><span class="ol-sum">+50 lines — accent at full chroma, corrected toward the ink only as far as needed</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">getMapStyle / tile expansion helpers</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">buildPinRampStops / sampleHeatRamp</span><span class="ol-sum">unchanged — the rank ramp the proposal PINS sample</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The new code sits immediately after POI_COLORS on purpose: POI_MUTE and the proposal floor are two halves of ONE decision about hierarchy, and reading either alone gives you the wrong idea about why the number is what it is.</li><li>PROPOSAL_CONTRAST_OVER_POI = 1.15 — a ratio over whatever the place labels are painted at, so the guarantee survives someone re-tuning POI_MUTE.</li><li>The mix walks toward `selection` in 0.05 steps and stops at the first one that clears the floor — coarser than solving, but the search space is one dimension over eight authored accents, and stepping keeps results stable under edits.</li><li>Same rule, opposite directions: `selection` is #FFFFFF on the dark themes and #1f2320 on the light ones, so the identical line LIFTS transit (5.7 → 9.6) and DEEPENS trees (5.0 → 6.4).</li><li>PROPOSAL_COUNT_FADE = 0.30 mixes toward `base`, which likewise darkens on dark and lightens on light — the count recedes on both without a per-basemap branch.</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/mapStyles.ts b/client-react/src/mapStyles.ts</span>
+<span class="d-meta">index d996f06..e9c6457 100644</span>
+<span class="d-meta">--- a/client-react/src/mapStyles.ts</span>
+<span class="d-meta">+++ b/client-react/src/mapStyles.ts</span>
+<span class="d-hunk">@@ -327,6 +327,100 @@ export const POI_COLORS: Record&lt;Basemap, Record&lt;string, string&gt;&gt; =</span>
+<span class="d-ctx">     ]),</span>
+<span class="d-ctx">   ) as Record&lt;Basemap, Record&lt;string, string&gt;&gt;;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/** sRGB relative luminance (WCAG), for the contrast floor below. */</span>
+<span class="d-add">+function luminance([r, g, b]: [number, number, number]): number {</span>
+<span class="d-add">+  const lin = (v: number) =&gt; {</span>
+<span class="d-add">+    const s = v / 255;</span>
+<span class="d-add">+    return s &lt;= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** WCAG contrast ratio between two colors. */</span>
+<span class="d-add">+function contrastRatio(a: [number, number, number], b: [number, number, number]): number {</span>
+<span class="d-add">+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) =&gt; y - x);</span>
+<span class="d-add">+  return (hi + 0.05) / (lo + 0.05);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * How much louder a proposal label must read than the loudest place label.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * This is the OTHER SIDE of POI_MUTE, and the two numbers only make sense read</span>
+<span class="d-add">+ * together. Place labels are pulled 58% toward grey so the top proposals can be</span>
+<span class="d-add">+ * the loudest thing on the map; until now the whole of that headroom was spent</span>
+<span class="d-add">+ * on the PINS. A pin says something is wanted somewhere — it cannot say what.</span>
+<span class="d-add">+ * Words can, so the words get the headroom.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Expressed as a RATIO over the place labels rather than as an absolute target,</span>
+<span class="d-add">+ * because the thing being guaranteed is the hierarchy, not a number: whatever</span>
+<span class="d-add">+ * the POI tier is painted at, a proposal clears it. Raise it and the proposals</span>
+<span class="d-add">+ * shout louder; drop it to 1 and the two tiers merge.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+const PROPOSAL_CONTRAST_OVER_POI = 1.15;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Ceiling on how far an accent may be dragged toward the ink to reach that</span>
+<span class="d-add">+ *  floor. Past this a color stops being the map&#x27;s accent and starts being a</span>
+<span class="d-add">+ *  tint of the selection color — better a slightly quiet label that still wears</span>
+<span class="d-add">+ *  the theme than a legible one that belongs to no map in particular. */</span>
+<span class="d-add">+const PROPOSAL_CONTRAST_MAX_MIX = 0.55;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** How far the vote-count line recedes toward the paper, away from the claim it</span>
+<span class="d-add">+ *  belongs to. It is the supporting number, not the demand — subordinate on</span>
+<span class="d-add">+ *  both basemaps, since mixing toward `base` darkens on dark and lightens on</span>
+<span class="d-add">+ *  light. */</span>
+<span class="d-add">+const PROPOSAL_COUNT_FADE = 0.30;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Text colors for the top-proposal label layer: the claim, its vote count,</span>
+<span class="d-add">+ *  and the halo that carries both over saturated heat. */</span>
+<span class="d-add">+export interface ProposalLabelColors {</span>
+<span class="d-add">+  label: string;</span>
+<span class="d-add">+  count: string;</span>
+<span class="d-add">+  halo: string;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * The proposal-label palette for a style.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * The accent is used at FULL CHROMA wherever it can be — it is the color the</span>
+<span class="d-add">+ * heat wears, so a label in it reads as belonging to the heat it names, and</span>
+<span class="d-add">+ * these are the one text tier on the map allowed to be vivid. It is corrected</span>
+<span class="d-add">+ * only when it cannot carry the type on its own, and then only as far as</span>
+<span class="d-add">+ * needed: mixed toward the theme&#x27;s `selection` ink until it clears the place</span>
+<span class="d-add">+ * labels by PROPOSAL_CONTRAST_OVER_POI.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * That one rule covers both basemaps in opposite directions, because</span>
+<span class="d-add">+ * `selection` is white on the dark themes and near-black on the light ones. It</span>
+<span class="d-add">+ * LIFTS the accents that are too dim on near-black (transit&#x27;s #3B8EE0 sits at</span>
+<span class="d-add">+ * 5.7:1, under the place labels&#x27; own 7–8:1) and DEEPENS the ones too pale on</span>
+<span class="d-add">+ * paper (trees&#x27; #5FA052 manages 5.0:1 against 5.5:1). Accents that already</span>
+<span class="d-add">+ * clear the bar — the bike green at 11:1 — are left exactly as authored.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function proposalLabelColors(style: MapStyle): ProposalLabelColors {</span>
+<span class="d-add">+  const paper = parseColor(style.base);</span>
+<span class="d-add">+  const ink = parseColor(style.selection);</span>
+<span class="d-add">+  const loudestPoi = Math.max(</span>
+<span class="d-add">+    ...Object.values(POI_COLORS[style.basemap])</span>
+<span class="d-add">+      .map((c) =&gt; contrastRatio(parseColor(c), paper)),</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+  const target = loudestPoi * PROPOSAL_CONTRAST_OVER_POI;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const accent = parseColor(style.accent);</span>
+<span class="d-add">+  let label = accent;</span>
+<span class="d-add">+  // Walk toward the ink in small steps and stop at the first mix that clears</span>
+<span class="d-add">+  // the floor. Coarser than a solve, but the search space is one dimension over</span>
+<span class="d-add">+  // eight authored accents, and stepping keeps the result stable under edits.</span>
+<span class="d-add">+  for (let mix = 0; contrastRatio(label, paper) &lt; target &amp;&amp; mix &lt; PROPOSAL_CONTRAST_MAX_MIX;) {</span>
+<span class="d-add">+    mix = Math.min(mix + 0.05, PROPOSAL_CONTRAST_MAX_MIX);</span>
+<span class="d-add">+    label = mixRgb(accent, ink, mix);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  return {</span>
+<span class="d-add">+    label: rgbToCss(label),</span>
+<span class="d-add">+    count: rgbToCss(mixRgb(label, paper, PROPOSAL_COUNT_FADE)),</span>
+<span class="d-add">+    halo: style.base,</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /** Resolve a style id to its MapStyle, falling back to the default. */</span>
+<span class="d-ctx"> export function getMapStyle(id: string): MapStyle {</span>
+<span class="d-ctx">   return MAP_STYLES[id] ?? DEFAULT_MAP_STYLE;</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

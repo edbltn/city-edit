@@ -29,6 +29,25 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-12-proposal-labels.html">
+    <div class="date">2026-08-12</div>
+    <h2>Words on the map: a text tier for top proposals</h2>
+    <p>A proposal pin can say that <em>something</em> is wanted <em>somewhere</em>; it cannot say
+    what. This draws the words — the claim in caps with its vote count under it — beside each
+    top-proposal pin. They are drawn as a MapLibre <strong>symbol layer</strong> rather than as
+    markup on the pin, so the decluttering is not ours to write: MapLibre runs one collision index
+    across every symbol layer, placement starts at the topmost layer, and adding this one above the
+    place labels means proposals claim their space first and the POI names step aside. Each symbol
+    also carries a transparent <strong>34×42 puck</strong> matching the Leaflet pin's footprint, so
+    a business name can no longer land underneath a pin — which it could before. And these are the
+    one text tier allowed to be <em>vivid</em>: <code>POI_MUTE</code> exists to buy the proposals
+    that headroom, and it was all being spent on pin shapes and glow rings, the two channels least
+    able to carry meaning. Making the contrast floor a <strong>ratio over the place labels</strong>
+    rather than a fixed number caught two accents the eye had not — transit's blue at
+    <strong>5.7:1</strong> against near-black, <em>under</em> the muted labels it was supposed to
+    outrank, and trees' green at 5.0:1 inside the POI band on paper.</p>
+  </a>
+
   <a class="entry" href="./2026-08-12-vote-type-toggle-latency.html">
     <div class="date">2026-08-12</div>
     <h2>The vote-type toggle, measured: one second down to one frame</h2>
