@@ -8,6 +8,8 @@ import {
   edgeMidpointResolver,
   applyTopProposalLimit,
   selectTopProposals,
+  selectTopProposalsFrom,
+  computeWinnerCandidates,
   topLabelForEdges,
   type EdgePosition,
   type VoteTypeWinner,
@@ -428,5 +430,47 @@ describe("selectTopProposals — block uniqueness + kind filter (full path)", ()
       label === "Add bike greenway" ? "route" as const : "point" as const;
     const out = selectTopProposals(data, SALT, 10, 600, kindOf, 0);
     expect(out.map((w) => w.label)).toEqual(["Add bike parking"]);
+  });
+});
+
+describe("selectTopProposalsFrom — the legend-toggle contract", () => {
+  // GraphLayer caches the candidate scan for a vote epoch and re-selects from
+  // it whenever the legend toggles. That is only sound while re-selecting from
+  // cached candidates gives exactly what a fresh filtered scan would.
+  const legend = ["Bike", "Tree", "Bench"];
+  const evt: [number, number, number][][] = [
+    [[0, 9, 0]],
+    [[1, 8, 0]],
+    [[2, 7, 0]],
+    [[0, 3, 0], [1, 2, 0]],
+  ];
+  const nodes: [number, number][] = [
+    [40.700, -74.00], [40.700, -74.00],
+    [40.710, -74.00], [40.710, -74.00],
+    [40.720, -74.00], [40.720, -74.00],
+    [40.730, -74.00], [40.730, -74.00],
+  ];
+  const edges: [number, number, string][] = [[0, 1, ""], [2, 3, ""], [4, 5, ""], [6, 7, ""]];
+  const data = { vote_type_legend: legend, edge_vote_types: evt, ...topo(nodes, edges) };
+
+  const hideTree = (l: string) => l !== "Tree";
+
+  it("re-selecting from cached candidates equals a fresh filtered scan", () => {
+    const candidates = computeWinnerCandidates(legend, evt, 6, undefined, 0);
+    expect(selectTopProposalsFrom(data, candidates, SALT, 10, 600, hideTree))
+      .toEqual(selectTopProposals(data, SALT, 10, 600, undefined, 0, hideTree));
+  });
+
+  it("hiding a type frees its slot for another type's runner-up", () => {
+    const candidates = computeWinnerCandidates(legend, evt, 6, undefined, 0);
+    const all = selectTopProposalsFrom(data, candidates, SALT, 2, 600);
+    const filtered = selectTopProposalsFrom(data, candidates, SALT, 2, 600, hideTree);
+    expect(all.map((w) => w.label)).toEqual(["Bike", "Tree"]);
+    expect(filtered.map((w) => w.label)).toEqual(["Bike", "Bench"]);
+  });
+
+  it("the candidate scan itself ignores visibility", () => {
+    expect(computeWinnerCandidates(legend, evt, 6, undefined, 0).map((w) => w.label))
+      .toContain("Tree");
   });
 });

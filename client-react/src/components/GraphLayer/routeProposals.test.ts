@@ -10,6 +10,8 @@ import {
   chooseAnchorOrder,
   chooseAnchorOrderBefore,
   computeRouteProposals,
+  createRouteProposalJob,
+  rankRouteProposals,
   corridorCoordinates,
   corridorFromEdgeIds,
   corridorSliceBetween,
@@ -1172,5 +1174,56 @@ describe("corridorSliceBetween (per-segment corridor resolution)", () => {
       segments: [[0, 1]], // doesn't cover the path
     });
     expect(corridorSliceBetween(topo, stale, nodeLL(0), nodeLL(2))).toBeNull();
+  });
+});
+
+describe("rankRouteProposals — the legend-toggle contract", () => {
+  // The whole visibility fast path rests on one property: a type's corridors
+  // don't depend on which OTHER types are shown. If that ever stops holding,
+  // GraphLayer's route cache starts serving a stale map after a toggle.
+  const edges: [number, number][] = [
+    [0, 1], [1, 2], [2, 3],   // bike corridor
+    [4, 5], [5, 6], [6, 7],   // tree corridor
+  ];
+  const votes = evt(
+    [[BIKE, 20, 0]], [[BIKE, 20, 0]], [[BIKE, 20, 0]],
+    [[TREE, 9, 0]], [[TREE, 9, 0]], [[TREE, 9, 0]],
+  );
+
+  function jobFor() {
+    const topo = makeTopo(edges);
+    return createRouteProposalJob(topo, buildNodeAdj(topo), {
+      edge_vote_types: votes, vote_type_legend: LEGEND,
+    }, { minRouteBlocks: 1 });
+  }
+
+  it("steps a type identically whether or not the other type is hidden", () => {
+    const all = jobFor();
+    const filtered = createRouteProposalJob(
+      makeTopo(edges), buildNodeAdj(makeTopo(edges)),
+      { edge_vote_types: votes, vote_type_legend: LEGEND },
+      { minRouteBlocks: 1, isVisible: (l) => l === "Bike lane" },
+    );
+    expect(filtered.types).toEqual([BIKE]);
+    expect(all.step(BIKE)).toEqual(filtered.step(BIKE));
+  });
+
+  it("re-ranking a cached subset equals recomputing with the type hidden", () => {
+    const job = jobFor();
+    const cached = new Map(job.types.map((li) => [li, job.step(li)]));
+
+    const fromCache = rankRouteProposals(
+      job.types.filter((li) => LEGEND[li] !== "Tree").map((li) => cached.get(li)!),
+    );
+    const fromScratch = compute(edges, votes, { isVisible: (l) => l !== "Tree" });
+
+    expect(fromCache.map((p) => p.id)).toEqual(fromScratch.map((p) => p.id));
+    expect(fromCache.map((p) => p.score)).toEqual(fromScratch.map((p) => p.score));
+  });
+
+  it("re-ranking the full cached set equals the unfiltered recompute", () => {
+    const job = jobFor();
+    expect(rankRouteProposals(job.types.map(job.step)))
+      .toEqual(compute(edges, votes));
   });
 });

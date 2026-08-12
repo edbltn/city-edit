@@ -111,6 +111,30 @@ export function computeVoteTypeWinners(
   minNet = 0,
   isVisible?: VoteTypeVisibility
 ): VoteTypeWinner[] {
+  const candidates = computeWinnerCandidates(legend, edgeVoteTypes, perTypeLimit, kindOf, minNet);
+  return isVisible ? candidates.filter((w) => isVisible(w.label)) : candidates;
+}
+
+/**
+ * Step 1 WITHOUT the legend-visibility filter — the part that costs an O(edges)
+ * scan, and the part that does not depend on which types are toggled on.
+ *
+ * Visibility is a display gesture, not a vote-state change: which edge wins for
+ * a given type is identical whether its neighbours in the legend are shown or
+ * hidden. Keeping the scan separate lets the caller cache it for a vote state
+ * and re-select in microseconds when the legend toggles (GraphLayer's PBTP
+ * candidate cache) instead of rescanning three million edges to redraw the same
+ * pins. Filter the result with `filterWinnersByVisibility` before steps 2–5 —
+ * pruning here rather than from the finished list is what lets a hidden type's
+ * slot be taken by someone else's runner-up.
+ */
+export function computeWinnerCandidates(
+  legend: string[],
+  edgeVoteTypes: [number, number, number][][],
+  perTypeLimit = 1,
+  kindOf?: VoteTypeKindResolver,
+  minNet = 0
+): VoteTypeWinner[] {
   if (!legend.length || !edgeVoteTypes.length) return [];
 
   const floor = Math.max(0, minNet);
@@ -132,13 +156,20 @@ export function computeVoteTypeWinners(
     const label = legend[legendIdx];
     if (!label) continue;
     if (kindOf && kindOf(label) === "route") continue;
-    if (isVisible && !isVisible(label)) continue;
     edges.sort((a, b) => b.count - a.count);
     for (const { edgeIdx, count } of edges.slice(0, perTypeLimit)) {
       winners.push({ legendIdx, label, edgeIdx, count });
     }
   }
   return winners;
+}
+
+/** Drop candidates whose vote type is toggled off in the legend. */
+export function filterWinnersByVisibility(
+  candidates: VoteTypeWinner[],
+  isVisible?: VoteTypeVisibility
+): VoteTypeWinner[] {
+  return isVisible ? candidates.filter((w) => isVisible(w.label)) : candidates;
 }
 
 /**
@@ -357,14 +388,34 @@ export function selectTopProposals(
   isVisible?: VoteTypeVisibility
 ): VoteTypeWinner[] {
   if (!data) return [];
-  const perType = computeVoteTypeWinners(
-    data.vote_type_legend ?? [],
-    data.edge_vote_types ?? [],
-    TOP_PROPOSALS_PER_TYPE,
-    kindOf,
-    minNet,
-    isVisible
+  return selectTopProposalsFrom(
+    data,
+    computeWinnerCandidates(
+      data.vote_type_legend ?? [],
+      data.edge_vote_types ?? [],
+      TOP_PROPOSALS_PER_TYPE,
+      kindOf,
+      minNet
+    ),
+    salt, limit, minSpacingMeters, isVisible
   );
+}
+
+/**
+ * Steps 2–5 over an already-scanned candidate set (`computeWinnerCandidates`).
+ * Everything here operates on a few dozen survivors, so re-running it when the
+ * legend's visibility toggles is effectively free — that's the whole point of
+ * splitting it out from the edge scan.
+ */
+export function selectTopProposalsFrom(
+  data: Pick<GraphData, "vote_type_legend" | "edge_vote_types"> & GraphTopology,
+  candidates: VoteTypeWinner[],
+  salt: number,
+  limit: number,
+  minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M,
+  isVisible?: VoteTypeVisibility
+): VoteTypeWinner[] {
+  const perType = filterWinnersByVisibility(candidates, isVisible);
   const perEdge = dedupeWinnersByEdge(perType, salt);
   const perBlock = dedupeWinnersByBlock(
     perEdge, salt, (edgeIdx) => blockKeyOf(data, edgeIdx)

@@ -1374,36 +1374,49 @@ export function createRouteProposalJob(
     return dedupeRoutes(typeProposals, jaccardThreshold);
   };
 
-  const finish = (perType: RouteProposal[][]): RouteProposal[] => {
-    const byScore = (a: RouteProposal, b: RouteProposal) =>
-      b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-    const all = perType.flat();
-    all.sort(byScore);
-    // Diversity pass: walk by score, admitting at most `maxPerType` per vote
-    // type; leftover slots backfill from the skipped (5th-and-up of their type)
-    // by score. Final list re-sorted so callers still see pure score order.
-    const taken: RouteProposal[] = [];
-    const skipped: RouteProposal[] = [];
-    const perTypeCount = new Map<number, number>();
-    for (const p of all) {
-      const c = perTypeCount.get(p.legendIdx) ?? 0;
-      if (c < maxPerType) {
-        perTypeCount.set(p.legendIdx, c + 1);
-        taken.push(p);
-      } else {
-        skipped.push(p);
-      }
-    }
-    const ranked = taken.slice(0, limit);
-    for (const p of skipped) {
-      if (ranked.length >= limit) break;
-      ranked.push(p);
-    }
-    ranked.sort(byScore);
-    return ranked;
-  };
+  return { types, step, finish: (perType) => rankRouteProposals(perType, { maxPerType, limit }) };
+}
 
-  return { types, step, finish };
+/**
+ * The assembly tail of the job: rank every type's corridors into one capped,
+ * diversity-balanced list. Depends ONLY on the per-type results, never on how
+ * they were produced — so a caller holding cached per-type arrays (GraphLayer's
+ * route cache) can re-rank a different SUBSET of them, which is exactly what a
+ * legend visibility toggle needs: drop the hidden types' arrays and re-rank.
+ * No clustering, no edge walk, microseconds.
+ */
+export function rankRouteProposals(
+  perType: RouteProposal[][],
+  opts: { maxPerType?: number; limit?: number } = {},
+): RouteProposal[] {
+  const maxPerType = opts.maxPerType ?? MAX_PER_TYPE;
+  const limit = opts.limit ?? DEFAULT_LIMIT;
+  const byScore = (a: RouteProposal, b: RouteProposal) =>
+    b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const all = perType.flat();
+  all.sort(byScore);
+  // Diversity pass: walk by score, admitting at most `maxPerType` per vote
+  // type; leftover slots backfill from the skipped (5th-and-up of their type)
+  // by score. Final list re-sorted so callers still see pure score order.
+  const taken: RouteProposal[] = [];
+  const skipped: RouteProposal[] = [];
+  const perTypeCount = new Map<number, number>();
+  for (const p of all) {
+    const c = perTypeCount.get(p.legendIdx) ?? 0;
+    if (c < maxPerType) {
+      perTypeCount.set(p.legendIdx, c + 1);
+      taken.push(p);
+    } else {
+      skipped.push(p);
+    }
+  }
+  const ranked = taken.slice(0, limit);
+  for (const p of skipped) {
+    if (ranked.length >= limit) break;
+    ranked.push(p);
+  }
+  ranked.sort(byScore);
+  return ranked;
 }
 
 /**
