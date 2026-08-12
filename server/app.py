@@ -46,6 +46,7 @@ from database import (
     create_map, get_map_passcode_hash, list_vote_type_lists, set_map_subdomain,
     set_vote_sources, fetch_vote_sources_for_edges,
     promote_vote_types, fetch_voted_vote_type_labels,
+    get_sticker, resolve_sticker,
     DATABASE_URL,
 )
 
@@ -2258,6 +2259,64 @@ def client_timing():
     src = re.sub(r"[^a-zA-Z0-9_-]", "", str(payload.get("src") or ""))[:32] or "direct"
     logger.info(f"[MAPLOAD] map={slug} ms={int(ms)} cached_topo={cached} nav={nav} src={src}")
     return "", 204
+
+
+# ── Printed stickers (QR codes on poles) ────────────────────────────────────
+
+@app.route("/api/stickers/<code>", methods=["GET"])
+def sticker_lookup(code):
+    """What a scan of a printed sticker should do.
+
+    Two answers, and which one comes back is the whole design:
+
+      * unresolved — nobody has voted from this sticker yet, so we do not know
+        which pole it is on. The client asks the scanner to share their
+        location.
+      * resolved — someone already did, and the sticker is pinned to that spot.
+        The client goes straight there with the vote type preselected, and never
+        asks for location again.
+
+    Reading also counts the scan (see database.get_sticker): scans-per-sticker
+    is how you tell a busy corner from a wall nobody walks past, and it is the
+    only place that number exists.
+
+    Never cached. A sticker flips from unresolved to resolved exactly once, and
+    a CDN holding the old answer would keep prompting people for a location that
+    is already known.
+    """
+    sticker = get_sticker(code, count_scan=True)
+    if not sticker:
+        return jsonify({"error": "Unknown sticker code"}), 404
+    resp = jsonify(sticker)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/api/stickers/<code>/resolve", methods=["POST"])
+def sticker_resolve(code):
+    """Pin a sticker to the place it turned out to be.
+
+    Posted by the client after the scan's FIRST vote lands, not when the browser
+    hands over a location. A shared location says "I am here"; a cast vote says
+    "and this is the thing that is wrong here", which is what the sticker is
+    claiming to be about. It also means a scanner who shares location and then
+    wanders off leaves the sticker free for whoever actually uses it.
+
+    Write-once and race-safe in SQL (database.resolve_sticker). A second caller
+    gets 200 with the location that won, because from the client's point of view
+    "the sticker now has a location" is the same outcome either way.
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        lat = float(data["lat"])
+        lon = float(data["lng"] if "lng" in data else data["lon"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "lat and lng are required"}), 400
+    device_id, _ip_hash = _resolve_user(data)
+    resolved = resolve_sticker(code, lat, lon, device_id)
+    if not resolved:
+        return jsonify({"error": "Unknown sticker code or bad coordinates"}), 404
+    return jsonify(resolved)
 
 
 @app.route("/api/graph-votes", methods=["GET"])

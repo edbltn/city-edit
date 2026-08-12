@@ -9,6 +9,7 @@ Redis handles fast reads/writes and pub/sub; Postgres stores permanent history.
 """
 import logging
 import os
+import re
 import time
 from contextlib import contextmanager
 from typing import Optional
@@ -316,6 +317,47 @@ def init_db():
                     created_at TIMESTAMP DEFAULT NOW()
                 )
             """)
+
+            # ── Sticker codes: one row per printed sticker ──────────────────
+            # A sticker is a QR code on a pole. Its code is minted at print time
+            # (tools/stickers) and seeded here BEFORE the sheet goes in anyone's
+            # bag — an unseeded code is a 404 at the kerb.
+            #
+            # The row starts life knowing only what was printed on it (which map,
+            # which vote type, which line, which campaign tag). It does NOT know
+            # where the sticker ended up, because nobody does until someone puts
+            # it on a pole. The first scanner shares their location and votes,
+            # `resolve_sticker` stamps lat/lon, and from then on the code IS that
+            # place: every later scan skips the prompt and opens the vote there.
+            #
+            # That is why the resolved columns are write-once. A second visitor
+            # standing across the street must not be able to drag a sticker's
+            # identity down the block, and a re-run of the print seeder must not
+            # reset one that is already live (see resolve_sticker / the seed SQL).
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sticker_codes (
+                    code TEXT PRIMARY KEY,
+                    map_slug TEXT NOT NULL,
+                    vote_type TEXT NOT NULL,
+                    headline TEXT NOT NULL,
+                    src_tag TEXT NOT NULL,
+                    campaign TEXT,
+                    lat DOUBLE PRECISION,
+                    lon DOUBLE PRECISION,
+                    resolved_at TIMESTAMP,
+                    resolved_by VARCHAR(16),
+                    scans INT NOT NULL DEFAULT 0,
+                    first_scan_at TIMESTAMP,
+                    last_scan_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            # "Which of this campaign's stickers have found a home?" is the
+            # question the whole table exists to answer, so it gets the index.
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sticker_codes_campaign "
+                "ON sticker_codes(campaign, resolved_at)"
+            )
 
             logger.info("[DB] Database schema initialized successfully")
             return True
@@ -1279,6 +1321,129 @@ def list_map_redirects() -> list[dict]:
     except Exception as e:
         logger.error(f"[DB] list_map_redirects failed: {e}")
         return []
+
+
+# ── Sticker codes (printed QR stickers) ─────────────────────────────────────
+
+# Codes are minted from a 31-character alphabet with the ambiguous glyphs
+# removed (see tools/stickers/codes.py). Anything else never existed on paper.
+_STICKER_CODE = re.compile(r"^[23456789abcdefghjkmnpqrstuvwxyz]{4,12}$")
+
+
+def normalize_sticker_code(code: str) -> Optional[str]:
+    """Canonical form of a scanned code, or None if it could not be one.
+
+    The QR carries the URL in uppercase — that is what lets the whole link fit
+    QR's alphanumeric mode and stay a small, dense code (tools/stickers/codes.py
+    explains the trade) — so every lookup arrives shouting and is folded back
+    down here. Validating the shape before it reaches SQL also means a scanner
+    that appends junk gets a clean 404 instead of a query.
+    """
+    if not code:
+        return None
+    folded = code.strip().lower()
+    return folded if _STICKER_CODE.match(folded) else None
+
+
+def get_sticker(code: str, count_scan: bool = False) -> Optional[dict]:
+    """What a scan of `code` should do, or None if no such sticker was printed.
+
+    `count_scan` bumps the scan counter in the same statement as the read, so a
+    scan costs one round trip. Per-sticker scan counts live here rather than in
+    the map-load metric on purpose: the metric's `src` label is a low-cardinality
+    dashboard dimension shared by every sticker carrying the same message, while
+    "which individual poles get scanned" is a question with thousands of answers
+    and therefore a question for SQL.
+    """
+    if not DATABASE_URL:
+        return None
+    norm = normalize_sticker_code(code)
+    if not norm:
+        return None
+    try:
+        with get_cursor() as cursor:
+            if count_scan:
+                cursor.execute(
+                    """UPDATE sticker_codes
+                       SET scans = scans + 1,
+                           first_scan_at = COALESCE(first_scan_at, NOW()),
+                           last_scan_at = NOW()
+                       WHERE code = %s
+                       RETURNING code, map_slug, vote_type, headline, src_tag,
+                                 lat, lon, resolved_at""",
+                    (norm,),
+                )
+            else:
+                cursor.execute(
+                    """SELECT code, map_slug, vote_type, headline, src_tag,
+                              lat, lon, resolved_at
+                       FROM sticker_codes WHERE code = %s""",
+                    (norm,),
+                )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "code": row[0],
+                "mapSlug": row[1],
+                "voteType": row[2],
+                "headline": row[3],
+                "src": row[4],
+                # Absent rather than null when unresolved: the client's only
+                # question is "do I know where this sticker is yet?".
+                "location": ({"lat": row[5], "lng": row[6]}
+                             if row[7] is not None and row[5] is not None
+                             else None),
+            }
+    except Exception as e:
+        logger.error(f"[DB] get_sticker '{code}' failed: {e}")
+        return None
+
+
+def resolve_sticker(code: str, lat: float, lon: float,
+                    device_id: Optional[str] = None) -> Optional[dict]:
+    """Pin a sticker to the place it turned out to be, once.
+
+    Called after the first scanner actually casts a vote — not when they merely
+    share their location, because a shared location is a claim and a cast vote
+    is a commitment. From then on the sticker opens straight to this spot.
+
+    Write-once, enforced in the WHERE clause rather than by reading first: two
+    people scanning the same fresh sticker within a second of each other would
+    both see it unresolved, and the loser of that race must not overwrite the
+    winner. Returns the location now on the row — the existing one if we lost,
+    which is exactly what the caller should honour.
+    """
+    if not DATABASE_URL:
+        return None
+    norm = normalize_sticker_code(code)
+    if not norm:
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                """UPDATE sticker_codes
+                   SET lat = %s, lon = %s, resolved_at = NOW(), resolved_by = %s
+                   WHERE code = %s AND resolved_at IS NULL""",
+                (lat, lon, (device_id or None), norm),
+            )
+            claimed = cursor.rowcount == 1
+            cursor.execute(
+                "SELECT lat, lon FROM sticker_codes WHERE code = %s", (norm,)
+            )
+            row = cursor.fetchone()
+            if not row or row[0] is None:
+                return None
+            logger.info(
+                f"[STICKER] resolve code={norm} lat={row[0]:.6f} lon={row[1]:.6f} "
+                f"{'claimed' if claimed else 'already-resolved'}"
+            )
+            return {"lat": row[0], "lng": row[1], "claimed": claimed}
+    except Exception as e:
+        logger.error(f"[DB] resolve_sticker '{code}' failed: {e}")
+        return None
 
 
 def rename_map_slug(

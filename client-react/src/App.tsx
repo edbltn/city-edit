@@ -14,6 +14,8 @@ import {
 } from "./map/runtime";
 import { reportMapLoaded } from "./utils/loadTelemetry";
 import { captureSourceTag, withSourceTag } from "./utils/sourceTag";
+import { StickerGate } from "./components/StickerGate";
+import { detectStickerCodeFromUrl, capturePendingSticker } from "./sticker";
 
 /** Full-screen "Loading..." splash with the ASCII (| / - \) spinner. */
 function FullScreenLoader() {
@@ -79,9 +81,12 @@ function MapApp() {
 
   useEffect(() => {
     let cancelled = false;
-    // Capture ?src= (campaign attribution) BEFORE any redirect or URL rewrite
-    // can drop it — the beacon reads it when the loader dismisses.
+    // Capture ?src= (campaign attribution) and ?stk= (the sticker this visit
+    // was scanned from) BEFORE any redirect or URL rewrite can drop them — the
+    // beacon reads the first when the loader dismisses, and the first vote
+    // spends the second to pin the sticker to where it turned out to be.
     captureSourceTag();
+    capturePendingSticker();
     (async () => {
       let resolved = await resolveMapConfig();
       if (cancelled) return;
@@ -172,6 +177,14 @@ function MapApp() {
 }
 
 function App() {
+  // A scanned sticker (/s/<code>) resolves before anything else: it decides
+  // WHICH map and which point to open, so there is nothing for the map path to
+  // resolve until it has answered. It redirects to a normal /m/<slug> deep link
+  // and this branch is never taken again in that visit.
+  const stickerCode = detectStickerCodeFromUrl();
+  if (stickerCode) {
+    return <StickerGate code={stickerCode} />;
+  }
   // An explicit map in the URL (/m/<slug> or ?map=) means map mode even on the
   // apex/landing host — otherwise clicking a map card just re-rendered Landing.
   if (!detectMapSlugFromUrl() && isLandingHost()) {

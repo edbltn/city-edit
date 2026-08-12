@@ -24,10 +24,12 @@ export type DebugChannel =
   | "blocks"     // block heat/selection feature-state broadcasts
   | "proposals"  // route-proposal recomputes (counts + timing)
   | "maplibre"   // MapLibre lifecycle: load, webgl fallback, source errors
+  | "sticker"    // scanned-sticker resolution: lookup, location, pinning
   | "ws";        // websocket connect/disconnect/messages
 
 const ALL_CHANNELS: readonly DebugChannel[] = [
-  "topo", "votes", "cast", "store", "blocks", "proposals", "maplibre", "ws",
+  "topo", "votes", "cast", "store", "blocks", "proposals", "maplibre",
+  "sticker", "ws",
 ];
 
 const STORAGE_KEY = "cityedit_debug";

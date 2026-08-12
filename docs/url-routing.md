@@ -17,6 +17,7 @@ that table whenever you add one.
 | Subdomain | `bikepaths.cityedit.org` | A vanity host mapped to a map's slug in the DB |
 | Apex | `cityedit.org` | Landing page (map picker) |
 | Deep link | `/m/<slug>?z=&lat=&lng=&slat=&slng=&elat=&elng=&vt=` | A map plus camera + a pre-selected point/route + vote type |
+| Sticker scan | `cityedit.org/s/<code>` | A printed QR sticker; resolves to a deep link — see [Sticker codes](#sticker-codes-s-code) |
 
 The slug is the single source of truth. Subdomains are an optional alias that
 resolve **to** a slug; the camera/selection params ride along on either form.
@@ -35,6 +36,35 @@ extracts it as the `src` label, so **visits by source** is a Metrics Explorer /
 dashboard group-by; untagged visits are labeled `direct`. Tags are
 `[a-zA-Z0-9_-]`, max 32 chars. To start a new campaign, just mint a new tag in
 the printed/shared URL — no code change.
+
+### Sticker codes (`/s/<code>`)
+
+A printed sticker (`tools/stickers`) carries one URL and nothing else:
+`HTTPS://CITYEDIT.ORG/S/<code>`, uppercase so the whole link fits QR's
+alphanumeric mode. nginx serves the SPA shell for any path, so `/s/<code>` loads
+the app and `App.tsx` hands it to `StickerGate` **before** map resolution — the
+code is what decides which map and which point to open, so there is nothing to
+resolve until it has answered.
+
+`GET /api/stickers/<code>` (case-insensitive, `no-store`) returns the map slug,
+vote type, printed line, campaign tag, and either a location or `null`:
+
+- **`location: null`** — nobody has voted from this sticker yet, so nobody knows
+  which pole it is on. The gate asks the scanner to share their location once,
+  then `location.replace`s to `/m/<slug>?w=<lat>,<lng>&vt=…&src=…&stk=<code>`.
+- **a location** — the sticker is already pinned. The gate redirects straight to
+  the deep link with no prompt and no `stk`.
+
+`?stk=` is captured + stripped at boot exactly like `?src=` (`sticker/pending.ts`,
+beside `captureSourceTag()` in `App.tsx`), and is spent by the visit's **first
+cast vote**: `castVote.ts` posts the selection's current coordinate to
+`POST /api/stickers/<code>/resolve`, which is write-once and race-safe in SQL.
+A cast vote pins the sticker, not a shared location — and a location the visitor
+placed by hand (because they refused geolocation) never pins it at all.
+
+Two params, two resolutions of tracking: `?src=stk-<message>` is a low-cardinality
+**metric label** on `cityedit_map_load_ms`, while per-sticker scans and placements
+are rows on `sticker_codes` in Postgres. See `tools/stickers/README.md`.
 
 ## Client resolution (the load path)
 
@@ -208,6 +238,7 @@ one, add a row here.
 | Canonical-subdomain redirect (`/m/nyc-bikes` → `bikepaths.cityedit.org`) | client `location.replace` after map-config fetch | `App.tsx` + `themes.ts subdomainRedirectUrl` | preserved (+ re-attached `src`) |
 | Retired-slug redirects (renamed maps) | client `location.replace` on `MapConfig.redirect` | DB `map_redirects` table + `App.tsx` + `map/runtime.ts slugRedirectUrl` | preserved, `append_query` merged |
 | Staging: subdomain redirect disabled | `APP_ENV=staging` → `staging: true` on map config | `app.py` / `App.tsx` | n/a |
+| Sticker scan (`/s/<code>` → `/m/<slug>?w=…&vt=…`) | client `location.replace` after `GET /api/stickers/<code>` | `components/StickerGate` + `sticker/link.ts` | built fresh (`w`, `vt`, `z/lat/lng`, `src`; `stk` only while unresolved) |
 
 Current `map_redirects` rows (query the DB for the live list:
 `SELECT * FROM map_redirects;`):

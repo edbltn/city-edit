@@ -1,0 +1,108 @@
+/* ==========================================================================
+   StickerGate — the landing screen for a scanned sticker
+   ==========================================================================
+   Built to be read one-handed, outdoors, at a kerb, by someone who has already
+   decided. It borrows the sticker's own restraint: the printed line, an amber
+   rule, one button. The panel is narrow and the type is large because the
+   screen is small and the light is bad.
+
+   No theme is loaded here — ThemeProvider lives under the map subtree, and a
+   scan never reaches it — so this uses the :root palette defaults only. */
+
+.sticker-gate {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-main);
+}
+
+.sticker-gate-spinner {
+  font-size: 28px;
+  line-height: 1;
+  color: var(--color-start);
+}
+
+.sticker-gate-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  max-width: 380px;
+  text-align: center;
+}
+
+/* The line, set the way the sticker sets it: mono capitals, tracked, stacked.
+   Sized in vw with a ceiling so it fills a phone without wrapping oddly on a
+   desktop tab. */
+.sticker-gate-line {
+  margin: 0;
+  font-size: clamp(28px, 8.5vw, 40px);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: 0.05em;
+  color: var(--ink-strong);
+  text-wrap: balance;
+}
+
+/* The sticker's amber band, flattened out. The only colour on the screen. */
+.sticker-gate-rule {
+  height: 3px;
+  margin: var(--space-5) auto var(--space-5);
+  width: 64px;
+  background: var(--accent);
+}
+
+.sticker-gate-note {
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  opacity: 0.75;
+}
+
+.sticker-gate-note b {
+  font-weight: 600;
+  opacity: 1;
+}
+
+.sticker-gate-button {
+  display: block;
+  min-height: 52px;
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  font-family: var(--font-main);
+  font-size: var(--font-size-md);
+  letter-spacing: 0.04em;
+  color: var(--on-accent);
+  background: var(--accent);
+  text-decoration: none;
+  line-height: 28px;
+  cursor: pointer;
+}
+
+.sticker-gate-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.sticker-gate-secondary {
+  margin-top: var(--space-4);
+  padding: var(--space-2);
+  border: none;
+  font-family: var(--font-main);
+  font-size: var(--font-size-xs);
+  color: var(--ink);
+  background: none;
+  text-decoration: none;
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.sticker-gate-secondary:hover {
+  opacity: 0.85;
+}

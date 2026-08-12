@@ -15,6 +15,8 @@ import { CONFIG } from "../config";
 import { getMapSlug, getPasscodeToken } from "../map/runtime";
 import { ensureVoteTypeVisible } from "../map/voteTypeFilter";
 import { registerVoteTypeLabel } from "../map/voteTypeRegistry";
+import { selectionFromParams } from "../selection/serialize";
+import { hasPendingSticker, resolveSticker, takePendingSticker } from "../sticker";
 import { dlog, derror } from "./debugLog";
 import { getVoterId } from "./voterIdentity";
 import {
@@ -25,6 +27,30 @@ import {
   type BlockCoverage,
   type VoteDirection,
 } from "./voteStore";
+
+/**
+ * Pin the sticker this visit was scanned from to the place the vote landed.
+ *
+ * Only fires for a real cast: an unvote (direction 0) is someone taking a vote
+ * back, which is no evidence at all about where a sticker lives.
+ *
+ * The point comes from the URL rather than from the cast's edge ids, because
+ * the URL is the canonical serialization of the selection (selection/serialize.ts)
+ * and is therefore exactly the coordinate a future scan will deep-link to. Take
+ * it at cast time, not at boot: the scanner may well have dragged the pin from
+ * where their phone thought they were onto the corner they actually mean, and
+ * that corrected spot is the better answer for everyone who scans next.
+ */
+function pinPendingSticker(targetDir: VoteDirection | 0): void {
+  if (targetDir === 0 || !hasPendingSticker()) return;
+  const parsed = selectionFromParams(new URLSearchParams(window.location.search));
+  const point = parsed?.waypoints[0]?.coords;
+  if (!point) return;
+  const code = takePendingSticker();
+  if (!code) return;
+  dlog("sticker", `pinning ${code} to`, point);
+  void resolveSticker(code, point, getVoterId());
+}
 
 /** Detail of the `optimistic-vote` window event GraphLayer listens for. */
 export interface OptimisticVoteDetail {
@@ -259,6 +285,11 @@ export async function castVotes(params: {
     if (cleared.length > 0) {
       setVotes(mode, cleared, label, 0);
     }
+
+    // If this visit came from a scanned sticker that had never been placed,
+    // THIS is the moment it gets a location — a cast vote, not a shared
+    // coordinate, is what earns a sticker its spot on the map.
+    pinPendingSticker(targetDir);
 
     return { ok: true, targetDir, changedEdges: changedEdges.filter((e) => !declined.has(e)) };
   } catch (err) {
