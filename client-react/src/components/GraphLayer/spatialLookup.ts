@@ -1,3 +1,4 @@
+// Algorithm doc: docs/algorithms/02-top-proposals.md (TOP_PROPOSAL_LIMIT)
 import L from "leaflet";
 import Flatbush from "flatbush";
 import { pointToSegmentDist } from "./geometryHelpers";
@@ -91,9 +92,11 @@ export function decodeVoteTypes(
 }
 
 // Cap on how many top-proposal indicators show on the map. Each surviving
-// EDGE consumes one slot (winners are deduped per edge first), so the 20 most
+// EDGE consumes one slot (winners are deduped per edge first), so the 50 most
 // net-voted segments survive — drawn from the top few edges per vote type.
-export const TOP_PROPOSAL_LIMIT = 20;
+// With no support floor (TOP_PROPOSAL_MIN_NET = 0) this cap IS the legibility
+// control: ranking decides who gets a pin, not a threshold.
+export const TOP_PROPOSAL_LIMIT = 50;
 
 // "Spread to grid" interaction for crowded indicators. When a top-proposal
 // icon is clicked and other icons sit within CLUSTER_RADIUS_PX of it on screen,

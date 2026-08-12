@@ -33,7 +33,8 @@ import {
 } from "../MapLibreBackground/MapLibreBackground";
 import { makeVoteTypeIcon } from "./voteTypeIcon";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
-import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, TOP_PROPOSAL_MIN_NET, type VoteTypeWinner } from "./topProposals";
+import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, TOP_PROPOSAL_MIN_NET,
+  ROUTE_PROPOSAL_MIN_NET, type VoteTypeWinner } from "./topProposals";
 import {
   createRouteProposalJob, corridorFromEdgeIds, corridorSliceBetween, routeBlockEdges, isRouteCovered,
   routeCoverageRatio, ROUTE_SELECTED_MIN_COVERAGE,
@@ -292,7 +293,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const isStationNetwork = !!stationNetwork && stationNetwork !== "streets";
   // Per-map override of the top-proposal support floor (maps.top_proposal_min_net);
   // curated/imported maps set 0 so one-vote-per-proposal entries still surface.
+  // Pins have no default floor (ranking + the 50-slot cap keep the map legible);
+  // corridors keep the old, much higher bar unless a map overrides it, since a
+  // route grown from one vote is noise. The override still governs both.
   const topProposalMinNet = getCurrentMap()?.topProposalMinNet ?? TOP_PROPOSAL_MIN_NET;
+  const routeProposalMinNet = getCurrentMap()?.topProposalMinNet ?? ROUTE_PROPOSAL_MIN_NET;
   // One shared icon for every station, like a pin. Prefer a point-type vote type
   // (stations are points), else the map's first vote type.
   const stationLabel =
@@ -1488,10 +1493,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       // Legend toggles — a hidden type is skipped before its clustering runs,
       // so a filtered map recomputes faster, not slower.
       isVisible: isVoteTypeVisible,
-      // The top-proposal support floor (>topProposalMinNet net votes),
-      // expressed as the pipeline's minimum path score — same rule the PBTP
-      // winners apply, so both proposal families share one bar.
-      minRouteScore: topProposalMinNet + 1,
+      // The corridor support floor (>routeProposalMinNet), expressed as the
+      // pipeline's minimum path score. A map's topProposalMinNet override wins
+      // here too (nyc-proposals sets 0, one authoritative vote per project);
+      // absent an override this is the family's own default, NOT the pin floor.
+      minRouteScore: routeProposalMinNet + 1,
     });
     const perType: RouteProposal[][] = [];
     let i = 0;
@@ -1527,7 +1533,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     // The first slice is deferred too, so the caller (often itself an idle
     // callback that just ran the PBTP scan) returns before any heavy type runs.
     scheduleIdleSlice(slice);
-  }, [voteTypeKindOf, topProposalMinNet]);
+  }, [voteTypeKindOf, routeProposalMinNet]);
 
   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);
   useEffect(() => { recomputeRouteProposalsRef.current = recomputeRouteProposals; }, [recomputeRouteProposals]);

@@ -85,15 +85,29 @@ export type VoteTypeKindResolver = (label: string) => "route" | "point" | null;
 export type VoteTypeVisibility = (label: string) => boolean;
 
 /**
- * Support floor for the "Top Proposal" badge: a proposal only counts as a top
- * proposal with STRICTLY MORE than this many net votes. Without it, a rare
- * vote type's best edge earns a pin at net 1–2 while the modal shows other
- * types with far higher counts right next to it — confusing. Applies to BOTH
- * families: PBTP winners (net on the winning edge) and RBTP corridors (path
- * score = sum of nets); see GraphLayer's selectTopProposals /
- * createRouteProposalJob call sites.
+ * Support floor for a PBTP pin: an edge counts as a top proposal with STRICTLY
+ * MORE than this many net votes. Zero means any positive net qualifies — a
+ * single vote earns a pin. The ranking (net descending) plus TOP_PROPOSAL_LIMIT
+ * is what keeps the map legible now, rather than a threshold: the strongest
+ * proposals win the slots, and a quiet map still shows what little it has.
+ *
+ * A map may raise it for itself via `topProposalMinNet` (map/runtime.ts).
+ *
+ * This is the PIN floor only. Corridors have their own, much higher default —
+ * ROUTE_PROPOSAL_MIN_NET below — because a route drawn from one vote is noise,
+ * not a proposal.
  */
-export const TOP_PROPOSAL_MIN_NET = 100;
+export const TOP_PROPOSAL_MIN_NET = 0;
+
+/**
+ * Support floor for an RBTP corridor, as a path score (sum of edge nets). Kept
+ * where the shared floor used to sit: corridor growth off one or two votes
+ * wanders, and the 2026-07-30 noise-proposal fix depends on this bar. A map's
+ * `topProposalMinNet` override still wins when it is set (the imported
+ * nyc-proposals map sets 0, since each official project is one authoritative
+ * vote); see GraphLayer's createRouteProposalJob call site.
+ */
+export const ROUTE_PROPOSAL_MIN_NET = 100;
 
 /**
  * Step 1 — for each vote type, the top `perTypeLimit` edges by net support
@@ -363,8 +377,9 @@ export const TOP_PROPOSALS_PER_TYPE = 6;
 // Deliberately much wider than the cross-type grain (one pin per block, see
 // dedupeWinnersByBlock): identical pins carry zero extra information nearby,
 // while different-type pins are distinct proposals and only collapse when they
-// share a block. ~7–8 NYC avenue blocks; tune for denser/sparser networks.
-export const TOP_PROPOSAL_MIN_SPACING_M = 600;
+// share a block. A kilometre is ~12 NYC avenue blocks — wide enough that one
+// popular type spreads across neighbourhoods instead of pooling in one.
+export const TOP_PROPOSAL_MIN_SPACING_M = 1000;
 
 /**
  * Full selection path: top-N-per-POINT-type winners → one per edge (tiebreak)

@@ -31,7 +31,7 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored
 >   **square** pin at the edge midpoint. Selected by
 >   `topProposals.selectTopProposals` (client) — at most **one pin per block**
 >   across all vote types, and same-type pins at least
->   `TOP_PROPOSAL_MIN_SPACING_M` (600 m) apart — drawn by GraphLayer's
+>   `TOP_PROPOSAL_MIN_SPACING_M` (1000 m) apart — drawn by GraphLayer's
 >   `indicatorMarkers`.
 > - **RBTP** — **route-based top proposal**: a hot **corridor** (Layer 3 below),
 >   rendered as a **diamond** pin at its middle path edge. Computed by
@@ -228,9 +228,9 @@ Per vote type `T`, over edges with net(T) ≥ `MIN_NET` (high-activity gate #1):
    server-side Leiden step: components localize naturally, and corridor
    peeling separates parallel corridors inside one component). Components
    whose TOTAL weight can't reach `minRouteScore` are skipped outright — with
-   the top-proposal support floor (`TOP_PROPOSAL_MIN_NET`, net > 100, the same
-   bar PBTP winners clear) as the in-app score gate, this prunes nearly
-   everything before any routing work.
+   the corridor support floor (`ROUTE_PROPOSAL_MIN_NET`, score > 100 — the
+   pin family has no default floor) as the in-app score gate, this prunes
+   nearly everything before any routing work.
 3. **Routing-consistent growth** (`growCorridor`) — grow one corridor from the
    component's heaviest edge, repeatedly taking the heaviest net-positive arc
    off either tip (ties: lowest edge id) that fits the length budget. An

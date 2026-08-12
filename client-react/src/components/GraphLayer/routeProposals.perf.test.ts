@@ -6,7 +6,7 @@
 import { describe, it, expect } from "vitest";
 import { decodeTopologyBin, buildNodeAdj, buildBlockIndex } from "./graphTopology";
 import { computeRouteProposals, createRouteProposalJob } from "./routeProposals";
-import { selectTopProposals, TOP_PROPOSAL_MIN_NET } from "./topProposals";
+import { selectTopProposals, ROUTE_PROPOSAL_MIN_NET } from "./topProposals";
 
 const RUN = process.env.PERF === "1";
 
@@ -32,19 +32,19 @@ describe.runIf(RUN)("routeProposals perf (real nyc-bikes graph)", () => {
     const data = { ...topo, ...votes };
 
     // Warm + 3 timed runs with the prebuilt index (the new in-app path).
-    computeRouteProposals(topo, adj, data, { blockIndex, minRouteScore: TOP_PROPOSAL_MIN_NET + 1 });
+    computeRouteProposals(topo, adj, data, { blockIndex, minRouteScore: ROUTE_PROPOSAL_MIN_NET + 1 });
     const runs: number[] = [];
     let n = 0;
     for (let i = 0; i < 3; i++) {
       const s = performance.now();
-      n = computeRouteProposals(topo, adj, data, { blockIndex, minRouteScore: TOP_PROPOSAL_MIN_NET + 1 }).length;
+      n = computeRouteProposals(topo, adj, data, { blockIndex, minRouteScore: ROUTE_PROPOSAL_MIN_NET + 1 }).length;
       runs.push(performance.now() - s);
     }
 
     // Per-slice (per-type) durations — the longest is the worst main-thread
     // block the sliced in-app job can cause.
     const tJob0 = performance.now();
-    const job = createRouteProposalJob(topo, adj, data, { blockIndex, minRouteScore: TOP_PROPOSAL_MIN_NET + 1 });
+    const job = createRouteProposalJob(topo, adj, data, { blockIndex, minRouteScore: ROUTE_PROPOSAL_MIN_NET + 1 });
     const setupMs = performance.now() - tJob0;
     const sliceMs = job.types.map((t) => {
       const s = performance.now();

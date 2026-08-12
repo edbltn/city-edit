@@ -3,7 +3,9 @@ title: Top proposals — point-based (PBTP)
 description: How a handful of square pins are chosen out of every voted edge on the map.
 sources:
   - path: client-react/src/components/GraphLayer/topProposals.ts
-    anchors: [selectTopProposals, computeVoteTypeWinners, dedupeWinnersByEdge, dedupeWinnersByBlock, spaceOutWinners, applyTopProposalLimit, compareWinners, shuffleKey, topLabelForEdges, edgeMidpointResolver, TOP_PROPOSAL_MIN_NET, TOP_PROPOSALS_PER_TYPE, TOP_PROPOSAL_MIN_SPACING_M]
+    anchors: [selectTopProposals, computeVoteTypeWinners, dedupeWinnersByEdge, dedupeWinnersByBlock, spaceOutWinners, applyTopProposalLimit, compareWinners, shuffleKey, topLabelForEdges, edgeMidpointResolver, TOP_PROPOSAL_MIN_NET, ROUTE_PROPOSAL_MIN_NET, TOP_PROPOSALS_PER_TYPE, TOP_PROPOSAL_MIN_SPACING_M]
+  - path: client-react/src/components/GraphLayer/spatialLookup.ts
+    anchors: [TOP_PROPOSAL_LIMIT]
 ---
 
 # Top proposals — point-based (PBTP)
@@ -18,7 +20,7 @@ the obvious failure: a single popular avenue does not get to be all of them.
 A **PBTP** is one hot edge, drawn as a **square** pin at its midpoint. Its
 counterpart, the **RBTP** (a hot corridor, diamond pin), is
 [dossier 03](03-route-proposals.md). The two families are disjoint by vote-type
-kind and share one support floor, so the map never argues with itself about what
+kind, so the map never argues with itself about what
 is important.
 
 Selection is **pure and client-side**: a deterministic function of (topology,
@@ -93,12 +95,16 @@ RBTP's blocks already cover are dropped downstream by `dropPointsCoveredByRoutes
 
 | Knob | Value | Defined in | What breaks if you change it |
 |---|---|---|---|
-| `TOP_PROPOSAL_MIN_NET` | `100` | `topProposals.ts` | The support floor. Below this net, nothing is a top proposal at all. A map can override it per-map (`topProposalMinNet`; the imported `nyc-proposals` map sets 0, since official DOT proposals are authoritative at one vote each). Drop it globally and the map fills with pins backed by three people. |
+| `TOP_PROPOSAL_MIN_NET` | `0` | `topProposals.ts` | The pin support floor, applied strictly (`net > floor`). Zero since 2026-08-12: a single net vote earns a pin, and the ranking plus `TOP_PROPOSAL_LIMIT` decides who keeps one. A map can raise it for itself (`topProposalMinNet`). |
+| `ROUTE_PROPOSAL_MIN_NET` | `100` | `topProposals.ts` | The corridor floor, as a minimum path score — where the shared floor used to sit. Corridors keep it because a route grown from one or two votes wanders; a map's `topProposalMinNet` override still wins (`nyc-proposals` sets 0). |
+| `TOP_PROPOSAL_LIMIT` | `50` | `spatialLookup.ts` | Global cap on rendered pins, applied last, by net descending. With no support floor this is the legibility control. RBTP corridors are capped separately (`DEFAULT_LIMIT`, `routeProposals.ts`). |
 | `TOP_PROPOSALS_PER_TYPE` | `6` | `topProposals.ts` | How many edges per type reach the spacing step. Raise it and a popular type surfaces more distinct locations — at the cost of crowding other types out of the final `limit`. |
-| `TOP_PROPOSAL_MIN_SPACING_M` | `600` | `topProposals.ts` | Same-type non-max suppression radius, ≈ 7–8 NYC avenue blocks. Lower it and a hot avenue grows a stack of identical pins; raise it and a genuinely city-wide demand shows up as one pin in one neighbourhood. Tune for denser or sparser networks. |
+| `TOP_PROPOSAL_MIN_SPACING_M` | `1000` | `topProposals.ts` | Same-type non-max suppression radius, ≈ 12 NYC avenue blocks. Lower it and a hot avenue grows a stack of identical pins; raise it and a genuinely city-wide demand shows up as one pin in one neighbourhood. Tune for denser or sparser networks. |
 
-The same floor governs the corridor family: `createRouteProposalJob` is called
-with `minRouteScore = topProposalMinNet + 1`, so both families clear one bar.
+The families no longer share one bar (2026-08-12): `createRouteProposalJob` is
+called with `minRouteScore = routeProposalMinNet + 1`, which resolves to a map's
+`topProposalMinNet` override when set and to `ROUTE_PROPOSAL_MIN_NET` otherwise.
+Pins are ranked and capped; corridors are gated.
 
 ## Invariants
 
@@ -106,7 +112,8 @@ Enforced by `topProposals.test.ts`:
 
 - **One pin per block, globally.** Not per type — across all of them.
 - **Nothing below the floor.** Net ≤ `minNet` never appears, including ties at
-  exactly the floor.
+  exactly the floor. With the default `minNet = 0` that means any positive net
+  qualifies and net ≤ 0 never does.
 - **No route-kind pins.** A route-kind type never yields a PBTP, whatever its net.
 - **Determinism.** Same (topology, votes, salt) → byte-identical winners, in the
   same order. This is what lets selection re-run freely on every delta.
@@ -117,9 +124,9 @@ Enforced by `topProposals.test.ts`:
 
 | What went wrong | Why | Fix |
 |---|---|---|
-| Three identical pins stacked on one avenue | Only per-edge dedup existed; a corridor's top edges are adjacent segments | `spaceOutWinners` at 600 m ([2026-07-08](https://github.com/edbltn/city-edit/blob/main/changelog/2026-07-08-top-proposal-kinds.html)) |
+| Three identical pins stacked on one avenue | Only per-edge dedup existed; a corridor's top edges are adjacent segments | `spaceOutWinners`, now at 1000 m ([2026-07-08](https://github.com/edbltn/city-edit/blob/main/changelog/2026-07-08-top-proposal-kinds.html)) |
 | Route-shaped demands rendered as scattered points | Both families drew from the same pool | `pointType` kind split, PBTP/RBTP disjoint ([2026-07-08](https://github.com/edbltn/city-edit/blob/main/changelog/2026-07-08-top-proposal-kinds.html)) |
-| Pins backed by a handful of votes read as citywide consensus | No support floor | `TOP_PROPOSAL_MIN_NET`, with a per-map override ([2026-07-30](https://github.com/edbltn/city-edit/blob/main/changelog/index.html)) |
+| Pins backed by a handful of votes read as citywide consensus | No support floor | `TOP_PROPOSAL_MIN_NET` = 100, with a per-map override ([2026-07-30](https://github.com/edbltn/city-edit/blob/main/changelog/index.html)) — **superseded 2026-08-12**: the floor moved to 0 for pins and stayed at 100 for corridors, so a quiet map shows its proposals and rank decides the rest |
 | A pin and a corridor claimed the same street | Independent selection | `dropPointsCoveredByRoutes` |
 
 ## Extension points

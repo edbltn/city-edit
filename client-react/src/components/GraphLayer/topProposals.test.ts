@@ -11,6 +11,8 @@ import {
   selectTopProposalsFrom,
   computeWinnerCandidates,
   topLabelForEdges,
+  TOP_PROPOSAL_MIN_NET,
+  ROUTE_PROPOSAL_MIN_NET,
   type EdgePosition,
   type VoteTypeWinner,
 } from "./topProposals";
@@ -241,27 +243,32 @@ describe("selectTopProposals (full path)", () => {
 describe("top-proposal support floor (TOP_PROPOSAL_MIN_NET)", () => {
   const legend = ["Rare", "Popular"];
   const evt: [number, number, number][][] = [
-    [[0, 3, 0]],    // edge 0: Rare net 3 — below the floor
-    [[1, 150, 20]], // edge 1: Popular net 130 — above it
-    [[1, 100, 0]],  // edge 2: Popular net 100 — exactly at it (excluded: strictly greater)
+    [[0, 3, 0]],    // edge 0: Rare net 3
+    [[1, 150, 20]], // edge 1: Popular net 130
+    [[1, 100, 0]],  // edge 2: Popular net 100
   ];
 
-  it("selectTopProposals defaults to the floor and drops low-support winners", () => {
+  it("defaults to NO floor — a single net vote still earns a pin", () => {
+    expect(TOP_PROPOSAL_MIN_NET).toBe(0);
     const out = selectTopProposals(
       { vote_type_legend: legend, edge_vote_types: evt, ...topo([], []) }, SALT, 10,
     );
-    expect(out).toHaveLength(1);
+    expect(out).toHaveLength(3);
     expect(out[0]).toMatchObject({ label: "Popular", edgeIdx: 1, count: 130 });
   });
 
-  it("requires STRICTLY more than minNet (net == floor is out)", () => {
+  it("requires STRICTLY more than minNet when a map raises it", () => {
     const w = computeVoteTypeWinners(legend, evt, 3, undefined, 100);
     expect(w.map((x) => x.edgeIdx)).toEqual([1]);
   });
 
-  it("minNet 0 restores the any-positive-net behavior", () => {
+  it("minNet 0 admits any positive net", () => {
     const w = computeVoteTypeWinners(legend, evt, 3, undefined, 0);
     expect(w).toHaveLength(3);
+  });
+
+  it("corridors keep their own, higher default floor", () => {
+    expect(ROUTE_PROPOSAL_MIN_NET).toBe(100);
   });
 });
 
